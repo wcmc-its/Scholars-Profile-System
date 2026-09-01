@@ -696,21 +696,17 @@ async function handleUpdate(
           description: true,
           url: true,
           centerType: true,
-          // Dual-read fallback for the audit before-value: pre-backfill there is
-          // no `CenterLeader` row yet. Goes with the column in the contract PR.
-          directorCwid: true,
-          leaderInterim: true,
         },
       });
-      // #2542 — the current `director` assignment. Dual-read: pre-backfill
-      // there is no CenterLeader row yet, so fall back to the column.
+      // #2542 contract A — OrgUnitRoleAssignment is the sole director store;
+      // the `director_cwid`/`leader_interim` columns are retired.
       const beforeLeader = await tx.orgUnitRoleAssignment.findFirst({
         where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
         select: { cwid: true, interim: true },
         orderBy: { sortOrder: "asc" },
       });
-      const beforeDirectorCwid = beforeLeader?.cwid ?? before?.directorCwid ?? null;
-      const beforeInterim = beforeLeader?.interim ?? before?.leaderInterim ?? false;
+      const beforeDirectorCwid = beforeLeader?.cwid ?? null;
+      const beforeInterim = beforeLeader?.interim ?? false;
 
       if (Object.keys(updatePayload).length > 0) {
         await tx.center.update({

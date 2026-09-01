@@ -190,13 +190,14 @@ async function getDivisionUncached(
   // § A1.1). `slug` is consumed by `etl/ed`, not merged here.
   // `leaderCwid`/`leaderInterim` are NOT merged into this object any more —
   // `resolveUnitLeader` below reads `overrides` directly, same rationale as
-  // `lib/api/departments.ts`. `mergeUnitFields`'s `leaderCwid` input is
-  // passed through only to satisfy `UnitRowFieldsForMerge`'s shape
-  // (`lib/api/manual-layer.ts`, out of scope here) — the merged `leaderCwid`/
-  // `leaderInterim` output is never read.
+  // `lib/api/departments.ts`. `mergeUnitFields`'s `leaderCwid` input is a
+  // `null` placeholder passed through only to satisfy `UnitRowFieldsForMerge`'s
+  // shape (`lib/api/manual-layer.ts`, out of scope here) — Division has no
+  // `chiefCwid` column any more (#2542 contract A) and the merged
+  // `leaderCwid`/`leaderInterim` output is never read.
   const overrides = await loadUnitFieldOverrides("division", division.code, prisma);
   const merged = mergeUnitFields(
-    { description: division.description, url: division.url, leaderCwid: division.chiefCwid },
+    { description: division.description, url: division.url, leaderCwid: null },
     overrides,
   );
 

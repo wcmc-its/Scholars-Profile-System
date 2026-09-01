@@ -126,12 +126,13 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
   // directly so it can apply override-over-assignment precedence
   // (`lib/api/unit-leader.ts`) rather than the override-or-column precedence
   // `mergeUnitFields` gives every other field. `mergeUnitFields`'s
-  // `leaderCwid` input is passed through only to satisfy
+  // `leaderCwid` input is a `null` placeholder passed through only to satisfy
   // `UnitRowFieldsForMerge`'s shape (`lib/api/manual-layer.ts`, out of scope
-  // here) — the merged `leaderCwid`/`leaderInterim` output is never read.
+  // here) — Department has no `chairCwid` column any more (#2542 contract A)
+  // and the merged `leaderCwid`/`leaderInterim` output is never read.
   const overrides = await loadUnitFieldOverrides("department", dept.code, prisma);
   const merged = mergeUnitFields(
-    { description: dept.description, url: dept.url, leaderCwid: dept.chairCwid },
+    { description: dept.description, url: dept.url, leaderCwid: null },
     overrides,
   );
 

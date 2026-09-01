@@ -1533,17 +1533,27 @@ async function main() {
     let adminOverridesApplied = 0;
     for (const [code, cwid] of Object.entries(ADMIN_DEPT_LEADER_OVERRIDES)) {
       // #540 — a `field_override(leaderCwid)` row beats this hardcoded
-      // fallback in either direction. A non-empty override already wrote
-      // chairCwid above (`dept.chairCwid` truthy, caught below); an empty
-      // override wrote null as an explicit vacancy and MUST NOT be silently
-      // re-filled here (that would defeat the three-state model).
+      // fallback in either direction. A non-empty override already wrote an
+      // assignment above (caught by the existing-assignment check below); an
+      // empty override wrote null as an explicit vacancy and MUST NOT be
+      // silently re-filled here (that would defeat the three-state model).
       if (unitOverrides.deptLeaders.has(code)) continue;
       const dept = await db.write.department.findUnique({
         where: { code },
-        select: { code: true, category: true, chairCwid: true },
+        select: { code: true, category: true },
       });
       if (!dept || dept.category !== "administrative") continue;
-      if (dept.chairCwid) continue;
+      // #2542 contract A — `OrgUnitRoleAssignment` is the sole leader store;
+      // skip if this dept already holds either leadership key.
+      const existingLeader = await db.write.orgUnitRoleAssignment.findFirst({
+        where: {
+          entityType: "department",
+          entityId: code,
+          roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        },
+        select: { cwid: true },
+      });
+      if (existingLeader) continue;
       const scholar = await db.write.scholar.findUnique({
         where: { cwid },
         select: { cwid: true, deletedAt: true, status: true },
@@ -1853,11 +1863,15 @@ async function main() {
     const divisionsForChief = await db.write.division.findMany({
       select: { code: true, deptCode: true },
     });
+    // #2542 contract A — `OrgUnitRoleAssignment` is the sole chair store; the
+    // manager-graph disambiguator below only ever consults the CHAIR key
+    // (never DIRECTOR), matching the pre-contract `department.chairCwid` read.
     const deptChairs = new Map<string, string | null>();
-    for (const d of await db.write.department.findMany({
-      select: { code: true, chairCwid: true },
+    for (const a of await db.write.orgUnitRoleAssignment.findMany({
+      where: { entityType: "department", roleKey: DEPARTMENT_CHAIR_ROLE_KEY },
+      select: { entityId: true, cwid: true },
     })) {
-      deptChairs.set(d.code, d.chairCwid);
+      deptChairs.set(a.entityId, a.cwid);
     }
 
     const chiefVerdictTally: Record<ChiefVerdict, number> = {

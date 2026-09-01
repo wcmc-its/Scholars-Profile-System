@@ -48,7 +48,7 @@ export type OrgUnitRoleEntityType = "department" | "division" | "center" | "core
 /** The kind whose vocabulary ships today. */
 export const CENTER_ENTITY_TYPE = "center" satisfies OrgUnitRoleEntityType;
 
-/** Stable key of the seeded leadership role that `Center.directorCwid` migrates to. */
+/** Stable key of the seeded leadership role that `Center.directorCwid` migrated to (retired by #2542 contract A). */
 export const DIRECTOR_ROLE_KEY = "director";
 
 /**
@@ -192,7 +192,8 @@ export type OrgUnitRoleSeed = {
  * repointed call sites do on their own.
  *
  * The center set is MIGRATION-PRESERVING, not aspirational:
- *   - `director` is the migration target for `Center.directorCwid`. As of
+ *   - `director` was the migration target for `Center.directorCwid`, retired
+ *     by #2542 contract A. As of
  *     Phase B, `components/center/center-page.tsx:148-153` hardcodes nothing
  *     — it renders `leader.roleLabel` for every leadership-group,
  *     profileTitle-eligible role holder, in vocabulary order, so this entry's
