@@ -89,11 +89,13 @@ DB column name. FKs reference `scholar.cwid` (CWID-canonical). Soft delete is
 
 | Table | SOR | Purpose |
 |---|---|---|
-| **`department`** (`Department`) | ED (+ Manual `category`/leadership) | PK = `code` (stable LDAP org-unit code). `name`, `slug`, `category` (browse bucket, hand-curated, ETL-preserved), `chairCwid`, `scholarCount`. |
-| **`division`** (`Division`) | ED (+ Manual) | PK = `code`; `deptCode` FK. `chiefCwid`, `slug` (disambiguated by deptCode). |
-| **`center`** (`Center`) | Manual / seed | Cross-disciplinary centers & institutes. PK = `code`. `centerType` (center/institute badge), `directorCwid`, `leaderInterim`, `sortOrder`. Manually owned — no ETL writes it. |
+| **`department`** (`Department`) | ED (+ Manual `category`) | PK = `code` (stable LDAP org-unit code). `name`, `slug`, `category` (browse bucket, hand-curated, ETL-preserved), `scholarCount`. Leadership (chair) is `org_unit_role_assignment`, not a column — #2542 contract A retired `chairCwid`. |
+| **`division`** (`Division`) | ED (+ Manual) | PK = `code`; `deptCode` FK. `slug` (disambiguated by deptCode). Leadership (chief) is `org_unit_role_assignment` — #2542 contract A retired `chiefCwid`. |
+| **`center`** (`Center`) | Manual / seed | Cross-disciplinary centers & institutes. PK = `code`. `centerType` (center/institute badge), `sortOrder`. Manually owned — no ETL writes it. Leadership (director) + the `interim` qualifier are `org_unit_role_assignment` — #2542 contract A retired `directorCwid`/`leaderInterim`. |
 | **`center_membership`** (`CenterMembership`) | Manual | Per-scholar center membership; composite PK `(centerCode, cwid)`. |
 | **`division_membership`** (`DivisionMembership`) | Manual | Roster for *manually-created* divisions (`Division.source='manual'`); LDAP division membership stays on `Scholar.divCode`. |
+| **`org_unit_role`** (`OrgUnitRole`) | Manual (superuser/comms_steward) | The org-unit role vocabulary, one list per unit kind (`entityType`). PK `(entityType, key)`. `label` (editable), `roleGroup` (`leadership`/`membership`), `singleHolder`, `profileTitle`. |
+| **`org_unit_role_assignment`** (`OrgUnitRoleAssignment`) | ED (dept/div leadership) + Manual (center leadership, program leadership) | The sole leadership store for department/division/center (#2542). Composite key `(entityType, entityId, cwid, roleKey)`; `interim` qualifier rides with the row. No FK on `entityId` — polymorphic, like `UnitAdmin`. |
 
 ## 7. Manual-override layer (ADR-005) — ETL-immune
 

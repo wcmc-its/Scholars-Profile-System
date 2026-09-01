@@ -131,16 +131,18 @@ prominence(scholar) =
 
 where
   pubVolume       = scoredPubCount ?? <pubCount via one publicationAuthor groupBy> ?? 0
-  isChair         = ∃ Department.chairCwid = cwid          (lib/search-index-docs.ts:875)
-  isChief         = ∃ Division.chiefCwid  = cwid           (lib/search-index-docs.ts:879)
+  isChair         = ∃ OrgUnitRoleAssignment(department, chair|director) for cwid  (lib/search-index-docs.ts)
+  isChief         = ∃ OrgUnitRoleAssignment(division, chief) for cwid             (lib/search-index-docs.ts)
   PI_ROLES        = { 'PI', 'PI-Subaward', 'Co-PI' }       (Grant.role)
   piGrantCount    = count of Grant where role ∈ PI_ROLES
   nihPiGrantCount = count of Grant where role ∈ PI_ROLES AND nihIc IS NOT NULL  (NIH-funded only)
 ```
 
 - `hIndex`, `scoredPubCount` are precomputed on `Scholar` (nullable; ETL `etl/dynamodb`).
-- Leadership: one `department.findMany({where:{chairCwid:{in:cwids}}})` + one
-  `division.findMany({where:{chiefCwid:{in:cwids}}})` — identical source to the search index, so the
+- Leadership: one `orgUnitRoleAssignment.findMany({where:{entityType:'department',
+  roleKey:{in:[chair,director]}}})` + one `orgUnitRoleAssignment.findMany({where:{entityType:'division',
+  roleKey:'chief'}})` — identical source to the search index (`OrgUnitRoleAssignment`, #2542 contract A
+  retired the `Department.chairCwid`/`Division.chiefCwid` columns this used to read), so the
   dashboard's "chair" matches what search already ranks (override-applied via ED ETL).
 - PI counts: two `grant.groupBy({by:['cwid']})` (all-time, not just active — "times as PI" is
   cumulative). NIH flag = `nihIc` non-null (NIH-funded-only field, per Grant schema #78 F2).
@@ -164,8 +166,9 @@ hIndex + faculty boost mirror the org's tuned search ranking.
 2. Select identity + prominence inputs (`cwid, preferredName, slug, primaryTitle, primaryDepartment,
    roleCategory, deptCode, overview, hIndex, scoredPubCount, hasHeadshot, headshotCheckedAt`).
 3. Batch aggregates over the candidate cwids (all `{ in: cwids }`):
-   - `department.findMany({ where:{ chairCwid:{in} } })` → chair set
-   - `division.findMany({ where:{ chiefCwid:{in} } })` → chief set
+   - `orgUnitRoleAssignment.findMany({ where:{ entityType:'department', roleKey:{in:[chair,director]} } })`
+     → chair/director set (`roleKey` distinguishes the label, #58/#2542)
+   - `orgUnitRoleAssignment.findMany({ where:{ entityType:'division', roleKey:'chief' } })` → chief set
    - `grant.groupBy({ by:['cwid'], where:{ role:{in:PI_ROLES} } })` → PI count
    - `grant.groupBy({ by:['cwid'], where:{ role:{in:PI_ROLES}, nihIc:{not:null} } })` → NIH-PI count
    - `coiGapCandidate.groupBy({ by:['cwid','tier'], where:{ status:'new' } })` → pending COI by tier

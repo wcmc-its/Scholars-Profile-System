@@ -45,7 +45,7 @@ Do not let scope creep introduce these:
 - Importing membership history beyond the current snapshot — start_date is today (or the export date) for first migration, not back-filled to original join dates
 - Membership-derived facets on the people-search relevance score
 - Notifications when a membership transitions Active → Inactive
-- "Program directors" as a separate field (covered by `Center.directorCwid` today)
+- "Program directors" as a separate field (covered by the center director `OrgUnitRoleAssignment` row today — `Center.directorCwid` is retired, #2542 contract A)
 
 ## 3. Data model
 
