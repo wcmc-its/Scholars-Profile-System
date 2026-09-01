@@ -4,7 +4,7 @@
  * through the branded ConfirmDialog (#356 Phase 6 C9 / vision-round T3.2).
  */
 import * as React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
@@ -20,6 +20,20 @@ import {
 beforeEach(() => {
   vi.restoreAllMocks();
   mockPush.mockReset();
+});
+
+afterEach(() => {
+  // RTL's auto-cleanup (registered on import of @testing-library/react) unmounts
+  // any component a test left mounted, which can itself trigger the guard's
+  // disarm `popSentinel()` and leave a one-shot `popstate` listener pending on
+  // `window`. Drain it here so it can't fire during a LATER test and skew that
+  // test's call counts — otherwise plain test order (and `--sequence.shuffle`)
+  // can affect outcomes.
+  act(() => {
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+  });
+  mockPush.mockReset();
+  vi.restoreAllMocks();
 });
 
 /** The branded leave-confirmation is open iff its confirm button is in the DOM. */
@@ -460,5 +474,80 @@ describe("UnsavedChangesGuard — navigateAfterSave (#2546)", () => {
     await waitFor(() => expect(dialogIsOpen()).toBe(true));
     expect(mockPush).not.toHaveBeenCalled();
     expect(backSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("disarm then re-arm before the pop lands: the guard's own pop does not open the dialog", async () => {
+    // Listener-order regression: the disarm's one-shot (registered first) would
+    // clear bypassRef before the re-armed route-3 handler (registered second)
+    // ever saw it, so the re-armed handler misread the guard's own pop as a
+    // user Back press. Event identity (not listener order) must decide this.
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    const { rerender } = render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={false} ref={ref} />); // disarm pops
+    });
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={true} ref={ref} />); // re-arm before the pop lands
+    });
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(dialogIsOpen()).toBe(false);
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(backSpy).toHaveBeenCalledTimes(1);
+
+    // The re-armed handler must still work for an actual user Back press.
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    await waitFor(() => expect(dialogIsOpen()).toBe(true));
+  });
+
+  it("StrictMode double-invoke of the initial mount: the guard's own pop does not open the dialog", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    render(
+      <React.StrictMode>
+        <UnsavedChangesGuard dirty={true} ref={ref} />
+      </React.StrictMode>,
+    );
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(dialogIsOpen()).toBe(false);
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(backSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a second, unrelated disarm after navigateAfterSave does not re-push the consumed href", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    const { rerender } = render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+
+    // A later, unrelated disarm cycle must not replay the already-consumed href.
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={true} ref={ref} />);
+    });
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={false} ref={ref} />);
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(backSpy).toHaveBeenCalledTimes(2);
   });
 });

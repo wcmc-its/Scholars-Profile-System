@@ -104,6 +104,14 @@ export function UnsavedChangesGuard({
   // `navigateAfterSave` while a pop is already outstanding just overwrites it
   // rather than issuing a second pop.
   const afterPopRef = React.useRef<string | null>(null);
+  // The exact popstate Event our own pop produced. A disarm-then-re-arm before
+  // that pop lands registers a NEW route-3 handler (H2) alongside our one-shot
+  // (L1) on the same popstate; listener order is registration order, so L1
+  // (registered first, by the disarm) would run before H2 and clear
+  // `bypassRef` before H2 ever sees it — H2 would then misread our own pop as
+  // a user Back press. Comparing the event object itself is order-independent:
+  // both listeners receive the identical Event for one dispatch (#2546).
+  const ownPopEventRef = React.useRef<Event | null>(null);
 
   // Pop our own sentinel exactly once, however that pop was triggered (disarm
   // cleanup or `navigateAfterSave`). The resulting popstate is awaited via a
@@ -116,7 +124,8 @@ export function UnsavedChangesGuard({
     bypassRef.current = true;
     window.addEventListener(
       "popstate",
-      () => {
+      (e) => {
+        ownPopEventRef.current = e;
         popInFlightRef.current = false;
         bypassRef.current = false;
         const href = afterPopRef.current;
@@ -196,10 +205,10 @@ export function UnsavedChangesGuard({
     // Push a sentinel so a Back press pops onto it instead of off the page.
     window.history.pushState({ [SENTINEL_KEY]: true }, "");
 
-    function handler() {
-      if (bypassRef.current) {
+    function handler(e: PopStateEvent) {
+      if (bypassRef.current || e === ownPopEventRef.current) {
         // A popstate we initiated (confirmed back-nav / confirmed href pop /
-        // disarm cleanup); let it pass without re-trapping.
+        // disarm cleanup / navigateAfterSave); let it pass without re-trapping.
         bypassRef.current = false;
         // If this pop was the sentinel-removal for a confirmed href navigation,
         // the stack is now [...prev, editPage]; push the destination once so the
