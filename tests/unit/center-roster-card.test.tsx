@@ -322,6 +322,29 @@ describe("departed / unresolvable members (#2324)", () => {
     expect(screen.queryByTestId("roster-needs-close-out")).toBeNull();
   });
 
+  it("a Cornell (Ithaca) external member renders its name + a Cornell University badge, never Not in directory (#2519)", () => {
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "ab123", name: "Alice Big", title: "Research Associate", scholarState: "external" }),
+        ]}
+        programs={[]}
+      />,
+    );
+    expect(screen.getByTestId("center-roster-row-ab123")).toBeTruthy();
+    expect(screen.getByText("Alice Big")).toBeTruthy();
+    const badge = screen.getByTestId("roster-scholar-state-ab123");
+    expect(badge.textContent).toBe("Cornell University");
+    expect(badge.getAttribute("title")).toBe(
+      "Cornell University (Ithaca) directory member — no WCM profile",
+    );
+    expect(screen.queryByText("Not in directory")).toBeNull();
+    // Never flagged as needing close-out — an external member never had a WCM
+    // identity to have "left".
+    expect(screen.queryByTestId("roster-needs-close-out")).toBeNull();
+  });
+
   it("a departed member with a CURRENT membership is visible AND flagged — the two axes are independent", () => {
     // The dangerous state: person left WCM, nobody closed the membership. It is
     // membership-Active, so the status filter cannot catch it.

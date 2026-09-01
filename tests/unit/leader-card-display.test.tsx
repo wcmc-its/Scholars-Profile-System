@@ -64,4 +64,26 @@ describe("LeaderCard (display)", () => {
     expect(container.querySelector("abbr")).toBeNull();
     expect(screen.getByText("COE Liaison")).toBeTruthy();
   });
+
+  it("keeps the default mt-6/max-w-[460px] wrapper classes when no className is given", () => {
+    // Every pre-existing caller (scholar/department/division pages) omits
+    // `className` — their output must stay byte-identical.
+    const { container } = render(<LeaderCard leader={base} role="Chair" />);
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.className).toContain("mt-6");
+    expect(wrapper.className).toContain("max-w-[460px]");
+  });
+
+  it("replaces mt-6/max-w-[460px] with an overriding className (tailwind-merge conflict resolution)", () => {
+    // The center-page leadership grid passes `className="mt-0 max-w-none"` so
+    // cards sit flush in a grid cell instead of stacking with their own margin.
+    const { container } = render(
+      <LeaderCard leader={base} role="Chair" className="mt-0 max-w-none" />,
+    );
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.className).toContain("mt-0");
+    expect(wrapper.className).toContain("max-w-none");
+    expect(wrapper.className).not.toContain("mt-6");
+    expect(wrapper.className).not.toContain("max-w-[460px]");
+  });
 });

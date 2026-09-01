@@ -60,7 +60,7 @@ describe("groupToRawValues — ROLE_DISPLAY inversion", () => {
     }
   });
 
-  it("Postdocs & non-faculty folds in Postdoc/Fellow/Research staff/Instructor/Lecturer", () => {
+  it("Postdocs & non-faculty folds in Postdoc/Fellow/Research staff/Instructor/Lecturer/Non-faculty academic", () => {
     const raws = new Set(groupToRawValues("Postdocs & non-faculty"));
     for (const raw of [
       "POSTDOC",
@@ -73,6 +73,8 @@ describe("groupToRawValues — ROLE_DISPLAY inversion", () => {
       "instructor",
       "LECTURER",
       "lecturer",
+      "NON_FACULTY_ACADEMIC",
+      "non_faculty_academic",
     ]) {
       expect(raws.has(raw), `expected ${raw} in Postdocs & non-faculty raws`).toBe(true);
     }
@@ -112,12 +114,19 @@ describe("groupMatchesDisplay — client-side counterpart", () => {
     expect(groupMatchesDisplay("Doctoral students", "MD student")).toBe(false);
   });
 
+  it("'Non-faculty academic' maps to Postdocs & non-faculty, not left in no group", () => {
+    expect(groupMatchesDisplay("Postdocs & non-faculty", "Non-faculty academic")).toBe(true);
+    expect(groupToRawValues("Postdocs & non-faculty")).toEqual(
+      expect.arrayContaining(["NON_FACULTY_ACADEMIC", "non_faculty_academic"]),
+    );
+  });
+
   it("ROLE_GROUPS shape matches role-chip-row.tsx verbatim (label + displayLabels count)", () => {
     const byLabel = new Map(ROLE_GROUPS.map((g) => [g.label, g.displayLabels.length]));
     expect(byLabel.get("All")).toBe(0);
     expect(byLabel.get("Full-time faculty")).toBe(1);
     expect(byLabel.get("Affiliated faculty")).toBe(5);
-    expect(byLabel.get("Postdocs & non-faculty")).toBe(5);
+    expect(byLabel.get("Postdocs & non-faculty")).toBe(6);
     expect(byLabel.get("Doctoral students")).toBe(1);
   });
 });

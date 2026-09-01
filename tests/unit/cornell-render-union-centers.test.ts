@@ -49,7 +49,7 @@ vi.mock("@/lib/edit/cornell-directory-flag", () => ({
   isCornellDirectoryMembersEnabled: isCornellDirectoryMembersEnabledMock,
 }));
 
-import { getCenter, getCenterMembers } from "@/lib/api/centers";
+import { getCenter, getCenterMembers, getCenterMembersByType } from "@/lib/api/centers";
 
 const WCM_ROW = {
   cwid: "wcm001",
@@ -154,6 +154,13 @@ describe("center render union — flag ON", () => {
       slug: "",
       externalProfileUrl: "https://www.cornell.edu/search/sso/people.cfm?netid=ab123",
     });
+    // Chip-partition parity — the Cornell external member has no
+    // `roleCategory` label of its own, but it's tallied into "Affiliated
+    // faculty" so `roleCategoryCounts` sums to `total` (1 WCM + 1 external).
+    expect(result.roleCategoryCounts).toEqual({
+      "Full-time faculty": 1,
+      "Affiliated faculty": 1,
+    });
   });
 
   it("adds the Cornell member into the headline scholarCount", async () => {
@@ -220,5 +227,181 @@ describe("center render union — flag OFF", () => {
 
     const center = await getCenter("test-center-union-off-hero");
     expect(center!.scholarCount).toBe(1);
+  });
+});
+
+describe("center render union — getCenterMembersByType", () => {
+  // A second WCM scholar in the "Affiliated faculty" chip group, surname
+  // "Ztest" — sorts AFTER the Cornell external "Ada Byron" (surname "Byron"),
+  // so the merge-then-sort order is actually exercised, not just "external
+  // always first/last".
+  const AFFILIATED_SCHOLAR = {
+    cwid: "wcm002",
+    preferredName: "Alice Ztest",
+    slug: "alice-ztest",
+    primaryTitle: null,
+    primaryDepartment: null,
+    roleCategory: "affiliated_faculty",
+    overview: null,
+    professorialRank: null,
+    department: null,
+    division: null,
+  };
+  const AFFILIATED_ROW = {
+    cwid: "wcm002",
+    membershipType: null,
+    programCode: null,
+    startDate: null,
+    endDate: null,
+    source: "manual",
+  };
+
+  beforeEach(() => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(true);
+    membershipFindMany.mockImplementation(() =>
+      Promise.resolve([WCM_ROW, AFFILIATED_ROW, CORNELL_ROW]),
+    );
+    scholarFindMany.mockImplementation(
+      (args: { where?: { roleCategory?: { in?: string[] } } }) => {
+        const rawValues = args?.where?.roleCategory?.in ?? [];
+        const rows = [WCM_SCHOLAR, AFFILIATED_SCHOLAR].filter((s) =>
+          rawValues.includes(s.roleCategory),
+        );
+        return Promise.resolve(rows);
+      },
+    );
+  });
+
+  it("'Affiliated faculty' includes the Cornell external member, sorted by surname among WCM rows, total counts it", async () => {
+    const result = await getCenterMembersByType("TEST_CENTER_BY_TYPE", "Affiliated faculty", 0);
+    expect(result.total).toBe(2);
+    // "Byron" < "Ztest" — the external member sorts in by surname, not appended.
+    expect(result.hits.map((h) => h.cwid)).toEqual(["ab123", "wcm002"]);
+    expect(result.hits.find((h) => h.cwid === "ab123")).toMatchObject({
+      isExternal: true,
+      slug: "",
+    });
+  });
+
+  it("'Full-time faculty' does not include the Cornell external member", async () => {
+    const result = await getCenterMembersByType("TEST_CENTER_BY_TYPE", "Full-time faculty", 0);
+    expect(result.total).toBe(1);
+    expect(result.hits.map((h) => h.cwid)).toEqual(["wcm001"]);
+    expect(result.hits.some((h) => h.isExternal)).toBe(false);
+  });
+});
+
+describe("center render union — getCenterMembersByType — pagination across a page boundary with an interleaved external", () => {
+  // 25 WCM "affiliated_faculty" scholars split so the Cornell external's
+  // surname ("Tremaine") sorts strictly between them: 19 surnames < "tremaine"
+  // (the "Aaa*" block) and 6 surnames > "tremaine" (the "Zzz*" block).
+  // Merged + surname-sorted, the external lands at index 19 (the last slot of
+  // page 0, 0-indexed, 20/page) and the 6 "Zzz*" rows spill onto page 1 —
+  // exercising the boundary a slice-then-merge bug would get wrong.
+  const LOW_COUNT = 19;
+  const HIGH_COUNT = 6;
+
+  function pageScholar(cwid: string, surname: string) {
+    return {
+      cwid,
+      preferredName: `Scholar ${surname}`,
+      slug: cwid,
+      primaryTitle: null,
+      primaryDepartment: null,
+      roleCategory: "affiliated_faculty",
+      overview: null,
+      professorialRank: null,
+      department: null,
+      division: null,
+    };
+  }
+  const LOW_SCHOLARS = Array.from({ length: LOW_COUNT }, (_, i) =>
+    pageScholar(`wlo${String(i).padStart(2, "0")}`, `Aaa${String(i).padStart(2, "0")}`),
+  );
+  const HIGH_SCHOLARS = Array.from({ length: HIGH_COUNT }, (_, i) =>
+    pageScholar(`whi${String(i).padStart(2, "0")}`, `Zzz${String(i).padStart(2, "0")}`),
+  );
+  const PAGE_WCM_SCHOLARS = [...LOW_SCHOLARS, ...HIGH_SCHOLARS];
+
+  const PAGE_EXTERNAL_CUID = "nt001";
+  const PAGE_EXTERNAL_MEMBER = {
+    cuid: PAGE_EXTERNAL_CUID,
+    displayName: "Tabitha Tremaine",
+    givenName: "Tabitha",
+    familyName: "Tremaine",
+    title: "Research Associate",
+    dept: "Computer Science",
+    email: "nt001@cornell.edu",
+    affiliation: "staff",
+    source: "cornell-ithaca",
+    createdAt: new Date("2026-01-01"),
+    updatedAt: new Date("2026-01-01"),
+  };
+
+  beforeEach(() => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(true);
+    membershipFindMany.mockImplementation(() =>
+      Promise.resolve([
+        ...PAGE_WCM_SCHOLARS.map((s) => ({
+          cwid: s.cwid,
+          membershipType: null,
+          programCode: null,
+          startDate: null,
+          endDate: null,
+          source: "manual",
+        })),
+        {
+          cwid: PAGE_EXTERNAL_CUID,
+          membershipType: null,
+          programCode: null,
+          startDate: null,
+          endDate: null,
+          source: "cornell-ithaca",
+        },
+      ]),
+    );
+    scholarFindMany.mockImplementation(
+      (args: { where?: { roleCategory?: { in?: string[] } } }) => {
+        const rawValues = args?.where?.roleCategory?.in ?? [];
+        return Promise.resolve(
+          PAGE_WCM_SCHOLARS.filter((s) => rawValues.includes(s.roleCategory)),
+        );
+      },
+    );
+    externalMemberFindMany.mockResolvedValue([PAGE_EXTERNAL_MEMBER]);
+  });
+
+  it("page 0 ends with the external at index 19, page 1 gets the remaining 6, total is 26 on both pages", async () => {
+    const page0 = await getCenterMembersByType(
+      "TEST_CENTER_PAGE_BOUNDARY",
+      "Affiliated faculty",
+      0,
+    );
+    expect(page0.hits).toHaveLength(20);
+    expect(page0.total).toBe(26);
+    expect(page0.pageSize).toBe(20);
+    expect(page0.hits[19].cwid).toBe(PAGE_EXTERNAL_CUID);
+    expect(page0.hits[19]).toMatchObject({ isExternal: true });
+
+    const page1 = await getCenterMembersByType(
+      "TEST_CENTER_PAGE_BOUNDARY",
+      "Affiliated faculty",
+      1,
+    );
+    expect(page1.hits).toHaveLength(6);
+    expect(page1.total).toBe(26);
+    expect(page1.pageSize).toBe(20);
+    expect(page1.hits.every((h) => !h.isExternal)).toBe(true);
+  });
+
+  it("'Full-time faculty' on the same fixture never calls the externalMember mock", async () => {
+    externalMemberFindMany.mockClear();
+    const result = await getCenterMembersByType(
+      "TEST_CENTER_PAGE_BOUNDARY",
+      "Full-time faculty",
+      0,
+    );
+    expect(result.total).toBe(0);
+    expect(externalMemberFindMany).not.toHaveBeenCalled();
   });
 });

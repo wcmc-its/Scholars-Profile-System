@@ -6,7 +6,27 @@
  * the fake client's `unitAdmin.findMany` serves both it and the access query,
  * branching on the `where.cwid` discriminator.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// #2519 continuation — the Cornell (Ithaca) external-member hydration reaches
+// `ExternalMember` through `lib/api/external-members.ts`'s own `prisma`
+// singleton (not the injected `client` this file otherwise uses), and is
+// gated on the same flag the public roster union reads. Mock both the same
+// way `cornell-render-union-centers.test.ts` mocks the public path.
+const { externalMemberFindMany, isCornellDirectoryMembersEnabledMock } = vi.hoisted(() => ({
+  externalMemberFindMany: vi.fn(
+    async (): Promise<Array<{ cuid: string; displayName: string; title: string | null }>> => [],
+  ),
+  isCornellDirectoryMembersEnabledMock: vi.fn(() => false),
+}));
+
+vi.mock("@/lib/db", () => ({
+  prisma: { externalMember: { findMany: externalMemberFindMany } },
+}));
+
+vi.mock("@/lib/edit/cornell-directory-flag", () => ({
+  isCornellDirectoryMembersEnabled: isCornellDirectoryMembersEnabledMock,
+}));
 
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 
@@ -158,6 +178,11 @@ function fakeClient(o: Opts) {
 }
 
 const asClient = (c: ReturnType<typeof fakeClient>) => c as unknown as Client;
+
+beforeEach(() => {
+  isCornellDirectoryMembersEnabledMock.mockReturnValue(false);
+  externalMemberFindMany.mockReset().mockResolvedValue([]);
+});
 
 const DEPT = {
   code: "N1280",
@@ -463,6 +488,90 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
     for (const call of client.scholar.findMany.mock.calls) {
       expect(call[0].where).not.toHaveProperty("deletedAt");
     }
+  });
+});
+
+describe("loadUnitEditContext — Cornell (Ithaca) external roster hydration (#2519)", () => {
+  const manualDivision = {
+    code: "N9001",
+    name: "New Division",
+    description: null,
+    slug: "new-division",
+    source: "manual",
+    deptCode: "N1280",
+    department: { name: "Medicine", slug: "medicine" },
+  };
+
+  it("flag ON — a cornell-ithaca row hydrates name/title from ExternalMember and reports scholarState: external", async () => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(true);
+    externalMemberFindMany.mockResolvedValue([
+      { cuid: "ab123", displayName: "Alice Big", title: "Research Associate" },
+    ]);
+    const ctx = await loadUnitEditContext(
+      "division",
+      "N9001",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          division: manualDivision,
+          divisionMembers: [{ cwid: "ab123", source: "cornell-ithaca" }],
+          scholars: [],
+        }),
+      ),
+    );
+    const roster = ctx!.roster!;
+    expect(roster[0].name).toBe("Alice Big");
+    expect(roster[0].title).toBe("Research Associate");
+    expect(roster[0].scholarState).toBe("external");
+    // The batched lookup ran once for the whole roster, not once per row.
+    expect(externalMemberFindMany).toHaveBeenCalledTimes(1);
+    expect(externalMemberFindMany).toHaveBeenCalledWith({ where: { cuid: { in: ["ab123"] } } });
+  });
+
+  it("flag ON — a WCM (non-cornell) row is unchanged", async () => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(true);
+    const roster = (
+      await loadUnitEditContext(
+        "division",
+        "N9001",
+        SUPERUSER,
+        asClient(
+          fakeClient({
+            division: manualDivision,
+            divisionMembers: [{ cwid: "wcm001", source: "manual-ui" }],
+            scholars: [
+              { cwid: "wcm001", preferredName: "Wendy Cwm", primaryTitle: "Professor", deletedAt: null },
+            ],
+          }),
+        ),
+      )
+    )!.roster!;
+    expect(roster[0].name).toBe("Wendy Cwm");
+    expect(roster[0].title).toBe("Professor");
+    expect(roster[0].scholarState).toBe("active");
+    // No cornell cwids on this roster — the batched lookup never fires.
+    expect(externalMemberFindMany).not.toHaveBeenCalled();
+  });
+
+  it("flag OFF — a cornell-ithaca row is left as today (no ExternalMember query, name falls back to cwid)", async () => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(false);
+    const roster = (
+      await loadUnitEditContext(
+        "division",
+        "N9001",
+        SUPERUSER,
+        asClient(
+          fakeClient({
+            division: manualDivision,
+            divisionMembers: [{ cwid: "ab123", source: "cornell-ithaca" }],
+            scholars: [],
+          }),
+        ),
+      )
+    )!.roster!;
+    expect(roster[0].name).toBe("ab123");
+    expect(roster[0].scholarState).toBe("unknown");
+    expect(externalMemberFindMany).not.toHaveBeenCalled();
   });
 });
 
