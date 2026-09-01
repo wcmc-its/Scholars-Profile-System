@@ -22,6 +22,8 @@ const {
   mockAppointmentFindMany,
   mockDepartmentFindMany,
   mockDivisionFindMany,
+  mockDeptAssignmentFindMany,
+  mockDivAssignmentFindMany,
   mockCenterLeaderFindMany,
   mockCenterFindMany,
   mockProgramAssignmentFindMany,
@@ -39,8 +41,14 @@ const {
   mockScholarFamilyFindMany: vi.fn(),
   mockFamilySuppressionFindMany: vi.fn(),
   mockAppointmentFindMany: vi.fn(),
+  // #2542 contract A — `department.findMany` / `division.findMany` now serve
+  // ONLY the batched NAME lookup (`code: { in: [...] }`) the assignment rows
+  // point at; the leadership query itself moved to `orgUnitRoleAssignment`
+  // below (`Department.chairCwid` / `Division.chiefCwid` no longer exist).
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
+  mockDeptAssignmentFindMany: vi.fn(),
+  mockDivAssignmentFindMany: vi.fn(),
   mockCenterLeaderFindMany: vi.fn(),
   mockCenterFindMany: vi.fn(),
   // #2558 — a SEPARATE mock from `mockCenterLeaderFindMany`, even though both
@@ -70,17 +78,27 @@ vi.mock("@/lib/db", () => ({
       familySuppressionOverlay: { findMany: mockFamilySuppressionFindMany },
       // #742 §7 — the merged "Titles & positions" candidate loader.
       appointment: { findMany: mockAppointmentFindMany },
-      // #742 §2.5 — org-unit leadership-FK title augmentation.
+      // #742 §2.5 — org-unit leadership-FK title augmentation. `department` /
+      // `division` now serve only the name lookup — see the mock declarations above.
       department: { findMany: mockDepartmentFindMany },
       division: { findMany: mockDivisionFindMany },
-      // #2558 — dispatches by `where.entityType`: "center_program" goes to its
-      // own mock, everything else (today, only "center") keeps going to
-      // `mockCenterLeaderFindMany` unchanged.
+      // #2542 contract A / #2558 — dispatches by `where.entityType`: "department"
+      // and "division" go to their own leadership-assignment mocks,
+      // "center_program" to its own, everything else ("center") keeps going to
+      // `mockCenterLeaderFindMany`.
       orgUnitRoleAssignment: {
-        findMany: (args: { where?: { entityType?: string } }) =>
-          args?.where?.entityType === "center_program"
-            ? mockProgramAssignmentFindMany(args)
-            : mockCenterLeaderFindMany(args),
+        findMany: (args: { where?: { entityType?: string } }) => {
+          switch (args?.where?.entityType) {
+            case "department":
+              return mockDeptAssignmentFindMany(args);
+            case "division":
+              return mockDivAssignmentFindMany(args);
+            case "center_program":
+              return mockProgramAssignmentFindMany(args);
+            default:
+              return mockCenterLeaderFindMany(args);
+          }
+        },
       },
       center: { findMany: mockCenterFindMany },
       centerProgram: { findMany: mockCenterProgramFindMany },
@@ -225,6 +243,8 @@ beforeEach(() => {
   mockAppointmentFindMany.mockResolvedValue([]);
   mockDepartmentFindMany.mockResolvedValue([]);
   mockDivisionFindMany.mockResolvedValue([]);
+  mockDeptAssignmentFindMany.mockResolvedValue([]);
+  mockDivAssignmentFindMany.mockResolvedValue([]);
   mockCenterLeaderFindMany.mockResolvedValue([]);
   mockCenterFindMany.mockResolvedValue([]);
   mockProgramAssignmentFindMany.mockResolvedValue([]);
@@ -878,22 +898,21 @@ describe("assembleOverviewFacts — explicit pub snapshot + title/education delt
 // the appointment-title ETL. Each query keys on the scholar, deduped against the
 // appointment + primary titles.
 describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
-  it("surfaces a department chair recorded only on Department.chairCwid", async () => {
-    mockDepartmentFindMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", officialName: null, category: "clinical" },
-    ]);
+  it("surfaces a department chair recorded only on an OrgUnitRoleAssignment row", async () => {
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "MED", roleKey: "chair" }]);
+    mockDepartmentFindMany.mockResolvedValue([{ code: "MED", name: "Medicine", officialName: null }]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles).toEqual([
       { title: "Chair, Department of Medicine", organization: "Weill Cornell Medicine" },
     ]);
   });
 
-  // #58 / #2542 Phase D — an administrative department (e.g. the Library) is
-  // led by a DIRECTOR, not a Chair.
+  // #58 / #2542 — an administrative department (e.g. the Library) is led by a
+  // DIRECTOR, not a Chair. The assignment's own `roleKey` carries that
+  // distinction now — no `category` read needed here.
   it("labels an administrative department's leader 'Director', not 'Chair'", async () => {
-    mockDepartmentFindMany.mockResolvedValue([
-      { code: "LIB", name: "Library", officialName: null, category: "administrative" },
-    ]);
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "LIB", roleKey: "director" }]);
+    mockDepartmentFindMany.mockResolvedValue([{ code: "LIB", name: "Library", officialName: null }]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles).toEqual([
       { title: "Director, Department of Library", organization: "Weill Cornell Medicine" },
@@ -906,14 +925,20 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   // Director's real appointment title never matches.
   it("does not dedup a Director candidate against a 'Director of X' appointment (isChairTitleFor is chair-only)", async () => {
     mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Director of the Library")]);
-    mockDepartmentFindMany.mockResolvedValue([
-      { code: "LIB", name: "Library", officialName: null, category: "administrative" },
-    ]);
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "LIB", roleKey: "director" }]);
+    mockDepartmentFindMany.mockResolvedValue([{ code: "LIB", name: "Library", officialName: null }]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles.map((t) => t.title)).toEqual([
       "Director of the Library",
       "Director, Department of Library",
     ]);
+  });
+
+  it("a row whose department vanished emits no candidate (no FK to fall back on)", async () => {
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "GONE", roleKey: "chair" }]);
+    mockDepartmentFindMany.mockResolvedValue([]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([]);
   });
 
   it("uses the curated official name and surfaces an interim center director", async () => {
@@ -985,6 +1010,7 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
 
   it("dedups an FK chair the appointment table already confers (isChairTitleFor)", async () => {
     mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Sanford I. Weill Chair of Medicine")]);
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "MED", roleKey: "chair" }]);
     mockDepartmentFindMany.mockResolvedValue([{ code: "MED", name: "Medicine", officialName: null }]);
     const facts = await assembleOverviewFacts("self01");
     // The endowed appointment chair stays; the synthesized FK chair is deduped.
@@ -993,6 +1019,7 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
 
   it("dedups an FK division chief that exactly matches an appointment title", async () => {
     mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Chief, Division of Hematology")]);
+    mockDivAssignmentFindMany.mockResolvedValue([{ entityId: "HEME" }]);
     mockDivisionFindMany.mockResolvedValue([{ code: "HEME", name: "Hematology" }]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles.map((t) => t.title)).toEqual(["Chief, Division of Hematology"]);
@@ -1000,8 +1027,18 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
 
   it("scopes every leadership-FK query to the scholar (external leaders never match)", async () => {
     await assembleOverviewFacts("self01");
-    expect(mockDepartmentFindMany.mock.calls[0][0].where).toEqual({ chairCwid: "self01" });
-    expect(mockDivisionFindMany.mock.calls[0][0].where).toEqual({ chiefCwid: "self01" });
+    // #2542 contract A — chair/chief are `OrgUnitRoleAssignment` rows now;
+    // `Department.chairCwid` / `Division.chiefCwid` no longer exist.
+    expect(mockDeptAssignmentFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      entityType: "department",
+      roleKey: { in: ["chair", "director"] },
+    });
+    expect(mockDivAssignmentFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      entityType: "division",
+      roleKey: "chief",
+    });
     // #2542 — center leadership is an `OrgUnitRoleAssignment` row. The query is
     // scoped to the KIND as well as the scholar, because one shared vocabulary
     // now spans every unit kind; `profileTitle` is what keeps a non-title
@@ -1011,8 +1048,6 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
       entityType: "center",
       role: { roleGroup: "leadership", profileTitle: true },
     });
-    // ...and the dual-read fallback still scopes to this scholar.
-    expect(mockCenterFindMany.mock.calls[0][0].where).toEqual({ directorCwid: "self01" });
     // #2558 — the center_program assignment query, `profileTitle`-gated the
     // same way — see the dedicated "scopes the center_program assignment
     // query" test above.
