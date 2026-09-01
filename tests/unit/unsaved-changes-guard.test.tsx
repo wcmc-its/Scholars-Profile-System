@@ -355,4 +355,38 @@ describe("UnsavedChangesGuard — navigateAfterSave (#2546)", () => {
     expect(mockPush).toHaveBeenCalledWith("/edit/x");
     expect(backSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("re-arming after a navigateAfterSave pop does not swallow the next real Back press", async () => {
+    // Reproduces the dangling-bypassRef finding: if the one-shot listener
+    // doesn't also clear bypassRef, a route-3 handler that mounts AFTER the
+    // navigateAfterSave pop (a fresh dirty cycle) inherits a stale "this pop
+    // is ours" flag and silently swallows the user's next real Back press.
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    const { rerender } = render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+      rerender(<UnsavedChangesGuard dirty={false} ref={ref} />);
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+
+    // Re-arm: a fresh save cycle dirties the form again, pushing a new sentinel.
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={true} ref={ref} />);
+    });
+
+    // A real user Back press on the new sentinel must open the dialog, not be
+    // swallowed by a dangling bypass flag left over from the earlier pop.
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    await waitFor(() => expect(dialogIsOpen()).toBe(true));
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(backSpy).toHaveBeenCalledTimes(1);
+  });
 });

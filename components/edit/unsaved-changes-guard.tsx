@@ -121,6 +121,7 @@ export function UnsavedChangesGuard({
       "popstate",
       () => {
         popInFlightRef.current = false;
+        bypassRef.current = false;
         routerRef.current.push(href);
       },
       { once: true },
