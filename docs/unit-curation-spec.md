@@ -99,7 +99,7 @@ For `entityType ∈ {department, division}` the `field_override.fieldName` domai
 | `leaderCwid` | The unit's leader — type-agnostic name; `resolveUnitLeader` (`lib/api/unit-leader.ts`) derives the role label (Chair/Director) from `entityType`/category and applies override-over-`OrgUnitRoleAssignment` precedence (`Department.chairCwid` / `Division.chiefCwid` are retired, #2542 contract A). | Curator/Owner of the unit, or Superuser. | A real active `Scholar.cwid` or the empty string (the three states are below). Unknown CWID → `400`. |
 | `leaderInterim` | The interim/acting qualifier — renders "Interim Chair" / "Acting Chief". No backing column for dept/div; a synthesized merged property, default `false`. | Curator/Owner of the unit, or Superuser. | `'true'` / `'false'`. Inert without a `leaderCwid`. |
 
-For centers (manually-owned) the same fields are edited **in-row**: `description`, `slug` (**Superuser only** — the `Center.slug` column is updated directly, so the new `/centers/{slug}` URL is live at once), `directorCwid` + `leaderInterim`, `centerType` (**Superuser only**).
+For centers (manually-owned) the same fields are edited **in-row**: `description`, `slug` (**Superuser only** — the `Center.slug` column is updated directly, so the new `/centers/{slug}` URL is live at once), ~~`directorCwid` + `leaderInterim`~~, `centerType` (**Superuser only**). Leadership moved to an `OrgUnitRoleAssignment` row in #2542 contract A; the `directorCwid`/`leaderInterim` columns this line originally described were dropped in contract B.
 
 **Setting, clearing, and the three leadership states.** `POST /api/edit/field` takes `op: "set"` (default) or `"clear"`; `"clear"` **deletes** the `field_override` row, reverting the field to its ETL/seed value:
 
