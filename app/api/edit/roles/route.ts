@@ -23,7 +23,7 @@
  * (`skipDuplicates: true`, e.g. the roster route's per-write vocab seed), so
  * deleting it here would not stick; the fix is removing it from the seed
  * table instead. (c) 409 `role_has_holders` when
- * `countRoleHolders` (`lib/api/org-unit-roles-admin.ts` — the SAME two tables
+ * `countRoleHolders` (`lib/api/org-unit-roles-admin.ts` — the SAME three tables
  * `buildRoleRoster`'s `holderCount` sums, so this check can never disagree
  * with what the roster UI shows) is non-zero. Only past all three does it
  * delete any `OrgUnitRoleScope` allowlist rows for the key (their FK would
@@ -422,7 +422,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       // route's per-write vocab seed) — deleting it here would not stick.
       if (existing.source !== "manual") throw new RoleIsSeeded();
 
-      // The SAME two tables `buildRoleRoster`'s `holderCount` sums (see that
+      // The SAME three tables `buildRoleRoster`'s `holderCount` sums (see that
       // helper's docblock) — the UI count and this gate read identically, so
       // they cannot disagree.
       const holderCount = await countRoleHolders(tx, entityType, key);

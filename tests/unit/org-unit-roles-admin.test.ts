@@ -39,11 +39,17 @@ type ScopeGroup = {
   roleKey: string;
   _count: { _all: number };
 };
+type CoreLeaderGroup = {
+  role: string;
+  coreId: string;
+  _count: { _all: number };
+};
 
 function makeDb(input: {
   roles: RoleRow[];
   leadershipCounts?: AssignmentGroup[];
   membershipCounts?: MembershipGroup[];
+  coreLeaderCounts?: CoreLeaderGroup[];
   scopeCounts?: ScopeGroup[];
 }) {
   return {
@@ -58,11 +64,14 @@ function makeDb(input: {
     centerMembership: {
       groupBy: async () => input.membershipCounts ?? [],
     },
+    coreLeader: {
+      groupBy: async () => input.coreLeaderCounts ?? [],
+    },
     orgUnitRoleScope: {
       groupBy: async () => input.scopeCounts ?? [],
     },
     // Cast at the call site keeps the stub terse without re-declaring all of
-    // PrismaClient — `buildRoleRoster` only ever touches the four reads above.
+    // PrismaClient — `buildRoleRoster` only ever touches the five reads above.
   } as unknown as Parameters<typeof buildRoleRoster>[0];
 }
 
@@ -153,6 +162,35 @@ describe("buildRoleRoster", () => {
       }),
     );
     expect(rows[0].holderCount).toBe(3);
+  });
+
+  it("sums CoreLeader rows into holderCount for a core role, keyed by role", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [role("core", "co_director", "leadership", 10)],
+        coreLeaderCounts: [
+          { role: "co_director", coreId: "core-1", _count: { _all: 2 } },
+        ],
+      }),
+    );
+    expect(rows[0].holderCount).toBe(2);
+    expect(rows[0].unitCount).toBe(1);
+  });
+
+  it("a CoreLeader row never credits a same-named role under a different entityType", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [
+          role("core", "director", "leadership", 10),
+          role("center", "director", "leadership", 10),
+        ],
+        coreLeaderCounts: [{ role: "director", coreId: "core-1", _count: { _all: 1 } }],
+      }),
+    );
+    const core = rows.find((r) => r.entityType === "core")!;
+    const center = rows.find((r) => r.entityType === "center")!;
+    expect(core.holderCount).toBe(1);
+    expect(center.holderCount).toBe(0);
   });
 
   it("a role with zero holders in either source reports holderCount 0, not undefined", async () => {

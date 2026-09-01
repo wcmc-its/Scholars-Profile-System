@@ -7,13 +7,14 @@
  * TWO live counts, deliberately kept apart because they answer different
  * questions and only coincide for a `singleHolder` role:
  *   - `holderCount`: how many PEOPLE currently hold this role — assignment
- *     rows plus membership rows referencing that (entityType, key).
+ *     rows plus membership rows referencing that (entityType, key), plus (for
+ *     `core` roles) `CoreLeader` rows with a matching `role`.
  *   - `unitCount`: how many DISTINCT units (by entity id / center code) have
  *     at least one holder of that role. A role held by 400 people across 3
  *     centers has `holderCount: 400, unitCount: 3` — neither number alone is
  *     the "blast radius" of a rename; the confirm dialog states both.
  *
- * TWO holder sources, neither of which is a single Prisma relation on
+ * THREE holder sources, none of which is a single Prisma relation on
  * `OrgUnitRole` today:
  *   - `OrgUnitRoleAssignment` (the `leadershipHolders` relation) — the
  *     leadership half, one row per (entityType, entityId, roleKey, cwid).
@@ -23,11 +24,17 @@
  *     relation to OrgUnitRole YET" — the FK lands in a follow-up contract
  *     migration), so it is read directly off the column pair
  *     (`roleEntityType`, `membershipRoleKey`) rather than via `include`.
- * Both are read as a single grouped query each (`groupBy`, widened to include
- * the unit-identifying column — `entityId` / `centerCode` — alongside the
- * role columns) rather than N+1 per-row lookups; `holderCount` and
- * `unitCount` are both derived from those same two result sets, so this is
- * still exactly two round trips.
+ *   - `CoreLeader.role` — an open `VarChar(32)` string with NO FK to
+ *     `OrgUnitRole` at all (`prisma/schema.prisma`), written by
+ *     `app/api/edit/core/route.ts`. A `CoreLeader` row can only ever mean a
+ *     `"core"` role — the table carries no `entityType` column of its own —
+ *     so it credits `rosterKey("core", row.role)` unconditionally rather than
+ *     being filtered by the caller's `entityType`.
+ * All three are read as a single grouped query each (`groupBy`, widened to
+ * include the unit-identifying column — `entityId` / `centerCode` / `coreId`
+ * — alongside the role columns) rather than N+1 per-row lookups;
+ * `holderCount` and `unitCount` are both derived from those same three result
+ * sets, so this is still exactly three round trips.
  *
  * A THIRD field, `scopeRowCount`, rides along for the delete confirm (the
  * DELETE follow-up, `app/api/edit/roles/route.ts`): how many `OrgUnitRoleScope`
@@ -39,16 +46,19 @@
  * an allowlist, so mixing it into `holderCounts`/`unitsByKey` would be a
  * category error even though the query shape looks identical.
  *
- * `unitCount` UNIONS TWO COLUMNS THAT NOTHING FORCES TO AGREE. It dedupes
- * `OrgUnitRoleAssignment.entityId` against `CenterMembership.centerCode`, and
- * that is sound today only because every writer of a center assignment stores
- * `Center.code` verbatim (the #2542 backfill and `app/api/edit/unit/route.ts`),
- * while `centerCode` is FK'd to `Center.code`. But `entityId` is POLYMORPHIC
- * with no FK of its own, and `CenterMembership.roleEntityType` has no writer at
- * all — it only ever holds its `"center"` default. A future writer that stores
- * some other identifier in `entityId`, or sets a non-center `roleEntityType`,
- * would make the same unit look like two and silently inflate `unitCount`.
- * If you add such a writer, normalize here first.
+ * `unitCount` UNIONS COLUMNS THAT NOTHING FORCES TO AGREE. For `center` roles
+ * it dedupes `OrgUnitRoleAssignment.entityId` against
+ * `CenterMembership.centerCode`, and that is sound today only because every
+ * writer of a center assignment stores `Center.code` verbatim (the #2542
+ * backfill and `app/api/edit/unit/route.ts`), while `centerCode` is FK'd to
+ * `Center.code`. But `entityId` is POLYMORPHIC with no FK of its own, and
+ * `CenterMembership.roleEntityType` has no writer at all — it only ever holds
+ * its `"center"` default. A future writer that stores some other identifier
+ * in `entityId`, or sets a non-center `roleEntityType`, would make the same
+ * unit look like two and silently inflate `unitCount`. If you add such a
+ * writer, normalize here first. `CoreLeader.coreId` unions into the same set
+ * for `core` roles; it carries its own FK to `Core.id`, so it does not share
+ * that fragility.
  *
  * DB-CALLER-INJECTED ON PURPOSE. `buildRoleRoster` takes the Prisma client as
  * an explicit parameter rather than defaulting it from `lib/db.ts` (contrast
@@ -63,7 +73,11 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
  *  inject a fake without standing up a real `PrismaClient`. */
 export type OrgUnitRoleRosterDb = Pick<
   PrismaClient,
-  "orgUnitRole" | "orgUnitRoleAssignment" | "centerMembership" | "orgUnitRoleScope"
+  | "orgUnitRole"
+  | "orgUnitRoleAssignment"
+  | "centerMembership"
+  | "orgUnitRoleScope"
+  | "coreLeader"
 >;
 
 /** One roster row — an `OrgUnitRole` entry plus its live holder count. */
@@ -99,35 +113,39 @@ function rosterKey(entityType: string, key: string): string {
   return `${entityType}:${key}`;
 }
 
-/** The narrow read surface {@link countRoleHolders} needs — the SAME two
- *  tables the two `groupBy`s above read, so a single-key count can never
- *  disagree with what the full roster already shows for that row. */
+/** The narrow read surface {@link countRoleHolders} needs — the SAME three
+ *  tables the groupBys above read, so a single-key count can never disagree
+ *  with what the full roster already shows for that row. */
 export type OrgUnitRoleHolderCountDb = Pick<
   PrismaClient,
-  "orgUnitRoleAssignment" | "centerMembership"
+  "orgUnitRoleAssignment" | "centerMembership" | "coreLeader"
 >;
 
 /**
  * Live holder count for exactly one (`entityType`, `key`) vocabulary entry —
- * `OrgUnitRoleAssignment` rows plus `CenterMembership` rows keyed to it, the
- * same two sources {@link buildRoleRoster}'s `holderCount` sums, read here as
- * two direct `count`s for a single key instead of the batched `groupBy` the
- * full-roster builder uses. This is what the `/api/edit/roles` DELETE route
- * gates on, so the number a delete is refused for can never drift from the
- * `holderCount` the roster UI already renders for the row.
+ * `OrgUnitRoleAssignment` rows plus `CenterMembership` rows keyed to it, plus
+ * (for `entityType === "core"` only — a `CoreLeader` row can only ever mean a
+ * `"core"` role, since the table has no `entityType` column of its own)
+ * `CoreLeader` rows with a matching `role`. The same three sources
+ * {@link buildRoleRoster}'s `holderCount` sums, read here as direct `count`s
+ * for a single key instead of the batched `groupBy` the full-roster builder
+ * uses. This is what the `/api/edit/roles` DELETE route gates on, so the
+ * number a delete is refused for can never drift from the `holderCount` the
+ * roster UI already renders for the row.
  */
 export async function countRoleHolders(
   db: OrgUnitRoleHolderCountDb,
   entityType: string,
   key: string,
 ): Promise<number> {
-  const [assignmentCount, membershipCount] = await Promise.all([
+  const [assignmentCount, membershipCount, coreLeaderCount] = await Promise.all([
     db.orgUnitRoleAssignment.count({ where: { entityType, roleKey: key } }),
     db.centerMembership.count({
       where: { roleEntityType: entityType, membershipRoleKey: key },
     }),
+    entityType === "core" ? db.coreLeader.count({ where: { role: key } }) : 0,
   ]);
-  return assignmentCount + membershipCount;
+  return assignmentCount + membershipCount + coreLeaderCount;
 }
 
 /**
@@ -137,28 +155,33 @@ export async function countRoleHolders(
 export async function buildRoleRoster(
   db: OrgUnitRoleRosterDb,
 ): Promise<OrgUnitRoleRosterRow[]> {
-  const [roles, leadershipCounts, membershipCounts, scopeCounts] = await Promise.all([
-    db.orgUnitRole.findMany({
-      orderBy: [
-        { entityType: "asc" },
-        { roleGroup: "asc" },
-        { sortOrder: "asc" },
-        { key: "asc" },
-      ],
-    }),
-    db.orgUnitRoleAssignment.groupBy({
-      by: ["entityType", "roleKey", "entityId"],
-      _count: { _all: true },
-    }),
-    db.centerMembership.groupBy({
-      by: ["roleEntityType", "membershipRoleKey", "centerCode"],
-      _count: { _all: true },
-    }),
-    db.orgUnitRoleScope.groupBy({
-      by: ["entityType", "roleKey"],
-      _count: { _all: true },
-    }),
-  ]);
+  const [roles, leadershipCounts, membershipCounts, coreLeaderCounts, scopeCounts] =
+    await Promise.all([
+      db.orgUnitRole.findMany({
+        orderBy: [
+          { entityType: "asc" },
+          { roleGroup: "asc" },
+          { sortOrder: "asc" },
+          { key: "asc" },
+        ],
+      }),
+      db.orgUnitRoleAssignment.groupBy({
+        by: ["entityType", "roleKey", "entityId"],
+        _count: { _all: true },
+      }),
+      db.centerMembership.groupBy({
+        by: ["roleEntityType", "membershipRoleKey", "centerCode"],
+        _count: { _all: true },
+      }),
+      db.coreLeader.groupBy({
+        by: ["role", "coreId"],
+        _count: { _all: true },
+      }),
+      db.orgUnitRoleScope.groupBy({
+        by: ["entityType", "roleKey"],
+        _count: { _all: true },
+      }),
+    ]);
 
   const holderCounts = new Map<string, number>();
   // Distinct holding units per role key — a `Set` per key, sized at the end.
@@ -186,6 +209,12 @@ export async function buildRoleRoster(
       row._count._all,
       row.centerCode,
     );
+  }
+  for (const row of coreLeaderCounts) {
+    // No `entityType` column on `CoreLeader` — a row can only ever mean a
+    // `"core"` role, so this is credited unconditionally rather than gated
+    // on a caller-supplied entityType.
+    addHolders(rosterKey("core", row.role), row._count._all, row.coreId);
   }
 
   const scopeRowCounts = new Map<string, number>();

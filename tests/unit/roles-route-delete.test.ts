@@ -1,10 +1,11 @@
 /**
  * `DELETE /api/edit/roles` — the role-vocabulary console's delete follow-up
  * (#2542 Phase 3). Only a `manual`, zero-holder entry may be deleted; a
- * `seed` entry or one with any live holder (leadership `OrgUnitRoleAssignment`
- * OR membership `CenterMembership.membershipRoleKey`) refuses with 409. See
- * the route's DELETE docblock (`app/api/edit/roles/route.ts`) for the exact
- * gate order this file locks down.
+ * `seed` entry or one with any live holder (leadership `OrgUnitRoleAssignment`,
+ * membership `CenterMembership.membershipRoleKey`, or — for `core` roles only —
+ * `CoreLeader.role`) refuses with 409. See the route's DELETE docblock
+ * (`app/api/edit/roles/route.ts`) for the exact gate order this file locks
+ * down.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +25,9 @@ const h = vi.hoisted(() => ({
       count: vi.fn(),
     },
     centerMembership: {
+      count: vi.fn(),
+    },
+    coreLeader: {
       count: vi.fn(),
     },
   },
@@ -80,6 +84,7 @@ beforeEach(() => {
   h.tx.orgUnitRoleScope.deleteMany.mockResolvedValue({ count: 0 });
   h.tx.orgUnitRoleAssignment.count.mockResolvedValue(0);
   h.tx.centerMembership.count.mockResolvedValue(0);
+  h.tx.coreLeader.count.mockResolvedValue(0);
 });
 
 describe("DELETE /api/edit/roles — happy path", () => {
@@ -171,6 +176,28 @@ describe("DELETE /api/edit/roles — refusals", () => {
     const res = await DELETE(del({ entityType: "center", key: "deputy_director" }) as never);
     expect(res.status).toBe(409);
     expect((await res.json()).holderCount).toBe(7);
+  });
+
+  it("409 role_has_holders when the only holder is a CoreLeader row (entityType 'core')", async () => {
+    h.tx.orgUnitRole.findUnique.mockResolvedValue({
+      ...EXISTING_ROLE,
+      entityType: "core",
+      key: "co_director",
+    });
+    h.tx.coreLeader.count.mockResolvedValue(1);
+    const res = await DELETE(del({ entityType: "core", key: "co_director" }) as never);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, error: "role_has_holders", holderCount: 1 });
+    expect(h.tx.coreLeader.count).toHaveBeenCalledWith({ where: { role: "co_director" } });
+    expect(h.tx.orgUnitRole.delete).not.toHaveBeenCalled();
+  });
+
+  it("does NOT consult coreLeader for a non-core entityType", async () => {
+    h.tx.coreLeader.count.mockResolvedValue(9); // would 409 if wrongly consulted
+    const res = await DELETE(del({ entityType: "center", key: "deputy_director" }) as never);
+    expect(res.status).toBe(200);
+    expect(h.tx.coreLeader.count).not.toHaveBeenCalled();
   });
 
   it("404 not_found when the role does not exist", async () => {
