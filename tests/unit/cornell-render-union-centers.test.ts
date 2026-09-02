@@ -163,6 +163,56 @@ describe("center render union — flag ON", () => {
     });
   });
 
+  it("stamps membershipRoleLabel from a Cornell row's membershipRoleKey/roleVocabulary, and null for role key 'member'", async () => {
+    const CORNELL_ROW_LABELED = {
+      ...CORNELL_ROW,
+      membershipRoleKey: "affiliate_faculty",
+      roleVocabulary: { label: "Affiliate Faculty Fellow" },
+    };
+    const CORNELL_ROW_MEMBER = {
+      ...CORNELL_ROW,
+      cwid: "cd456",
+      membershipRoleKey: "member",
+      roleVocabulary: null,
+    };
+    const EXTERNAL_MEMBER_2 = {
+      ...EXTERNAL_MEMBER,
+      cuid: "cd456",
+      displayName: "Cody Doyle",
+      givenName: "Cody",
+      familyName: "Doyle",
+      email: "cd456@cornell.edu",
+    };
+    membershipFindMany.mockImplementation((args: { where?: { source?: string } }) => {
+      const rows = [WCM_ROW, CORNELL_ROW_LABELED, CORNELL_ROW_MEMBER];
+      return Promise.resolve(
+        args?.where?.source ? rows.filter((r) => r.source === args.where!.source) : rows,
+      );
+    });
+    externalMemberFindMany.mockResolvedValue([EXTERNAL_MEMBER, EXTERNAL_MEMBER_2]);
+
+    centerFindUnique.mockResolvedValue({
+      code: "TEST_CENTER_ROLE_LABEL",
+      name: "Test Center",
+      slug: "test-center-role-label",
+      description: null,
+      url: null,
+      // #2542 — the director is an `OrgUnitRoleAssignment` row with roleKey
+      // 'director'; an empty array is "no director", and the columns are the
+      // dual-read fallback, also empty here.
+      leaders: [],
+      directorCwid: null,
+      leaderInterim: false,
+    });
+
+    const result = await getCenterMembers("TEST_CENTER_ROLE_LABEL", {});
+    expect(result.mode).toBe("flat");
+    if (result.mode !== "flat") throw new Error("expected flat");
+    const byCwid = new Map(result.hits.map((h) => [h.cwid, h]));
+    expect(byCwid.get("ab123")?.membershipRoleLabel).toBe("Affiliate Faculty Fellow");
+    expect(byCwid.get("cd456")?.membershipRoleLabel).toBeNull();
+  });
+
   it("adds the Cornell member into the headline scholarCount", async () => {
     centerFindUnique.mockResolvedValue({
       code: "TEST_CENTER_UNION_ON_HERO",
@@ -288,6 +338,37 @@ describe("center render union — getCenterMembersByType", () => {
     expect(result.total).toBe(1);
     expect(result.hits.map((h) => h.cwid)).toEqual(["wcm001"]);
     expect(result.hits.some((h) => h.isExternal)).toBe(false);
+  });
+
+  it("stamps membershipRoleLabel on the Cornell hits in the 'Affiliated faculty' group", async () => {
+    const CORNELL_ROW_LABELED = {
+      ...CORNELL_ROW,
+      membershipRoleKey: "affiliate_faculty",
+      roleVocabulary: { label: "Affiliate Faculty Fellow" },
+    };
+    const CORNELL_ROW_MEMBER = {
+      ...CORNELL_ROW,
+      cwid: "cd456",
+      membershipRoleKey: "member",
+      roleVocabulary: null,
+    };
+    const EXTERNAL_MEMBER_2 = {
+      ...EXTERNAL_MEMBER,
+      cuid: "cd456",
+      displayName: "Cody Doyle",
+      givenName: "Cody",
+      familyName: "Doyle",
+      email: "cd456@cornell.edu",
+    };
+    membershipFindMany.mockImplementation(() =>
+      Promise.resolve([WCM_ROW, AFFILIATED_ROW, CORNELL_ROW_LABELED, CORNELL_ROW_MEMBER]),
+    );
+    externalMemberFindMany.mockResolvedValue([EXTERNAL_MEMBER, EXTERNAL_MEMBER_2]);
+
+    const result = await getCenterMembersByType("TEST_CENTER_BY_TYPE", "Affiliated faculty", 0);
+    const byCwid = new Map(result.hits.map((h) => [h.cwid, h]));
+    expect(byCwid.get("ab123")?.membershipRoleLabel).toBe("Affiliate Faculty Fellow");
+    expect(byCwid.get("cd456")?.membershipRoleLabel).toBeNull();
   });
 });
 
