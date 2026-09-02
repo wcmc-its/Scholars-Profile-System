@@ -122,6 +122,45 @@ describe("getCenterMembersByType", () => {
     expect(mockScholarFindMany).not.toHaveBeenCalled();
   });
 
+  it("CHPC fellows — surfaces a vocabulary membership-role label, but not for member/research keys", async () => {
+    mockCenterMembershipFindMany.mockResolvedValue([
+      {
+        cwid: "fac001",
+        membershipType: null,
+        membershipRoleKey: "core_faculty",
+        roleVocabulary: { label: "Core Faculty Fellow" },
+        ...ACTIVE,
+      },
+      {
+        cwid: "fac002",
+        membershipType: "research",
+        membershipRoleKey: "research",
+        roleVocabulary: { label: "Research" },
+        ...ACTIVE,
+      },
+      {
+        cwid: "fac003",
+        membershipType: null,
+        membershipRoleKey: "member",
+        roleVocabulary: { label: "Member" },
+        ...ACTIVE,
+      },
+    ]);
+    mockScholarFindMany.mockResolvedValue([
+      scholarRow("fac001", "full_time_faculty"),
+      scholarRow("fac002", "full_time_faculty"),
+      scholarRow("fac003", "full_time_faculty"),
+    ]);
+
+    const result = await getCenterMembersByType("CHPC", "Full-time faculty", 0);
+    const byId = new Map(result.hits.map((h) => [h.cwid, h]));
+    expect(byId.get("fac001")?.membershipRoleLabel).toBe("Core Faculty Fellow");
+    expect(byId.get("fac001")?.membershipType).toBeNull();
+    expect(byId.get("fac002")?.membershipRoleLabel).toBeNull();
+    expect(byId.get("fac002")?.membershipType).toBe("research");
+    expect(byId.get("fac003")?.membershipRoleLabel).toBeNull();
+  });
+
   it("paginates 0-indexed, 20/page, ordered by surname (matching the SSR roster)", async () => {
     const cwids = Array.from({ length: 25 }, (_, i) => `p${String(i).padStart(3, "0")}`);
     mockCenterMembershipFindMany.mockResolvedValue(
