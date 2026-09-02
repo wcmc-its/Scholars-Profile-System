@@ -146,3 +146,33 @@ describe("getCenterMembers — 1-indexed flat page contract (#2234)", () => {
     expect((result as Record<string, unknown>).roleCategoryCounts).toBeUndefined();
   });
 });
+
+describe("getCenterMembers — CHPC fellows — vocabulary membershipRoleLabel (flat, unprogrammed branch)", () => {
+  it("a core_faculty membershipRoleKey surfaces its roleVocabulary label; a research row surfaces null", async () => {
+    mockCenterMembershipFindMany.mockResolvedValue([
+      {
+        cwid: "fellow",
+        membershipRoleKey: "core_faculty",
+        roleVocabulary: { label: "Core Faculty Fellow" },
+        ...ACTIVE,
+      },
+      {
+        cwid: "researcher",
+        membershipType: "research",
+        membershipRoleKey: "research",
+        roleVocabulary: { label: "Research" },
+        ...ACTIVE,
+      },
+    ]);
+    mockScholarFindMany.mockResolvedValue([
+      scholarRow("fellow", "full_time_faculty"),
+      scholarRow("researcher", "full_time_faculty"),
+    ]);
+
+    const result = await getCenterMembers("CHPC", {});
+    if (result.mode !== "flat") throw new Error("expected flat");
+    const byId = new Map(result.hits.map((h) => [h.cwid, h]));
+    expect(byId.get("fellow")?.membershipRoleLabel).toBe("Core Faculty Fellow");
+    expect(byId.get("researcher")?.membershipRoleLabel).toBeNull();
+  });
+});

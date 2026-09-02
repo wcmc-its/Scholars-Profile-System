@@ -122,7 +122,7 @@ describe("getCenterMembersByType", () => {
     expect(mockScholarFindMany).not.toHaveBeenCalled();
   });
 
-  it("#2576 — surfaces a vocabulary membership-role label, but not for member/research keys", async () => {
+  it("CHPC fellows — surfaces a vocabulary membership-role label, but not for member/research keys", async () => {
     mockCenterMembershipFindMany.mockResolvedValue([
       {
         cwid: "fac001",

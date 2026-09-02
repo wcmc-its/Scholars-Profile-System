@@ -18,10 +18,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
+import type { ReactNode } from "react";
+
 vi.mock("@/components/department/person-row", () => ({
-  PersonRow: ({ hit }: { hit: { cwid: string; preferredName: string } }) => (
+  PersonRow: ({
+    hit,
+    trailingBadge,
+  }: {
+    hit: { cwid: string; preferredName: string };
+    trailingBadge?: ReactNode;
+  }) => (
     <div data-testid="person" data-cwid={hit.cwid}>
       {hit.preferredName}
+      {trailingBadge}
     </div>
   ),
 }));
@@ -31,7 +40,11 @@ import type { CenterMemberHit, CenterMembersResult } from "@/lib/api/centers";
 
 const FT = "Full-time faculty";
 
-function hit(cwid: string, roleCategory: string): CenterMemberHit {
+function hit(
+  cwid: string,
+  roleCategory: string,
+  membershipRoleLabel: string | null = null,
+): CenterMemberHit {
   return {
     cwid,
     preferredName: cwid.toUpperCase(),
@@ -46,7 +59,7 @@ function hit(cwid: string, roleCategory: string): CenterMemberHit {
     pubCount: 0,
     grantCount: 0,
     membershipType: "research",
-    membershipRoleLabel: null,
+    membershipRoleLabel,
   };
 }
 
@@ -247,5 +260,22 @@ describe("CenterMembersClient — flat roster server-filtered chip (#2537)", () 
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
     expect(screen.queryByText("No members match these filters.")).toBeNull();
+  });
+
+  it("CHPC fellows — a vocabulary membership-role label renders in the FLAT roster too, and a plain research row shows no Research text", () => {
+    const result: CenterMembersResult = {
+      mode: "flat",
+      hits: [hit("fellow", FT, "Core Faculty Fellow"), hit("researcher", FT, null)],
+      total: 2,
+      page: 1,
+      pageSize: 20,
+      roleCategoryCounts: { [FT]: 2 },
+    };
+    render(<CenterMembersClient result={result} centerSlug="chpc" />);
+
+    const rows = screen.getAllByTestId("person");
+    const byId = new Map(rows.map((el) => [el.getAttribute("data-cwid"), el]));
+    expect(byId.get("fellow")?.textContent).toContain("Core Faculty Fellow");
+    expect(byId.get("researcher")?.textContent).not.toContain("Research");
   });
 });

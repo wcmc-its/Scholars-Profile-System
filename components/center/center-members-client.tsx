@@ -698,7 +698,15 @@ function FlatMembers({
       ) : (
         <div className="flex flex-col">
           {visible.map((hit) => (
-            <PersonRow key={hit.cwid} hit={hit} />
+            <PersonRow
+              key={hit.cwid}
+              hit={hit}
+              trailingBadge={
+                hit.membershipRoleLabel ? (
+                  <MembershipRoleBadge label={hit.membershipRoleLabel} />
+                ) : undefined
+              }
+            />
           ))}
         </div>
       )}

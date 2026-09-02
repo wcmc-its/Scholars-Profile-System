@@ -390,7 +390,7 @@ describe("CenterMembersClient — program-page header links (#1105)", () => {
     expect(screen.getByRole("heading", { name: "Cancer Biology" })).toBeTruthy();
   });
 
-  it("#2576 — a vocabulary membership-role label renders as a badge, and never doubles up with Research/Clinical", () => {
+  it("CHPC fellows — a vocabulary membership-role label renders as a badge, and never doubles up with Research/Clinical", () => {
     const withRoleLabel: CenterMembersResult = {
       mode: "grouped",
       total: 3,
