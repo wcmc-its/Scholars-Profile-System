@@ -15,6 +15,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import type { ReactNode } from "react";
 
 vi.mock("@/components/department/person-row", () => ({
   // Surface the #962 chip labels so the chip-wiring can be asserted without the
@@ -22,9 +23,11 @@ vi.mock("@/components/department/person-row", () => ({
   PersonRow: ({
     hit,
     methodChips,
+    trailingBadge,
   }: {
     hit: { cwid: string; preferredName: string };
     methodChips?: Array<{ familyLabel: string }>;
+    trailingBadge?: ReactNode;
   }) => (
     <div
       data-testid="person"
@@ -32,6 +35,7 @@ vi.mock("@/components/department/person-row", () => ({
       data-chips={(methodChips ?? []).map((c) => c.familyLabel).join("|")}
     >
       {hit.preferredName}
+      {trailingBadge}
     </div>
   ),
 }));
@@ -56,10 +60,11 @@ function fam(supercategory: string, label: string, pmidCount: number): CenterMem
 function hit(
   cwid: string,
   roleCategory: string,
-  membershipType: CenterMembershipType,
+  membershipType: CenterMembershipType | null,
   departmentName: string,
   methodFamilies?: CenterMemberFamily[],
   professorialRank: string | null = null,
+  membershipRoleLabel: string | null = null,
 ) {
   return {
     cwid,
@@ -75,6 +80,7 @@ function hit(
     pubCount: 0,
     grantCount: 0,
     membershipType,
+    membershipRoleLabel,
     ...(methodFamilies
       ? { methodFamilies, topMethods: methodFamilies.slice(0, 3) }
       : {}),
@@ -382,5 +388,32 @@ describe("CenterMembersClient — program-page header links (#1105)", () => {
     render(<CenterMembersClient result={two} centerSlug="meyer-cancer-center" />);
     expect(screen.queryByRole("link", { name: "Cancer Biology" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Cancer Biology" })).toBeTruthy();
+  });
+
+  it("#2576 — a vocabulary membership-role label renders as a badge, and never doubles up with Research/Clinical", () => {
+    const withRoleLabel: CenterMembersResult = {
+      mode: "grouped",
+      total: 3,
+      groups: [
+        {
+          code: "CB",
+          label: "Cancer Biology",
+          members: [
+            hit("fellow", FT, null, "Medicine", undefined, null, "Core Faculty Fellow"),
+            hit("researcher", FT, "research", "Medicine"),
+            hit("plain", FT, null, "Medicine", undefined, null, null),
+          ],
+        },
+      ],
+    };
+    render(<CenterMembersClient result={withRoleLabel} centerSlug="x" />);
+
+    const rows = screen.getAllByTestId("person");
+    const byId = new Map(rows.map((el) => [el.getAttribute("data-cwid"), el]));
+    expect(byId.get("fellow")?.textContent).toContain("Core Faculty Fellow");
+    expect(byId.get("fellow")?.textContent).not.toContain("Research");
+    expect(byId.get("researcher")?.textContent).toContain("Research");
+    expect(byId.get("plain")?.textContent).not.toContain("Research");
+    expect(byId.get("plain")?.textContent).not.toContain("Core Faculty Fellow");
   });
 });

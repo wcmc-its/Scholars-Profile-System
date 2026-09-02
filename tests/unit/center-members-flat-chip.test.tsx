@@ -46,6 +46,7 @@ function hit(cwid: string, roleCategory: string): CenterMemberHit {
     pubCount: 0,
     grantCount: 0,
     membershipType: "research",
+    membershipRoleLabel: null,
   };
 }
 

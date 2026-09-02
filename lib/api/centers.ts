@@ -31,6 +31,8 @@ import { extractLastNameSort } from "@/lib/name-sort";
 import {
   CENTER_ENTITY_TYPE,
   CENTER_PROGRAM_ENTITY_TYPE,
+  MEMBER_ROLE_KEY,
+  deriveMembershipType,
   formatLeadershipTitle,
 } from "@/lib/org-unit-roles";
 import type {
@@ -255,6 +257,9 @@ export type CenterMemberFamily = MemberMethodFamily;
  *  classification (#552) the facet sidebar + per-row badge consume. */
 export type CenterMemberHit = DepartmentFacultyHit & {
   membershipType: CenterMembershipType | null;
+  /** Vocabulary label for a membership role that is neither plain `member`
+   *  nor research/clinical (e.g. "Core Faculty Fellow") — null otherwise. */
+  membershipRoleLabel: string | null;
   /** #1570 — ASMS professorial rank ("Professor" / "Associate Professor" /
    *  "Assistant Professor"), or null for members without one. Powers the
    *  "Professorial rank" facet in the roster sidebar. */
@@ -515,6 +520,16 @@ type CenterScholarRow = {
   division: { name: string } | null;
 };
 
+/** The badge label for a membership role, or null for plain `member` and for
+ *  research/clinical (the existing type pill already covers those). */
+function membershipRoleLabelFor(
+  key: string | null,
+  label: string | null | undefined,
+): string | null {
+  if (!key || key === MEMBER_ROLE_KEY || deriveMembershipType(key) !== null) return null;
+  return label ?? null;
+}
+
 /** Hydrate scholar rows into `DepartmentFacultyHit`s (plus the #1570 professorial
  *  rank the center facet reads) with pub/grant counts. */
 async function buildCenterMemberHits(
@@ -606,6 +621,8 @@ async function getCenterMembersUncached(
     select: {
       cwid: true,
       membershipType: true,
+      membershipRoleKey: true,
+      roleVocabulary: { select: { label: true } },
       programCode: true,
       startDate: true,
       endDate: true,
@@ -614,6 +631,8 @@ async function getCenterMembersUncached(
   })) as Array<{
     cwid: string;
     membershipType: CenterMembershipType | null;
+    membershipRoleKey: string | null;
+    roleVocabulary: { label: string } | null;
     programCode: string | null;
     startDate: Date | null;
     endDate: Date | null;
@@ -624,6 +643,16 @@ async function getCenterMembersUncached(
   );
   const activeCwids = activeMemberships.map((m) => m.cwid);
   if (activeCwids.length === 0) return emptyFlat;
+
+  // Per-cwid vocabulary role label (independent of source — a Cornell row's
+  // `membershipRoleKey` resolves the same way as a WCM row's).
+  const membershipRoleLabelByCwid = new Map<string, string | null>();
+  for (const m of activeMemberships) {
+    membershipRoleLabelByCwid.set(
+      m.cwid,
+      membershipRoleLabelFor(m.membershipRoleKey, m.roleVocabulary?.label),
+    );
+  }
 
   // #2519 — Cornell (Ithaca) render union. Off (or no cornell rows on this
   // center) ⇒ `cornellHits` is `[]` and every branch below is byte-identical
@@ -643,6 +672,7 @@ async function getCenterMembersUncached(
         .map((m): CenterMemberHit => ({
           ...buildExternalMemberHit(m),
           membershipType: null,
+          membershipRoleLabel: membershipRoleLabelByCwid.get(m.cuid) ?? null,
           professorialRank: null,
         }));
     }
@@ -660,6 +690,7 @@ async function getCenterMembersUncached(
     hs.map((h) => ({
       ...h,
       membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
+      membershipRoleLabel: membershipRoleLabelByCwid.get(h.cwid) ?? null,
     }));
 
   // #962 — layer PUBLIC method families onto already-built hits (GROUPED path
@@ -910,6 +941,8 @@ export async function getCenterMembersByType(
     select: {
       cwid: true,
       membershipType: true,
+      membershipRoleKey: true,
+      roleVocabulary: { select: { label: true } },
       startDate: true,
       endDate: true,
       source: true,
@@ -917,6 +950,8 @@ export async function getCenterMembersByType(
   })) as Array<{
     cwid: string;
     membershipType: CenterMembershipType | null;
+    membershipRoleKey: string | null;
+    roleVocabulary: { label: string } | null;
     startDate: Date | null;
     endDate: Date | null;
     source: string;
@@ -926,6 +961,16 @@ export async function getCenterMembersByType(
   );
   const activeCwids = activeMemberships.map((m) => m.cwid);
   if (activeCwids.length === 0) return empty;
+
+  // Per-cwid vocabulary role label (independent of source — a Cornell row's
+  // `membershipRoleKey` resolves the same way as a WCM row's).
+  const membershipRoleLabelByCwid = new Map<string, string | null>();
+  for (const m of activeMemberships) {
+    membershipRoleLabelByCwid.set(
+      m.cwid,
+      membershipRoleLabelFor(m.membershipRoleKey, m.roleVocabulary?.label),
+    );
+  }
 
   // #2519 — "Affiliated faculty" also draws in the center's active Cornell
   // (Ithaca) external members (see the docblock above); every other group
@@ -945,6 +990,7 @@ export async function getCenterMembersByType(
         .map((m): CenterMemberHit => ({
           ...buildExternalMemberHit(m),
           membershipType: null,
+          membershipRoleLabel: membershipRoleLabelByCwid.get(m.cuid) ?? null,
           professorialRank: null,
         }));
     }
@@ -998,6 +1044,7 @@ export async function getCenterMembersByType(
     const hits: CenterMemberHit[] = (await buildCenterMemberHits(pageRows)).map((h) => ({
       ...h,
       membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
+      membershipRoleLabel: membershipRoleLabelByCwid.get(h.cwid) ?? null,
     }));
     return { hits, total, page: safePage, pageSize: MEMBERS_PAGE_SIZE };
   }
@@ -1009,6 +1056,7 @@ export async function getCenterMembersByType(
   const wcmHits: CenterMemberHit[] = (await buildCenterMemberHits(scholars)).map((h) => ({
     ...h,
     membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
+    membershipRoleLabel: membershipRoleLabelByCwid.get(h.cwid) ?? null,
   }));
   const merged = [...wcmHits, ...cornellHits].sort(
     (a, b) =>

@@ -90,6 +90,25 @@ function MembershipBadge({ type }: { type: CenterMembershipType | null }) {
   );
 }
 
+/** Vocabulary membership-role badge (e.g. "Core Faculty Fellow") — same
+ *  size/shape as `MembershipBadge`, neutral colour. Renders instead of it, a
+ *  member never shows both. */
+function MembershipRoleBadge({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center rounded-[3px] border border-[#d8d8d8] bg-[#f4f4f4] px-[6px] text-[11px] font-medium leading-[1.4] text-[#4a4a4a]">
+      {label}
+    </span>
+  );
+}
+
+function trailingBadgeFor(m: Pick<CenterMemberHit, "membershipType" | "membershipRoleLabel">) {
+  return m.membershipRoleLabel ? (
+    <MembershipRoleBadge label={m.membershipRoleLabel} />
+  ) : (
+    <MembershipBadge type={m.membershipType} />
+  );
+}
+
 type RowWithProgram = CenterMemberHit & { programLabel: string };
 
 const TYPE_ORDER: CenterMembershipType[] = ["research", "clinical"];
@@ -408,7 +427,7 @@ function GroupedRoster({
                     <PersonRow
                       key={m.cwid}
                       hit={m}
-                      trailingBadge={<MembershipBadge type={m.membershipType} />}
+                      trailingBadge={trailingBadgeFor(m)}
                       methodChips={m.topMethods}
                     />
                   ))}
