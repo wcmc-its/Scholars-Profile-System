@@ -18,6 +18,17 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
  *
  * The tab markup mirrors `AdminTab` in `admin-subnav.tsx`, kept in sync by hand — cheap for the one
  * tab that carries a hover, and safer than importing string consts across the server/client line.
+ *
+ * 🔴 TOUCH IS HAND-WIRED (#2588). Radix's HoverCardTrigger preventDefaults `touchstart`, which on
+ * iOS cancels the synthesized click — so wrapping the tab in a hover trigger DID eat its href on an
+ * iPhone: the tab was completely inert, exactly the failure the test below guards against for the
+ * mouse. `onTouchEnd` (the one trigger event Radix leaves alone) re-issues the click the browser
+ * was denied, so <Link> still owns the routing and the href stays the single source of truth.
+ * `composeEventHandlers` cannot opt out of Radix's preventDefault — it only skips the Radix handler
+ * when the default is ALREADY prevented, and there is no un-prevent.
+ *
+ * The explanatory card stays hover-only on purpose: a tooltip a touch user cannot dismiss is worse
+ * than none, and what a phone needs from this tab is to reach the surface.
  */
 export function MatchaTab({ active }: { active: boolean }) {
   const tab = active ? (
@@ -31,6 +42,10 @@ export function MatchaTab({ active }: { active: boolean }) {
   ) : (
     <Link
       href="/edit/matcha"
+      onTouchEnd={(e) => {
+        e.preventDefault();
+        e.currentTarget.click();
+      }}
       className="text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap"
       data-testid="admin-tab-matcha"
     >
