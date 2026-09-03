@@ -43,6 +43,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
+import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { displayPublicationType } from "@/lib/publication-types";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
 import { lastNameKey } from "@/lib/last-name-key";
@@ -203,22 +204,6 @@ type PubForCitation = {
   pmcid: string | null;
 };
 
-/** Build the volume/issue/pages segment in NLM punctuation. Output:
- *  ";Vol(Issue):Pages." with each piece omitted gracefully when null.
- *  Returns "" when all three are null so the citation skips the block. */
-function formatVolIssuePages(
-  volume: string | null,
-  issue: string | null,
-  pages: string | null,
-): string {
-  if (!volume && !issue && !pages) return "";
-  let s = "";
-  if (volume) s += volume;
-  if (issue) s += `(${issue})`;
-  if (pages) s += `:${pages}`;
-  return s;
-}
-
 function buildCitationParagraph(
   index: number,
   pub: PubForCitation,
@@ -234,6 +219,8 @@ function buildCitationParagraph(
   // Falls back to the verbose journal title when the abbreviation is
   // missing — happens for ~5% of pubs the ETL didn't hit.
   const journalForCitation = pub.journalAbbrev ?? pub.journal ?? "";
+  // #2580 — the shared formatter also treats a literal "NULL" volume/issue/pages
+  // as absent; the local copy printed `2024;NULL(NULL):NULL.` into the .docx.
   const volIssuePages = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
   // Title strips a single trailing period (PubMed inconsistency); we
   // always re-emit one after the title so spacing is uniform.
@@ -243,9 +230,17 @@ function buildCitationParagraph(
 
   // PMID/PMCID assemble as one block joined by ; (NLM convention) with
   // a single trailing period after the whole block.
+  //
+  // #2580 — `Publication.pmid` carries a source-prefixed article id for
+  // non-PubMed records ("SCOPUS:105037533819"), which this used to label
+  // `PMID:` AND wrap in a `pubmed.ncbi.nlm.nih.gov/SCOPUS:.../` hyperlink —
+  // a link that is dead the moment the reader clicks it in Word. The shared
+  // helper decides the label and hands back `href: null` for those, so they
+  // render as plain "Scopus: 105037533819".
+  const id = citationIdentifier(pub.pmid);
   const idRuns: (TextRun | ExternalHyperlink)[] = [
-    new TextRun({ text: "PMID: " }),
-    hyperlinkRun(pub.pmid, `https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`),
+    new TextRun({ text: `${id.label}: ` }),
+    id.href ? hyperlinkRun(id.value, id.href) : new TextRun({ text: id.value }),
   ];
   if (pub.pmcid) {
     idRuns.push(new TextRun({ text: "; PMCID: " }));
