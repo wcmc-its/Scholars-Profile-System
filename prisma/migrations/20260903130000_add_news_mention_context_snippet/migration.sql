@@ -14,12 +14,13 @@
 -- `context_snippet` holds ~200-300 chars of the article's title+body text
 -- around the matched name's first occurrence, word-boundary clipped so no
 -- word is cut mid-string, with the matched name itself always intact. It is
--- populated only for a NAME row whose match_basis is BODY or TITLE — the two
--- bases the ETL finds by scanning prose and can therefore locate a position
--- in. TAG (the feed's own tag list) and CAPTION (photo alt text) have no
--- comparable "position in the article" to snippet, so those rows, and every
--- VIVO/CURATOR row, carry NULL here — same standing convention as
--- detected_name/likelihood/match_basis.
+-- populated for any NAME row whose name appears in the prose at all. That
+-- includes a TAG row: the feed tags the people a story quotes, so a tagged
+-- scholar is normally also named in the body, and the HIGH rows are precisely
+-- the ones a reviewer is deciding on — leaving those contextless would defeat
+-- the purpose. NULL survives for a tag-only or caption-only mention (nothing
+-- in the prose to quote) and for every VIVO/CURATOR row — the same standing
+-- convention as detected_name/likelihood/match_basis.
 --
 -- Additive and nullable, no backfill. Existing rows keep context_snippet
 -- NULL, which reads correctly as "captured before this shipped" — and the

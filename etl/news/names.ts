@@ -424,6 +424,13 @@ function bandForScore(score: number): "HIGH" | "MEDIUM" | "LOW" {
  * a person tag: a department legitimately appears as a FRAGMENT of a longer tag
  * ("Hematology and Oncology" contains "Oncology"), and department names are
  * institutional enough that a stray substring collision is not a practical risk.
+ *
+ * That last claim is MEASURED, not assumed: the shortest `primaryDepartment` in
+ * the corpus is 7 characters (679 scholars; nothing shorter exists). A mid-word
+ * collision needs a department short enough to fall inside an unrelated word, so
+ * no minimum-length guard is warranted here. Re-check that floor before
+ * concluding this check is carelessly unguarded — a 2-3 character department
+ * would need one.
  */
 function tagContainsDepartment(tags: string[], department: string | null): boolean {
   const dept = department?.trim().toLowerCase();
@@ -500,6 +507,27 @@ export function detectMentions(
   const tagSet = new Set(tagTokens.flat());
   const honorifics = honorificNamePhrases(sources.text);
 
+  /**
+   * The prose snippet for the first of `seqs` that appears in the article text,
+   * or null when none of them do.
+   *
+   * Hoisted out of the basis ladder so a TAG row gets a snippet too. The feed
+   * tags the people a story quotes, so a tagged scholar is normally ALSO named
+   * in the prose — and the HIGH rows are precisely the ones a reviewer is
+   * deciding on, so leaving them contextless defeats the point of the snippet.
+   * Null survives only for a genuine tag-only or caption-only mention, where
+   * there is no prose position to quote.
+   */
+  const proseSnippet = (seqs: readonly string[][]): string | null => {
+    for (const seq of seqs) {
+      const at = sequenceIndices(tokens, seq);
+      if (at.length === 0) continue;
+      const i = at[0]!;
+      return extractSnippet(sources.text, spans[i]!.start, spans[i + seq.length - 1]!.end);
+    }
+    return null;
+  };
+
   const hits: {
     cwid: string;
     displayName: string;
@@ -525,6 +553,7 @@ export function detectMentions(
     if (match) {
       basis = "TAG";
       tier = BASIS_TIER.TAG;
+      contextSnippet = proseSnippet(entry.sequences);
     }
 
     // 2. BODY/TITLE — prose, demoted to TITLE when EVERY occurrence of the name
@@ -588,9 +617,10 @@ export function detectMentions(
       groupKey: match.join(" "),
       basis,
       tier,
-      // Only BODY/TITLE ever populate contextSnippet above; TAG/CAPTION leave
-      // it at its `null` default.
-      contextSnippet: basis === "BODY" || basis === "TITLE" ? contextSnippet : null,
+      // BODY/TITLE take it from the scored occurrence; TAG takes it from
+      // `proseSnippet`. Stays null only for a mention with no prose position at
+      // all — a tag-only or caption-only row.
+      contextSnippet,
     });
   }
 

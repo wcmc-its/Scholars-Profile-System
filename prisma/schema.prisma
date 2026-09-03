@@ -3182,10 +3182,12 @@ model NewsMention {
   /// ~200-300 chars of raw article text around the matched name's first prose
   /// occurrence, word-boundary clipped, matched name intact (#2578 follow-up) —
   /// lets a /edit/news-queue reviewer judge a candidate (e.g. an endowed-chair
-  /// false positive) without opening the article. Populated only for a NAME row
-  /// whose matchBasis is BODY or TITLE (the two bases with a prose position);
-  /// null for VIVO/CURATOR rows, for TAG/CAPTION rows, and for a NAME row
-  /// matched before this shipped.
+  /// false positive) without opening the article. Populated for any NAME row
+  /// whose name appears in the prose at all — including a TAG row, since the
+  /// feed tags the people a story quotes and the HIGH rows are the ones a
+  /// reviewer is actually deciding on. Null for VIVO/CURATOR rows, for a
+  /// tag-only or caption-only mention (no prose position to quote), and for a
+  /// NAME row matched before this shipped.
   contextSnippet String?           @map("context_snippet") @db.VarChar(512)
   /// Per-mention profile hide (the scholar's /edit "hide" control). A published
   /// mention renders only when this is true.

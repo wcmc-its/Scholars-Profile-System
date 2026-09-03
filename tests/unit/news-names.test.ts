@@ -379,8 +379,37 @@ describe("#2578 regression — endowed-chair names must not outrank the tagged f
 
     // Girardi, who holds the chair and gave the address, IS tagged.
     expect(byCwid.lng1).toMatchObject({ likelihood: "HIGH", basis: "TAG" });
-    // TAG has no prose position, so no snippet either.
-    expect(byCwid.lng1.contextSnippet).toBeNull();
+    // A TAG row gets a snippet too, taken from the prose. The feed tags the
+    // people a story quotes, so a tagged scholar is normally also named in the
+    // body — and the HIGH rows are the ones a reviewer is actually deciding on,
+    // so leaving them contextless would defeat the point of the snippet.
+    expect(byCwid.lng1.contextSnippet).not.toBeNull();
+    expect(byCwid.lng1.contextSnippet).toContain("Girardi");
+  });
+
+  it("a tag-only mention — name never in the prose — has no snippet to quote", () => {
+    // The one case that legitimately stays null: tagged, but absent from the
+    // body, so there is no prose position to extract.
+    const index = buildNameIndex([
+      {
+        cwid: "abs1",
+        fullName: "Alexis Nordgren",
+        preferredName: "Alexis Nordgren",
+        primaryTitle: "Professor",
+        primaryDepartment: "Neurology",
+      },
+    ]);
+    const [hit] = detectMentions(
+      {
+        title: "A study with no faculty named in the prose",
+        text: "A study with no faculty named in the prose. The work was described in a journal.",
+        tags: ["Alexis Nordgren", "Neurology"],
+        captionText: "",
+      },
+      index,
+    );
+    expect(hit).toMatchObject({ likelihood: "HIGH", basis: "TAG" });
+    expect(hit!.contextSnippet).toBeNull();
   });
 
   it("Radiopharmaceutical: Coleman is demoted, Tagawa is reachable at the tag tier", () => {
