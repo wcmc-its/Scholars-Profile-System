@@ -31,6 +31,22 @@ export type ScrapedArticle = {
   cwids: string[];
   /** The article body as plain text — scanned for prose name-mentions. */
   bodyText: string;
+  /**
+   * The feed's own story tags (`term_node_tid`, comma-split and trimmed) — a
+   * mix of faculty names, departments, centers, topics and the story type
+   * (#2578). NOT pre-classified into person-vs-department: person tags are not
+   * reliably `Dr. `-prefixed (students are tagged bare), so the matcher just
+   * intersects every entry against the scholar name index and a tag that
+   * resolves to nobody matches nothing. Empty when the feed omits them.
+   */
+  tags: string[];
+  /**
+   * Photo alt text (featured image + every body `<img alt>`), space-joined —
+   * the weakest mention tier (#2578). Kept SEPARATE from bodyText: `clean()`
+   * strips attributes, so this text is not otherwise in the corpus at all, and
+   * merging it in would silently promote a caption-only name to the prose tier.
+   */
+  captionText: string;
 };
 
 /** Shared with the scraper so a cwid it emits can never fail validation here. */
@@ -78,6 +94,12 @@ const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
 const TITLE_MAX = 512;
 const EXCERPT_MAX = 2000;
 const BODY_MAX = 60000;
+// #2578 — headroom over what the feed actually publishes, measured across 500
+// live stories: the longest single tag entry was 65 chars ("Jill Roberts
+// Institute for Research in Inflammatory Bowel Disease") and the longest joined
+// caption 360. Both are truncated in the scraper rather than throwing here.
+const TAG_MAX = 255;
+const CAPTION_MAX = 4000;
 
 /** Parse + validate the seed. Throws on anything malformed. */
 export function parseSeed(text: string): ScrapedArticle[] {
@@ -91,10 +113,8 @@ export function validateArticles(raw: unknown[]): ScrapedArticle[] {
   const seen = new Set<string>();
   return raw.map((r, i) => {
     if (typeof r !== "object" || r === null) throw new Error(`[News] article ${i}: not an object`);
-    const { url, title, excerpt, thumbnailUrl, publishedAt, cwids, bodyText } = r as Record<
-      string,
-      unknown
-    >;
+    const { url, title, excerpt, thumbnailUrl, publishedAt, cwids, bodyText, tags, captionText } =
+      r as Record<string, unknown>;
 
     // The url becomes an href on a public profile. Pin it to the news path under
     // the WCM origin so a corrupt or tampered seed cannot inject an off-site or
@@ -142,6 +162,29 @@ export function validateArticles(raw: unknown[]): ScrapedArticle[] {
       throw new Error(`[News] article ${i} (${url}): bodyText missing, too long, or has control chars`);
     }
 
+    // #2578 — tags and captionText are OPTIONAL in the JSON, like cwids: a seed
+    // file written before they existed must still load rather than fail a run.
+    // They are required on the TypeScript type, so the scraper always emits them
+    // (empty at worst) and no code path can quietly skip the tag tier.
+    if (tags !== undefined && !Array.isArray(tags)) {
+      throw new Error(`[News] article ${i} (${url}): tags must be an array`);
+    }
+    const tagList = (tags ?? []) as unknown[];
+    for (const t of tagList) {
+      if (typeof t !== "string" || t.length > TAG_MAX || CONTROL_RE.test(t)) {
+        throw new Error(`[News] article ${i} (${url}): invalid tag ${JSON.stringify(t)}`);
+      }
+    }
+    if (captionText !== undefined && captionText !== null) {
+      if (
+        typeof captionText !== "string" ||
+        captionText.length > CAPTION_MAX ||
+        CONTROL_RE.test(captionText)
+      ) {
+        throw new Error(`[News] article ${i} (${url}): invalid captionText`);
+      }
+    }
+
     if (seen.has(url)) throw new Error(`[News] article ${i}: duplicate url ${url}`);
     seen.add(url);
 
@@ -153,6 +196,12 @@ export function validateArticles(raw: unknown[]): ScrapedArticle[] {
       publishedAt: (publishedAt as string | null | undefined) ?? null,
       cwids: [...new Set(cwidList as string[])],
       bodyText,
+      // Trim + drop empties here as well as in the scraper: this validator is the
+      // only guard a hand-edited seed file passes through.
+      tags: [
+        ...new Set((tagList as string[]).map((t) => t.trim()).filter((t) => t.length > 0)),
+      ],
+      captionText: ((captionText as string | null | undefined) ?? "").trim(),
     };
   });
 }

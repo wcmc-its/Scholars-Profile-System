@@ -47,6 +47,8 @@ const MONTHS: Record<string, number> = {
 const TITLE_MAX = 512;
 const EXCERPT_MAX = 2000;
 const BODY_MAX = 60000;
+const TAG_MAX = 255;
+const CAPTION_MAX = 4000;
 
 /**
  * Ignore articles published before this date.
@@ -150,6 +152,68 @@ export function parseCwids(html: string): string[] {
   return [...out];
 }
 
+/**
+ * `term_node_tid` — the feed's own comma-delimited story tags — as a trimmed,
+ * deduped list (#2578). Exported for tests.
+ *
+ * The list mixes faculty names, departments, centers, topic tags and the story
+ * type: "Dr. Scott Tagawa, Englander Institute for Precision Medicine,
+ * Hematology and Oncology, …, News from WCM". It is NOT classified here.
+ * Person tags are not reliably `Dr. `-prefixed (students are tagged bare), so
+ * any up-front person-vs-department split would be guesswork; names.ts instead
+ * intersects every entry against the scholar roster, and an entry that resolves
+ * to nobody simply matches nothing.
+ *
+ * Entity-decoded through the same `clean()` as every other field — the feed
+ * publishes "Awards &amp; Honors" — and each entry capped at TAG_MAX so one long
+ * upstream term truncates instead of failing the whole run at validation.
+ */
+export function parseTags(raw: unknown): string[] {
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+  const out = new Set<string>();
+  for (const part of raw.split(",")) {
+    const tag = truncate(clean(part), TAG_MAX);
+    if (tag) out.add(tag);
+  }
+  return [...out];
+}
+
+/**
+ * Every photo's alt text on the page — the featured image plus each body
+ * `<img alt>` — space-joined (#2578). Exported for tests.
+ *
+ * This is where a caption names its subject on this feed. There is no
+ * `<figcaption>` anywhere in the corpus (0/100 sampled); a captioned photo is a
+ * triple-nested `<div class="caption">` wrapper whose person name lives in the
+ * img's alt attribute — `alt="Dr. Olivier Elemento"`, `alt="Dr. Kyu Rhee"`. So
+ * one attribute regex gets the whole signal and no HTML parser is needed.
+ *
+ * `clean()` strips attributes, so none of this text reaches bodyText: a scholar
+ * named ONLY in a photo alt is invisible to the prose pass. Measured on 100 live
+ * stories, 12 carried a person-shaped alt name absent from the prose.
+ *
+ * ponytail: alt attributes only, NOT the caption's visible prose. That prose is
+ * a text node three `<div>`s deep inside the `.caption` wrapper, so reaching it
+ * means a real HTML parse for what is already the weakest tier — and its subject
+ * is normally the alt text anyway. Upgrade path if a reviewer ever reports a
+ * miss: match the `<div class="caption">…</div>` block and strip it, rather than
+ * adding a parser dependency for one field.
+ */
+export function parseCaptions(bodyHtml: string, featuredImage: unknown): string {
+  const alts: string[] = [];
+  const featuredAlt =
+    typeof featuredImage === "object" && featuredImage !== null
+      ? (featuredImage as { alt?: unknown }).alt
+      : undefined;
+  if (typeof featuredAlt === "string") alts.push(featuredAlt);
+  for (const m of bodyHtml.matchAll(/<img\b[^>]*\balt="([^"]*)"/gi)) alts.push(m[1]);
+  const joined = alts
+    .map((a) => clean(a))
+    .filter((a) => a.length > 0)
+    .join(" ");
+  return truncate(joined, CAPTION_MAX);
+}
+
 /** `field_story_post_date` ("August 5, 2026") as ISO YYYY-MM-DD, or null. Exported for tests. */
 export function parseDate(text: string): string | null {
   const m = text.match(
@@ -230,6 +294,11 @@ export function feedStories(json: string): ScrapedArticle[] {
       // name matcher scans.
       cwids: parseCwids(bodyHtml),
       bodyText: clean(bodyHtml).slice(0, BODY_MAX),
+      // #2578 — the feed's own faculty tags (the strongest mention signal) and
+      // the photo alt text (the weakest). Both are read off the raw story, so
+      // they must be parsed here rather than recovered from bodyText later.
+      tags: parseTags(s.term_node_tid),
+      captionText: parseCaptions(bodyHtml, s.field_story_featured_image),
     });
   }
   return out;

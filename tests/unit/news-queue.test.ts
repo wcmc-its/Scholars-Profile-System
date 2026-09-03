@@ -24,6 +24,7 @@ type Row = {
   publishedAt: Date | null;
   detectedName: string | null;
   likelihood: string | null;
+  matchBasis: string | null;
   source: string;
   sourceRef: string | null;
   createdAt: Date;
@@ -37,6 +38,7 @@ function vivo(over: Partial<Row> & { id: string; cwid: string }): Row {
     publishedAt: new Date("2026-07-10T00:00:00Z"),
     detectedName: null,
     likelihood: null,
+    matchBasis: null,
     source: "VIVO",
     sourceRef: null,
     createdAt: new Date("2026-07-18T00:00:00Z"),
@@ -51,6 +53,7 @@ function name(over: Partial<Row> & { id: string; cwid: string }): Row {
     title: "A name-matched article",
     detectedName: "Fei Wang",
     likelihood: "HIGH",
+    matchBasis: "TAG",
     source: "NAME",
     sourceRef: `https://news.weill.cornell.edu/${over.id}|fei wang`,
     ...over,
@@ -143,5 +146,57 @@ describe("loadNewsQueue — history shows every source", () => {
     const groups = await loadNewsQueue(c, "pending");
 
     expect(groups.map((g) => g.rows[0].likelihood)).toEqual(["HIGH", "MEDIUM"]);
+  });
+});
+
+/**
+ * #2578 — the queue must be able to tell a reviewer WHY a candidate scored what
+ * it did. `likelihood` cannot carry that alone: it folds in contested-ness as
+ * well as basis, so a MEDIUM means either "prose match" or "tagged, but two
+ * scholars share the name". The basis is the half that distinguishes them.
+ */
+describe("loadNewsQueue — match basis (#2578)", () => {
+  it("carries matchBasis through to the row the UI renders", async () => {
+    const { client: c } = client([
+      name({ id: "t1", cwid: "aaa1001", likelihood: "HIGH", matchBasis: "TAG" }),
+    ]);
+    const groups = await loadNewsQueue(c, "pending");
+    expect(groups[0].rows[0].matchBasis).toBe("TAG");
+  });
+
+  it("ranks the new LOW tier below MEDIUM but above an unscored row", async () => {
+    // LOW must not collapse into the 0 fallback: a scored LOW candidate is still
+    // more actionable than a pre-#2578 row carrying no likelihood at all.
+    const { client: c } = client([
+      name({ id: "u1", cwid: "ddd4004", likelihood: null, matchBasis: null }),
+      name({ id: "l1", cwid: "ccc3003", likelihood: "LOW", matchBasis: "TITLE" }),
+      name({ id: "m1", cwid: "bbb2002", likelihood: "MEDIUM", matchBasis: "BODY" }),
+      name({ id: "h1", cwid: "aaa1001", likelihood: "HIGH", matchBasis: "TAG" }),
+    ]);
+    const groups = await loadNewsQueue(c, "pending");
+
+    expect(groups.map((g) => g.rows[0].likelihood)).toEqual(["HIGH", "MEDIUM", "LOW", null]);
+    expect(groups.map((g) => g.rows[0].matchBasis)).toEqual(["TAG", "BODY", "TITLE", null]);
+  });
+
+  it("still surfaces a contested group, whatever the basis, and sinks it last", async () => {
+    // Two scholars, ONE detected name ⇒ one shared sourceRef ⇒ a single-select.
+    // A TAG basis does not make it uncontested: the tag names *a* Fei Wang, not
+    // which one. The UI keys "This is the one" / "None of these" off this flag.
+    const ref = "https://news.weill.cornell.edu/x|fei wang";
+    const { client: c } = client([
+      name({ id: "c1", cwid: "aaa1001", likelihood: "MEDIUM", matchBasis: "TAG", sourceRef: ref }),
+      name({ id: "c2", cwid: "bbb2002", likelihood: "MEDIUM", matchBasis: "TAG", sourceRef: ref }),
+      name({ id: "s1", cwid: "ccc3003", likelihood: "LOW", matchBasis: "CAPTION" }),
+    ]);
+    const groups = await loadNewsQueue(c, "pending");
+
+    const contested = groups.find((g) => g.contested);
+    expect(contested).toBeDefined();
+    expect(contested!.rows).toHaveLength(2);
+    expect(contested!.rows.map((r) => r.competingCwids.length)).toEqual([1, 1]);
+    // Contested ranks 0 — it needs disambiguation before it needs ranking, so it
+    // sits below even the solo LOW candidate. Shipped behaviour, pinned here.
+    expect(groups[groups.length - 1].contested).toBe(true);
   });
 });

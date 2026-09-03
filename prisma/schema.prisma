@@ -3164,9 +3164,18 @@ model NewsMention {
   /// The prose name string the ETL matched (NAME source only), shown in the
   /// review queue. Null for VIVO/CURATOR rows.
   detectedName  String?           @map("detected_name") @db.VarChar(255)
-  /// Match confidence for a NAME row: HIGH (unique full-name match) | MEDIUM
-  /// (full name shared by >1 scholar — ambiguous). Null for VIVO/CURATOR.
+  /// Match confidence for a NAME row: HIGH | MEDIUM | LOW. Derived from
+  /// `matchBasis`, then capped at MEDIUM when the folded name is shared by >1
+  /// scholar (contested). Null for VIVO/CURATOR.
   likelihood    String?           @db.VarChar(8)
+  /// WHERE the name was found, which is what decides `likelihood` (#2578):
+  /// TAG (the newsroom feed's own story tags — the strongest signal) | BODY
+  /// (article prose) | CAPTION (photo alt text only) | TITLE (prose, but every
+  /// occurrence sits inside an endowed-chair or memorial phrase, so the story is
+  /// about the chair's HOLDER, not the person it is named for). Carries the
+  /// reviewer-facing "why" that `likelihood` alone cannot, since likelihood also
+  /// folds in contested-ness. Null for VIVO/CURATOR rows.
+  matchBasis    String?           @map("match_basis") @db.VarChar(16)
   /// Contested-group key "<url>|<detectedName>" — pending rows sharing it are
   /// competing candidates for one prose mention. Null for VIVO/CURATOR rows.
   sourceRef     String?           @map("source_ref") @db.VarChar(768)
