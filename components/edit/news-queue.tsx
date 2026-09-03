@@ -31,9 +31,37 @@ function formatDate(iso: string | null): string {
   });
 }
 
+/**
+ * How the ETL found the name, in reviewer language (#2578).
+ *
+ * `likelihood` alone cannot explain itself: it folds in contested-ness as well
+ * as basis, so a MEDIUM may mean "prose match" or "tagged but two scholars share
+ * the name". The basis is the half a reviewer can actually act on — above all
+ * `TITLE`, the endowed-chair/memorial case that drove most rejections, where the
+ * story is about the chair's HOLDER rather than the person it is named for.
+ */
+const BASIS_LABEL: Readonly<Record<string, { text: string; hint: string }>> = {
+  TAG: {
+    text: "newsroom tag",
+    hint: "The newsroom's own story tags name this scholar — attribution by the article's authors.",
+  },
+  BODY: { text: "article text", hint: "Named in the article prose." },
+  CAPTION: {
+    text: "photo caption",
+    hint: "Named only in a photo's alt text, nowhere in the prose.",
+  },
+  TITLE: {
+    text: "endowed title only",
+    hint:
+      "Named only inside an endowed-chair or memorial phrase (e.g. “the O. Wayne Isom Professor of…”). " +
+      "The story is usually about the chair's holder, not the person it is named for.",
+  },
+};
+
 /** The scholar identity block a reviewer weighs: name, title, department, and the
- *  match likelihood for a name-detected candidate. */
+ *  match likelihood + basis for a name-detected candidate. */
 function Candidate({ row }: { row: NewsQueueRow }) {
+  const basis = row.matchBasis ? BASIS_LABEL[row.matchBasis] : undefined;
   return (
     <div className="min-w-0">
       <p className="text-[14px] font-medium">
@@ -62,6 +90,18 @@ function Candidate({ row }: { row: NewsQueueRow }) {
         ) : row.likelihood ? (
           <span className="text-muted-foreground ml-2 text-[10px] font-semibold tracking-wider uppercase">
             {row.likelihood}
+          </span>
+        ) : null}
+        {/* The basis rides beside the likelihood rather than replacing it: the
+            score drives the sort, the basis explains it. Absent on VIVO rows and
+            on NAME rows matched before #2578, where it is simply unknown. */}
+        {row.source !== "VIVO" && basis ? (
+          <span
+            className="text-muted-foreground border-border ml-2 rounded-sm border px-1 py-px text-[10px] font-medium"
+            title={basis.hint}
+            data-testid={`news-queue-basis-${row.matchBasis}`}
+          >
+            {basis.text}
           </span>
         ) : null}
       </p>

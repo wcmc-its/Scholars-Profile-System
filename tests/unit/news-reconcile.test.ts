@@ -27,6 +27,7 @@ const existing = (over: Partial<ExistingMention>): ExistingMention => ({
   thumbnailUrl: null,
   detectedName: "Jane Roe",
   likelihood: "HIGH",
+  matchBasis: "TAG",
   sourceRef: `${URL}|jane roe`,
   ...over,
 });
@@ -42,7 +43,19 @@ const incomingName = {
   source: "NAME" as const,
   detectedName: "Jane Roe",
   likelihood: "HIGH",
+  matchBasis: "TAG",
   sourceRef: `${URL}|jane roe`,
+};
+
+/** The VIVO shape of the same row: the whole NAME provenance set is null. */
+const incomingVivo = {
+  ...incomingName,
+  source: "VIVO" as const,
+  status: "published" as const,
+  detectedName: null,
+  likelihood: null,
+  matchBasis: null,
+  sourceRef: null,
 };
 
 describe("reconcile — review state", () => {
@@ -62,21 +75,45 @@ describe("reconcile — review state", () => {
   it("does NOT resurrect an ETL-owned REJECTED row even when VIVO now links it", () => {
     const patch = reconcile(
       existing({ status: "rejected", source: "NAME", enteredByCwid: null }),
-      { ...incomingName, source: "VIVO", status: "published", detectedName: null, likelihood: null, sourceRef: null },
+      incomingVivo,
     );
     expect(patch).toEqual({});
   });
 
   it("upgrades an ETL-owned pending NAME row to VIVO when the article gains the link", () => {
-    const patch = reconcile(existing({ status: "pending", source: "NAME", enteredByCwid: null }), {
-      ...incomingName,
+    const patch = reconcile(
+      existing({ status: "pending", source: "NAME", enteredByCwid: null }),
+      incomingVivo,
+    );
+    expect(patch).toMatchObject({
       source: "VIVO",
       status: "published",
       detectedName: null,
-      likelihood: null,
       sourceRef: null,
+      // #2578 — the basis clears with the rest of the NAME provenance. A row now
+      // joined by identifier that still claimed "newsroom tag" would tell the
+      // queue a story that is no longer true.
+      matchBasis: null,
     });
-    expect(patch).toMatchObject({ source: "VIVO", status: "published", detectedName: null, sourceRef: null });
+  });
+
+  it("re-tiers an ETL-owned NAME row when the basis changes (#2578)", () => {
+    // The endowed-chair demotion has to be able to LAND on rows already stored:
+    // the queue's whole backlog was seeded before the tag signal existed.
+    const patch = reconcile(
+      existing({ likelihood: "HIGH", matchBasis: null, enteredByCwid: null }),
+      { ...incomingName, likelihood: "LOW", matchBasis: "TITLE" },
+    );
+    expect(patch).toEqual({ likelihood: "LOW", matchBasis: "TITLE" });
+  });
+
+  it("never re-tiers a HUMAN-touched row", () => {
+    // A curator's decision outranks any score the ETL can compute.
+    const patch = reconcile(
+      existing({ likelihood: "HIGH", matchBasis: null, enteredByCwid: "curator1", status: "published" }),
+      { ...incomingName, likelihood: "LOW", matchBasis: "TITLE" },
+    );
+    expect(patch).toEqual({});
   });
 
   it("never downgrades an existing VIVO row when only a NAME match arrives", () => {
@@ -107,6 +144,8 @@ describe("articlesToMentions", () => {
     publishedAt: "2026-07-16",
     cwids: ["xim2002"], // VIVO-linked
     bodyText: "Work by Xiaojing Ma with collaborator Jane Roe.",
+    tags: [],
+    captionText: "",
   };
 
   it("makes a published VIVO row + a pending NAME row, never both for one scholar", () => {
@@ -185,6 +224,8 @@ describe("articlesToMentions — story dedup (#2241)", () => {
     publishedAt: "2024-04-30",
     cwids: ["dcl2001"],
     bodyText: "Dr. David Lyden, the Stavros S. Niarchos Professor...",
+    tags: ["Dr. David Lyden"],
+    captionText: "",
   });
 
   it("emits ONE row when the feed carries the story under two slugs", () => {

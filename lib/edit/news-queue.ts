@@ -38,6 +38,10 @@ export type NewsQueueRow = {
   /** The prose name string the ETL matched — "the name being matched against". */
   detectedName: string | null;
   likelihood: string | null;
+  /** WHERE the name was found — TAG | BODY | CAPTION | TITLE (#2578). The "why"
+   *  behind the likelihood, which also folds in contested-ness and so can't
+   *  carry it. Null on VIVO/CURATOR rows and on NAME rows matched before #2578. */
+  matchBasis: string | null;
   /** How the ETL attached this scholar: `VIVO` (trusted cwid link, auto-published)
    *  or `NAME` (prose match, queue-reviewed). Only shown on the history tabs —
    *  pending is name-only. */
@@ -82,7 +86,14 @@ export function isNewsQueueTabVisible(session: {
   return isNewsQueueEnabled() && (session.isSuperuser || session.isCommsSteward === true);
 }
 
-const LIKELIHOOD_RANK: Readonly<Record<string, number>> = { HIGH: 2, MEDIUM: 1 };
+/**
+ * Pending sort weight. LOW ranks ABOVE the 0 fallback on purpose: 0 is what an
+ * unknown/absent likelihood scores (a pre-#2578 row, or a contested group, which
+ * is forced to 0 below), and a scored LOW candidate is still more actionable
+ * than an unscored one. Contested stays at 0 — it needs disambiguation before it
+ * needs ranking, which is the shipped behaviour.
+ */
+const LIKELIHOOD_RANK: Readonly<Record<string, number>> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 
 /**
  * How many rows the read-only history tabs load.
@@ -136,6 +147,7 @@ export async function loadNewsQueue(
       publishedAt: true,
       detectedName: true,
       likelihood: true,
+      matchBasis: true,
       source: true,
       sourceRef: true,
       createdAt: true,
@@ -195,6 +207,7 @@ export async function loadNewsQueue(
           publishedAt: r.publishedAt ? r.publishedAt.toISOString().slice(0, 10) : null,
           detectedName: r.detectedName,
           likelihood: r.likelihood,
+          matchBasis: r.matchBasis,
           source: r.source,
           sourceRef: r.sourceRef,
           createdAt: r.createdAt.toISOString(),

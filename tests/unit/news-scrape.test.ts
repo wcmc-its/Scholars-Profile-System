@@ -5,7 +5,15 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { feedStories, parseCwids, parseDate, scrapeNews } from "@/etl/news/scrape";
+import {
+  feedStories,
+  parseCaptions,
+  parseCwids,
+  parseDate,
+  parseTags,
+  scrapeNews,
+} from "@/etl/news/scrape";
+import { validateArticles } from "@/etl/news/seed";
 
 const ORIGIN = "https://news.weill.cornell.edu";
 
@@ -17,6 +25,7 @@ const story = (opts: {
   teaser?: string;
   image?: string | null;
   path?: string;
+  tags?: string;
 }) => ({
   story: {
     uuid: opts.slug,
@@ -30,7 +39,7 @@ const story = (opts: {
         ? null
         : { src: opts.image ?? `${ORIGIN}/sites/default/files/x.jpg?itok=a&amp;c=b`, alt: "alt" },
     field_story_type: "News from WCM",
-    term_node_tid: "Cardiology, Dr. Someone",
+    term_node_tid: opts.tags ?? "Cardiology, Dr. Someone",
   },
 });
 
@@ -48,6 +57,10 @@ describe("feedStories", () => {
       publishedAt: "2026-07-16",
       cwids: [],
       bodyText: "Body text.",
+      // #2578 — the feed's own tags and the photo alt text, both of which the
+      // scraper used to parse and drop.
+      tags: ["Cardiology", "Dr. Someone"],
+      captionText: "alt",
     });
   });
 
@@ -83,6 +96,89 @@ describe("feedStories", () => {
   it("nulls an unparseable date rather than failing the story", () => {
     const [a] = feedStories(feed([story({ slug: "x", date: "sometime" })]));
     expect(a.publishedAt).toBeNull();
+  });
+});
+
+describe("parseTags (#2578 — the feed's own story tags)", () => {
+  it("comma-splits, trims, decodes entities and drops empties", () => {
+    // The live feed publishes "Awards &amp; Honors" and pads inconsistently.
+    expect(parseTags("Dr. Scott Tagawa,  Patient Care ,, Awards &amp; Honors,")).toEqual([
+      "Dr. Scott Tagawa",
+      "Patient Care",
+      "Awards & Honors",
+    ]);
+  });
+
+  it("does not classify person vs department — it returns everything", () => {
+    // Person tags are NOT reliably `Dr. `-prefixed (students are tagged bare),
+    // so any up-front split would be guesswork. names.ts intersects against the
+    // roster instead, and a tag that resolves to nobody matches nothing.
+    expect(parseTags("Cassandra Stecker, Dr. Leonard Girardi, Education")).toEqual([
+      "Cassandra Stecker",
+      "Dr. Leonard Girardi",
+      "Education",
+    ]);
+  });
+
+  it("dedupes and returns [] for a missing or blank field", () => {
+    expect(parseTags("Research, Research")).toEqual(["Research"]);
+    expect(parseTags("")).toEqual([]);
+    expect(parseTags(undefined)).toEqual([]);
+    expect(parseTags(null)).toEqual([]);
+    expect(parseTags(42)).toEqual([]);
+  });
+});
+
+describe("parseCaptions (#2578 — photo alt text)", () => {
+  it("joins the featured-image alt with every body <img alt>", () => {
+    // There is no <figcaption> anywhere in this feed: a captioned photo is a
+    // nested <div class="caption"> whose person name lives in the img's alt.
+    expect(
+      parseCaptions(
+        '<p>Body.</p><div class="caption"><img alt="Dr. Olivier Elemento" src="/a.jpg"></div>' +
+          '<img alt="Dr. Kyu Rhee" src="/b.jpg">',
+        { src: `${ORIGIN}/f.jpg`, alt: "trophies" },
+      ),
+    ).toBe("trophies Dr. Olivier Elemento Dr. Kyu Rhee");
+  });
+
+  it("survives a missing featured image and empty alts", () => {
+    expect(parseCaptions('<img alt="" src="/a.jpg">', null)).toBe("");
+    expect(parseCaptions("<p>No images.</p>", undefined)).toBe("");
+  });
+});
+
+describe("validateArticles — tags + captionText (#2578)", () => {
+  const base = {
+    url: `${ORIGIN}/news/2026/07/a`,
+    title: "T",
+    excerpt: null,
+    thumbnailUrl: null,
+    publishedAt: "2026-07-16",
+    cwids: [],
+    bodyText: "b",
+  };
+
+  it("accepts a seed written BEFORE the fields existed", () => {
+    // Optional in the JSON, like cwids: an older seed file must still load
+    // rather than fail a run. They are required on the TypeScript type, so the
+    // scraper can never quietly skip the tag tier.
+    const [a] = validateArticles([base]);
+    expect(a.tags).toEqual([]);
+    expect(a.captionText).toBe("");
+  });
+
+  it("trims, drops empties and dedupes tags from a hand-edited seed", () => {
+    const [a] = validateArticles([{ ...base, tags: [" Research ", "", "Research", "Patient Care"] }]);
+    expect(a.tags).toEqual(["Research", "Patient Care"]);
+  });
+
+  it("rejects a non-array tags field and a control char in either", () => {
+    expect(() => validateArticles([{ ...base, tags: "Research" }])).toThrow(/tags must be an array/);
+    expect(() => validateArticles([{ ...base, tags: ["ok\u0000"] }])).toThrow(/invalid tag/);
+    expect(() => validateArticles([{ ...base, captionText: "cap\u009f" }])).toThrow(
+      /invalid captionText/,
+    );
   });
 });
 

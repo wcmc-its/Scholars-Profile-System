@@ -53,6 +53,8 @@ type MentionUpsert = {
   source: "VIVO" | "NAME";
   detectedName: string | null;
   likelihood: string | null;
+  /** How the NAME match was made — TAG|BODY|TITLE|CAPTION (#2578). Null for VIVO. */
+  matchBasis: string | null;
   sourceRef: string | null;
 };
 
@@ -126,11 +128,19 @@ export function articlesToMentions(
         source: "VIVO",
         detectedName: null,
         likelihood: null,
+        matchBasis: null,
         sourceRef: null,
       });
     }
     // detectMentions already excludes the VIVO cwids, so no scholar is both.
-    for (const d of detectMentions(`${a.title} ${a.bodyText}`, nameIndex, new Set(a.cwids))) {
+    for (const d of detectMentions(
+      // #2578 — the feed's own tags are the strongest signal and the photo alt
+      // text the weakest, so all three streams are kept SEPARATE here; merging
+      // them into one blob would erase the basis the tiering is built on.
+      { text: `${a.title} ${a.bodyText}`, tags: a.tags, captionText: a.captionText },
+      nameIndex,
+      new Set(a.cwids),
+    )) {
       put({
         ...meta,
         cwid: d.cwid,
@@ -138,6 +148,7 @@ export function articlesToMentions(
         source: "NAME",
         detectedName: d.detectedName,
         likelihood: d.likelihood,
+        matchBasis: d.basis,
         sourceRef: `${a.url}|${d.groupKey}`,
       });
     }
@@ -161,6 +172,7 @@ export type ExistingMention = {
   thumbnailUrl: string | null;
   detectedName: string | null;
   likelihood: string | null;
+  matchBasis: string | null;
   sourceRef: string | null;
 };
 
@@ -187,10 +199,14 @@ export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string
       data.status = "published";
       data.detectedName = null;
       data.likelihood = null;
+      // The whole NAME provenance set clears together — a stale basis on a row
+      // now joined by identifier would tell the queue a story that isn't true.
+      data.matchBasis = null;
       data.sourceRef = null;
     } else if (r.source === "NAME" && cur.source === "NAME") {
       if (cur.detectedName !== r.detectedName) data.detectedName = r.detectedName;
       if (cur.likelihood !== r.likelihood) data.likelihood = r.likelihood;
+      if (cur.matchBasis !== r.matchBasis) data.matchBasis = r.matchBasis;
       if (cur.sourceRef !== r.sourceRef) data.sourceRef = r.sourceRef;
     }
     // NAME arriving for an existing VIVO row: keep VIVO, change nothing.
@@ -221,6 +237,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
           thumbnailUrl: true,
           detectedName: true,
           likelihood: true,
+          matchBasis: true,
           sourceRef: true,
         },
       })
@@ -281,6 +298,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
               source: r.source,
               detectedName: r.detectedName,
               likelihood: r.likelihood,
+              matchBasis: r.matchBasis,
               sourceRef: r.sourceRef,
               // enteredByCwid stays null: the ETL is not a manual edit.
             },
