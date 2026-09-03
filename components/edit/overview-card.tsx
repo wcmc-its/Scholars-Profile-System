@@ -74,7 +74,7 @@ import {
   type OverviewStreamResult,
 } from "@/lib/edit/overview-stream";
 import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
-import { cn } from "@/lib/utils";
+import { cn, OVERVIEW_HTML_CLASS } from "@/lib/utils";
 
 /** The hard cap on stored sanitized HTML (`self-edit-spec.md` § overview) — the
  *  server ceiling. Save still blocks if somehow exceeded, mapping to the
@@ -258,7 +258,12 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
     >
       {hasBio ? (
         <div
-          className="prose prose-sm border-apollo-border bg-apollo-surface-2 rounded-md border px-4 py-3"
+          className={cn(
+            "border-apollo-border bg-apollo-surface-2 rounded-md border px-4 py-3",
+            // #2579 — `prose prose-sm` here styled nothing; the read-only
+            // preview dropped links and list markers the published page shows.
+            OVERVIEW_HTML_CLASS,
+          )}
           dangerouslySetInnerHTML={{ __html: initialHtml }}
           data-slot="overview-readonly"
         />
