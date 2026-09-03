@@ -262,7 +262,8 @@ export async function fetchAuthorshipRows(
       .filter((a) => a.scholar)
       .map((a) => a.scholar!.cwid);
     if (isPublicationDark(suppressions, pub.pmid, confirmedWcmCwids)) continue;
-    const authorsClean = stripBrackets(pub.authorsString);
+    // #2581 — the untruncated byline; see the note on the article-row select.
+    const authorsClean = stripBrackets(pub.fullAuthorsString ?? pub.authorsString);
     for (const a of pub.authors) {
       if (!a.scholar) continue;
       if (isAuthorHidden(suppressions, pub.pmid, a.scholar.cwid)) continue;
@@ -311,6 +312,14 @@ export async function fetchArticleRows(
       citationCount: true,
       publicationType: true,
       authorsString: true,
+      // #2581 — `authorsString` is the TRUNCATED byline (see Publication): on a
+      // prod census it is shorter than `fullAuthorsString` on 76,232 of 193,662
+      // publications, dropping 3.68 authors on average and up to 1,264. An
+      // export that silently omits co-authors is the defect; prefer the full
+      // field, which is populated on every row that has a byline at all (the
+      // fallback below never actually fires in prod — 0 rows have one without
+      // the other — but it costs nothing and matches the other citation paths).
+      fullAuthorsString: true,
       // Confirmed, active WCM authors — needed only to derive publication
       // darkness (a pub whose every confirmed WCM author is hidden is dark).
       // Same author carve as fetchAuthorshipRows.
@@ -353,7 +362,7 @@ export async function fetchArticleRows(
         : null,
       citationCount: pub.citationCount,
       publicationType: pub.publicationType,
-      authors: stripBrackets(pub.authorsString),
+      authors: stripBrackets(pub.fullAuthorsString ?? pub.authorsString),
     });
   }
   return rows;
