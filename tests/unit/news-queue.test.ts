@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { NEWS_HISTORY_LIMIT, loadNewsQueue } from "@/lib/edit/news-queue";
+import { NEWS_HISTORY_LIMIT, loadNewsQueue, snippetMatchRanges } from "@/lib/edit/news-queue";
 
 type Row = {
   id: string;
@@ -255,5 +255,61 @@ describe("loadNewsQueue — match basis (#2578)", () => {
     // ...and within the tied HIGH tier, the newer article sorts first.
     expect(groups[0].rows[0].id).toBe("new-high");
     expect(groups[1].rows[0].id).toBe("old-high");
+  });
+});
+
+/**
+ * #2578 follow-up — the reviewer-facing name highlight.
+ *
+ * The queue shows ~300 chars of scraped prose and asks the reviewer to judge
+ * whether the story is really about this scholar. Until now the matched name was
+ * rendered flat, so they had to find it themselves. `snippetMatchRanges` locates
+ * it the same way the ETL did — on FOLDED tokens with original offsets — because
+ * `detectedName` is the roster's name, not the article's wording.
+ */
+describe("snippetMatchRanges — #2578 name highlight", () => {
+  const at = (snippet: string, ranges: [number, number][]) =>
+    ranges.map(([s, e]) => snippet.slice(s, e));
+
+  it("locates the full name and returns the ARTICLE's spelling, not the roster's", () => {
+    const snippet = "…said Dr. Sarah Chen, who led the trial.";
+    expect(at(snippet, snippetMatchRanges(snippet, "Sarah Chen"))).toEqual(["Sarah Chen"]);
+  });
+
+  it("matches across case and diacritics the roster name does not carry", () => {
+    const snippet = "A study by JOSÉ GARCÍA found that…";
+    expect(at(snippet, snippetMatchRanges(snippet, "Jose Garcia"))).toEqual(["JOSÉ GARCÍA"]);
+  });
+
+  it("marks every occurrence, without overlapping two marks", () => {
+    const snippet = "Chen Wei joined in 2019. Chen Wei now leads the lab.";
+    expect(at(snippet, snippetMatchRanges(snippet, "Chen Wei"))).toEqual(["Chen Wei", "Chen Wei"]);
+  });
+
+  it("falls back to the surname when the full name is not in the prose", () => {
+    // The roster drifted (preferredName changed); the snippet was anchored on a
+    // sequence that no longer matches in full.
+    const snippet = "…as Dr. Chen explained to the audience.";
+    expect(at(snippet, snippetMatchRanges(snippet, "Sarah Chen"))).toEqual(["Chen"]);
+  });
+
+  it("returns no ranges when neither the name nor the surname appears", () => {
+    expect(snippetMatchRanges("A story about something else entirely.", "Sarah Chen")).toEqual([]);
+  });
+
+  it("returns no ranges for a null snippet or a null detected name", () => {
+    expect(snippetMatchRanges(null, "Sarah Chen")).toEqual([]);
+    expect(snippetMatchRanges("Dr. Chen spoke.", null)).toEqual([]);
+    expect(snippetMatchRanges("", "Sarah Chen")).toEqual([]);
+  });
+
+  it("does not match a name fragment inside a longer word", () => {
+    // Token equality, not substring: "Chenoweth" must not light up for "Chen".
+    expect(snippetMatchRanges("…quoting Ann Chenoweth on the study.", "Sarah Chen")).toEqual([]);
+  });
+
+  it("survives an ellipsis-prefixed snippet, whose offsets shift", () => {
+    const snippet = "…and then Sarah Chen said…";
+    expect(at(snippet, snippetMatchRanges(snippet, "Sarah Chen"))).toEqual(["Sarah Chen"]);
   });
 });
