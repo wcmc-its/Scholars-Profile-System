@@ -11,6 +11,7 @@
  *
  * Read-only and pure of authz: the caller gates (isSuperuser || isCommsSteward).
  */
+import { tokenizeWithSpans } from "@/etl/news/names";
 import { formatPublishedName } from "@/lib/postnominal";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -48,6 +49,11 @@ export type NewsQueueRow = {
    *  (no prose position to snippet), and on a NAME row matched before this
    *  shipped. */
   contextSnippet: string | null;
+  /** Character ranges of the detected name INSIDE `contextSnippet`, so the queue
+   *  can emphasise the name the reviewer is judging instead of making them find
+   *  it in ~300 chars of scraped prose. Empty when there is nothing to mark.
+   *  Computed here rather than stored: see `snippetMatchRanges`. */
+  contextSnippetMatches: [number, number][];
   /** How the ETL attached this scholar: `VIVO` (trusted cwid link, auto-published)
    *  or `NAME` (prose match, queue-reviewed). Only shown on the history tabs —
    *  pending is name-only. */
@@ -71,6 +77,58 @@ export type NewsQueueGroup = {
    *  reject the others. The UI must not offer a plain "approve" here. */
   contested: boolean;
 };
+
+/**
+ * Character ranges of `detectedName` inside `contextSnippet`, for the queue's
+ * name highlight.
+ *
+ * Derived at read time, NOT stored. Marking the name in the stored string (an
+ * ETL-side `((...))` wrapper, the way `authorsString` marks WCM authors) would
+ * mean re-running the news backfill over every existing row to see it — and the
+ * news ETL is incremental, so `scrapeNews()` never revisits an article already
+ * in `news_mention`. Recomputing costs one tokenise of a <=512-char string and
+ * lights up every row already in the table.
+ *
+ * Matching mirrors the ETL's own: `tokenizeWithSpans` folds tokens (case,
+ * diacritics, punctuation) while keeping the ORIGINAL character offsets, so the
+ * prose's own spelling is what gets marked. A plain `indexOf(detectedName)`
+ * would miss most rows — `detectedName` is the roster's `preferredName ??
+ * fullName`, not the article's wording, so it does not match "Dr. Chen" or an
+ * accented spelling.
+ *
+ * Every stored snippet contains the name by construction: `proseSnippet()` only
+ * returns one for a sequence actually located in the prose, and BODY/TITLE build
+ * theirs from the scored occurrence's own offsets — a mention with no prose
+ * position gets a null snippet, not a name-less one. The surname fallback is
+ * therefore for the roster drifting away from what the ETL matched on (the
+ * snippet may have been anchored on `fullName` while `detectedName` holds a
+ * since-changed `preferredName`), not for the ordinary case.
+ */
+export function snippetMatchRanges(
+  snippet: string | null,
+  detectedName: string | null,
+): [number, number][] {
+  if (!snippet || !detectedName) return [];
+  const spans = tokenizeWithSpans(snippet);
+  const wanted = tokenizeWithSpans(detectedName).map((t) => t.token);
+  if (spans.length === 0 || wanted.length === 0) return [];
+
+  const findSequence = (seq: string[]): [number, number][] => {
+    const found: [number, number][] = [];
+    for (let i = 0; i + seq.length <= spans.length; i++) {
+      if (seq.some((tok, j) => spans[i + j]!.token !== tok)) continue;
+      found.push([spans[i]!.start, spans[i + seq.length - 1]!.end]);
+      i += seq.length - 1; // never overlap two marks
+    }
+    return found;
+  };
+
+  const whole = findSequence(wanted);
+  // ponytail: surname alone is the fallback, so two unrelated Smiths in one
+  // snippet both light up. Harmless on a review aid — it can only over-mark,
+  // never hide the name — and it only fires when the full name did not match.
+  return whole.length > 0 ? whole : findSequence([wanted[wanted.length - 1]!]);
+}
 
 export function isNewsQueueEnabled(): boolean {
   return process.env.NEWS_APPROVAL_QUEUE === "on";
@@ -224,6 +282,7 @@ export async function loadNewsQueue(
           likelihood: r.likelihood,
           matchBasis: r.matchBasis,
           contextSnippet: r.contextSnippet,
+          contextSnippetMatches: snippetMatchRanges(r.contextSnippet, r.detectedName),
           source: r.source,
           sourceRef: r.sourceRef,
           createdAt: r.createdAt.toISOString(),

@@ -12,7 +12,7 @@
  */
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,34 @@ import { NEWS_HISTORY_LIMIT } from "@/lib/edit/news-queue";
 import type { NewsQueueGroup, NewsQueueRow } from "@/lib/edit/news-queue";
 
 type Tab = "pending" | "approved" | "rejected";
+
+/**
+ * The snippet with the detected name emphasised at `ranges` (#2578 follow-up).
+ *
+ * Returns React nodes, never an HTML string: this is scraped article prose, and
+ * the surrounding comment's rule — no `dangerouslySetInnerHTML` here, ever —
+ * still holds. React escapes text children, so marking the name costs nothing
+ * in safety. An empty `ranges` renders exactly the flat string it always did.
+ */
+function highlightName(snippet: string, ranges: [number, number][]): ReactNode {
+  if (ranges.length === 0) return snippet;
+  const out: ReactNode[] = [];
+  let at = 0;
+  for (const [start, end] of ranges) {
+    // Defensive: a range outside the string, or one that overlaps its
+    // predecessor, is dropped rather than allowed to slice text out of order.
+    if (start < at || end > snippet.length || start >= end) continue;
+    if (start > at) out.push(snippet.slice(at, start));
+    out.push(
+      <mark key={start} className="text-foreground bg-transparent font-semibold not-italic">
+        {snippet.slice(start, end)}
+      </mark>,
+    );
+    at = end;
+  }
+  if (at < snippet.length) out.push(snippet.slice(at));
+  return out;
+}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Undated";
@@ -149,11 +177,15 @@ function Candidate({ row }: { row: NewsQueueRow }) {
           endowed-chair false positive like the O. Wayne Isom case the basis
           hint above describes) without opening the article. Rendered as plain
           text, never dangerouslySetInnerHTML: this is scraped article prose,
-          not markup this page should ever interpret. Visually secondary —
+          not markup this page should ever interpret — the matched name is
+          emphasised by slicing the string into React nodes, not by injecting
+          markup into it. Visually secondary —
           smaller and lighter than the title/department line above — and only
           present for a NAME row with a prose position (BODY/TITLE basis). */}
       {row.contextSnippet ? (
-        <p className="text-muted-foreground/80 mt-1 text-[11px] italic">“{row.contextSnippet}”</p>
+        <p className="text-muted-foreground/80 mt-1 text-[11px] italic">
+          “{highlightName(row.contextSnippet, row.contextSnippetMatches)}”
+        </p>
       ) : null}
     </div>
   );
