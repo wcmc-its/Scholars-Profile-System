@@ -17,6 +17,12 @@
  * changed field ({@link buildChanges}). Long values are collapsed in the UI
  * (`<details>`), so the length concern that motivated hiding them upstream does
  * not apply here.
+ *
+ * The audit table stores CWIDs only, so every person on the page — editors,
+ * impersonated actors, and edited scholars — is resolved to a name + title
+ * through one batched `Scholar` read into {@link EditActivitySummary.people}
+ * (#2589). A map rather than per-row name fields because one editor appears in
+ * dozens of rows, and because it keeps the pure `shapeSummary` untouched.
  */
 import { detailForAction, humanizeField } from "@/lib/api/scholar-audit";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -24,8 +30,8 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 /** Rolling window the summary spans. */
 export const EDIT_ACTIVITY_WINDOW_DAYS = 30;
 
-/** The one Prisma method this module needs — keeps the unit test client tiny. */
-export type EditActivityClient = Pick<PrismaClient, "$queryRaw">;
+/** The Prisma surface this module needs — keeps the unit test client tiny. */
+export type EditActivityClient = Pick<PrismaClient, "$queryRaw" | "scholar">;
 
 export type PerDay = { day: string; edits: number };
 export type TopEditor = { actorCwid: string; edits: number };
@@ -45,6 +51,10 @@ export type RecentEdit = {
   /** A compact fallback detail for non-field actions (proxy cwid, slug), else null. */
   detail: string | null;
 };
+/** A person behind a CWID. `title` is null for scholars with no primary title. */
+export type PersonRef = { name: string; title: string | null };
+/** CWID -> person, for the CWIDs on this page that resolve to a Scholar. */
+export type PeopleDirectory = Record<string, PersonRef>;
 export type EditActivitySummary = {
   windowDays: number;
   totalEdits: number;
@@ -52,6 +62,9 @@ export type EditActivitySummary = {
   topEditors: TopEditor[];
   topEntities: TopEntity[];
   recent: RecentEdit[];
+  /** Names/titles for the CWIDs above. Absent keys render as the bare CWID —
+   *  non-scholar admins and service accounts legitimately never resolve. */
+  people: PeopleDirectory;
 };
 
 // Raw row shapes as MySQL/Prisma returns them: COUNT(*) is a bigint, DATE()/
@@ -152,6 +165,8 @@ export function shapeSummary(
 ): EditActivitySummary {
   const shapedPerDay = perDay.map((r) => ({ day: toDay(r.day), edits: Number(r.edits) }));
   return {
+    // Filled in by loadEditActivitySummary — this shaper stays pure/DB-free.
+    people: {},
     windowDays: EDIT_ACTIVITY_WINDOW_DAYS,
     totalEdits: shapedPerDay.reduce((sum, r) => sum + r.edits, 0),
     perDay: shapedPerDay,
@@ -173,6 +188,40 @@ export function shapeSummary(
       detail: detailForAction(r.action, asJson(r.before_values), asJson(r.after_values)),
     })),
   };
+}
+
+/**
+ * Every CWID the summary refers to: editors (both tables), impersonated actors,
+ * and scholar entity ids — `target_entity_id` IS a CWID when the entity type is
+ * `scholar`, and a unit code otherwise, which is why the type is checked.
+ */
+export function collectCwids(summary: EditActivitySummary): string[] {
+  const cwids = new Set<string>();
+  for (const e of summary.topEditors) cwids.add(e.actorCwid);
+  for (const e of summary.topEntities) if (e.entityType === "scholar") cwids.add(e.entityId);
+  for (const r of summary.recent) {
+    cwids.add(r.actorCwid);
+    if (r.impersonatedCwid) cwids.add(r.impersonatedCwid);
+    if (r.entityType === "scholar") cwids.add(r.entityId);
+  }
+  cwids.delete("");
+  return [...cwids];
+}
+
+/** One batched name/title read. Deleted scholars are NOT excluded — the audit
+ *  log outlives the profile, and a name is better than a bare CWID either way. */
+export async function resolvePeople(
+  client: EditActivityClient,
+  cwids: readonly string[],
+): Promise<PeopleDirectory> {
+  if (cwids.length === 0) return {};
+  const rows = await client.scholar.findMany({
+    where: { cwid: { in: [...cwids] } },
+    select: { cwid: true, preferredName: true, primaryTitle: true },
+  });
+  return Object.fromEntries(
+    rows.map((r) => [r.cwid, { name: r.preferredName, title: r.primaryTitle }]),
+  );
 }
 
 /**
@@ -218,5 +267,20 @@ export async function loadEditActivitySummary(
        LIMIT 100`,
   ]);
 
-  return shapeSummary(perDay, editors, entities, recent);
+  const summary = shapeSummary(perDay, editors, entities, recent);
+  // Names are decoration; the audit rows are the page. A throw from THIS read
+  // would surface as the "activity unavailable" notice — a cosmetic lookup must
+  // never be able to take down a working page — so it is logged and swallowed,
+  // leaving every person rendered as a bare CWID.
+  try {
+    summary.people = await resolvePeople(client, collectCwids(summary));
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "edit_activity_name_resolve_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+  return summary;
 }

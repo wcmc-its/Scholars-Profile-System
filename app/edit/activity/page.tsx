@@ -15,6 +15,7 @@
  * flag — the superuser gate is the control). Renders the standard console header
  * + AdminSubnav so it matches the other `/edit/*` admin surfaces.
  */
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -23,6 +24,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import {
   type EditActivitySummary,
   type FieldChange,
+  type PeopleDirectory,
   type RecentEdit,
   loadEditActivitySummary,
 } from "@/lib/api/edit-activity";
@@ -68,6 +70,24 @@ function historyHref(entityType: string, entityId: string): string | null {
   if (entityType === "scholar") return `/edit/scholar/${id}/history`;
   if (entityType === "center") return `/edit/center/${id}/history`;
   return null;
+}
+
+/**
+ * A person as `Name, Title (cwid)` — the audit log stores CWIDs only, and a bare
+ * CWID tells an operator nothing about who edited what (#2589). Falls back to the
+ * CWID alone when it does not resolve: non-scholar admins and service accounts
+ * legitimately have no Scholar row.
+ */
+function PersonLabel({ cwid, people }: { cwid: string; people: PeopleDirectory }) {
+  const person = people[cwid];
+  if (!person) return <>{cwid}</>;
+  return (
+    <>
+      {person.name}
+      {person.title ? <span className="text-muted-foreground">, {person.title}</span> : null}{" "}
+      <span className="text-muted-foreground">({cwid})</span>
+    </>
+  );
 }
 
 const thClass = "px-3 py-2 font-medium";
@@ -120,7 +140,8 @@ function CountTable({
 }: {
   caption: string;
   headers: [string, string, string?];
-  rows: ReadonlyArray<[string, string, string?]>;
+  /** Nodes, not strings, so a cell can carry a <PersonLabel>. */
+  rows: ReadonlyArray<[ReactNode, ReactNode, ReactNode?]>;
 }) {
   return (
     <section className="mt-8">
@@ -145,7 +166,7 @@ function CountTable({
               </tr>
             ) : (
               rows.map((r, i) => (
-                <tr key={`${r[0]}-${i}`} className="border-apollo-border border-b align-top">
+                <tr key={i} className="border-apollo-border border-b align-top">
                   <td className={tdClass}>{r[0]}</td>
                   <td className={tdClass}>{r[1]}</td>
                   {r[2] !== undefined && <td className={`${tdClass} whitespace-nowrap`}>{r[2]}</td>}
@@ -159,13 +180,18 @@ function CountTable({
   );
 }
 
-function EntityCell({ edit }: { edit: RecentEdit }) {
+function EntityCell({ edit, people }: { edit: RecentEdit; people: PeopleDirectory }) {
   const href = historyHref(edit.entityType, edit.entityId);
-  const inner = (
-    <>
-      {edit.entityType} <span className="text-muted-foreground">{edit.entityId}</span>
-    </>
-  );
+  const inner =
+    edit.entityType === "scholar" ? (
+      <>
+        scholar <PersonLabel cwid={edit.entityId} people={people} />
+      </>
+    ) : (
+      <>
+        {edit.entityType} <span className="text-muted-foreground">{edit.entityId}</span>
+      </>
+    );
   return href ? (
     <Link href={href} className="text-apollo-slate hover:underline">
       {inner}
@@ -191,13 +217,24 @@ function ActivityBody({ summary }: { summary: EditActivitySummary }) {
       />
       <CountTable
         caption="Top editors"
-        headers={["Actor", "Edits"]}
-        rows={summary.topEditors.map((r) => [r.actorCwid, r.edits.toLocaleString()])}
+        headers={["Editor", "Edits"]}
+        rows={summary.topEditors.map((r) => [
+          <PersonLabel key={r.actorCwid} cwid={r.actorCwid} people={summary.people} />,
+          r.edits.toLocaleString(),
+        ])}
       />
       <CountTable
         caption="Most-edited entities"
         headers={["Type", "Entity", "Edits"]}
-        rows={summary.topEntities.map((r) => [r.entityType, r.entityId, r.edits.toLocaleString()])}
+        rows={summary.topEntities.map((r) => [
+          r.entityType,
+          r.entityType === "scholar" ? (
+            <PersonLabel key={r.entityId} cwid={r.entityId} people={summary.people} />
+          ) : (
+            r.entityId
+          ),
+          r.edits.toLocaleString(),
+        ])}
       />
 
       <section className="mt-8">
@@ -207,7 +244,7 @@ function ActivityBody({ summary }: { summary: EditActivitySummary }) {
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr className="border-apollo-border border-b">
                 <th className={thClass}>When</th>
-                <th className={thClass}>Actor</th>
+                <th className={thClass}>Editor</th>
                 <th className={thClass}>Action</th>
                 <th className={thClass}>Entity</th>
                 <th className={thClass}>Details</th>
@@ -229,14 +266,17 @@ function ActivityBody({ summary }: { summary: EditActivitySummary }) {
                   >
                     <td className={`${tdClass} whitespace-nowrap`}>{formatTs(e.ts)}</td>
                     <td className={tdClass}>
-                      {e.actorCwid}
+                      <PersonLabel cwid={e.actorCwid} people={summary.people} />
                       {e.impersonatedCwid && (
-                        <span className="text-muted-foreground"> (as {e.impersonatedCwid})</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          (as <PersonLabel cwid={e.impersonatedCwid} people={summary.people} />)
+                        </span>
                       )}
                     </td>
                     <td className={`${tdClass} whitespace-nowrap`}>{labelForAction(e.action)}</td>
                     <td className={tdClass}>
-                      <EntityCell edit={e} />
+                      <EntityCell edit={e} people={summary.people} />
                     </td>
                     <td className={`${tdClass} max-w-xl`}>
                       <Details edit={e} />
