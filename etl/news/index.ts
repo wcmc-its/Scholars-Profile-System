@@ -56,6 +56,10 @@ type MentionUpsert = {
   /** How the NAME match was made — TAG|BODY|TITLE|CAPTION (#2578). Null for VIVO. */
   matchBasis: string | null;
   sourceRef: string | null;
+  /** ~200-300 chars of raw article text around the matched name, for the queue
+   *  UI (#2578 follow-up). Null for VIVO and for a NAME match with no prose
+   *  position (TAG/CAPTION) — see DetectedMention.contextSnippet. */
+  contextSnippet: string | null;
 };
 
 async function recordRun(args: {
@@ -130,6 +134,7 @@ export function articlesToMentions(
         likelihood: null,
         matchBasis: null,
         sourceRef: null,
+        contextSnippet: null,
       });
     }
     // detectMentions already excludes the VIVO cwids, so no scholar is both.
@@ -137,7 +142,10 @@ export function articlesToMentions(
       // #2578 — the feed's own tags are the strongest signal and the photo alt
       // text the weakest, so all three streams are kept SEPARATE here; merging
       // them into one blob would erase the basis the tiering is built on.
-      { text: `${a.title} ${a.bodyText}`, tags: a.tags, captionText: a.captionText },
+      // `title` rides ALONGSIDE `text` (not instead of it) — #2578 follow-up's
+      // BODY score needs to know where the headline ends in the combined
+      // stream; see MentionSources.title.
+      { title: a.title, text: `${a.title} ${a.bodyText}`, tags: a.tags, captionText: a.captionText },
       nameIndex,
       new Set(a.cwids),
     )) {
@@ -150,6 +158,7 @@ export function articlesToMentions(
         likelihood: d.likelihood,
         matchBasis: d.basis,
         sourceRef: `${a.url}|${d.groupKey}`,
+        contextSnippet: d.contextSnippet,
       });
     }
   }
@@ -174,6 +183,10 @@ export type ExistingMention = {
   likelihood: string | null;
   matchBasis: string | null;
   sourceRef: string | null;
+  /** #2578 follow-up — same review-state discipline as detectedName/likelihood/
+   *  matchBasis: refreshed on a NAME->NAME re-scrape, cleared on a VIVO upgrade,
+   *  never touched on a human-touched row. */
+  contextSnippet: string | null;
 };
 
 /**
@@ -203,11 +216,13 @@ export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string
       // now joined by identifier would tell the queue a story that isn't true.
       data.matchBasis = null;
       data.sourceRef = null;
+      data.contextSnippet = null;
     } else if (r.source === "NAME" && cur.source === "NAME") {
       if (cur.detectedName !== r.detectedName) data.detectedName = r.detectedName;
       if (cur.likelihood !== r.likelihood) data.likelihood = r.likelihood;
       if (cur.matchBasis !== r.matchBasis) data.matchBasis = r.matchBasis;
       if (cur.sourceRef !== r.sourceRef) data.sourceRef = r.sourceRef;
+      if (cur.contextSnippet !== r.contextSnippet) data.contextSnippet = r.contextSnippet;
     }
     // NAME arriving for an existing VIVO row: keep VIVO, change nothing.
   }
@@ -239,6 +254,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
           likelihood: true,
           matchBasis: true,
           sourceRef: true,
+          contextSnippet: true,
         },
       })
     : [];
@@ -300,6 +316,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
               likelihood: r.likelihood,
               matchBasis: r.matchBasis,
               sourceRef: r.sourceRef,
+              contextSnippet: r.contextSnippet,
               // enteredByCwid stays null: the ETL is not a manual edit.
             },
           });

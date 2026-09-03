@@ -32,6 +32,37 @@ function formatDate(iso: string | null): string {
 }
 
 /**
+ * Confidence-tier badge colours — green / amber / red, per the product owner's
+ * ask (#2578 follow-up). Every class is an EXISTING house token, none invented
+ * here:
+ *
+ *   HIGH   apollo-green*  — the same pairing matcha-panel.tsx's `strong` fit
+ *                           tier and `GRANT_TIER_CLASS` already use.
+ *   MEDIUM apollo-amber*  — likewise matcha-panel.tsx's `good` fit tier. Amber's
+ *                           "confidence/tier classification" meaning is one of
+ *                           its FOUR settled uses (app/globals.css, the Apollo
+ *                           colour-language block) — this is that meaning, not
+ *                           a new one.
+ *   LOW    apollo-red-tint + text-destructive — apollo-red-tint/-border are the
+ *                           only "red" tint pair the token system defines.
+ *                           `--apollo-maroon` is NOT used for the text here: the
+ *                           same colour-language block reserves maroon "Brand
+ *                           only; never a provenance cue", so LOW instead pairs
+ *                           the red tint with `--destructive` (the house DANGER
+ *                           role), which is already how this queue's own error
+ *                           text reads (`text-destructive` above).
+ *
+ * Green has no OTHER meaning on this page (the "Yours to edit" ownership badge
+ * lives only on the scholar edit panel), so this does not collide with the
+ * colour-language block's "never two meanings on the same surface" rule.
+ */
+const LIKELIHOOD_BADGE_CLASS: Readonly<Record<string, string>> = {
+  HIGH: "border-apollo-green-tint-border bg-apollo-green-tint text-apollo-green-foreground",
+  MEDIUM: "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber",
+  LOW: "border-apollo-red-tint-border bg-apollo-red-tint text-destructive",
+};
+
+/**
  * How the ETL found the name, in reviewer language (#2578).
  *
  * `likelihood` alone cannot explain itself: it folds in contested-ness as well
@@ -88,7 +119,12 @@ function Candidate({ row }: { row: NewsQueueRow }) {
             VIVO
           </span>
         ) : row.likelihood ? (
-          <span className="text-muted-foreground ml-2 text-[10px] font-semibold tracking-wider uppercase">
+          <span
+            className={`ml-2 rounded-sm border px-1 py-px text-[10px] font-semibold tracking-wider uppercase ${
+              LIKELIHOOD_BADGE_CLASS[row.likelihood] ?? "text-muted-foreground border-transparent"
+            }`}
+            data-testid={`news-queue-likelihood-${row.likelihood}`}
+          >
             {row.likelihood}
           </span>
         ) : null}
@@ -108,6 +144,17 @@ function Candidate({ row }: { row: NewsQueueRow }) {
       <p className="text-muted-foreground text-xs">
         {[row.title, row.department, row.roleLabel].filter(Boolean).join(" · ") || "—"}
       </p>
+      {/* Name-in-context snippet (#2578 follow-up) — the raw article text around
+          the matched name, so a reviewer can judge a candidate (e.g. an
+          endowed-chair false positive like the O. Wayne Isom case the basis
+          hint above describes) without opening the article. Rendered as plain
+          text, never dangerouslySetInnerHTML: this is scraped article prose,
+          not markup this page should ever interpret. Visually secondary —
+          smaller and lighter than the title/department line above — and only
+          present for a NAME row with a prose position (BODY/TITLE basis). */}
+      {row.contextSnippet ? (
+        <p className="text-muted-foreground/80 mt-1 text-[11px] italic">“{row.contextSnippet}”</p>
+      ) : null}
     </div>
   );
 }

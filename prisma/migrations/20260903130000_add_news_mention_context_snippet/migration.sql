@@ -1,0 +1,36 @@
+-- #2578 follow-up — capture a short snippet of raw article text around a
+-- prose-matched name, so a /edit/news-queue reviewer can judge a candidate
+-- without opening the article.
+--
+-- The motivating case is the SAME endowed-chair regression #2578 fixed with
+-- `match_basis`:
+--
+--   "…and the O. Wayne Isom Professor of Cardiothoracic Surgery, commended…"
+--
+-- Knowing the basis is TITLE already tells a reviewer the match is likely an
+-- endowed-chair false positive, but they still had to open the article to
+-- confirm it. The snippet above makes the rejection instant, without a click.
+--
+-- `context_snippet` holds ~200-300 chars of the article's title+body text
+-- around the matched name's first occurrence, word-boundary clipped so no
+-- word is cut mid-string, with the matched name itself always intact. It is
+-- populated only for a NAME row whose match_basis is BODY or TITLE — the two
+-- bases the ETL finds by scanning prose and can therefore locate a position
+-- in. TAG (the feed's own tag list) and CAPTION (photo alt text) have no
+-- comparable "position in the article" to snippet, so those rows, and every
+-- VIVO/CURATOR row, carry NULL here — same standing convention as
+-- detected_name/likelihood/match_basis.
+--
+-- Additive and nullable, no backfill. Existing rows keep context_snippet
+-- NULL, which reads correctly as "captured before this shipped" — and the
+-- next etl/news run backfills it for every ETL-owned NAME row it re-scrapes
+-- (reconcile() refreshes context_snippet alongside detected_name/likelihood/
+-- match_basis on a NAME->NAME refresh, and clears it with the rest of the
+-- NAME provenance set on a VIVO upgrade). A human-touched row is never
+-- re-scored or re-snippeted, the table's standing review-state discipline.
+--
+-- VARCHAR(512) — the snippet's own extraction target is ~200-300 chars before
+-- word-boundary clipping trims it further in; 512 leaves headroom for a long
+-- matched name plus both ellipses without ever needing a hard mid-word cut.
+
+ALTER TABLE `news_mention` ADD COLUMN `context_snippet` VARCHAR(512) NULL;

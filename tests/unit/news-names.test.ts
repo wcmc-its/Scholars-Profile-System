@@ -6,10 +6,14 @@
  * name folds; a VIVO-linked scholar is excluded from the weaker prose pass.
  *
  * #2578 adds the confidence tiering: the newsroom feed's OWN story tags are the
- * strongest signal (HIGH), prose is MEDIUM, a photo caption is LOW, and a prose
- * hit that only ever appears inside an endowed-chair or memorial phrase is
- * demoted to LOW. The two regression cases at the bottom are the reason the
- * change exists and are pinned against the real live tag lists.
+ * strongest signal (HIGH), a photo caption is LOW, and a prose hit that only
+ * ever appears inside an endowed-chair or memorial phrase is demoted to LOW.
+ * The two regression cases near the bottom are the reason the change exists and
+ * are pinned against the real live tag lists.
+ *
+ * #2578 FOLLOW-UP adds the BODY score (0..7, banded HIGH/MEDIUM/LOW) that
+ * replaced the old flat BODY -> MEDIUM band, plus the context-snippet capture.
+ * See the "BODY score components" and the final regression test below.
  */
 import { describe, expect, it } from "vitest";
 
@@ -33,11 +37,17 @@ const scholar = (over: Partial<ScholarNameInput> & { cwid: string; fullName: str
 /** Article sources with everything absent by default, so each test names only
  *  the stream it is exercising. */
 const sources = (over: Partial<MentionSources> = {}): MentionSources => ({
+  title: "",
   text: "",
   tags: [],
   captionText: "",
   ...over,
 });
+
+/** `n` filler tokens that never match a scholar surname — lets a fixture place
+ *  a name at an EXACT fraction of the token stream without hand-counting words
+ *  (#2578 follow-up BODY-score tests). */
+const filler = (n: number) => Array(n).fill("x").join(" ");
 
 describe("foldToken", () => {
   it("folds diacritics to base ASCII, lowercase", () => {
@@ -60,10 +70,12 @@ describe("detectMentions", () => {
     scholar({ cwid: "dco2", fullName: "David Cohen", primaryTitle: "Prof B", primaryDepartment: "Dept B" }),
   ]);
 
-  it("emits MEDIUM/BODY for a unique full-name match in prose", () => {
-    // #2578 — prose alone is now MEDIUM, not HIGH. Only the feed's own tags earn
-    // HIGH, because prose is exactly what the endowed-chair false positives
-    // exploited.
+  it("emits a scored LOW/BODY for a plain prose match with none of the four score signals (#2578 follow-up)", () => {
+    // "Xiaojing Ma" is at token index 3 of 7 (43%: past the first third), named
+    // once, no feed tags at all (so no department bonus), and no headline — so
+    // every one of the four score signals is absent and the score is 0.
+    // Also pins the exact context snippet: the whole text, since it is shorter
+    // than the extraction radius on both sides.
     const hits = detectMentions(
       sources({ text: "Findings by Dr. Xiaojing Ma were published." }),
       index,
@@ -72,9 +84,10 @@ describe("detectMentions", () => {
       {
         cwid: "xim2002",
         detectedName: "Xiaojing Ma",
-        likelihood: "MEDIUM",
+        likelihood: "LOW",
         basis: "BODY",
         groupKey: "xiaojing ma",
+        contextSnippet: "Findings by Dr. Xiaojing Ma were published.",
       },
     ]);
   });
@@ -88,6 +101,8 @@ describe("detectMentions", () => {
         likelihood: "HIGH",
         basis: "TAG",
         groupKey: "xiaojing ma",
+        // TAG has no prose position to snippet (#2578 follow-up).
+        contextSnippet: null,
       },
     ]);
   });
@@ -104,6 +119,9 @@ describe("detectMentions", () => {
         likelihood: "LOW",
         basis: "CAPTION",
         groupKey: "xiaojing ma",
+        // CAPTION's occurrence lives in captionText, a separate stream with no
+        // position in the scanned text (#2578 follow-up).
+        contextSnippet: null,
       },
     ]);
   });
@@ -121,9 +139,18 @@ describe("detectMentions", () => {
     expect(hits[0]).toMatchObject({ likelihood: "HIGH", basis: "TAG" });
   });
 
-  it("emits a contested MEDIUM pair when a full name resolves to two scholars", () => {
-    const hits = detectMentions(sources({ text: "Co-author David Cohen commented." }), index);
+  it("caps a contested BODY match at MEDIUM even when its score alone would be HIGH", () => {
+    // "David Cohen" is at token index 0 of 11 (< 10% -> +3), mentioned twice
+    // (+1) = score 4 = HIGH on its own. The contested cap (a folded full name
+    // shared by >1 scholar) pulls it down to MEDIUM, same as it would a
+    // contested TAG or a contested score that only just cleared MEDIUM — the
+    // cap is a ceiling, not a re-scoring.
+    const hits = detectMentions(
+      sources({ text: "David Cohen chaired the panel. Later, David Cohen closed the session." }),
+      index,
+    );
     expect(hits.map((h) => h.cwid).sort()).toEqual(["dco1", "dco2"]);
+    expect(hits.every((h) => h.basis === "BODY")).toBe(true);
     expect(hits.every((h) => h.likelihood === "MEDIUM")).toBe(true);
     // Same groupKey => the queue groups them as one single-select decision.
     expect(new Set(hits.map((h) => h.groupKey)).size).toBe(1);
@@ -232,6 +259,76 @@ describe("honorificNamePhrases — the endowed-chair shapes (#2578)", () => {
 });
 
 /**
+ * #2578 follow-up — the four BODY score signals, each isolated with a fixture
+ * built from `filler()` tokens so the exact position fraction is arithmetic,
+ * not eyeballed, plus the two required band boundaries (1/2 and 3/4). Weights
+ * and boundary provenance are documented on `scoreBodyMention`/`bandForScore`
+ * in etl/news/names.ts; this file only pins the resulting behaviour.
+ */
+describe("BODY score components + band boundaries (#2578 follow-up)", () => {
+  const index = buildNameIndex([
+    scholar({ cwid: "jsm1", fullName: "Jane Smith", primaryDepartment: "Neurology" }),
+  ]);
+  const hit = (over: Partial<MentionSources>) => detectMentions(sources(over), index)[0];
+
+  it("position in the first tenth alone scores +3 -> MEDIUM (score 3)", () => {
+    // "Jane Smith" at token index 5 of 100 (5%, under the 10% cutoff).
+    const hits = hit({ text: `${filler(5)} Jane Smith ${filler(93)}` });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "MEDIUM" });
+  });
+
+  it("...plus a second mention crosses into HIGH (score 4) — the 3/4 boundary", () => {
+    // Identical to the case above but the name is repeated once more: +3 (still
+    // in the first tenth) +1 (mentioned twice) = 4.
+    const hits = hit({ text: `${filler(5)} Jane Smith ${filler(40)} Jane Smith ${filler(53)}` });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "HIGH" });
+  });
+
+  it("position in the first third, but NOT the first tenth, scores +1 -> LOW (score 1)", () => {
+    // Index 20 of 100 (20%: in the first third, past the first tenth).
+    const hits = hit({ text: `${filler(20)} Jane Smith ${filler(78)}` });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "LOW" });
+  });
+
+  it("...plus a second mention crosses into MEDIUM (score 2) — the 1/2 boundary", () => {
+    // +1 (first-third position) +1 (mentioned twice) = 2.
+    const hits = hit({ text: `${filler(20)} Jane Smith ${filler(58)} Jane Smith ${filler(18)}` });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "MEDIUM" });
+  });
+
+  it("outside the first third and mentioned once earns no bonus -> LOW (score 0)", () => {
+    // Index 50 of 100 (50%: past the first third).
+    const hits = hit({ text: `${filler(50)} Jane Smith ${filler(48)}` });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "LOW" });
+  });
+
+  it("mentioned more than once, ALONE, scores +1 -> LOW (score 1)", () => {
+    // Both occurrences sit past the first third (50/104 and 82/104), so the
+    // repeat bonus is the only signal firing.
+    const hits = hit({ text: `${filler(50)} Jane Smith ${filler(30)} Jane Smith ${filler(20)}` });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "LOW" });
+  });
+
+  it("a feed tag containing the scholar's own department, ALONE, scores +2 -> MEDIUM (score 2)", () => {
+    const hits = hit({
+      text: `${filler(50)} Jane Smith ${filler(48)}`,
+      tags: ["Neurology research"],
+    });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "MEDIUM" });
+  });
+
+  it("named in the headline, ALONE, scores +1 -> LOW (score 1)", () => {
+    // The headline itself is 42 tokens (36 filler + "Jane Smith wins prize
+    // today finally"), with the name at index 36 — still under a third of the
+    // combined 62-token stream, so no position bonus fires and the headline
+    // bonus is isolated.
+    const title = `${filler(36)} Jane Smith wins prize today finally`;
+    const hits = hit({ title, text: `${title} ${filler(20)}` });
+    expect(hits).toMatchObject({ basis: "BODY", likelihood: "LOW" });
+  });
+});
+
+/**
  * The two rejections that motivated #2578, pinned against the REAL body text and
  * the REAL `term_node_tid` lists from the live feed (both verified 2026-09-03).
  *
@@ -248,6 +345,7 @@ describe("#2578 regression — endowed-chair names must not outrank the tagged f
     ]);
     const hits = detectMentions(
       {
+        title: "White Coat Ceremony Kicks off Medical Education for M.D. Class of 2030",
         text:
           "White Coat Ceremony Kicks off Medical Education for M.D. Class of 2030 " +
           "In his keynote address, Dr. Leonard Girardi, M.D. '89 , chair of the Department of " +
@@ -274,9 +372,15 @@ describe("#2578 regression — endowed-chair names must not outrank the tagged f
     expect(byCwid.owi1.likelihood).toBe("LOW");
     expect(byCwid.owi1.basis).toBe("TITLE");
     expect(byCwid.owi1.likelihood).not.toBe("HIGH");
+    // #2578 follow-up — the reviewer-facing snippet: this is what makes the
+    // rejection instant without opening the article.
+    expect(byCwid.owi1.contextSnippet).not.toBeNull();
+    expect(byCwid.owi1.contextSnippet).toContain("O. Wayne Isom");
 
     // Girardi, who holds the chair and gave the address, IS tagged.
     expect(byCwid.lng1).toMatchObject({ likelihood: "HIGH", basis: "TAG" });
+    // TAG has no prose position, so no snippet either.
+    expect(byCwid.lng1.contextSnippet).toBeNull();
   });
 
   it("Radiopharmaceutical: Coleman is demoted, Tagawa is reachable at the tag tier", () => {
@@ -286,6 +390,7 @@ describe("#2578 regression — endowed-chair names must not outrank the tagged f
     ]);
     const hits = detectMentions(
       {
+        title: "Radiopharmaceutical May Benefit Patients with Metastatic Prostate Cancer Sooner",
         text:
           "Radiopharmaceutical May Benefit Patients with Metastatic Prostate Cancer Sooner " +
           "said lead author Dr. Scott Tagawa, the Gebroe Family Professor of Hematology-Oncology " +
@@ -318,7 +423,10 @@ describe("#2578 regression — endowed-chair names must not outrank the tagged f
   it("a chair-holder named ELSEWHERE in the prose is not demoted with the chair", () => {
     // "Every occurrence", not "any": the demotion counts honorific hits against
     // total body hits, so someone quoted in the story keeps the prose tier even
-    // when their name also appears in a chair title.
+    // when their name also appears in a chair title. This particular fixture
+    // also happens to score HIGH (index 1 of 13 tokens = 7.7%, under the first
+    // tenth: +3; mentioned twice: +1 = 4) — incidental to the point, which is
+    // that basis stays BODY, never TITLE.
     const index = buildNameIndex([scholar({ cwid: "own1", fullName: "Owen North" })]);
     const hits = detectMentions(
       sources({
@@ -326,6 +434,46 @@ describe("#2578 regression — endowed-chair names must not outrank the tagged f
       }),
       index,
     );
-    expect(hits[0]).toMatchObject({ likelihood: "MEDIUM", basis: "BODY" });
+    expect(hits[0]).toMatchObject({ basis: "BODY", likelihood: "HIGH" });
+  });
+
+  /**
+   * The regression test #2578's follow-up spec calls out by name: the guard
+   * that makes the BODY score safe to ship is that TITLE is decided and
+   * short-circuited BEFORE `scoreBodyMention` ever runs (see the module
+   * docblock in etl/news/names.ts). This fixture is deliberately built so that,
+   * WERE it scored instead of short-circuited, it would earn HIGH: the name
+   * sits at token index 4 of 25 (16% — a first-third position bonus, +1), is
+   * mentioned twice (+1), and a feed tag contains the scholar's own department
+   * (+2) — 4 points, >= HIGH_SCORE. It must stay LOW/TITLE regardless, because
+   * EVERY occurrence sits inside "the … Professor of …".
+   *
+   * Verified locally that this test actually exercises the guard: temporarily
+   * removing the short-circuit (making TITLE fall through into
+   * scoreBodyMention like BODY does) turns this test red — it asserts HIGH/BODY
+   * instead of LOW/TITLE — confirming it is not vacuous.
+   */
+  it("stays LOW/TITLE even positioned early and mentioned twice — proves scoring cannot promote an honorific match", () => {
+    const index = buildNameIndex([
+      scholar({
+        cwid: "owi1",
+        fullName: "O Wayne Isom",
+        primaryTitle: "Professor Emeritus",
+        primaryDepartment: "Cardiothoracic Surgery",
+      }),
+    ]);
+    const hits = detectMentions(
+      sources({
+        text:
+          "Alumni gathered as the O. Wayne Isom Professor of Cardiothoracic Surgery welcomed the class. " +
+          "Later, the O. Wayne Isom Professor of Cardiothoracic Surgery addressed guests.",
+        // The scholar's own department, present in a tag — would earn the
+        // DEPARTMENT_TAG_BONUS if this were ever scored.
+        tags: ["Cardiothoracic Surgery"],
+      }),
+      index,
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ likelihood: "LOW", basis: "TITLE" });
   });
 });

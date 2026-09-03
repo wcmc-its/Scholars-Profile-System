@@ -29,6 +29,7 @@ const existing = (over: Partial<ExistingMention>): ExistingMention => ({
   likelihood: "HIGH",
   matchBasis: "TAG",
   sourceRef: `${URL}|jane roe`,
+  contextSnippet: null,
   ...over,
 });
 
@@ -45,6 +46,7 @@ const incomingName = {
   likelihood: "HIGH",
   matchBasis: "TAG",
   sourceRef: `${URL}|jane roe`,
+  contextSnippet: null,
 };
 
 /** The VIVO shape of the same row: the whole NAME provenance set is null. */
@@ -56,6 +58,7 @@ const incomingVivo = {
   likelihood: null,
   matchBasis: null,
   sourceRef: null,
+  contextSnippet: null,
 };
 
 describe("reconcile — review state", () => {
@@ -82,7 +85,7 @@ describe("reconcile — review state", () => {
 
   it("upgrades an ETL-owned pending NAME row to VIVO when the article gains the link", () => {
     const patch = reconcile(
-      existing({ status: "pending", source: "NAME", enteredByCwid: null }),
+      existing({ status: "pending", source: "NAME", enteredByCwid: null, contextSnippet: "…was named…" }),
       incomingVivo,
     );
     expect(patch).toMatchObject({
@@ -94,6 +97,10 @@ describe("reconcile — review state", () => {
       // joined by identifier that still claimed "newsroom tag" would tell the
       // queue a story that is no longer true.
       matchBasis: null,
+      // #2578 follow-up — the snippet is part of that same NAME provenance set
+      // and clears with it: a VIVO-joined row has no "matched name" to have
+      // been found in context of.
+      contextSnippet: null,
     });
   });
 
@@ -107,11 +114,27 @@ describe("reconcile — review state", () => {
     expect(patch).toEqual({ likelihood: "LOW", matchBasis: "TITLE" });
   });
 
+  it("refreshes the context snippet on a NAME->NAME re-scrape (#2578 follow-up)", () => {
+    // A re-scrape can find a BETTER (or merely different) prose occurrence to
+    // snippet even when the tier/basis themselves are unchanged.
+    const patch = reconcile(
+      existing({ matchBasis: "BODY", likelihood: "MEDIUM", contextSnippet: "…old snippet…", enteredByCwid: null }),
+      { ...incomingName, matchBasis: "BODY", likelihood: "MEDIUM", contextSnippet: "…new snippet…" },
+    );
+    expect(patch).toEqual({ contextSnippet: "…new snippet…" });
+  });
+
   it("never re-tiers a HUMAN-touched row", () => {
     // A curator's decision outranks any score the ETL can compute.
     const patch = reconcile(
-      existing({ likelihood: "HIGH", matchBasis: null, enteredByCwid: "curator1", status: "published" }),
-      { ...incomingName, likelihood: "LOW", matchBasis: "TITLE" },
+      existing({
+        likelihood: "HIGH",
+        matchBasis: null,
+        contextSnippet: null,
+        enteredByCwid: "curator1",
+        status: "published",
+      }),
+      { ...incomingName, likelihood: "LOW", matchBasis: "TITLE", contextSnippet: "…never applied…" },
     );
     expect(patch).toEqual({});
   });

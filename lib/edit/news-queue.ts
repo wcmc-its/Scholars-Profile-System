@@ -42,6 +42,12 @@ export type NewsQueueRow = {
    *  behind the likelihood, which also folds in contested-ness and so can't
    *  carry it. Null on VIVO/CURATOR rows and on NAME rows matched before #2578. */
   matchBasis: string | null;
+  /** ~200-300 chars of raw article text around the matched name (#2578 follow-
+   *  up), rendered beneath the candidate so a reviewer can judge it without
+   *  opening the article. Null on VIVO/CURATOR rows, on a TAG/CAPTION NAME row
+   *  (no prose position to snippet), and on a NAME row matched before this
+   *  shipped. */
+  contextSnippet: string | null;
   /** How the ETL attached this scholar: `VIVO` (trusted cwid link, auto-published)
    *  or `NAME` (prose match, queue-reviewed). Only shown on the history tabs —
    *  pending is name-only. */
@@ -92,6 +98,14 @@ export function isNewsQueueTabVisible(session: {
  * is forced to 0 below), and a scored LOW candidate is still more actionable
  * than an unscored one. Contested stays at 0 — it needs disambiguation before it
  * needs ranking, which is the shipped behaviour.
+ *
+ * #2578 follow-up — the product owner's "sort by confidence then recency" ask is
+ * already this: `loadNewsQueue` ranks Pending by this table first (tier
+ * descending) and breaks ties by `publishedAt` descending within a tier (see the
+ * comparator below). Introducing the scored BODY tier changes WHICH rows carry
+ * HIGH/MEDIUM/LOW, not this table or the comparator — `likelihood` is still one
+ * of the same three strings. No sort-logic change was needed; see
+ * tests/unit/news-queue.test.ts for the within-tier recency coverage.
  */
 const LIKELIHOOD_RANK: Readonly<Record<string, number>> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 
@@ -148,6 +162,7 @@ export async function loadNewsQueue(
       detectedName: true,
       likelihood: true,
       matchBasis: true,
+      contextSnippet: true,
       source: true,
       sourceRef: true,
       createdAt: true,
@@ -208,6 +223,7 @@ export async function loadNewsQueue(
           detectedName: r.detectedName,
           likelihood: r.likelihood,
           matchBasis: r.matchBasis,
+          contextSnippet: r.contextSnippet,
           source: r.source,
           sourceRef: r.sourceRef,
           createdAt: r.createdAt.toISOString(),
