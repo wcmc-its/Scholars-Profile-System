@@ -28,12 +28,15 @@ import {
   loadActiveCoreClaimsByCore,
 } from "@/lib/api/core-merge";
 import { normalizeMeshTerms } from "@/lib/api/profile";
+import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
 
 /** A WCM scholar resolved from a CWID, linkable to their public profile. */
 export interface QueueScholar {
   cwid: string;
   name: string;
-  slug: string;
+  /** Profile slug, or null for an ED-only person (core staff with no Scholar
+   *  row, #1239) — named but not linkable. */
+  slug: string | null;
   /** Primary department, when known (core staff may have none). */
   dept: string | null;
 }
@@ -265,6 +268,22 @@ export async function loadCoreReviewQueue(
       if (list.length >= WCM_AUTHORS_CAP || list.some((w) => w.cwid === a.cwid)) continue;
       list.push(scholar);
       wcmByPmid.set(a.pmid, list);
+    }
+  }
+
+  // Core staff with no Scholar row AND not on the byline (#1239) — the last
+  // resort is the enterprise directory, which knows every employee. Fail-soft:
+  // an LDAP hiccup just leaves the bare CWID showing, it never fails the page.
+  // ponytail: one uncached lookup per page load, rare by construction (a
+  // handful of CWIDs at most); cache it if the directory ever gets slow.
+  const namelessCwids = [...coStaffCwids].filter((c) => !scholarByCwidLc.has(c.toLowerCase()));
+  if (namelessCwids.length > 0) {
+    try {
+      for (const p of await fetchDirectoryPeopleByCwid(namelessCwids)) {
+        putScholar({ cwid: p.cwid, name: p.name, slug: null, dept: p.dept });
+      }
+    } catch (err) {
+      console.error("[core-queue] ED name enrichment failed", err);
     }
   }
 

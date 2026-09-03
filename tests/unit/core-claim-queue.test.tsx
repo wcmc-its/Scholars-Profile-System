@@ -133,6 +133,24 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText(/zzz9999/)).toBeTruthy();
   });
 
+  it("names an ED-only core-staff co-author without linking a profile (#1239)", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            coauthors: ["abc9001"],
+            coauthorScholars: [{ cwid: "abc9001", name: "Pat Moreno", slug: null, dept: "CBIC" }],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText("Pat Moreno")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Pat Moreno" })).toBeNull();
+    expect(screen.queryByText(/abc9001/)).toBeNull();
+  });
+
   it("exposes abstract, full author list, and linked WCM authors in the details expander (Tier 2)", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(screen.getByText("We imaged the brain in detail.")).toBeTruthy();
