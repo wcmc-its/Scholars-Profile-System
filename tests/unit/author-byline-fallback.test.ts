@@ -18,7 +18,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { fetchAuthorBylineForPmids } from "@/lib/api/topics";
+import { bylineWithDroppedCount, fetchAuthorBylineForPmids } from "@/lib/api/topics";
 
 /** A confirmed WCM author row in the shape fetchAuthorBylineForPmids selects
  *  (no deletedAt/status filter — we classify on status here). */
@@ -45,7 +45,11 @@ describe("fetchAuthorBylineForPmids — #718 suppression-safe byline", () => {
     mockPublicationAuthorFindMany.mockResolvedValue([authorRow("100", "active")]);
     mockSuppressionFindMany.mockResolvedValue([]);
     mockPublicationFindMany.mockResolvedValue([
-      { pmid: "100", authorsString: "((Mejia J)), Smith A, Doe B" },
+      {
+        pmid: "100",
+        authorsString: "((Mejia J)), Smith A, Doe B",
+        fullAuthorsString: "Mejia J, Smith A, Doe B",
+      },
     ]);
     const out = await fetchAuthorBylineForPmids(["100"]);
     expect(out.get("100")).toBe("Mejia J, Smith A, Doe B");
@@ -81,7 +85,9 @@ describe("fetchAuthorBylineForPmids — #718 suppression-safe byline", () => {
   it("withholds the byline when authorsString is null (no fabricated line)", async () => {
     mockPublicationAuthorFindMany.mockResolvedValue([authorRow("500", "active")]);
     mockSuppressionFindMany.mockResolvedValue([]);
-    mockPublicationFindMany.mockResolvedValue([{ pmid: "500", authorsString: null }]);
+    mockPublicationFindMany.mockResolvedValue([
+      { pmid: "500", authorsString: null, fullAuthorsString: null },
+    ]);
     const out = await fetchAuthorBylineForPmids(["500"]);
     expect(out.get("500")).toBeUndefined();
   });
@@ -93,7 +99,7 @@ describe("fetchAuthorBylineForPmids — #718 suppression-safe byline", () => {
     ]);
     mockSuppressionFindMany.mockResolvedValue([]);
     mockPublicationFindMany.mockResolvedValue([
-      { pmid: "600", authorsString: "Lin Q, Wang Y" },
+      { pmid: "600", authorsString: "Lin Q, Wang Y", fullAuthorsString: "Lin Q, Wang Y" },
     ]);
     const out = await fetchAuthorBylineForPmids(["600", "700"]);
     expect(out.get("600")).toBe("Lin Q, Wang Y");
@@ -101,7 +107,49 @@ describe("fetchAuthorBylineForPmids — #718 suppression-safe byline", () => {
     // Only the eligible pmid is queried for its byline.
     expect(mockPublicationFindMany).toHaveBeenCalledWith({
       where: { pmid: { in: ["600"] } },
-      select: { pmid: true, authorsString: true },
+      select: { pmid: true, authorsString: true, fullAuthorsString: true },
     });
+  });
+});
+
+describe("bylineWithDroppedCount — #2581 truncated-byline overflow suffix", () => {
+  it("appends the dropped-author count, counting tokens not characters", () => {
+    expect(
+      bylineWithDroppedCount(
+        "((Mejia J)), Smith A, Doe B",
+        "Mejia J, Smith A, Doe B, Patel R, Okafor N, Ito K",
+      ),
+    ).toBe("Mejia J, Smith A, Doe B + 3 more");
+  });
+
+  it("adds no suffix when fullAuthorsString is null (nothing to compare)", () => {
+    expect(bylineWithDroppedCount("Lin Q, Wang Y", null)).toBe("Lin Q, Wang Y");
+  });
+
+  it("adds no suffix when the two lists hold the same authors", () => {
+    expect(bylineWithDroppedCount("((Lin Q)), Wang Y", "Lin Q, Wang Y")).toBe("Lin Q, Wang Y");
+  });
+
+  it("never prints a negative when full is somehow SHORTER (bad upstream data)", () => {
+    expect(bylineWithDroppedCount("Lin Q, Wang Y, Doe B", "Lin Q")).toBe("Lin Q, Wang Y, Doe B");
+  });
+
+  it("adds no suffix to an empty byline", () => {
+    expect(bylineWithDroppedCount(null, "Lin Q, Wang Y")).toBe("");
+    expect(bylineWithDroppedCount("   ", "Lin Q, Wang Y")).toBe("");
+  });
+
+  it("surfaces the suffix through fetchAuthorBylineForPmids", async () => {
+    mockPublicationAuthorFindMany.mockResolvedValue([authorRow("800", "active")]);
+    mockSuppressionFindMany.mockResolvedValue([]);
+    mockPublicationFindMany.mockResolvedValue([
+      {
+        pmid: "800",
+        authorsString: "((Lin Q)), Wang Y",
+        fullAuthorsString: "Lin Q, Wang Y, Doe B",
+      },
+    ]);
+    const out = await fetchAuthorBylineForPmids(["800"]);
+    expect(out.get("800")).toBe("Lin Q, Wang Y + 1 more");
   });
 });

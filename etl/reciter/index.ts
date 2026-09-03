@@ -40,6 +40,7 @@
  * Usage: `npm run etl:reciter`
  */
 import { Prisma } from "@/lib/generated/prisma/client";
+import { isAbsentValue } from "@/lib/citation";
 import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { markTopicRebuildStarted } from "../../lib/etl-state";
@@ -84,6 +85,17 @@ type AuthorListRow = {
   authorFirstName: string | null;
   personIdentifier: string | null;
 };
+
+/** #2581 — a byline for an external record, from `reciterdb.authorship_review`.
+ *  `external_id` is BARE numeric ("105037533819") where
+ *  `analysis_summary_article.article_id` is prefixed ("SCOPUS:105037533819");
+ *  `authors_json` is a JSON array of `{ given, surname }` objects.
+ *
+ *  `authors_json` is typed `unknown`, not `string`: whether the driver hands
+ *  back the raw JSON text or an already-decoded array depends on the column's
+ *  declared type upstream, which was never probed.
+ *  `composeAuthorStringFromReviewJson` accepts both. */
+type AuthorshipReviewRow = { external_id: string; authors_json: unknown };
 
 type JournalAbbrevRow = {
   pmid: number;
@@ -140,6 +152,45 @@ function composeAuthorString(rows: AuthorListRow[]): string | null {
     const last = (r.authorLastName ?? "").trim();
     const initials = deriveInitials(r.authorFirstName);
     if (!last) continue;
+    tokens.push(initials ? `${last} ${initials}` : last);
+  }
+  return tokens.length > 0 ? tokens.join(", ") : null;
+}
+
+/**
+ * Issue #2581 — compose the same `Lastname I, Lastname IJ` string as
+ * {@link composeAuthorString}, but from an `authorship_review.authors_json`
+ * value: a JSON array whose elements carry exactly `given` and `surname`.
+ * External (non-PubMed) records have no rows in analysis_summary_author_list /
+ * analysis_summary_author at all, so this is their only byline source.
+ *
+ * Never throws. A byline is cosmetic — a malformed or non-array `authors_json`,
+ * or an element with no surname, must not take down the nightly publication
+ * upsert — so a bad value yields null and a bad element is skipped, leaving the
+ * `??` chain at the call site to fall through to null.
+ */
+export function composeAuthorStringFromReviewJson(authorsJson: unknown): string | null {
+  if (authorsJson == null || authorsJson === "") return null;
+  // Accepts BOTH shapes on purpose. The column may hand back a JSON string, or —
+  // if reciterdb types it JSON and the mariadb driver decodes it — an already
+  // parsed array. Assuming `string` would make JSON.parse throw on every row and
+  // return null corpus-wide, which reads as "the data isn't there" rather than
+  // as a bug. The probe measured the JSON's shape, never the driver's JS type.
+  let parsed: unknown = authorsJson;
+  if (typeof authorsJson === "string") {
+    try {
+      parsed = JSON.parse(authorsJson);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(parsed)) return null;
+  const tokens: string[] = [];
+  for (const el of parsed) {
+    const author = el as { given?: unknown; surname?: unknown } | null;
+    const last = typeof author?.surname === "string" ? author.surname.trim() : "";
+    if (!last) continue;
+    const initials = deriveInitials(typeof author?.given === "string" ? author.given : null);
     tokens.push(initials ? `${last} ${initials}` : last);
   }
   return tokens.length > 0 ? tokens.join(", ") : null;
@@ -558,6 +609,80 @@ async function main() {
       maxDropPct: 30,
     });
 
+    // #2581 — external (non-PubMed) records have NO byline: their author names
+    // are in neither analysis_summary_author_list nor analysis_summary_author,
+    // the two tables read above, so ~3,310 rows land with both authorsString and
+    // fullAuthorsString null. The names DO exist in
+    // `reciterdb.authorship_review.authors_json`, so compose the byline there.
+    //
+    // The join is NOT on raw values: `analysis_summary_article.article_id` is
+    // source-PREFIXED ("SCOPUS:105037533819") while `authorship_review.external_id`
+    // is BARE numeric ("105037533819") — all 10,527 scopus rows are bare, and
+    // `LIKE 'SCOPUS:%'` matches none of them, so a raw join returns zero rows.
+    // Only `SCOPUS:` ids are stripped and the query is pinned to
+    // `source = 'scopus'`: an OPENALEX: id could strip to a colliding bare value.
+    //
+    // Best-effort per batch, matching the analysis_nih and ecommons_pmid_link
+    // reads above. `authorship_review` is curator state owned by the AAR
+    // pipeline — not one of the reporting tables this ETL has always read — so
+    // an ungranted SELECT or a rename upstream must degrade to "no byline"
+    // rather than throw out of main() and take down the publication upsert this
+    // block sits in front of. A byline is cosmetic; the corpus is not.
+    const scopusPmidByBareId = new Map<string, number>();
+    for (const [pmid, articleId] of articleIdByPmid) {
+      if (!articleId.startsWith("SCOPUS:")) continue;
+      scopusPmidByBareId.set(articleId.slice("SCOPUS:".length), pmid);
+    }
+    const scopusAuthorsByPmid = new Map<number, string>();
+    for (const batch of chunks(Array.from(scopusPmidByBareId.keys()), IN_BATCH)) {
+      try {
+        await withReciterConnection(async (conn) => {
+          const rows = (await conn.query(
+            `SELECT external_id, authors_json
+               FROM authorship_review
+              WHERE source = 'scopus' AND external_id IN (?)
+                    AND authors_json IS NOT NULL AND authors_json <> ''`,
+            [batch],
+          )) as AuthorshipReviewRow[];
+          for (const r of rows) {
+            // One row per author-under-review, so one article matches several
+            // rows (40 sampled articles → 50 rows). A probe found ZERO articles
+            // whose rows disagree on authors_json, so the first sighting wins —
+            // do not concatenate. `status` describes the review, not the byline,
+            // so it is deliberately not filtered on.
+            const pmid = scopusPmidByBareId.get(String(r.external_id));
+            if (pmid === undefined || scopusAuthorsByPmid.has(pmid)) continue;
+            const composed = composeAuthorStringFromReviewJson(r.authors_json);
+            if (composed) scopusAuthorsByPmid.set(pmid, composed);
+          }
+        });
+      } catch (err) {
+        console.warn(
+          `authorship_review fetch failed for a batch (continuing without a Scopus byline for it): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    console.log(`Got ${scopusAuthorsByPmid.size} Scopus review bylines.`);
+
+    // The per-batch catch above, plus an emptied or rebuilt authorship_review,
+    // both arrive here as a near-empty map — and this map is NOT write-safe just
+    // because it is read behind a `??`. `publicationSignature` hashes both
+    // authorsString and fullAuthorsString, and the upsert below writes every
+    // changed row unconditionally, so a byline this ETL stored last night is
+    // overwritten with NULL tonight the moment the map loses its entry. That is
+    // exactly the wipe every assertSourceVolume above prevents. `existing`
+    // counts only the rows this read owns — the external SCOPUS: pmids — so a
+    // healthy PubMed corpus cannot mask a total loss of the Scopus source.
+    assertSourceVolume("reciter:scopus-review-bylines", {
+      incoming: scopusAuthorsByPmid.size,
+      existing: await db.write.publication.count({
+        where: { pmid: { startsWith: "SCOPUS:" }, authorsString: { not: null } },
+      }),
+      maxDropPct: 30,
+    });
+
     // Issue #89 — NLM journal abbreviation. person_article carries the
     // ISO abbreviation per pmid (despite the name, it's the NLM-style
     // form: "Proc Natl Acad Sci U S A"). Distinct per pmid; pick first
@@ -643,7 +768,25 @@ async function main() {
     await db.write.publicationScore.deleteMany();
 
     const pubRows = Array.from(articleByPmid.values()).map((a) => {
-      const authorsString = authorsStringByPmid.get(Number(a.pmid)) ?? null;
+      // #2581 — FALLBACK ONLY, never an override: a PubMed-derived byline always
+      // wins, and the Scopus map is empty for every PubMed row anyway. Filling
+      // authorsString matters as much as fullAuthorsString below — the profile
+      // and topic pages read authorsString, so filling only the latter would fix
+      // the CV and .docx exports while leaving the visible profile byline blank.
+      // The composed string carries no `((...))` WCM author markers: the PubMed
+      // path adds those from a signal authors_json does not have, so these rows
+      // simply render unbolded.
+      // ponytail: hard-truncated to the column width. `authorsString` is
+      // VarChar(2000) while `fullAuthorsString` below is Text — the PubMed value
+      // fits only because it arrives already truncated upstream, a property the
+      // composed Scopus string does not share (Scopus COMPLETE returns up to 100
+      // authors). Without the cap, one hyperauthorship record raises MySQL 1406
+      // under STRICT_TRANS_TABLES and fails the nightly deterministically, every
+      // night, until someone edits the row by hand. Widen the column if a
+      // mid-name cut ever matters; the untruncated list is in fullAuthorsString.
+      const scopusByline = scopusAuthorsByPmid.get(Number(a.pmid)) ?? null;
+      const authorsString =
+        authorsStringByPmid.get(Number(a.pmid)) ?? scopusByline?.slice(0, 2000) ?? null;
       const nih = nihByPmid.get(Number(a.pmid));
       return {
         pmid: pubKey(Number(a.pmid)),
@@ -664,7 +807,7 @@ async function main() {
             : (recoveredTitles.get(Number(a.pmid)) ?? `(untitled, pmid ${a.pmid})`),
         ),
         authorsString,
-        fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? null,
+        fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? scopusByline,
         journal: a.journalTitleVerbose,
         year: a.articleYear,
         publicationType: a.publicationTypeCanonical,
@@ -677,9 +820,17 @@ async function main() {
         dateAddedToEntrez: parseDate(a.datePublicationAddedToEntrez),
         doi: a.doi,
         pmcid: a.pmcid,
-        volume: a.volume,
-        issue: a.issue,
-        pages: a.pages,
+        // #2580 — external rows carry the literal four-character string 'NULL'
+        // in all three columns (40/40 sampled; zero SQL nulls), which printed as
+        // `2024;NULL(NULL):NULL.` in every citation. Normalised here at the
+        // boundary, for the same reason the encoding repair above is: the
+        // signature diff below then rewrites the already-stored dirty rows on the
+        // next run, so no separate backfill is needed. `isAbsentValue` is the
+        // citation builders' own predicate — narrow on purpose, so real values
+        // like "Suppl", "Spec No", "IX" and "DECIPHeR" survive untouched.
+        volume: isAbsentValue(a.volume) ? null : a.volume,
+        issue: isAbsentValue(a.issue) ? null : a.issue,
+        pages: isAbsentValue(a.pages) ? null : a.pages,
         journalAbbrev: journalAbbrevByPmid.get(Number(a.pmid)) ?? null,
         // No PubMed record for external-source pubs — leave the URL null so the
         // render never builds a dead pubmed.ncbi link for a non-PubMed pmid.

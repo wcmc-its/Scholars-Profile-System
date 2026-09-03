@@ -31,9 +31,14 @@ import { pubSource } from "@/lib/publication-source";
  * `VARCHAR` column takes when an upstream export wrote the string instead of a
  * SQL NULL. Deliberately narrow: `"N/A"`, `"none"` and `"-"` are NOT swept in,
  * because no evidence says the corpus uses them here and a real volume or page
- * range could plausibly look like one.
+ * range could plausibly look like one. `"Suppl"`, `"Spec No"`, `"IX"` and
+ * `"DECIPHeR"` are all real volume/issue/pages values in this corpus.
+ *
+ * Exported (rather than kept private to the two builders below) so the ReciterDB
+ * ETL can null the same literal at ingest with the SAME predicate — one place
+ * decides what "absent" means for these columns (#2580).
  */
-function isAbsent(value: string | null | undefined): boolean {
+export function isAbsentValue(value: string | null | undefined): boolean {
   if (value == null) return true;
   const t = value.trim();
   return t === "" || t.toLowerCase() === "null";
@@ -51,9 +56,9 @@ export function formatVolIssuePages(
   issue: string | null | undefined,
   pages: string | null | undefined,
 ): string {
-  const v = isAbsent(volume) ? "" : volume!.trim();
-  const i = isAbsent(issue) ? "" : issue!.trim();
-  const p = isAbsent(pages) ? "" : pages!.trim();
+  const v = isAbsentValue(volume) ? "" : volume!.trim();
+  const i = isAbsentValue(issue) ? "" : issue!.trim();
+  const p = isAbsentValue(pages) ? "" : pages!.trim();
   if (!v && !i && !p) return "";
   let s = v;
   if (i) s += `(${i})`;

@@ -4,13 +4,19 @@
  * Renders the same {q, filters, sort} payload as the CSV exports into a
  * numbered Vancouver-style bibliography:
  *
- *   1. Smith JA, **Wolf M**, Jones BC, et al. Klotho and Clinical Outcomes
- *      in CKD. Am J Kidney Dis. 2024. doi:10.1053/j.ajkd.2023.10.015.
- *      PMID: 38670054. PMCID: PMC11098699.
+ *   1. Smith JA, **Wolf M**, Jones BC. Klotho and Clinical Outcomes in
+ *      CKD. Am J Kidney Dis. 2024;83(4):512-520.
+ *      doi:10.1053/j.ajkd.2023.10.015. PMID: 38670054. PMCID: PMC11098699.
  *
- * Vancouver vs the spec's AMA: journal name is NOT italicized; authors
- * past the 6th collapse to "..., et al." Everything else (sentence-case
- * title, hyperlinked PMID/PMCID/DOI, WCM-author bolding) carries over.
+ * Vancouver vs the spec's AMA: journal name is NOT italicized. Everything
+ * else (sentence-case title, hyperlinked PMID/PMCID/DOI, WCM-author
+ * bolding) carries over.
+ *
+ * NOTE: there is deliberately no "..., et al." collapse. An earlier version
+ * of this docblock claimed authors past the 6th collapse; `buildAuthorRuns`
+ * has always iterated EVERY token with no cap, so a 30-author paper prints
+ * 30 names. The claim was documentation of a rule nobody implemented — if
+ * the et-al collapse is actually wanted, it is a change, not a bug fix.
  *
  * Bolding rule: only authors *selected* via the `wcmAuthor` filter on
  * the search page are bold. The reciter ETL marks every WCM-affiliated
@@ -22,9 +28,10 @@
  * publications, bold them throughout") more directly than bolding every
  * WCM coauthor.
  *
- * Volume / issue / pages aren't currently in the Scholars data layer
- * (#89 spec §6.1 calls them out); the citation renders Year only after
- * the journal until those fields are plumbed through.
+ * Volume / issue / pages ARE in the Scholars data layer (#89 spec §6.1
+ * calls them out); the citation renders them after the year via the
+ * shared `formatVolIssuePages` helper, which also reads a literal "NULL"
+ * volume/issue/pages as absent (#2580) rather than printing it.
  */
 import {
   AlignmentType,
