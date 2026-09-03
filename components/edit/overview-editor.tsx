@@ -40,7 +40,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
+import { cn, OVERVIEW_HTML_CLASS } from "@/lib/utils";
 
 export type OverviewEditorProps = {
   /** The initial sanitized HTML to load into the editor. Empty string = blank document. */
@@ -97,7 +97,10 @@ export function OverviewEditor({ initialHtml, onChange }: OverviewEditorProps) {
         "aria-multiline": "true",
         class: cn(
           "min-h-[12rem] px-4 py-3 text-base leading-relaxed",
-          "prose prose-sm max-w-none",
+          // #2579 — was `prose prose-sm max-w-none`, which matched no rule (no
+          // typography plugin on Tailwind v4), so an inserted link was
+          // indistinguishable from plain text while composing it.
+          OVERVIEW_HTML_CLASS,
           "focus:outline-none",
         ),
       },

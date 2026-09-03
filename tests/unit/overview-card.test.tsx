@@ -1129,12 +1129,15 @@ describe("OverviewCard — conditional hints", () => {
 // ---------------------------------------------------------------------------
 
 describe("OverviewCard — readOnly arm", () => {
-  it("renders the bio as sanitized HTML in a prose container", () => {
+  it("renders the bio as sanitized HTML in a mark-styled container", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>Hi I am Alex.</p>" readOnly />);
     const readonly = document.querySelector('[data-slot="overview-readonly"]');
     expect(readonly).not.toBeNull();
     expect((readonly as HTMLElement).innerHTML).toBe("<p>Hi I am Alex.</p>");
-    expect((readonly as HTMLElement).className).toContain("prose");
+    // #2579 — this asserted `prose`, a class that matched no rule under
+    // Tailwind v4 (no typography plugin), so it passed while the container
+    // styled nothing. Assert the shared mark classes actually in force.
+    expect((readonly as HTMLElement).className).toContain("[&_a]:underline");
   });
 
   it("renders 'No overview yet.' when initialHtml is empty", () => {
@@ -1170,5 +1173,27 @@ describe("OverviewCard — readOnly arm", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly={false} />);
     expect(screen.getByTestId("mock-editor")).toBeTruthy();
     expect(screen.getByTestId("overview-save")).toBeTruthy();
+  });
+});
+
+/**
+ * #2579 — the read-only preview shared the editor's defect: it rendered the
+ * overview through dead `prose prose-sm` classes, so the preview dropped the
+ * links and list markers the published profile shows. Preview and published
+ * output now share one constant.
+ */
+describe("OverviewCard — read-only preview mark styling (#2579)", () => {
+  const previewClass = () =>
+    document.querySelector('[data-slot="overview-readonly"]')?.getAttribute("class") ?? "";
+
+  it("styles anchors and list markers in the preview", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly />);
+    expect(previewClass()).toContain("[&_a]:underline");
+    expect(previewClass()).toContain("[&_ul]:list-disc");
+  });
+
+  it("carries no `prose` class", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly />);
+    expect(previewClass()).not.toMatch(/\bprose\b/);
   });
 });

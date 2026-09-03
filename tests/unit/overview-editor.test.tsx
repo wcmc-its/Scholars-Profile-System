@@ -126,3 +126,40 @@ describe("OverviewEditor — onChange", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * #2579 — an inserted link rendered as plain text on the editing surface, so an
+ * editor could neither see that a link existed nor where it started and ended,
+ * and cannot read the HTML to check. The cause was `prose prose-sm max-w-none`
+ * on the ProseMirror surface: this project runs Tailwind v4 with no
+ * `@plugin "@tailwindcss/typography"` and no typography package, so those
+ * classes matched no rule at all.
+ */
+describe("OverviewEditor — rendered-mark styling (#2579)", () => {
+  const surface = async () =>
+    await screen.findByRole("textbox", { name: "Profile overview" });
+
+  it("styles anchors, so a link is visible while composing", async () => {
+    render(
+      <OverviewEditor
+        initialHtml='<p>see <a href="https://example.org">the docs</a></p>'
+        onChange={() => {}}
+      />,
+    );
+    const cls = (await surface()).getAttribute("class") ?? "";
+    expect(cls).toContain("[&_a]:underline");
+    expect(cls).toContain("[&_a]:text-[var(--color-accent-slate)]");
+  });
+
+  it("styles the list markers the toolbar can produce", async () => {
+    render(<OverviewEditor initialHtml="" onChange={() => {}} />);
+    const cls = (await surface()).getAttribute("class") ?? "";
+    expect(cls).toContain("[&_ul]:list-disc");
+    expect(cls).toContain("[&_ol]:list-decimal");
+  });
+
+  it("carries no `prose` class — it styles nothing here and hid this bug", async () => {
+    render(<OverviewEditor initialHtml="" onChange={() => {}} />);
+    expect((await surface()).getAttribute("class") ?? "").not.toMatch(/\bprose\b/);
+  });
+});
