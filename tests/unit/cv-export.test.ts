@@ -791,8 +791,7 @@ describe("appointment rows — the institution column (#2582)", () => {
   it("still routes hospital rows to D2 and academic rows to D1 after composing", () => {
     // Regression guard: `isHospital` tests the organization string, so composing
     // BEFORE the routing decision could flip a row into the wrong table. The
-    // composition happens after, and every hospital-routed value already names
-    // an institution anyway.
+    // composition happens after, so it cannot.
     const { academic, hospital } = apptOutline({
       profile: baseProfile({
         appointments: [
@@ -811,6 +810,24 @@ describe("appointment rows — the institution column (#2582)", () => {
     expect(academic[0]).toContain("Population Health Sciences");
     expect(hospital).toHaveLength(1);
     expect(hospital[0]).toContain("NewYork-Presbyterian Hospital");
+    expect(hospital[0]).not.toContain(CV_HOME_INSTITUTION);
+  });
+
+  it("never composes a hospital-routed row, even from the ED faculty feed", () => {
+    // The case the test above does NOT reach: that one is an `ED-NYP` row, so
+    // the provenance gate stops it before the heuristic is consulted. A plain
+    // `ED` faculty row whose org unit carries a hospital token IS composed-
+    // eligible, so the leave-alone heuristic has to repeat every token
+    // `isHospital` routes on — `\bnyp\b` is the one that was missing, and it
+    // would have produced "NYP …, Weill Cornell Medicine, New York, NY" in the
+    // Hospital Appointments table.
+    const { academic, hospital } = apptOutline({
+      profile: baseProfile({ appointments: [edAppointment("NYP Ambulatory Care Network")] }),
+      mentees: [],
+      pops: null,
+    });
+    expect(academic).toHaveLength(0);
+    expect(hospital).toHaveLength(1);
     expect(hospital[0]).not.toContain(CV_HOME_INSTITUTION);
   });
 

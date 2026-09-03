@@ -128,6 +128,13 @@ export const CV_HOME_INSTITUTION = "Weill Cornell Medicine, New York, NY";
  * happens to contain "Institute" keeps today's bare label rather than risking a
  * false institution claim on a row that is genuinely external.
  *
+ * Every token `isHospital` routes on is repeated here — `\bnyp\b` included,
+ * which is why it appears despite "presbyterian" covering the spelled-out name.
+ * That makes "a hospital-routed row is never composed" hold on this heuristic
+ * ALONE, rather than resting on the provenance gate: an ED faculty-feed row
+ * whose org unit happened to carry a hospital token would otherwise route to
+ * D2 and still be composed.
+ *
  * ponytail: a token list cannot tell "Memorial Sloan Kettering Cancer Center"
  * from a WCM unit — the provenance gate in `appointmentRows` is what actually
  * keeps non-WCM rows safe, and this is the second belt. The real fix is
@@ -136,7 +143,7 @@ export const CV_HOME_INSTITUTION = "Weill Cornell Medicine, New York, NY";
  * field lands.
  */
 const NAMES_INSTITUTION_RE =
-  /cornell|presbyterian|hospital|university|college|institute|medical cent(?:er|re)|school of medicine/i;
+  /cornell|presbyterian|hospital|\bnyp\b|university|college|institute|medical cent(?:er|re)|school of medicine/i;
 
 /** The "Institution, city and state" cell for an ED-sourced appointment row. */
 function institutionCell(org: string): string {
