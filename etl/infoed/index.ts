@@ -545,6 +545,55 @@ export async function repointReissuedSuppressions(
 }
 
 /**
+ * #2224 follow-up — drop the suppressions THIS ETL minted for a grant that has
+ * just left the InfoEd feed and that {@link repointReissuedSuppressions} did
+ * not claim for a reissue.
+ *
+ * Runs after the re-point, so a `system-confidential-title` row still sitting
+ * on a stale external_id is one no reissue accounted for: its target is gone,
+ * so the takedown enforces nothing, and it fails `etl:integrity`
+ * (`suppression:orphan-infoed`) every night until someone deletes it by hand.
+ * Measured on prod 2026-09-03: one CDA-titled award dropped out of the feed and
+ * pinned the nightly red, with nothing hidden and nothing to do.
+ *
+ * Lossless only because these rows are mechanically reproducible:
+ * `reconcileConfidentialTitles` re-mints from the title on whatever run the
+ * award reappears, under whatever key it comes back as. A HUMAN's takedown is
+ * not reproducible, so this touches none of them — those stay orphaned and stay
+ * reported, which is the confidentiality consequence #2224 is about. Narrowing
+ * the INFOED half of that signal to human takedowns is the point: it goes back
+ * to meaning "a curator's decision lost its target", not "an award expired".
+ *
+ * DELETE, not revoke, and un-revoked rows only — both follow from
+ * `reconcileConfidentialTitles` deduping on entityId across revoked rows too.
+ * A revoked tombstone left here would permanently disable the re-mint if the
+ * same key came back; and an existing revoke is a human's "this title is a
+ * false positive", which must outlive the grant for exactly that reason.
+ *
+ * No index reflection: the grant row is already deleted, so the nightly rebuild
+ * has nothing to project and the funding doc goes with it.
+ */
+export async function dropSystemSuppressionsForDeletedGrants(
+  staleExternalIds: readonly string[],
+): Promise<void> {
+  if (staleExternalIds.length === 0) return;
+  const { count } = await db.write.suppression.deleteMany({
+    where: {
+      entityType: "grant",
+      createdBy: SYSTEM_CONFIDENTIAL_TITLE,
+      revokedAt: null,
+      entityId: { in: [...staleExternalIds] },
+    },
+  });
+  if (count > 0) {
+    console.log(
+      `[InfoEd] dropped ${count} auto-minted confidential-title suppression(s) ` +
+        `whose grant left the feed.`,
+    );
+  }
+}
+
+/**
  * #2020 — reconcile the undated-award worklist.
  *
  * Upserts a `GrantDateGap` for every award InfoEd left without a project
@@ -833,6 +882,9 @@ async function main() {
     // whereas re-pointing FIRST and then crashing would un-hide the stale row
     // that is still there.
     await repointReissuedSuppressions(plan.staleExternalIds, existingGrants, plan.toCreate);
+    // AFTER the re-point for the same reason it is after the deleteMany: what
+    // survives on a stale id here is an orphan no reissue explains.
+    await dropSystemSuppressionsForDeletedGrants(plan.staleExternalIds);
 
     await reconcileDateGaps(undated, backfilledIds);
     await reconcileConfidentialTitles(inserts);
