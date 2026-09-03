@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   EDIT_ACTIVITY_WINDOW_DAYS,
+  type EditActivitySummary,
   buildChanges,
   coerceValue,
+  collectCwids,
+  loadEditActivitySummary,
   shapeSummary,
   toDay,
 } from "@/lib/api/edit-activity";
@@ -128,5 +131,108 @@ describe("shapeSummary", () => {
     expect(s.totalEdits).toBe(0);
     expect(s.perDay).toEqual([]);
     expect(s.recent).toEqual([]);
+  });
+});
+
+describe("collectCwids", () => {
+  /** Only the fields collectCwids reads. */
+  const summary = (over: Partial<EditActivitySummary>): EditActivitySummary =>
+    ({
+      windowDays: 30,
+      totalEdits: 0,
+      perDay: [],
+      topEditors: [],
+      topEntities: [],
+      recent: [],
+      people: {},
+      ...over,
+    }) as EditActivitySummary;
+
+  const recentRow = (over: Partial<EditActivitySummary["recent"][number]>) => ({
+    id: "r",
+    ts: "2026-07-03T00:00:00.000Z",
+    actorCwid: "act0001",
+    impersonatedCwid: null,
+    action: "field_update",
+    entityType: "scholar",
+    entityId: "sch0001",
+    changes: [],
+    detail: null,
+    ...over,
+  });
+
+  it("collects editors, impersonated actors, and scholar entity ids — deduped", () => {
+    expect(
+      collectCwids(
+        summary({
+          topEditors: [{ actorCwid: "act0001", edits: 9 }],
+          topEntities: [{ entityType: "scholar", entityId: "sch0002", edits: 4 }],
+          recent: [
+            recentRow({}),
+            recentRow({ id: "r2", impersonatedCwid: "imp0003" }),
+            recentRow({ id: "r3" }),
+          ],
+        }),
+      ).sort(),
+    ).toEqual(["act0001", "imp0003", "sch0001", "sch0002"]);
+  });
+
+  it("🔴 never treats a non-scholar entity id as a CWID — those are unit CODES", () => {
+    // `target_entity_id` is a department/division/center code for every other
+    // entity type. Feeding those to the Scholar lookup is harmless but wrong, and
+    // it is how a code would end up rendered as somebody's name.
+    expect(
+      collectCwids(
+        summary({
+          topEntities: [
+            { entityType: "center", entityId: "CTSC", edits: 4 },
+            { entityType: "department", entityId: "MED", edits: 2 },
+          ],
+          recent: [recentRow({ entityType: "center", entityId: "CTSC" })],
+        }),
+      ).sort(),
+    ).toEqual(["act0001"]);
+  });
+});
+
+describe("loadEditActivitySummary name resolution", () => {
+  /** $queryRaw answers the four aggregate reads in call order. */
+  const fakeClient = (scholarFindMany: () => Promise<unknown[]>) => {
+    const answers = [
+      [{ day: "2026-07-03", edits: 1 }],
+      [{ actor_cwid: "act0001", edits: 1 }],
+      [],
+      [],
+    ];
+    let call = 0;
+    return {
+      $queryRaw: async () => answers[call++] ?? [],
+      scholar: { findMany: scholarFindMany },
+    } as never;
+  };
+
+  it("attaches name + title for each resolved CWID", async () => {
+    const summary = await loadEditActivitySummary(
+      fakeClient(async () => [
+        { cwid: "act0001", preferredName: "Ada Editor", primaryTitle: "Professor of Medicine" },
+      ]),
+    );
+    expect(summary.people).toEqual({
+      act0001: { name: "Ada Editor", title: "Professor of Medicine" },
+    });
+  });
+
+  it("🔴 fails SOFT when the Scholar read throws — a cosmetic lookup must not blank the page", async () => {
+    // The page renders its "unavailable" notice when this loader throws. Before the
+    // fail-soft, an unreadable Scholar table turned a perfectly good audit read into
+    // an outage.
+    const summary = await loadEditActivitySummary(
+      fakeClient(async () => {
+        throw new Error("SELECT command denied");
+      }),
+    );
+    expect(summary.people).toEqual({});
+    expect(summary.totalEdits).toBe(1);
+    expect(summary.topEditors).toEqual([{ actorCwid: "act0001", edits: 1 }]);
   });
 });
