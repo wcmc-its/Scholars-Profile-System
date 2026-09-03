@@ -3,7 +3,7 @@
  * (#497 PR-3c, `slug-personalization-ui-spec.md` § 3.1).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
@@ -392,6 +392,25 @@ describe("AdminSubnav", () => {
       expect(screen.getAllByText(/Paste the ask\. Get the shortlist\./)).toHaveLength(1);
       vi.doUnmock("@/lib/api/matcha");
     });
+
+    // The href assertion above passes on an iPhone that cannot use it: Radix's hover
+    // trigger preventDefaults `touchstart`, which cancels the click iOS would have
+    // synthesized, so the tab navigated NOWHERE on touch (#2588).
+    it("re-issues the tap as a click on touch — the hover wrap ate the href on iOS (#2588)", async () => {
+      vi.resetModules();
+      vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
+      const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
+      render(<Subnav active="profiles" pendingSlugRequests={null} pendingHonors={null} superuserSurfaces />);
+      const tab = screen.getByTestId("admin-tab-matcha");
+      const clicked: string[] = [];
+      tab.addEventListener("click", (ev) => {
+        ev.preventDefault(); // jsdom cannot navigate; the href itself is asserted above
+        clicked.push((ev.currentTarget as HTMLAnchorElement).getAttribute("href") ?? "");
+      });
+      expect(fireEvent.touchEnd(tab)).toBe(false); // our handler preventDefaulted the tap
+      expect(clicked).toEqual(["/edit/matcha"]);
+      vi.doUnmock("@/lib/api/matcha");
+    });
   });
 });
 
@@ -638,6 +657,35 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       expect(menu.querySelector(`[data-testid="admin-tab-${id}"]`)).toBeTruthy();
     // a member of a DIFFERENT group is not smuggled in
     expect(menu.querySelector('[data-testid="admin-tab-usage"]')).toBeNull();
+  });
+
+  // ── Touch (#2588) ─────────────────────────────────────────────────────────
+  // Radix HoverCard is mouse-only AND hostile to touch: its trigger preventDefaults
+  // `touchstart`, which on iOS cancels the synthesized click, so a tap reached neither
+  // the menu nor the group's own href — the whole grouped nav was inert on an iPhone.
+  // The hover/focus tests above cannot see that: focus is not a tap.
+  it("opens a group menu on TOUCH — the tap used to reach nothing at all (#2588)", async () => {
+    grouped();
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    const trigger = screen.getByTestId("admin-group-registries");
+    // `false` = a handler preventDefaulted, i.e. the tap opens the menu rather than
+    // falling through to the first member's href.
+    expect(fireEvent.touchEnd(trigger)).toBe(false);
+    const menu = await screen.findByTestId("admin-group-menu-registries");
+    expect(menu.querySelector('[data-testid="admin-tab-administrators"]')).toBeTruthy();
+    // …and it toggles: a second tap closes it.
+    fireEvent.touchEnd(trigger);
+    await waitFor(() => expect(screen.queryByTestId("admin-group-menu-registries")).toBeNull());
+  });
+
+  it("opens the ACTIVE group's menu on touch too — its <span> trigger has no href to fall back on", async () => {
+    grouped();
+    render(<AdminSubnav active="slugs" {...allOn} />);
+    const trigger = screen.getByTestId("admin-group-registries");
+    expect(trigger.getAttribute("href")).toBeNull();
+    fireEvent.touchEnd(trigger);
+    const menu = await screen.findByTestId("admin-group-menu-registries");
+    expect(menu.querySelector('[data-testid="admin-tab-methods"]')).toBeTruthy();
   });
 
   it("renders no tier-2 sub-bar in any state — the hover menu replaced it", () => {

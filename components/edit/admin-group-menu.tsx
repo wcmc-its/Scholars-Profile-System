@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -25,10 +26,18 @@ export type GroupMenuMember = {
  * digest, invisible to jsdom). The whole HoverCard composition therefore lives inside
  * this one client boundary; the server nav only hands it plain serializable props.
  *
- * The group label stays a real <Link> to its first visible member, so a click/tap
+ * The group label stays a real <Link> to its first visible member, so a click
  * still reaches that surface directly (unchanged); the menu is the fast path to the
  * others. Members render as plain links here — Matcha included, so no nested
  * HoverCard — because the menu is itself the disclosure.
+ *
+ * 🔴 TOUCH IS HAND-WIRED (#2588). Radix HoverCard is mouse-only and actively BREAKS
+ * touch: its trigger preventDefaults `touchstart` — which cancels the synthesized
+ * click on iOS, so even the group's own <Link> never fires — and wraps open/close in
+ * `excludeTouch`. On an iPhone the whole grouped nav was therefore INERT: no menu,
+ * and no navigation either. `composeEventHandlers` cannot opt out (it only skips the
+ * Radix handler when the default is ALREADY prevented, and there is no un-prevent),
+ * so the tap is handled here — see `openOnTouch` below.
  */
 export function AdminGroupMenu({
   groupId,
@@ -46,6 +55,16 @@ export function AdminGroupMenu({
   members: GroupMenuMember[];
 }) {
   const testId = `admin-group-${groupId}`;
+  // Controlled so the touch path can open the menu; mouse hover and keyboard focus
+  // still drive it through Radix's own onOpenChange (see the touch note above).
+  const [open, setOpen] = useState(false);
+  // `onTouchEnd` is the one trigger event Radix leaves alone. preventDefault stops
+  // the tap from becoming a click on the group <Link>, so a tap opens the menu
+  // instead of jumping to the first member — the members are all in the menu.
+  const openOnTouch = (e: React.TouchEvent) => {
+    e.preventDefault();
+    setOpen((o) => !o);
+  };
   // A trailing chevron marks every group entry as a disclosure, open or not
   // (`Console Nav Menu.dc.html`, option 1a — "anchored card").
   const chevron = (
@@ -71,6 +90,9 @@ export function AdminGroupMenu({
       className="border-apollo-maroon inline-flex shrink-0 items-center gap-1 border-b-2 py-3 text-sm font-medium whitespace-nowrap"
       aria-current="page"
       data-testid={testId}
+      // A bare <span> is not focusable, so the active group alone could not open its
+      // menu by keyboard — the one entry whose members have no other route to them.
+      tabIndex={0}
     >
       {label}
       {chevron}
@@ -86,8 +108,10 @@ export function AdminGroupMenu({
     </Link>
   );
   return (
-    <HoverCard openDelay={80} closeDelay={150}>
-      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+    <HoverCard open={open} onOpenChange={setOpen} openDelay={80} closeDelay={150}>
+      <HoverCardTrigger asChild onTouchEnd={openOnTouch}>
+        {trigger}
+      </HoverCardTrigger>
       {/* Default popover chrome (border/bg/padding/shadow) is stripped here so the
           notch + card below can draw their own — this is the "anchored card"
           treatment, distinct from the generic `HoverCardContent` MatchaTab uses. */}
@@ -106,6 +130,7 @@ export function AdminGroupMenu({
               <li key={m.id}>
                 <Link
                   href={m.href}
+                  onClick={() => setOpen(false)}
                   aria-current={m.active ? "page" : undefined}
                   data-testid={`admin-tab-${m.id}`}
                   className={`flex min-h-9 items-center justify-between gap-2.5 rounded-[7px] border-l-2 px-2.5 text-sm whitespace-nowrap ${
