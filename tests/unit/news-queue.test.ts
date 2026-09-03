@@ -14,7 +14,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { NEWS_HISTORY_LIMIT, loadNewsQueue, snippetMatchRanges } from "@/lib/edit/news-queue";
+import { scoreProminence } from "@/lib/api/prominence";
+import {
+  NEWS_HISTORY_LIMIT,
+  loadNewsQueue,
+  snippetMatchRanges,
+  sortNewsQueueGroups,
+} from "@/lib/edit/news-queue";
+import type { NewsQueueGroup } from "@/lib/edit/news-queue";
 
 type Row = {
   id: string;
@@ -26,6 +33,8 @@ type Row = {
   likelihood: string | null;
   matchBasis: string | null;
   contextSnippet: string | null;
+  showOnProfile: boolean;
+  enteredByCwid: string | null;
   source: string;
   sourceRef: string | null;
   createdAt: Date;
@@ -41,6 +50,8 @@ function vivo(over: Partial<Row> & { id: string; cwid: string }): Row {
     likelihood: null,
     matchBasis: null,
     contextSnippet: null,
+    showOnProfile: true,
+    enteredByCwid: null,
     source: "VIVO",
     sourceRef: null,
     createdAt: new Date("2026-07-18T00:00:00Z"),
@@ -62,10 +73,26 @@ function name(over: Partial<Row> & { id: string; cwid: string }): Row {
   };
 }
 
+/** Per-cwid overrides for the fake roster, so a test can make one scholar the
+ *  Dean or give another a deep publication record (the prominence inputs). */
+type Person = {
+  preferredName?: string;
+  primaryTitle?: string | null;
+  scoredPubCount?: number | null;
+  hIndex?: number | null;
+};
+
 /** Minimal stand-in for the Prisma surface the loader touches. `calls` records
- *  the `where` each findMany got, so a re-added source filter fails the test. */
-function client(rows: Row[]) {
+ *  the `where` each findMany got, so a re-added source filter fails the test;
+ *  `scholarCwids` records the cwid IN-list of every scholar read, so dropping
+ *  the decider (`entered_by_cwid`) from the name lookup fails too.
+ *
+ *  `grant` / `orgUnitRoleAssignment` are read by `computeProminence`, not by the
+ *  loader itself: empty here, so a fixture's prominence is decided purely by its
+ *  publication counts and title. */
+function client(rows: Row[], people: Record<string, Person> = {}, omitCwids: string[] = []) {
   const calls: Array<Record<string, unknown>> = [];
+  const scholarCwids: string[][] = [];
   const c = {
     newsMention: {
       findMany: async (args: Record<string, unknown>) => {
@@ -74,20 +101,32 @@ function client(rows: Row[]) {
       },
     },
     scholar: {
-      findMany: async () =>
-        [...new Set(rows.map((r) => r.cwid))].map((cwid) => ({
-          cwid,
-          slug: `slug-${cwid}`,
-          preferredName: `Scholar ${cwid}`,
-          postnominal: null,
-          fullName: `Scholar ${cwid}`,
-          roleCategory: "full_time_faculty",
-          primaryTitle: "Professor of Medicine",
-          primaryDepartment: "Medicine",
-        })),
+      findMany: async (args: { where?: { cwid?: { in?: string[] } } }) => {
+        const requested = args.where?.cwid?.in ?? [];
+        scholarCwids.push(requested);
+        // `omitCwids` lets a test drive the loader's "cwid absent from the
+        // prominence map" branch, which is otherwise unreachable: the fake used
+        // to answer for every cwid it was asked about.
+        return requested
+          .filter((cwid) => !omitCwids.includes(cwid))
+          .map((cwid) => ({
+            cwid,
+            slug: `slug-${cwid}`,
+            preferredName: people[cwid]?.preferredName ?? `Scholar ${cwid}`,
+            postnominal: null,
+            fullName: `Scholar ${cwid}`,
+            roleCategory: "full_time_faculty",
+            primaryTitle: people[cwid]?.primaryTitle ?? "Professor of Medicine",
+            primaryDepartment: "Medicine",
+            scoredPubCount: people[cwid]?.scoredPubCount ?? null,
+            hIndex: people[cwid]?.hIndex ?? null,
+          }));
+      },
     },
+    grant: { groupBy: async () => [] },
+    orgUnitRoleAssignment: { findMany: async () => [] },
   };
-  return { client: c as unknown as Parameters<typeof loadNewsQueue>[0], calls };
+  return { client: c as unknown as Parameters<typeof loadNewsQueue>[0], calls, scholarCwids };
 }
 
 describe("loadNewsQueue — history shows every source", () => {
@@ -311,5 +350,243 @@ describe("snippetMatchRanges — #2578 name highlight", () => {
   it("survives an ellipsis-prefixed snippet, whose offsets shift", () => {
     const snippet = "…and then Sarah Chen said…";
     expect(at(snippet, snippetMatchRanges(snippet, "Sarah Chen"))).toEqual(["Sarah Chen"]);
+  });
+});
+
+/**
+ * The queue's sort selector.
+ *
+ * ~1,371 rows sit pending, so comms needs more than one way in: the shipped
+ * certainty order for "work the confident matches", pure recency for "what did
+ * the newsroom just run", and prominence for "the Dean's mentions first". All
+ * three re-order the SAME loaded groups client-side — the loader is not
+ * parameterised by sort (see its doc comment).
+ */
+describe("sortNewsQueueGroups — the reviewer's sort selector", () => {
+  /** Prominence inputs. `grant` / `orgUnitRoleAssignment` are empty in the fake
+   *  client, so the score reduces to publication counts + the faculty weight,
+   *  and the tier to the title heuristic — "Dean" is tier 0, everyone else 3. */
+  const people: Record<string, Person> = {
+    aaa1001: { scoredPubCount: 5 },
+    bbb2002: { scoredPubCount: 500 }, // the deepest record in the fixture
+    ccc3003: { primaryTitle: "Dean", scoredPubCount: 1 }, // tier 0, thin record
+    ddd4004: {},
+    eee5005: {},
+  };
+
+  const contestedRef = "https://news.weill.cornell.edu/contested|fei wang";
+
+  /** Likelihood, publication depth and article date each imply a DIFFERENT
+   *  order, so no two sorts can pass by accident. */
+  const fixture = () =>
+    client(
+      [
+        name({
+          id: "h1",
+          cwid: "aaa1001",
+          likelihood: "HIGH",
+          publishedAt: new Date("2026-01-01T00:00:00Z"),
+        }),
+        name({
+          id: "m1",
+          cwid: "bbb2002",
+          likelihood: "MEDIUM",
+          publishedAt: new Date("2026-05-01T00:00:00Z"),
+        }),
+        name({
+          id: "l1",
+          cwid: "ccc3003",
+          likelihood: "LOW",
+          publishedAt: new Date("2026-08-01T00:00:00Z"),
+        }),
+        name({
+          id: "c1",
+          cwid: "ddd4004",
+          likelihood: "MEDIUM",
+          sourceRef: contestedRef,
+          publishedAt: new Date("2026-09-01T00:00:00Z"),
+        }),
+        name({
+          id: "c2",
+          cwid: "eee5005",
+          likelihood: "MEDIUM",
+          sourceRef: contestedRef,
+          publishedAt: new Date("2026-09-01T00:00:00Z"),
+        }),
+      ],
+      people,
+    );
+
+  const ids = (groups: NewsQueueGroup[]) => groups.map((g) => g.rows[0].id);
+
+  it("'certainty' IS the shipped pending order, whatever order it is handed", async () => {
+    const { client: c } = fixture();
+    const groups = await loadNewsQueue(c, "pending");
+    // HIGH, MEDIUM, LOW, then the contested group (forced to rank 0) — today's
+    // behaviour, and the default the sort selector must not disturb.
+    expect(ids(groups)).toEqual(["h1", "m1", "l1", "c1"]);
+    // Re-sorting a shuffled copy lands back on exactly that sequence.
+    expect(ids(sortNewsQueueGroups([...groups].reverse(), "certainty"))).toEqual(ids(groups));
+  });
+
+  it("'recent' ignores likelihood entirely", async () => {
+    const { client: c } = fixture();
+    const groups = await loadNewsQueue(c, "pending");
+    // Newest article first: the contested group leads despite ranking last under
+    // certainty, and the HIGH match sinks to the bottom on its January date.
+    expect(ids(sortNewsQueueGroups(groups, "recent"))).toEqual(["c1", "l1", "m1", "h1"]);
+  });
+
+  it("'prominence' puts a tier-0 Dean above a higher-scoring tier-3 scholar", async () => {
+    const { client: c } = fixture();
+    const groups = await loadNewsQueue(c, "pending");
+    const sorted = sortNewsQueueGroups(groups, "prominence");
+    // l1 is the Dean (tier 0) on a 1-publication record; m1 is tier 3 with 500.
+    // Tier wins outright — then, WITHIN tier 3, prominence orders m1 (500) above
+    // h1 (5) above the contested pair (0).
+    expect(ids(sorted)).toEqual(["l1", "m1", "h1", "c1"]);
+    expect(sorted[0].rows[0].leadershipTier).toBe(0);
+    expect(sorted[1].rows[0].prominence).toBeGreaterThan(sorted[0].rows[0].prominence);
+  });
+
+  it("ranks a contested group by its BEST candidate, not by rows[0]", async () => {
+    // The group exists because we do not know which scholar it belongs to, so a
+    // group that might be the most prominent person in the queue must be offered
+    // at that person's position — sorting on rows[0] would bury it arbitrarily.
+    const { client: c } = client(
+      [
+        name({ id: "solo", cwid: "aaa1001" }),
+        name({ id: "c1", cwid: "ddd4004", sourceRef: contestedRef }),
+        name({ id: "c2", cwid: "eee5005", sourceRef: contestedRef }),
+      ],
+      { aaa1001: { scoredPubCount: 100 }, ddd4004: {}, eee5005: { scoredPubCount: 5000 } },
+    );
+    const groups = await loadNewsQueue(c, "pending");
+    expect(ids(sortNewsQueueGroups(groups, "prominence"))).toEqual(["c1", "solo"]);
+  });
+
+  it("returns a new array and never mutates its argument", async () => {
+    const { client: c } = fixture();
+    const groups = await loadNewsQueue(c, "pending");
+    const before = ids(groups);
+
+    const sorted = sortNewsQueueGroups(groups, "recent");
+
+    expect(sorted).not.toBe(groups);
+    expect(ids(groups)).toEqual(before);
+  });
+});
+
+/**
+ * The two editorial/provenance fields the decision UI renders alongside status:
+ * "do we want it on the profile?" and "who decided this?".
+ */
+describe("loadNewsQueue — showOnProfile + the decider", () => {
+  it("carries showOnProfile through, orthogonal to status", async () => {
+    // "Approved but don't publish" is published + showOnProfile=false — there is
+    // deliberately no fourth status for it.
+    const { client: c } = client([name({ id: "hidden", cwid: "aaa1001", showOnProfile: false })]);
+    const groups = await loadNewsQueue(c, "published");
+    expect(groups[0].rows[0].showOnProfile).toBe(false);
+  });
+
+  it("resolves the decider's name even though a steward is not in the queue", async () => {
+    // `entered_by_cwid` is usually a comms steward, who has no mention of their
+    // own in the queue — the name read must cover the ACTORS as well as the
+    // mentioned scholars, or every decided row reads as an anonymous cwid.
+    const { client: c, scholarCwids } = client(
+      [name({ id: "d1", cwid: "aaa1001", enteredByCwid: "std9001" })],
+      { std9001: { preferredName: "Robin Steward" } },
+    );
+    const groups = await loadNewsQueue(c, "published");
+
+    expect(groups[0].rows[0].decidedByName).toBe("Robin Steward");
+    expect(scholarCwids.some((cwids) => cwids.includes("std9001"))).toBe(true);
+  });
+
+  it("leaves decidedByName null on an ETL-written row", async () => {
+    const { client: c } = client([name({ id: "etl", cwid: "aaa1001" })]);
+    const groups = await loadNewsQueue(c, "pending");
+    expect(groups[0].rows[0].decidedByName).toBeNull();
+  });
+});
+
+/**
+ * The shared prominence scorer (`lib/api/prominence.ts`), pinned from its second
+ * consumer: /edit/scholars and this queue must never rank the same scholar
+ * differently, which is why the formula was extracted rather than copied.
+ */
+describe("scoreProminence — the one prominence definition", () => {
+  const base = {
+    scoredPubCount: null,
+    hIndex: null,
+    roleCategory: null,
+    primaryTitle: null,
+    chairLabel: null,
+    isChief: false,
+    piCount: 0,
+    nihPiCount: 0,
+  };
+
+  it("scores a scholar with no counts as a finite number, never NaN", () => {
+    // A NaN score sorts arbitrarily against everything, so a scholar with a null
+    // hIndex / scoredPubCount must land on a real 0 rather than propagating one.
+    const { prominence } = scoreProminence(base);
+    expect(Number.isNaN(prominence)).toBe(false);
+    expect(prominence).toBe(0);
+    expect(Number.isNaN(scoreProminence({ ...base, scoredPubCount: 10 }).prominence)).toBe(false);
+  });
+
+  it("ranks a chair above a chief on an otherwise identical record", () => {
+    const chair = scoreProminence({ ...base, chairLabel: "Chair" });
+    const chief = scoreProminence({ ...base, isChief: true });
+
+    expect(chair.prominence).toBeGreaterThan(chief.prominence);
+    expect(chair.leadershipLabel).toBe("Chair");
+    expect(chief.leadershipLabel).toBe("Chief");
+    // Both are tier 2 — the chair/chief difference is in the SCORE, not the tier.
+    expect(chair.leadershipTier).toBe(chief.leadershipTier);
+  });
+});
+
+/**
+ * The two branches the mutation probe found unpinned.
+ *
+ * Both are "quiet" defaults — the kind that produce a plausible number rather
+ * than an error — so nothing else in the suite notices when they invert.
+ */
+describe("prominence fallbacks — the unpinned defaults", () => {
+  it("scores a mention whose scholar is missing as tier 3, not tier 0", async () => {
+    // The worst possible inversion: default the tier to 0 and an unresolvable
+    // cwid outranks the actual Dean and every chair on the `prominence` sort.
+    // Mutating LEADERSHIP_TIER.none -> 0 here used to leave the suite green.
+    const { client: c } = client(
+      [name({ id: "n1", cwid: "ghost001", likelihood: "HIGH" })],
+      {},
+      ["ghost001"],
+    );
+    const groups = await loadNewsQueue(c, "pending");
+    expect(groups[0].rows[0].leadershipTier).toBe(3);
+    expect(groups[0].rows[0].prominence).toBe(0);
+  });
+
+  it("never lets a null count reach the sort as NaN", async () => {
+    // `Math.log1p(null)` is 0, so asserting `prominence === 0` cannot tell a
+    // guarded formula from an unguarded one. Assert FINITENESS, and assert the
+    // row still orders — NaN silently makes every comparison false and scrambles
+    // the sort rather than throwing.
+    const { client: c } = client(
+      [
+        name({ id: "n1", cwid: "aaa1001", likelihood: "HIGH" }),
+        name({ id: "n2", cwid: "bbb1002", likelihood: "HIGH" }),
+      ],
+      { aaa1001: { scoredPubCount: null, hIndex: null }, bbb1002: { scoredPubCount: 40, hIndex: 20 } },
+    );
+    const groups = await loadNewsQueue(c, "pending");
+    for (const g of groups) {
+      expect(Number.isFinite(g.rows[0].prominence)).toBe(true);
+    }
+    const sorted = sortNewsQueueGroups(groups, "prominence");
+    expect(sorted.map((g) => g.rows[0].cwid)).toEqual(["bbb1002", "aaa1001"]);
   });
 });

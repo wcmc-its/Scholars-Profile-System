@@ -1,9 +1,10 @@
 /**
  * `POST /api/edit/news-mention/decision` — the news approval queue's write.
  *
- * Moves a `pending` NAME-matched mention to `published` or `rejected`. Gated on
- * `isSuperuser || isCommsSteward` (external comms IS the comms-steward function),
- * and flag-gated behind `NEWS_APPROVAL_QUEUE` (off ⇒ 404, like the page).
+ * Moves a `pending` NAME-matched mention to `published` or `rejected`, and an
+ * already-`rejected` one back to `published` (#2578 follow-up — see TERMINALITY).
+ * Gated on `isSuperuser || isCommsSteward` (external comms IS the comms-steward
+ * function), and flag-gated behind `NEWS_APPROVAL_QUEUE` (off ⇒ 404, like the page).
  * Deliberately NOT a leg on `authorizeOverviewWrite`, whose first leg is `self`:
  * a scholar could otherwise approve a pending mention onto their own profile,
  * which is the whole point of a human-confirmation gate on a name match.
@@ -21,11 +22,32 @@
  * between two calls would credit two people with one mention. One hoisted `ts`
  * ties the N+1 audit rows as ONE decision (`ts` feeds `row_hash`).
  *
- * TERMINALITY. `rejected` is terminal so a re-scrape cannot re-propose a row a
- * human turned down; nothing in the DB enforces it (bare ENUM, no CHECK). The
- * `status !== "pending"` re-check inside the transaction IS that enforcement, and
- * also the race guard when two reviewers hit one row. Every decided row sets
- * `entered_by_cwid` so etl/news treats it as human-touched and never reverts it.
+ * TERMINALITY — HALF OF IT SURVIVES (#2578 follow-up). `rejected` is terminal
+ * against the ETL and NOT against a human reviewer; only the first half was ever
+ * the point. Against the ETL: every decision sets `entered_by_cwid`, which marks
+ * the row human-touched, and etl/news never reverts such a row — so a re-scrape
+ * still cannot re-propose something a human turned down. That invariant is
+ * untouched, and it is precisely what makes un-rejecting safe.
+ *
+ * Against a reviewer, `rejected` is no longer terminal: comms needs a "whoops,
+ * that WAS the right person" path off the Rejected tab, so `approve` is allowed on
+ * a `rejected` row in three cases —
+ *   1. UNCONTESTED (no `sourceRef`, or nobody else shares it): approve. One person
+ *      moves; this is the common case.
+ *   2. CONTESTED with NO sibling published: approve, and reject the still-PENDING
+ *      siblings exactly as the pending path does. (The queue warns before the
+ *      click; the route does not re-litigate it.)
+ *   3. CONTESTED with a sibling ALREADY published: REFUSE (`already_decided` ⇒
+ *      409). Approving would have to un-publish a SECOND scholar's row, and that
+ *      has to be its own deliberate decision, never a silent side effect of this
+ *      one. No new code implements this — the "already given away" pre-check
+ *      below IS case 3, unchanged.
+ * `reject` stays pending-only (re-rejecting writes an audit row that says
+ * nothing), and `published` stays undecidable in both directions — un-publishing
+ * is the profile card's `hide`/`reject` on POST /api/edit/news-mention. The status
+ * re-check still lives INSIDE the transaction: nothing in the DB constrains these
+ * transitions (bare ENUM, no CHECK), and it is also the race guard for two
+ * reviewers hitting one row.
  */
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -82,12 +104,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await db.write.$transaction(async (tx) => {
       const row = (await tx.newsMention.findUnique({ where: { id: mentionId } })) as StoredRow | null;
       if (!row) return { kind: "not_found" as const };
-      // Only a pending row is decidable, re-checked INSIDE the transaction (race
-      // guard + terminality enforcement — the DB has neither).
-      if (row.status !== "pending") return { kind: "not_pending" as const };
+      // What this route may decide, re-checked INSIDE the transaction (race guard
+      // — the DB has no CHECK). Pending in either direction, plus the un-reject
+      // path: a REJECTED row may still be APPROVED (#2578 follow-up). `reject`
+      // stays pending-only and `published` stays undecidable — see TERMINALITY.
+      const decidable =
+        row.status === "pending" || (row.status === "rejected" && decision === "approve");
+      if (!decidable) return { kind: "not_pending" as const };
 
       // A detected name can only resolve to ONE scholar. If a sibling is already
       // published, this is a competing claim on a mention already given away.
+      // This is also the WHOLE of un-reject case 3: approving a rejected row whose
+      // sibling won would mean un-publishing that second scholar, which must be a
+      // separate deliberate decision — so refuse here rather than cascade.
       if (decision === "approve" && row.sourceRef) {
         const taken = await tx.newsMention.findFirst({
           where: { sourceRef: row.sourceRef, status: "published", id: { not: row.id } },
@@ -115,7 +144,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ts,
       });
 
-      // Approving a contested detected-name rejects its siblings atomically.
+      // Approving a contested detected-name rejects its siblings atomically. The
+      // un-reject path (case 2) lands here unchanged: still-PENDING siblings are
+      // rejected, and siblings already rejected are left alone — re-writing a
+      // terminal row would emit an audit row that says nothing.
       let siblingsRejected = 0;
       const affectedCwids = new Set<string>([row.cwid]);
       if (decision === "approve" && row.sourceRef) {

@@ -38,6 +38,7 @@ import {
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
+import { scoreProminence } from "@/lib/api/prominence";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
@@ -76,85 +77,17 @@ export { PI_ROLES };
  *  the hidden-scholars filter off (the roster defaults to including them). */
 const HIDDEN_ROLES = ["doctoral_student", "affiliate_alumni"] as const;
 
-/** Prominence weights — kept here so they're easy to tune in one place.
- *  Leadership weights mirror the people-search #532 constants (chair > chief). */
-const W_HINDEX = 0.5;
-const W_PI = 0.5;
-const W_NIH_PI = 0.5;
-const W_CHAIR = 3.0;
-const W_CHIEF = 1.5;
-const W_FACULTY = 1.0;
-
 /**
- * Institutional-leadership sort tiers (lower number ranks higher), #1 v2 decision.
- * The Dean must rank #1 even though he is not a department chair. Tiers 0/1 are
- * derived from `primaryTitle` TEXT — no hand-maintained cwid map — so the set
- * stays current as titles change; chairs/chiefs (tier 2) keep their FK-based
- * prominence boost; everyone else is tier 3. Within a tier, prominence then name.
+ * The prominence weights, the leadership tiers and the title heuristic moved to
+ * `lib/api/prominence.ts` when the news-approval queue needed to sort by the same
+ * score — one definition, so tuning a weight can't leave two surfaces ranking
+ * differently. This module still owns the whole-roster READS (grouped aggregates
+ * across the entire table, see the module doc comment); only the arithmetic moved.
  *
- *   0 — THE Dean (an unmodified "Dean": not Associate/…, not school-specific)
- *   1 — the active deanery + named institutional officers (Provost/President/EVP)
- *   2 — department chairs / division chiefs (FK-identified)
- *   3 — everyone else
- *
- * Emeritus/Emerita titles are excluded from leadership entirely — a retired dean
- * ranks by prominence like everyone else (#1 v2 refinement).
+ * Re-exported, not redeclared: importers of this module (and the roster's own
+ * `tests/unit/data-quality-loader.test.ts`) keep the path they already use.
  */
-export const LEADERSHIP_TIER = { dean: 0, deanery: 1, chairChief: 2, none: 3 } as const;
-
-const TITLE_EMERITUS = /\bemerit(?:us|a|i)\b/i;
-const HAS_DEAN = /\bdean\b/i;
-/** Modifiers that demote a "Dean" title out of tier 0 (it's a sub-dean). */
-const SUBDEAN_MODIFIER = /\b(?:associate|assistant|affiliate|senior|interim|deputy|vice)\b/i;
-/** A school/college-specific deanship (Graduate School, WCM-Qatar) is not THE dean. */
-const SCHOOL_SPECIFIC_DEAN = /\b(?:graduate school|qatar)\b/i;
-
-/** A concise label for an active (non-Emeritus) deanery / institutional-officer title. */
-function deaneryLabel(title: string): string | null {
-  if (/\bsenior associate dean\b/i.test(title)) return "Senior Associate Dean";
-  if (/\bassociate dean\b/i.test(title)) return "Associate Dean";
-  if (/\bassistant dean\b/i.test(title)) return "Assistant Dean";
-  if (/\baffiliate dean\b/i.test(title)) return "Affiliate Dean";
-  if (/\b(?:vice|deputy) dean\b/i.test(title)) return "Vice Dean";
-  if (/\binterim dean\b/i.test(title)) return "Interim Dean";
-  if (HAS_DEAN.test(title)) return "Dean"; // school-specific dean (Graduate School / Qatar)
-  if (/\bprovost\b/i.test(title)) return "Provost";
-  if (/\bpresident\b/i.test(title)) return "President";
-  if (/\bexecutive vice (?:president|dean)\b|\bevp\b/i.test(title)) return "EVP";
-  return null;
-}
-
-/**
- * Classify a scholar's leadership tier + display label from their title + the
- * chair/chief FK flags. THE Dean (tier 0) sorts above the active deanery (tier 1),
- * which sorts above FK chairs/chiefs (tier 2), which sort above everyone (tier 3).
- *
- * `chairLabel` is pre-resolved by the caller, not a plain "is this cwid a
- * department chair" boolean: an administrative department's leader is a
- * DIRECTOR, not a Chair (#58 / #2542) — the caller reads it straight off the
- * `OrgUnitRoleAssignment.roleKey`, which already carries that distinction.
- * `null` means "not a department leader at all";
- * a non-null string is "Chair" or "Director" (whichever the caller resolved).
- * `isChief` stays a boolean — divisions have no category ternary, so there is
- * only one possible label for them.
- */
-export function classifyLeadership(
-  title: string | null,
-  chairLabel: string | null,
-  isChief: boolean,
-): { tier: number; label: string | null } {
-  const t = (title ?? "").trim();
-  if (t && !TITLE_EMERITUS.test(t)) {
-    if (HAS_DEAN.test(t) && !SUBDEAN_MODIFIER.test(t) && !SCHOOL_SPECIFIC_DEAN.test(t)) {
-      return { tier: LEADERSHIP_TIER.dean, label: "Dean" };
-    }
-    const label = deaneryLabel(t);
-    if (label) return { tier: LEADERSHIP_TIER.deanery, label };
-  }
-  if (chairLabel) return { tier: LEADERSHIP_TIER.chairChief, label: chairLabel };
-  if (isChief) return { tier: LEADERSHIP_TIER.chairChief, label: "Chief" };
-  return { tier: LEADERSHIP_TIER.none, label: null };
-}
+export { LEADERSHIP_TIER, classifyLeadership } from "@/lib/api/prominence";
 
 const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 
@@ -531,17 +464,20 @@ async function computeDataQualityEntries(
     const chairLabel = chairLabelByCwid.get(s.cwid) ?? null;
     const isChair = chairLabel !== null;
     const isChief = chiefs.has(s.cwid);
-    const pi = piCount.get(s.cwid) ?? 0;
-    const nihPi = nihPiCount.get(s.cwid) ?? 0;
-    const prominence =
-      Math.log1p(s.scoredPubCount ?? 0) +
-      W_HINDEX * Math.log1p(s.hIndex ?? 0) +
-      Math.max(isChair ? W_CHAIR : 0, isChief ? W_CHIEF : 0) +
-      W_PI * Math.log1p(pi) +
-      W_NIH_PI * Math.log1p(nihPi) +
-      (s.roleCategory === "full_time_faculty" ? W_FACULTY : 0);
-
-    const { tier, label } = classifyLeadership(s.primaryTitle ?? null, chairLabel, isChief);
+    // The formula + tier rules live in `lib/api/prominence.ts` (one definition,
+    // shared with the news queue). The READS stay here: this loader scores the
+    // whole in-scope roster from grouped aggregates, which is the opposite shape
+    // to `computeProminence`'s bounded `IN` reads.
+    const { prominence, leadershipTier, leadershipLabel } = scoreProminence({
+      scoredPubCount: s.scoredPubCount,
+      hIndex: s.hIndex,
+      roleCategory: s.roleCategory ?? null,
+      primaryTitle: s.primaryTitle ?? null,
+      chairLabel,
+      isChief,
+      piCount: piCount.get(s.cwid) ?? 0,
+      nihPiCount: nihPiCount.get(s.cwid) ?? 0,
+    });
 
     const headshot: HeadshotState =
       s.hasHeadshot === true ? "present" : s.hasHeadshot === false ? "missing" : "unknown";
@@ -562,8 +498,8 @@ async function computeDataQualityEntries(
       roleCategory: s.roleCategory ?? null,
       isChair,
       isChief,
-      leadership: label,
-      leadershipTier: tier,
+      leadership: leadershipLabel,
+      leadershipTier,
       isVisible: s.status === "active",
       headshot,
       hasOverview,

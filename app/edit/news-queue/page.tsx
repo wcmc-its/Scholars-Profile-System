@@ -23,7 +23,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { isNewsQueueEnabled, loadNewsQueue } from "@/lib/edit/news-queue";
+import { isNewsQueueEnabled, loadNewsQueue, loadNewsQueueCounts } from "@/lib/edit/news-queue";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +43,13 @@ export default async function NewsQueuePage() {
   // indistinguishable from a missing one for a non-reviewer.
   if (!session.isSuperuser && session.isCommsSteward !== true) notFound();
 
-  const [pending, approved, rejected] = await Promise.all([
+  const [pending, approved, rejected, counts] = await Promise.all([
     loadNewsQueue(db.read, "pending"),
     loadNewsQueue(db.read, "published"),
     loadNewsQueue(db.read, "rejected"),
+    // The history tabs are capped, so the Approved header's totals cannot come
+    // from `approved` — they are counted at the DB.
+    loadNewsQueueCounts(db.read),
   ]);
   const pendingCount = pending.reduce((sum, g) => sum + g.rows.length, 0);
   const contestedCount = pending.filter((g) => g.contested).length;
@@ -74,7 +77,12 @@ export default async function NewsQueuePage() {
                   : ""
               }. Nothing here shows on a profile until it is approved.`}
         </p>
-        <NewsQueue pending={pending} approved={approved} rejected={rejected} />
+        <NewsQueue
+          pending={pending}
+          approved={approved}
+          rejected={rejected}
+          counts={counts}
+        />
     </ConsoleShell>
   );
 }
