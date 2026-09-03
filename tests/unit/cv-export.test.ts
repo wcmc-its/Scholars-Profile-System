@@ -15,6 +15,7 @@ import JSZip from "jszip";
 import {
   buildWcmCvBuffer,
   cvOutline,
+  CV_HOME_INSTITUTION,
   OUTLINE_ITEM_CAP,
   type CvInput,
   type PopsEnrichment,
@@ -664,5 +665,179 @@ describe("cvOutline — document-ordered CV preview", () => {
     expect(d1.count).toBe(1);
     expect(d1.items[0]!.text).toContain("Assistant Professor");
     expect(d1.items[0]!.text).toContain("2005–2010"); // rendered as a completed (past) range
+  });
+});
+
+// ── #2580 — citation identifiers and the literal "NULL" volume/issue/pages ───
+
+describe("buildWcmCv — bibliography citation defects (#2580)", () => {
+  const withPub = (over: Partial<CvInput["bibliography"][number]>): CvInput => ({
+    ...researchInput,
+    bibliography: [{ ...researchInput.bibliography[0]!, ...over }],
+  });
+
+  it("never prints a literal 'NULL' volume/issue/pages, and keeps the year", async () => {
+    // The reported render: `... 2024;NULL(NULL):NULL. doi: <doi>.` The columns
+    // are VarChar and some rows carry the word, which the old falsy-only guard
+    // let through. This assertion fails against that code.
+    const text = allText(await documentXml(withPub({ volume: "NULL", issue: "NULL", pages: "NULL" })));
+    expect(text).not.toContain("NULL");
+    expect(text).toContain("2024."); // year alone, with no dangling ";"
+    expect(text).not.toContain("2024;");
+  });
+
+  it("keeps the real pieces when only one of the three is the literal 'NULL'", async () => {
+    const text = allText(await documentXml(withPub({ issue: "NULL" })));
+    expect(text).toContain("2024;83:500-510.");
+    expect(text).not.toContain("NULL");
+  });
+
+  it("labels a Scopus-only id 'Scopus: <bare id>', not 'PMID: SCOPUS:<id>'", async () => {
+    const text = allText(await documentXml(withPub({ pmid: "SCOPUS:105037533819", pmcid: null })));
+    expect(text).toContain("Scopus: 105037533819");
+    expect(text).not.toContain("PMID:");
+    expect(text).not.toContain("SCOPUS:105037533819");
+  });
+
+  it("still labels a real PubMed id 'PMID: <n>' alongside its PMCID", async () => {
+    const text = allText(await documentXml(researchInput));
+    expect(text).toContain("PMID: 38670054; PMCID: PMC11098699.");
+  });
+});
+
+// ── #2582 — the appointments "Institution, city and state" column ────────────
+
+describe("appointment rows — the institution column (#2582)", () => {
+  /** D1 (Academic) / D2 (Hospital) item texts for one set of appointments. */
+  const apptOutline = (over: Parameters<typeof cvOutline>[0]) => {
+    const o = cvOutline(over);
+    return {
+      academic: entryOf(o, "D", "D1").items.map((i) => i.text),
+      hospital: entryOf(o, "D", "D2").items.map((i) => i.text),
+    };
+  };
+
+  const edAppointment = (organization: string) => ({
+    title: "Professor",
+    organization,
+    startDate: "2018-07-01",
+    endDate: null,
+    isPrimary: true,
+    isInterim: false,
+    isActive: true,
+    source: "ED" as const,
+  });
+
+  it("composes the institution onto a bare ED unit label", () => {
+    // The observed defect: the cell read just "Population Health Sciences"
+    // under a column headed "Institution, city and state".
+    const { academic } = apptOutline({
+      profile: baseProfile({ appointments: [edAppointment("Population Health Sciences")] }),
+      mentees: [],
+      pops: null,
+    });
+    expect(academic[0]).toContain(`Population Health Sciences, ${CV_HOME_INSTITUTION}`);
+  });
+
+  it("leaves a value that already names an institution alone", () => {
+    // ED's own fallback organization IS the institution — composing would give
+    // "Weill Cornell Medicine, Weill Cornell Medicine, New York, NY".
+    const { academic } = apptOutline({
+      profile: baseProfile({ appointments: [edAppointment("Weill Cornell Medicine")] }),
+      mentees: [],
+      pops: null,
+    });
+    expect(academic[0]).toContain("Weill Cornell Medicine");
+    expect(academic[0]).not.toContain("Weill Cornell Medicine, Weill Cornell");
+  });
+
+  it("never composes onto a POPS row — those already carry a real institution", () => {
+    // Provenance gate: POPS institutions can be external, INCLUDING names the
+    // token heuristic would miss — this fixture deliberately contains none of
+    // its tokens, so only the provenance check can keep it clean.
+    const pops: PopsEnrichment = {
+      ...clinicalPops,
+      appointments: [
+        { title: "Visiting Scientist", institution: "Riverbend Labs", start: "2011", end: "2013" },
+      ],
+    };
+    const { academic } = apptOutline({
+      profile: baseProfile({ appointments: [] }),
+      mentees: [],
+      pops,
+    });
+    expect(academic[0]).toContain("Riverbend Labs");
+    expect(academic[0]).not.toContain(CV_HOME_INSTITUTION);
+  });
+
+  it("composes onto a historical ED unit, which was a WCM appointment (#1323)", () => {
+    const { academic } = apptOutline({
+      profile: baseProfile({ appointments: [] }),
+      mentees: [],
+      pops: null,
+      historicalAppointments: [
+        {
+          title: "Assistant Professor",
+          organization: "Population Health Sciences",
+          startDate: "2005-07-01",
+          endDate: "2010-06-30",
+          isActive: false,
+        },
+      ],
+    });
+    expect(academic[0]).toContain(`Population Health Sciences, ${CV_HOME_INSTITUTION}`);
+  });
+
+  it("still routes hospital rows to D2 and academic rows to D1 after composing", () => {
+    // Regression guard: `isHospital` tests the organization string, so composing
+    // BEFORE the routing decision could flip a row into the wrong table. The
+    // composition happens after, so it cannot.
+    const { academic, hospital } = apptOutline({
+      profile: baseProfile({
+        appointments: [
+          edAppointment("Population Health Sciences"),
+          {
+            ...edAppointment("NewYork-Presbyterian Hospital"),
+            title: "Attending Physician",
+            source: "ED-NYP" as const,
+          },
+        ],
+      }),
+      mentees: [],
+      pops: null,
+    });
+    expect(academic).toHaveLength(1);
+    expect(academic[0]).toContain("Population Health Sciences");
+    expect(hospital).toHaveLength(1);
+    expect(hospital[0]).toContain("NewYork-Presbyterian Hospital");
+    expect(hospital[0]).not.toContain(CV_HOME_INSTITUTION);
+  });
+
+  it("never composes a hospital-routed row, even from the ED faculty feed", () => {
+    // The case the test above does NOT reach: that one is an `ED-NYP` row, so
+    // the provenance gate stops it before the heuristic is consulted. A plain
+    // `ED` faculty row whose org unit carries a hospital token IS composed-
+    // eligible, so the leave-alone heuristic has to repeat every token
+    // `isHospital` routes on — `\bnyp\b` is the one that was missing, and it
+    // would have produced "NYP …, Weill Cornell Medicine, New York, NY" in the
+    // Hospital Appointments table.
+    const { academic, hospital } = apptOutline({
+      profile: baseProfile({ appointments: [edAppointment("NYP Ambulatory Care Network")] }),
+      mentees: [],
+      pops: null,
+    });
+    expect(academic).toHaveLength(0);
+    expect(hospital).toHaveLength(1);
+    expect(hospital[0]).not.toContain(CV_HOME_INSTITUTION);
+  });
+
+  it("writes the composed cell into the downloaded .docx, not just the preview", async () => {
+    const text = allText(
+      await documentXml({
+        ...researchInput,
+        profile: baseProfile({ appointments: [edAppointment("Population Health Sciences")] }),
+      }),
+    );
+    expect(text).toContain(`Population Health Sciences, ${CV_HOME_INSTITUTION}`);
   });
 });

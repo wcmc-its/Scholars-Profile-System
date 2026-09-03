@@ -37,6 +37,7 @@ import {
   type CoPublicationFull,
   type MenteeCoPubGroup,
 } from "@/lib/api/mentoring";
+import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { toCsv } from "@/lib/csv";
 import { htmlToPlainText } from "@/lib/utils";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
@@ -279,14 +280,24 @@ function buildCitationParagraph(
   // `H<sub>2</sub>O` render with real subscript runs (#331).
   const titleRuns = buildPubmedRuns(titleClean);
   const journal = pub.journal ?? "";
+  // #2580 — the shared formatter treats a literal "NULL" volume/issue/pages as
+  // absent; the local copy printed `2024;NULL(NULL):NULL.` into the .docx.
   const volIssuePages = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
 
+  // #2580 — `CoPublicationFull.pmid` is a number, but ReciterDB assigns external
+  // (non-PubMed) records a synthetic NEGATIVE pmid, which this used to label
+  // `PMID:` and link as `pubmed.ncbi.nlm.nih.gov/-3/` — dead in the reader's
+  // Word document. The shared helper labels such a row "Source: External" and
+  // returns no href.
+  const id = citationIdentifier(pub.pmid);
   const idRuns: (TextRun | ExternalHyperlink)[] = [
-    new TextRun({ text: "PMID: " }),
-    new ExternalHyperlink({
-      link: `https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`,
-      children: [new TextRun({ text: String(pub.pmid), style: "Hyperlink" })],
-    }),
+    new TextRun({ text: `${id.label}: ` }),
+    id.href
+      ? new ExternalHyperlink({
+          link: id.href,
+          children: [new TextRun({ text: id.value, style: "Hyperlink" })],
+        })
+      : new TextRun({ text: id.value }),
   ];
   if (pub.pmcid) {
     idRuns.push(new TextRun({ text: "; PMCID: " }));
@@ -327,19 +338,6 @@ function buildCitationParagraph(
     indent: { left: HANGING_INDENT_TWIPS, hanging: HANGING_INDENT_TWIPS },
     spacing: { after: 60 },
   });
-}
-
-function formatVolIssuePages(
-  volume: string | null,
-  issue: string | null,
-  pages: string | null,
-): string {
-  if (!volume && !issue && !pages) return "";
-  let s = "";
-  if (volume) s += volume;
-  if (issue) s += `(${issue})`;
-  if (pages) s += `:${pages}`;
-  return s;
 }
 
 function pageNumberFooter(): Footer {
