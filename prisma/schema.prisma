@@ -3144,30 +3144,30 @@ model ScholarTechnology {
 ///          reviewer disambiguates by title/department and approving one rejects
 ///          its siblings.
 model NewsMention {
-  id            String            @id @default(uuid()) @db.VarChar(64)
-  cwid          String            @db.VarChar(32)
+  id             String            @id @default(uuid()) @db.VarChar(64)
+  cwid           String            @db.VarChar(32)
   /// Absolute URL of the public news article — the (cwid, url) dedup key and the
   /// contested-group key stem.
-  url           String            @db.VarChar(512)
-  title         String            @db.Text
+  url            String            @db.VarChar(512)
+  title          String            @db.Text
   /// Publication date parsed from the article detail page ("July 16, 2026").
   /// Null when the page carries no parseable date.
-  publishedAt   DateTime?         @map("published_at")
+  publishedAt    DateTime?         @map("published_at")
   /// Listing excerpt/summary as plain text. Null when the listing omits it.
-  excerpt       String?           @db.Text
+  excerpt        String?           @db.Text
   /// Absolute URL of the article thumbnail. Null when the listing omits it.
-  thumbnailUrl  String?           @map("thumbnail_url") @db.VarChar(512)
-  status        NewsMentionStatus @default(pending)
+  thumbnailUrl   String?           @map("thumbnail_url") @db.VarChar(512)
+  status         NewsMentionStatus @default(pending)
   /// How the (scholar, article) link was established: VIVO (link) | NAME (prose
   /// match) | CURATOR (manual). Governs trust/provenance, not display.
-  source        String            @default("VIVO") @db.VarChar(32)
+  source         String            @default("VIVO") @db.VarChar(32)
   /// The prose name string the ETL matched (NAME source only), shown in the
   /// review queue. Null for VIVO/CURATOR rows.
-  detectedName  String?           @map("detected_name") @db.VarChar(255)
+  detectedName   String?           @map("detected_name") @db.VarChar(255)
   /// Match confidence for a NAME row: HIGH | MEDIUM | LOW. Derived from
   /// `matchBasis`, then capped at MEDIUM when the folded name is shared by >1
   /// scholar (contested). Null for VIVO/CURATOR.
-  likelihood    String?           @db.VarChar(8)
+  likelihood     String?           @db.VarChar(8)
   /// WHERE the name was found, which is what decides `likelihood` (#2578):
   /// TAG (the newsroom feed's own story tags — the strongest signal) | BODY
   /// (article prose) | CAPTION (photo alt text only) | TITLE (prose, but every
@@ -3175,17 +3175,27 @@ model NewsMention {
   /// about the chair's HOLDER, not the person it is named for). Carries the
   /// reviewer-facing "why" that `likelihood` alone cannot, since likelihood also
   /// folds in contested-ness. Null for VIVO/CURATOR rows.
-  matchBasis    String?           @map("match_basis") @db.VarChar(16)
+  matchBasis     String?           @map("match_basis") @db.VarChar(16)
   /// Contested-group key "<url>|<detectedName>" — pending rows sharing it are
   /// competing candidates for one prose mention. Null for VIVO/CURATOR rows.
-  sourceRef     String?           @map("source_ref") @db.VarChar(768)
+  sourceRef      String?           @map("source_ref") @db.VarChar(768)
+  /// ~200-300 chars of raw article text around the matched name's first prose
+  /// occurrence, word-boundary clipped, matched name intact (#2578 follow-up) —
+  /// lets a /edit/news-queue reviewer judge a candidate (e.g. an endowed-chair
+  /// false positive) without opening the article. Populated for any NAME row
+  /// whose name appears in the prose at all — including a TAG row, since the
+  /// feed tags the people a story quotes and the HIGH rows are the ones a
+  /// reviewer is actually deciding on. Null for VIVO/CURATOR rows, for a
+  /// tag-only or caption-only mention (no prose position to quote), and for a
+  /// NAME row matched before this shipped.
+  contextSnippet String?           @map("context_snippet") @db.VarChar(512)
   /// Per-mention profile hide (the scholar's /edit "hide" control). A published
   /// mention renders only when this is true.
-  showOnProfile Boolean           @default(true) @map("show_on_profile")
+  showOnProfile  Boolean           @default(true) @map("show_on_profile")
   /// The actor who last changed status/visibility via /edit; null for ETL writes.
-  enteredByCwid String?           @map("entered_by_cwid") @db.VarChar(32)
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
+  enteredByCwid  String?           @map("entered_by_cwid") @db.VarChar(32)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 

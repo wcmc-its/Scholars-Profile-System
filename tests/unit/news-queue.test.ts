@@ -25,6 +25,7 @@ type Row = {
   detectedName: string | null;
   likelihood: string | null;
   matchBasis: string | null;
+  contextSnippet: string | null;
   source: string;
   sourceRef: string | null;
   createdAt: Date;
@@ -39,6 +40,7 @@ function vivo(over: Partial<Row> & { id: string; cwid: string }): Row {
     detectedName: null,
     likelihood: null,
     matchBasis: null,
+    contextSnippet: null,
     source: "VIVO",
     sourceRef: null,
     createdAt: new Date("2026-07-18T00:00:00Z"),
@@ -198,5 +200,60 @@ describe("loadNewsQueue — match basis (#2578)", () => {
     // Contested ranks 0 — it needs disambiguation before it needs ranking, so it
     // sits below even the solo LOW candidate. Shipped behaviour, pinned here.
     expect(groups[groups.length - 1].contested).toBe(true);
+  });
+
+  it("carries contextSnippet through to the row the UI renders", async () => {
+    const { client: c } = client([
+      name({
+        id: "t1",
+        cwid: "aaa1001",
+        likelihood: "LOW",
+        matchBasis: "TITLE",
+        contextSnippet: "…and the O. Wayne Isom Professor of Cardiothoracic Surgery, commended…",
+      }),
+    ]);
+    const groups = await loadNewsQueue(c, "pending");
+    expect(groups[0].rows[0].contextSnippet).toBe(
+      "…and the O. Wayne Isom Professor of Cardiothoracic Surgery, commended…",
+    );
+  });
+
+  /**
+   * #2578 follow-up — "sort by confidence then recency": within one tier, newer
+   * publishedAt sorts first. This was already the loader's behaviour before the
+   * scored BODY tier (LIKELIHOOD_RANK ranks the tier, the comparator breaks ties
+   * by publishedAt descending) — see the docblock on LIKELIHOOD_RANK. Pinned
+   * here explicitly because the scored tier is what the product owner's ask was
+   * actually about, even though the sort mechanism itself needed no change.
+   */
+  it("sorts newer before older WITHIN a tier (recency), after confidence", async () => {
+    const { client: c } = client([
+      name({
+        id: "old-high",
+        cwid: "aaa1001",
+        likelihood: "HIGH",
+        publishedAt: new Date("2026-01-01T00:00:00Z"),
+      }),
+      name({
+        id: "new-high",
+        cwid: "bbb2002",
+        likelihood: "HIGH",
+        publishedAt: new Date("2026-08-01T00:00:00Z"),
+      }),
+      name({
+        id: "new-medium",
+        cwid: "ccc3003",
+        likelihood: "MEDIUM",
+        publishedAt: new Date("2026-09-01T00:00:00Z"),
+      }),
+    ]);
+    const groups = await loadNewsQueue(c, "pending");
+
+    // Confidence still dominates: the newer MEDIUM sinks below BOTH HIGH rows
+    // despite being the most recent article of the three...
+    expect(groups.map((g) => g.rows[0].id)).toEqual(["new-high", "old-high", "new-medium"]);
+    // ...and within the tied HIGH tier, the newer article sorts first.
+    expect(groups[0].rows[0].id).toBe("new-high");
+    expect(groups[1].rows[0].id).toBe("old-high");
   });
 });
