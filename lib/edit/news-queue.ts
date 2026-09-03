@@ -10,16 +10,29 @@
  * decision route does this atomically — see app/api/edit/news-mention/decision).
  *
  * Read-only and pure of authz: the caller gates (isSuperuser || isCommsSteward).
+ *
+ * 🔴 This module reaches the CLIENT bundle: `components/edit/news-queue.tsx` is
+ * a "use client" component with a runtime `NEWS_HISTORY_LIMIT` import (and now
+ * `sortNewsQueueGroups`). Nothing in this file's import graph may construct
+ * `prisma` at module scope or import `@/lib/db` — that drags the mariadb driver
+ * into the browser and breaks the Next build on `fs`/`net` (the same trap
+ * documented on `lib/edit/manageable-units.ts`). `@/lib/api/prominence` is safe
+ * on that count: its Prisma import is type-only and it holds no module state.
  */
 import { tokenizeWithSpans } from "@/etl/news/names";
+import { LEADERSHIP_TIER, computeProminence } from "@/lib/api/prominence";
 import { formatPublishedName } from "@/lib/postnominal";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { NewsMentionStatus } from "@/lib/generated/prisma/enums";
 
 /** The Prisma surface this loader needs — a hand-rolled structural type does NOT
- *  accept a real `PrismaClient`, so Pick from it. */
-type NewsQueueClient = Pick<PrismaClient, "newsMention" | "scholar">;
+ *  accept a real `PrismaClient`, so Pick from it. `grant` /
+ *  `orgUnitRoleAssignment` are `computeProminence`'s reads, not this loader's. */
+type NewsQueueClient = Pick<
+  PrismaClient,
+  "newsMention" | "scholar" | "grant" | "orgUnitRoleAssignment"
+>;
 
 export type NewsQueueRow = {
   id: string;
@@ -49,6 +62,12 @@ export type NewsQueueRow = {
    *  (no prose position to snippet), and on a NAME row matched before this
    *  shipped. */
   contextSnippet: string | null;
+  /** True when the SCHOLAR THEMSELVES turned this mention down — they clicked
+   *  "Not me" on their own /edit news card, which is a disavowal of an article
+   *  about them, not a comms triage decision. The Rejected tab can now approve a
+   *  row back onto a public profile, so this must be visible: re-approving one
+   *  of these republishes something its subject explicitly declined. */
+  declinedByScholar: boolean;
   /** Character ranges of the detected name INSIDE `contextSnippet`, so the queue
    *  can emphasise the name the reviewer is judging instead of making them find
    *  it in ~300 chars of scraped prose. Empty when there is nothing to mark.
@@ -64,6 +83,22 @@ export type NewsQueueRow = {
   decidedAt: string;
   /** Competing candidates for the same detected name (contested groups only). */
   competingCwids: string[];
+  /** The EDITORIAL half of the decision: "do we want this on the profile?".
+   *  Orthogonal to `status`, which is the CORRECTNESS half ("is this the right
+   *  person?"). "Approved but don't publish" is `status='published'` +
+   *  `showOnProfile=false` — deliberately not a fourth status. */
+  showOnProfile: boolean;
+  /** The mentioned scholar's prominence score (`lib/api/prominence.ts`); higher
+   *  is more prominent, 0 when the cwid has no scholar row. Drives the queue's
+   *  optional "prominence" sort — comms triages the Dean before a postdoc. */
+  prominence: number;
+  /** Leadership sort tier (0 Dean · 1 deanery · 2 chair/chief · 3 none); 3 when
+   *  the cwid has no scholar row. */
+  leadershipTier: number;
+  /** Display name of the last human to decide this row (`entered_by_cwid`), or
+   *  null for an ETL-written row. The actor is often a comms steward who is NOT
+   *  one of the queue's own scholars — see the loader's scholar read. */
+  decidedByName: string | null;
 };
 
 /** One detected-name's worth of candidates. A group of 1 is the normal case. */
@@ -128,6 +163,35 @@ export function snippetMatchRanges(
   // snippet both light up. Harmless on a review aid — it can only over-mark,
   // never hide the name — and it only fires when the full name did not match.
   return whole.length > 0 ? whole : findSequence([wanted[wanted.length - 1]!]);
+}
+
+/** True totals for the queue headers. The history tabs are CAPPED, so their
+ *  loaded rows cannot be counted for a header without lying once the corpus
+ *  passes the cap. */
+export type NewsQueueCounts = {
+  approved: number;
+  /** Approved but deliberately NOT on the profile (`showOnProfile = false`) —
+   *  the "approved but don't publish" state. This is the number a steward
+   *  auditing suppressed mentions acts on, so it must be the real one. */
+  approvedHidden: number;
+};
+
+/**
+ * Count published / published-but-hidden mentions at the DB.
+ *
+ * Separate from `loadNewsQueue` on purpose: that function is capped at
+ * NEWS_HISTORY_LIMIT for the history tabs, so its rows are a WINDOW, not a
+ * population. Two indexed counts are cheaper than lifting the cap, and keeping
+ * them apart stops anyone "simplifying" the header back onto the capped rows.
+ */
+export async function loadNewsQueueCounts(
+  client: Pick<NewsQueueClient, "newsMention">,
+): Promise<NewsQueueCounts> {
+  const [approved, approvedHidden] = await Promise.all([
+    client.newsMention.count({ where: { status: "published" } }),
+    client.newsMention.count({ where: { status: "published", showOnProfile: false } }),
+  ]);
+  return { approved, approvedHidden };
 }
 
 export function isNewsQueueEnabled(): boolean {
@@ -197,6 +261,12 @@ export const NEWS_HISTORY_LIMIT = 500;
  * that rank entirely — VIVO rows have a null likelihood and would rank 0, burying
  * them under every NAME approval. Both then sort most-recent article first, with
  * `createdAt` breaking the final tie for a deterministic order.
+ *
+ * The loader is NOT parameterised by sort. The reviewer's sort selector is
+ * applied client-side over these groups via `sortNewsQueueGroups`, whose
+ * "certainty" branch IS this default order — re-sorting ~1,371 already-loaded
+ * groups costs nothing, and a sort param would mean a server round-trip plus a
+ * second (status, …) index the table does not have.
  */
 export async function loadNewsQueue(
   client: NewsQueueClient,
@@ -221,6 +291,8 @@ export async function loadNewsQueue(
       likelihood: true,
       matchBasis: true,
       contextSnippet: true,
+      showOnProfile: true,
+      enteredByCwid: true,
       source: true,
       sourceRef: true,
       createdAt: true,
@@ -229,20 +301,35 @@ export async function loadNewsQueue(
   });
   if (rows.length === 0) return [];
 
+  // Both follow-up reads are keyed on DISTINCT cwids, not rows: Pending carries
+  // ~1,371 mentions but far fewer distinct scholars, so deduping first is the
+  // difference between a handful of bounded `IN` queries and a per-row lookup.
+  // Do NOT "optimise" this back into a lookup inside the row map.
+  const mentionCwids = [...new Set(rows.map((r) => r.cwid))];
+  // The DECIDER is usually a comms steward, who is generally NOT one of the
+  // queue's own scholars — so the name read covers both sets, rather than paying
+  // for a second query to resolve `entered_by_cwid`.
+  const actorCwids = rows.map((r) => r.enteredByCwid).filter((c): c is string => c !== null);
+
   // One query for every scholar, not one per row.
-  const scholars = await client.scholar.findMany({
-    where: { cwid: { in: [...new Set(rows.map((r) => r.cwid))] } },
-    select: {
-      cwid: true,
-      slug: true,
-      preferredName: true,
-      postnominal: true,
-      fullName: true,
-      roleCategory: true,
-      primaryTitle: true,
-      primaryDepartment: true,
-    },
-  });
+  const [scholars, prominenceByCwid] = await Promise.all([
+    client.scholar.findMany({
+      where: { cwid: { in: [...new Set([...mentionCwids, ...actorCwids])] } },
+      select: {
+        cwid: true,
+        slug: true,
+        preferredName: true,
+        postnominal: true,
+        fullName: true,
+        roleCategory: true,
+        primaryTitle: true,
+        primaryDepartment: true,
+      },
+    }),
+    // Scoped to the MENTIONED scholars only — an actor's prominence is not a
+    // queue-ordering input.
+    computeProminence(client, mentionCwids),
+  ]);
   const byCwid = new Map(scholars.map((s) => [s.cwid, s]));
 
   // Group by detected-name line. A NULL sourceRef is its own group keyed by id,
@@ -266,6 +353,10 @@ export async function loadNewsQueue(
       rows: groupRows.map((r) => {
         const s = byCwid.get(r.cwid);
         const preferred = s?.preferredName ?? s?.fullName ?? r.cwid;
+        const score = prominenceByCwid.get(r.cwid);
+        // Same preferred-name fallback as `scholarName`, minus the postnominal:
+        // this is a "who decided this" byline, not the published profile name.
+        const actor = r.enteredByCwid === null ? null : byCwid.get(r.enteredByCwid);
         return {
           id: r.id,
           cwid: r.cwid,
@@ -288,27 +379,104 @@ export async function loadNewsQueue(
           createdAt: r.createdAt.toISOString(),
           decidedAt: r.updatedAt.toISOString(),
           competingCwids: contested ? cwids.filter((c) => c !== r.cwid) : [],
+          showOnProfile: r.showOnProfile,
+          prominence: score?.prominence ?? 0,
+          leadershipTier: score?.leadershipTier ?? LEADERSHIP_TIER.none,
+          declinedByScholar: status === "rejected" && r.enteredByCwid === r.cwid,
+          decidedByName:
+            r.enteredByCwid === null
+              ? null
+              : (actor?.preferredName ?? actor?.fullName ?? r.enteredByCwid),
         };
       }),
     });
   }
 
-  const rankByLikelihood = status === "pending";
-  return out.sort((a, b) => {
-    if (rankByLikelihood) {
-      const ra = a.contested ? 0 : (LIKELIHOOD_RANK[a.rows[0].likelihood ?? ""] ?? 0);
-      const rb = b.contested ? 0 : (LIKELIHOOD_RANK[b.rows[0].likelihood ?? ""] ?? 0);
-      if (ra !== rb) return rb - ra;
-    }
-    const ad = a.rows[0].publishedAt;
-    const bd = b.rows[0].publishedAt;
-    if (ad !== bd) {
-      if (ad === null) return 1;
-      if (bd === null) return -1;
-      return bd.localeCompare(ad);
-    }
-    return a.rows[0].createdAt.localeCompare(b.rows[0].createdAt);
-  });
+  // Pending gets the likelihood rank ("certainty", the shipped default order);
+  // history must not (a VIVO row's null likelihood would rank 0 and bury it).
+  return status === "pending" ? sortNewsQueueGroups(out, "certainty") : out.sort(compareRecency);
+}
+
+/**
+ * The reviewer-selectable orderings for the loaded groups.
+ *
+ *  - "certainty" — the DEFAULT and the shipped pending order: likelihood rank
+ *    first (contested sunk to 0), then most-recent article. Do not change it.
+ *  - "recent" — pure recency, no likelihood weighting: "what did the newsroom
+ *    just publish", regardless of how confident the match is.
+ *  - "prominence" — leadership tier then prominence: triage the Dean's mentions
+ *    before a postdoc's when the queue is 1,300 rows deep.
+ */
+export type NewsQueueSort = "certainty" | "recent" | "prominence";
+
+/** Most-recent article first; a null `publishedAt` always sinks. 0 when tied,
+ *  so each caller adds its own `createdAt` tie-break. */
+function comparePublished(a: NewsQueueGroup, b: NewsQueueGroup): number {
+  const ad = a.rows[0].publishedAt;
+  const bd = b.rows[0].publishedAt;
+  if (ad === bd) return 0;
+  if (ad === null) return 1;
+  if (bd === null) return -1;
+  return bd.localeCompare(ad);
+}
+
+/** The shipped recency tail, shared by "certainty" and the history tabs:
+ *  newest article first, `createdAt` ASC breaking the final tie. */
+function compareRecency(a: NewsQueueGroup, b: NewsQueueGroup): number {
+  return comparePublished(a, b) || a.rows[0].createdAt.localeCompare(b.rows[0].createdAt);
+}
+
+/** The shipped PENDING order — likelihood rank, contested forced to 0, then
+ *  recency. This is the one comparator `loadNewsQueue` has always applied. */
+function compareCertainty(a: NewsQueueGroup, b: NewsQueueGroup): number {
+  const ra = a.contested ? 0 : (LIKELIHOOD_RANK[a.rows[0].likelihood ?? ""] ?? 0);
+  const rb = b.contested ? 0 : (LIKELIHOOD_RANK[b.rows[0].likelihood ?? ""] ?? 0);
+  if (ra !== rb) return rb - ra;
+  return compareRecency(a, b);
+}
+
+/** Pure recency: no likelihood weighting at all, `createdAt` DESC on a tie (the
+ *  newest row wins here, unlike "certainty"'s stable oldest-first tail). */
+function compareRecent(a: NewsQueueGroup, b: NewsQueueGroup): number {
+  return comparePublished(a, b) || b.rows[0].createdAt.localeCompare(a.rows[0].createdAt);
+}
+
+/** A contested group is ranked by its BEST candidate, not `rows[0]`: the group
+ *  exists precisely because we don't know which scholar it belongs to, and a
+ *  group that might be the Dean deserves the Dean's place in the queue. */
+function bestTier(g: NewsQueueGroup): number {
+  return Math.min(...g.rows.map((r) => r.leadershipTier));
+}
+function bestProminence(g: NewsQueueGroup): number {
+  return Math.max(...g.rows.map((r) => r.prominence));
+}
+
+/** Leadership tier (0 ranks highest) then prominence, falling back to the
+ *  certainty order so equally-prominent groups keep the default sequence. */
+function compareProminence(a: NewsQueueGroup, b: NewsQueueGroup): number {
+  return (
+    bestTier(a) - bestTier(b) ||
+    bestProminence(b) - bestProminence(a) ||
+    compareCertainty(a, b)
+  );
+}
+
+/**
+ * Re-order loaded groups for the queue's sort selector. Returns a NEW array —
+ * the client holds the loader's groups across tab switches, so sorting in place
+ * would mutate state React is still rendering from.
+ */
+export function sortNewsQueueGroups(
+  groups: NewsQueueGroup[],
+  sort: NewsQueueSort,
+): NewsQueueGroup[] {
+  const cmp =
+    sort === "recent"
+      ? compareRecent
+      : sort === "prominence"
+        ? compareProminence
+        : compareCertainty;
+  return [...groups].sort(cmp);
 }
 
 /** Count pending mentions — the admin sub-nav's pending-count pill. */
