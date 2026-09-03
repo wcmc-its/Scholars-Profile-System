@@ -1262,14 +1262,20 @@ function Byline({ row }: { row: CoreQueueRow }) {
               <HoverTooltip
                 text={`${staff.name} — core staff${staff.dept ? `, ${staff.dept}` : ""}`}
               >
-                <a
-                  href={`/${staff.slug}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
-                >
-                  {tok}
-                </a>
+                {staff.slug ? (
+                  <a
+                    href={`/${staff.slug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
+                  >
+                    {tok}
+                  </a>
+                ) : (
+                  <span className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium">
+                    {tok}
+                  </span>
+                )}
               </HoverTooltip>
             ) : (
               tok
@@ -1345,6 +1351,8 @@ function StrengthDots({
 
 /** Link to a scholar's public profile (`/{slug}`), opening in a new tab. */
 function ScholarLink({ scholar }: { scholar: QueueScholar }) {
+  // ED-only staff (no Scholar row) have no profile to link to — name only.
+  if (!scholar.slug) return <span className="text-foreground">{scholar.name}</span>;
   return (
     <a
       href={`/${scholar.slug}`}
