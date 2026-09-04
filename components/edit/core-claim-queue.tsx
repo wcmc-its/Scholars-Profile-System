@@ -71,7 +71,7 @@ interface Signal {
   strength: string;
 }
 
-/** The five core-usage signals (ack, co-author, LLM, repeat-user, topical MeSH). */
+/** The five core-usage signals (ack, co-author, LLM, repeat-user, prefilter prior). */
 const SIGNAL_COUNT = 5;
 const SIGNAL_ICON: Record<SignalKind, LucideIcon> = {
   ack: Quote,
@@ -89,12 +89,36 @@ const KIND_ORDER: Record<SignalKind, number> = {
   topic: 4,
 };
 /**
+ * Which of the prefilter's two signals actually produced this prior.
+ *
+ * `topicalPrior` is ReciterAI's `prefilter_prior`: a noisy-OR of author-affinity
+ * (0.6) and bare-descriptor MeSH E-tree membership (0.4), so exactly four values are
+ * reachable — 0.76 both, 0.60 author only, 0.40 MeSH only, 0 neither.
+ *
+ * This exists because the queue used to render all of them as "Topical MeSH match /
+ * The paper carries a MeSH descriptor under this core's technique branch". Measured
+ * on prod 2026-09-04, that sentence was FALSE on 7,332 of the 9,352 chips live —
+ * 100% of core 1's, 94.6% of core 9's, 86.5% of core 5's — and would have been false
+ * on every one of core 14's, whose MeSH membership is zero. Decode instead of
+ * asserting. Pure.
+ */
+export function decodeTopicalPrior(prior: number): { mesh: boolean; affinity: boolean } {
+  // Compare on the integer percent: the four reachable values are exact there, and
+  // float equality against 0.76 is not.
+  const pct = Math.round(prior * 100);
+  return { mesh: pct === 40 || pct === 76, affinity: pct === 60 || pct === 76 };
+}
+
+/**
  * Which of the five signals fired for a row. Strength is FIXED PER SIGNAL TYPE —
  * how much that *kind* of evidence should move a reviewer — NOT the model's
  * self-score: ack = Direct (4), core-staff co-author = Strong (3),
- * LLM read = Moderate (2) regardless of score, repeat-user prior and topical
- * MeSH prior = Weak (1) — both are indirect priors, not direct evidence about
- * this specific paper. The raw value rides along as a secondary readout in the
+ * LLM read = Moderate (2) regardless of score, repeat-user prior and the
+ * prefilter prior = Weak (1) — both are indirect priors, not direct evidence
+ * about this specific paper. Note the prefilter prior OVERLAPS the repeat-user
+ * one by construction (see decodeTopicalPrior): on an author-only prior the two
+ * rows are the same evidence, which is why that case says so out loud rather
+ * than reading as independent corroboration. The raw value rides along as a secondary readout in the
  * meter — LLM as a score out of 10, and repeat-user as a percentage whose
  * MEANING changed with ReciterAI #382: it used to be a capped strength (values
  * piled on the 0.85 ceiling — 84% of one live queue sat exactly there), and is
@@ -108,7 +132,12 @@ export function buildSignals(row: CoreQueueRow): Signal[] {
   if (row.coauthors.length > 0) out.push({ kind: "coauthor", dots: 3, strength: "Strong" });
   if (row.llmScore !== null) out.push({ kind: "llm", dots: 2, strength: "Moderate" });
   if (row.authorAffinity !== null) out.push({ kind: "affinity", dots: 1, strength: "Weak" });
-  if (row.topicalPrior !== null) out.push({ kind: "topic", dots: 1, strength: "Weak" });
+  // A prior of 0 is the prefilter saying NEITHER of its signals fired — absent
+  // evidence, which by the engine's own convention emits no key rather than a
+  // zero-valued one (pipeline_cores/combine.py evidence_features). Rendering it
+  // would put a "0%" chip on a row that has nothing to show.
+  if (row.topicalPrior !== null && row.topicalPrior > 0)
+    out.push({ kind: "topic", dots: 1, strength: "Weak" });
   return out.sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 }
 
@@ -1282,11 +1311,23 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
         "The largest share of any byline author's own publications that are work with this core";
       value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
       break;
-    case "topic":
-      lead = "Topical MeSH match";
-      sub = "The paper carries a MeSH descriptor under this core's technique branch";
+    case "topic": {
+      const { mesh, affinity } = decodeTopicalPrior(row.topicalPrior ?? 0);
+      lead =
+        mesh && affinity
+          ? "MeSH match + repeat user"
+          : mesh
+            ? "Topical MeSH match"
+            : "Prefilter prior — repeat user, no MeSH match";
+      sub =
+        mesh && affinity
+          ? "Carries a MeSH descriptor under this core's technique branch, and an author with prior confirmed use"
+          : mesh
+            ? "The paper carries a MeSH descriptor under this core's technique branch"
+            : "An author has prior confirmed use of this core. No MeSH descriptor matched — the same evidence as the repeat-user row above";
       value = `${Math.round((row.topicalPrior ?? 0) * 100)}%`;
       break;
+    }
   }
   return (
     <li className="border-apollo-border grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-3 border-t pt-3">
