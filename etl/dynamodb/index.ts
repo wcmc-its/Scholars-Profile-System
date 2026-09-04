@@ -66,6 +66,7 @@ import { planPublicationTopicPrune } from "./publication-topic-prune";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
 import { buildPublicationCoreWrites } from "./publication-core-mapper";
+import { planPublicationCorePrune } from "./publication-core-prune";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import {
@@ -884,6 +885,51 @@ async function main() {
       pubCoreRowsUpserted += chunk.length;
     }
     console.log(`publication_core upserts complete: ${pubCoreRowsUpserted} rows.`);
+
+    // ----- Block 6 keyed prune (#2601) ---------------------------------
+    // The upsert loop only ADDS/updates pairs. When the engine re-scores a core
+    // and DEMOTES a (pmid, coreId) to `below_threshold`, the mapper drops it
+    // (skippedBelowThreshold above) so it falls out of the write set entirely —
+    // and the stale row then sits in the owner's claim queue forever. 148 such
+    // rows accumulated on core 14 and were being deleted by hand after every
+    // re-score. Delete the existing keys absent from this run's write set, but
+    // only when the write set clears the guardedReplace floor, so a partial or
+    // truncated scan can never mass-delete (mirrors the Block 2 prune above).
+    //
+    // Safe for human review work: claims/rejections are NOT stored here. They
+    // live in the ETL-immune `core_claim` table (ADR-005), which has no FK to
+    // publication_core (so no cascade, no constraint failure), and every read
+    // surface re-attaches a CLAIMED pair whose engine row is gone via its
+    // manual-PMID-add path (lib/api/core-queue.ts, cores.ts,
+    // publication-detail.ts). Delete-only, so it needs no transaction: a partial
+    // prune is safe (the next run finishes it).
+    const existingPubCoreKeys = await db.write.publicationCore.findMany({
+      select: { pmid: true, coreId: true },
+    });
+    const corePrunePlan = planPublicationCorePrune(
+      coreMap.writes,
+      existingPubCoreKeys,
+      await db.write.publicationCore.count(),
+    );
+    if (!corePrunePlan.prune) {
+      console.warn(
+        `publication_core prune SKIPPED -- ${corePrunePlan.reason}; likely a ` +
+          "partial CORE# scan, retaining stale rows this run.",
+      );
+    } else if (corePrunePlan.stale.length === 0) {
+      console.log("publication_core prune: no stale pairs.");
+    } else {
+      let corePruned = 0;
+      const CORE_PRUNE_BATCH = 200;
+      for (let i = 0; i < corePrunePlan.stale.length; i += CORE_PRUNE_BATCH) {
+        const chunk = corePrunePlan.stale.slice(i, i + CORE_PRUNE_BATCH);
+        const res = await db.write.publicationCore.deleteMany({
+          where: { OR: chunk.map((k) => ({ pmid: k.pmid, coreId: k.coreId })) },
+        });
+        corePruned += res.count;
+      }
+      console.log(`publication_core prune: removed ${corePruned} stale pair(s).`);
+    }
 
     // ===================================================================
     // Block 7: GRANT# → opportunity  (GrantRecs Phase 2)
