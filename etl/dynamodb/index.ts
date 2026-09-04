@@ -78,6 +78,21 @@ import { partitionRecords } from "./partition";
 import { fetchExcludedTopicIds } from "./excluded-topics";
 import { planTopicPrune } from "./topic-prune";
 
+
+/** A core the engine emitted nothing for this run: its rows are RETAINED, not
+ *  pruned, so one quiet producer cannot empty a whole review queue overnight.
+ *  Loud on purpose — this is a producer question, not routine ETL noise. */
+function warnHeldCores(held: readonly { pmid: string; coreId: string }[]): void {
+  const byCore = new Map<string, number>();
+  for (const k of held) byCore.set(k.coreId, (byCore.get(k.coreId) ?? 0) + 1);
+  console.warn(
+    `publication_core prune HELD BACK ${held.length} row(s) across ${byCore.size} core(s) ` +
+      "that received ZERO writes this run (engine emitted nothing for them -- investigate " +
+      "upstream rather than deleting a live queue): " +
+      [...byCore].map(([id, n]) => `core ${id}=${n}`).join(", "),
+  );
+}
+
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
 
@@ -916,6 +931,9 @@ async function main() {
         `publication_core prune SKIPPED -- ${corePrunePlan.reason}; likely a ` +
           "partial CORE# scan, retaining stale rows this run.",
       );
+    } else if (corePrunePlan.held.length > 0 && corePrunePlan.stale.length === 0) {
+      warnHeldCores(corePrunePlan.held);
+      console.log("publication_core prune: no stale pairs.");
     } else if (corePrunePlan.stale.length === 0) {
       console.log("publication_core prune: no stale pairs.");
     } else {
@@ -928,6 +946,7 @@ async function main() {
         });
         corePruned += res.count;
       }
+      if (corePrunePlan.held.length > 0) warnHeldCores(corePrunePlan.held);
       console.log(`publication_core prune: removed ${corePruned} stale pair(s).`);
     }
 
