@@ -361,7 +361,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Co-authored only")).toBeTruthy();
   });
 
-  it("treats 'All' as the reset and as checked while nothing else is ticked (Tier 3)", () => {
+  it("treats 'All' as a reset button, not a fourth checkbox (Tier 3)", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -382,14 +382,18 @@ describe("CoreClaimQueue", () => {
       />,
     );
     const box = (name: RegExp) => screen.getByRole("checkbox", { name });
-    expect(box(/^All/).getAttribute("aria-checked")).toBe("true"); // empty set reads as All
+    const all = () => screen.getByRole("button", { name: /^All/ });
+    // "All" is an ACTION, not a fourth checkbox: it must NOT claim the checkbox
+    // role, because a checked box that cannot be unchecked announces nothing on
+    // Space. The three real filters are the only checkboxes in the group.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    expect(all().getAttribute("aria-checked")).toBeNull();
 
     fireEvent.click(box(/^Acknowledged/));
-    expect(box(/^All/).getAttribute("aria-checked")).toBe("false");
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByText("Bare paper")).toBeNull();
 
-    fireEvent.click(box(/^All/));
+    fireEvent.click(all());
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByText("Bare paper")).toBeTruthy();
   });
@@ -417,7 +421,7 @@ describe("CoreClaimQueue", () => {
       />,
     );
     const label = (name: RegExp) => screen.getByRole("checkbox", { name }).textContent;
-    expect(label(/^All/)).toBe("All 2");
+    expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 2");
     expect(label(/^Acknowledged/)).toBe("Acknowledged 1");
     expect(label(/^Co-authored/)).toBe("Co-authored 1");
     expect(label(/^LLM-flagged/)).toBe("LLM-flagged 1");
@@ -426,7 +430,7 @@ describe("CoreClaimQueue", () => {
     const acked = screen.getByLabelText("Candidate: Acked paper");
     fireEvent.click(within(acked).getByRole("button", { name: /confirm/i }));
     await waitFor(() => expect(label(/^Acknowledged/)).toBe("Acknowledged 0"));
-    expect(label(/^All/)).toBe("All 1");
+    expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 1");
   });
 
   it("re-sorts by LLM score when selected (Tier 3)", () => {

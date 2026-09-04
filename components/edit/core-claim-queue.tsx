@@ -305,8 +305,8 @@ export function CoreClaimQueue({
     clearPending(pmid);
   }
 
-  // Bulk-confirm the high-confidence band in one click — clears the easy top so
-  // uncertain-first leaves the reviewer only what genuinely needs a call. One
+  // Bulk-confirm the high-confidence band in one click — clears the easy top,
+  // which is where the likelihood-first default now puts it. One
   // request to the bulk endpoint: the upsert + audit + writeback loop runs in a
   // single server transaction (no client-side fan-out / partial-failure spray).
   async function confirmHighConfidence(pmids: string[]) {
@@ -924,16 +924,20 @@ function QueueControls({
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter candidates">
         {FILTERS.map((f) => {
-          // "All" is the reset, not a fourth box: it reads as ticked exactly
-          // when nothing else is. Buttons keep the native Space/Enter activation
-          // the checkbox role expects, so no key handler of our own.
-          const checked = f.key === "all" ? filter.size === 0 : filter.has(f.key);
+          // "All" is an ACTION, not a fourth box, so it gets plain button
+          // semantics. Giving it role="checkbox" would promise a control that
+          // unticks: once it reads checked, pressing Space on it changes
+          // nothing and announces nothing, which is the one thing the checkbox
+          // role guarantees it won't do. The three real filters are genuine
+          // checkboxes; native Space/Enter activation covers all four.
+          const isAll = f.key === "all";
+          const checked = isAll ? filter.size === 0 : filter.has(f.key);
           return (
             <button
               key={f.key}
               type="button"
-              role="checkbox"
-              aria-checked={checked}
+              role={isAll ? undefined : "checkbox"}
+              aria-checked={isAll ? undefined : checked}
               onClick={() => onToggleFilter(f.key)}
               className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
                 checked
