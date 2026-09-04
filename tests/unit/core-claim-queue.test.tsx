@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) 
 
 import {
   buildSignals,
+  decodeTopicalPrior,
   compareBySort,
   CoreClaimQueue,
   matchesFilters,
@@ -120,6 +121,27 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByText(/Repeat user of this core/)).toBeNull();
     expect(screen.queryByText(/Co-authored with/)).toBeNull();
     expect(screen.queryByText(/Named in the acknowledgments|Acknowledged in text/)).toBeNull();
+  });
+
+  it("does not claim a MeSH descriptor on an author-only prefilter prior", () => {
+    // The bug this pins: every prefilter_prior rendered "The paper carries a MeSH
+    // descriptor under this core's technique branch". On prod 2026-09-04 that was
+    // false on 7,332 of 9,352 live chips, and core 14's entire 4,645-row backfill
+    // is 0.60 (author-only, MeSH membership zero) — so it would have been false on
+    // every row of the queue that actually gets reviewed.
+    render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.6 })]} confirmed={[]} />);
+    expect(screen.queryByText(/MeSH descriptor under this core's technique branch/)).toBeNull();
+    expect(screen.getByText(/Prefilter prior — repeat user, no MeSH match/)).toBeTruthy();
+  });
+
+  it("keeps the MeSH wording when the MeSH signal actually fired", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.4 })]} confirmed={[]} />);
+    expect(screen.getByText("Topical MeSH match")).toBeTruthy();
+  });
+
+  it("names both signals when the prior is the noisy-OR of the two", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.76 })]} confirmed={[]} />);
+    expect(screen.getByText("MeSH match + repeat user")).toBeTruthy();
   });
 
   it("renders the synopsis and links resolved core-staff co-authors to their profile (Tier 2)", () => {
@@ -932,8 +954,8 @@ describe("buildSignals", () => {
     expect(signals.at(-1)).toMatchObject({ kind: "affinity", dots: 1, strength: "Weak" });
   });
 
-  it("adds the topical MeSH prior as a fifth signal, ordered after affinity", () => {
-    const signals = buildSignals(row({ topicalPrior: 0.37 }));
+  it("adds the prefilter prior as a fifth signal, ordered after affinity", () => {
+    const signals = buildSignals(row({ topicalPrior: 0.4 }));
     expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity", "topic"]);
     expect(signals.at(-1)).toMatchObject({ kind: "topic", dots: 1, strength: "Weak" });
   });
@@ -942,6 +964,29 @@ describe("buildSignals", () => {
     const signals = buildSignals(row({ topicalPrior: null }));
     expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
     expect(signals).toHaveLength(4);
+  });
+
+  it("does not render a chip for a prior of 0 (neither prefilter signal fired)", () => {
+    // Absent evidence, not weak evidence — a "0%" chip claims a readout it has none of.
+    const signals = buildSignals(row({ topicalPrior: 0 }));
+    expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
+  });
+});
+
+describe("decodeTopicalPrior", () => {
+  // prefilter_prior = noisy-OR(author 0.6, mesh 0.4) -> exactly four reachable values.
+  it("decodes each of the four reachable values", () => {
+    expect(decodeTopicalPrior(0.76)).toEqual({ mesh: true, affinity: true });
+    expect(decodeTopicalPrior(0.6)).toEqual({ mesh: false, affinity: true });
+    expect(decodeTopicalPrior(0.4)).toEqual({ mesh: true, affinity: false });
+    expect(decodeTopicalPrior(0)).toEqual({ mesh: false, affinity: false });
+  });
+
+  it("does not claim a MeSH match on an author-only prior", () => {
+    // The whole point: 7,332 of 9,352 live chips were 0.60 and every one of them
+    // rendered "carries a MeSH descriptor". Core 14's MeSH membership is zero, so
+    // every row of its 4,645-row backfill lands here.
+    expect(decodeTopicalPrior(0.6).mesh).toBe(false);
   });
 
   it("omits a signal that did not fire", () => {
