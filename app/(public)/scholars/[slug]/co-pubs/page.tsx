@@ -53,11 +53,17 @@ async function resolveMentor(slug: string) {
   return mentor && isPubliclyDisplayed(mentor.roleCategory) ? mentor : null;
 }
 
+// #2599 — `roleCategory` is already selected by `resolveMentor` (it feeds the
+// fail-closed `isPubliclyDisplayed` link gate above), and it is the only shape
+// this wrapper is ever called with. Threading it through keeps the enrolled-student
+// postnominal suppression on this anonymous surface, where the mentor's name is
+// published in `<title>`, the meta description and the `<h1>`.
 function publishedName(s: {
   preferredName: string;
   postnominal: string | null;
+  roleCategory: string | null;
 }): string {
-  return formatPublishedName(s.preferredName, s.postnominal);
+  return formatPublishedName(s.preferredName, s.postnominal, s.roleCategory);
 }
 
 export async function generateMetadata({
@@ -189,7 +195,15 @@ export default async function MentorCoPubsRollupPage({
 function EmptyState({
   mentor,
 }: {
-  mentor: { slug: string; preferredName: string; postnominal: string | null };
+  // #2599 — `roleCategory` is part of the name shape now, not an extra: it is what
+  // suppresses an enrolled student's programme-of-study postnominal. The one caller
+  // passes `resolveMentor`'s row, which already selects it.
+  mentor: {
+    slug: string;
+    preferredName: string;
+    postnominal: string | null;
+    roleCategory: string | null;
+  };
 }) {
   return (
     <div className="rounded-md border border-border bg-zinc-50 px-4 py-6 text-sm dark:bg-zinc-900/40">

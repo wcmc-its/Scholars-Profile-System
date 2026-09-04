@@ -923,8 +923,16 @@ export async function fetchDoctoralStudents(client: Client): Promise<EdFacultyEn
  * Shared projection: LDAP search entries → EdFacultyEntry[]. Skips records with
  * no CWID. Phase 2 fields (primaryPersonTypeCode, personTypeCodes, ou, degreeCode)
  * are populated here so downstream deriveRoleCategory has everything it needs.
+ *
+ * Exported for unit tests (tests/unit/ldap-title-normalisation.test.ts). The
+ * name helpers below are pure and easy to test in isolation, but isolation is
+ * not enough here: this projection is the ONLY caller, its own callers
+ * (fetchActiveFaculty / fetchDoctoralStudents) are stubbed wholesale by
+ * tests/unit/etl-ed-slug-pin.test.ts, and reverting the preferredName line to
+ * `displayName || constructed` left the whole suite green. Exporting it is what
+ * lets a test assert the WIRING, not just the helper.
  */
-function projectEntries(
+export function projectEntries(
   searchEntries: ReadonlyArray<Record<string, unknown>>,
   fallbackOu: string,
 ): EdFacultyEntry[] {
@@ -938,13 +946,20 @@ function projectEntries(
     const sn = stripSurnameNoise(firstString(e.sn) ?? "");
     const displayName = stripTrailingDegree(firstString(e.displayName)?.trim() ?? "");
     const constructed = [givenName, sn].filter(Boolean).join(" ").trim();
+    // fullName keeps the constructed form when it's richer than displayName
+    // (carries the explicit middle name token for full-text search recall). It
+    // is computed BEFORE preferredName because it is also the FIRST anchor the
+    // #2600 unit-qualifier strip below tries.
+    const constructedFull = [givenName, middleName, sn].filter(Boolean).join(" ").trim();
     // Prefer LDAP-curated displayName so middle names, initials, and stylized
     // capitalization ("M. Cary Reid") are honored. Concatenation can't reproduce
-    // those conventions and silently drops the curator's middle component.
-    const preferredName = displayName || constructed;
-    // fullName keeps the constructed form when it's richer than displayName
-    // (carries the explicit middle name token for full-text search recall).
-    const constructedFull = [givenName, middleName, sn].filter(Boolean).join(" ").trim();
+    // those conventions and silently drops the curator's middle component. #2600
+    // — but drop ED's own unit disambiguation tail first, since preferredName is
+    // the published name AND the slug basis. Anchors go LONGEST FIRST so a real
+    // middle name survives when it matches, while a middle name ED populates
+    // later can't silently re-attach the qualifier; see stripUnitQualifier.
+    const preferredName =
+      stripUnitQualifier(displayName, [constructedFull, constructed]) || constructed;
     const fullName = constructedFull || preferredName;
 
     const r = e as Record<string, unknown>;
@@ -1083,6 +1098,96 @@ function stripTrailingDegree(name: string): string {
     (t) => /[A-Z]/.test(t) && !/^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?$/i.test(t),
   );
   return looksLikeDegree ? name.slice(0, m.index).trim() : name.trim();
+}
+
+/**
+ * #2600 — ED appends a unit disambiguation tail to `displayName` when a name
+ * collides with another person in the directory: "<Given> <Surname> -
+ * Infectious Diseases". `displayName` is the PUBLISHED name and the slug basis
+ * (`etl/ed/index.ts` calls `deriveSlug(f.preferredName)`), so the tail reached
+ * the profile h1, the `<title>`, the meta description, the OG card, the
+ * JSON-LD, the autocomplete completion input, and the URL itself.
+ *
+ * The rule is PREFIX-ANCHORED rather than "cut at the first ' - '": it only
+ * ever truncates back to a name ED itself constructed, never to a substring no
+ * curator authored. `anchors` is tried IN ORDER and the first that holds wins,
+ * so the caller passes the longest candidate first — `[givenName + middleName +
+ * sn, givenName + sn]`.
+ *
+ * Two anchors, not one. Anchoring solely on the middle-name form is
+ * NON-MONOTONE: a populated `weillCornellEduMiddleName` makes the anchor "Alice
+ * Renner Fenwick", which is not a prefix of "Alice Fenwick - Infectious
+ * Diseases", so the qualifier survives — and if ED backfills a middle name for
+ * one of the 45 AFTER this ships, `maybeUpdatedSlug` (etl/ed/index.ts)
+ * recomputes the base slug from the re-qualified name and re-mints, flipping a
+ * live public URL back on its own. The correlation is adverse: the curator who
+ * resolves a name collision with a unit tail is the same person who later fills
+ * in the middle name. Longest-first still keeps a genuine middle name whenever
+ * it really does match.
+ *
+ * Measured over prod on 2026-09-04, active + publicly-displayed scholars:
+ *   - 45 records have an ED-constructed name as a STRICT PREFIX of displayName,
+ *     and ALL 45 tails are the " - <Unit>" form (one of them is " - M.D.").
+ *     ZERO no-delimiter prefix extensions exist, so demanding the detached
+ *     delimiter costs nothing and protects the case where displayName is simply
+ *     the longer real name ("Mary Jane" ⊂ "Mary Jane Smith").
+ *   - 412 records differ the OTHER way — the constructed form is richer (an
+ *     unabridged middle name where displayName carries an initial). A prefix
+ *     rule never touches them.
+ *   - 15 of the 16 parenthetical names in prod are NICKNAMES sitting mid-name;
+ *     the constructed form is not a prefix of those, so they survive.
+ *   - Two records place the surname AFTER the " - ", and for both the
+ *     displayName equals the constructed form exactly, so there is no prefix
+ *     EXTENSION and the tail test declines. That is exactly why
+ *     `lib/name-sort.ts:stripUnitDisambiguation` is NOT reused here — it cuts
+ *     unconditionally, which is right for a sort key and would rename those two
+ *     people on a public page.
+ *
+ * A trailing-PARENTHETICAL branch is omitted DELIBERATELY. It fires on zero of
+ * the 45, and ED spends parentheses on nicknames (15 of the 16 above); nothing
+ * distinguishes a trailing "(Bob)" from a trailing "(Radiology)", so accepting
+ * "(" would truncate "Robert Smith (Bob)" to "Robert Smith". Add the branch
+ * back only with evidence of a real TRAILING parenthetical unit qualifier.
+ *
+ * Known limitations. The anchor comparison is exact-string and the delimiter
+ * vocabulary is exactly " - ", so each of these leaves the qualifier IN PLACE —
+ * every one fails SAFE, a no-op miss rather than a rename:
+ *   - a double space, an NBSP, or a case difference between the constructed
+ *     name and displayName breaks the prefix;
+ *   - an en/em-dash tail ("Alice Fenwick – Infectious Diseases"), or a hyphen
+ *     with no trailing space, fails the delimiter test;
+ *   - a degree between the name and the tail ("Alice Fenwick, MD - Infectious
+ *     Diseases") breaks the prefix, and `stripTrailingDegree` cannot pre-clean
+ *     it because that regex is `$`-anchored and declines a non-terminal degree.
+ * 45 is therefore a FLOOR on the records this fixes, not a count of them.
+ *
+ * One residual RENAME risk remains: if ED's `sn` carries only part of a real
+ * surname and displayName spells the rest after " - ", the rule truncates a
+ * real name. 0 such records were measured, and the two prod records that put a
+ * surname after " - " are protected by the exact-match case above.
+ *
+ * Returns `displayName` untouched whenever no anchor holds; the caller keeps
+ * its own empty-displayName fallback to the given+surname form.
+ *
+ * Exported for unit tests (tests/unit/ldap-title-normalisation.test.ts).
+ */
+export function stripUnitQualifier(displayName: string, anchors: readonly string[]): string {
+  for (const candidate of anchors) {
+    const anchor = candidate.trim();
+    // An empty anchor prefix-matches everything; skip to the next candidate
+    // rather than truncating to "". (givenName and sn are both optional in ED.)
+    if (!anchor) continue;
+    if (!displayName.startsWith(anchor)) continue;
+    // The whole rule, in one test: the tail must be whitespace, a hyphen, then
+    // whitespace. It subsumes the exact-match case (empty tail, no match) and
+    // the ATTACHED-hyphen case — a surname ED only half-carries (`sn` "Ruiz",
+    // displayName "Ana Ruiz-Delgado") leaves the tail "-Delgado", which has no
+    // leading whitespace and so is never truncated to "Ana Ruiz". That is the
+    // precise rename the prefix anchor exists to prevent.
+    if (!/^\s+-\s/.test(displayName.slice(anchor.length))) continue;
+    return anchor;
+  }
+  return displayName;
 }
 
 // ---------------------------------------------------------------------------

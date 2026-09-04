@@ -72,7 +72,11 @@ export async function GET(
     return NextResponse.json({ error: "mentor not found" }, { status: 404 });
   }
 
-  const mentorName = formatPublishedName(mentor.preferredName, mentor.postnominal);
+  const mentorName = formatPublishedName(
+    mentor.preferredName,
+    mentor.postnominal,
+    mentor.roleCategory,
+  );
 
   const rollup = await getAllMentorCoPublications(mentor.cwid);
   const filename = `co-pubs_${mentor.cwid}_all.${format}`;

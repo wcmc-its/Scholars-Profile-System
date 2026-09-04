@@ -891,7 +891,7 @@ export async function getMenteesForMentor(
       scholar: s
         ? {
             slug: s.slug,
-            publishedName: formatPublishedName(s.preferredName, s.postnominal),
+            publishedName: formatPublishedName(s.preferredName, s.postnominal, s.roleCategory),
             primaryDepartment: s.primaryDepartment,
             roleCategory: s.roleCategory,
           }
@@ -1250,10 +1250,14 @@ export async function getMentorMenteePair(
   // is on a scholar profile page so they're always present there.
   const mentor = await prisma.scholar.findUnique({
     where: { cwid: mentorCwid },
-    select: { preferredName: true, postnominal: true },
+    // #2599 — `roleCategory` is selected for the postnominal suppression, not for
+    // a visibility carve: an enrolled doctoral student can be a MENTOR here (an
+    // MD-PhD student mentoring a rotation student), and their programme-of-study
+    // "degree" must not render as an earned one.
+    select: { preferredName: true, postnominal: true, roleCategory: true },
   });
   const mentorName = mentor
-    ? formatPublishedName(mentor.preferredName, mentor.postnominal)
+    ? formatPublishedName(mentor.preferredName, mentor.postnominal, mentor.roleCategory)
     : mentorCwid;
 
   return { mentorName, menteeName, manualOnly };

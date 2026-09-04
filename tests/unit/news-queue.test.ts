@@ -80,6 +80,10 @@ type Person = {
   primaryTitle?: string | null;
   scoredPubCount?: number | null;
   hIndex?: number | null;
+  /** #2599 — the two columns `formatPublishedName` reads. Overridable so a test
+   *  can drive the enrolled-student suppression at the CALL SITE. */
+  postnominal?: string | null;
+  roleCategory?: string | null;
 };
 
 /** Minimal stand-in for the Prisma surface the loader touches. `calls` records
@@ -113,9 +117,15 @@ function client(rows: Row[], people: Record<string, Person> = {}, omitCwids: str
             cwid,
             slug: `slug-${cwid}`,
             preferredName: people[cwid]?.preferredName ?? `Scholar ${cwid}`,
-            postnominal: null,
+            postnominal: people[cwid]?.postnominal ?? null,
             fullName: `Scholar ${cwid}`,
-            roleCategory: "full_time_faculty",
+            // `in`, not `??`: `roleCategory: null` is a MEANINGFUL fixture state
+            // (an un-backfilled scholar, who keeps their credential), and `??`
+            // would silently rewrite it to faculty.
+            roleCategory:
+              cwid in people && "roleCategory" in people[cwid]
+                ? people[cwid].roleCategory
+                : "full_time_faculty",
             primaryTitle: people[cwid]?.primaryTitle ?? "Professor of Medicine",
             primaryDepartment: "Medicine",
             scoredPubCount: people[cwid]?.scoredPubCount ?? null,
@@ -588,5 +598,55 @@ describe("prominence fallbacks — the unpinned defaults", () => {
     }
     const sorted = sortNewsQueueGroups(groups, "prominence");
     expect(sorted.map((g) => g.rows[0].cwid)).toEqual(["bbb1002", "aaa1001"]);
+  });
+});
+
+/**
+ * #2599 — CALL-SITE coverage for the enrolled-student postnominal suppression.
+ *
+ * `lib/postnominal.ts` is unit-tested on its own; that cannot see whether THIS
+ * loader still passes the real `roleCategory`. The third parameter is required but
+ * its type admits `null`, so swapping `s?.roleCategory ?? null` for a literal `null`
+ * here leaves `tsc` clean and every other test green while the feature goes dark.
+ * These assertions are what go red on that mutation.
+ *
+ * The trap the mutation would imitate is one line away in the real loader:
+ * `formatPublishedName(preferred, …, s?.roleCategory ?? null)` is immediately
+ * followed by `formatRoleCategory(s?.roleCategory ?? null)`, which turns the same
+ * value into `"Doctoral student"`. `roleLabel` is asserted alongside `scholarName`
+ * below so the two stay visibly distinct.
+ */
+describe("loadNewsQueue — enrolled-student postnominal (#2599)", () => {
+  it("renders the BARE name for an enrolled doctoral student", async () => {
+    const { client: c } = client([name({ id: "n1", cwid: "prg9001", likelihood: "HIGH" })], {
+      prg9001: {
+        preferredName: "Priya Raghunathan",
+        postnominal: "Doctor of Philosophy",
+        roleCategory: "doctoral_student_phd",
+      },
+    });
+    const groups = await loadNewsQueue(c, "pending");
+
+    // The queue previews what an approval publishes, so it must not preview a
+    // doctorate the scholar has not been awarded.
+    expect(groups[0].rows[0].scholarName).toBe("Priya Raghunathan");
+    // Same column, the OTHER helper — the humanized label still renders.
+    expect(groups[0].rows[0].roleLabel).toBe("PhD student");
+  });
+
+  it("still normalizes and renders an earned full-title degree for faculty", async () => {
+    // The control: identical postnominal, a recognized non-student role. Without
+    // this the assertion above would also pass on a loader that had stopped
+    // rendering postnominals entirely.
+    const { client: c } = client([name({ id: "n1", cwid: "ewh9002", likelihood: "HIGH" })], {
+      ewh9002: {
+        preferredName: "Elena Whitcombe",
+        postnominal: "Doctor of Philosophy",
+        roleCategory: "full_time_faculty",
+      },
+    });
+    const groups = await loadNewsQueue(c, "pending");
+
+    expect(groups[0].rows[0].scholarName).toBe("Elena Whitcombe, PhD");
   });
 });
