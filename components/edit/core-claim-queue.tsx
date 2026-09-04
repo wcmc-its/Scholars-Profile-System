@@ -59,7 +59,8 @@ export function parsePmidBlock(text: string): { pmids: string[]; invalid: string
 type Decision = "claimed" | "rejected";
 /** Which list the segmented control is showing (only when there's history). */
 type QueueView = "review" | "confirmed" | "rejected";
-type FilterKey = "all" | "ack" | "coauthored" | "llm";
+/** Exported for the pure-predicate tests; "all" is the reset, never a set member. */
+export type FilterKey = "all" | "ack" | "coauthored" | "llm";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm";
 
 type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
@@ -148,7 +149,7 @@ export function compareBySort(sort: SortKey, a: CoreQueueRow, b: CoreQueueRow): 
   }
 }
 
-/** Does a candidate match the active filter? `all` keeps everything. */
+/** Does a candidate match ONE filter key? `all` keeps everything. */
 function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
   switch (filter) {
     case "ack":
@@ -160,6 +161,19 @@ function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
     default:
       return true;
   }
+}
+
+/**
+ * OR-combined match across the ticked filters: a row shows if ANY of them
+ * matches, so "Acknowledged + Co-authored" widens the queue rather than
+ * narrowing it to the intersection (a reviewer ticking two kinds of evidence
+ * wants both piles, not the rows carrying both). An empty set is the "All"
+ * pill — nothing ticked means no narrowing at all. Pure.
+ */
+export function matchesFilters(row: CoreQueueRow, filters: ReadonlySet<FilterKey>): boolean {
+  if (filters.size === 0) return true;
+  for (const f of filters) if (matchesFilter(row, f)) return true;
+  return false;
 }
 
 interface CoreClaimQueueProps {
@@ -195,7 +209,9 @@ export function CoreClaimQueue({
           ? "rejected"
           : "review",
   );
-  const [filter, setFilter] = useState<FilterKey>("all");
+  // Ticked evidence filters, OR-combined. The empty set IS "All" — there is no
+  // "all" member, the pill just reads as ticked when nothing else is.
+  const [filter, setFilter] = useState<ReadonlySet<FilterKey>>(() => new Set());
   // Default to the most-uncertain band: the 96%s don't need a human, the 55–75%s do.
   const [sort, setSort] = useState<SortKey>("uncertain");
   // Polite SR announcement of the last outcome — the success path is otherwise
@@ -209,6 +225,15 @@ export function CoreClaimQueue({
   const [addPending, setAddPending] = useState(false);
   const [addResult, setAddResult] = useState<string | null>(null);
   const router = useRouter();
+
+  // Tick/untick one filter; the "All" pill clears back to no narrowing.
+  const toggleFilter = (key: FilterKey) =>
+    setFilter((s) => {
+      if (key === "all") return new Set<FilterKey>();
+      const next = new Set(s);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   const markPending = (pmid: string) => setPending((s) => new Set(s).add(pmid));
   const clearPending = (pmid: string) =>
@@ -475,16 +500,32 @@ export function CoreClaimQueue({
   }
 
   // Remaining review work (decided rows stay visible for undo but don't count).
-  const remaining = candidates.filter((c) => !decided.has(c.pmid)).length;
-  // Apply the filter (but always keep a just-decided row visible so undo stays
+  const open = candidates.filter((c) => !decided.has(c.pmid));
+  const remaining = open.length;
+  // Per-option counts, over the still-open population only — a decided row is
+  // held on screen for its undo and must not inflate a filter. These earn their
+  // place: on core 14 today "Acknowledged" and "Co-authored" both match ZERO
+  // rows, so without the count a reviewer ticks a box, gets an empty queue and
+  // has no way to tell a dead filter from a bug.
+  // ponytail: four extra passes over `open`, recomputed every render, no memo.
+  // Fine at the sizes cores actually queue, but loadCoreReviewQueue has no
+  // LIMIT — if one core ever returns thousands of candidates, fold these into a
+  // single reduce or wrap them in useMemo([candidates, decided]).
+  const filterCounts: Record<FilterKey, number> = {
+    all: open.length,
+    ack: open.filter((c) => matchesFilter(c, "ack")).length,
+    coauthored: open.filter((c) => matchesFilter(c, "coauthored")).length,
+    llm: open.filter((c) => matchesFilter(c, "llm")).length,
+  };
+  // Apply the filters (but always keep a just-decided row visible so undo stays
   // reachable), then sort. Likelihood is the loader's order; LLM re-sorts by score.
   const visible = candidates
-    .filter((c) => decided.has(c.pmid) || matchesFilter(c, filter))
+    .filter((c) => decided.has(c.pmid) || matchesFilters(c, filter))
     .slice()
     .sort((a, b) => compareBySort(sort, a, b));
   // Open candidates the engine is most sure of — the one-click bulk-confirm band.
-  const highConfidencePmids = candidates
-    .filter((c) => !decided.has(c.pmid) && c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD)
+  const highConfidencePmids = open
+    .filter((c) => c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD)
     .map((c) => c.pmid);
   // Tabs only earn their place once there's history to switch to; otherwise the
   // queue is the single "To review" scroll it always was.
@@ -596,7 +637,13 @@ export function CoreClaimQueue({
         <>
           {candidates.length > 0 ? (
             <div className="mb-2">
-              <QueueControls filter={filter} onFilter={setFilter} sort={sort} onSort={setSort} />
+              <QueueControls
+                filter={filter}
+                onToggleFilter={toggleFilter}
+                counts={filterCounts}
+                sort={sort}
+                onSort={setSort}
+              />
             </div>
           ) : null}
 
@@ -614,7 +661,7 @@ export function CoreClaimQueue({
             </p>
           ) : visible.length === 0 ? (
             <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
-              No candidates match this filter.
+              No candidates match these filters.
             </p>
           ) : (
             <ul className="flex flex-col gap-3">
@@ -671,7 +718,8 @@ export function CoreClaimQueue({
 }
 
 /** The segmented view switch (To review / Confirmed / Rejected), shown once the
- *  queue has history. `aria-pressed` pills, matching the FILTERS affordance. */
+ *  queue has history. `aria-pressed` pills — same styling as the FILTERS row,
+ *  but a single choice, where the filters below are multi-select checkboxes. */
 function ViewTabs({
   view,
   onView,
@@ -851,33 +899,42 @@ function RejectedRow({
 
 function QueueControls({
   filter,
-  onFilter,
+  onToggleFilter,
+  counts,
   sort,
   onSort,
 }: {
-  filter: FilterKey;
-  onFilter: (f: FilterKey) => void;
+  filter: ReadonlySet<FilterKey>;
+  onToggleFilter: (f: FilterKey) => void;
+  counts: Record<FilterKey, number>;
   sort: SortKey;
   onSort: (s: SortKey) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter candidates">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            aria-pressed={filter === f.key}
-            onClick={() => onFilter(f.key)}
-            className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
-              filter === f.key
-                ? "bg-apollo-maroon border-transparent text-white"
-                : "border-apollo-border text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+        {FILTERS.map((f) => {
+          // "All" is the reset, not a fourth box: it reads as ticked exactly
+          // when nothing else is. Buttons keep the native Space/Enter activation
+          // the checkbox role expects, so no key handler of our own.
+          const checked = f.key === "all" ? filter.size === 0 : filter.has(f.key);
+          return (
+            <button
+              key={f.key}
+              type="button"
+              role="checkbox"
+              aria-checked={checked}
+              onClick={() => onToggleFilter(f.key)}
+              className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
+                checked
+                  ? "bg-apollo-maroon border-transparent text-white"
+                  : "border-apollo-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {f.label} <span className="tabular-nums opacity-80">{counts[f.key]}</span>
+            </button>
+          );
+        })}
       </div>
       <label className="text-muted-foreground flex items-center gap-1 text-[13px]">
         <span className="sr-only">Sort by</span>

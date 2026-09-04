@@ -13,8 +13,10 @@ import {
   buildSignals,
   compareBySort,
   CoreClaimQueue,
+  matchesFilters,
   parsePmidBlock,
 } from "@/components/edit/core-claim-queue";
+import type { FilterKey } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
 
 function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
@@ -298,9 +300,127 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Acked paper")).toBeTruthy();
     expect(screen.getByText("Bare paper")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Acknowledged" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
     expect(screen.getByText("Acked paper")).toBeTruthy();
     expect(screen.queryByText("Bare paper")).toBeNull();
+  });
+
+  it("OR-combines two ticked filters instead of intersecting them (Tier 3)", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            pmid: "1",
+            title: "Acked only",
+            signalAck: true,
+            ackAlias: "CBIC",
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+          }),
+          row({
+            pmid: "2",
+            title: "Co-authored only",
+            signalAck: false,
+            ackAlias: null,
+            llmScore: null,
+          }),
+          row({
+            pmid: "3",
+            title: "LLM only",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const tick = (name: RegExp) => fireEvent.click(screen.getByRole("checkbox", { name }));
+
+    tick(/^Acknowledged/);
+    expect(screen.queryByText("Co-authored only")).toBeNull();
+
+    tick(/^Co-authored/);
+    // union, not intersection: neither row carries both signals, both are shown
+    expect(screen.getByText("Acked only")).toBeTruthy();
+    expect(screen.getByText("Co-authored only")).toBeTruthy();
+    expect(screen.queryByText("LLM only")).toBeNull();
+
+    // un-ticking is the same click
+    tick(/^Acknowledged/);
+    expect(screen.queryByText("Acked only")).toBeNull();
+    expect(screen.getByText("Co-authored only")).toBeTruthy();
+  });
+
+  it("treats 'All' as the reset and as checked while nothing else is ticked (Tier 3)", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Acked paper", signalAck: true, ackAlias: "CBIC" }),
+          row({
+            pmid: "2",
+            title: "Bare paper",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const box = (name: RegExp) => screen.getByRole("checkbox", { name });
+    expect(box(/^All/).getAttribute("aria-checked")).toBe("true"); // empty set reads as All
+
+    fireEvent.click(box(/^Acknowledged/));
+    expect(box(/^All/).getAttribute("aria-checked")).toBe("false");
+    expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByText("Bare paper")).toBeNull();
+
+    fireEvent.click(box(/^All/));
+    expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("Bare paper")).toBeTruthy();
+  });
+
+  it("labels each filter with its count over the still-undecided rows (Tier 3)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Acked paper", signalAck: true, ackAlias: "CBIC" }),
+          row({
+            pmid: "2",
+            title: "Bare paper",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const label = (name: RegExp) => screen.getByRole("checkbox", { name }).textContent;
+    expect(label(/^All/)).toBe("All 2");
+    expect(label(/^Acknowledged/)).toBe("Acknowledged 1");
+    expect(label(/^Co-authored/)).toBe("Co-authored 1");
+    expect(label(/^LLM-flagged/)).toBe("LLM-flagged 1");
+
+    // a decided row is held on screen for its undo but must not inflate a count
+    const acked = screen.getByLabelText("Candidate: Acked paper");
+    fireEvent.click(within(acked).getByRole("button", { name: /confirm/i }));
+    await waitFor(() => expect(label(/^Acknowledged/)).toBe("Acknowledged 0"));
+    expect(label(/^All/)).toBe("All 1");
   });
 
   it("re-sorts by LLM score when selected (Tier 3)", () => {
@@ -430,7 +550,7 @@ describe("CoreClaimQueue", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
     await screen.findByRole("button", { name: /undo/i });
 
-    fireEvent.click(screen.getByRole("button", { name: "Acknowledged" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
     // still shown via the decided-row override, so its Undo is reachable
     expect(screen.getByRole("button", { name: /undo/i })).toBeTruthy();
   });
@@ -832,6 +952,28 @@ describe("buildSignals", () => {
       row({ ackAlias: null, signalAck: true, coauthors: [], llmScore: null, authorAffinity: null }),
     );
     expect(ack).toMatchObject({ kind: "ack", dots: 4, strength: "Direct" });
+  });
+});
+
+describe("matchesFilters", () => {
+  const acked = row({ signalAck: true, ackAlias: "CBIC", coauthors: [], llmScore: null });
+  const llmOnly = row({ signalAck: false, ackAlias: null, coauthors: [], llmScore: 4 });
+  const set = (...keys: FilterKey[]) => new Set<FilterKey>(keys);
+
+  it("keeps everything when nothing is ticked (the empty set is 'All')", () => {
+    expect(matchesFilters(acked, set())).toBe(true);
+    expect(matchesFilters(llmOnly, set())).toBe(true);
+  });
+
+  it("ORs the ticked keys — one match is enough, no intersection", () => {
+    expect(matchesFilters(acked, set("ack", "llm"))).toBe(true);
+    expect(matchesFilters(llmOnly, set("ack", "llm"))).toBe(true);
+    // ack + co-authored: the LLM-only row carries neither
+    expect(matchesFilters(llmOnly, set("ack", "coauthored"))).toBe(false);
+  });
+
+  it("excludes a row that matches none of the ticked keys", () => {
+    expect(matchesFilters(acked, set("coauthored"))).toBe(false);
   });
 });
 
