@@ -212,8 +212,13 @@ export function CoreClaimQueue({
   // Ticked evidence filters, OR-combined. The empty set IS "All" — there is no
   // "all" member, the pill just reads as ticked when nothing else is.
   const [filter, setFilter] = useState<ReadonlySet<FilterKey>>(() => new Set());
-  // Default to the most-uncertain band: the 96%s don't need a human, the 55–75%s do.
-  const [sort, setSort] = useState<SortKey>("uncertain");
+  // Default to engine likelihood, high→low — the loader's own order, so the queue
+  // opens on what the engine is surest of. This is a deliberate override, not the
+  // original reasoning: the previous default was "uncertain first", on the ground
+  // that the 96%s don't need a human and the 55–75%s do. That argument still
+  // holds and that band is still one select away (and "Confirm N high-confidence"
+  // clears the easy top in one click) — the owner chose likelihood anyway.
+  const [sort, setSort] = useState<SortKey>("likelihood");
   // Polite SR announcement of the last outcome — the success path is otherwise
   // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");

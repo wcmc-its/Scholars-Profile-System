@@ -436,7 +436,7 @@ describe("CoreClaimQueue", () => {
     );
     const titles = () =>
       screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    // default is uncertain-first; pin a likelihood baseline before testing LLM sort
+    // likelihood-desc is the default; set it explicitly so the baseline is pinned
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "likelihood" } });
     expect(titles()).toEqual(["High likelihood, low LLM", "Low likelihood, high LLM"]);
 
@@ -444,7 +444,7 @@ describe("CoreClaimQueue", () => {
     expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
   });
 
-  it("defaults to uncertain-first ordering", () => {
+  it("defaults to likelihood-desc ordering, not uncertain-first", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -456,7 +456,9 @@ describe("CoreClaimQueue", () => {
       />,
     );
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titles).toEqual(["Borderline", "Near-certain"]); // closest to 0.5 first
+    expect(titles).toEqual(["Near-certain", "Borderline"]); // highest likelihood first
+    // and the select agrees, so the visible label matches the applied order
+    expect((screen.getByLabelText("Sort by") as HTMLSelectElement).value).toBe("likelihood");
   });
 
   it("re-sorts likelihood-desc, then uncertain-first when selected", () => {
