@@ -77,6 +77,12 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("7/10")).toBeTruthy(); // raw score still shown
     expect(screen.getByText("Repeat user of this core")).toBeTruthy();
     expect(screen.getByText("42%")).toBeTruthy(); // affinity readout
+    // the readout is a RATE post-ReciterAI #382, and the copy has to say so
+    expect(
+      screen.getByText(
+        "The largest share of any byline author's own publications that are work with this core",
+      ),
+    ).toBeTruthy();
   });
 
   it("shows the PMID verbatim (linked to PubMed), citation count, DOI, and rationale", () => {

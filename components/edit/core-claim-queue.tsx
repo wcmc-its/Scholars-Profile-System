@@ -94,8 +94,13 @@ const KIND_ORDER: Record<SignalKind, number> = {
  * self-score: ack = Direct (4), core-staff co-author = Strong (3),
  * LLM read = Moderate (2) regardless of score, repeat-user prior and topical
  * MeSH prior = Weak (1) — both are indirect priors, not direct evidence about
- * this specific paper. The raw value (8/10, 45%) rides along as a secondary
- * readout in the meter. Pure; ordered strongest-first.
+ * this specific paper. The raw value rides along as a secondary readout in the
+ * meter — LLM as a score out of 10, and repeat-user as a percentage whose
+ * MEANING changed with ReciterAI #382: it used to be a capped strength (values
+ * piled on the 0.85 ceiling — 84% of one live queue sat exactly there), and is
+ * now a rate, the share of an author's own corpus already given to this core,
+ * so the same paper reads single digits where it used to read 85%. Pure;
+ * ordered strongest-first.
  */
 export function buildSignals(row: CoreQueueRow): Signal[] {
   const out: Signal[] = [];
@@ -1265,8 +1270,12 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
       value = `${row.llmScore}/10`;
       break;
     case "affinity":
+      // Post-ReciterAI #382 this is a RATE, not a capped strength, so the copy has
+      // to say what the percentage is a share OF — a bare number next to "Weak"
+      // reads as a regression when the same paper drops from 85% to 6%.
       lead = "Repeat user of this core";
-      sub = "From the author's prior confirmed pubs with this core";
+      sub =
+        "The largest share of any byline author's own publications that are work with this core";
       value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
       break;
     case "topic":
