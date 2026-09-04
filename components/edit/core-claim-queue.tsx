@@ -59,7 +59,8 @@ export function parsePmidBlock(text: string): { pmids: string[]; invalid: string
 type Decision = "claimed" | "rejected";
 /** Which list the segmented control is showing (only when there's history). */
 type QueueView = "review" | "confirmed" | "rejected";
-type FilterKey = "all" | "ack" | "coauthored" | "llm";
+/** Exported for the pure-predicate tests; "all" is the reset, never a set member. */
+export type FilterKey = "all" | "ack" | "coauthored" | "llm";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm";
 
 type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
@@ -93,8 +94,13 @@ const KIND_ORDER: Record<SignalKind, number> = {
  * self-score: ack = Direct (4), core-staff co-author = Strong (3),
  * LLM read = Moderate (2) regardless of score, repeat-user prior and topical
  * MeSH prior = Weak (1) — both are indirect priors, not direct evidence about
- * this specific paper. The raw value (8/10, 45%) rides along as a secondary
- * readout in the meter. Pure; ordered strongest-first.
+ * this specific paper. The raw value rides along as a secondary readout in the
+ * meter — LLM as a score out of 10, and repeat-user as a percentage whose
+ * MEANING changed with ReciterAI #382: it used to be a capped strength (values
+ * piled on the 0.85 ceiling — 84% of one live queue sat exactly there), and is
+ * now a rate, the share of an author's own corpus already given to this core,
+ * so the same paper reads single digits where it used to read 85%. Pure;
+ * ordered strongest-first.
  */
 export function buildSignals(row: CoreQueueRow): Signal[] {
   const out: Signal[] = [];
@@ -148,7 +154,7 @@ export function compareBySort(sort: SortKey, a: CoreQueueRow, b: CoreQueueRow): 
   }
 }
 
-/** Does a candidate match the active filter? `all` keeps everything. */
+/** Does a candidate match ONE filter key? `all` keeps everything. */
 function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
   switch (filter) {
     case "ack":
@@ -160,6 +166,19 @@ function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
     default:
       return true;
   }
+}
+
+/**
+ * OR-combined match across the ticked filters: a row shows if ANY of them
+ * matches, so "Acknowledged + Co-authored" widens the queue rather than
+ * narrowing it to the intersection (a reviewer ticking two kinds of evidence
+ * wants both piles, not the rows carrying both). An empty set is the "All"
+ * pill — nothing ticked means no narrowing at all. Pure.
+ */
+export function matchesFilters(row: CoreQueueRow, filters: ReadonlySet<FilterKey>): boolean {
+  if (filters.size === 0) return true;
+  for (const f of filters) if (matchesFilter(row, f)) return true;
+  return false;
 }
 
 interface CoreClaimQueueProps {
@@ -195,9 +214,16 @@ export function CoreClaimQueue({
           ? "rejected"
           : "review",
   );
-  const [filter, setFilter] = useState<FilterKey>("all");
-  // Default to the most-uncertain band: the 96%s don't need a human, the 55–75%s do.
-  const [sort, setSort] = useState<SortKey>("uncertain");
+  // Ticked evidence filters, OR-combined. The empty set IS "All" — there is no
+  // "all" member, the pill just reads as ticked when nothing else is.
+  const [filter, setFilter] = useState<ReadonlySet<FilterKey>>(() => new Set());
+  // Default to engine likelihood, high→low — the loader's own order, so the queue
+  // opens on what the engine is surest of. This is a deliberate override, not the
+  // original reasoning: the previous default was "uncertain first", on the ground
+  // that the 96%s don't need a human and the 55–75%s do. That argument still
+  // holds and that band is still one select away (and "Confirm N high-confidence"
+  // clears the easy top in one click) — the owner chose likelihood anyway.
+  const [sort, setSort] = useState<SortKey>("likelihood");
   // Polite SR announcement of the last outcome — the success path is otherwise
   // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");
@@ -209,6 +235,15 @@ export function CoreClaimQueue({
   const [addPending, setAddPending] = useState(false);
   const [addResult, setAddResult] = useState<string | null>(null);
   const router = useRouter();
+
+  // Tick/untick one filter; the "All" pill clears back to no narrowing.
+  const toggleFilter = (key: FilterKey) =>
+    setFilter((s) => {
+      if (key === "all") return new Set<FilterKey>();
+      const next = new Set(s);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   const markPending = (pmid: string) => setPending((s) => new Set(s).add(pmid));
   const clearPending = (pmid: string) =>
@@ -270,8 +305,8 @@ export function CoreClaimQueue({
     clearPending(pmid);
   }
 
-  // Bulk-confirm the high-confidence band in one click — clears the easy top so
-  // uncertain-first leaves the reviewer only what genuinely needs a call. One
+  // Bulk-confirm the high-confidence band in one click — clears the easy top,
+  // which is where the likelihood-first default now puts it. One
   // request to the bulk endpoint: the upsert + audit + writeback loop runs in a
   // single server transaction (no client-side fan-out / partial-failure spray).
   async function confirmHighConfidence(pmids: string[]) {
@@ -475,16 +510,32 @@ export function CoreClaimQueue({
   }
 
   // Remaining review work (decided rows stay visible for undo but don't count).
-  const remaining = candidates.filter((c) => !decided.has(c.pmid)).length;
-  // Apply the filter (but always keep a just-decided row visible so undo stays
+  const open = candidates.filter((c) => !decided.has(c.pmid));
+  const remaining = open.length;
+  // Per-option counts, over the still-open population only — a decided row is
+  // held on screen for its undo and must not inflate a filter. These earn their
+  // place: on core 14 today "Acknowledged" and "Co-authored" both match ZERO
+  // rows, so without the count a reviewer ticks a box, gets an empty queue and
+  // has no way to tell a dead filter from a bug.
+  // ponytail: four extra passes over `open`, recomputed every render, no memo.
+  // Fine at the sizes cores actually queue, but loadCoreReviewQueue has no
+  // LIMIT — if one core ever returns thousands of candidates, fold these into a
+  // single reduce or wrap them in useMemo([candidates, decided]).
+  const filterCounts: Record<FilterKey, number> = {
+    all: open.length,
+    ack: open.filter((c) => matchesFilter(c, "ack")).length,
+    coauthored: open.filter((c) => matchesFilter(c, "coauthored")).length,
+    llm: open.filter((c) => matchesFilter(c, "llm")).length,
+  };
+  // Apply the filters (but always keep a just-decided row visible so undo stays
   // reachable), then sort. Likelihood is the loader's order; LLM re-sorts by score.
   const visible = candidates
-    .filter((c) => decided.has(c.pmid) || matchesFilter(c, filter))
+    .filter((c) => decided.has(c.pmid) || matchesFilters(c, filter))
     .slice()
     .sort((a, b) => compareBySort(sort, a, b));
   // Open candidates the engine is most sure of — the one-click bulk-confirm band.
-  const highConfidencePmids = candidates
-    .filter((c) => !decided.has(c.pmid) && c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD)
+  const highConfidencePmids = open
+    .filter((c) => c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD)
     .map((c) => c.pmid);
   // Tabs only earn their place once there's history to switch to; otherwise the
   // queue is the single "To review" scroll it always was.
@@ -596,7 +647,13 @@ export function CoreClaimQueue({
         <>
           {candidates.length > 0 ? (
             <div className="mb-2">
-              <QueueControls filter={filter} onFilter={setFilter} sort={sort} onSort={setSort} />
+              <QueueControls
+                filter={filter}
+                onToggleFilter={toggleFilter}
+                counts={filterCounts}
+                sort={sort}
+                onSort={setSort}
+              />
             </div>
           ) : null}
 
@@ -614,7 +671,7 @@ export function CoreClaimQueue({
             </p>
           ) : visible.length === 0 ? (
             <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
-              No candidates match this filter.
+              No candidates match these filters.
             </p>
           ) : (
             <ul className="flex flex-col gap-3">
@@ -671,7 +728,8 @@ export function CoreClaimQueue({
 }
 
 /** The segmented view switch (To review / Confirmed / Rejected), shown once the
- *  queue has history. `aria-pressed` pills, matching the FILTERS affordance. */
+ *  queue has history. `aria-pressed` pills — same styling as the FILTERS row,
+ *  but a single choice, where the filters below are multi-select checkboxes. */
 function ViewTabs({
   view,
   onView,
@@ -851,33 +909,46 @@ function RejectedRow({
 
 function QueueControls({
   filter,
-  onFilter,
+  onToggleFilter,
+  counts,
   sort,
   onSort,
 }: {
-  filter: FilterKey;
-  onFilter: (f: FilterKey) => void;
+  filter: ReadonlySet<FilterKey>;
+  onToggleFilter: (f: FilterKey) => void;
+  counts: Record<FilterKey, number>;
   sort: SortKey;
   onSort: (s: SortKey) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter candidates">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            aria-pressed={filter === f.key}
-            onClick={() => onFilter(f.key)}
-            className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
-              filter === f.key
-                ? "bg-apollo-maroon border-transparent text-white"
-                : "border-apollo-border text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+        {FILTERS.map((f) => {
+          // "All" is an ACTION, not a fourth box, so it gets plain button
+          // semantics. Giving it role="checkbox" would promise a control that
+          // unticks: once it reads checked, pressing Space on it changes
+          // nothing and announces nothing, which is the one thing the checkbox
+          // role guarantees it won't do. The three real filters are genuine
+          // checkboxes; native Space/Enter activation covers all four.
+          const isAll = f.key === "all";
+          const checked = isAll ? filter.size === 0 : filter.has(f.key);
+          return (
+            <button
+              key={f.key}
+              type="button"
+              role={isAll ? undefined : "checkbox"}
+              aria-checked={isAll ? undefined : checked}
+              onClick={() => onToggleFilter(f.key)}
+              className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
+                checked
+                  ? "bg-apollo-maroon border-transparent text-white"
+                  : "border-apollo-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {f.label} <span className="tabular-nums opacity-80">{counts[f.key]}</span>
+            </button>
+          );
+        })}
       </div>
       <label className="text-muted-foreground flex items-center gap-1 text-[13px]">
         <span className="sr-only">Sort by</span>
@@ -1203,8 +1274,12 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
       value = `${row.llmScore}/10`;
       break;
     case "affinity":
+      // Post-ReciterAI #382 this is a RATE, not a capped strength, so the copy has
+      // to say what the percentage is a share OF — a bare number next to "Weak"
+      // reads as a regression when the same paper drops from 85% to 6%.
       lead = "Repeat user of this core";
-      sub = "From the author's prior confirmed pubs with this core";
+      sub =
+        "The largest share of any byline author's own publications that are work with this core";
       value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
       break;
     case "topic":
