@@ -148,6 +148,63 @@ const VISIBLE_ROLE_KEYS: ReadonlySet<string> = new Set<string>([
 ]);
 
 /**
+ * Every `role_category` token this repo RECOGNIZES — the visible roles plus the
+ * hidden identity classes (`HIDDEN_ROLE_CATEGORIES`, which carries the suffixed
+ * `doctoral_student_*` variants and `affiliate_alumni`). Membership here is the
+ * only way to distinguish "a known role that is not a student" from "a token no
+ * version of this enum ever emitted", which is what lets
+ * {@link isEnrolledDoctoralStudent} fail closed without stripping a credential
+ * off every legitimate role.
+ */
+const KNOWN_ROLE_KEYS: ReadonlySet<string> = new Set<string>([
+  ...VISIBLE_ROLE_KEYS,
+  ...HIDDEN_ROLE_CATEGORIES,
+]);
+
+/**
+ * Whether this role is an ENROLLED doctoral student — i.e. someone still reading
+ * for the degree, not someone who holds it.
+ *
+ * The `doctoral_student` PREFIX (not an exact match) is the whole point (#1026):
+ * the DB carries suffixed variants `doctoral_student_md` / `_phd` / `_mdphd` that
+ * an exact-match check missed. Case-folded because `ROLE_DISPLAY` carries an
+ * UPPER_SNAKE_CASE half and some fixtures/legacy rows use it.
+ *
+ * **Fails CLOSED on an unrecognized token — same defence as {@link isPubliclyDisplayed},
+ * for the same reason (#2202).** `formatRoleCategory` (`lib/role-display.ts`) turns
+ * these very enum values into humanized labels — `doctoral_student` → `"Doctoral
+ * student"`, `doctoral_student_md` → `"MD student"` — and BOTH queue loaders call it
+ * on the line immediately after `formatPublishedName`. A prefix-only check answers
+ * `false` for `"Doctoral student"`, so a two-line-apart label/enum mixup would republish
+ * an enrolled student as "<name>, PhD" with no type error to catch it. That is exactly
+ * the #2202 shape, where a humanized label sailing through a raw-enum check published
+ * 684 students by name. Anything `KNOWN_ROLE_KEYS` does not contain is therefore treated
+ * as enrolled.
+ *
+ * The asymmetry that justifies erring this way: suppressing a postnominal on an unknown
+ * role costs a degree suffix on a name that still renders in full, while ADMITTING one
+ * asserts a credential the person may not hold — which is the harm #2599 exists to stop.
+ * Cheap miss, expensive false claim, so the unknown branch takes the cheap one.
+ *
+ * Returns FALSE for null/undefined — deliberately the opposite default from
+ * {@link isPubliclyDisplayed}, and NOT the same case as an unrecognized token.
+ * Absence of a role is not evidence of enrolment, so an un-backfilled scholar keeps
+ * whatever credential ED recorded for them rather than having it silently stripped.
+ *
+ * Two consumers, one prefix: this gate (a) hides the enrollee from directed-traffic
+ * surfaces via `isPubliclyDisplayed`, and (b) suppresses the degree postnominal in
+ * `formatPublishedName` (#2599). Extracted so the prefix lives in exactly one place.
+ */
+export function isEnrolledDoctoralStudent(
+  role: RoleCategory | string | null | undefined,
+): boolean {
+  if (role == null) return false;
+  const key = String(role).trim().toLowerCase();
+  if (key.startsWith("doctoral_student")) return true;
+  return !KNOWN_ROLE_KEYS.has(key);
+}
+
+/**
  * Whether a scholar with this role may be surfaced on a public directed-traffic
  * surface (search/browse/profile/home) and rendered as a clickable profile link.
  *
@@ -162,18 +219,23 @@ const VISIBLE_ROLE_KEYS: ReadonlySet<string> = new Set<string>([
  * scholar), not an unrecognized token, and 21 of the 22 call sites read the raw
  * nullable column — failing closed on null would drop those scholars from the
  * profile route, the A–Z browse, the people index and the CSV export.
+ *
+ * BEHAVIOUR IS UNCHANGED by `isEnrolledDoctoralStudent` widening to fail closed
+ * (#2599). The two branches partition the input: a token the widened predicate newly
+ * answers `true` for is by construction absent from `KNOWN_ROLE_KEYS` ⊇
+ * `VISIBLE_ROLE_KEYS`, so the final line would have returned `false` for it anyway.
+ * Only the branch that produces the `false` moved. `tests/unit/eligibility.test.ts`
+ * pins that equivalence directly.
  */
 export function isPubliclyDisplayed(
   role: RoleCategory | string | null | undefined,
 ): boolean {
   if (role == null) return true;
-  // #1026 — the DB carries SUFFIXED student roles (doctoral_student_md / _phd /
-  // _mdphd) that an exact-match check missed. Prefix-match covers every variant.
-  // Case-folded because ROLE_DISPLAY carries an UPPER_SNAKE_CASE half and some
-  // fixtures/legacy rows use it.
-  const r = String(role).trim().toLowerCase();
-  if (r.startsWith("doctoral_student")) return false;
-  return VISIBLE_ROLE_KEYS.has(r);
+  // #1026 — the SUFFIXED student roles are caught by the shared prefix predicate,
+  // which also absorbs the unrecognized-token case this function used to reject on
+  // its own final line (see the equivalence argument above).
+  if (isEnrolledDoctoralStudent(role)) return false;
+  return VISIBLE_ROLE_KEYS.has(String(role).trim().toLowerCase());
 }
 
 /**

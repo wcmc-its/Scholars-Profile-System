@@ -352,6 +352,98 @@ describe("getMenteesForMentor — manual mentees (#2011)", () => {
 });
 
 /**
+ * #2599 — CALL-SITE coverage for the enrolled-student postnominal suppression.
+ *
+ * `lib/postnominal.ts` has its own unit tests, and they are not enough. The
+ * `roleCategory` parameter is REQUIRED but its type admits `null`, so replacing
+ * `s.roleCategory` with a literal `null` at this call site leaves `tsc` clean and
+ * every helper test green — the feature goes dark silently, which is this repo's
+ * most common latent-bug shape ("declared but never connected"). These assertions
+ * go red on exactly that mutation.
+ *
+ * This is the ANONYMOUS exposure the suppression exists for: the mentee chip
+ * reaches `components/scholar/mentoring-section.tsx` on the public profile and on
+ * the co-pubs rollup page, and the #536 carve deliberately EXEMPTS relational
+ * mentions — a doctoral student is named here by design, so nothing upstream
+ * filters them out and the postnominal is the only thing being suppressed.
+ */
+describe("getMenteesForMentor — enrolled-student postnominal (#2599)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.MENTORING_COPUB_BRIDGE;
+    phdFindMany.mockResolvedValue([]);
+    postdocFindMany.mockResolvedValue([]);
+    studentPhdProgramFindMany.mockResolvedValue([]);
+    scholarFindMany.mockResolvedValue([]);
+    aocMenteeFindMany.mockResolvedValue([]);
+    suppressionFindMany.mockResolvedValue([]);
+    fieldOverrideFindUnique.mockResolvedValue(null as never);
+    withReciterConnection.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    delete process.env.MENTORING_COPUB_BRIDGE;
+  });
+
+  /** One sourced PhD mentee with a Scholar row carrying the given role + degree. */
+  function seedMentee(roleCategory: string | null, postnominal: string | null): void {
+    phdFindMany.mockResolvedValue([
+      {
+        menteeCwid: "prg9001",
+        menteeFirstName: "Priya",
+        menteeLastName: "Raghunathan",
+        conferralYear: null,
+        programType: "PhD",
+        majorDesc: "Immunology",
+      },
+    ]);
+    scholarFindMany.mockResolvedValue([
+      {
+        cwid: "prg9001",
+        slug: "priya-raghunathan",
+        preferredName: "Priya Raghunathan",
+        postnominal,
+        primaryDepartment: "Immunology",
+        roleCategory,
+      },
+    ]);
+  }
+
+  it("renders the BARE name for an enrolled doctoral student", async () => {
+    // ED stores the PROGRAMME of study in `weillCornellEduDegree` for the enrolled.
+    // #201's normalization turns it into "PhD", which asserts a degree they have
+    // not been awarded — on a public profile.
+    seedMentee("doctoral_student", "Doctor of Philosophy");
+
+    const { mentees } = await getMenteesForMentor(MENTOR);
+
+    expect(mentees).toHaveLength(1);
+    expect(mentees[0].scholar?.publishedName).toBe("Priya Raghunathan");
+    // The chip itself is unchanged — the student is still NAMED, still linkable.
+    // Only the credential is withheld.
+    expect(mentees[0].scholar?.slug).toBe("priya-raghunathan");
+  });
+
+  it("suppresses on the SUFFIXED student variants the DB actually carries (#1026)", async () => {
+    for (const role of ["doctoral_student_md", "doctoral_student_phd", "doctoral_student_mdphd"]) {
+      seedMentee(role, "Doctor of Philosophy");
+      const { mentees } = await getMenteesForMentor(MENTOR);
+      expect(mentees[0].scholar?.publishedName).toBe("Priya Raghunathan");
+    }
+  });
+
+  it("still NORMALIZES and renders the degree for a non-student mentee", async () => {
+    // The control that makes the assertions above discriminating rather than
+    // vacuous: same fixture, same postnominal, a recognized non-student role.
+    seedMentee("postdoc", "Doctor of Philosophy");
+
+    const { mentees } = await getMenteesForMentor(MENTOR);
+
+    expect(mentees[0].scholar?.publishedName).toBe("Priya Raghunathan, PhD");
+  });
+});
+
+/**
  * #2011 follow-up — co-pubs for a manual-only mentee, computed from local
  * Aurora at read time.
  *

@@ -35,6 +35,7 @@ import { multiPiExternalIds } from "@/lib/funding-projection";
 import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { formatPublishedName } from "@/lib/postnominal";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import {
   isMethodsLensEnabled,
@@ -479,9 +480,15 @@ export type ProfilePayload = {
    *  Null when absent. Combine with preferredName via `publishedName` for
    *  display surfaces. */
   postnominal: string | null;
-  /** preferredName with postnominal appended ("Curtis Cole, MD") when present.
+  /** preferredName with postnominal appended ("Alina Serrano, MD") when present.
    *  Single source of truth for any UI that renders a scholar's published
-   *  name (profile H1, author chips, search results, etc.). */
+   *  name (profile H1, author chips, search results, etc.).
+   *
+   *  Built by `formatPublishedName` (#2599), NOT by raw concatenation, so this
+   *  field carries #201's normalization ("Doctor of Philosophy" → "PhD") and the
+   *  enrolled-doctoral-student suppression. It feeds the WCM CV export's signature
+   *  block and PI line (`lib/edit/cv-export.ts`) via `POST /api/edit/cv`, which
+   *  applies no role carve of its own — see the call site. */
   publishedName: string;
   fullName: string;
   primaryTitle: string | null;
@@ -1626,9 +1633,27 @@ export const getScholarFullProfileBySlug = cache(
       preferredName: scholar.preferredName,
       roleCategory: scholar.roleCategory,
       postnominal: scholar.postnominal,
-      publishedName: scholar.postnominal
-        ? `${scholar.preferredName}, ${scholar.postnominal}`
-        : scholar.preferredName,
+      // #2599 — was a raw `${preferredName}, ${postnominal}` concatenation, which
+      // bypassed BOTH helpers. This payload has no role carve anywhere upstream:
+      // `getScholarFullProfileBySlug` filters only on `deletedAt`/`status`, and
+      // `authorizeCvExport` gates on self / superuser / assigned proxy / unit-admin /
+      // `cv_generator` — none of which is a role-category carve. So
+      // `POST /api/edit/cv` for an enrolled doctoral student printed
+      // "<name>, Doctor of Philosophy" into the WCM CV signature block and the
+      // PI line (`lib/edit/cv-export.ts`) — a document the scholar submits.
+      //
+      // SECOND EFFECT, DELIBERATE: routing through here also applies #201's
+      // normalization to the public profile `<h1>` and metadata, so the handful of
+      // faculty who record an EARNED degree in full-title form now render
+      // "<name>, PhD" rather than "<name>, Doctor of Philosophy". That is #201's
+      // original intent, and it is what makes the /edit queues' claim to preview
+      // "exactly what an approval will publish" true — until now the queues
+      // normalized and the profile did not.
+      publishedName: formatPublishedName(
+        scholar.preferredName,
+        scholar.postnominal,
+        scholar.roleCategory,
+      ),
       fullName: scholar.fullName,
       primaryTitle: scholar.primaryTitle,
       primaryDepartment: scholar.primaryDepartment,
@@ -1963,9 +1988,16 @@ export const getScholarFullProfileBySlug = cache(
           ? {
               cwid: scholar.postdoctoralMentor.cwid,
               slug: scholar.postdoctoralMentor.slug,
-              publishedName: scholar.postdoctoralMentor.postnominal
-                ? `${scholar.postdoctoralMentor.preferredName}, ${scholar.postdoctoralMentor.postnominal}`
-                : scholar.postdoctoralMentor.preferredName,
+              // #2599 — the sibling of `publishedName` above, and the same
+              // exposure: the only gate here is deletedAt/status, so a hidden
+              // identity class DOES reach this card (the `roleCategory` field
+              // below exists precisely so the view can render it as plain text
+              // rather than a link). Route it through the same helper.
+              publishedName: formatPublishedName(
+                scholar.postdoctoralMentor.preferredName,
+                scholar.postdoctoralMentor.postnominal,
+                scholar.postdoctoralMentor.roleCategory,
+              ),
               primaryTitle: scholar.postdoctoralMentor.primaryTitle ?? null,
               identityImageEndpoint: identityImageEndpoint(scholar.postdoctoralMentor.cwid),
               roleCategory: scholar.postdoctoralMentor.roleCategory,

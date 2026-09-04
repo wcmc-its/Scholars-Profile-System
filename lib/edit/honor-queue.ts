@@ -291,7 +291,11 @@ export async function loadHonorQueue(
           id: r.id,
           cwid: r.cwid,
           slug: s?.slug ?? null,
-          scholarName: formatPublishedName(preferred, s?.postnominal ?? null),
+          scholarName: formatPublishedName(
+            preferred,
+            s?.postnominal ?? null,
+            s?.roleCategory ?? null,
+          ),
           roleLabel: formatRoleCategory(s?.roleCategory ?? null),
           roleCategory: s?.roleCategory ?? null,
           title: s?.primaryTitle ?? null,

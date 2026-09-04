@@ -18,6 +18,14 @@
  * into the browser and breaks the Next build on `fs`/`net` (the same trap
  * documented on `lib/edit/manageable-units.ts`). `@/lib/api/prominence` is safe
  * on that count: its Prisma import is type-only and it holds no module state.
+ * `@/lib/postnominal` is safe too, and so is the ONE hop it adds to the graph
+ * (#2599) — `@/lib/postnominal` → `@/lib/eligibility`: that module has ZERO
+ * imports of any kind, declares only `const` arrays/Sets and pure functions plus
+ * types, and never names `prisma` or `PrismaClient`. It is already in the client
+ * bundle by other routes (`components/publication/author-chip-row.tsx` and
+ * `components/scholar/mentoring-section.tsx` are both "use client" and import
+ * `isPubliclyDisplayed` from it), which is why it is deliberately NOT typed against
+ * generated Prisma — see its `publicRoleWhere` docblock.
  */
 import { tokenizeWithSpans } from "@/etl/news/names";
 import { LEADERSHIP_TIER, computeProminence } from "@/lib/api/prominence";
@@ -38,7 +46,11 @@ export type NewsQueueRow = {
   id: string;
   cwid: string;
   slug: string | null;
-  /** The name AS THE PROFILE RENDERS IT (preferredName + postnominal). */
+  /** The name AS THE PROFILE RENDERS IT — `formatPublishedName`, the same builder
+   *  `lib/api/profile.ts` uses for the profile `<h1>`, so this previews what an
+   *  approval publishes. Not a bare `preferredName + postnominal`: it normalizes
+   *  ("Doctor of Philosophy" → "PhD") and suppresses an enrolled doctoral student's
+   *  programme-of-study degree entirely (#2599). */
   scholarName: string;
   roleLabel: string | null;
   roleCategory: string | null;
@@ -361,7 +373,11 @@ export async function loadNewsQueue(
           id: r.id,
           cwid: r.cwid,
           slug: s?.slug ?? null,
-          scholarName: formatPublishedName(preferred, s?.postnominal ?? null),
+          scholarName: formatPublishedName(
+            preferred,
+            s?.postnominal ?? null,
+            s?.roleCategory ?? null,
+          ),
           roleLabel: formatRoleCategory(s?.roleCategory ?? null),
           roleCategory: s?.roleCategory ?? null,
           title: s?.primaryTitle ?? null,
