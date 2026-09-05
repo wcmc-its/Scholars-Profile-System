@@ -2473,6 +2473,33 @@ model CoreClaim {
   @@map("core_claim")
 }
 
+/// A core owner's manually-attested "known client" of a core facility — the
+/// CWID-only pass of ReciterAI #383 / SPS #2607: someone the owner knows uses
+/// the core, independent of any publication evidence. Mirrors CoreClaim's
+/// soft-remove convention (no hard delete, so the add/remove history survives):
+/// `removedAt IS NULL` is "active". No FK to core/scholar — a client CWID may
+/// precede a Scholar row (non-faculty core user) or outlive a core delete, the
+/// same ETL-immunity ADR-005 uses. `cwid` is stored lowercased/trimmed; the
+/// active list mirrors to the shared ReciterAI DynamoDB table
+/// (`lib/cores/client-writeback.ts`) so the engine can fold it into the next
+/// cores inference run as a signal, alongside the read/display join done here
+/// case-insensitively against `Scholar.cwid` (see `lib/api/core-clients.ts`).
+model CoreClient {
+  id        String    @id @default(uuid()) @db.VarChar(64)
+  coreId    String    @map("core_id") @db.VarChar(32)
+  cwid      String    @db.VarChar(32)
+  /// EFFECTIVE actor cwid (the impersonation target while "View as" is live,
+  /// else the real user) — same convention as CoreClaim.claimedBy.
+  addedBy   String    @map("added_by") @db.VarChar(32)
+  addedAt   DateTime  @default(now()) @map("added_at")
+  removedBy String?   @map("removed_by") @db.VarChar(32)
+  removedAt DateTime? @map("removed_at") // soft-remove → "active" = removedAt IS NULL
+
+  @@unique([coreId, cwid]) // one current row per (core, cwid) pair
+  @@index([coreId]) // per-core client list
+  @@map("core_client")
+}
+
 /// ReCiterAI publication scores per scholar+pmid pair (Q6 minimal projection).
 /// The other of the two fields that flow DynamoDB to MySQL.
 model PublicationScore {
