@@ -271,6 +271,12 @@ export function CoreClaimQueue({
   const [addText, setAddText] = useState("");
   const [addPending, setAddPending] = useState(false);
   const [addResult, setAddResult] = useState<string | null>(null);
+  // "Known clients" (ReciterAI #383 / SPS #2607) — the panel's open/closed
+  // state and its list live here (not in CoreClientsPanel), the same
+  // controlled-child pattern as Add PMIDs above, so the panel body can render
+  // as a toolbar sibling instead of a toolbar child (see the render below).
+  const [clientsOpen, setClientsOpen] = useState(false);
+  const [clientRows, setClientRows] = useState<CoreClientRow[]>(clients);
   const router = useRouter();
 
   // Tick/untick one filter; the "All" pill clears back to no narrowing.
@@ -631,7 +637,15 @@ export function CoreClaimQueue({
           >
             <Plus className="size-4" aria-hidden /> Add PMIDs
           </button>
-          <CoreClientsPanel coreId={core.id} initial={clients} />
+          <button
+            type="button"
+            onClick={() => setClientsOpen((v) => !v)}
+            aria-pressed={clientsOpen}
+            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+          >
+            <Users className="size-4" aria-hidden /> Known clients{" "}
+            <span className="tabular-nums opacity-80">{clientRows.length}</span>
+          </button>
         </div>
       </div>
 
@@ -679,6 +693,15 @@ export function CoreClaimQueue({
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {clientsOpen ? (
+        <CoreClientsPanel
+          coreId={core.id}
+          clients={clientRows}
+          onClientsChange={setClientRows}
+          onClose={() => setClientsOpen(false)}
+        />
       ) : null}
 
       {view === "review" ? (

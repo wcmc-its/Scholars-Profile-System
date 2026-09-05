@@ -7,14 +7,14 @@
  * `lib/api/core-queue.ts`'s case-insensitive CWID join (the engine's/owner's
  * casing is not guaranteed to match `scholar.cwid`'s stored casing).
  *
- * `parseCwidBlock` is the pure parsing half — mirrors
- * `components/edit/core-claim-queue.tsx`'s `parsePmidBlock`, but for a CWID
- * shape and a wider separator set (spaces, commas, semicolons, newlines).
+ * `parseCwidBlock` is re-exported from `lib/cores/cwid-block.ts` (the pure
+ * parsing half, shared with `components/edit/core-clients-panel.tsx` — see
+ * that module's comment for why the parser lives apart from this one, which
+ * imports `@/lib/db` at module scope).
  */
 import { db } from "@/lib/db";
 
-/** A CWID is 2-5 letters followed by 1-6 digits (e.g. `djb2001`, `ab123`). */
-const CWID_PATTERN = /^[a-z]{2,5}[0-9]{1,6}$/;
+export { parseCwidBlock } from "@/lib/cores/cwid-block";
 
 /** One resolved "known clients" row for the panel. */
 export interface CoreClientRow {
@@ -26,33 +26,6 @@ export interface CoreClientRow {
   slug: string | null;
   addedAt: Date;
   addedBy: string;
-}
-
-/**
- * Split a pasted block on any run of whitespace, commas, or semicolons;
- * lowercase + trim each token, de-dupe, and classify as a well-formed CWID or
- * `invalid`. Pure — unit-tested without the network, mirroring
- * `parsePmidBlock`'s contract (nothing is silently dropped).
- */
-export function parseCwidBlock(text: string): { cwids: string[]; invalid: string[] } {
-  const tokens = text
-    .split(/[\s,;]+/)
-    .map((t) => t.trim().toLowerCase())
-    .filter((t) => t.length > 0);
-  const cwids: string[] = [];
-  const invalid: string[] = [];
-  const seen = new Set<string>();
-  for (const t of tokens) {
-    if (CWID_PATTERN.test(t)) {
-      if (!seen.has(t)) {
-        seen.add(t);
-        cwids.push(t);
-      }
-    } else {
-      invalid.push(t);
-    }
-  }
-  return { cwids, invalid };
 }
 
 /** Minimal Prisma surface this loader needs — mock-friendly for unit tests. */

@@ -10,8 +10,8 @@
  * trusting the client) so a malformed token never reaches `core_client`;
  * malformed tokens are reported back as `invalid`, not rejected outright — a
  * paste of 40 CWIDs with one typo should not throw the other 39 away.
- * Response: `{ added: Array<{cwid, name: string|null}>, alreadyPresent:
- * string[], invalid: string[] }`.
+ * Response: `{ added: Array<{cwid, name: string|null, slug: string|null}>,
+ * alreadyPresent: string[], invalid: string[] }`.
  *
  * DELETE body: `{ coreId: string; cwid: string }` — soft-removes one active
  * row. `{ removed: true }`, or 404 when there is no active row for that CWID.
@@ -24,9 +24,16 @@
  * Each write is one MySQL transaction: upsert/soft-remove the `core_client`
  * row + a B03 audit row (`core_client_add` / `core_client_remove`,
  * `targetEntityType: "core"`, `targetEntityId: "{coreId}:{cwid}"`,
- * before/after `{ active: boolean }`). After the commit, best-effort mirrors
- * the core's FULL active client list to the engine's DynamoDB
- * (`lib/cores/client-writeback.ts`) — dormant-safe, never fails the write.
+ * before/after `{ active: boolean }`), and — still inside that same
+ * transaction — a re-read of the FULL active client list. That in-tx list
+ * (never a separate `db.read` call) is what gets mirrored to the engine's
+ * DynamoDB after the commit (`lib/cores/client-writeback.ts`, best-effort,
+ * dormant-safe, never fails the write): a reader-replica read at that point
+ * would race replica lag and could miss the just-added CWID or still show a
+ * just-removed one. The two pre-write reads that gate what gets written
+ * (`activeRows` in POST, `existing` in DELETE) go through `db.write` for the
+ * same read-your-writes reason; the core-existence and name-resolution reads
+ * stay on `db.read`.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
@@ -47,14 +54,12 @@ const PATH = "/api/edit/core-client";
  *  unbounded transaction (mirrors MAX_BULK_PMIDS on the claim bulk route). */
 const MAX_CWIDS = 500;
 
-/** Re-read the FULL active client list for a core and mirror it, best-effort.
- *  Never throws — a mirror failure must not fail the write it follows. */
-async function mirrorActiveClients(coreId: string): Promise<unknown> {
-  const activeAfter = await db.read.coreClient.findMany({
-    where: { coreId, removedAt: null },
-    select: { cwid: true },
-  });
-  return writeBackCoreClients({ coreId, cwids: activeAfter.map((r) => r.cwid) }).catch((err) => {
+/** Mirror a core's FULL active client list to the engine, best-effort. Never
+ *  throws — a mirror failure must not fail the write it follows. `cwids` must
+ *  come from a read taken INSIDE the write transaction (never a separate
+ *  `db.read` call) — see the module comment for why. */
+async function mirrorActiveClients(coreId: string, cwids: string[]): Promise<unknown> {
+  return writeBackCoreClients({ coreId, cwids }).catch((err) => {
     logEditFailure(`${PATH}#writeback`, err);
     return { ok: false as const, skipped: false as const };
   });
@@ -104,7 +109,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const activeRows =
     parsedCwids.length > 0
-      ? await db.read.coreClient.findMany({
+      ? await db.write.coreClient.findMany({
           where: { coreId, cwid: { in: parsedCwids }, removedAt: null },
           select: { cwid: true },
         })
@@ -113,10 +118,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const toWrite = parsedCwids.filter((c) => !activeSet.has(c));
   const alreadyPresent = parsedCwids.filter((c) => activeSet.has(c));
 
+  let writeback: unknown;
   if (toWrite.length > 0) {
     const now = new Date();
+    let mirrorCwids: string[];
     try {
-      await db.write.$transaction(async (tx) => {
+      mirrorCwids = await db.write.$transaction(async (tx) => {
         for (const cwid of toWrite) {
           await tx.coreClient.upsert({
             where: { coreId_cwid: { coreId, cwid } },
@@ -136,30 +143,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             requestId,
           });
         }
+        // Re-read the full active list from the SAME transaction — see the
+        // module comment on why this must not be a separate db.read call.
+        const activeAfter = await tx.coreClient.findMany({
+          where: { coreId, removedAt: null },
+          select: { cwid: true },
+        });
+        return activeAfter.map((r) => r.cwid);
       });
     } catch (err) {
       logEditFailure(PATH, err);
       return editError(500, "write_failed");
     }
+    // best-effort engine writeback: mirror the FULL active list read inside
+    // the transaction above. Only when something actually changed (mirrors
+    // the bulk-claim "nothing written → no transaction, no writeback" posture).
+    writeback = await mirrorActiveClients(coreId, mirrorCwids);
   }
 
-  // --- resolve names for the newly-added cwids only (case-insensitive, same
-  //     convention as loadCoreClients — never reject a well-formed CWID for
-  //     having no Scholar row, just report name: null). ---
+  // --- resolve names + slugs for the newly-added cwids only (case-insensitive,
+  //     same convention as loadCoreClients — never reject a well-formed CWID
+  //     for having no Scholar row, just report name/slug: null). ---
   const scholars =
     toWrite.length > 0
       ? await db.read.scholar.findMany({
           where: { cwid: { in: toWrite } },
-          select: { cwid: true, preferredName: true },
+          select: { cwid: true, preferredName: true, slug: true },
         })
       : [];
-  const nameByLowerCwid = new Map(scholars.map((s) => [s.cwid.toLowerCase(), s.preferredName]));
-  const added = toWrite.map((cwid) => ({ cwid, name: nameByLowerCwid.get(cwid) ?? null }));
-
-  // --- best-effort engine writeback: mirror the FULL active list after the
-  //     commit. Only when something actually changed (mirrors the bulk-claim
-  //     "nothing written → no transaction, no writeback" posture). ---
-  const writeback = toWrite.length > 0 ? await mirrorActiveClients(coreId) : undefined;
+  const byLowerCwid = new Map(scholars.map((s) => [s.cwid.toLowerCase(), s]));
+  const added = toWrite.map((cwid) => {
+    const scholar = byLowerCwid.get(cwid);
+    return { cwid, name: scholar?.preferredName ?? null, slug: scholar?.slug ?? null };
+  });
 
   return editOk({ added, alreadyPresent, invalid, writeback });
 }
@@ -202,7 +218,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
-  const existing = await db.read.coreClient.findUnique({
+  const existing = await db.write.coreClient.findUnique({
     where: { coreId_cwid: { coreId, cwid: normalizedCwid } },
     select: { removedAt: true },
   });
@@ -211,8 +227,9 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   }
 
   const now = new Date();
+  let mirrorCwids: string[];
   try {
-    await db.write.$transaction(async (tx) => {
+    mirrorCwids = await db.write.$transaction(async (tx) => {
       await tx.coreClient.update({
         where: { coreId_cwid: { coreId, cwid: normalizedCwid } },
         data: { removedBy: session.cwid, removedAt: now },
@@ -229,13 +246,20 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
         ts: now,
         requestId,
       });
+      // Re-read the full active list from the SAME transaction — see the
+      // module comment on why this must not be a separate db.read call.
+      const activeAfter = await tx.coreClient.findMany({
+        where: { coreId, removedAt: null },
+        select: { cwid: true },
+      });
+      return activeAfter.map((r) => r.cwid);
     });
   } catch (err) {
     logEditFailure(`${PATH}#remove`, err);
     return editError(500, "write_failed");
   }
 
-  const writeback = await mirrorActiveClients(coreId);
+  const writeback = await mirrorActiveClients(coreId, mirrorCwids);
 
   return editOk({ removed: true, writeback });
 }

@@ -43,11 +43,13 @@ vi.mock("@/lib/db", () => ({
   db: {
     read: {
       core: { findUnique: mockCoreFindUnique },
-      coreClient: { findMany: mockClientFindMany, findUnique: mockClientFindUnique },
       scholar: { findMany: mockScholarFindMany },
       unitAdmin: { findUnique: mockUnitAdminFindUnique },
     },
-    write: { $transaction: mockTransaction },
+    write: {
+      $transaction: mockTransaction,
+      coreClient: { findMany: mockClientFindMany, findUnique: mockClientFindUnique },
+    },
   },
 }));
 
@@ -102,7 +104,9 @@ beforeEach(() => {
   mockAppendAuditRow.mockResolvedValue(undefined);
   mockWriteBack.mockResolvedValue({ ok: true, skipped: false });
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
-    cb({ coreClient: { upsert: mockClientUpsert, update: mockClientUpdate } }),
+    cb({
+      coreClient: { upsert: mockClientUpsert, update: mockClientUpdate, findMany: mockClientFindMany },
+    }),
   );
 });
 
@@ -157,15 +161,15 @@ describe("POST /api/edit/core-client", () => {
 
   it("adds a new CWID: upserts + audits (core_client_add) + mirrors the full active list", async () => {
     mockScholarFindMany.mockResolvedValue([
-      { cwid: "djb2001", preferredName: "Doug Ballon" },
+      { cwid: "djb2001", preferredName: "Doug Ballon", slug: "doug-ballon" },
     ]);
     mockClientFindMany
-      .mockResolvedValueOnce([]) // pre-write active check: none active yet
-      .mockResolvedValueOnce([{ cwid: "djb2001" }]); // post-write mirror read
+      .mockResolvedValueOnce([]) // pre-write active check (db.write, read-your-writes): none active yet
+      .mockResolvedValueOnce([{ cwid: "djb2001" }]); // post-write mirror read, from INSIDE the tx
     const res = await post({ cwids: ["DJB2001"] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      added: [{ cwid: "djb2001", name: "Doug Ballon" }],
+      added: [{ cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon" }],
       alreadyPresent: [],
       invalid: [],
     });
@@ -199,6 +203,15 @@ describe("POST /api/edit/core-client", () => {
     expect(res.status).toBe(200);
     const upsert = mockClientUpsert.mock.calls[0][0];
     expect(upsert.update).toMatchObject({ removedBy: null, removedAt: null, addedBy: ACTOR });
+  });
+
+  it("resolves slug: null for an added CWID with no Scholar row, and for one with no slug", async () => {
+    mockScholarFindMany.mockResolvedValue([{ cwid: "djb2001", preferredName: "Doug Ballon", slug: null }]);
+    mockClientFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ cwid: "djb2001" }]);
+    const res = await post({ cwids: ["djb2001"] });
+    expect(await res.json()).toMatchObject({
+      added: [{ cwid: "djb2001", name: "Doug Ballon", slug: null }],
+    });
   });
 
   it("reports an already-active CWID as alreadyPresent, writes nothing for it", async () => {

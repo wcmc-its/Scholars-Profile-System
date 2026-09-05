@@ -1090,4 +1090,21 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
     expect(screen.getByRole("button", { name: /Known clients/ }).textContent).toContain("0");
   });
+
+  it("opens the panel body as a sibling of the toolbar (not nested inside it) on click", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    // absent before the click
+    expect(screen.queryByLabelText("CWIDs")).toBeNull();
+
+    const toggle = screen.getByRole("button", { name: /Known clients/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+
+    // present after, and NOT a descendant of the toolbar row the button lives in
+    const textarea = screen.getByLabelText("CWIDs");
+    expect(textarea).toBeTruthy();
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    const toolbarRow = toggle.closest("div");
+    expect(toolbarRow?.contains(textarea)).toBe(false);
+  });
 });
