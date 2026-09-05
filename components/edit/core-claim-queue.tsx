@@ -27,8 +27,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import type { CoreClientRow } from "@/lib/api/core-clients";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { CoreClientsPanel } from "@/components/edit/core-clients-panel";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { toCsv } from "@/lib/csv";
 
@@ -217,6 +219,11 @@ interface CoreClaimQueueProps {
   /** Previously-rejected pairs (server-loaded) for the Rejected tab. Optional so
    *  the simple all-candidates render stays a single prop set. */
   rejected?: CoreQueueRow[];
+  /** The core's current active "Known clients" list (ReciterAI #383 / SPS
+   *  #2607). Optional so the simple all-candidates render stays a single prop
+   *  set; defaults to empty so the panel still renders (with nothing listed)
+   *  when a caller doesn't pass it. */
+  clients?: CoreClientRow[];
 }
 
 export function CoreClaimQueue({
@@ -224,6 +231,7 @@ export function CoreClaimQueue({
   candidates,
   confirmed,
   rejected = [],
+  clients = [],
 }: CoreClaimQueueProps) {
   const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -623,6 +631,7 @@ export function CoreClaimQueue({
           >
             <Plus className="size-4" aria-hidden /> Add PMIDs
           </button>
+          <CoreClientsPanel coreId={core.id} initial={clients} />
         </div>
       </div>
 

@@ -28,6 +28,7 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { CoreClaimQueue } from "@/components/edit/core-claim-queue";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { loadCoreClients, type CoreClientLookup } from "@/lib/api/core-clients";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -81,6 +82,8 @@ export default async function EditCoreReviewPage({
   const queue = await loadCoreReviewQueue(coreId, db.read);
   if (!queue) notFound();
 
+  const clients = await loadCoreClients(coreId, db.read as unknown as CoreClientLookup);
+
   return (
     <div className="min-h-screen bg-apollo-page" data-slot="edit-core-review-page">
       {/* This page has no `AdminSubnav` below it, so the top bar must supply the
@@ -108,6 +111,7 @@ export default async function EditCoreReviewPage({
           candidates={queue.candidates}
           confirmed={queue.confirmed}
           rejected={queue.rejected}
+          clients={clients}
         />
       </main>
     </div>

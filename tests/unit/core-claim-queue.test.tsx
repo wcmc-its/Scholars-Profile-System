@@ -1061,3 +1061,33 @@ describe("compareBySort", () => {
     expect(compareBySort("uncertain", flip, sure)).toBeLessThan(0);
   });
 });
+
+// "Known clients" panel (ReciterAI #383 / SPS #2607) — the panel's own
+// behavior is covered by tests/unit/core-clients-panel.test.tsx; this just
+// confirms CoreClaimQueue wires the toolbar button in with the right count.
+describe("CoreClaimQueue — Known clients toolbar wiring", () => {
+  it("renders the Known clients button next to Add PMIDs, with the active count", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[]}
+        clients={[
+          { cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", addedAt: new Date(), addedBy: "rev01" },
+        ]}
+      />,
+    );
+    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
+    const knownClients = screen.getByRole("button", { name: /Known clients/ });
+    expect(knownClients.textContent).toContain("1");
+    // Known clients sits right after Add PMIDs in DOM order (toolbar wiring).
+    expect(
+      addPmids.compareDocumentPosition(knownClients) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("renders the Known clients button with a 0 count when no clients prop is passed", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    expect(screen.getByRole("button", { name: /Known clients/ }).textContent).toContain("0");
+  });
+});
