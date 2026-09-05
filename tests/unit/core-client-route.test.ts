@@ -11,6 +11,7 @@ const {
   mockReadEditRequest,
   mockCoreFindUnique,
   mockClientFindMany,
+  mockTxFindMany,
   mockClientFindUnique,
   mockScholarFindMany,
   mockUnitAdminFindUnique,
@@ -23,6 +24,7 @@ const {
   mockReadEditRequest: vi.fn(),
   mockCoreFindUnique: vi.fn(),
   mockClientFindMany: vi.fn(),
+  mockTxFindMany: vi.fn(),
   mockClientFindUnique: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockUnitAdminFindUnique: vi.fn(),
@@ -96,7 +98,8 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockCoreFindUnique.mockResolvedValue({ id: "2" });
   mockUnitAdminFindUnique.mockResolvedValue(null); // role none; superuser session allows
-  mockClientFindMany.mockResolvedValue([]); // no prior active rows / empty mirror list by default
+  mockClientFindMany.mockResolvedValue([]); // no prior active rows (db.write gating read) by default
+  mockTxFindMany.mockResolvedValue([]); // empty in-tx mirror list by default
   mockClientFindUnique.mockResolvedValue({ removedAt: null }); // an active row exists (DELETE default)
   mockScholarFindMany.mockResolvedValue([]);
   mockClientUpsert.mockResolvedValue({});
@@ -105,7 +108,7 @@ beforeEach(() => {
   mockWriteBack.mockResolvedValue({ ok: true, skipped: false });
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
     cb({
-      coreClient: { upsert: mockClientUpsert, update: mockClientUpdate, findMany: mockClientFindMany },
+      coreClient: { upsert: mockClientUpsert, update: mockClientUpdate, findMany: mockTxFindMany },
     }),
   );
 });
@@ -163,9 +166,10 @@ describe("POST /api/edit/core-client", () => {
     mockScholarFindMany.mockResolvedValue([
       { cwid: "djb2001", preferredName: "Doug Ballon", slug: "doug-ballon" },
     ]);
-    mockClientFindMany
-      .mockResolvedValueOnce([]) // pre-write active check (db.write, read-your-writes): none active yet
-      .mockResolvedValueOnce([{ cwid: "djb2001" }]); // post-write mirror read, from INSIDE the tx
+    mockClientFindMany.mockResolvedValueOnce([]); // pre-write active check (db.write, read-your-writes): none active yet
+    // The tx mirror read gets its OWN, DISTINCT list — proves writeBackCoreClients
+    // received the in-tx read, not whatever db.write/db.read findMany would return.
+    mockTxFindMany.mockResolvedValueOnce([{ cwid: "djb2001" }]);
     const res = await post({ cwids: ["DJB2001"] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
@@ -189,16 +193,22 @@ describe("POST /api/edit/core-client", () => {
     expect(audit.afterValues).toEqual({ active: true });
     expect(audit.actorCwid).toBe(ACTOR);
 
-    // mirror runs AFTER the transaction, with the full post-write active list
+    // mirror runs AFTER the transaction, with the full post-write active list —
+    // and that list must be the tx mock's DISTINCT list, not db.write's/db.read's.
     expect(mockTransaction).toHaveBeenCalled();
     expect(mockWriteBack).toHaveBeenCalledWith({ coreId: "2", cwids: ["djb2001"] });
+    expect(mockTxFindMany).toHaveBeenCalledTimes(1);
     const transactionOrder = mockTransaction.mock.invocationCallOrder[0];
+    const upsertOrder = mockClientUpsert.mock.invocationCallOrder[0];
+    const txFindManyOrder = mockTxFindMany.mock.invocationCallOrder[0];
     const writebackOrder = mockWriteBack.mock.invocationCallOrder[0];
+    expect(txFindManyOrder).toBeGreaterThan(upsertOrder);
     expect(writebackOrder).toBeGreaterThan(transactionOrder);
   });
 
   it("re-adding a soft-removed CWID clears removedBy/removedAt (via the same upsert)", async () => {
-    mockClientFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ cwid: "djb2001" }]);
+    mockClientFindMany.mockResolvedValueOnce([]);
+    mockTxFindMany.mockResolvedValueOnce([{ cwid: "djb2001" }]);
     const res = await post({ cwids: ["djb2001"] });
     expect(res.status).toBe(200);
     const upsert = mockClientUpsert.mock.calls[0][0];
@@ -207,7 +217,8 @@ describe("POST /api/edit/core-client", () => {
 
   it("resolves slug: null for an added CWID with no Scholar row, and for one with no slug", async () => {
     mockScholarFindMany.mockResolvedValue([{ cwid: "djb2001", preferredName: "Doug Ballon", slug: null }]);
-    mockClientFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ cwid: "djb2001" }]);
+    mockClientFindMany.mockResolvedValueOnce([]);
+    mockTxFindMany.mockResolvedValueOnce([{ cwid: "djb2001" }]);
     const res = await post({ cwids: ["djb2001"] });
     expect(await res.json()).toMatchObject({
       added: [{ cwid: "djb2001", name: "Doug Ballon", slug: null }],
@@ -224,7 +235,8 @@ describe("POST /api/edit/core-client", () => {
   });
 
   it("reports a malformed token as invalid without rejecting the well-formed ones", async () => {
-    mockClientFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ cwid: "djb2001" }]);
+    mockClientFindMany.mockResolvedValueOnce([]);
+    mockTxFindMany.mockResolvedValueOnce([{ cwid: "djb2001" }]);
     const res = await post({ cwids: ["djb2001", "not-a-cwid"] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
@@ -249,7 +261,8 @@ describe("POST /api/edit/core-client", () => {
   });
 
   it("a mirror failure is swallowed (advisory) and the add still 200s", async () => {
-    mockClientFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ cwid: "djb2001" }]);
+    mockClientFindMany.mockResolvedValueOnce([]);
+    mockTxFindMany.mockResolvedValueOnce([{ cwid: "djb2001" }]);
     mockWriteBack.mockRejectedValue(new Error("ddb down"));
     const res = await post({ cwids: ["djb2001"] });
     expect(res.status).toBe(200);
@@ -301,7 +314,10 @@ describe("DELETE /api/edit/core-client", () => {
   });
 
   it("soft-removes an active row: update + audit (core_client_remove) in one tx, then mirrors", async () => {
-    mockClientFindMany.mockResolvedValue([]); // nothing left active after the removal
+    // db.write's findMany is a stale/DISTINCT list that must NOT reach the
+    // writeback — only the in-tx read (mockTxFindMany) may.
+    mockClientFindMany.mockResolvedValue([{ cwid: "stale-should-not-be-used" }]);
+    mockTxFindMany.mockResolvedValueOnce([]); // nothing left active after the removal, read INSIDE the tx
     const res = await del();
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ removed: true });
@@ -319,10 +335,15 @@ describe("DELETE /api/edit/core-client", () => {
     expect(audit.beforeValues).toEqual({ active: true });
     expect(audit.afterValues).toEqual({ active: false });
 
-    // mirror runs AFTER the transaction, with the full remaining active list
+    // mirror runs AFTER the transaction, with the tx mock's DISTINCT (empty)
+    // remaining-active list — never db.write's/db.read's stale list.
     expect(mockWriteBack).toHaveBeenCalledWith({ coreId: "2", cwids: [] });
+    expect(mockTxFindMany).toHaveBeenCalledTimes(1);
     const transactionOrder = mockTransaction.mock.invocationCallOrder[0];
+    const updateOrder = mockClientUpdate.mock.invocationCallOrder[0];
+    const txFindManyOrder = mockTxFindMany.mock.invocationCallOrder[0];
     const writebackOrder = mockWriteBack.mock.invocationCallOrder[0];
+    expect(txFindManyOrder).toBeGreaterThan(updateOrder);
     expect(writebackOrder).toBeGreaterThan(transactionOrder);
   });
 

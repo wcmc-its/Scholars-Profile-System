@@ -589,7 +589,10 @@ export function CoreClaimQueue({
       <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
         {announce}
       </div>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div
+        data-slot="core-queue-toolbar"
+        className="mb-2 flex flex-wrap items-center justify-between gap-2"
+      >
         {hasHistory ? (
           <ViewTabs
             view={view}

@@ -1104,7 +1104,24 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     const textarea = screen.getByLabelText("CWIDs");
     expect(textarea).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    const toolbarRow = toggle.closest("div");
-    expect(toolbarRow?.contains(textarea)).toBe(false);
+
+    // The OUTER toolbar row is the justify-between container that wraps both
+    // button groups (view tabs/heading + the Add PMIDs / Known clients
+    // buttons) — not just the inner "flex flex-wrap items-center gap-2"
+    // button group. `toggle.closest("div")` alone would only find that inner
+    // group and miss a regression that nests the panel inside the outer row.
+    const outerRow = toggle.closest('[data-slot="core-queue-toolbar"]');
+    expect(outerRow).toBeTruthy();
+    expect(outerRow?.className).toContain("justify-between");
+    expect(outerRow?.contains(textarea)).toBe(false);
+
+    // And the panel body is a later sibling in the same parent as the
+    // Add PMIDs block sits in — not merely "somewhere outside" the toolbar.
+    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
+    const commonParent = outerRow?.parentElement;
+    expect(commonParent?.contains(addPmids)).toBe(true);
+    expect(commonParent?.contains(textarea)).toBe(true);
+    const position = outerRow?.compareDocumentPosition(textarea) ?? 0;
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
