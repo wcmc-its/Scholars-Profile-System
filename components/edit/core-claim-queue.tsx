@@ -27,8 +27,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import type { CoreClientRow } from "@/lib/api/core-clients";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { CoreClientsPanel } from "@/components/edit/core-clients-panel";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { toCsv } from "@/lib/csv";
 
@@ -217,6 +219,11 @@ interface CoreClaimQueueProps {
   /** Previously-rejected pairs (server-loaded) for the Rejected tab. Optional so
    *  the simple all-candidates render stays a single prop set. */
   rejected?: CoreQueueRow[];
+  /** The core's current active "Known clients" list (ReciterAI #383 / SPS
+   *  #2607). Optional so the simple all-candidates render stays a single prop
+   *  set; defaults to empty so the panel still renders (with nothing listed)
+   *  when a caller doesn't pass it. */
+  clients?: CoreClientRow[];
 }
 
 export function CoreClaimQueue({
@@ -224,6 +231,7 @@ export function CoreClaimQueue({
   candidates,
   confirmed,
   rejected = [],
+  clients = [],
 }: CoreClaimQueueProps) {
   const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -263,6 +271,12 @@ export function CoreClaimQueue({
   const [addText, setAddText] = useState("");
   const [addPending, setAddPending] = useState(false);
   const [addResult, setAddResult] = useState<string | null>(null);
+  // "Known clients" (ReciterAI #383 / SPS #2607) — the panel's open/closed
+  // state and its list live here (not in CoreClientsPanel), the same
+  // controlled-child pattern as Add PMIDs above, so the panel body can render
+  // as a toolbar sibling instead of a toolbar child (see the render below).
+  const [clientsOpen, setClientsOpen] = useState(false);
+  const [clientRows, setClientRows] = useState<CoreClientRow[]>(clients);
   const router = useRouter();
 
   // Tick/untick one filter; the "All" pill clears back to no narrowing.
@@ -575,7 +589,10 @@ export function CoreClaimQueue({
       <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
         {announce}
       </div>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div
+        data-slot="core-queue-toolbar"
+        className="mb-2 flex flex-wrap items-center justify-between gap-2"
+      >
         {hasHistory ? (
           <ViewTabs
             view={view}
@@ -622,6 +639,15 @@ export function CoreClaimQueue({
             className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
           >
             <Plus className="size-4" aria-hidden /> Add PMIDs
+          </button>
+          <button
+            type="button"
+            onClick={() => setClientsOpen((v) => !v)}
+            aria-pressed={clientsOpen}
+            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+          >
+            <Users className="size-4" aria-hidden /> Known clients{" "}
+            <span className="tabular-nums opacity-80">{clientRows.length}</span>
           </button>
         </div>
       </div>
@@ -670,6 +696,15 @@ export function CoreClaimQueue({
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {clientsOpen ? (
+        <CoreClientsPanel
+          coreId={core.id}
+          clients={clientRows}
+          onClientsChange={setClientRows}
+          onClose={() => setClientsOpen(false)}
+        />
       ) : null}
 
       {view === "review" ? (

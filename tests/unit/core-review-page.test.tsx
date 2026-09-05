@@ -20,6 +20,7 @@ const {
   mockLogAuthzDenied,
   mockForbidden,
   mockQueueComponent,
+  mockLoadClients,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -34,11 +35,16 @@ const {
   mockLogAuthzDenied: vi.fn(),
   mockForbidden: vi.fn(() => null),
   mockQueueComponent: vi.fn(() => null),
+  // "Known clients" (ReciterAI #383 / SPS #2607) — this page also loads the
+  // core's active client list alongside the queue; stubbed out here since
+  // this file is purely about the authorization gates above it.
+  mockLoadClients: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/api/core-queue", () => ({ loadCoreReviewQueue: mockLoadQueue }));
+vi.mock("@/lib/api/core-clients", () => ({ loadCoreClients: mockLoadClients }));
 vi.mock("@/lib/auth/authz-events", () => ({ logAuthzDenied: mockLogAuthzDenied }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -87,6 +93,7 @@ const QUEUE = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockLoadQueue.mockResolvedValue(QUEUE);
+  mockLoadClients.mockResolvedValue([]);
 });
 
 describe("/edit/core/[coreId]/review — authorization", () => {

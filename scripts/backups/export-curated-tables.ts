@@ -108,6 +108,10 @@ export const CURATED_TABLES: readonly string[] = [
   //     are stored here, so these are part of the org-unit curation surface. ---
   "field_override",
   "suppression",
+  // ReciterAI #383 / SPS #2607 (CWID-only pass) — a core owner's manually
+  // attested "known client" list; ETL-immune, same posture as `core_claim`
+  // (not itself curated here — see the note at its own migration for why).
+  "core_client",
 ];
 
 interface ColumnMeta {

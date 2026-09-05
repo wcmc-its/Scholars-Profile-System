@@ -101,6 +101,18 @@ export type AuditAction =
    *  inference); `targetEntityType='core'`, `targetEntityId` is the
    *  `"{coreId}:{pmid}"` pair, before/after carry the claim status transition. */
   | "core_claim"
+  /** a core owner (or Superuser/comms_steward) added a CWID to a core's
+   *  "Known clients" list on `/edit/core/[coreId]/review` (ReciterAI #383 /
+   *  SPS #2607, CWID-only pass); `targetEntityType='core'`, `targetEntityId`
+   *  is the `"{coreId}:{cwid}"` pair; before/after carry `{ active: boolean }`.
+   *  Requires the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "core_client_add"
+  /** the inverse of `core_client_add` — a known-client CWID soft-removed from
+   *  a core's list. Same `targetEntityType`/`targetEntityId` shape; before/
+   *  after carry `{ active: boolean }`. Requires the `scholars_audit` action
+   *  ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "core_client_remove"
   /** a scholar (or a genuine superuser on their behalf) confirmed a RePORTER
    *  PMID-overlap "Is this you?" match (`REPORTER_MATCH_V2`); writes the
    *  `person_nih_profile` row whose grants materialize next nightly.

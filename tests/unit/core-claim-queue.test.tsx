@@ -1061,3 +1061,67 @@ describe("compareBySort", () => {
     expect(compareBySort("uncertain", flip, sure)).toBeLessThan(0);
   });
 });
+
+// "Known clients" panel (ReciterAI #383 / SPS #2607) — the panel's own
+// behavior is covered by tests/unit/core-clients-panel.test.tsx; this just
+// confirms CoreClaimQueue wires the toolbar button in with the right count.
+describe("CoreClaimQueue — Known clients toolbar wiring", () => {
+  it("renders the Known clients button next to Add PMIDs, with the active count", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[]}
+        clients={[
+          { cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", addedAt: new Date(), addedBy: "rev01" },
+        ]}
+      />,
+    );
+    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
+    const knownClients = screen.getByRole("button", { name: /Known clients/ });
+    expect(knownClients.textContent).toContain("1");
+    // Known clients sits right after Add PMIDs in DOM order (toolbar wiring).
+    expect(
+      addPmids.compareDocumentPosition(knownClients) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("renders the Known clients button with a 0 count when no clients prop is passed", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    expect(screen.getByRole("button", { name: /Known clients/ }).textContent).toContain("0");
+  });
+
+  it("opens the panel body as a sibling of the toolbar (not nested inside it) on click", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    // absent before the click
+    expect(screen.queryByLabelText("CWIDs")).toBeNull();
+
+    const toggle = screen.getByRole("button", { name: /Known clients/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+
+    // present after, and NOT a descendant of the toolbar row the button lives in
+    const textarea = screen.getByLabelText("CWIDs");
+    expect(textarea).toBeTruthy();
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+    // The OUTER toolbar row is the justify-between container that wraps both
+    // button groups (view tabs/heading + the Add PMIDs / Known clients
+    // buttons) — not just the inner "flex flex-wrap items-center gap-2"
+    // button group. `toggle.closest("div")` alone would only find that inner
+    // group and miss a regression that nests the panel inside the outer row.
+    const outerRow = toggle.closest('[data-slot="core-queue-toolbar"]');
+    expect(outerRow).toBeTruthy();
+    expect(outerRow?.className).toContain("justify-between");
+    expect(outerRow?.contains(textarea)).toBe(false);
+
+    // And the panel body is a later sibling in the same parent as the
+    // Add PMIDs block sits in — not merely "somewhere outside" the toolbar.
+    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
+    const commonParent = outerRow?.parentElement;
+    expect(commonParent?.contains(addPmids)).toBe(true);
+    expect(commonParent?.contains(textarea)).toBe(true);
+    const position = outerRow?.compareDocumentPosition(textarea) ?? 0;
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
