@@ -491,9 +491,12 @@ export const PUBLICATION_INDEX_INCLUDE = {
     // doc, moving BM25 field-length normalization and so every relevance
     // score, with nothing failing. That is a legitimate change to make — but
     // as a decision A/B'd against scripts/search-eval/, not a side effect of
-    // an ETL change. Against deployed data this filters nothing (the ETL
-    // `buildAuthorshipRows` skips authors outside `ourCwidSet`; staging held
-    // 0 of 285,587 null-cwid rows and prod 0 of 285,526, 2026-09), but
+    // an ETL change. Against deployed data it filters nothing, structurally:
+    // the only writer that runs deployed, `buildAuthorshipRows` in
+    // etl/reciter/index.ts, skips authors outside `ourCwidSet` and returns an
+    // `AuthorshipRow` whose `cwid` is a non-nullable `string`, so no deployed
+    // environment holds a null-cwid row. Staging was counted as a check on
+    // that (0 of 285,587, 2026-09); other environments were not counted. But
     // `seed/publications.ts` writes non-WCM rows, so an index built from a
     // seeded dev database does lose those names. `buildPublicationDoc` itself
     // does not filter — a caller passing its own rows keeps the full byline.

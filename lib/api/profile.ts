@@ -1122,12 +1122,16 @@ export const getScholarFullProfileBySlug = cache(
                 // WCM authorship rows only — a projection guard, not a
                 // behavior change: the `wcmAuthors` mapper below already
                 // requires `au.scholar`, which a null-cwid row never has, so
-                // output is identical with or without it. Deployed data is
-                // WCM-only anyway (the ETL `buildAuthorshipRows` skips authors
-                // outside `ourCwidSet`; staging and prod each held zero
-                // null-cwid rows, 2026-09) and `seed/publications.ts` is the
-                // one writer of non-WCM rows. This keeps such rows from being
-                // hauled over the wire per publication just to be dropped.
+                // output is identical with or without it. No deployed
+                // environment holds a null-cwid row anyway: the only writer
+                // that runs deployed, `buildAuthorshipRows` in
+                // etl/reciter/index.ts, skips authors outside `ourCwidSet`
+                // and returns an `AuthorshipRow` whose `cwid` is a
+                // non-nullable `string`. Staging was counted as a check on
+                // that (0 of 285,587, 2026-09); other environments were not
+                // counted. `seed/publications.ts` is the one writer of
+                // non-WCM rows. This keeps such rows from being hauled over
+                // the wire per publication just to be dropped.
                 where: { cwid: { not: null } },
                 orderBy: { position: "asc" },
                 include: {
