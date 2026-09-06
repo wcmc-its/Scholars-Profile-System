@@ -2,6 +2,9 @@
  * The per-core review queue client component (components/edit/core-claim-queue).
  * Renders candidate evidence and posts confirm/reject to /api/edit/core-claim with
  * optimistic local state. fetch is mocked — no DB/network.
+ *
+ * Every fixture value here is synthetic: made-up names, made-up CWIDs, made-up
+ * PMIDs. Nothing in this file is a real person or a real record.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -10,10 +13,16 @@ const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
 
 import {
+  bandRange,
   buildSignals,
-  decodeTopicalPrior,
   compareBySort,
   CoreClaimQueue,
+  decodeTopicalPrior,
+  evidenceGroupKey,
+  evidenceGroupLabel,
+  evidenceTokens,
+  likelihoodBand,
+  llmVerdict,
   matchesFilters,
   parsePmidBlock,
 } from "@/components/edit/core-claim-queue";
@@ -26,25 +35,27 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     title: "Advanced MRI of the brain",
     journal: "NeuroImage",
     year: 2021,
-    authorsString: "Ballon D, Dyke J",
-    fullAuthorsString: "Ballon D, Dyke J, Xiang J",
+    authorsString: "Testerson A, Fixture B",
+    fullAuthorsString: "Testerson A, Fixture B, Sample C",
     abstract: "We imaged the brain in detail.",
     synopsis: "A faster MRI sequence.",
     likelihood: 0.82,
     status: "candidate",
-    coauthors: ["djb2001"],
-    coauthorScholars: [{ cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", dept: "Radiology" }],
-    wcmAuthors: [{ cwid: "jx2001", name: "Jenny Xiang", slug: "jenny-xiang", dept: "Genomics" }],
+    coauthors: ["aaa1001"],
+    coauthorScholars: [
+      { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" },
+    ],
+    wcmAuthors: [{ cwid: "ccc1003", name: "Casey Sample", slug: "casey-sample", dept: "Genomics" }],
     signalAck: true,
     ackAlias: "CBIC",
-    ackSnippet: "processed at the Citigroup Biomedical Imaging Center",
+    ackSnippet: "processed at the CBIC imaging facility",
     llmScore: 7,
     llmRationale: "Acknowledges the imaging core for confocal microscopy.",
     authorAffinity: 0.42,
     topicalPrior: null,
     citationCount: 12,
     pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
-    doi: "10.1016/j.neuroimage.2021.001",
+    doi: "10.1000/synthetic.2021.001",
     claimed: false,
     isManual: false,
     relativeCitationRatio: null,
@@ -56,47 +67,114 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
 
 const CORE = { id: "2", name: "Biomedical Imaging" };
 
+/** Expand the only open card's evidence strip — signal rows start collapsed. */
+function showEvidence() {
+  fireEvent.click(screen.getByRole("button", { name: /Show evidence/ }));
+}
+
+/** The expanded per-signal list of the only open card. */
+function evidence() {
+  return screen.getByLabelText("evidence");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("CoreClaimQueue", () => {
-  it("renders a candidate with its combined-likelihood bar and per-signal rows", () => {
+  it("reads the score as a band word plus a percent, with no 'likelihood' caption", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(screen.getByText("Advanced MRI of the brain")).toBeTruthy();
-    // combined-likelihood bar
-    expect(screen.getByText("Combined likelihood")).toBeTruthy();
-    expect(screen.getByText("82%")).toBeTruthy();
-    expect(screen.getByText(/4 of 5 signals fired/)).toBeTruthy();
-    // one row per fired signal, with fixed-per-type tiers + raw readout in the meter
-    expect(screen.getByText("Named in the acknowledgments")).toBeTruthy();
-    expect(screen.getByText("Direct")).toBeTruthy(); // ack tier
-    expect(screen.getByRole("link", { name: "Doug Ballon" })).toBeTruthy(); // co-author row
-    expect(screen.getByText("LLM triage")).toBeTruthy();
-    expect(screen.getByText("Moderate")).toBeTruthy(); // LLM is Moderate regardless of 7/10
-    expect(screen.getByText("7/10")).toBeTruthy(); // raw score still shown
-    expect(screen.getByText("Repeat user of this core")).toBeTruthy();
-    expect(screen.getByText("42%")).toBeTruthy(); // affinity readout
+    // the whole score vocabulary is the band word + the percent
+    expect(screen.getByText("Moderate 82%")).toBeTruthy();
+    expect(screen.queryByText("Combined likelihood")).toBeNull();
+    expect(screen.queryByText(/Evidence score/)).toBeNull();
+    expect(screen.getByText(/4 of 5 signals/)).toBeTruthy();
+  });
+
+  it("names each band at its exact threshold, and just below it", () => {
+    const at = (likelihood: number) => {
+      const view = render(
+        <CoreClaimQueue core={CORE} candidates={[row({ likelihood })]} confirmed={[]} />,
+      );
+      const text = view.container.querySelector('[data-slot="core-queue-score"]')?.textContent;
+      view.unmount();
+      return text;
+    };
+    // inclusive lower bounds: 0.85 / 0.65 / 0.40 are IN the higher band
+    expect(at(0.85)).toBe("Strong 85%");
+    expect(at(0.94)).toBe("Strong 94%");
+    expect(at(0.84)).toBe("Moderate 84%");
+    expect(at(0.65)).toBe("Moderate 65%");
+    expect(at(0.71)).toBe("Moderate 71%");
+    expect(at(0.64)).toBe("Slight 64%");
+    expect(at(0.4)).toBe("Slight 40%");
+    expect(at(0.52)).toBe("Slight 52%");
+    expect(at(0.39)).toBe("Weak 39%");
+    expect(at(0.34)).toBe("Weak 34%");
+    expect(at(0)).toBe("Weak 0%");
+  });
+
+  it("summarises the evidence as label/value tokens before anything is expanded", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const strip = screen.getByRole("button", { name: /Show evidence/ });
+    expect(strip.textContent).toContain("Acknowledged as");
+    expect(strip.textContent).toContain("“CBIC”");
+    expect(strip.textContent).toContain("Alex Testerson");
+    expect(strip.textContent).toContain("42% of an author's own work");
+    expect(strip.textContent).toContain("possibly core work"); // llmScore 7
+    // the signal rows themselves stay closed until asked for
+    expect(screen.queryByLabelText("evidence")).toBeNull();
+  });
+
+  it("renders the per-signal rows, their strength words and their raw readouts once expanded", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    showEvidence();
+    const list = within(evidence());
+    expect(list.getByText("Named in the acknowledgments")).toBeTruthy();
+    expect(list.getByText("Direct")).toBeTruthy(); // ack tier
+    expect(list.getByRole("link", { name: "Alex Testerson" })).toBeTruthy(); // co-author row
+    expect(list.getByText("LLM read of title and abstract")).toBeTruthy();
+    expect(list.getByText("Moderate")).toBeTruthy(); // LLM is Moderate regardless of 7/10
+    expect(list.getByText("7/10")).toBeTruthy(); // raw score still shown
+    expect(list.getByText("Repeat user")).toBeTruthy();
+    expect(list.getByText("42%")).toBeTruthy(); // affinity readout
     // the readout is a RATE post-ReciterAI #382, and the copy has to say so
     expect(
-      screen.getByText(
+      list.getByText(
         "The largest share of any byline author's own publications that are work with this core",
       ),
     ).toBeTruthy();
   });
 
+  it("highlights the matched alias inside the acknowledgment quote", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
+    );
+    showEvidence();
+    expect(container.querySelector("mark")?.textContent).toBe("CBIC");
+  });
+
   it("shows the PMID verbatim (linked to PubMed), citation count, DOI, and rationale", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    expect(
-      screen.getByText("Acknowledges the imaging core for confocal microscopy."),
-    ).toBeTruthy();
+    showEvidence();
+    expect(screen.getByText("Acknowledges the imaging core for confocal microscopy.")).toBeTruthy();
     expect(screen.getByText("12 citations")).toBeTruthy();
     // the PMID is shown verbatim and is the PubMed link
     const pubmed = screen.getByRole("link", { name: /PMID 30418319/ });
     expect(pubmed.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/30418319/");
     const doi = screen.getByRole("link", { name: /doi/i });
-    expect(doi.getAttribute("href")).toBe("https://doi.org/10.1016/j.neuroimage.2021.001");
+    expect(doi.getAttribute("href")).toBe("https://doi.org/10.1000/synthetic.2021.001");
+  });
+
+  it("copies the PMID and flips the button label", () => {
+    const writeText = vi.fn();
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy PMID" }));
+    expect(writeText).toHaveBeenCalledWith("30418319");
+    expect(screen.getByRole("button", { name: "PMID copied" })).toBeTruthy();
   });
 
   it("falls back to a generic ack chip when signalAck is set without an alias", () => {
@@ -107,10 +185,11 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.getByText("Acknowledged in text")).toBeTruthy();
+    showEvidence();
+    expect(within(evidence()).getByText("Acknowledged in text")).toBeTruthy();
   });
 
-  it("omits a signal chip when its signal did not fire", () => {
+  it("omits a signal row when its signal did not fire", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -118,48 +197,62 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.queryByText(/Repeat user of this core/)).toBeNull();
-    expect(screen.queryByText(/Co-authored with/)).toBeNull();
-    expect(screen.queryByText(/Named in the acknowledgments|Acknowledged in text/)).toBeNull();
+    showEvidence();
+    const list = within(evidence());
+    expect(list.queryByText("Repeat user")).toBeNull();
+    expect(list.queryByText("Staff co-author")).toBeNull();
+    expect(list.queryByText(/Named in the acknowledgments|Acknowledged in text/)).toBeNull();
   });
 
   it("does not claim a MeSH descriptor on an author-only prefilter prior", () => {
     // The bug this pins: every prefilter_prior rendered "The paper carries a MeSH
     // descriptor under this core's technique branch". On prod 2026-09-04 that was
-    // false on 7,332 of 9,352 live chips, and core 14's entire 4,645-row backfill
-    // is 0.60 (author-only, MeSH membership zero) — so it would have been false on
-    // every row of the queue that actually gets reviewed.
+    // false on 7,332 of 9,352 live chips, and core 14's entire backfill is 0.60
+    // (author-only, MeSH membership zero) — so it would have been false on every
+    // row of the queue that actually gets reviewed.
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.6 })]} confirmed={[]} />);
+    showEvidence();
     expect(screen.queryByText(/MeSH descriptor under this core's technique branch/)).toBeNull();
     expect(screen.getByText(/Prefilter prior — repeat user, no MeSH match/)).toBeTruthy();
   });
 
   it("keeps the MeSH wording when the MeSH signal actually fired", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.4 })]} confirmed={[]} />);
+    showEvidence();
     expect(screen.getByText("Topical MeSH match")).toBeTruthy();
   });
 
   it("names both signals when the prior is the noisy-OR of the two", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.76 })]} confirmed={[]} />);
+    showEvidence();
     expect(screen.getByText("MeSH match + repeat user")).toBeTruthy();
   });
 
-  it("renders the synopsis and links resolved core-staff co-authors to their profile (Tier 2)", () => {
+  it("counts all five signals, so the numerator can reach its own denominator", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.76 })]} confirmed={[]} />);
+    expect(screen.getByText("5 of 5 signals")).toBeTruthy();
+  });
+
+  it("renders the synopsis and links resolved core-staff co-authors to their profile", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(screen.getByText("A faster MRI sequence.")).toBeTruthy();
-    const staff = screen.getByRole("link", { name: "Doug Ballon" });
-    expect(staff.getAttribute("href")).toBe("/doug-ballon");
+    showEvidence();
+    const staff = within(evidence()).getByRole("link", { name: "Alex Testerson" });
+    expect(staff.getAttribute("href")).toBe("/alex-testerson");
     expect(screen.getByText(/\(Radiology\)/)).toBeTruthy();
   });
 
-  it("shows an unresolved core-staff CWID as bare text (Tier 2 fallback)", () => {
+  it("shows an unresolved core-staff CWID as bare text", () => {
     render(
       <CoreClaimQueue
         core={CORE}
-        candidates={[row({ coauthors: ["djb2001", "zzz9999"], coauthorScholars: row().coauthorScholars })]}
+        candidates={[
+          row({ coauthors: ["aaa1001", "zzz9999"], coauthorScholars: row().coauthorScholars }),
+        ]}
         confirmed={[]}
       />,
     );
+    showEvidence();
     expect(screen.getByText(/zzz9999/)).toBeTruthy();
   });
 
@@ -169,24 +262,32 @@ describe("CoreClaimQueue", () => {
         core={CORE}
         candidates={[
           row({
-            coauthors: ["abc9001"],
-            coauthorScholars: [{ cwid: "abc9001", name: "Pat Moreno", slug: null, dept: "CBIC" }],
+            coauthors: ["bbb9001"],
+            coauthorScholars: [{ cwid: "bbb9001", name: "Robin Placeholder", slug: null, dept: "CBIC" }],
           }),
         ]}
         confirmed={[]}
       />,
     );
-    expect(screen.getByText("Pat Moreno")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Pat Moreno" })).toBeNull();
-    expect(screen.queryByText(/abc9001/)).toBeNull();
+    showEvidence();
+    expect(screen.getAllByText("Robin Placeholder").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Robin Placeholder" })).toBeNull();
+    expect(screen.queryByText(/bbb9001/)).toBeNull();
   });
 
-  it("exposes abstract, full author list, and linked WCM authors in the details expander (Tier 2)", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    expect(screen.getByText("We imaged the brain in detail.")).toBeTruthy();
-    expect(screen.getByText(/Ballon D, Dyke J, Xiang J/)).toBeTruthy();
-    const wcm = screen.getByRole("link", { name: "Jenny Xiang" });
-    expect(wcm.getAttribute("href")).toBe("/jenny-xiang");
+  it("no longer offers the abstract/MeSH Details disclosure", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ meshTerms: [{ ui: "D001921", label: "Brain" }] })]}
+        confirmed={[]}
+      />,
+    );
+    expect(container.querySelector("details")).toBeNull();
+    expect(screen.queryByText("Details")).toBeNull();
+    expect(screen.queryByText("We imaged the brain in detail.")).toBeNull();
+    expect(screen.queryByText("Brain")).toBeNull();
+    expect(screen.queryByText(/Testerson A, Fixture B, Sample C/)).toBeNull();
   });
 
   it("posts a claim and moves the row out of the review list on Confirm", async () => {
@@ -194,7 +295,7 @@ describe("CoreClaimQueue", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
@@ -202,9 +303,7 @@ describe("CoreClaimQueue", () => {
     expect(JSON.parse(init.body)).toEqual({ pmid: "30418319", coreId: "2", status: "claimed" });
 
     // the confirmed row leaves "To review" (its Confirm button is gone)
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /confirm/i })).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^confirm$/i })).toBeNull());
   });
 
   it("tints the decided strip green on confirm and red on reject (mockup parity)", async () => {
@@ -247,10 +346,11 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.getByText(/0 of 5 signals fired/)).toBeTruthy();
-    expect(
-      screen.getByText(/No displayed signal fired — the combined score moved/),
-    ).toBeTruthy();
+    expect(screen.getByText(/0 of 5 signals/)).toBeTruthy();
+    // the collapsed strip says so too, before anything is opened
+    expect(screen.getByText("No labelled signal.")).toBeTruthy();
+    showEvidence();
+    expect(screen.getByText(/The score moved on engine inputs this queue doesn’t show/)).toBeTruthy();
   });
 
   it("surfaces an error and keeps the row when the POST is refused", async () => {
@@ -262,23 +362,21 @@ describe("CoreClaimQueue", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /reject/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^reject$/i }));
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("not_core_owner"),
-    );
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("not_core_owner"));
     // still reviewable — the Confirm button is still present
-    expect(screen.getByRole("button", { name: /confirm/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^confirm$/i })).toBeTruthy();
   });
 
-  // --- Tier 3: undo / keyboard / filter / sort ---
+  // --- undo / keyboard / facets / sort ---
 
-  it("undo posts a revoke and restores the actionable card (Tier 3)", async () => {
+  it("undo posts a revoke and restores the actionable card", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
     const undo = await screen.findByRole("button", { name: /undo/i });
     fireEvent.click(undo);
 
@@ -289,10 +387,10 @@ describe("CoreClaimQueue", () => {
       status: "revoked",
     });
     // the card is actionable again
-    await waitFor(() => expect(screen.getByRole("button", { name: /confirm/i })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^confirm$/i })).toBeTruthy());
   });
 
-  it("confirms via the 'a' keyboard shortcut on the focused card (Tier 3)", async () => {
+  it("confirms via the 'a' keyboard shortcut on the focused card", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
@@ -305,7 +403,7 @@ describe("CoreClaimQueue", () => {
     );
   });
 
-  it("filters the visible candidates (Tier 3)", () => {
+  it("filters the visible candidates", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -333,7 +431,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByText("Bare paper")).toBeNull();
   });
 
-  it("OR-combines two ticked filters instead of intersecting them (Tier 3)", () => {
+  it("AND-combines two ticked facets, narrowing to the rows carrying both", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -345,22 +443,18 @@ describe("CoreClaimQueue", () => {
             ackAlias: "CBIC",
             coauthors: [],
             coauthorScholars: [],
-            llmScore: null,
           }),
           row({
             pmid: "2",
             title: "Co-authored only",
             signalAck: false,
             ackAlias: null,
-            llmScore: null,
           }),
           row({
             pmid: "3",
-            title: "LLM only",
-            signalAck: false,
-            ackAlias: null,
-            coauthors: [],
-            coauthorScholars: [],
+            title: "Both signals",
+            signalAck: true,
+            ackAlias: "CBIC",
           }),
         ]}
         confirmed={[]}
@@ -370,20 +464,62 @@ describe("CoreClaimQueue", () => {
 
     tick(/^Acknowledged/);
     expect(screen.queryByText("Co-authored only")).toBeNull();
-
-    tick(/^Co-authored/);
-    // union, not intersection: neither row carries both signals, both are shown
     expect(screen.getByText("Acked only")).toBeTruthy();
-    expect(screen.getByText("Co-authored only")).toBeTruthy();
-    expect(screen.queryByText("LLM only")).toBeNull();
+
+    tick(/^Staff co-author/);
+    // intersection, not union: only the row carrying BOTH survives
+    expect(screen.queryByText("Acked only")).toBeNull();
+    expect(screen.queryByText("Co-authored only")).toBeNull();
+    expect(screen.getByText("Both signals")).toBeTruthy();
 
     // un-ticking is the same click
     tick(/^Acknowledged/);
-    expect(screen.queryByText("Acked only")).toBeNull();
     expect(screen.getByText("Co-authored only")).toBeTruthy();
   });
 
-  it("treats 'All' as a reset button, not a fourth checkbox (Tier 3)", () => {
+  it("drops a facet whose count is 0 rather than offering a pill that empties the queue", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row()]} // has an affinity, and no known client on the byline
+        confirmed={[]}
+      />,
+    );
+    // present, with counts
+    expect(screen.getByRole("checkbox", { name: /^Acknowledged/ })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /^Staff co-author/ })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /^LLM-flagged/ })).toBeTruthy();
+    // absent entirely (not disabled, not zero-labelled)
+    expect(screen.queryByRole("checkbox", { name: /^Client co-author/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /^No prior usage/ })).toBeNull();
+    // "All" is the reset and always stands
+    expect(screen.getByRole("button", { name: /^All/ })).toBeTruthy();
+  });
+
+  it("shows the Client co-author facet once a byline author is a known client", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row()]}
+        confirmed={[]}
+        clients={[
+          {
+            cwid: "ccc1003",
+            name: "Casey Sample",
+            slug: "casey-sample",
+            addedAt: new Date("2026-01-01"),
+            addedBy: "aaa1001",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByRole("checkbox", { name: "Client co-author 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Show evidence/ }).textContent).toContain(
+      "Casey Sample",
+    );
+  });
+
+  it("treats 'All' as a reset button, not another checkbox", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -405,10 +541,8 @@ describe("CoreClaimQueue", () => {
     );
     const box = (name: RegExp) => screen.getByRole("checkbox", { name });
     const all = () => screen.getByRole("button", { name: /^All/ });
-    // "All" is an ACTION, not a fourth checkbox: it must NOT claim the checkbox
-    // role, because a checked box that cannot be unchecked announces nothing on
-    // Space. The three real filters are the only checkboxes in the group.
-    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    // "All" is an ACTION, not another checkbox: a checked box that cannot be
+    // unchecked announces nothing on Space. Only the real facets are checkboxes.
     expect(all().getAttribute("aria-checked")).toBeNull();
 
     fireEvent.click(box(/^Acknowledged/));
@@ -420,7 +554,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Bare paper")).toBeTruthy();
   });
 
-  it("labels each filter with its count over the still-undecided rows (Tier 3)", async () => {
+  it("labels each facet with its count over the still-undecided rows", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     render(
@@ -445,17 +579,22 @@ describe("CoreClaimQueue", () => {
     const label = (name: RegExp) => screen.getByRole("checkbox", { name }).textContent;
     expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 2");
     expect(label(/^Acknowledged/)).toBe("Acknowledged 1");
-    expect(label(/^Co-authored/)).toBe("Co-authored 1");
+    expect(label(/^Staff co-author/)).toBe("Staff co-author 1");
     expect(label(/^LLM-flagged/)).toBe("LLM-flagged 1");
+    // "Bare paper" has no affinity, so the no-prior facet is live at 1
+    expect(label(/^No prior usage/)).toBe("No prior usage on the byline 1");
 
     // a decided row is held on screen for its undo but must not inflate a count
     const acked = screen.getByLabelText("Candidate: Acked paper");
-    fireEvent.click(within(acked).getByRole("button", { name: /confirm/i }));
-    await waitFor(() => expect(label(/^Acknowledged/)).toBe("Acknowledged 0"));
+    fireEvent.click(within(acked).getByRole("button", { name: /^confirm$/i }));
+    // it drops out of the counts entirely once it is the last row carrying that signal
+    await waitFor(() =>
+      expect(screen.queryByRole("checkbox", { name: /^Acknowledged/ })).toBeNull(),
+    );
     expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 1");
   });
 
-  it("re-sorts by LLM score when selected (Tier 3)", () => {
+  it("re-sorts by LLM score when selected", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -466,14 +605,22 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const titles = () =>
-      screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    const titles = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     // likelihood-desc is the default; set it explicitly so the baseline is pinned
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "likelihood" } });
     expect(titles()).toEqual(["High likelihood, low LLM", "Low likelihood, high LLM"]);
 
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "llm" } });
     expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
+  });
+
+  it("keeps the shipped 'Strongest signal' and 'LLM score' sort options", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const options = within(screen.getByLabelText("Sort by") as HTMLSelectElement)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(options).toContain("Sort: Strongest signal");
+    expect(options).toContain("Sort: LLM score");
   });
 
   it("defaults to likelihood-desc ordering, not uncertain-first", () => {
@@ -504,15 +651,14 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const titles = () =>
-      screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    const titles = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "likelihood" } });
     expect(titles()).toEqual(["Very confident", "Coin-flip"]);
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "uncertain" } });
     expect(titles()).toEqual(["Coin-flip", "Very confident"]);
   });
 
-  it("announces the outcome politely for screen readers (Tier 3)", async () => {
+  it("announces the outcome politely for screen readers", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
@@ -520,13 +666,11 @@ describe("CoreClaimQueue", () => {
     expect(live.getAttribute("aria-live")).toBe("polite");
     expect(live.textContent).toBe(""); // silent until an action
 
-    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
-    await waitFor(() =>
-      expect(live.textContent).toBe("Confirmed Advanced MRI of the brain."),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
+    await waitFor(() => expect(live.textContent).toBe("Confirmed Advanced MRI of the brain."));
   });
 
-  it("rejects via the 'r' shortcut and undoes via 'u' on the decided card (Tier 3)", async () => {
+  it("rejects via the 'r' shortcut and undoes via 'u' on the decided card", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
@@ -546,7 +690,7 @@ describe("CoreClaimQueue", () => {
     );
   });
 
-  it("ArrowDown moves roving focus to the next card (Tier 3)", () => {
+  it("ArrowDown moves roving focus to the next card", () => {
     const { container } = render(
       <CoreClaimQueue
         core={CORE}
@@ -559,29 +703,33 @@ describe("CoreClaimQueue", () => {
     expect((document.activeElement as HTMLElement)?.getAttribute("data-pmid")).toBe("2");
   });
 
-  it("does NOT fire a shortcut typed into a child control (the shell-only guard) (Tier 3)", () => {
+  it("does NOT fire a shortcut typed into a child control (the shell-only guard)", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
 
     // 'a' typed while the Confirm button (a child) is focused must NOT claim.
-    fireEvent.keyDown(screen.getByRole("button", { name: /confirm/i }), { key: "a" });
+    fireEvent.keyDown(screen.getByRole("button", { name: /^confirm$/i }), { key: "a" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps a just-decided row visible under a filter that would exclude it, so undo stays reachable (Tier 3)", async () => {
+  it("keeps a just-decided row visible under a facet that would exclude it, so undo stays reachable", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    // a candidate that does NOT match the "Acknowledged" filter
+    // two candidates so the Acknowledged facet survives the decision
     render(
       <CoreClaimQueue
         core={CORE}
-        candidates={[row({ signalAck: false, ackAlias: null })]}
+        candidates={[
+          row({ pmid: "1", signalAck: false, ackAlias: null }),
+          row({ pmid: "2", title: "Acked sibling", signalAck: true, ackAlias: "CBIC" }),
+        ]}
         confirmed={[]}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    const target = screen.getByLabelText("Candidate: Advanced MRI of the brain");
+    fireEvent.click(within(target).getByRole("button", { name: /^confirm$/i }));
     await screen.findByRole("button", { name: /undo/i });
 
     fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
@@ -589,50 +737,153 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByRole("button", { name: /undo/i })).toBeTruthy();
   });
 
-  // --- bulk confirm / Confirmed-list revoke / verify-in-expander ---
+  // --- evidence grouping ---
 
-  it("bulk-confirms the high-confidence band (≥0.90) via one bulk POST", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("confirm", vi.fn(() => true)); // accept the guard dialog
+  it("groups rows by evidence kind, in the group vocabulary, with a band range", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Acked A", likelihood: 0.94 }),
+          row({ pmid: "2", title: "Acked B", likelihood: 0.52 }),
+          row({
+            pmid: "3",
+            title: "LLM only",
+            likelihood: 0.5,
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            authorAffinity: null,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(
+      screen.getByText("2 papers · acknowledgment + staff co-author + LLM read + repeat user"),
+    ).toBeTruthy();
+    expect(screen.getByText("1 paper · LLM read")).toBeTruthy();
+    // the range speaks bands, never "likelihood 52–94%"
+    expect(screen.getByText("Slight to Strong")).toBeTruthy();
+    expect(screen.queryByText(/likelihood \d/)).toBeNull();
+  });
+
+  it("labels a group with no evidence kinds 'no labelled signal'", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            pmid: "1",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText("1 paper · no labelled signal")).toBeTruthy();
+  });
+
+  it("collapses and re-expands a group", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const caret = screen.getByRole("button", { name: "Collapse or expand this group" });
+    expect(caret.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(caret);
+    expect(screen.queryByText("Advanced MRI of the brain")).toBeNull();
+    fireEvent.click(caret);
+    expect(screen.getByText("Advanced MRI of the brain")).toBeTruthy();
+  });
+
+  it("turns grouping off and back on", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const toggle = screen.getByRole("button", { name: /^Grouped by evidence$/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: /^Group by evidence$/ })).toBeTruthy();
+    // no group header while flat
+    expect(screen.queryByRole("button", { name: "Collapse or expand this group" })).toBeNull();
+    expect(screen.getByText("Advanced MRI of the brain")).toBeTruthy();
+  });
+
+  // --- selection mode + the hand-picked bulk bar ---
+
+  it("has no likelihood-gated bulk-confirm sweep", () => {
     render(
       <CoreClaimQueue
         core={CORE}
         candidates={[
           row({ pmid: "1", title: "High A", likelihood: 0.96 }),
           row({ pmid: "2", title: "High B", likelihood: 0.91 }),
-          row({ pmid: "3", title: "Uncertain", likelihood: 0.6 }),
         ]}
         confirmed={[]}
       />,
     );
-    const bulk = screen.getByRole("button", { name: /Confirm 2 high-confidence/ });
-    fireEvent.click(bulk);
-    // a SINGLE request to the bulk endpoint with just the two ≥0.90 pmids
+    expect(screen.queryByRole("button", { name: /high-confidence/i })).toBeNull();
+    expect(screen.queryByText(/Confirm 2/)).toBeNull();
+  });
+
+  it("confirms a hand-selected set through one bulk POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Picked A" }),
+          row({ pmid: "2", title: "Picked B" }),
+          row({ pmid: "3", title: "Left alone" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Picked A" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Picked B" }));
+    expect(screen.getByText("2 papers selected")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
     expect(url).toBe("/api/edit/core-claim/bulk");
     expect(JSON.parse(init.body)).toEqual({ coreId: "2", pmids: ["1", "2"], status: "claimed" });
+    expect(screen.getByTestId("core-claim-live").textContent).toBe("Confirmed 2 publications.");
   });
 
-  it("surfaces the failure on the band and announces it when the bulk POST is refused", async () => {
+  it("surfaces the failure on every selected row when the bulk POST is refused", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("confirm", vi.fn(() => true));
     render(
-      <CoreClaimQueue
-        core={CORE}
-        candidates={[row({ pmid: "1", title: "High A", likelihood: 0.96 })]}
-        confirmed={[]}
-      />,
+      <CoreClaimQueue core={CORE} candidates={[row({ pmid: "1", title: "Picked A" })]} confirmed={[]} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Confirm 1 high-confidence/ }));
-    // the row stays reviewable with an error surfaced (not marked confirmed)
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Picked A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("bulk confirm failed"));
-    expect(screen.getByRole("button", { name: /confirm$/i })).toBeTruthy();
+    // the row stays reviewable
+    expect(screen.getByRole("button", { name: /^confirm$/i })).toBeTruthy();
     expect(screen.getByTestId("core-claim-live").textContent).toBe(
       "Bulk confirm could not be saved.",
     );
+  });
+
+  it("'Select N' on a group arms selection mode and picks that whole pile", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Picked A" }), row({ pmid: "2", title: "Picked B" })]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
+    expect(screen.getByText("2 papers selected")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
   });
 
   it("shows a 'Manually added' badge on a confirmed row with no engine signals", () => {
@@ -699,7 +950,7 @@ describe("CoreClaimQueue", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("does not call the API on a block with no valid PMIDs", () => {
+  it("does not call the API on a block with no valid PMIDs, and names what it ignored", () => {
     vi.stubGlobal("fetch", vi.fn());
     render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
@@ -707,7 +958,7 @@ describe("CoreClaimQueue", () => {
       target: { value: "abc, def" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Claim" }));
-    expect(screen.getByText(/No valid PMIDs found/)).toBeTruthy();
+    expect(screen.getByText(/No valid PMIDs found \(ignored: abc, def\)\./)).toBeTruthy();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -746,9 +997,9 @@ describe("CoreClaimQueue", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /revoke/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(
-      JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status,
-    ).toBe("rejected");
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status).toBe(
+      "rejected",
+    );
   });
 
   // --- segmented tabs (#1239): To review / Confirmed / Rejected ---
@@ -833,35 +1084,15 @@ describe("CoreClaimQueue", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /restore/i }));
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("not_core_owner"),
-    );
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("not_core_owner"));
     // not restored — the Restore affordance is still present
     expect(screen.getByRole("button", { name: /restore/i })).toBeTruthy();
     expect(screen.queryByText(/re-files on next load/)).toBeNull();
   });
 
-  it("renders MeSH terms as chips in the Details expander", () => {
-    render(
-      <CoreClaimQueue
-        core={CORE}
-        candidates={[
-          row({ meshTerms: [{ ui: "D001921", label: "Brain" }, { ui: null, label: "Neurons" }] }),
-        ]}
-        confirmed={[]}
-      />,
-    );
-    expect(screen.getByText("Brain")).toBeTruthy();
-    expect(screen.getByText("Neurons")).toBeTruthy();
-  });
-
   it("suppresses a 0 on a just-published paper as 'No citations yet'", () => {
     render(
-      <CoreClaimQueue
-        core={CORE}
-        candidates={[row({ citationCount: 0, year: 9999 })]}
-        confirmed={[]}
-      />,
+      <CoreClaimQueue core={CORE} candidates={[row({ citationCount: 0, year: 9999 })]} confirmed={[]} />,
     );
     expect(screen.getByText(/No citations yet · published 9999/)).toBeTruthy();
   });
@@ -877,22 +1108,38 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText(/RCR 2.1 \(89th pct\)/)).toBeTruthy();
   });
 
-  it("renders abstract inline markup as real subscript, not escaped text", () => {
-    const { container } = render(
+  it("highlights the core-staff author inline in the byline (best-effort)", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    // the "Testerson A" token links to the staff profile
+    const chip = screen.getByText("Testerson A");
+    expect(chip.closest("a")?.getAttribute("href")).toBe("/alex-testerson");
+  });
+
+  it("reports how much of the queue the current filter is showing", () => {
+    render(
       <CoreClaimQueue
         core={CORE}
-        candidates={[row({ abstract: "We used NaN<sub>3</sub> in buffer." })]}
+        candidates={[
+          row({ pmid: "1", title: "Acked paper" }),
+          row({
+            pmid: "2",
+            title: "Bare paper",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+          }),
+        ]}
         confirmed={[]}
       />,
     );
-    expect(container.querySelector("sub")?.textContent).toBe("3");
-  });
-
-  it("highlights the core-staff author inline in the byline (best-effort)", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    // "Ballon D" token links to Doug Ballon's profile
-    const chip = screen.getByText("Ballon D");
-    expect(chip.closest("a")?.getAttribute("href")).toBe("/doug-ballon");
+    expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
+    expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
   });
 
   it("downloads the queue as a CSV citation list with PMID + status columns", () => {
@@ -941,8 +1188,113 @@ describe("parsePmidBlock", () => {
     expect(invalid).toEqual(["abc", "007"]); // leading zero is not a real PMID
   });
 
+  it("never salvages digits out of a mixed token", () => {
+    // A weaker parser that split on any non-digit run would silently turn
+    // "abc123def" into PMID 123. A trust boundary does not guess.
+    const { pmids, invalid } = parsePmidBlock("abc123def 456");
+    expect(pmids).toEqual(["456"]);
+    expect(invalid).toEqual(["abc123def"]);
+  });
+
   it("returns empty arrays for blank input", () => {
     expect(parsePmidBlock("   \n  ")).toEqual({ pmids: [], invalid: [] });
+  });
+});
+
+describe("likelihoodBand", () => {
+  it("uses inclusive lower bounds at every boundary", () => {
+    expect(likelihoodBand(1).label).toBe("Strong");
+    expect(likelihoodBand(0.85).label).toBe("Strong");
+    expect(likelihoodBand(0.8499).label).toBe("Moderate");
+    expect(likelihoodBand(0.65).label).toBe("Moderate");
+    expect(likelihoodBand(0.6499).label).toBe("Slight");
+    expect(likelihoodBand(0.4).label).toBe("Slight");
+    expect(likelihoodBand(0.3999).label).toBe("Weak");
+    expect(likelihoodBand(0).label).toBe("Weak");
+  });
+});
+
+describe("llmVerdict", () => {
+  it("reads the dense triage score in words", () => {
+    expect(llmVerdict(10)).toBe("reads as core work");
+    expect(llmVerdict(8)).toBe("reads as core work");
+    expect(llmVerdict(7)).toBe("possibly core work");
+    expect(llmVerdict(6)).toBe("possibly core work");
+    expect(llmVerdict(5)).toBe("little sign of core use");
+    expect(llmVerdict(1)).toBe("little sign of core use");
+  });
+});
+
+describe("evidenceTokens", () => {
+  it("names each fired signal as a label/value pair", () => {
+    expect(evidenceTokens(row())).toEqual([
+      { label: "Acknowledged as", value: "“CBIC”" },
+      { label: "Staff co-author", value: "Alex Testerson" },
+      { label: "Repeat user", value: "42% of an author's own work" },
+      { label: "LLM on title and abstract", value: "possibly core work" },
+    ]);
+  });
+
+  it("adds a client-co-author token only for a byline author on the known-clients list", () => {
+    expect(evidenceTokens(row(), new Set(["ccc1003"]))).toContainEqual({
+      label: "Client co-author",
+      value: "Casey Sample",
+    });
+    expect(evidenceTokens(row(), new Set(["nobody0001"]))).not.toContainEqual(
+      expect.objectContaining({ label: "Client co-author" }),
+    );
+  });
+
+  it("returns nothing when no signal fired", () => {
+    expect(
+      evidenceTokens(
+        row({
+          signalAck: false,
+          ackAlias: null,
+          coauthors: [],
+          coauthorScholars: [],
+          llmScore: null,
+          authorAffinity: null,
+        }),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("evidenceGroupKey / evidenceGroupLabel / bandRange", () => {
+  it("keys a row by which evidence kinds fired, prior excluded", () => {
+    expect(evidenceGroupKey(row())).toBe("ack+coauthor+llm+affinity");
+    // the prefilter prior restates the repeat-user prior, so it never splits a pile
+    expect(evidenceGroupKey(row({ topicalPrior: 0.6 }))).toBe("ack+coauthor+llm+affinity");
+    expect(
+      evidenceGroupKey(
+        row({
+          signalAck: false,
+          ackAlias: null,
+          coauthors: [],
+          coauthorScholars: [],
+          llmScore: null,
+          authorAffinity: null,
+        }),
+      ),
+    ).toBe("none");
+  });
+
+  it("speaks the group vocabulary, singular-safe", () => {
+    expect(evidenceGroupLabel("ack", 1)).toBe("1 paper · acknowledgment");
+    expect(evidenceGroupLabel("ack", 3)).toBe("3 papers · acknowledgment");
+    expect(evidenceGroupLabel("coauthor", 2)).toBe("2 papers · staff co-author");
+    expect(evidenceGroupLabel("llm", 2)).toBe("2 papers · LLM read");
+    expect(evidenceGroupLabel("affinity", 2)).toBe("2 papers · repeat user");
+    expect(evidenceGroupLabel("none", 2)).toBe("2 papers · no labelled signal");
+    expect(evidenceGroupLabel("ack+coauthor", 2)).toBe("2 papers · acknowledgment + staff co-author");
+  });
+
+  it("gives the group's range in band words, never a likelihood percentage", () => {
+    expect(bandRange([0.52, 0.94])).toBe("Slight to Strong");
+    expect(bandRange([0.9, 0.95])).toBe("Strong");
+    expect(bandRange([0.9])).toBe(""); // a single row already shows its own band
+    expect(bandRange([])).toBe("");
   });
 });
 
@@ -971,23 +1323,6 @@ describe("buildSignals", () => {
     const signals = buildSignals(row({ topicalPrior: 0 }));
     expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
   });
-});
-
-describe("decodeTopicalPrior", () => {
-  // prefilter_prior = noisy-OR(author 0.6, mesh 0.4) -> exactly four reachable values.
-  it("decodes each of the four reachable values", () => {
-    expect(decodeTopicalPrior(0.76)).toEqual({ mesh: true, affinity: true });
-    expect(decodeTopicalPrior(0.6)).toEqual({ mesh: false, affinity: true });
-    expect(decodeTopicalPrior(0.4)).toEqual({ mesh: true, affinity: false });
-    expect(decodeTopicalPrior(0)).toEqual({ mesh: false, affinity: false });
-  });
-
-  it("does not claim a MeSH match on an author-only prior", () => {
-    // The whole point: 7,332 of 9,352 live chips were 0.60 and every one of them
-    // rendered "carries a MeSH descriptor". Core 14's MeSH membership is zero, so
-    // every row of its 4,645-row backfill lands here.
-    expect(decodeTopicalPrior(0.6).mesh).toBe(false);
-  });
 
   it("omits a signal that did not fire", () => {
     const signals = buildSignals(
@@ -1012,9 +1347,27 @@ describe("decodeTopicalPrior", () => {
   });
 });
 
+describe("decodeTopicalPrior", () => {
+  // prefilter_prior = noisy-OR(author 0.6, mesh 0.4) -> exactly four reachable values.
+  it("decodes each of the four reachable values", () => {
+    expect(decodeTopicalPrior(0.76)).toEqual({ mesh: true, affinity: true });
+    expect(decodeTopicalPrior(0.6)).toEqual({ mesh: false, affinity: true });
+    expect(decodeTopicalPrior(0.4)).toEqual({ mesh: true, affinity: false });
+    expect(decodeTopicalPrior(0)).toEqual({ mesh: false, affinity: false });
+  });
+
+  it("does not claim a MeSH match on an author-only prior", () => {
+    // The whole point: 7,332 of 9,352 live chips were 0.60 and every one of them
+    // rendered "carries a MeSH descriptor". Core 14's MeSH membership is zero, so
+    // every row of its backfill lands here.
+    expect(decodeTopicalPrior(0.6).mesh).toBe(false);
+  });
+});
+
 describe("matchesFilters", () => {
   const acked = row({ signalAck: true, ackAlias: "CBIC", coauthors: [], llmScore: null });
   const llmOnly = row({ signalAck: false, ackAlias: null, coauthors: [], llmScore: 4 });
+  const both = row({ signalAck: true, ackAlias: "CBIC", llmScore: 4 });
   const set = (...keys: FilterKey[]) => new Set<FilterKey>(keys);
 
   it("keeps everything when nothing is ticked (the empty set is 'All')", () => {
@@ -1022,15 +1375,25 @@ describe("matchesFilters", () => {
     expect(matchesFilters(llmOnly, set())).toBe(true);
   });
 
-  it("ORs the ticked keys — one match is enough, no intersection", () => {
-    expect(matchesFilters(acked, set("ack", "llm"))).toBe(true);
-    expect(matchesFilters(llmOnly, set("ack", "llm"))).toBe(true);
-    // ack + co-authored: the LLM-only row carries neither
-    expect(matchesFilters(llmOnly, set("ack", "coauthored"))).toBe(false);
+  it("ANDs the ticked keys — every one of them has to match", () => {
+    expect(matchesFilters(both, set("ack", "llm"))).toBe(true);
+    expect(matchesFilters(acked, set("ack", "llm"))).toBe(false); // no LLM score
+    expect(matchesFilters(llmOnly, set("ack", "llm"))).toBe(false); // not acknowledged
   });
 
   it("excludes a row that matches none of the ticked keys", () => {
     expect(matchesFilters(acked, set("coauthored"))).toBe(false);
+  });
+
+  it("matches the client facet only against the passed known-clients set", () => {
+    expect(matchesFilters(row(), set("client"), new Set(["ccc1003"]))).toBe(true);
+    expect(matchesFilters(row(), set("client"), new Set(["nobody0001"]))).toBe(false);
+    expect(matchesFilters(row(), set("client"))).toBe(false);
+  });
+
+  it("matches the no-prior facet on a null affinity", () => {
+    expect(matchesFilters(row({ authorAffinity: null }), set("noprior"))).toBe(true);
+    expect(matchesFilters(row({ authorAffinity: 0.1 }), set("noprior"))).toBe(false);
   });
 });
 
@@ -1060,6 +1423,19 @@ describe("compareBySort", () => {
     const flip = row({ likelihood: 0.51 });
     expect(compareBySort("uncertain", flip, sure)).toBeLessThan(0);
   });
+
+  it("year: the newer paper comes first, ties broken by likelihood", () => {
+    expect(compareBySort("year", row({ year: 2026 }), row({ year: 2019 }))).toBeLessThan(0);
+    expect(
+      compareBySort("year", row({ year: 2024, likelihood: 0.9 }), row({ year: 2024, likelihood: 0.3 })),
+    ).toBeLessThan(0);
+  });
+
+  it("cites: the more-cited paper comes first", () => {
+    expect(compareBySort("cites", row({ citationCount: 90 }), row({ citationCount: 2 }))).toBeLessThan(
+      0,
+    );
+  });
 });
 
 // "Known clients" panel (ReciterAI #383 / SPS #2607) — the panel's own
@@ -1073,7 +1449,13 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
         candidates={[]}
         confirmed={[]}
         clients={[
-          { cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", addedAt: new Date(), addedBy: "rev01" },
+          {
+            cwid: "aaa1001",
+            name: "Alex Testerson",
+            slug: "alex-testerson",
+            addedAt: new Date("2026-01-01"),
+            addedBy: "rev01",
+          },
         ]}
       />,
     );

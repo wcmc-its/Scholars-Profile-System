@@ -91,20 +91,38 @@ export default async function EditCoreReviewPage({
       <ConsoleTopBar variant="console" showAccountMenu />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <p className="mb-4">
+        {/* Breadcrumb, not a bare back-link: this page is two levels down and
+            directly linkable, so both ancestors have to be reachable from it. */}
+        <nav aria-label="Breadcrumb" className="text-muted-foreground mb-3.5 flex gap-2 text-xs">
+          <Link href="/edit/core" className="text-apollo-slate hover:underline">
+            Cores
+          </Link>
+          <span aria-hidden className="opacity-50">
+            /
+          </span>
           <Link
             href={`/edit/core/${encodeURIComponent(coreId)}`}
             className="text-apollo-slate hover:underline"
           >
-            &larr; Back to {queue.core.name}
+            {queue.core.name}
           </Link>
-        </p>
+          <span aria-hidden className="opacity-50">
+            /
+          </span>
+          <span>Review publications</span>
+        </nav>
 
-        <h1 className="mb-1 text-xl font-bold">{queue.core.name} — core publications</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Publications our signals flag as having used this core. Confirm the ones that did and
-          reject false positives — your decisions surface on the public profiles and prime the next
-          inference run.
+        <p className="text-apollo-maroon mb-1.5 text-[11px] font-medium tracking-[0.09em] uppercase">
+          Core facility · review queue
+        </p>
+        {/* `page-title` (not `font-serif`) is the repo's page-subject hook — see
+            the typography rule in app/globals.css. */}
+        <h1 className="page-title mb-1.5 text-[29px] leading-tight font-semibold">
+          {queue.core.name}
+        </h1>
+        <p className="text-muted-foreground mb-6 max-w-[56ch] text-[13px]">
+          Confirm the publications that used this core and reject the false positives. Decisions
+          show on public profiles and prime the next inference run.
         </p>
         <CoreClaimQueue
           core={queue.core}
