@@ -34,6 +34,13 @@
  *   - PMID/CWID parsing keeps the shipped strict parsers and their
  *     rejected-token reporting; the artboard's split-on-any-non-digit form
  *     would silently turn "abc123def" into PMID 123.
+ *   - the free-text filter box sits with the facet pills, not in the tab strip.
+ *     The artboard drew it in the strip, where it stays on screen over the
+ *     Confirmed and Rejected lists, but its own filter only ever narrowed the
+ *     review list — a control that does nothing on two tabs out of three. It
+ *     also had no clear of its own, so "Clear filters" drops the text with the
+ *     pills, and the count line and the "Nothing matches this filter." state
+ *     both count the query.
  */
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -54,6 +61,7 @@ import type { CoreClientRow } from "@/lib/api/core-clients";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 import { CoreClientsPanel } from "@/components/edit/core-clients-panel";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { Input } from "@/components/ui/input";
 import { toCsv } from "@/lib/csv";
 
 /** A pasted block of PMIDs, split on any run of whitespace/commas. Digit-only
@@ -366,6 +374,48 @@ export function matchesFilters(
   return true;
 }
 
+/**
+ * Everything the free-text filter searches on one row, lowercased and joined.
+ *
+ * The rule is: search only what the card puts on screen. A reviewer who types a
+ * word and gets a row back has to be able to see WHY it came back, or the count
+ * line lies to them. So this is the card's own text — title, journal, PMID, the
+ * synopsis, the byline, the acknowledgment alias and its captured quote — plus
+ * the WCM-byline and core-staff names the evidence rows resolve on expand.
+ *
+ * Three fields the artboard's blob searched are dropped, each because the row
+ * doesn't carry it or the card doesn't show it:
+ *   - method family + tool: not plumbed into `CoreQueueRow` at all, so there is
+ *     nothing to match (this is also why the placeholder doesn't promise it);
+ *   - the affinity "who": `authorAffinity` is a bare 0-1 number here, with no
+ *     person attached to search on;
+ *   - `meshTerms`: on the row, but nothing has rendered it since the Details
+ *     disclosure came out — an invisible match is worse than a miss.
+ * Pure.
+ */
+export function searchBlob(row: CoreQueueRow): string {
+  return [
+    row.title,
+    row.journal,
+    row.pmid,
+    row.synopsis,
+    row.authorsString,
+    row.ackAlias,
+    row.ackSnippet,
+    ...row.wcmAuthors.map((a) => a.name),
+    ...row.coauthorScholars.map((a) => a.name),
+  ]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" ")
+    .toLowerCase();
+}
+
+/** Does a row match the free-text filter? A blank query narrows nothing. Pure. */
+export function matchesQuery(row: CoreQueueRow, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return q === "" || searchBlob(row).includes(q);
+}
+
 interface CoreClaimQueueProps {
   core: CoreReviewQueue["core"];
   candidates: CoreQueueRow[];
@@ -408,6 +458,12 @@ export function CoreClaimQueue({
   // Ticked evidence facets, AND-combined. The empty set IS "All" — there is no
   // "all" member, the pill just reads as ticked when nothing else is.
   const [filter, setFilter] = useState<ReadonlySet<FilterKey>>(() => new Set());
+  // Free-text narrowing, AND-ed with the facets (see `searchBlob`). It lives with
+  // the facet pills, NOT in the tab strip: the count line, the "Clear filters"
+  // link and the "Nothing matches this filter." state that report its effect are
+  // all review-tab controls, so a box drawn above the Confirmed/Rejected lists
+  // would be inert on two tabs out of three.
+  const [query, setQuery] = useState("");
   // Default to engine likelihood, high→low — the loader's own order, so the queue
   // opens on what the engine is surest of. This is a deliberate override, not the
   // original reasoning: the previous default was "uncertain first", on the ground
@@ -423,6 +479,10 @@ export function CoreClaimQueue({
   // its own Confirm/Reject for the first click.
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  // Which bulk decision is in flight, if any. Every per-row button here already
+  // carries disabled={pending}; the selection bar needs the same, or a
+  // double-click on "Confirm all" posts the same batch twice.
+  const [bulkPending, setBulkPending] = useState<Decision | null>(null);
   // Which rows have their evidence expanded (collapsed by default — the token
   // strip is the summary, the signal rows are the read-in-depth).
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
@@ -454,6 +514,14 @@ export function CoreClaimQueue({
       if (!next.delete(key)) next.add(key);
       return next;
     });
+  // The text box has no clear affordance of its own, so "Clear filters" is it —
+  // one link that drops BOTH narrowings, because the count line and the empty
+  // state below report them as one.
+  const clearFilters = () => {
+    setFilter(new Set());
+    setQuery("");
+  };
+  const narrowed = filter.size > 0 || query.trim().length > 0;
 
   const toggleIn = (
     set: (fn: (s: ReadonlySet<string>) => ReadonlySet<string>) => void,
@@ -534,7 +602,8 @@ export function CoreClaimQueue({
    * transaction (no client-side fan-out / partial-failure spray).
    */
   async function bulkDecide(pmids: string[], status: Decision) {
-    if (pmids.length === 0) return;
+    if (pmids.length === 0 || bulkPending !== null) return;
+    setBulkPending(status);
     setPending((s) => new Set([...s, ...pmids]));
     const res = await fetch("/api/edit/core-claim/bulk", {
       method: "POST",
@@ -562,6 +631,7 @@ export function CoreClaimQueue({
       for (const p of pmids) next.delete(p);
       return next;
     });
+    setBulkPending(null);
     setAnnounce(
       ok
         ? `${verb} ${pmids.length} publication${pmids.length === 1 ? "" : "s"}.`
@@ -756,10 +826,14 @@ export function CoreClaimQueue({
     noprior: open.filter((c) => matchesFilter(c, "noprior", clientCwids)).length,
     llm: open.filter((c) => matchesFilter(c, "llm", clientCwids)).length,
   };
-  // Apply the facets (but always keep a just-decided row visible so undo stays
-  // reachable), then sort. Likelihood is the loader's order; LLM re-sorts by score.
+  // Apply the facets AND the free-text query (but always keep a just-decided row
+  // visible so undo stays reachable), then sort. Likelihood is the loader's
+  // order; LLM re-sorts by score.
   const visible = candidates
-    .filter((c) => decided.has(c.pmid) || matchesFilters(c, filter, clientCwids))
+    .filter(
+      (c) =>
+        decided.has(c.pmid) || (matchesFilters(c, filter, clientCwids) && matchesQuery(c, query)),
+    )
     .slice()
     .sort((a, b) => compareBySort(sort, a, b));
   // Rows in render order, bucketed by evidence kind when grouping is on. The
@@ -907,6 +981,8 @@ export function CoreClaimQueue({
                 filter={filter}
                 onToggleFilter={toggleFilter}
                 counts={facetCounts}
+                query={query}
+                onQuery={setQuery}
                 sort={sort}
                 onSort={setSort}
                 grouped={grouped}
@@ -925,10 +1001,10 @@ export function CoreClaimQueue({
               <span>
                 Showing {visible.length} of {candidates.length} candidates
               </span>
-              {filter.size > 0 ? (
+              {narrowed ? (
                 <button
                   type="button"
-                  onClick={() => toggleFilter("all")}
+                  onClick={clearFilters}
                   className="text-apollo-slate underline"
                 >
                   Clear filters
@@ -1046,17 +1122,19 @@ export function CoreClaimQueue({
           <span className="h-5 w-px bg-white/20" aria-hidden />
           <button
             type="button"
+            disabled={bulkPending !== null}
             onClick={() => bulkDecide(selectedPmids, "claimed")}
-            className="inline-flex h-8 items-center rounded-full bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white"
+            className="inline-flex h-8 items-center rounded-full bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white disabled:opacity-50"
           >
-            Confirm all
+            {bulkPending === "claimed" ? "Confirming…" : "Confirm all"}
           </button>
           <button
             type="button"
+            disabled={bulkPending !== null}
             onClick={() => bulkDecide(selectedPmids, "rejected")}
-            className="inline-flex h-8 items-center rounded-full border border-white/30 px-3 text-sm"
+            className="inline-flex h-8 items-center rounded-full border border-white/30 px-3 text-sm disabled:opacity-50"
           >
-            Reject all
+            {bulkPending === "rejected" ? "Rejecting…" : "Reject all"}
           </button>
           <button
             type="button"
@@ -1303,6 +1381,8 @@ function QueueControls({
   filter,
   onToggleFilter,
   counts,
+  query,
+  onQuery,
   sort,
   onSort,
   grouped,
@@ -1313,6 +1393,8 @@ function QueueControls({
   filter: ReadonlySet<FilterKey>;
   onToggleFilter: (f: FilterKey) => void;
   counts: Record<FilterKey, number>;
+  query: string;
+  onQuery: (q: string) => void;
   sort: SortKey;
   onSort: (s: SortKey) => void;
   grouped: boolean;
@@ -1322,7 +1404,13 @@ function QueueControls({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter candidates">
+      {/* The pill row and the text box are both "filter candidates"; naming them
+          apart keeps two controls from answering to one accessible name. */}
+      <div
+        className="flex flex-wrap gap-1.5"
+        role="group"
+        aria-label="Filter candidates by evidence"
+      >
         {FILTERS.filter((f) => f.key === "all" || counts[f.key] > 0).map((f) => {
           // "All" is an ACTION, not another box, so it gets plain button
           // semantics. Giving it role="checkbox" would promise a control that
@@ -1380,6 +1468,16 @@ function QueueControls({
           ))}
         </select>
       </label>
+      {/* Placeholder names only what `searchBlob` actually searches — the
+          artboard's "or method" would promise a field this row never carries. */}
+      <Input
+        type="search"
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        placeholder="Filter by title, author, journal or PMID…"
+        aria-label="Filter candidates"
+        className="ml-auto h-8 w-[330px] max-w-full text-xs"
+      />
     </div>
   );
 }

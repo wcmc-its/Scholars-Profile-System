@@ -24,6 +24,7 @@ import {
   likelihoodBand,
   llmVerdict,
   matchesFilters,
+  matchesQuery,
   parsePmidBlock,
 } from "@/components/edit/core-claim-queue";
 import type { FilterKey } from "@/components/edit/core-claim-queue";
@@ -1142,6 +1143,116 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
   });
 
+  it("narrows the queue on the free-text filter, and counts it in the showing line", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Advanced MRI of the brain" }),
+          row({ pmid: "2", title: "Flow cytometry gating strategies", journal: "Cytometry A" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "cytometry" },
+    });
+    expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
+    expect(screen.getByText("Flow cytometry gating strategies")).toBeTruthy();
+    expect(screen.queryByText("Advanced MRI of the brain")).toBeNull();
+  });
+
+  it("shows the empty state when the text query matches nothing", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row(), row({ pmid: "2" })]} confirmed={[]} />);
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "electron tomography" },
+    });
+    expect(screen.getByText("Nothing matches this filter.")).toBeTruthy();
+    expect(screen.getByText("Showing 0 of 2 candidates")).toBeTruthy();
+  });
+
+  it("'Clear filters' clears the text box as well as the pills, and appears for text alone", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Acked paper" }),
+          row({
+            pmid: "2",
+            title: "Bare paper",
+            signalAck: false,
+            ackAlias: null,
+            ackSnippet: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
+    // nothing narrowed yet — no clear affordance to offer
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+
+    // text ALONE surfaces the clear link (the text box has none of its own)
+    fireEvent.change(input, { target: { value: "acked" } });
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeTruthy();
+    expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
+
+    // pills on top of text: both narrowings AND-combine
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
+    expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(input.value).toBe("");
+    expect(
+      screen.getByRole("checkbox", { name: /^Acknowledged/ }).getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("disables both selection-bar buttons while a bulk decision is in flight", async () => {
+    // A double-click on "Confirm all" used to post the same batch twice: the bar
+    // had no disabled state, unlike every per-row button in this component.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn(() =>
+      gate.then(() => ({ ok: true, json: async () => ({ ok: true }) })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Picked A" }), row({ pmid: "2", title: "Picked B" })]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+
+    // the acting button swaps to the pending label, both are disabled
+    const confirming = screen.getByRole("button", { name: "Confirming…" }) as HTMLButtonElement;
+    expect(confirming.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Reject all" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    fireEvent.click(confirming);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // the second click posts nothing
+
+    release();
+    await waitFor(() =>
+      expect(screen.getByTestId("core-claim-live").textContent).toBe("Confirmed 2 publications."),
+    );
+  });
+
   it("downloads the queue as a CSV citation list with PMID + status columns", () => {
     // jsdom's Blob has no .text(); capture the CSV via the constructor instead.
     let csvText = "";
@@ -1174,6 +1285,59 @@ describe("CoreClaimQueue", () => {
     expect(csvText).toContain("Confirmed");
     expect(csvText).toContain("PMID: 111."); // citation string
     clickSpy.mockRestore();
+  });
+});
+
+describe("matchesQuery", () => {
+  const searchable = row({
+    title: "Advanced MRI of the brain",
+    journal: "NeuroImage",
+    pmid: "30418319",
+    synopsis: "A faster acquisition sequence.",
+    authorsString: "Testerson A, Fixture B",
+    ackAlias: "CBIC",
+    ackSnippet: "processed at the CBIC imaging facility",
+    wcmAuthors: [{ cwid: "ccc1003", name: "Casey Sample", slug: "casey-sample", dept: "Genomics" }],
+    coauthorScholars: [
+      { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" },
+    ],
+    meshTerms: [{ ui: "D000000", label: "Zebrafish" }],
+  });
+
+  it("matches on each field the card puts on screen", () => {
+    expect(matchesQuery(searchable, "advanced mri")).toBe(true); // title, case-insensitive
+    expect(matchesQuery(searchable, "NeuroImage")).toBe(true); // journal
+    expect(matchesQuery(searchable, "30418")).toBe(true); // pmid, partial
+    expect(matchesQuery(searchable, "acquisition")).toBe(true); // synopsis
+    expect(matchesQuery(searchable, "Fixture B")).toBe(true); // byline
+    expect(matchesQuery(searchable, "cbic")).toBe(true); // acknowledgment alias
+    expect(matchesQuery(searchable, "imaging facility")).toBe(true); // acknowledgment quote
+    expect(matchesQuery(searchable, "Casey Sample")).toBe(true); // WCM byline scholar
+    expect(matchesQuery(searchable, "Alex Testerson")).toBe(true); // core-staff co-author
+  });
+
+  it("narrows nothing on a blank query, and misses what the row doesn't carry", () => {
+    expect(matchesQuery(searchable, "")).toBe(true);
+    expect(matchesQuery(searchable, "   ")).toBe(true);
+    expect(matchesQuery(searchable, "flow cytometry")).toBe(false);
+  });
+
+  it("does NOT search MeSH — the card no longer shows it, so a hit is unexplainable", () => {
+    expect(matchesQuery(searchable, "Zebrafish")).toBe(false);
+  });
+
+  it("tolerates a row with every optional text field null", () => {
+    const bare = row({
+      journal: null,
+      synopsis: null,
+      authorsString: null,
+      ackAlias: null,
+      ackSnippet: null,
+      wcmAuthors: [],
+      coauthorScholars: [],
+    });
+    expect(matchesQuery(bare, "brain")).toBe(true); // still has a title
+    expect(matchesQuery(bare, "NeuroImage")).toBe(false);
   });
 });
 
