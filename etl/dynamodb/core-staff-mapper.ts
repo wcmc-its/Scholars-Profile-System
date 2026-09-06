@@ -1,48 +1,71 @@
 /**
- * Pure helper for etl/dynamodb/index.ts Block 6b (CORE#/STAFF -> core.staff_count),
- * split out so the per-record parsing + guards can be unit-tested without a
- * DynamoDB scan — the same split as ./publication-core-mapper.ts.
+ * Pure helper for etl/dynamodb/index.ts Block 6b (CORE#/STAFF_DICT ->
+ * core.staff_count + core.staff_tracked_count), split out so the per-record
+ * parsing + guards can be unit-tested without a DynamoDB scan — the same split
+ * as ./publication-core-mapper.ts.
  *
- * ReciterAI writes one item per core at `PK = CORE#{core_id}`, `SK = STAFF`,
- * carrying `staff_count`: the number of CWIDs in that core's `staff:` list in
- * the facility dictionary. The COUNT ONLY, by contract — the consumer renders
- * one integer, and copying the staff CWIDs into a second datastore would be
- * PII surface bought for nothing. This mapper therefore reads exactly one
- * attribute and there is nothing here to mirror a roster with.
+ * ReciterAI writes one item per core at `PK = CORE#{core_id}`,
+ * `SK = STAFF_DICT`, carrying TWO counts drawn from the facility dictionary:
  *
- * Direction matters: this item flows ReciterAI -> SPS. The sibling
- * `(CORE#{core_id}, CLIENTS)` item flows the other way (SPS writes it in
- * lib/cores/client-writeback.ts, the engine reads it) and is never touched
- * here — ./partition.ts keeps them apart on the exact `SK`.
+ *   `staff_count`          how many CWIDs the dictionary LISTS under `staff:`
+ *   `staff_tracked_count`  how many of those the co-author signal can MATCH
  *
- * ABSENT IS NOT ZERO. A core with no STAFF item must produce NO write at all,
- * leaving `core.staff_count` exactly as it was; a core whose item says
+ * The second is the load-bearing one, and it is NOT a formality. The signal
+ * (pipeline_cores/signals.py `coauthorship_index`) reads the core's
+ * `tracked_staff_cwids`, not its `staff:` list; a listed staff member with no
+ * personIdentifier upstream is simply invisible to it. On the live dictionary
+ * the two counts differ on 8 of 14 cores, and three of those list staff while
+ * tracking none. A consumer given only the listed count would put "the
+ * co-author signal draws on N core staff" on screen for cores where the signal
+ * cannot fire at all — a chip asserting a mechanism that is not the one behind
+ * the number, which is exactly the `decodeTopicalPrior` failure this codebase
+ * has already shipped once. So both counts travel, together, all the way to
+ * the UI.
+ *
+ * COUNTS ONLY, by contract — the consumer renders two integers, and copying
+ * the staff CWIDs into a second datastore would be PII surface bought for
+ * nothing. This mapper therefore reads exactly two attributes and there is
+ * nothing here to mirror a roster with.
+ *
+ * Direction matters, and the SK suffix is how it is marked. `STAFF_DICT` is
+ * dictionary-sourced and flows ReciterAI -> SPS. The bare `STAFF` key is
+ * deliberately NOT used: it is reserved for a future SPS-curated staff list,
+ * which by the existing `(CORE#{core_id}, CLIENTS)` precedent (SPS writes it
+ * in lib/cores/client-writeback.ts, the engine reads it) would want exactly
+ * that key and would run the other way. ./partition.ts keeps all three apart
+ * on the exact `SK`.
+ *
+ * ABSENT IS NOT ZERO. A core with no STAFF_DICT item must produce NO write at
+ * all, leaving both columns exactly as they were; a core whose item says
  * `staff_count: 0` must produce a write OF 0. That distinction is the whole
- * point of the nullable column: NULL reads as "not published yet" (the queue
- * shows no chip), 0 reads as "the dictionary lists no staff for this core"
- * (the queue says the staff co-author signal cannot fire). Collapsing the two
- * would be this repo's standing failure mode — a fail-soft read on a path that
- * WRITES is a wipe — so the mapper only ever emits writes for items it
- * actually saw, and every skip is counted rather than defaulted.
+ * point of the nullable columns: NULL means "not published yet" (the queue
+ * shows no chip), 0 means "the dictionary lists no staff for this core" (the
+ * queue says the co-author signal cannot fire). Collapsing the two would be
+ * this repo's standing failure mode — a fail-soft read on a path that WRITES
+ * is a wipe — so the mapper only ever emits writes for items it actually saw,
+ * and every skip is counted rather than defaulted.
  */
 
 /**
- * Minimal shape of a CORE#/STAFF record consumed by the mapper. The
+ * Minimal shape of a CORE#/STAFF_DICT record consumed by the mapper. The
  * DocumentClient scan unmarshals the attribute format, so a DynamoDB `N`
  * arrives as a JS number; the string form is accepted too because a hand-
  * written item (or a `PutItem` from a script) can land it as `S`.
  */
 export type CoreStaffRecordInput = {
   PK: string; // "CORE#{core_id}"
-  SK: string; // "STAFF"
+  SK: string; // "STAFF_DICT"
   core_id?: string;
   staff_count?: number | string;
+  staff_tracked_count?: number | string;
 };
 
 export type CoreStaffWrite = {
   coreId: string;
-  /** The dictionary roster size. Always a non-negative integer; 0 is a real value. */
+  /** Listed in the dictionary's `staff:` key. Non-negative integer; 0 is real. */
   staffCount: number;
+  /** Of those, the ones the co-author signal can match. Never exceeds `staffCount`. */
+  staffTrackedCount: number;
 };
 
 export type CoreStaffMapResult = {
@@ -54,6 +77,10 @@ export type CoreStaffMapResult = {
   skippedUnknownCore: number;
   /** Skipped: `staff_count` absent, non-numeric, negative, or fractional. */
   skippedMissingCount: number;
+  /** Skipped: `staff_tracked_count` absent, non-numeric, negative, or fractional. */
+  skippedMissingTracked: number;
+  /** Skipped: tracked > listed, which no dictionary entry can mean. */
+  skippedIncoherent: number;
 };
 
 function parseCoreId(it: CoreStaffRecordInput): string {
@@ -70,7 +97,7 @@ function parseCoreId(it: CoreStaffRecordInput): string {
  * returning 0 for an unparseable value would write "this core has no staff"
  * over a real roster on the strength of a malformed item.
  */
-function parseStaffCount(raw: number | string | undefined): number | null {
+function parseCount(raw: number | string | undefined): number | null {
   const n =
     typeof raw === "number"
       ? raw
@@ -82,11 +109,24 @@ function parseStaffCount(raw: number | string | undefined): number | null {
 }
 
 /**
- * Map CORE#/STAFF scan records to `core.staff_count` write payloads.
+ * Map CORE#/STAFF_DICT scan records to write payloads carrying BOTH counts.
+ *
+ * The two counts are all-or-nothing. An item that carries a listed count but
+ * no usable tracked count is skipped outright rather than half-written,
+ * because a row with `staff_count = 4, staff_tracked_count = NULL` is the one
+ * state the UI cannot render honestly: it can neither claim the signal draws
+ * on 4 nor claim it cannot fire. Skipping leaves both columns as they were and
+ * the chip stays invisible, which is the fail-safe direction — a producer that
+ * ships the listed count first and the tracked count later publishes nothing
+ * until it publishes both, instead of publishing the misleading half.
+ *
+ * `tracked > listed` is rejected on the same grounds: the dictionary cannot
+ * track staff it does not list, and rendering "7 of 4 core staff" would be a
+ * visible lie about a number the reviewer is being asked to trust.
  *
  * Every guard SKIPS (counted, not thrown) so a malformed item on one core
  * cannot fail the nightly for the rest — and, critically, a skip emits no
- * write, so the existing column value survives untouched. Later items win on a
+ * write, so the existing column values survive untouched. Later items win on a
  * duplicate core id, matching the last-write-wins an upsert loop would give.
  */
 export function buildCoreStaffWrites(
@@ -94,10 +134,12 @@ export function buildCoreStaffWrites(
   sets: { knownCoreIds: ReadonlySet<string> },
 ): CoreStaffMapResult {
   const { knownCoreIds } = sets;
-  const byCore = new Map<string, number>();
+  const byCore = new Map<string, CoreStaffWrite>();
   let skippedMissingCore = 0;
   let skippedUnknownCore = 0;
   let skippedMissingCount = 0;
+  let skippedMissingTracked = 0;
+  let skippedIncoherent = 0;
 
   for (const it of records) {
     const coreId = parseCoreId(it);
@@ -109,18 +151,29 @@ export function buildCoreStaffWrites(
       skippedUnknownCore += 1;
       continue;
     }
-    const staffCount = parseStaffCount(it.staff_count);
+    const staffCount = parseCount(it.staff_count);
     if (staffCount === null) {
       skippedMissingCount += 1;
       continue;
     }
-    byCore.set(coreId, staffCount);
+    const staffTrackedCount = parseCount(it.staff_tracked_count);
+    if (staffTrackedCount === null) {
+      skippedMissingTracked += 1;
+      continue;
+    }
+    if (staffTrackedCount > staffCount) {
+      skippedIncoherent += 1;
+      continue;
+    }
+    byCore.set(coreId, { coreId, staffCount, staffTrackedCount });
   }
 
   return {
-    writes: [...byCore].map(([coreId, staffCount]) => ({ coreId, staffCount })),
+    writes: [...byCore.values()],
     skippedMissingCore,
     skippedUnknownCore,
     skippedMissingCount,
+    skippedMissingTracked,
+    skippedIncoherent,
   };
 }

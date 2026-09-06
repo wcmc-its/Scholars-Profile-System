@@ -102,9 +102,19 @@ export type CoreRecord = {
 };
 
 /**
- * The engine's per-core staff-roster item: PK=`CORE#{core_id}`, SK=`STAFF`.
- * One item per core carrying the SIZE of the facility dictionary's `staff:`
- * list — not the CWIDs themselves (see etl/dynamodb/core-staff-mapper.ts).
+ * The engine's per-core staff-count item: PK=`CORE#{core_id}`,
+ * SK=`STAFF_DICT`. One item per core carrying two SIZES taken from the
+ * facility dictionary — never the CWIDs themselves (see
+ * etl/dynamodb/core-staff-mapper.ts):
+ *
+ *   `staff_count`          how many CWIDs the dictionary LISTS under `staff:`
+ *   `staff_tracked_count`  how many of those the co-author signal can MATCH
+ *
+ * `STAFF_DICT`, not `STAFF`, and the suffix is the direction marker: this item
+ * is dictionary-sourced and flows ReciterAI -> SPS. The bare `STAFF` key is
+ * reserved for a future SPS-CURATED staff list, which by the existing
+ * `(CORE#{id}, CLIENTS)` precedent (SPS writes, the engine reads) would want
+ * exactly that key and would run the other way.
  *
  * Note the key shape is the MIRROR of a CoreRecord's: the core is the
  * PARTITION here (`PK`), where a CoreRecord puts the publication in `PK` and
@@ -113,9 +123,10 @@ export type CoreRecord = {
  */
 export type CoreStaffRecord = {
   PK: string; // CORE#{core_id}
-  SK: string; // "STAFF"
+  SK: string; // "STAFF_DICT"
   core_id?: string;
   staff_count?: number | string;
+  staff_tracked_count?: number | string;
   [key: string]: unknown;
 };
 
@@ -139,17 +150,19 @@ export type Buckets = {
  *   Block 4 IMPACT#    -> publication         begins_with(PK, "IMPACT#pmid_")
  *   Block 5 TOOL#      -> scholar_tool        begins_with(PK, "TOOL#")
  *   Block 6 PUB#/CORE# -> core                begins_with(SK, "CORE#")   <- SK, not PK
- *   Block 6b CORE#/STAFF -> core.staff_count  PK CORE# AND SK === "STAFF"
+ *   Block 6b CORE#/STAFF_DICT -> core.staff_*  PK CORE# AND SK === "STAFF_DICT"
  *
  * The buckets are disjoint (one `continue` per match), so the union exactly
  * reproduces what the six independent filtered scans kept. Block 7 (GRANT#) is
  * NOT handled here — it delegates to grant-opportunity-etl.ts's own scan.
  *
  * Block 6b is the one bucket that never had a filtered scan of its own: the
- * STAFF item is new (ReciterAI writes it, SPS reads it), and it was previously
- * dropped as unmatched. It is matched on the EXACT `SK === "STAFF"`, not a
- * prefix, so the sibling `SK = "CLIENTS"` item (which SPS writes and this ETL
- * must never read back) keeps falling through unmatched exactly as before.
+ * STAFF_DICT item is new (ReciterAI writes it, SPS reads it), and it was
+ * previously dropped as unmatched. It is matched on the EXACT
+ * `SK === "STAFF_DICT"`, not a prefix, so BOTH siblings under the same `CORE#`
+ * partition keep falling through unmatched exactly as before: `SK = "CLIENTS"`
+ * (which SPS writes and this ETL must never read back) and the reserved
+ * `SK = "STAFF"` (a future SPS-curated list, likewise SPS-written).
  */
 export function partitionRecords(items: Array<Record<string, unknown>>): Buckets {
   const b: Buckets = {
@@ -172,11 +185,13 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
       b.cores.push(it as CoreRecord);
       continue;
     }
-    // Block 6b keys on BOTH halves: PK=CORE#{core_id}, SK="STAFF". The SK is
-    // matched exactly rather than by prefix so the sibling PK=CORE#… item SPS
-    // writes (SK="CLIENTS", lib/cores/client-writeback.ts) stays unmatched —
-    // reading our own writeback back in would be a loop, not an ingest.
-    if (pk.startsWith("CORE#") && sk === "STAFF") {
+    // Block 6b keys on BOTH halves: PK=CORE#{core_id}, SK="STAFF_DICT". The SK
+    // is matched exactly rather than by prefix so the sibling PK=CORE#… items
+    // SPS writes stay unmatched — SK="CLIENTS" (lib/cores/client-writeback.ts)
+    // today, and the reserved SK="STAFF" tomorrow. Reading our own writeback
+    // back in would be a loop, not an ingest, and a `sk.startsWith("STAFF")`
+    // here would swallow that reserved key the day it is used.
+    if (pk.startsWith("CORE#") && sk === "STAFF_DICT") {
       b.coreStaff.push(it as CoreStaffRecord);
       continue;
     }

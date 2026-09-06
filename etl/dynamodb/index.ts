@@ -953,51 +953,66 @@ async function main() {
     }
 
     // ===================================================================
-    // Block 6b: CORE#/STAFF → core.staff_count  (staff roster size)
+    // Block 6b: CORE#/STAFF_DICT → core.staff_count + core.staff_tracked_count
     // ===================================================================
-    // ReciterAI publishes one item per core at PK=CORE#{core_id}, SK=STAFF
-    // carrying `staff_count`: how many CWIDs are in that core's `staff:` list
-    // in the facility dictionary. That is the population the co-author signal
-    // (signal 2) draws on, so the review queue can finally tell an owner what
-    // is behind it — "Co-author signal draws on N core staff".
+    // ReciterAI publishes one item per core at PK=CORE#{core_id},
+    // SK=STAFF_DICT carrying TWO counts taken from the facility dictionary:
+    // `staff_count` (how many CWIDs its `staff:` key LISTS) and
+    // `staff_tracked_count` (how many of those the co-author signal, signal 2,
+    // can actually MATCH). The review queue renders both.
     //
-    // The COUNT ONLY, by contract. The roster itself stays in the dictionary:
-    // the consumer renders one integer, so mirroring staff CWIDs into MySQL
+    // Both, because the second is the one the signal runs on and it is
+    // routinely smaller: pipeline_cores/signals.py `coauthorship_index` reads
+    // the core's `tracked_staff_cwids`, not its `staff:` list, so a listed
+    // staff member with no personIdentifier upstream is invisible to it. The
+    // two counts differ on 8 of the 14 live cores, and three of those list
+    // staff while tracking none. Landing only `staff_count` would let the
+    // queue tell an owner "the co-author signal draws on N core staff" for a
+    // core where it cannot fire at all.
+    //
+    // COUNTS ONLY, by contract. The roster itself stays in the dictionary:
+    // the consumer renders two integers, so mirroring staff CWIDs into MySQL
     // would be PII surface bought for nothing.
     //
-    // Note the direction. The sibling (CORE#{core_id}, CLIENTS) item runs the
-    // OTHER way — SPS writes it (lib/cores/client-writeback.ts), the engine
-    // reads it — and this block must never touch it; ./partition.ts keeps the
-    // two apart on the exact SK.
+    // Note the direction, which the SK suffix marks. STAFF_DICT is
+    // dictionary-sourced, ReciterAI → SPS. The sibling (CORE#{core_id},
+    // CLIENTS) item runs the OTHER way — SPS writes it
+    // (lib/cores/client-writeback.ts), the engine reads it — and the bare
+    // (CORE#{core_id}, STAFF) key is reserved for a future SPS-curated staff
+    // list that would run that way too. This block must never touch either;
+    // ./partition.ts keeps all three apart on the exact SK.
     //
     // ABSENT IS NOT ZERO. `update` (not `upsert`, and not a blanket
     // updateMany-to-0 first) on ONLY the cores this run actually saw: a core
-    // with no STAFF item keeps whatever staff_count it already had, and the
-    // column stays NULL for a core the engine has never published. A
+    // with no STAFF_DICT item keeps whatever counts it already had, and both
+    // columns stay NULL for a core the engine has never published. A
     // fail-soft read on a path that WRITES is a wipe, and a nightly that
     // zeroed every core the moment the producer went quiet would be exactly
     // that. `staff_count: 0` in a present item IS written, because "the
     // dictionary lists no staff for this core" is real, useful review state.
+    // The two counts are written together or not at all — see the mapper.
     const coreStaffItems = buckets.coreStaff;
-    console.log(`Found ${coreStaffItems.length} CORE#/STAFF record(s).`);
+    console.log(`Found ${coreStaffItems.length} CORE#/STAFF_DICT record(s).`);
     const staffMap = buildCoreStaffWrites(coreStaffItems, { knownCoreIds });
     console.log(
-      `core.staff_count candidates: ${staffMap.writes.length} (skipped: ` +
+      `core staff counts candidates: ${staffMap.writes.length} (skipped: ` +
         `${staffMap.skippedMissingCore} unresolvable core id, ` +
         `${staffMap.skippedUnknownCore} unknown core, ` +
-        `${staffMap.skippedMissingCount} absent/invalid staff_count).`,
+        `${staffMap.skippedMissingCount} absent/invalid staff_count, ` +
+        `${staffMap.skippedMissingTracked} absent/invalid staff_tracked_count, ` +
+        `${staffMap.skippedIncoherent} tracked > listed).`,
     );
     let coreStaffRowsUpdated = 0;
     for (const w of staffMap.writes) {
       await db.write.core.update({
         where: { id: w.coreId },
-        data: { staffCount: w.staffCount },
+        data: { staffCount: w.staffCount, staffTrackedCount: w.staffTrackedCount },
       });
       coreStaffRowsUpdated += 1;
     }
     console.log(
-      `core.staff_count updates complete: ${coreStaffRowsUpdated} core(s) ` +
-        `(${knownCoreIds.size - coreStaffRowsUpdated} left untouched — no STAFF item this run).`,
+      `core staff count updates complete: ${coreStaffRowsUpdated} core(s) ` +
+        `(${knownCoreIds.size - coreStaffRowsUpdated} left untouched — no STAFF_DICT item this run).`,
     );
 
     // ===================================================================
@@ -1053,7 +1068,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}, core_staff_count=${coreStaffRowsUpdated}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}, core_staff_counts=${coreStaffRowsUpdated}`,
     );
   } catch (err) {
     await db.write.etlRun.update({

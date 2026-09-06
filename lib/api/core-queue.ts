@@ -120,13 +120,21 @@ export interface CoreReviewQueue {
   core: {
     id: string;
     name: string;
-    /** Size of the core's `staff:` roster in ReciterAI's facility dictionary —
-     *  the population the co-author signal draws on (ETL-owned, projected by
-     *  etl/dynamodb Block 6b). NULL means the engine has not published a count
-     *  for this core yet, which is NOT the same as 0: 0 means the dictionary
-     *  lists no staff, so the staff co-author signal cannot fire at all. The
-     *  queue toolbar renders nothing for null and a distinct sentence for 0. */
+    /** How many core staff ReciterAI's facility dictionary LISTS for this core
+     *  (ETL-owned, projected by etl/dynamodb Block 6b). NULL means the engine
+     *  has not published counts for this core yet, which is NOT the same as 0:
+     *  0 means the dictionary lists no staff at all. */
     staffCount: number | null;
+    /** Of those listed staff, how many the co-author signal can actually MATCH
+     *  — the number the signal really runs on, and the one the toolbar chip
+     *  leads with. It is routinely smaller than `staffCount` (the two differ on
+     *  8 of the 14 live cores) because the signal reads the core's tracked
+     *  staff CWIDs, not its dictionary list, so a listed staff member with no
+     *  personIdentifier upstream is invisible to it. 0 here with a positive
+     *  `staffCount` is a real state: the dictionary lists staff but the signal
+     *  cannot fire. Written in lockstep with `staffCount`, so in practice the
+     *  two are both NULL or both set. */
+    staffTrackedCount: number | null;
   };
   candidates: CoreQueueRow[];
   confirmed: CoreQueueRow[];
@@ -214,7 +222,7 @@ export async function loadCoreReviewQueue(
 ): Promise<CoreReviewQueue | null> {
   const core = await client.core.findUnique({
     where: { id: coreId },
-    select: { id: true, name: true, staffCount: true },
+    select: { id: true, name: true, staffCount: true, staffTrackedCount: true },
   });
   if (!core) return null;
 
@@ -421,11 +429,16 @@ export async function loadCoreReviewQueue(
     (pmid) => claims.get(pmid) ?? null,
   );
   return {
-    // Rebuilt rather than passed straight through so `staffCount` is always
-    // present and always `number | null` — an `undefined` reaching the client
-    // would render as "not published yet" by accident rather than by the
-    // column actually being NULL.
-    core: { id: core.id, name: core.name, staffCount: core.staffCount ?? null },
+    // Rebuilt rather than passed straight through so both staff counts are
+    // always present and always `number | null` — an `undefined` reaching the
+    // client would render as "not published yet" by accident rather than by
+    // the column actually being NULL.
+    core: {
+      id: core.id,
+      name: core.name,
+      staffCount: core.staffCount ?? null,
+      staffTrackedCount: core.staffTrackedCount ?? null,
+    },
     candidates,
     confirmed,
     rejected,

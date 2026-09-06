@@ -73,11 +73,16 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
   };
 }
 
-/** `staffCount: null` is the DEFAULT fixture state on purpose — the engine has
- *  published no staff count for most cores, and every test that is not about
- *  the chip should be rendering the queue exactly as it looked before the
- *  chip existed. The chip tests override it. */
-const CORE = { id: "2", name: "Biomedical Imaging", staffCount: null };
+/** Both staff counts null is the DEFAULT fixture state on purpose — the engine
+ *  has published none for most cores, and every test that is not about the chip
+ *  should be rendering the queue exactly as it looked before the chip existed.
+ *  The chip tests override them. */
+const CORE = {
+  id: "2",
+  name: "Biomedical Imaging",
+  staffCount: null as number | null,
+  staffTrackedCount: null as number | null,
+};
 
 /** Expand the only open card's evidence strip — signal rows start collapsed. */
 function showEvidence() {
@@ -1903,49 +1908,148 @@ describe("compareBySort", () => {
   });
 });
 
-// The toolbar's core-staff lock chip. `core.staffCount` is the size of the
-// core's `staff:` roster in ReciterAI's facility dictionary, landed on
-// `core.staff_count` by etl/dynamodb Block 6b. The three states are NOT
-// interchangeable: null is "not published yet" (draw nothing), 0 is "the
-// dictionary lists no staff" (its own sentence), positive is the mockup's line.
+// The toolbar's core-staff lock chip. `core.staffCount` is how many core staff
+// ReciterAI's facility dictionary LISTS; `core.staffTrackedCount` is how many
+// of those the co-author signal can actually MATCH, landed on
+// `core.staff_count` / `core.staff_tracked_count` by etl/dynamodb Block 6b.
+//
+// The four states are NOT interchangeable, and the reason the tracked count
+// exists at all is that the chip must never claim the signal draws on staff it
+// cannot match: on the live dictionary the two counts differ on 8 of 14 cores,
+// core 14 (the one in the owner's mockup) lists 4 and tracks 1, and cores 8, 10
+// and 13 list staff while tracking none.
 describe("CoreClaimQueue — core-staff lock chip", () => {
   const chip = () => document.querySelector('[data-slot="core-staff-chip"]');
   const chipText = () => (chip()?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-  it("renders the mockup's sentence with the count, and EMPHASISES the number", () => {
+  it("renders the mockup's sentence as 'M of N', and EMPHASISES that fraction", () => {
+    // Core 14's live shape. The pre-revision chip said "draws on 4 core staff"
+    // here, which was false: the signal can match exactly one of the four.
     render(
-      <CoreClaimQueue core={{ ...CORE, staffCount: 4 }} candidates={[row()]} confirmed={[]} />,
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: 1 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
     );
-    expect(chipText()).toBe("Co-author signal draws on 4 core staff from the facility dictionary");
-    // the mockup bolds the number and its noun, not the whole sentence
+    expect(chipText()).toBe(
+      "Co-author signal draws on 1 of 4 core staff from the facility dictionary",
+    );
+    // the mockup bolds the number; the number here is the fraction, not the
+    // listed count alone — bolding "4" would re-tell the lie in bold.
     const bolded = chip()?.querySelector(".font-semibold");
-    expect(bolded?.textContent).toBe("4 core staff");
+    expect((bolded?.textContent ?? "").replace(/\s+/g, " ").trim()).toBe("1 of 4");
   });
 
-  it("renders NOTHING when the count is null — not-yet-published must look like nothing", () => {
-    // CORE's own staffCount is null: this is the pre-chip rendering, unchanged.
+  it("still says 'M of N' when every listed staff member is tracked", () => {
+    // Core 1 on the live dictionary: 4 listed, 4 tracked. The fraction stays —
+    // a bare "4" would make the reader guess which of the two numbers it is.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: 4 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chipText()).toBe(
+      "Co-author signal draws on 4 of 4 core staff from the facility dictionary",
+    );
+  });
+
+  it("renders NOTHING when the counts are null — not-yet-published must look like nothing", () => {
+    // CORE's own counts are null: this is the pre-chip rendering, unchanged.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(chip()).toBeNull();
     expect(screen.queryByText(/core staff/)).toBeNull();
     expect(screen.queryByText(/facility dictionary/)).toBeNull();
   });
 
-  it("says the signal cannot fire when the count is 0 — never 'draws on 0 core staff'", () => {
-    // 0 is a real, published state (three cores are in it) and the most useful
-    // thing a reviewer can learn here: every candidate they see is carried by
-    // the other four signals.
+  it("renders NOTHING for a half-known row (listed known, tracked null)", () => {
+    // The ETL writes the pair together or not at all, so this row should not
+    // exist — and if one ever does, silence beats guessing: the chip can
+    // neither claim the signal draws on 4 nor claim it cannot fire.
     render(
-      <CoreClaimQueue core={{ ...CORE, staffCount: 0 }} candidates={[row()]} confirmed={[]} />,
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: null }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chip()).toBeNull();
+    expect(screen.queryByText(/draws on/)).toBeNull();
+  });
+
+  it("says the signal cannot fire when the dictionary LISTS none — never 'draws on 0'", () => {
+    // Cores 4, 6 and 7 on the live dictionary. The most useful thing a reviewer
+    // can learn here: every candidate they see is carried by the other four
+    // signals.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 0, staffTrackedCount: 0 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
     );
     expect(chipText()).toBe(
       "The facility dictionary lists no core staff, so the co-author signal cannot fire for this core.",
     );
-    expect(chipText()).not.toContain("draws on 0");
+    expect(chipText()).not.toContain("draws on");
+  });
+
+  it("says the signal cannot fire when staff are LISTED but none are tracked", () => {
+    // Cores 8 (3 listed), 10 (2) and 13 (1). This is the state the single-count
+    // chip got most wrong — it would have claimed "draws on 3 core staff" for a
+    // core where the co-author signal cannot contribute anything at all.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 3, staffTrackedCount: 0 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chipText()).toBe(
+      "The facility dictionary lists 3 core staff, but none are resolvable, so the co-author signal cannot fire for this core.",
+    );
+    expect(chipText()).not.toContain("draws on");
+  });
+
+  it("never renders a bare listed count as the number the signal draws on", () => {
+    // The single property this whole revision exists for, swept over every
+    // divergent core in the live dictionary (listed/tracked).
+    for (const [staffCount, staffTrackedCount] of [
+      [7, 4],
+      [3, 2],
+      [5, 2],
+      [3, 0],
+      [2, 1],
+      [2, 0],
+      [1, 0],
+      [4, 1],
+    ]) {
+      const view = render(
+        <CoreClaimQueue
+          core={{ ...CORE, staffCount, staffTrackedCount }}
+          candidates={[row()]}
+          confirmed={[]}
+        />,
+      );
+      expect(chipText()).not.toContain(`draws on ${staffCount} core staff`);
+      if (staffTrackedCount > 0) {
+        expect(chipText()).toContain(`draws on ${staffTrackedCount} of ${staffCount} core staff`);
+      } else {
+        expect(chipText()).toContain("cannot fire");
+      }
+      view.unmount();
+    }
   });
 
   it("keeps the chip and the button group in the same toolbar row, chip first", () => {
     render(
-      <CoreClaimQueue core={{ ...CORE, staffCount: 4 }} candidates={[row()]} confirmed={[]} />,
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: 1 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
     );
     const toolbar = document.querySelector('[data-slot="core-queue-toolbar"]');
     const knownClients = screen.getByRole("button", { name: /Known clients/ });
@@ -1962,9 +2066,18 @@ describe("CoreClaimQueue — core-staff lock chip", () => {
     // The mockup draws one. The roster lives in the facility dictionary, not in
     // SPS, and this toolbar already carries one knowingly-inert control
     // ("Reporting..."); a second would make dead controls the pattern.
-    for (const staffCount of [null, 0, 4]) {
+    for (const [staffCount, staffTrackedCount] of [
+      [null, null],
+      [0, 0],
+      [3, 0],
+      [4, 1],
+    ] as Array<[number | null, number | null]>) {
       const view = render(
-        <CoreClaimQueue core={{ ...CORE, staffCount }} candidates={[row()]} confirmed={[]} />,
+        <CoreClaimQueue
+          core={{ ...CORE, staffCount, staffTrackedCount }}
+          candidates={[row()]}
+          confirmed={[]}
+        />,
       );
       expect(screen.queryByRole("button", { name: /Manage staff/i })).toBeNull();
       expect(screen.queryByRole("link", { name: /Manage staff/i })).toBeNull();

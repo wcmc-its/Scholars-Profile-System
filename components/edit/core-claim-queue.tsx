@@ -46,12 +46,14 @@
  *     as a ticked facet.
  *
  *   - the mockup's "Co-author signal draws on N core staff from the facility
- *     dictionary" lock chip is now BUILT: ReciterAI publishes the roster size
- *     per core (PK=CORE#{id}, SK=STAFF) and etl/dynamodb Block 6b lands it on
- *     `core.staff_count`. It renders only when the count is known — null (the
- *     engine has not published one) draws nothing at all, and 0 gets its own
- *     sentence, since "draws on 0 core staff" is both awkward and the single
- *     most useful thing a reviewer could learn about such a core.
+ *     dictionary" lock chip is now BUILT, and reads "M of N": ReciterAI
+ *     publishes both the LISTED roster size and the TRACKED subset the signal
+ *     can actually match (PK=CORE#{id}, SK=STAFF_DICT), and etl/dynamodb
+ *     Block 6b lands them on `core.staff_count` / `core.staff_tracked_count`.
+ *     The mockup's bare N is the listed count, which is wrong on 8 of the 14
+ *     live cores — the very core it draws lists 4 and tracks 1 — so the chip
+ *     leads with the tracked number and says outright when the signal cannot
+ *     fire at all. Unpublished counts still draw nothing (see `CoreStaffChip`).
  *
  * Drawn in the mockup, NOT built here (no data behind either):
  *   - the chip's "Manage staff" link — the roster lives in ReciterAI's facility
@@ -972,7 +974,7 @@ export function CoreClaimQueue({
         data-slot="core-queue-toolbar"
         className="mb-2 flex flex-wrap items-center justify-between gap-2"
       >
-        <CoreStaffChip staffCount={core.staffCount} />
+        <CoreStaffChip staffCount={core.staffCount} staffTrackedCount={core.staffTrackedCount} />
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -1307,21 +1309,37 @@ export function CoreClaimQueue({
 
 /**
  * The toolbar's lock chip: what the co-author signal (signal 2) actually has to
- * work with on this core. `staffCount` is the size of the `staff:` roster in
- * ReciterAI's facility dictionary, projected onto `core.staff_count` by
- * etl/dynamodb Block 6b — a COUNT, never the CWIDs, which stay upstream.
+ * work with on this core. Both counts come from ReciterAI's facility
+ * dictionary via etl/dynamodb Block 6b (`PK=CORE#{id}, SK=STAFF_DICT`) — COUNTS,
+ * never the CWIDs, which stay upstream.
  *
- * Three states, and the difference between the last two is the point:
- *   - `null` — the engine has published no count for this core. Renders
- *     NOTHING, exactly as before this shipped. Not-yet-published must look
- *     like nothing at all, never like an empty roster; the rest of this queue
- *     is built on the same invisible-not-broken property.
- *   - `0` — the dictionary genuinely lists no staff for this core (three cores
- *     are in this state). Gets its OWN sentence, because "draws on 0 core
- *     staff" is both awkward and buries the single most useful thing a
- *     reviewer could learn here: signal 2 cannot fire for this core at all, so
- *     every candidate they see is carried by the other four signals.
- *   - a positive count — the mockup's sentence, with the number emphasized.
+ * The two numbers are not interchangeable, and that is the whole reason this
+ * chip renders both. `staffCount` is what the dictionary LISTS under the core's
+ * `staff:` key. `staffTrackedCount` is how many of those the signal can
+ * actually MATCH: pipeline_cores/signals.py `coauthorship_index` reads the
+ * core's tracked staff CWIDs, so a listed staff member with no personIdentifier
+ * upstream is invisible to it. The two differ on 8 of the 14 live cores; the
+ * largest lists four and tracks one, and three list staff while tracking none.
+ * A chip built on the listed count alone would tell a reviewer the signal
+ * "draws on 4 core staff" on exactly the core in the owner's mockup, where it
+ * draws on one — the same species of false mechanism claim `decodeTopicalPrior`
+ * already put on 7,332 live chips. So the sentence leads with the tracked
+ * count and carries the listed one behind it, and the two dead states say so
+ * outright rather than naming a number the signal cannot use.
+ *
+ * Four states:
+ *   - counts unpublished (`staffCount` null; `staffTrackedCount` null is the
+ *     same case, since the ETL writes the pair together or not at all) —
+ *     renders NOTHING, exactly as before this shipped. Not-yet-published must
+ *     look like nothing at all, never like an empty roster; the rest of this
+ *     queue is built on the same invisible-not-broken property.
+ *   - listed 0 — the dictionary lists no staff at all for this core. Its own
+ *     sentence: the signal cannot fire, so every candidate the reviewer sees is
+ *     carried by the other four signals.
+ *   - listed > 0, tracked 0 — the dictionary lists staff but none of them
+ *     resolve. Same conclusion, different cause, and the cause is worth saying:
+ *     this one is fixable upstream, "lists none" is not.
+ *   - tracked > 0 — the mockup's sentence, "M of N" emphasized.
  *
  * The mockup also draws a "Manage staff" link beside this chip. It is
  * deliberately NOT built: there is no destination — the roster lives in the
@@ -1330,8 +1348,14 @@ export function CoreClaimQueue({
  * ("Reporting..."); a second would make dead controls the pattern here. It
  * becomes a `/roles` link the day a core-staff role exists.
  */
-function CoreStaffChip({ staffCount }: { staffCount: number | null }) {
-  if (staffCount === null) return null;
+function CoreStaffChip({
+  staffCount,
+  staffTrackedCount,
+}: {
+  staffCount: number | null;
+  staffTrackedCount: number | null;
+}) {
+  if (staffCount === null || staffTrackedCount === null) return null;
   return (
     <span
       data-slot="core-staff-chip"
@@ -1343,11 +1367,18 @@ function CoreStaffChip({ staffCount }: { staffCount: number | null }) {
           The facility dictionary lists no core staff, so the co-author signal cannot fire for this
           core.
         </span>
+      ) : staffTrackedCount === 0 ? (
+        <span>
+          The facility dictionary lists {staffCount} core staff, but none are resolvable, so the
+          co-author signal cannot fire for this core.
+        </span>
       ) : (
         <span>
           Co-author signal draws on{" "}
-          <span className="text-foreground font-semibold">{staffCount} core staff</span> from the
-          facility dictionary
+          <span className="text-foreground font-semibold">
+            {staffTrackedCount} of {staffCount}
+          </span>{" "}
+          core staff from the facility dictionary
         </span>
       )}
     </span>

@@ -11,8 +11,9 @@
  * Covers:
  *   - one item of each recognized type lands in exactly its bucket
  *   - a PUB#… item whose SK is CORE#… lands in `cores` (SK-first rule)
- *   - a CORE#…/STAFF item lands in `coreStaff`, and the sibling CORE#…/CLIENTS
- *     item SPS itself writes stays DROPPED
+ *   - a CORE#…/STAFF_DICT item lands in `coreStaff`, while both SPS-written
+ *     siblings under the same partition — CORE#…/CLIENTS and the reserved
+ *     CORE#…/STAFF — stay DROPPED
  *   - a GRANT#… item and a PUB#… item WITHOUT an SK CORE# prefix are dropped
  *   - prefix boundaries: TAXONOMY# vs TOPIC#, and the required cwid_/pmid_ tails
  */
@@ -47,7 +48,7 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     const impact = { PK: "IMPACT#pmid_30418319", SK: "SCORE", impact_score: 0.7 };
     const tool = { PK: "TOOL#crispr", SK: "PUB#1", pmid: 1 };
     const core = { PK: "PUB#30418319", SK: "CORE#2", core_id: "2" };
-    const coreStaff = { PK: "CORE#2", SK: "STAFF", staff_count: 4 };
+    const coreStaff = { PK: "CORE#2", SK: "STAFF_DICT", staff_count: 7, staff_tracked_count: 4 };
 
     const b = partitionRecords([tax, topic, faculty, impact, tool, core, coreStaff]);
 
@@ -69,10 +70,17 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     expect(b.coreStaff[0]).toBe(coreStaff);
   });
 
-  it("routes a CORE#…/STAFF item into coreStaff — the key shape is the MIRROR of a core row's", () => {
+  it("routes a CORE#…/STAFF_DICT item into coreStaff — the key shape is the MIRROR of a core row's", () => {
     // A CoreRecord is PK=PUB#…, SK=CORE#…; the staff item is PK=CORE#…,
-    // SK=STAFF. Same "CORE#" text, opposite halves of the key, different bucket.
-    const staff = { PK: "CORE#14", SK: "STAFF", core_id: "14", staff_count: 0 };
+    // SK=STAFF_DICT. Same "CORE#" text, opposite halves of the key, different
+    // bucket. Both attributes ride along untouched — the mapper reads them.
+    const staff = {
+      PK: "CORE#14",
+      SK: "STAFF_DICT",
+      core_id: "14",
+      staff_count: 4,
+      staff_tracked_count: 1,
+    };
     const b = partitionRecords([staff]);
     expect(sizes(b)).toEqual({ ...emptyBucketSizes(), coreStaff: 1 });
     expect(b.coreStaff[0]).toBe(staff);
@@ -82,10 +90,20 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
 
   it("keeps DROPPING the CORE#…/CLIENTS item SPS writes back to the engine", () => {
     // lib/cores/client-writeback.ts writes (CORE#{id}, CLIENTS) — SPS -> engine.
-    // The STAFF match is on the EXACT SK, not a CORE#-PK prefix, so this item is
-    // still unmatched: ingesting our own writeback would be a loop, not a read.
+    // The STAFF_DICT match is on the EXACT SK, not a CORE#-PK prefix, so this
+    // item is still unmatched: ingesting our own writeback would be a loop, not
+    // a read.
     const clients = { PK: "CORE#2", SK: "CLIENTS", client_cwids: ["aaa1001"], client_count: 1 };
     const b = partitionRecords([clients]);
+    expect(sizes(b)).toEqual(emptyBucketSizes());
+  });
+
+  it("DROPS the reserved CORE#…/STAFF key — the SK is matched exactly, not by prefix", () => {
+    // The bare STAFF key is reserved for a future SPS-CURATED staff list, which
+    // would run SPS -> engine like CLIENTS does. A `sk.startsWith("STAFF")`
+    // here would swallow it the day it exists and feed our own writes back in.
+    const reserved = { PK: "CORE#2", SK: "STAFF", staff_cwids: ["aaa1001"] };
+    const b = partitionRecords([reserved]);
     expect(sizes(b)).toEqual(emptyBucketSizes());
   });
 
