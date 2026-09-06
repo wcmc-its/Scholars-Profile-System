@@ -30,6 +30,9 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     llmRationale: null,
     authorAffinity: null,
     topicalPrior: null,
+    methodTier: null,
+    methodEvidence: [],
+    meshEvidence: [],
     citationCount: 0,
     pubmedUrl: null,
     doi: null,
@@ -134,6 +137,14 @@ describe("loadCoreReviewQueue mapping", () => {
     llmRationale: "Methods cite the core's confocal microscope.",
     authorAffinity: "0.4200",
     topicalPrior: "0.3700",
+    methodTier: "strong",
+    methodEvidence: [
+      { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
+      { family: "flow cytometry" }, // malformed — dropped by the read-side narrow
+    ],
+    meshEvidence: [
+      { descriptor_ui: "D008856", descriptor: "Microscopy, Confocal", tree_prefix: "E01" },
+    ],
     publication: {
       title: "Advanced MRI",
       journal: "Synthetic Journal of Core Imaging Science",
@@ -253,6 +264,36 @@ describe("loadCoreReviewQueue mapping", () => {
       reader([{ ...rawRow(), authorAffinity: null } as unknown as ReturnType<typeof rawRow>]),
     );
     expect(queue?.candidates[0]?.authorAffinity).toBeNull();
+  });
+
+  it("narrows the method/MeSH evidence columns, dropping malformed entries", async () => {
+    const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
+    expect(r?.methodTier).toBe("strong");
+    // the { family } entry has no tool/sentence and never reaches the consumer
+    expect(r?.methodEvidence).toEqual([
+      { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
+    ]);
+    expect(r?.meshEvidence).toEqual([
+      { descriptor_ui: "D008856", descriptor: "Microscopy, Confocal", tree_prefix: "E01" },
+    ]);
+  });
+
+  it("returns empty evidence lists when the JSON columns are null or not a list", async () => {
+    const empty = await loadCoreReviewQueue(
+      "2",
+      reader([
+        {
+          ...rawRow(),
+          methodTier: null,
+          methodEvidence: null,
+          meshEvidence: "not-a-list",
+        } as unknown as ReturnType<typeof rawRow>,
+      ]),
+    );
+    const r = empty?.candidates[0];
+    expect(r?.methodTier).toBeNull();
+    expect(r?.methodEvidence).toEqual([]);
+    expect(r?.meshEvidence).toEqual([]);
   });
 
   it("keeps a null topicalPrior null (Number(null) would be 0)", async () => {

@@ -37,6 +37,9 @@ export type CoreRecordInput = {
   llm_rationale?: string;
   author_affinity?: number; // 0-1 repeat-user prior
   prefilter_prior?: number; // 0-1 batch_screen noisy-OR prior (author-affinity 0.6 + bare-descriptor MeSH E-tree membership 0.4)
+  method_tier?: string; // family-strength band: strong | moderate | weak
+  method_evidence?: unknown; // [{ family, tool, sentence }], pre-ranked strongest first
+  mesh_evidence?: unknown; // [{ descriptor_ui, descriptor, tree_prefix }]
 };
 
 export type PubCoreWrite = {
@@ -52,6 +55,9 @@ export type PubCoreWrite = {
   llmRationale: string | null;
   authorAffinity: Prisma.Decimal | null;
   topicalPrior: Prisma.Decimal | null;
+  methodTier: string | null;
+  methodEvidence: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  meshEvidence: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   scoredAt: Date;
 };
 
@@ -70,6 +76,36 @@ export type PublicationCoreMapResult = {
 
 /** Engine status for a scored-but-not-surfaced (pub, core) pair. */
 const STATUS_BELOW_THRESHOLD = "below_threshold";
+
+/** Keys the engine always writes on a `method_evidence` entry. */
+const METHOD_EVIDENCE_KEYS = ["family", "tool", "sentence"] as const;
+/** Keys the engine always writes on a `mesh_evidence` entry. */
+const MESH_EVIDENCE_KEYS = ["descriptor_ui", "descriptor", "tree_prefix"] as const;
+/** `publication_core.method_tier` is VARCHAR(16); a longer value would 1406. */
+const METHOD_TIER_MAX = 16;
+
+/**
+ * Keep the well-formed entries of an evidence list, dropping the rest. The scan
+ * is untrusted, so an entry missing one of the engine's required string keys is
+ * dropped here rather than written through for a consumer to defend against;
+ * anything that isn't a list at all yields no entries (never throws). Entries
+ * that pass are kept WHOLE — a field the engine adds later then lands without
+ * another ETL change, which is the failure this plumbing exists to fix.
+ *
+ * Upstream order is preserved: `method_evidence` arrives pre-ranked, strongest
+ * first, and consumers read `[0]` as the strongest.
+ */
+function evidenceEntries(
+  value: unknown,
+  requiredKeys: ReadonlyArray<string>,
+): Prisma.InputJsonValue[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is Prisma.InputJsonValue => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+    const rec = entry as Record<string, unknown>;
+    return requiredKeys.every((k) => typeof rec[k] === "string");
+  });
+}
 
 function parseCoreId(it: CoreRecordInput): string {
   if (typeof it.SK === "string" && it.SK.startsWith("CORE#")) return it.SK.slice("CORE#".length);
@@ -143,6 +179,17 @@ export function buildPublicationCoreWrites(
       typeof it.llm_score === "number" && Number.isFinite(it.llm_score)
         ? Math.trunc(it.llm_score)
         : null;
+    // The engine writes method_tier and method_evidence together or not at all,
+    // but neither is required here — a tier with no evidence (or the reverse)
+    // lands as-is rather than dropping the row.
+    const methodTier =
+      typeof it.method_tier === "string" &&
+      it.method_tier.trim() &&
+      it.method_tier.trim().length <= METHOD_TIER_MAX
+        ? it.method_tier.trim()
+        : null;
+    const methodEvidence = evidenceEntries(it.method_evidence, METHOD_EVIDENCE_KEYS);
+    const meshEvidence = evidenceEntries(it.mesh_evidence, MESH_EVIDENCE_KEYS);
 
     writes.push({
       pmid: pmidStr,
@@ -164,6 +211,9 @@ export function buildPublicationCoreWrites(
         typeof it.prefilter_prior === "number" && Number.isFinite(it.prefilter_prior)
           ? new Prisma.Decimal(it.prefilter_prior)
           : null,
+      methodTier,
+      methodEvidence: methodEvidence.length ? methodEvidence : Prisma.JsonNull,
+      meshEvidence: meshEvidence.length ? meshEvidence : Prisma.JsonNull,
       scoredAt: new Date(scoredAtMs),
     });
   }
