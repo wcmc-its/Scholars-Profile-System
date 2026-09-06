@@ -11,7 +11,9 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     pmid: "1",
     title: "A paper",
     journal: null,
+    journalAbbrev: null,
     year: 2020,
+    dateAddedToEntrez: null,
     authorsString: null,
     fullAuthorsString: null,
     abstract: null,
@@ -134,8 +136,10 @@ describe("loadCoreReviewQueue mapping", () => {
     topicalPrior: "0.3700",
     publication: {
       title: "Advanced MRI",
-      journal: "NeuroImage",
+      journal: "Synthetic Journal of Core Imaging Science",
+      journalAbbrev: "Synth J Core Imaging Sci",
       year: 2021,
+      dateAddedToEntrez: new Date("2026-02-18T00:00:00.000Z"),
       authorsString: "Ballon D",
       fullAuthorsString: "Ballon D, Dyke J, Xiang J",
       abstract: "We imaged the brain.",
@@ -271,8 +275,10 @@ describe("loadCoreReviewQueue mapping", () => {
           {
             pmid: "99999999",
             title: "An older paper the engine never scored",
-            journal: "Cell Reports",
+            journal: "Synthetic Journal of Late Findings",
+            journalAbbrev: "Synth J Late Find",
             year: 2019,
+            dateAddedToEntrez: new Date("2019-11-04T00:00:00.000Z"),
             authorsString: "Someone S",
             fullAuthorsString: "Someone S",
             abstract: null,
@@ -293,6 +299,10 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(manual?.isManual).toBe(true);
     expect(manual?.claimed).toBe(true);
     expect(manual?.title).toBe("An older paper the engine never scored");
+    // the manual builder is the SECOND mapping site — a field added only to the
+    // engine builder silently renders blank on every manually-added row.
+    expect(manual?.journalAbbrev).toBe("Synth J Late Find");
+    expect(manual?.dateAddedToEntrez).toBe("2019-11-04");
     expect(manual?.likelihood).toBe(0);
     expect(manual?.coauthors).toEqual([]);
     expect(manual?.topicalPrior).toBeNull();
@@ -311,6 +321,52 @@ describe("loadCoreReviewQueue mapping", () => {
       ...(queue?.rejected ?? []),
     ].map((r) => r.pmid);
     expect(pmids).not.toContain("99999999");
+  });
+
+  it("maps the abbreviated journal alongside the full title (the card prefers the abbreviation)", async () => {
+    const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
+    expect(r?.journalAbbrev).toBe("Synth J Core Imaging Sci");
+    // the full title stays on the row — it is the card's fallback, and the CSV
+    // export and the free-text filter both still read it.
+    expect(r?.journal).toBe("Synthetic Journal of Core Imaging Science");
+  });
+
+  it("maps a null journalAbbrev to null (no abbreviation on file)", async () => {
+    const raw = { ...rawRow(), publication: { ...rawRow().publication, journalAbbrev: null } };
+    const r = (
+      await loadCoreReviewQueue("2", reader([raw as unknown as ReturnType<typeof rawRow>]))
+    )?.candidates[0];
+    expect(r?.journalAbbrev).toBeNull();
+    expect(r?.journal).toBe("Synthetic Journal of Core Imaging Science");
+  });
+
+  it("reads the @db.Date index date as a UTC calendar date, not the viewer's local one", async () => {
+    // `dateAddedToEntrez` is `@db.Date` — Prisma returns midnight UTC. Read with
+    // the LOCAL getters in any zone west of UTC and it is the previous day.
+    const prev = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      // Control: proves the zone switch actually took, so this test can never
+      // pass vacuously on a UTC runner.
+      expect(new Date("2026-02-18T00:00:00.000Z").getDate()).toBe(17);
+      const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
+      expect(r?.dateAddedToEntrez).toBe("2026-02-18");
+    } finally {
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
+  });
+
+  it("keeps a null dateAddedToEntrez null (never ingested)", async () => {
+    const raw = {
+      ...rawRow(),
+      publication: { ...rawRow().publication, dateAddedToEntrez: null },
+    };
+    const r = (
+      await loadCoreReviewQueue("2", reader([raw as unknown as ReturnType<typeof rawRow>]))
+    )?.candidates[0];
+    expect(r?.dateAddedToEntrez).toBeNull();
+    expect(r?.year).toBe(2021); // the card's fallback is still there
   });
 
   it("returns null when the core does not exist", async () => {

@@ -18,14 +18,19 @@ import {
   compareBySort,
   CoreClaimQueue,
   decodeTopicalPrior,
+  displayTitle,
   evidenceGroupKey,
   evidenceGroupLabel,
   evidenceTokens,
+  formatAddedToPubMed,
   likelihoodBand,
   llmVerdict,
   matchesFilters,
   matchesQuery,
   parsePmidBlock,
+  searchBlob,
+  CSV_HEADERS,
+  csvRow,
 } from "@/components/edit/core-claim-queue";
 import type { FilterKey } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
@@ -34,8 +39,10 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
   return {
     pmid: "30418319",
     title: "Advanced MRI of the brain",
-    journal: "NeuroImage",
+    journal: "Synthetic Journal of Core Imaging Science",
+    journalAbbrev: "Synth J Core Imaging Sci",
     year: 2021,
+    dateAddedToEntrez: "2026-02-18",
     authorsString: "Testerson A, Fixture B",
     fullAuthorsString: "Testerson A, Fixture B, Sample C",
     abstract: "We imaged the brain in detail.",
@@ -76,6 +83,16 @@ function showEvidence() {
 /** The expanded per-signal list of the only open card. */
 function evidence() {
   return screen.getByLabelText("evidence");
+}
+
+/**
+ * The card header's meta line (the sibling right under the title), whitespace-
+ * collapsed. The middot separators carry no spaces of their own, so this reads
+ * as "<journal>·<vintage>·PMID <n>" — the copy button contributes no text.
+ */
+function metaLine(container: HTMLElement): string {
+  const el = container.querySelector("h3")?.nextElementSibling;
+  return (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 afterEach(() => {
@@ -157,16 +174,74 @@ describe("CoreClaimQueue", () => {
     expect(container.querySelector("mark")?.textContent).toBe("CBIC");
   });
 
-  it("shows the PMID verbatim (linked to PubMed), citation count, DOI, and rationale", () => {
+  it("shows the PMID verbatim (linked to PubMed) and the rationale", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     showEvidence();
     expect(screen.getByText("Acknowledges the imaging core for confocal microscopy.")).toBeTruthy();
-    expect(screen.getByText("12 citations")).toBeTruthy();
     // the PMID is shown verbatim and is the PubMed link
     const pubmed = screen.getByRole("link", { name: /PMID 30418319/ });
     expect(pubmed.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/30418319/");
-    const doi = screen.getByRole("link", { name: /doi/i });
-    expect(doi.getAttribute("href")).toBe("https://doi.org/10.1000/synthetic.2021.001");
+  });
+
+  it("reads the header meta as one middot line: abbreviated journal, PubMed date, PMID", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
+    );
+    expect(metaLine(container)).toBe(
+      "Synth J Core Imaging Sci·Added to PubMed Feb 18, 2026·PMID 30418319",
+    );
+    // the full journal title is NOT what the card shows
+    expect(screen.queryByText("Synthetic Journal of Core Imaging Science")).toBeNull();
+  });
+
+  it("falls back to the full journal title when no abbreviation is on file", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row({ journalAbbrev: null })]} confirmed={[]} />,
+    );
+    expect(metaLine(container)).toBe(
+      "Synthetic Journal of Core Imaging Science·Added to PubMed Feb 18, 2026·PMID 30418319",
+    );
+  });
+
+  it("falls back to the publication year when PubMed never indexed a date", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row({ dateAddedToEntrez: null })]} confirmed={[]} />,
+    );
+    expect(metaLine(container)).toBe("Synth J Core Imaging Sci·2021·PMID 30418319");
+    expect(metaLine(container)).not.toContain("Added to PubMed");
+  });
+
+  it("renders no vintage and no dangling separator when the row has neither date nor year", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ dateAddedToEntrez: null, year: null, journal: null, journalAbbrev: null }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    // one surviving part → no separator at all, and no "Added to PubMed —"
+    expect(metaLine(container)).toBe("PMID 30418319");
+  });
+
+  it("keeps the DOI, the citation count and the RCR readout off the card header", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ relativeCitationRatio: 2.1, nihPercentile: 0 })]}
+        confirmed={[]}
+      />,
+    );
+    const meta = metaLine(container);
+    expect(meta).not.toContain("RCR");
+    expect(meta).not.toContain("pct");
+    expect(meta).not.toContain("DOI");
+    expect(screen.queryByRole("link", { name: /doi/i })).toBeNull();
+    // the pre-existing "RCR 0 (0th pct)" case: nihPercentile is literally 0, not
+    // null, so the old header rendered it. It goes with the readout.
+    expect(screen.queryByText(/RCR/)).toBeNull();
+    expect(screen.queryByText(/citations?/i)).toBeNull();
   });
 
   it("copies the PMID and flips the button label", () => {
@@ -493,8 +568,11 @@ describe("CoreClaimQueue", () => {
     // absent entirely (not disabled, not zero-labelled)
     expect(screen.queryByRole("checkbox", { name: /^Client co-author/ })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: /^No prior usage/ })).toBeNull();
-    // "All" is the reset and always stands
-    expect(screen.getByRole("button", { name: /^All/ })).toBeTruthy();
+    // and every pill in the group is a genuine checkbox — the "All" reset pill
+    // is gone, so there is no button-among-checkboxes left in this row
+    expect(screen.queryByRole("button", { name: /^All\b/ })).toBeNull();
+    const facets = screen.getByRole("group", { name: "Filter candidates by evidence" });
+    expect(within(facets).queryAllByRole("button")).toEqual([]);
   });
 
   it("shows the Client co-author facet once a byline author is a known client", () => {
@@ -520,7 +598,7 @@ describe("CoreClaimQueue", () => {
     );
   });
 
-  it("treats 'All' as a reset button, not another checkbox", () => {
+  it("has NO 'All' reset pill — 'Clear filters' is the only reset, for pills and text alike", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -531,6 +609,7 @@ describe("CoreClaimQueue", () => {
             title: "Bare paper",
             signalAck: false,
             ackAlias: null,
+            ackSnippet: null,
             coauthors: [],
             coauthorScholars: [],
             llmScore: null,
@@ -541,18 +620,28 @@ describe("CoreClaimQueue", () => {
       />,
     );
     const box = (name: RegExp) => screen.getByRole("checkbox", { name });
-    const all = () => screen.getByRole("button", { name: /^All/ });
-    // "All" is an ACTION, not another checkbox: a checked box that cannot be
-    // unchecked announces nothing on Space. Only the real facets are checkboxes.
-    expect(all().getAttribute("aria-checked")).toBeNull();
+    // the pill is gone in every guise — as a button, and as a checkbox
+    expect(screen.queryByRole("button", { name: /^All\b/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /^All\b/ })).toBeNull();
 
+    // a PILL narrowing resets through "Clear filters"
     fireEvent.click(box(/^Acknowledged/));
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByText("Bare paper")).toBeNull();
-
-    fireEvent.click(all());
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByText("Bare paper")).toBeTruthy();
+
+    // ...and so does a TEXT-ONLY narrowing, which the retired "All" pill never
+    // touched: with it gone this link is the sole reset affordance on the queue.
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "acked" },
+    });
+    expect(screen.queryByText("Bare paper")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect((screen.getByLabelText("Filter candidates") as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("Bare paper")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
   });
 
   it("labels each facet with its count over the still-undecided rows", async () => {
@@ -578,7 +667,7 @@ describe("CoreClaimQueue", () => {
       />,
     );
     const label = (name: RegExp) => screen.getByRole("checkbox", { name }).textContent;
-    expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 2");
+    expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
     expect(label(/^Acknowledged/)).toBe("Acknowledged 1");
     expect(label(/^Staff co-author/)).toBe("Staff co-author 1");
     expect(label(/^LLM-flagged/)).toBe("LLM-flagged 1");
@@ -592,7 +681,9 @@ describe("CoreClaimQueue", () => {
     await waitFor(() =>
       expect(screen.queryByRole("checkbox", { name: /^Acknowledged/ })).toBeNull(),
     );
-    expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 1");
+    // the remaining facets fall with it — the decided row counts for nothing
+    expect(label(/^No prior usage/)).toBe("No prior usage on the byline 1");
+    expect(screen.queryByRole("checkbox", { name: /^Staff co-author/ })).toBeNull();
   });
 
   it("re-sorts by LLM score when selected", () => {
@@ -615,13 +706,34 @@ describe("CoreClaimQueue", () => {
     expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
   });
 
-  it("keeps the shipped 'Strongest signal' and 'LLM score' sort options", () => {
+  it("splits the sort control into a visible 'Sort' label and BARE option text", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const options = within(screen.getByLabelText("Sort by") as HTMLSelectElement)
+    const select = screen.getByLabelText("Sort by") as HTMLSelectElement;
+    const options = within(select)
       .getAllByRole("option")
       .map((o) => o.textContent);
-    expect(options).toContain("Sort: Strongest signal");
-    expect(options).toContain("Sort: LLM score");
+    // the label now carries the word, so no option repeats it. Order is the
+    // shipped order (unchanged by this pass); membership is what's pinned.
+    expect(options).toHaveLength(6);
+    for (const label of [
+      "Most certain first",
+      "Most uncertain first",
+      "Newest in PubMed",
+      "Most cited",
+      "Strongest signal",
+      "LLM score",
+    ]) {
+      expect(options).toContain(label);
+    }
+    expect(options.some((o) => o?.startsWith("Sort"))).toBe(false);
+
+    // the visible label is a real <label for=…> tied to the select — not loose
+    // text sitting next to it...
+    const visible = screen.getByText("Sort", { selector: "label" }) as HTMLLabelElement;
+    expect(visible.htmlFor).toBe(select.id);
+    expect(select.id).not.toBe("");
+    // ...and the select keeps the fuller accessible name the sr-only span gave it
+    expect(select.getAttribute("aria-label")).toBe("Sort by");
   });
 
   it("defaults to likelihood-desc ordering, not uncertain-first", () => {
@@ -704,14 +816,146 @@ describe("CoreClaimQueue", () => {
     expect((document.activeElement as HTMLElement)?.getAttribute("data-pmid")).toBe("2");
   });
 
+  it("moves roving focus with j (down) and k (up), the vi twins of the arrows", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "First" }),
+          row({ pmid: "2", title: "Second" }),
+          row({ pmid: "3", title: "Third" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const card = (pmid: string) =>
+      container.querySelector(`[data-card][data-pmid="${pmid}"]`) as HTMLElement;
+    const focused = () => (document.activeElement as HTMLElement)?.getAttribute("data-pmid");
+
+    fireEvent.keyDown(card("1"), { key: "j" });
+    expect(focused()).toBe("2");
+    fireEvent.keyDown(card("2"), { key: "j" });
+    expect(focused()).toBe("3");
+    fireEvent.keyDown(card("3"), { key: "k" });
+    expect(focused()).toBe("2");
+    fireEvent.keyDown(card("2"), { key: "k" });
+    expect(focused()).toBe("1");
+    // uppercase reads the same (the handler lowercases the key)
+    fireEvent.keyDown(card("1"), { key: "J" });
+    expect(focused()).toBe("2");
+  });
+
+  it("'x' ticks the focused card AND arms selection mode from the default state", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Picked A" }), row({ pmid: "2", title: "Picked B" })]}
+        confirmed={[]}
+      />,
+    );
+    const card = (pmid: string) =>
+      container.querySelector(`[data-card][data-pmid="${pmid}"]`) as HTMLElement;
+    // selection mode is OFF by default — no checkboxes, no selection bar
+    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Select Picked A" })).toBeNull();
+
+    fireEvent.keyDown(card("1"), { key: "x" });
+    // it armed the mode...
+    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
+    // ...and ticked this row, and only this row
+    expect(
+      (screen.getByRole("checkbox", { name: "Select Picked A" }) as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("checkbox", { name: "Select Picked B" }) as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(screen.getByText("1 paper selected")).toBeTruthy();
+
+    // a second 'x' TOGGLES it back off (and leaves the mode armed)
+    fireEvent.keyDown(card("1"), { key: "x" });
+    expect(
+      (screen.getByRole("checkbox", { name: "Select Picked A" }) as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(screen.queryByText(/paper[s]? selected/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
+  });
+
+  it("advertises the new keys on the card shell via aria-keyshortcuts", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
+    );
+    const shell = container.querySelector("[data-card]") as HTMLElement;
+    const keys = (shell.getAttribute("aria-keyshortcuts") ?? "").split(" ");
+    for (const k of ["a", "r", "x", "j", "k", "ArrowUp", "ArrowDown"]) expect(keys).toContain(k);
+  });
+
   it("does NOT fire a shortcut typed into a child control (the shell-only guard)", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "First" }), row({ pmid: "2", title: "Second" })]}
+        confirmed={[]}
+      />,
+    );
 
     // 'a' typed while the Confirm button (a child) is focused must NOT claim.
-    fireEvent.keyDown(screen.getByRole("button", { name: /^confirm$/i }), { key: "a" });
+    const confirm = screen.getAllByRole("button", { name: /^confirm$/i })[0];
+    fireEvent.keyDown(confirm, { key: "a" });
     expect(fetchMock).not.toHaveBeenCalled();
+    // ...nor may the new keys act from a child: no roving move, no selection.
+    fireEvent.keyDown(confirm, { key: "j" });
+    expect(container.querySelector("[data-card]:focus")).toBeNull();
+    fireEvent.keyDown(confirm, { key: "x" });
+    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
+
+    // The same holds for a child INPUT: arm selection, then type into the row's
+    // own checkbox. 'x' there must toggle nothing beyond the native control.
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
+    const box = screen.getByRole("checkbox", { name: "Select First" }) as HTMLInputElement;
+    fireEvent.keyDown(box, { key: "x" });
+    expect(box.checked).toBe(false);
+    fireEvent.keyDown(box, { key: "j" });
+    expect(container.querySelector("[data-card]:focus")).toBeNull();
+    fireEvent.keyDown(box, { key: "r" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT hijack j/k/x typed into the FILTER BOX", () => {
+    // The load-bearing case for the shell-only guard now that the shortcuts are
+    // ordinary printable characters and the filter box moved into the header:
+    // typing a word containing j, k or x must narrow the queue and nothing else
+    // — no focus jump, no selection mode, no claim.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Jacks, Kydd and Xu on imaging" }),
+          row({ pmid: "2", title: "Second" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    for (const key of ["j", "k", "x", "a", "r", "u", "ArrowDown", "ArrowUp"]) {
+      fireEvent.keyDown(input, { key });
+    }
+    // focus never left the box for a card, no card was decided, no mode armed
+    expect(document.activeElement).toBe(input);
+    expect(container.querySelector("[data-card]:focus")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: /^Select / })).toBeNull();
+
+    // and the box still filters, so the guard didn't cost the control anything
+    fireEvent.change(input, { target: { value: "jacks" } });
+    expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
   });
 
   it("keeps a just-decided row visible under a facet that would exclude it, so undo stays reachable", async () => {
@@ -1180,24 +1424,6 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByText(/re-files on next load/)).toBeNull();
   });
 
-  it("suppresses a 0 on a just-published paper as 'No citations yet'", () => {
-    render(
-      <CoreClaimQueue core={CORE} candidates={[row({ citationCount: 0, year: 9999 })]} confirmed={[]} />,
-    );
-    expect(screen.getByText(/No citations yet · published 9999/)).toBeTruthy();
-  });
-
-  it("shows RCR and percentile when present", () => {
-    render(
-      <CoreClaimQueue
-        core={CORE}
-        candidates={[row({ relativeCitationRatio: 2.1, nihPercentile: 89 })]}
-        confirmed={[]}
-      />,
-    );
-    expect(screen.getByText(/RCR 2.1 \(89th pct\)/)).toBeTruthy();
-  });
-
   it("highlights the core-staff author inline in the byline (best-effort)", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     // the "Testerson A" token links to the staff profile
@@ -1342,38 +1568,20 @@ describe("CoreClaimQueue", () => {
     );
   });
 
-  it("downloads the queue as a CSV citation list with PMID + status columns", () => {
-    // jsdom's Blob has no .text(); capture the CSV via the constructor instead.
-    let csvText = "";
-    vi.stubGlobal(
-      "Blob",
-      class {
-        constructor(parts: string[]) {
-          csvText = parts.join("");
-        }
-      },
-    );
-    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() });
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => undefined);
-
+  it("offers no CSV download — the button came out to match the mockup toolbar", () => {
+    // Owner decision: the header is [Known clients] [Add PMIDs] [Reporting...]
+    // and nothing else. `downloadCsv()` is deliberately KEPT in the component,
+    // uncalled, for the day a reporting view gives it an entry point again — so
+    // this asserts the BUTTON is gone, not that the export was deleted.
     render(
       <CoreClaimQueue
         core={CORE}
-        candidates={[row({ pmid: "111", title: "A candidate" })]}
+        candidates={[row({ pmid: "111", title: "A candidate." })]}
         confirmed={[row({ pmid: "222", title: "A confirmed one", claimed: true })]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /download csv/i }));
-
-    expect(csvText).toContain("PMID,Title,Authors"); // header row
-    expect(csvText).toContain("111"); // candidate PMID
-    expect(csvText).toContain("To review");
-    expect(csvText).toContain("222"); // confirmed PMID
-    expect(csvText).toContain("Confirmed");
-    expect(csvText).toContain("PMID: 111."); // citation string
-    clickSpy.mockRestore();
+    expect(screen.queryByRole("button", { name: /download/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /csv/i })).toBeNull();
   });
 });
 
@@ -1695,7 +1903,7 @@ describe("compareBySort", () => {
 // behavior is covered by tests/unit/core-clients-panel.test.tsx; this just
 // confirms CoreClaimQueue wires the toolbar button in with the right count.
 describe("CoreClaimQueue — Known clients toolbar wiring", () => {
-  it("renders the Known clients button next to Add PMIDs, with the active count", () => {
+  it("renders Known clients with a PARENTHESISED count, first of the three header buttons", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1712,13 +1920,74 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
         ]}
       />,
     );
-    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
     const knownClients = screen.getByRole("button", { name: /Known clients/ });
-    expect(knownClients.textContent).toContain("1");
-    // Known clients sits right after Add PMIDs in DOM order (toolbar wiring).
+    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
+    const reporting = screen.getByRole("button", { name: /Reporting/ });
+    // "(1)", not the old bare "1"
+    expect(knownClients.textContent?.replace(/\s+/g, " ").trim()).toBe("Known clients (1)");
+    // mockup order: [Known clients (N)] [Add PMIDs] [Reporting...]
     expect(
-      addPmids.compareDocumentPosition(knownClients) & Node.DOCUMENT_POSITION_FOLLOWING,
+      knownClients.compareDocumentPosition(addPmids) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      addPmids.compareDocumentPosition(reporting) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("ships 'Reporting...' DISABLED with the reason on it — there is no reporting route", () => {
+    // An enabled control that no-ops is the failure this codebase keeps hitting.
+    // The button is drawn because the mockup draws it; it is inert and SAYS so.
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const reporting = screen.getByRole("button", { name: /Reporting/ }) as HTMLButtonElement;
+    expect(reporting.textContent).toContain("Reporting...");
+    expect(reporting.getAttribute("aria-disabled")).toBe("true");
+    // NOT the native `disabled` attribute: that drops it from the tab order, which
+    // would hide the reason from exactly the keyboard and screen-reader users most
+    // likely to wonder why the button does nothing.
+    expect(reporting.disabled).toBe(false);
+    expect(reporting.getAttribute("title")).toBe("Reporting view is not built yet");
+    // the reason is in the accessibility tree, not only in a hover tooltip
+    const why = document.getElementById(reporting.getAttribute("aria-describedby") ?? "");
+    expect(why?.textContent).toBe("Reporting view is not built yet");
+  });
+
+  it("keeps the CSV column contract under test while the export button is off the toolbar", () => {
+    // Removing "Download CSV" removed the only caller of downloadCsv(), and with it
+    // the only coverage of the column order. A downloaded CSV's headers are a
+    // de-facto contract for whoever parses the file, so they are pinned directly.
+    expect([...CSV_HEADERS]).toEqual([
+      "PMID",
+      "Title",
+      "Authors",
+      "Journal",
+      "Year",
+      "DOI",
+      "Status",
+      "Likelihood",
+      "Citation",
+    ]);
+    const r = row({
+      pmid: "42",
+      title: "A candidate.",
+      journal: "Journal of Synthetic Results",
+      journalAbbrev: "J Synth Res",
+      year: 2024,
+      doi: "10.1000/xyz",
+      likelihood: 0.82,
+      authorsString: "Testerson A, Sample C",
+      fullAuthorsString: "Testerson A, Sample C, Placeholder R",
+    });
+    const cells = csvRow(r, "To review");
+    expect(cells[0]).toBe("42");
+    // RAW title, period intact — an export is a record, not a rendering
+    expect(cells[1]).toBe("A candidate.");
+    expect(cells[2]).toBe("Testerson A, Sample C, Placeholder R");
+    // FULL journal, not the abbreviation the card now shows
+    expect(cells[3]).toBe("Journal of Synthetic Results");
+    expect(cells[5]).toBe("10.1000/xyz");
+    expect(cells[6]).toBe("To review");
+    expect(cells[7]).toBe("0.820");
+    expect(cells[8]).toContain("PMID: 42.");
   });
 
   it("renders the Known clients button with a 0 count when no clients prop is passed", () => {
@@ -1740,14 +2009,15 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(textarea).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
 
-    // The OUTER toolbar row is the justify-between container that wraps both
-    // button groups (view tabs/heading + the Add PMIDs / Known clients
-    // buttons) — not just the inner "flex flex-wrap items-center gap-2"
+    // The OUTER toolbar row is the justify-end container holding the three
+    // header buttons — not just the inner "flex flex-wrap items-center gap-2"
     // button group. `toggle.closest("div")` alone would only find that inner
     // group and miss a regression that nests the panel inside the outer row.
+    // (It was justify-BETWEEN while the view tabs shared this row; the tabs are
+    // in the queue panel now, so the buttons sit alone against the right edge.)
     const outerRow = toggle.closest('[data-slot="core-queue-toolbar"]');
     expect(outerRow).toBeTruthy();
-    expect(outerRow?.className).toContain("justify-between");
+    expect(outerRow?.className).toContain("justify-end");
     expect(outerRow?.contains(textarea)).toBe(false);
 
     // And the panel body is a later sibling in the same parent as the
@@ -1758,5 +2028,216 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(commonParent?.contains(textarea)).toBe(true);
     const position = outerRow?.compareDocumentPosition(textarea) ?? 0;
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+// The queue header as the mockup draws it: one bordered panel holding a TAB
+// STRIP (not pills), the free-text filter on the tabs' own line, the facet and
+// control rows, and a status band along the bottom.
+describe("CoreClaimQueue — header panel", () => {
+  const withHistory = (
+    <CoreClaimQueue
+      core={CORE}
+      candidates={[row({ pmid: "1" }), row({ pmid: "2" })]}
+      confirmed={[row({ pmid: "8", title: "Done pub", claimed: true })]}
+      rejected={[row({ pmid: "9", title: "Nope pub" })]}
+    />
+  );
+  const panel = (container: HTMLElement) =>
+    container.querySelector('[data-slot="core-queue-panel"]') as HTMLElement;
+
+  it("wraps the tabs, facets, controls and status strip in ONE bordered panel", () => {
+    const { container } = render(withHistory);
+    const p = panel(container);
+    expect(p).toBeTruthy();
+    expect(p.className).toContain("rounded-lg");
+    expect(p.className).toContain("border");
+    // everything the header owns lives inside it...
+    expect(p.contains(screen.getByRole("group", { name: "Queue view" }))).toBe(true);
+    expect(p.contains(screen.getByLabelText("Filter candidates"))).toBe(true);
+    expect(p.contains(screen.getByRole("group", { name: "Filter candidates by evidence" }))).toBe(
+      true,
+    );
+    expect(p.contains(screen.getByLabelText("Sort by"))).toBe(true);
+    expect(p.contains(screen.getByText(/^Showing /))).toBe(true);
+    // ...and the candidate cards do NOT
+    expect(p.querySelector("[data-card]")).toBeNull();
+  });
+
+  it("keeps the tab semantics: a Queue view group of aria-pressed buttons", () => {
+    render(withHistory);
+    const tabs = screen.getByRole("group", { name: "Queue view" });
+    const buttons = within(tabs).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirmed 1/ }));
+    expect(
+      within(screen.getByRole("group", { name: "Queue view" }))
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-pressed")),
+    ).toEqual(["false", "true", "false"]);
+    expect(screen.getByText("Done pub")).toBeTruthy();
+  });
+
+  it("renders Confirmed/Rejected tabs ONLY when their own count is above 0", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row()]}
+        confirmed={[row({ pmid: "8", title: "Done pub", claimed: true })]}
+      />,
+    );
+    const tabs = screen.getByRole("group", { name: "Queue view" });
+    expect(
+      within(tabs)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["To review1", "Confirmed1"]);
+    expect(within(tabs).queryByRole("button", { name: /Rejected/ })).toBeNull();
+  });
+
+  it("badges the ACTIVE tab's count in filled maroon and leaves inactive counts plain", () => {
+    render(withHistory);
+    const tab = (name: RegExp) =>
+      within(screen.getByRole("group", { name: "Queue view" })).getByRole("button", { name });
+    const countSpan = (el: HTMLElement) => el.querySelector("span") as HTMLElement;
+    // active: a filled circular badge
+    expect(countSpan(tab(/^To review/)).className).toContain("bg-apollo-maroon");
+    expect(countSpan(tab(/^To review/)).className).toContain("rounded-full");
+    // inactive: plain muted text, no fill
+    expect(countSpan(tab(/^Confirmed/)).className).not.toContain("bg-apollo-maroon");
+    expect(countSpan(tab(/^Confirmed/)).className).toContain("text-muted-foreground");
+  });
+
+  it("puts the filter on the tab-strip line, and promises 'method' knowingly", () => {
+    const { container } = render(withHistory);
+    const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
+    // the mockup's exact string. NOTE `searchBlob` does NOT search a method —
+    // CoreQueueRow carries none — so that word is aspirational by owner
+    // decision, not a bug. See the comment at the placeholder.
+    expect(input.placeholder).toBe("Filter by title, author, journal, PMID or method...");
+    // same row as the tabs: one shared parent, not stacked under them
+    const tabs = screen.getByRole("group", { name: "Queue view" });
+    expect(tabs.parentElement?.contains(input)).toBe(true);
+    // and the row is the first thing in the panel
+    expect(panel(container).firstElementChild?.contains(input)).toBe(true);
+  });
+
+  it("keeps the filter OFF the Confirmed and Rejected tabs, where it is inert", () => {
+    render(withHistory);
+    expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirmed 1/ }));
+    expect(screen.queryByLabelText("Filter candidates")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Filter candidates by evidence" })).toBeNull();
+    expect(screen.queryByText(/^Showing /)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Rejected 1/ }));
+    expect(screen.queryByLabelText("Filter candidates")).toBeNull();
+
+    // ...and comes back on the way home
+    fireEvent.click(screen.getByRole("button", { name: /To review/ }));
+    expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
+  });
+
+  it("bands the status strip inside the panel: count left, key legend right", () => {
+    const { container } = render(withHistory);
+    const strip = container.querySelector('[data-slot="core-queue-status"]') as HTMLElement;
+    expect(strip).toBeTruthy();
+    expect(panel(container).contains(strip)).toBe(true);
+    // a real background band, not loose text on the page
+    expect(strip.className).toContain("bg-apollo-surface-2");
+    expect(strip.className).toContain("border-t");
+    expect(within(strip).getByText("Showing 2 of 2 candidates")).toBeTruthy();
+    // the legend, verbatim
+    const legend = strip.lastElementChild as HTMLElement;
+    expect(legend.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "Keys: j/k move · a confirm · r reject · x select · u undo",
+    );
+    // it sits after the count, pushed to the right edge
+    expect(legend.className).toContain("ml-auto");
+  });
+
+  it("still shows a plain 'To review' heading (no tab strip) when there is no history", () => {
+    const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(screen.queryByRole("group", { name: "Queue view" })).toBeNull();
+    const heading = screen.getByRole("heading", { level: 2 });
+    expect(heading.textContent).toBe("To review1");
+    // and it is inside the panel, where the tab strip would be
+    expect(panel(container).contains(heading)).toBe(true);
+  });
+});
+
+describe("displayTitle", () => {
+  it("drops the sentence-final period PubMed stores on nearly every title", () => {
+    expect(displayTitle("A synthetic study of core usage.")).toBe(
+      "A synthetic study of core usage",
+    );
+  });
+
+  it("leaves a title that carries no trailing period alone", () => {
+    expect(displayTitle("Advanced MRI of the brain")).toBe("Advanced MRI of the brain");
+  });
+
+  it("keeps a trailing question mark or exclamation — that punctuation is the title's own", () => {
+    expect(displayTitle("Does the assay scale?")).toBe("Does the assay scale?");
+    expect(displayTitle("It scales!")).toBe("It scales!");
+  });
+
+  it("keeps a period that closes an initialism (dropping it would misspell the word)", () => {
+    expect(displayTitle("Core facility funding in the U.S.")).toBe(
+      "Core facility funding in the U.S.",
+    );
+    expect(displayTitle("A trial run at the N.I.H.")).toBe("A trial run at the N.I.H.");
+  });
+
+  it("strips ONE period only, and survives degenerate input", () => {
+    expect(displayTitle("Ends in an ellipsis...")).toBe("Ends in an ellipsis..");
+    expect(displayTitle("")).toBe("");
+  });
+
+  it("is display-only — the raw title still reaches the free-text filter", () => {
+    // searchBlob is the card's own text; it must keep matching what curators
+    // paste in, periods and all.
+    expect(searchBlob(row({ title: "A synthetic study of core usage." }))).toContain(
+      "a synthetic study of core usage.",
+    );
+  });
+});
+
+describe("formatAddedToPubMed", () => {
+  it("reads as the mockup does", () => {
+    expect(formatAddedToPubMed("2026-02-18")).toBe("Added to PubMed Feb 18, 2026");
+  });
+
+  it("returns null with no date, so the caller renders nothing rather than an empty slot", () => {
+    expect(formatAddedToPubMed(null)).toBeNull();
+    expect(formatAddedToPubMed("")).toBeNull();
+    expect(formatAddedToPubMed("not-a-date")).toBeNull();
+  });
+
+  it("formats in UTC — a local format would show the PREVIOUS day west of UTC", () => {
+    // `dateAddedToEntrez` is a `@db.Date`: a calendar date with no zone, which
+    // parses to midnight UTC. Format that instant in New York and Feb 18 reads
+    // as Feb 17 — the exact off-by-one this pins.
+    const prev = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      // Control: proves the zone switch actually took, so this test cannot pass
+      // vacuously on a UTC runner.
+      expect(
+        new Date("2026-02-18T00:00:00Z").toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }),
+      ).toBe("Feb 17, 2026");
+      expect(formatAddedToPubMed("2026-02-18")).toBe("Added to PubMed Feb 18, 2026");
+      // and the same trap at a month boundary, where it also changes the month
+      expect(formatAddedToPubMed("2026-03-01")).toBe("Added to PubMed Mar 1, 2026");
+    } finally {
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
   });
 });

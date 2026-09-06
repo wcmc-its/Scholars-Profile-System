@@ -34,13 +34,23 @@
  *   - PMID/CWID parsing keeps the shipped strict parsers and their
  *     rejected-token reporting; the artboard's split-on-any-non-digit form
  *     would silently turn "abc123def" into PMID 123.
- *   - the free-text filter box sits with the facet pills, not in the tab strip.
- *     The artboard drew it in the strip, where it stays on screen over the
- *     Confirmed and Rejected lists, but its own filter only ever narrowed the
- *     review list — a control that does nothing on two tabs out of three. It
- *     also had no clear of its own, so "Clear filters" drops the text with the
- *     pills, and the count line and the "Nothing matches this filter." state
- *     both count the query.
+ *   - the free-text filter box sits IN the tab-strip row (the mockup's own
+ *     placement, chosen by the owner), but still renders only on the To review
+ *     tab: its filter narrows the review list alone, so drawing it over the
+ *     Confirmed and Rejected lists would be a control that does nothing on two
+ *     tabs out of three. It has no clear of its own, so "Clear filters" drops
+ *     the text with the pills, and the count line and the "Nothing matches this
+ *     filter." state both count the query.
+ *   - there is no "All" reset pill. "Clear filters" in the status strip is the
+ *     single reset affordance, and it appears for a text-only narrowing as well
+ *     as a ticked facet.
+ *
+ * Drawn in the mockup, NOT built here (no data behind either):
+ *   - the "Co-author signal draws on N core staff from the facility dictionary"
+ *     lock chip and its "Manage staff" link — SPS ingests no core-staff
+ *     dictionary count, and there is no such route;
+ *   - the "Method family identified" facet — no method data reaches
+ *     `CoreQueueRow` (see `searchBlob`).
  */
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -49,8 +59,8 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
-  Download,
   ExternalLink,
+  FileText,
   PenLine,
   Plus,
   Undo2,
@@ -88,11 +98,92 @@ export function parsePmidBlock(text: string): { pmids: string[]; invalid: string
   return { pmids, invalid };
 }
 
+/**
+ * The title as the card shows it: PubMed stores a sentence-final period on
+ * nearly every title, and the header reads as a heading, not a sentence.
+ *
+ * Strips ONE trailing "." and nothing else. A trailing "?" or "!" is part of
+ * the title's own voice ("Does X cause Y?") and stays, and a "." straight after
+ * an uppercase letter is the last stop of an initialism ("... in the U.S."),
+ * where dropping it would misspell the word.
+ *
+ * Display only — the stored title, the CSV citation string and `searchBlob` all
+ * keep the raw value. Pure.
+ */
+/** CSV export column order. Exported so the column CONTRACT stays under test while
+ *  the "Download CSV" button is off the toolbar (the mockup moved export into the
+ *  reporting view, which is not built). A downloaded CSV's headers are a de-facto
+ *  contract for whoever parses the file, so this order must not drift silently. */
+export const CSV_HEADERS = [
+  "PMID",
+  "Title",
+  "Authors",
+  "Journal",
+  "Year",
+  "DOI",
+  "Status",
+  "Likelihood",
+  "Citation",
+] as const;
+
+/** One CSV row for a queue row, given its already-resolved display status.
+ *  Pure: `status` is passed in because deriving it needs component state.
+ *  NOTE the two deliberate mismatches with the card: the CSV keeps the FULL journal
+ *  (not `journalAbbrev`) and the RAW title (not `displayTitle`), because an export is
+ *  a record, not a rendering — a stripped trailing period would corrupt a citation. */
+export function csvRow(r: CoreQueueRow, status: string): (string | number)[] {
+  const authors = r.fullAuthorsString ?? r.authorsString ?? "";
+  // plain Vancouver-ish citation string, PMID-anchored
+  const citation =
+    [authors, r.title, r.journal, r.year].filter(Boolean).join(". ") + `. PMID: ${r.pmid}.`;
+  return [
+    r.pmid,
+    r.title,
+    authors,
+    r.journal ?? "",
+    r.year ?? "",
+    r.doi ?? "",
+    status,
+    r.likelihood.toFixed(3),
+    citation,
+  ];
+}
+
+export function displayTitle(title: string): string {
+  if (!title.endsWith(".")) return title;
+  const prev = title.slice(-2, -1);
+  if (/[A-Z]/.test(prev)) return title;
+  return title.slice(0, -1);
+}
+
+/**
+ * "Added to PubMed Feb 18, 2026" from a `YYYY-MM-DD` calendar date, or null
+ * when there is no date (the caller then falls back to the publication year —
+ * an empty slot with a dangling separator is worse than neither).
+ *
+ * Formatted in UTC on purpose. `dateAddedToEntrez` is a `@db.Date`, which
+ * reaches this component as a calendar date with no zone; parsing it as UTC
+ * midnight and formatting it in the VIEWER's zone would render the previous day
+ * for everyone west of UTC — including every WCM curator. Pure.
+ */
+export function formatAddedToPubMed(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  return `Added to PubMed ${d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  })}`;
+}
+
 type Decision = "claimed" | "rejected";
 /** Which list the segmented control is showing (only when there's history). */
 type QueueView = "review" | "confirmed" | "rejected";
-/** Exported for the pure-predicate tests; "all" is the reset, never a set member. */
-export type FilterKey = "all" | "client" | "ack" | "coauthored" | "noprior" | "llm";
+/** Exported for the pure-predicate tests. There is no "all" member: the empty
+ *  set IS "no narrowing", and "Clear filters" is the only reset control. */
+export type FilterKey = "client" | "ack" | "coauthored" | "noprior" | "llm";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm" | "year" | "cites";
 
 type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
@@ -286,7 +377,6 @@ export function bandRange(likelihoods: readonly number[]): string {
 }
 
 const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: "all", label: "All" },
   { key: "client", label: "Client co-author" },
   { key: "ack", label: "Acknowledged" },
   { key: "coauthored", label: "Staff co-author" },
@@ -334,7 +424,8 @@ export function compareBySort(sort: SortKey, a: CoreQueueRow, b: CoreQueueRow): 
   }
 }
 
-/** Does a candidate match ONE filter key? `all` keeps everything. */
+/** Does a candidate match ONE filter key? Exhaustive over `FilterKey` — with the
+ *  "All" pill gone there is no catch-all key left to fall through to. */
 function matchesFilter(
   row: CoreQueueRow,
   filter: FilterKey,
@@ -351,15 +442,13 @@ function matchesFilter(
       return row.authorAffinity === null;
     case "llm":
       return row.llmScore !== null;
-    default:
-      return true;
   }
 }
 
 /**
  * AND-combined match across the ticked facets: a row shows only if EVERY ticked
  * facet matches, so "Acknowledged + Staff co-author" narrows to the rows
- * carrying both. An empty set is the "All" pill — nothing ticked means no
+ * carrying both. The empty set IS the unnarrowed queue — nothing ticked means no
  * narrowing at all. Dropping a 0-count facet (see `facetCounts` below) keeps a
  * SINGLE tick from ever emptying the queue; an intersection of two live facets
  * still can, which is what the "Nothing matches this filter." state is for.
@@ -386,7 +475,9 @@ export function matchesFilters(
  * Three fields the artboard's blob searched are dropped, each because the row
  * doesn't carry it or the card doesn't show it:
  *   - method family + tool: not plumbed into `CoreQueueRow` at all, so there is
- *     nothing to match (this is also why the placeholder doesn't promise it);
+ *     nothing to match. NOTE the filter placeholder DOES say "method" (the
+ *     owner took the mockup's string) — that word is aspirational until method
+ *     data reaches this row, not a bug in this function;
  *   - the affinity "who": `authorAffinity` is a bare 0-1 number here, with no
  *     person attached to search on;
  *   - `meshTerms`: on the row, but nothing has rendered it since the Details
@@ -455,14 +546,14 @@ export function CoreClaimQueue({
           ? "rejected"
           : "review",
   );
-  // Ticked evidence facets, AND-combined. The empty set IS "All" — there is no
-  // "all" member, the pill just reads as ticked when nothing else is.
+  // Ticked evidence facets, AND-combined. The empty set IS the unnarrowed queue
+  // — there is no "all" member and no "All" pill; "Clear filters" resets.
   const [filter, setFilter] = useState<ReadonlySet<FilterKey>>(() => new Set());
-  // Free-text narrowing, AND-ed with the facets (see `searchBlob`). It lives with
-  // the facet pills, NOT in the tab strip: the count line, the "Clear filters"
-  // link and the "Nothing matches this filter." state that report its effect are
-  // all review-tab controls, so a box drawn above the Confirmed/Rejected lists
-  // would be inert on two tabs out of three.
+  // Free-text narrowing, AND-ed with the facets (see `searchBlob`). It sits in
+  // the tab-strip row (the mockup's placement) but renders on the To review tab
+  // ONLY: the count line, the "Clear filters" link and the "Nothing matches this
+  // filter." state that report its effect are all review-tab controls, so a box
+  // drawn over the Confirmed/Rejected lists would be inert on two tabs of three.
   const [query, setQuery] = useState("");
   // Default to engine likelihood, high→low — the loader's own order, so the queue
   // opens on what the engine is surest of. This is a deliberate override, not the
@@ -506,17 +597,18 @@ export function CoreClaimQueue({
 
   const clientCwids: ReadonlySet<string> = new Set(clientRows.map((c) => c.cwid.toLowerCase()));
 
-  // Tick/untick one facet; the "All" pill clears back to no narrowing.
+  // Tick/untick one facet. Resetting is "Clear filters" below — the only one.
   const toggleFilter = (key: FilterKey) =>
     setFilter((s) => {
-      if (key === "all") return new Set<FilterKey>();
       const next = new Set(s);
       if (!next.delete(key)) next.add(key);
       return next;
     });
   // type="search" gives the box the platform's own clear button, but that only
   // drops the text. "Clear filters" is the one link that drops BOTH narrowings,
-  // because the count line and the empty state below report them as one.
+  // because the count line and the empty state below report them as one — and
+  // with the "All" pill retired it is the ONLY reset affordance on this surface,
+  // so `narrowed` below has to catch a text-only narrowing too.
   const clearFilters = () => {
     setFilter(new Set());
     setQuery("");
@@ -762,41 +854,28 @@ export function CoreClaimQueue({
 
   // Download the queue (both lists) as a CSV citation list, reflecting the current
   // session state. Client-side blob — the rows are already in hand, no API needed.
+  //
+  // CURRENTLY UNCALLED, ON PURPOSE. The header's "Download CSV" button came out
+  // when the toolbar was matched to the mockup ([Known clients] [Add PMIDs]
+  // [Reporting...]); the export itself is kept whole because the owner expects
+  // to restore an entry point once the reporting view exists. Re-wire it rather
+  // than re-write it — deleting it means rebuilding the status/citation/DOI
+  // column contract from scratch.
+  //
+  // With no caller it is also UNTESTED (its test asserted through the button,
+  // and now asserts the button's absence) and eslint reports it as an unused
+  // var. Both are expected while it waits; restore its coverage with its entry
+  // point.
   function downloadCsv() {
-    const headers = [
-      "PMID",
-      "Title",
-      "Authors",
-      "Journal",
-      "Year",
-      "DOI",
-      "Status",
-      "Likelihood",
-      "Citation",
-    ];
+    const headers = CSV_HEADERS;
     const statusOf = (pmid: string, base: "candidate" | "confirmed" | "rejected"): string => {
       if (base === "confirmed") return revokedConfirmed.has(pmid) ? "Revoked" : "Confirmed";
       if (base === "rejected") return restoredRejected.has(pmid) ? "Restored" : "Rejected";
       const d = decided.get(pmid);
       return d === "claimed" ? "Confirmed" : d === "rejected" ? "Rejected" : "To review";
     };
-    const toRow = (r: CoreQueueRow, base: "candidate" | "confirmed" | "rejected") => {
-      const authors = r.fullAuthorsString ?? r.authorsString ?? "";
-      // plain Vancouver-ish citation string, PMID-anchored
-      const citation =
-        [authors, r.title, r.journal, r.year].filter(Boolean).join(". ") + `. PMID: ${r.pmid}.`;
-      return [
-        r.pmid,
-        r.title,
-        authors,
-        r.journal ?? "",
-        r.year ?? "",
-        r.doi ?? "",
-        statusOf(r.pmid, base),
-        r.likelihood.toFixed(3),
-        citation,
-      ];
-    };
+    const toRow = (r: CoreQueueRow, base: "candidate" | "confirmed" | "rejected") =>
+      csvRow(r, statusOf(r.pmid, base));
     const csv = toCsv(headers, [
       ...candidates.map((r) => toRow(r, "candidate")),
       ...confirmed.map((r) => toRow(r, "confirmed")),
@@ -831,7 +910,6 @@ export function CoreClaimQueue({
   // LIMIT — if one core ever returns thousands of candidates, fold these into a
   // single reduce or wrap them in useMemo([candidates, decided]).
   const facetCounts: Record<FilterKey, number> = {
-    all: open.length,
     client: open.filter((c) => matchesFilter(c, "client", clientCwids)).length,
     ack: open.filter((c) => matchesFilter(c, "ack", clientCwids)).length,
     coauthored: open.filter((c) => matchesFilter(c, "coauthored", clientCwids)).length,
@@ -879,36 +957,24 @@ export function CoreClaimQueue({
       <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
         {announce}
       </div>
+      {/* The mockup's top row. Its left half is the "Co-author signal draws on N
+          core staff …" lock chip + "Manage staff" link, which is NOT built: SPS
+          ingests no core-staff dictionary count and there is no such route, so
+          the row is buttons alone, right-aligned. */}
       <div
         data-slot="core-queue-toolbar"
-        className="mb-2 flex flex-wrap items-center justify-between gap-2"
+        className="mb-2 flex flex-wrap items-center justify-end gap-2"
       >
-        {hasHistory ? (
-          <ViewTabs
-            view={view}
-            onView={setView}
-            reviewCount={remaining}
-            confirmedCount={confirmed.length}
-            rejectedCount={rejected.length}
-          />
-        ) : (
-          <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
-            To review
-            <span className="text-muted-foreground text-sm font-normal tabular-nums">
-              {remaining}
-            </span>
-          </h2>
-        )}
         <div className="flex flex-wrap items-center gap-2">
-          {candidates.length > 0 || confirmed.length > 0 || rejected.length > 0 ? (
-            <button
-              type="button"
-              onClick={downloadCsv}
-              className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
-            >
-              <Download className="size-4" aria-hidden /> Download CSV
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={() => setClientsOpen((v) => !v)}
+            aria-pressed={clientsOpen}
+            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+          >
+            <Users className="size-4" aria-hidden /> Known clients (
+            <span className="tabular-nums">{clientRows.length}</span>)
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -920,15 +986,29 @@ export function CoreClaimQueue({
           >
             <Plus className="size-4" aria-hidden /> Add PMIDs
           </button>
+          {/* The mockup's third button. There IS no core reporting route in this
+              repo, so it ships DISABLED with the reason on it rather than as a
+              live control that no-ops — an enabled button that does nothing is
+              the failure this codebase keeps getting burned by. */}
+          {/* aria-disabled, NOT the native `disabled` attribute. `disabled` removes the
+              button from the tab order, which would make the explanation below
+              mouse-hover-only — the keyboard and screen-reader users most likely to
+              wonder why it does nothing are exactly the ones who could never reach it.
+              Focusable + aria-disabled keeps it announced and readable; the click is a
+              no-op and the reason is in the accessible name, not just a title. */}
           <button
             type="button"
-            onClick={() => setClientsOpen((v) => !v)}
-            aria-pressed={clientsOpen}
-            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+            aria-disabled="true"
+            aria-describedby="core-queue-reporting-why"
+            onClick={(e) => e.preventDefault()}
+            title="Reporting view is not built yet"
+            className="border-border-strong text-muted-foreground inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-full border bg-background px-3 text-sm opacity-50"
           >
-            <Users className="size-4" aria-hidden /> Known clients{" "}
-            <span className="tabular-nums opacity-80">{clientRows.length}</span>
+            <FileText className="size-4" aria-hidden /> Reporting...
           </button>
+          <span id="core-queue-reporting-why" className="sr-only">
+            Reporting view is not built yet
+          </span>
         </div>
       </div>
 
@@ -990,31 +1070,68 @@ export function CoreClaimQueue({
         />
       ) : null}
 
-      {view === "review" ? (
-        <>
-          {candidates.length > 0 ? (
-            <div className="mb-2">
-              <QueueControls
-                filter={filter}
-                onToggleFilter={toggleFilter}
-                counts={facetCounts}
-                query={query}
-                onQuery={setQuery}
-                sort={sort}
-                onSort={setSort}
-                grouped={grouped}
-                onToggleGrouped={() => setGrouped((g) => !g)}
-                selectMode={selectMode}
-                onToggleSelectMode={() => {
-                  setSelectMode((m) => !m);
-                  if (selectMode) setSelected(new Set());
-                }}
-              />
-            </div>
+      {/* One bordered panel holding the tab strip, the facets, the controls and
+          the status strip, so the active tab reads as connected to the body it
+          switches. The head strip is surface-2 and the active tab is surface, so
+          the raised tab merges into the panel below it. */}
+      <div
+        data-slot="core-queue-panel"
+        className="border-apollo-border bg-apollo-surface mb-3 overflow-hidden rounded-lg border"
+      >
+        <div className="border-apollo-border bg-apollo-surface-2 flex flex-wrap items-end gap-x-3 gap-y-2 border-b px-3 pt-2">
+          {hasHistory ? (
+            <ViewTabs
+              view={view}
+              onView={setView}
+              reviewCount={remaining}
+              confirmedCount={confirmed.length}
+              rejectedCount={rejected.length}
+            />
+          ) : (
+            <h2 className="mb-2 flex items-baseline gap-2 text-[15px] font-semibold">
+              To review
+              <span className="text-muted-foreground text-sm font-normal tabular-nums">
+                {remaining}
+              </span>
+            </h2>
+          )}
+          {view === "review" && candidates.length > 0 ? (
+            /* "method" is ASPIRATIONAL: `searchBlob` does not search a method
+               family or tool because `CoreQueueRow` never carries one. The owner
+               chose the mockup's string over the trimmed one; the word starts
+               being true when method data reaches this row, and until then a
+               method query simply matches nothing. Not a bug — see searchBlob. */
+            <Input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter by title, author, journal, PMID or method..."
+              aria-label="Filter candidates"
+              className="mb-2 ml-auto h-8 w-[330px] max-w-full text-xs"
+            />
           ) : null}
+        </div>
 
-          {candidates.length > 0 ? (
-            <div className="text-muted-foreground mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {view === "review" && candidates.length > 0 ? (
+          <>
+            <QueueControls
+              filter={filter}
+              onToggleFilter={toggleFilter}
+              counts={facetCounts}
+              sort={sort}
+              onSort={setSort}
+              grouped={grouped}
+              onToggleGrouped={() => setGrouped((g) => !g)}
+              selectMode={selectMode}
+              onToggleSelectMode={() => {
+                setSelectMode((m) => !m);
+                if (selectMode) setSelected(new Set());
+              }}
+            />
+            <div
+              data-slot="core-queue-status"
+              className="border-apollo-border bg-apollo-surface-2 text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-3 py-2 text-xs"
+            >
               <span>
                 Showing {visible.length} of {candidates.length} candidates
               </span>
@@ -1028,12 +1145,16 @@ export function CoreClaimQueue({
                 </button>
               ) : null}
               <span className="ml-auto">
-                Shortcuts (focused card): <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject · <Kbd>u</Kbd>{" "}
-                undo · <Kbd>↑</Kbd>/<Kbd>↓</Kbd> move.
+                Keys: <Kbd>j</Kbd>/<Kbd>k</Kbd> move · <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject ·{" "}
+                <Kbd>x</Kbd> select · <Kbd>u</Kbd> undo
               </span>
             </div>
-          ) : null}
+          </>
+        ) : null}
+      </div>
 
+      {view === "review" ? (
+        <>
           {candidates.length === 0 ? (
             <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
               Nothing to review — every candidate publication for this core has been confirmed or
@@ -1077,6 +1198,14 @@ export function CoreClaimQueue({
                               selectMode={selectMode}
                               selected={selected.has(row.pmid)}
                               onToggleSelected={() => toggleIn(setSelected, row.pmid)}
+                              // "x" both ticks the row and arms selection mode,
+                              // so the shortcut works from the queue's default
+                              // (unselectable) state without a mouse trip to
+                              // "Select several" first.
+                              onSelectShortcut={() => {
+                                toggleIn(setSelected, row.pmid);
+                                setSelectMode(true);
+                              }}
                               copied={copiedPmid === row.pmid}
                               onCopyPmid={() => copyPmid(row.pmid)}
                               onDecide={(status) => send(row.pmid, status)}
@@ -1169,9 +1298,17 @@ export function CoreClaimQueue({
   );
 }
 
-/** The segmented view switch (To review / Confirmed / Rejected), shown once the
- *  queue has history. `aria-pressed` pills — same styling as the FILTERS row,
- *  but a single choice, where the filters below are multi-select checkboxes. */
+/**
+ * The view switch (To review / Confirmed / Rejected), shown once the queue has
+ * history. A bordered TAB STRIP, not pills: the active tab is a raised card that
+ * loses its bottom border and so joins the panel body it switches, and its count
+ * is a filled maroon badge. Inactive tabs are plain text with a muted count.
+ *
+ * The semantics are the pills' semantics unchanged — a `role="group"` of
+ * `aria-pressed` buttons (a single choice among the ones on offer, where the
+ * facets below are multi-select checkboxes), and Confirmed/Rejected render only
+ * when their own count is above 0.
+ */
 function ViewTabs({
   view,
   onView,
@@ -1191,25 +1328,34 @@ function ViewTabs({
     { key: "rejected", label: "Rejected", count: rejectedCount, show: rejectedCount > 0 },
   ];
   return (
-    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Queue view">
+    <div className="-mb-px flex flex-wrap items-end gap-1" role="group" aria-label="Queue view">
       {tabs
         .filter((t) => t.show)
-        .map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            aria-pressed={view === t.key}
-            onClick={() => onView(t.key)}
-            className={`focus-visible:ring-apollo-maroon inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
-              view === t.key
-                ? "bg-apollo-maroon border-transparent text-white"
-                : "border-apollo-border text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-            <span className="tabular-nums opacity-80">{t.count}</span>
-          </button>
-        ))}
+        .map((t) => {
+          const active = view === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onView(t.key)}
+              className={`focus-visible:ring-apollo-maroon inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
+                active
+                  ? "border-apollo-border bg-apollo-surface text-foreground rounded-t-md border border-b-transparent font-medium"
+                  : "text-muted-foreground hover:text-foreground border border-transparent"
+              }`}
+            >
+              {t.label}
+              {active ? (
+                <span className="bg-apollo-maroon inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-px text-[11px] tabular-nums text-white">
+                  {t.count}
+                </span>
+              ) : (
+                <span className="text-muted-foreground tabular-nums">{t.count}</span>
+              )}
+            </button>
+          );
+        })}
     </div>
   );
 }
@@ -1394,12 +1540,13 @@ function RejectedRow({
   );
 }
 
+/** The facet row and the controls row, stacked inside the queue panel. The
+ *  free-text box is NOT here — it sits in the tab-strip row above (the mockup's
+ *  placement), which is why this takes no `query`. */
 function QueueControls({
   filter,
   onToggleFilter,
   counts,
-  query,
-  onQuery,
   sort,
   onSort,
   grouped,
@@ -1410,8 +1557,6 @@ function QueueControls({
   filter: ReadonlySet<FilterKey>;
   onToggleFilter: (f: FilterKey) => void;
   counts: Record<FilterKey, number>;
-  query: string;
-  onQuery: (q: string) => void;
   sort: SortKey;
   onSort: (s: SortKey) => void;
   grouped: boolean;
@@ -1420,34 +1565,30 @@ function QueueControls({
   onToggleSelectMode: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {/* The pill row and the text box are both "filter candidates"; naming them
-          apart keeps two controls from answering to one accessible name. */}
+    <div className="flex flex-col gap-2 px-3 py-2.5">
+      {/* The pill row and the text box above are both "filter candidates";
+          naming them apart keeps two controls from answering to one name. */}
       <div
         className="flex flex-wrap gap-1.5"
         role="group"
         aria-label="Filter candidates by evidence"
       >
-        {FILTERS.filter((f) => f.key === "all" || counts[f.key] > 0).map((f) => {
-          // "All" is an ACTION, not another box, so it gets plain button
-          // semantics. Giving it role="checkbox" would promise a control that
-          // unticks: once it reads checked, pressing Space on it changes
-          // nothing and announces nothing, which is the one thing the checkbox
-          // role guarantees it won't do. The real facets are genuine
-          // checkboxes; native Space/Enter activation covers all of them.
-          const isAll = f.key === "all";
-          const checked = isAll ? filter.size === 0 : filter.has(f.key);
+        {/* Every pill is a genuine checkbox — the old "All" reset pill is gone
+            (owner decision), so there is no odd button-among-checkboxes left in
+            this group. Native Space/Enter activation covers all of them. */}
+        {FILTERS.filter((f) => counts[f.key] > 0).map((f) => {
+          const checked = filter.has(f.key);
           return (
             <button
               key={f.key}
               type="button"
-              role={isAll ? undefined : "checkbox"}
-              aria-checked={isAll ? undefined : checked}
+              role="checkbox"
+              aria-checked={checked}
               onClick={() => onToggleFilter(f.key)}
               className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
                 checked
                   ? "bg-apollo-maroon border-transparent text-white"
-                  : "border-apollo-border text-muted-foreground hover:text-foreground"
+                  : "border-apollo-border text-muted-foreground hover:text-foreground bg-apollo-surface"
               }`}
             >
               {f.label} <span className="tabular-nums opacity-80">{counts[f.key]}</span>
@@ -1455,46 +1596,48 @@ function QueueControls({
           );
         })}
       </div>
-      <button
-        type="button"
-        aria-pressed={grouped}
-        onClick={onToggleGrouped}
-        className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
-      >
-        {grouped ? "Grouped by evidence" : "Group by evidence"}
-      </button>
-      <button
-        type="button"
-        aria-pressed={selectMode}
-        onClick={onToggleSelectMode}
-        className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
-      >
-        {selectMode ? "Exit selection" : "Select several"}
-      </button>
-      <label className="text-muted-foreground flex items-center gap-1 text-[13px]">
-        <span className="sr-only">Sort by</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={grouped}
+          onClick={onToggleGrouped}
+          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
+        >
+          {grouped ? "Grouped by evidence" : "Group by evidence"}
+        </button>
+        <button
+          type="button"
+          aria-pressed={selectMode}
+          onClick={onToggleSelectMode}
+          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
+        >
+          {selectMode ? "Exit selection" : "Select several"}
+        </button>
+        {/* The label is VISIBLE now and carries the word the options used to
+            repeat, so the option text is bare ("Most certain first", not
+            "Sort: Most certain first"). htmlFor/id ties the label to the select
+            so clicking it focuses the control; aria-label keeps the fuller
+            accessible name ("Sort by") the sr-only span used to give it. */}
+        <label
+          htmlFor="core-queue-sort"
+          className="text-muted-foreground ml-1 text-[13px] font-medium"
+        >
+          Sort
+        </label>
         <select
+          id="core-queue-sort"
+          aria-label="Sort by"
           value={sort}
           onChange={(e) => onSort(e.target.value as SortKey)}
           className="border-border-strong bg-apollo-surface focus-visible:ring-apollo-maroon rounded-md border px-2 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2"
         >
           {SORTS.map((s) => (
             <option key={s.key} value={s.key}>
-              Sort: {s.label}
+              {s.label}
             </option>
           ))}
         </select>
-      </label>
-      {/* Placeholder names only what `searchBlob` actually searches — the
-          artboard's "or method" would promise a field this row never carries. */}
-      <Input
-        type="search"
-        value={query}
-        onChange={(e) => onQuery(e.target.value)}
-        placeholder="Filter by title, author, journal or PMID…"
-        aria-label="Filter candidates"
-        className="ml-auto h-8 w-[330px] max-w-full text-xs"
-      />
+      </div>
     </div>
   );
 }
@@ -1508,8 +1651,12 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 // Focusable shell shared by the active and decided card states — carries the
-// keyboard contract (a/r/u + ↑/↓), firing only when the card itself is focused
-// (not a child button/link), so its inner controls keep their native behavior.
+// keyboard contract (a/r/x/u + j/k/↑/↓), firing only when the card itself is
+// focused (not a child button/link/input), so its inner controls keep their
+// native behavior. That guard is LOAD-BEARING now that j, k and x are ordinary
+// printable characters: the queue's free-text filter box lives outside this
+// subtree entirely, and every in-card control (checkbox, Confirm, Reject, the
+// evidence disclosure) is a child, so neither can be hijacked by a shortcut.
 const CARD_SHELL =
   "bg-apollo-surface rounded-lg border border-apollo-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-maroon";
 
@@ -1524,6 +1671,7 @@ function CandidateCard({
   selectMode,
   selected,
   onToggleSelected,
+  onSelectShortcut,
   copied,
   onCopyPmid,
   onDecide,
@@ -1539,6 +1687,10 @@ function CandidateCard({
   selectMode: boolean;
   selected: boolean;
   onToggleSelected: () => void;
+  /** "x": tick this row AND arm selection mode, so the shortcut works from the
+   *  queue's default state. Distinct from `onToggleSelected`, which is the
+   *  checkbox's own handler and must not turn the mode on by itself. */
+  onSelectShortcut: () => void;
   copied: boolean;
   onCopyPmid: () => void;
   onDecide: (status: Decision) => void;
@@ -1547,10 +1699,12 @@ function CandidateCard({
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (e.target !== e.currentTarget) return; // only when the shell itself is focused
     const k = e.key.toLowerCase();
-    if (k === "arrowdown" || k === "arrowup") {
+    // j/k are the vi-style twins of ArrowDown/ArrowUp, not a second mechanism.
+    const down = k === "arrowdown" || k === "j";
+    if (down || k === "arrowup" || k === "k") {
       e.preventDefault();
       const li = e.currentTarget.closest("li");
-      const sibling = k === "arrowdown" ? li?.nextElementSibling : li?.previousElementSibling;
+      const sibling = down ? li?.nextElementSibling : li?.previousElementSibling;
       (sibling?.querySelector("[data-card]") as HTMLElement | null)?.focus();
       return;
     }
@@ -1561,6 +1715,10 @@ function CandidateCard({
     } else if (!decided && k === "r") {
       e.preventDefault();
       onDecide("rejected");
+    } else if (!decided && k === "x") {
+      // Selection is a To-review affordance; a decided row has nothing to sweep.
+      e.preventDefault();
+      onSelectShortcut();
     } else if (decided && k === "u") {
       e.preventDefault();
       onUndo();
@@ -1580,7 +1738,7 @@ function CandidateCard({
         tabIndex={0}
         role="group"
         aria-label={`${decided === "claimed" ? "Confirmed" : "Rejected"}: ${row.title}`}
-        aria-keyshortcuts="u ArrowUp ArrowDown"
+        aria-keyshortcuts="u j k ArrowUp ArrowDown"
         onKeyDown={onKeyDown}
       >
         <div className="flex min-w-0 items-center gap-2 text-sm">
@@ -1617,8 +1775,34 @@ function CandidateCard({
   const band = likelihoodBand(row.likelihood);
   const signals = buildSignals(row);
   const tokens = evidenceTokens(row, clientCwids);
-  // A 0 on a just-published paper isn't "0 citations", it's "not cited yet".
-  const recentlyPublished = row.year !== null && row.year >= new Date().getFullYear() - 1;
+  // The header's meta line, middot-separated: the abbreviated journal (the full
+  // title is a paragraph for some journals), when PubMed indexed it, then the
+  // PMID. Each part is dropped when its data is missing rather than rendered
+  // empty, so the separators are built from what actually survives.
+  const journalLabel = row.journalAbbrev ?? row.journal;
+  const addedToPubMed = formatAddedToPubMed(row.dateAddedToEntrez);
+  const metaParts: Array<{ key: string; node: ReactNode }> = [];
+  if (journalLabel) metaParts.push({ key: "journal", node: <span>{journalLabel}</span> });
+  if (addedToPubMed) metaParts.push({ key: "added", node: <span>{addedToPubMed}</span> });
+  // No index date on file — the publication year is the only vintage left.
+  else if (row.year !== null)
+    metaParts.push({ key: "year", node: <span className="tabular-nums">{row.year}</span> });
+  metaParts.push({
+    key: "pmid",
+    // PMID shown verbatim (curators key off it); links to PubMed when present.
+    node: row.pubmedUrl ? (
+      <a
+        href={row.pubmedUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-foreground inline-flex items-center gap-1 tabular-nums hover:underline"
+      >
+        PMID {row.pmid} <ExternalLink className="size-3" aria-hidden />
+      </a>
+    ) : (
+      <span className="tabular-nums">PMID {row.pmid}</span>
+    ),
+  });
   return (
     <div
       className={`${CARD_SHELL} px-5 py-4`}
@@ -1627,7 +1811,7 @@ function CandidateCard({
       tabIndex={0}
       role="group"
       aria-label={`Candidate: ${row.title}`}
-      aria-keyshortcuts="a r ArrowUp ArrowDown"
+      aria-keyshortcuts="a r x j k ArrowUp ArrowDown"
       onKeyDown={onKeyDown}
     >
       <div
@@ -1655,23 +1839,18 @@ function CandidateCard({
               </span>
             </p>
           ) : null}
-          <h3 className="text-foreground text-[15px] font-medium">{row.title}</h3>
-          <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-            {row.journal ? <span>{row.journal}</span> : null}
-            {row.year ? <span className="tabular-nums">{row.year}</span> : null}
-            {/* PMID shown verbatim (curators key off it); links to PubMed when present. */}
-            {row.pubmedUrl ? (
-              <a
-                href={row.pubmedUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-foreground inline-flex items-center gap-1 tabular-nums hover:underline"
-              >
-                PMID {row.pmid} <ExternalLink className="size-3" aria-hidden />
-              </a>
-            ) : (
-              <span className="tabular-nums">PMID {row.pmid}</span>
-            )}
+          <h3 className="text-foreground text-[15px] font-medium">{displayTitle(row.title)}</h3>
+          <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+            {metaParts.map((part, i) => (
+              <span key={part.key} className="inline-flex items-center gap-1.5">
+                {i > 0 ? (
+                  <span className="text-muted-foreground/60" aria-hidden>
+                    ·
+                  </span>
+                ) : null}
+                {part.node}
+              </span>
+            ))}
             <button
               type="button"
               onClick={onCopyPmid}
@@ -1685,30 +1864,6 @@ function CandidateCard({
                 <Copy className="size-3" aria-hidden />
               )}
             </button>
-            {row.doi ? (
-              <a
-                href={`https://doi.org/${row.doi}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-foreground inline-flex items-center gap-1 hover:underline"
-              >
-                DOI <ExternalLink className="size-3" aria-hidden />
-              </a>
-            ) : null}
-            {row.citationCount > 0 ? (
-              <span className="tabular-nums">
-                {row.citationCount} citation{row.citationCount === 1 ? "" : "s"}
-              </span>
-            ) : recentlyPublished ? (
-              <span>No citations yet{row.year ? ` · published ${row.year}` : ""}</span>
-            ) : (
-              <span className="tabular-nums">0 citations</span>
-            )}
-            {row.nihPercentile !== null ? (
-              <span className="tabular-nums">
-                RCR {row.relativeCitationRatio ?? "—"} ({row.nihPercentile}th pct)
-              </span>
-            ) : null}
           </div>
           <Byline row={row} />
           {row.synopsis ? (
