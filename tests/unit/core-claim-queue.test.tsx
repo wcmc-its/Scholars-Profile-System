@@ -29,6 +29,8 @@ import {
   matchesQuery,
   parsePmidBlock,
   searchBlob,
+  CSV_HEADERS,
+  csvRow,
 } from "@/components/edit/core-claim-queue";
 import type { FilterKey } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
@@ -1938,10 +1940,54 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     const reporting = screen.getByRole("button", { name: /Reporting/ }) as HTMLButtonElement;
     expect(reporting.textContent).toContain("Reporting...");
-    expect(reporting.disabled).toBe(true);
     expect(reporting.getAttribute("aria-disabled")).toBe("true");
-    // the explanation is reachable, not just a greyed-out mystery
+    // NOT the native `disabled` attribute: that drops it from the tab order, which
+    // would hide the reason from exactly the keyboard and screen-reader users most
+    // likely to wonder why the button does nothing.
+    expect(reporting.disabled).toBe(false);
     expect(reporting.getAttribute("title")).toBe("Reporting view is not built yet");
+    // the reason is in the accessibility tree, not only in a hover tooltip
+    const why = document.getElementById(reporting.getAttribute("aria-describedby") ?? "");
+    expect(why?.textContent).toBe("Reporting view is not built yet");
+  });
+
+  it("keeps the CSV column contract under test while the export button is off the toolbar", () => {
+    // Removing "Download CSV" removed the only caller of downloadCsv(), and with it
+    // the only coverage of the column order. A downloaded CSV's headers are a
+    // de-facto contract for whoever parses the file, so they are pinned directly.
+    expect([...CSV_HEADERS]).toEqual([
+      "PMID",
+      "Title",
+      "Authors",
+      "Journal",
+      "Year",
+      "DOI",
+      "Status",
+      "Likelihood",
+      "Citation",
+    ]);
+    const r = row({
+      pmid: "42",
+      title: "A candidate.",
+      journal: "Journal of Synthetic Results",
+      journalAbbrev: "J Synth Res",
+      year: 2024,
+      doi: "10.1000/xyz",
+      likelihood: 0.82,
+      authorsString: "Testerson A, Sample C",
+      fullAuthorsString: "Testerson A, Sample C, Placeholder R",
+    });
+    const cells = csvRow(r, "To review");
+    expect(cells[0]).toBe("42");
+    // RAW title, period intact — an export is a record, not a rendering
+    expect(cells[1]).toBe("A candidate.");
+    expect(cells[2]).toBe("Testerson A, Sample C, Placeholder R");
+    // FULL journal, not the abbreviation the card now shows
+    expect(cells[3]).toBe("Journal of Synthetic Results");
+    expect(cells[5]).toBe("10.1000/xyz");
+    expect(cells[6]).toBe("To review");
+    expect(cells[7]).toBe("0.820");
+    expect(cells[8]).toContain("PMID: 42.");
   });
 
   it("renders the Known clients button with a 0 count when no clients prop is passed", () => {

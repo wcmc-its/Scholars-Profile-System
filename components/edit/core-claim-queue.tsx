@@ -110,6 +110,45 @@ export function parsePmidBlock(text: string): { pmids: string[]; invalid: string
  * Display only — the stored title, the CSV citation string and `searchBlob` all
  * keep the raw value. Pure.
  */
+/** CSV export column order. Exported so the column CONTRACT stays under test while
+ *  the "Download CSV" button is off the toolbar (the mockup moved export into the
+ *  reporting view, which is not built). A downloaded CSV's headers are a de-facto
+ *  contract for whoever parses the file, so this order must not drift silently. */
+export const CSV_HEADERS = [
+  "PMID",
+  "Title",
+  "Authors",
+  "Journal",
+  "Year",
+  "DOI",
+  "Status",
+  "Likelihood",
+  "Citation",
+] as const;
+
+/** One CSV row for a queue row, given its already-resolved display status.
+ *  Pure: `status` is passed in because deriving it needs component state.
+ *  NOTE the two deliberate mismatches with the card: the CSV keeps the FULL journal
+ *  (not `journalAbbrev`) and the RAW title (not `displayTitle`), because an export is
+ *  a record, not a rendering — a stripped trailing period would corrupt a citation. */
+export function csvRow(r: CoreQueueRow, status: string): (string | number)[] {
+  const authors = r.fullAuthorsString ?? r.authorsString ?? "";
+  // plain Vancouver-ish citation string, PMID-anchored
+  const citation =
+    [authors, r.title, r.journal, r.year].filter(Boolean).join(". ") + `. PMID: ${r.pmid}.`;
+  return [
+    r.pmid,
+    r.title,
+    authors,
+    r.journal ?? "",
+    r.year ?? "",
+    r.doi ?? "",
+    status,
+    r.likelihood.toFixed(3),
+    citation,
+  ];
+}
+
 export function displayTitle(title: string): string {
   if (!title.endsWith(".")) return title;
   const prev = title.slice(-2, -1);
@@ -828,40 +867,15 @@ export function CoreClaimQueue({
   // var. Both are expected while it waits; restore its coverage with its entry
   // point.
   function downloadCsv() {
-    const headers = [
-      "PMID",
-      "Title",
-      "Authors",
-      "Journal",
-      "Year",
-      "DOI",
-      "Status",
-      "Likelihood",
-      "Citation",
-    ];
+    const headers = CSV_HEADERS;
     const statusOf = (pmid: string, base: "candidate" | "confirmed" | "rejected"): string => {
       if (base === "confirmed") return revokedConfirmed.has(pmid) ? "Revoked" : "Confirmed";
       if (base === "rejected") return restoredRejected.has(pmid) ? "Restored" : "Rejected";
       const d = decided.get(pmid);
       return d === "claimed" ? "Confirmed" : d === "rejected" ? "Rejected" : "To review";
     };
-    const toRow = (r: CoreQueueRow, base: "candidate" | "confirmed" | "rejected") => {
-      const authors = r.fullAuthorsString ?? r.authorsString ?? "";
-      // plain Vancouver-ish citation string, PMID-anchored
-      const citation =
-        [authors, r.title, r.journal, r.year].filter(Boolean).join(". ") + `. PMID: ${r.pmid}.`;
-      return [
-        r.pmid,
-        r.title,
-        authors,
-        r.journal ?? "",
-        r.year ?? "",
-        r.doi ?? "",
-        statusOf(r.pmid, base),
-        r.likelihood.toFixed(3),
-        citation,
-      ];
-    };
+    const toRow = (r: CoreQueueRow, base: "candidate" | "confirmed" | "rejected") =>
+      csvRow(r, statusOf(r.pmid, base));
     const csv = toCsv(headers, [
       ...candidates.map((r) => toRow(r, "candidate")),
       ...confirmed.map((r) => toRow(r, "confirmed")),
@@ -976,15 +990,25 @@ export function CoreClaimQueue({
               repo, so it ships DISABLED with the reason on it rather than as a
               live control that no-ops — an enabled button that does nothing is
               the failure this codebase keeps getting burned by. */}
+          {/* aria-disabled, NOT the native `disabled` attribute. `disabled` removes the
+              button from the tab order, which would make the explanation below
+              mouse-hover-only — the keyboard and screen-reader users most likely to
+              wonder why it does nothing are exactly the ones who could never reach it.
+              Focusable + aria-disabled keeps it announced and readable; the click is a
+              no-op and the reason is in the accessible name, not just a title. */}
           <button
             type="button"
-            disabled
             aria-disabled="true"
+            aria-describedby="core-queue-reporting-why"
+            onClick={(e) => e.preventDefault()}
             title="Reporting view is not built yet"
             className="border-border-strong text-muted-foreground inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-full border bg-background px-3 text-sm opacity-50"
           >
             <FileText className="size-4" aria-hidden /> Reporting...
           </button>
+          <span id="core-queue-reporting-why" className="sr-only">
+            Reporting view is not built yet
+          </span>
         </div>
       </div>
 
