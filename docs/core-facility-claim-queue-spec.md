@@ -156,17 +156,19 @@ After the commit (never before, never blocking it): a **best-effort DynamoDB wri
 
 The scale companion: `{ coreId, pmids: string[], status: "claimed" | "rejected" }`, capped at `MAX_BULK_PMIDS = 500`. Same upsert + audit loop, **one transaction** for the whole batch (not N). Role resolved once (the core dimension is identical for every pmid). Pre-filters pmids already at the target status (idempotent skip, counted in the response). `revoked` is deliberately **not** a bulk action — undo stays a single-row gesture on the single-claim route.
 
-Drives the UI's **"Confirm N high-confidence"** button: candidates at `likelihood >= 0.9` with no existing decision, one click, one request, one transaction — instead of N client-side round-trips.
+Drives the queue's **hand-picked selection bar**: a reviewer arms "Select several" (or "Select N" on an evidence group they're already reading), ticks the rows they mean, and "Confirm all" / "Reject all" posts exactly that set — one click, one request, one transaction, instead of N client-side round-trips. Both buttons disable for the duration and the acting one reads "Confirming…" / "Rejecting…", so a double-click can't post the same batch twice.
+
+It used to drive a **"Confirm N high-confidence"** button instead — every open candidate at `likelihood >= 0.9`, swept in one click. That button and the `HIGH_CONFIDENCE_LIKELIHOOD = 0.9` constant behind it are **gone**. The threshold was never validated against an observed confirm rate, and a threshold sweep decides rows the reviewer never looked at; the selection bar keeps the batching and drops the blind part. "Reject all" — and only "Reject all" — asks for confirmation first. The asymmetry is deliberate: a wrong bulk *confirm* surfaces on the public core page, where someone will eventually notice it, while a wrong bulk *reject* just silently leaves the papers absent with nothing to notice. "Confirm all" is unguarded because the rows are hand-picked and on screen, which was the whole reason for removing the sweep; per-row reject is unguarded too, since that is one visible row with Undo beside it.
 
 ### Manual PMID add — built, extending this same endpoint
 
 An owner who knows a paper used their core — one the engine never scored, or scored `below_threshold` — can paste a block of known PMIDs and claim them directly, independent of the engine queue. No new endpoint: this bulk route now does the work.
 
-**Write path.** One addition on top of the existing route: a `db.read.publication.findMany({ where: { pmid: { in: pmids } }, select: { pmid: true } })` existence check, run alongside the prior-active-claims lookup. A pmid not in that set is returned as a new `notFound: string[]` in the response (alongside the existing `skipped`-already-claimed count) instead of being written — a pmid `core_claim` is FK-less, so nothing at the DB layer would otherwise reject it, and it would then display nowhere (see below). Everything else — the transaction, the audit row, `MAX_BULK_PMIDS = 500` — is unchanged, and the check is a no-op for the existing "Confirm N high-confidence" caller (its pmids always already have a `publication` row). `revoked` stays out of scope (single-row-only route, unchanged) — manual add only ever writes `claimed`.
+**Write path.** One addition on top of the existing route: a `db.read.publication.findMany({ where: { pmid: { in: pmids } }, select: { pmid: true } })` existence check, run alongside the prior-active-claims lookup. A pmid not in that set is returned as a new `notFound: string[]` in the response (alongside the existing `skipped`-already-claimed count) instead of being written — a pmid `core_claim` is FK-less, so nothing at the DB layer would otherwise reject it, and it would then display nowhere (see below). Everything else — the transaction, the audit row, `MAX_BULK_PMIDS = 500` — is unchanged, and the check is a no-op for the selection-bar caller (its pmids come off rows already rendered on screen, so they always already have a `publication` row). `revoked` stays out of scope (single-row-only route, unchanged) — manual add only ever writes `claimed`.
 
 **Read path.** All three consumers (`loadCoreReviewQueue`/`lib/api/core-queue.ts`, `getCorePage`/`lib/api/cores.ts`, `resolvePublicationCores`/`lib/api/publication-detail.ts`) now run a fourth query for `core_claim` rows with no matching `publication_core` row (CLAIMED only — a REJECTED claim with nothing to reject isn't surfaced), joined directly to `Publication` (and `Core`, for the modal) for display fields, and union the result into the same collection handed to the existing partition/select functions — the shape `getMenteesForMentor` (`lib/api/mentoring.ts`) already used to fold `getManualMentees` (`lib/api/manual-layer.ts`) in alongside engine-sourced queries. `core-merge.ts` needed no changes: `effectiveCoreStatus`/`isEffectiveConfirmed` already short-circuit on an active claim before reading engine status, so a manual row's placeholder `status` field is never actually read. New `isManual: boolean` field on `CoreQueueRow`, threaded through so the UI can label the row.
 
-**UI.** An "Add PMIDs" affordance in the owner queue header, next to "Confirm N high-confidence" — a textarea taking a newline/comma/space-separated block (`parsePmidBlock`, client-side parse + de-dupe), posting to the same bulk endpoint with `status: "claimed"`. The result line reports added / already-claimed / not-found-in-SPS, then `router.refresh()`s so the new row's real title/journal/etc. comes from the server (the component has no local data for a pmid it didn't already have in props). Turns out the once-open "likelihood bar" display question resolved itself for free: `partitionCoreQueue` always routes an active `claimed` claim straight to the **Confirmed** tab, which renders the compact `ConfirmedRow` (title/year/PMID/Revoke) — it never reaches the candidate-card likelihood-bar rendering at all. `ConfirmedRow` shows a small "Manually added" badge when `isManual` is set, so the row's missing evidence trail is explained rather than silently absent.
+**UI.** An "Add PMIDs" affordance in the owner queue header, alongside "Download CSV" and "Known clients" — a textarea taking a newline/comma/space-separated block (`parsePmidBlock`, client-side parse + de-dupe), posting to the same bulk endpoint with `status: "claimed"`. The result line reports added / already-claimed / not-found-in-SPS, then `router.refresh()`s so the new row's real title/journal/etc. comes from the server (the component has no local data for a pmid it didn't already have in props). Turns out the once-open "likelihood bar" display question resolved itself for free: `partitionCoreQueue` always routes an active `claimed` claim straight to the **Confirmed** tab, which renders the compact `ConfirmedRow` (title/year/PMID/Revoke) — it never reaches the candidate-card likelihood-bar rendering at all. `ConfirmedRow` shows a small "Manually added" badge when `isManual` is set, so the row's missing evidence trail is explained rather than silently absent.
 
 ## UI — `/edit/core/[coreId]` (owner review queue)
 
@@ -179,9 +181,10 @@ An owner who knows a paper used their core — one the engine never scored, or s
 │ ones that did and reject false positives — your decisions surface on         │
 │ the public profiles and prime the next inference run.                        │
 │                                                                              │
-│ To review  14                    [Confirm 3 high-confidence]  [Download CSV] │
+│ To review  14              [Download CSV]  [Add PMIDs]  [Known clients 4]    │
 │                                                                              │
-│ (All) (Acknowledged) (Co-authored) (LLM-flagged)   Sort: Uncertain first     │
+│ (All) (Acknowledged) (Staff co-author) (LLM-flagged)  Sort: Most certain    │
+│                                  [Filter by title, author, journal or PMID…] │
 │ Shortcuts (focused card): a confirm | r reject | u undo | up/down move       │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │   Spatial transcriptomics of the tumor microenvironment in murine            │
@@ -195,7 +198,8 @@ An owner who knows a paper used their core — one the engine never scored, or s
 │   Single-cell profiling was performed using the imaging core's Leica         │
 │   SP8 confocal system with subsequent spatial deconvolution.                 │
 │                                                                              │
-│   Combined likelihood  ################----                              82% │
+│   Moderate  82%                                                              │
+│   ################----                                                       │
 │                                                                              │
 │   Why this surfaced . 3 of 5 signals fired                                   │
 │     Named in the acknowledgments                                ****  Direct │
@@ -204,8 +208,6 @@ An owner who knows a paper used their core — one the engine never scored, or s
 │     Co-authored with Rachel Chen (Pathology)                    ***.  Strong │
 │     LLM triage                                                **..  Moderate │
 │       Methods section explicitly names core equipment                   8/10 │
-│                                                                              │
-│   > Details (abstract, full author list, WCM authors, MeSH)                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │   Comparative analysis of flow cytometry gating strategies for rare          │
 │   population detection ... (next card, likelihood 55%, near the              │
@@ -213,9 +215,23 @@ An owner who knows a paper used their core — one the engine never scored, or s
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Notes on the mockup: `[Chen R]` in the byline is a tinted, linked chip in the real UI — the co-author signal's staff CWID resolved to a named scholar and overlaid onto the flat `authorsString` by best-effort surname match (`ponytail`-marked in the source: the data carries no per-author byline token, so this mirrors how the profile page overlays author links). The default sort is **"Uncertain first"** — likelihoods near 50/50 surface before the engine's own high-confidence tail, on the theory that a 96% doesn't need a human and a 58% does.
+Notes on the mockup: `[Chen R]` in the byline is a tinted, linked chip in the real UI — the co-author signal's staff CWID resolved to a named scholar and overlaid onto the flat `authorsString` by best-effort surname match (`ponytail`-marked in the source: the data carries no per-author byline token, so this mirrors how the profile page overlays author links). The default sort is **"Most certain first"** (the `likelihood` key), not the "Uncertain first" option beside it — the mockup and this note both said otherwise for a while, but the component has defaulted to `likelihood` since before the direction-A rebuild. "Uncertain first" remains available, and is the better setting when the aim is calibration rather than throughput: likelihoods near 50/50 are where a human adds the most.
 
 Checked against the original design artifact (`Core Claim Queue.dc.html`) and brought into parity: the just-decided strip is now color-tinted (green/confirmed, red/rejected — it rendered in flat neutral gray before, including a gray, non-red Rejected icon); a 0-signal candidate now explains itself ("No displayed signal fired — the combined score moved on inputs the queue doesn't label.") instead of silently omitting the evidence list — a real, reachable state per the topical-MeSH-prior note above; Revoked/Restored rows on the Confirmed/Rejected tabs keep title, year, and PMID visible with an added "— re-files on next load" note, instead of the whole line collapsing to just "Revoked — {title}"; and `Publication.synopsis` gets the mockup's light boxed treatment. Not brought into parity: the mockup's "· just now" Confirmed-tab entries are a demo artifact of having no server — the real, documented behavior is that a session-decided row stays in the review list as a strip until the next page load, not an instant move into the Confirmed tab.
+
+The score reads as the **band word plus the percent** ("Moderate 82%") over a band-coloured meter — Strong ≥ 0.85, Moderate ≥ 0.65, Slight ≥ 0.40, else Weak. There is no "Combined likelihood" caption any more, and no threshold tick on the meter: with the 0.9 sweep gone (see the bulk write path above), a hairline at 90% would mark a control that no longer exists. The card also no longer carries the **`> Details` disclosure** — the abstract, full author list, WCM byline authors and MeSH chips it held are off the card entirely; the plain-language synopsis, which was never part of it, stays. (`CoreQueueRow` still *loads* `abstract` and `meshTerms`; nothing renders them, and the field docs on the loader say so.)
+
+The **free-text filter** on the controls row narrows the review list on the card's own visible text — title, journal, PMID, synopsis, byline, the resolved WCM/core-staff names, and the acknowledgment alias + quote. It sits with the facet pills rather than in the tab strip because everything that reports its effect is a review-tab control: the "Showing N of M candidates" line, the "Clear filters" link (which drops the text and the pills together; the box's own native clear button drops only the text) and the "Nothing matches this filter." state. It deliberately does *not* search MeSH or method family: the first is no longer on the card and the second was never plumbed into `CoreQueueRow`, and a match a reviewer can't see is worse than a miss.
+
+**Selection bar.** "Select several" (or "Select N" on a group header) puts a checkbox on each card and floats one bar over the queue for as long as anything is ticked:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  3 papers selected  │  [Confirm all]  [Reject all]  │  Clear │
+└──────────────────────────────────────────────────────────────┘
+```
+
+One request for the whole hand-picked set (`POST /api/edit/core-claim/bulk`), with both buttons disabled and the acting one reading "Confirming…"/"Rejecting…" until it returns. No confirmation dialog: the rows were picked one at a time and are on screen.
 
 ### Tabs, once there's history
 

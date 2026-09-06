@@ -1,37 +1,67 @@
 "use client";
 
 /**
- * Per-core review queue (the owner surface at /edit/core/[coreId]). Mirrors the
- * coi-gap-card pattern: ranked candidate cards with inline evidence and per-row
- * actions that POST to /api/edit/core-claim, with optimistic local state. A
- * confirm/reject removes the row from the "To review" list; a confirm lifts it
- * into the "Confirmed" list. Kept deliberately simpler than coi-gap-card — cores
- * have no dual org/paper view and a binary (confirm/reject) decision.
+ * Per-core review queue (the owner surface at /edit/core/[coreId]/review).
+ *
+ * Ranked candidate rows with a band+percent score readout, a one-line evidence
+ * summary that expands into the per-signal breakdown, and per-row actions that
+ * POST to /api/edit/core-claim with optimistic local state. A confirm/reject
+ * removes the row from the "To review" list; a confirm lifts it into the
+ * "Confirmed" list.
+ *
+ * Layout follows the core-claim-queue artboard (direction A, queue variant):
+ *   - the score reads as a BAND WORD + percent ("Strong 94%"), never a labelled
+ *     "Combined likelihood" bar. Bands are Strong >= 0.85, Moderate >= 0.65,
+ *     Slight >= 0.40, else Weak;
+ *   - rows group by which KINDS of evidence fired, with a per-group band range;
+ *   - facet pills carry live counts, AND-combine, and are dropped entirely at
+ *     count 0 (a pill that can only ever empty the queue is not a control);
+ *   - evidence collapses to a token strip and expands to the signal rows.
+ *
+ * Deliberate departures from the artboard, and why:
+ *   - NO bulk "Confirm N high-confidence" sweep, and no 90% hairline tick on the
+ *     meter. The sweep was gated on a 0.9 threshold never validated against an
+ *     observed confirm rate; with it gone the tick marks nothing a curator can
+ *     act on, so drawing it would imply a control that no longer exists.
+ *   - the signal count says "N of 5" with all FIVE signals countable (the
+ *     artboard's own numerator excluded two rows it drew, so it could never
+ *     reach its own denominator).
+ *   - the group header names BANDS, not "likelihood 41-94%" — the band
+ *     vocabulary is the only score vocabulary this surface uses.
+ *   - the prefilter prior stays a visible signal row rather than the artboard's
+ *     dimmed "Not evidence" footnote: `decodeTopicalPrior` gives it a true
+ *     reading here (see below), and it has to be visible to be countable.
+ *   - PMID/CWID parsing keeps the shipped strict parsers and their
+ *     rejected-token reporting; the artboard's split-on-any-non-digit form
+ *     would silently turn "abc123def" into PMID 123.
+ *   - the free-text filter box sits with the facet pills, not in the tab strip.
+ *     The artboard drew it in the strip, where it stays on screen over the
+ *     Confirmed and Rejected lists, but its own filter only ever narrowed the
+ *     review list — a control that does nothing on two tabs out of three. It
+ *     also had no clear of its own, so "Clear filters" drops the text with the
+ *     pills, and the count line and the "Nothing matches this filter." state
+ *     both count the query.
  */
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check,
-  CheckCheck,
-  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Copy,
   Download,
   ExternalLink,
   PenLine,
   Plus,
-  Quote,
-  Repeat,
-  Sparkles,
-  Tag,
   Undo2,
   Users,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type { CoreClientRow } from "@/lib/api/core-clients";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
-import { sanitizePubmedHtml } from "@/lib/utils";
 import { CoreClientsPanel } from "@/components/edit/core-clients-panel";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { Input } from "@/components/ui/input";
 import { toCsv } from "@/lib/csv";
 
 /** A pasted block of PMIDs, split on any run of whitespace/commas. Digit-only
@@ -62,8 +92,8 @@ type Decision = "claimed" | "rejected";
 /** Which list the segmented control is showing (only when there's history). */
 type QueueView = "review" | "confirmed" | "rejected";
 /** Exported for the pure-predicate tests; "all" is the reset, never a set member. */
-export type FilterKey = "all" | "ack" | "coauthored" | "llm";
-type SortKey = "likelihood" | "uncertain" | "strongest" | "llm";
+export type FilterKey = "all" | "client" | "ack" | "coauthored" | "noprior" | "llm";
+type SortKey = "likelihood" | "uncertain" | "strongest" | "llm" | "year" | "cites";
 
 type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
 interface Signal {
@@ -75,13 +105,6 @@ interface Signal {
 
 /** The five core-usage signals (ack, co-author, LLM, repeat-user, prefilter prior). */
 const SIGNAL_COUNT = 5;
-const SIGNAL_ICON: Record<SignalKind, LucideIcon> = {
-  ack: Quote,
-  coauthor: Users,
-  llm: Sparkles,
-  affinity: Repeat,
-  topic: Tag,
-};
 /** Stable tie-break so equal-strength signals keep a deterministic order. */
 const KIND_ORDER: Record<SignalKind, number> = {
   ack: 0,
@@ -90,6 +113,7 @@ const KIND_ORDER: Record<SignalKind, number> = {
   affinity: 3,
   topic: 4,
 };
+
 /**
  * Which of the prefilter's two signals actually produced this prior.
  *
@@ -120,13 +144,13 @@ export function decodeTopicalPrior(prior: number): { mesh: boolean; affinity: bo
  * about this specific paper. Note the prefilter prior OVERLAPS the repeat-user
  * one by construction (see decodeTopicalPrior): on an author-only prior the two
  * rows are the same evidence, which is why that case says so out loud rather
- * than reading as independent corroboration. The raw value rides along as a secondary readout in the
- * meter — LLM as a score out of 10, and repeat-user as a percentage whose
- * MEANING changed with ReciterAI #382: it used to be a capped strength (values
- * piled on the 0.85 ceiling — 84% of one live queue sat exactly there), and is
- * now a rate, the share of an author's own corpus already given to this core,
- * so the same paper reads single digits where it used to read 85%. Pure;
- * ordered strongest-first.
+ * than reading as independent corroboration. The raw value rides along as the
+ * signal's value line — LLM as a score out of 10, and repeat-user as a
+ * percentage whose MEANING changed with ReciterAI #382: it used to be a capped
+ * strength (values piled on the 0.85 ceiling — 84% of one live queue sat exactly
+ * there), and is now a rate, the share of an author's own corpus already given
+ * to this core, so the same paper reads single digits where it used to read 85%.
+ * Pure; ordered strongest-first.
  */
 export function buildSignals(row: CoreQueueRow): Signal[] {
   const out: Signal[] = [];
@@ -143,22 +167,141 @@ export function buildSignals(row: CoreQueueRow): Signal[] {
   return out.sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 }
 
+/** The four score bands. `label` is the whole score vocabulary of this surface —
+ *  there is no "Combined likelihood"/"Evidence score" caption anywhere. */
+export type BandLabel = "Strong" | "Moderate" | "Slight" | "Weak";
+interface Band {
+  min: number;
+  label: BandLabel;
+  /** Tailwind text colour for the band word. */
+  text: string;
+  /** Tailwind background for the meter fill. */
+  fill: string;
+}
+const BANDS: readonly Band[] = [
+  { min: 0.85, label: "Strong", text: "text-apollo-green", fill: "bg-apollo-green" },
+  { min: 0.65, label: "Moderate", text: "text-apollo-slate", fill: "bg-apollo-slate" },
+  { min: 0.4, label: "Slight", text: "text-apollo-amber", fill: "bg-apollo-amber" },
+  { min: 0, label: "Weak", text: "text-muted-foreground", fill: "bg-muted-foreground" },
+];
+
+/** Band for a 0–1 likelihood. Thresholds are inclusive lower bounds, so 0.85 is
+ *  Strong, 0.65 Moderate and 0.40 Slight exactly on the boundary. Pure. */
+export function likelihoodBand(likelihood: number): Band {
+  return BANDS.find((b) => likelihood >= b.min) ?? BANDS[BANDS.length - 1];
+}
+
+/** What the dense LLM triage score means, in words a reviewer can act on. Pure. */
+export function llmVerdict(score: number): string {
+  return score >= 8
+    ? "reads as core work"
+    : score >= 6
+      ? "possibly core work"
+      : "little sign of core use";
+}
+
+/** One label/value pair in the collapsed evidence strip. */
+export interface EvidenceToken {
+  label: string;
+  value: string;
+}
+
+/**
+ * The collapsed evidence line as label/value pairs, so the values carry the
+ * weight rather than a run-on sentence. `clientCwids` is the core's own "Known
+ * clients" list (lowercased CWIDs) — a byline author on it is a stronger read
+ * than a bare WCM co-author. Pure.
+ */
+export function evidenceTokens(
+  row: CoreQueueRow,
+  clientCwids: ReadonlySet<string> = new Set(),
+): EvidenceToken[] {
+  const tokens: EvidenceToken[] = [];
+  if (row.ackAlias) tokens.push({ label: "Acknowledged as", value: `“${row.ackAlias}”` });
+  else if (row.signalAck) tokens.push({ label: "Acknowledged", value: "in the full text" });
+  if (row.coauthors.length > 0) {
+    const named = row.coauthorScholars[0]?.name ?? row.coauthors[0];
+    tokens.push({ label: "Staff co-author", value: named });
+  }
+  const clients = row.wcmAuthors.filter((a) => clientCwids.has(a.cwid.toLowerCase()));
+  if (clients.length > 0) {
+    tokens.push({
+      label: clients.length > 1 ? "Client co-authors" : "Client co-author",
+      value: clients.map((c) => c.name).join("; "),
+    });
+  }
+  if (row.authorAffinity !== null) {
+    tokens.push({
+      label: "Repeat user",
+      value: `${Math.round(row.authorAffinity * 100)}% of an author's own work`,
+    });
+  }
+  if (row.llmScore !== null) {
+    tokens.push({ label: "LLM on title and abstract", value: llmVerdict(row.llmScore) });
+  }
+  return tokens;
+}
+
+/**
+ * Which evidence KINDS fired on a row, as a stable grouping key ("ack+coauthor",
+ * "llm", "none"). The prefilter prior is left out on purpose: by construction it
+ * restates the repeat-user prior (see decodeTopicalPrior), so grouping on it
+ * would split one pile of evidence into two under different names. Pure.
+ */
+export function evidenceGroupKey(row: CoreQueueRow): string {
+  const kinds = buildSignals(row)
+    .map((s) => s.kind)
+    .filter((k) => k !== "topic");
+  return kinds.length === 0 ? "none" : kinds.join("+");
+}
+
+/** The evidence vocabulary a group header speaks. */
+const GROUP_NAMES: Record<string, string> = {
+  ack: "acknowledgment",
+  coauthor: "staff co-author",
+  llm: "LLM read",
+  affinity: "repeat user",
+  none: "no labelled signal",
+};
+
+/** "3 papers · acknowledgment + staff co-author" — singular-safe. Pure. */
+export function evidenceGroupLabel(key: string, count: number): string {
+  const kinds = key
+    .split("+")
+    .map((k) => GROUP_NAMES[k] ?? k)
+    .join(" + ");
+  return `${count} ${count === 1 ? "paper" : "papers"} · ${kinds}`;
+}
+
+/**
+ * The band spread across a group, in the band vocabulary — never "likelihood
+ * 41–94%", which is the caption the score readout deliberately dropped. Empty
+ * for a single-row group (that row already carries its own band). Pure.
+ */
+export function bandRange(likelihoods: readonly number[]): string {
+  if (likelihoods.length < 2) return "";
+  const low = likelihoodBand(Math.min(...likelihoods)).label;
+  const high = likelihoodBand(Math.max(...likelihoods)).label;
+  return low === high ? low : `${low} to ${high}`;
+}
+
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
+  { key: "client", label: "Client co-author" },
   { key: "ack", label: "Acknowledged" },
-  { key: "coauthored", label: "Co-authored" },
+  { key: "coauthored", label: "Staff co-author" },
+  { key: "noprior", label: "No prior usage on the byline" },
   { key: "llm", label: "LLM-flagged" },
 ];
 
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: "likelihood", label: "Likelihood (high → low)" },
-  { key: "uncertain", label: "Uncertain first" },
+  { key: "likelihood", label: "Most certain first" },
+  { key: "uncertain", label: "Most uncertain first" },
   { key: "strongest", label: "Strongest signal" },
   { key: "llm", label: "LLM score" },
+  { key: "year", label: "Newest in PubMed" },
+  { key: "cites", label: "Most cited" },
 ];
-
-/** One-click bulk-confirm sweeps open candidates at or above this likelihood. */
-const HIGH_CONFIDENCE_LIKELIHOOD = 0.9;
 
 /** Highest single-signal strength on a row (0 when nothing fired). */
 function maxSignalDots(row: CoreQueueRow): number {
@@ -171,6 +314,8 @@ function maxSignalDots(row: CoreQueueRow): number {
  *   uncertain  — closest to 50/50 first, where a reviewer's call matters most
  *   strongest  — by the single strongest signal, then likelihood
  *   llm        — by dense LLM triage score
+ *   year       — newest publication year first, then likelihood
+ *   cites      — most-cited first
  */
 export function compareBySort(sort: SortKey, a: CoreQueueRow, b: CoreQueueRow): number {
   switch (sort) {
@@ -180,18 +325,30 @@ export function compareBySort(sort: SortKey, a: CoreQueueRow, b: CoreQueueRow): 
       return maxSignalDots(b) - maxSignalDots(a) || b.likelihood - a.likelihood;
     case "llm":
       return (b.llmScore ?? -1) - (a.llmScore ?? -1);
+    case "year":
+      return (b.year ?? 0) - (a.year ?? 0) || b.likelihood - a.likelihood;
+    case "cites":
+      return b.citationCount - a.citationCount;
     default:
       return b.likelihood - a.likelihood;
   }
 }
 
 /** Does a candidate match ONE filter key? `all` keeps everything. */
-function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
+function matchesFilter(
+  row: CoreQueueRow,
+  filter: FilterKey,
+  clientCwids: ReadonlySet<string>,
+): boolean {
   switch (filter) {
+    case "client":
+      return row.wcmAuthors.some((a) => clientCwids.has(a.cwid.toLowerCase()));
     case "ack":
       return row.signalAck || row.ackAlias !== null;
     case "coauthored":
       return row.coauthors.length > 0;
+    case "noprior":
+      return row.authorAffinity === null;
     case "llm":
       return row.llmScore !== null;
     default:
@@ -200,16 +357,63 @@ function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
 }
 
 /**
- * OR-combined match across the ticked filters: a row shows if ANY of them
- * matches, so "Acknowledged + Co-authored" widens the queue rather than
- * narrowing it to the intersection (a reviewer ticking two kinds of evidence
- * wants both piles, not the rows carrying both). An empty set is the "All"
- * pill — nothing ticked means no narrowing at all. Pure.
+ * AND-combined match across the ticked facets: a row shows only if EVERY ticked
+ * facet matches, so "Acknowledged + Staff co-author" narrows to the rows
+ * carrying both. An empty set is the "All" pill — nothing ticked means no
+ * narrowing at all. Dropping a 0-count facet (see `facetCounts` below) keeps a
+ * SINGLE tick from ever emptying the queue; an intersection of two live facets
+ * still can, which is what the "Nothing matches this filter." state is for.
+ * Pure.
  */
-export function matchesFilters(row: CoreQueueRow, filters: ReadonlySet<FilterKey>): boolean {
-  if (filters.size === 0) return true;
-  for (const f of filters) if (matchesFilter(row, f)) return true;
-  return false;
+export function matchesFilters(
+  row: CoreQueueRow,
+  filters: ReadonlySet<FilterKey>,
+  clientCwids: ReadonlySet<string> = new Set(),
+): boolean {
+  for (const f of filters) if (!matchesFilter(row, f, clientCwids)) return false;
+  return true;
+}
+
+/**
+ * Everything the free-text filter searches on one row, lowercased and joined.
+ *
+ * The rule is: search only what the card puts on screen. A reviewer who types a
+ * word and gets a row back has to be able to see WHY it came back, or the count
+ * line lies to them. So this is the card's own text — title, journal, PMID, the
+ * synopsis, the byline, the acknowledgment alias and its captured quote — plus
+ * the WCM-byline and core-staff names the evidence rows resolve on expand.
+ *
+ * Three fields the artboard's blob searched are dropped, each because the row
+ * doesn't carry it or the card doesn't show it:
+ *   - method family + tool: not plumbed into `CoreQueueRow` at all, so there is
+ *     nothing to match (this is also why the placeholder doesn't promise it);
+ *   - the affinity "who": `authorAffinity` is a bare 0-1 number here, with no
+ *     person attached to search on;
+ *   - `meshTerms`: on the row, but nothing has rendered it since the Details
+ *     disclosure came out — an invisible match is worse than a miss.
+ * Pure.
+ */
+export function searchBlob(row: CoreQueueRow): string {
+  return [
+    row.title,
+    row.journal,
+    row.pmid,
+    row.synopsis,
+    row.authorsString,
+    row.ackAlias,
+    row.ackSnippet,
+    ...row.wcmAuthors.map((a) => a.name),
+    ...row.coauthorScholars.map((a) => a.name),
+  ]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" ")
+    .toLowerCase();
+}
+
+/** Does a row match the free-text filter? A blank query narrows nothing. Pure. */
+export function matchesQuery(row: CoreQueueRow, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return q === "" || searchBlob(row).includes(q);
 }
 
 interface CoreClaimQueueProps {
@@ -251,22 +455,43 @@ export function CoreClaimQueue({
           ? "rejected"
           : "review",
   );
-  // Ticked evidence filters, OR-combined. The empty set IS "All" — there is no
+  // Ticked evidence facets, AND-combined. The empty set IS "All" — there is no
   // "all" member, the pill just reads as ticked when nothing else is.
   const [filter, setFilter] = useState<ReadonlySet<FilterKey>>(() => new Set());
+  // Free-text narrowing, AND-ed with the facets (see `searchBlob`). It lives with
+  // the facet pills, NOT in the tab strip: the count line, the "Clear filters"
+  // link and the "Nothing matches this filter." state that report its effect are
+  // all review-tab controls, so a box drawn above the Confirmed/Rejected lists
+  // would be inert on two tabs out of three.
+  const [query, setQuery] = useState("");
   // Default to engine likelihood, high→low — the loader's own order, so the queue
   // opens on what the engine is surest of. This is a deliberate override, not the
   // original reasoning: the previous default was "uncertain first", on the ground
   // that the 96%s don't need a human and the 55–75%s do. That argument still
-  // holds and that band is still one select away (and "Confirm N high-confidence"
-  // clears the easy top in one click) — the owner chose likelihood anyway.
+  // holds and that band is still one select away — the owner chose likelihood anyway.
   const [sort, setSort] = useState<SortKey>("likelihood");
+  // Rows grouped by which KINDS of evidence fired. On by default (the artboard's
+  // own default): the pile a reviewer is looking at is "everything acknowledged",
+  // not a flat likelihood ladder.
+  const [grouped, setGrouped] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
+  // Multi-select mode: off by default, so a row's checkbox never competes with
+  // its own Confirm/Reject for the first click.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  // Which bulk decision is in flight, if any. Every per-row button here already
+  // carries disabled={pending}; the selection bar needs the same, or a
+  // double-click on "Confirm all" posts the same batch twice.
+  const [bulkPending, setBulkPending] = useState<Decision | null>(null);
+  // Which rows have their evidence expanded (collapsed by default — the token
+  // strip is the summary, the signal rows are the read-in-depth).
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [copiedPmid, setCopiedPmid] = useState<string | null>(null);
   // Polite SR announcement of the last outcome — the success path is otherwise
   // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");
   // Manual PMID add: paste a block of known PMIDs and claim them directly,
-  // independent of the engine queue (POST /api/edit/core-claim/bulk — the same
-  // endpoint "Confirm N high-confidence" uses).
+  // independent of the engine queue (POST /api/edit/core-claim/bulk).
   const [addOpen, setAddOpen] = useState(false);
   const [addText, setAddText] = useState("");
   const [addPending, setAddPending] = useState(false);
@@ -279,12 +504,32 @@ export function CoreClaimQueue({
   const [clientRows, setClientRows] = useState<CoreClientRow[]>(clients);
   const router = useRouter();
 
-  // Tick/untick one filter; the "All" pill clears back to no narrowing.
+  const clientCwids: ReadonlySet<string> = new Set(clientRows.map((c) => c.cwid.toLowerCase()));
+
+  // Tick/untick one facet; the "All" pill clears back to no narrowing.
   const toggleFilter = (key: FilterKey) =>
     setFilter((s) => {
       if (key === "all") return new Set<FilterKey>();
       const next = new Set(s);
       if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  // type="search" gives the box the platform's own clear button, but that only
+  // drops the text. "Clear filters" is the one link that drops BOTH narrowings,
+  // because the count line and the empty state below report them as one.
+  const clearFilters = () => {
+    setFilter(new Set());
+    setQuery("");
+  };
+  const narrowed = filter.size > 0 || query.trim().length > 0;
+
+  const toggleIn = (
+    set: (fn: (s: ReadonlySet<string>) => ReadonlySet<string>) => void,
+    id: string,
+  ) =>
+    set((s) => {
+      const next = new Set(s);
+      if (!next.delete(id)) next.add(id);
       return next;
     });
 
@@ -348,37 +593,48 @@ export function CoreClaimQueue({
     clearPending(pmid);
   }
 
-  // Bulk-confirm the high-confidence band in one click — clears the easy top,
-  // which is where the likelihood-first default now puts it. One
-  // request to the bulk endpoint: the upsert + audit + writeback loop runs in a
-  // single server transaction (no client-side fan-out / partial-failure spray).
-  async function confirmHighConfidence(pmids: string[]) {
-    if (pmids.length === 0) return;
+  /**
+   * Decide EVERY hand-selected row in one request. This is the selection bar's
+   * action, not a threshold sweep: the rows were picked one at a time (or by
+   * "Select N" on a group a reviewer is looking at), so there is no unseen band
+   * and nothing to gate on a likelihood number. One request to the bulk
+   * endpoint: the upsert + audit + writeback loop runs in a single server
+   * transaction (no client-side fan-out / partial-failure spray).
+   */
+  async function bulkDecide(pmids: string[], status: Decision) {
+    if (pmids.length === 0 || bulkPending !== null) return;
+    // Only "Reject all" is guarded, and the asymmetry is the point: a wrong bulk
+    // CONFIRM shows up on the public core page where someone will notice it, while a
+    // wrong bulk REJECT just silently leaves the papers missing. Per-row reject stays
+    // unguarded — it is one visible row, and Undo sits right there.
     if (
-      typeof window !== "undefined" &&
+      status === "rejected" &&
       !window.confirm(
-        `Confirm ${pmids.length} high-confidence publication${pmids.length === 1 ? "" : "s"} for this core?`,
+        `Reject ${pmids.length} publication${pmids.length === 1 ? "" : "s"} for this core?`,
       )
     ) {
       return;
     }
+    setBulkPending(status);
     setPending((s) => new Set([...s, ...pmids]));
     const res = await fetch("/api/edit/core-claim/bulk", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ coreId: core.id, pmids, status: "claimed" }),
+      body: JSON.stringify({ coreId: core.id, pmids, status }),
     }).catch(() => null);
     const ok = res?.ok === true;
+    const verb = status === "claimed" ? "Confirmed" : "Rejected";
     if (ok) {
       setDecided((m) => {
         const next = new Map(m);
-        for (const p of pmids) next.set(p, "claimed");
+        for (const p of pmids) next.set(p, status);
         return next;
       });
+      setSelected(new Set());
     } else {
       setErrors((m) => {
         const next = new Map(m);
-        for (const p of pmids) next.set(p, "bulk confirm failed");
+        for (const p of pmids) next.set(p, `bulk ${status === "claimed" ? "confirm" : "reject"} failed`);
         return next;
       });
     }
@@ -387,10 +643,11 @@ export function CoreClaimQueue({
       for (const p of pmids) next.delete(p);
       return next;
     });
+    setBulkPending(null);
     setAnnounce(
       ok
-        ? `Confirmed ${pmids.length} high-confidence publication${pmids.length === 1 ? "" : "s"}.`
-        : "Bulk confirm could not be saved.",
+        ? `${verb} ${pmids.length} publication${pmids.length === 1 ? "" : "s"}.`
+        : `Bulk ${status === "claimed" ? "confirm" : "reject"} could not be saved.`,
     );
   }
 
@@ -403,7 +660,9 @@ export function CoreClaimQueue({
     const { pmids, invalid } = parsePmidBlock(addText);
     if (pmids.length === 0) {
       setAddResult(
-        invalid.length > 0 ? `No valid PMIDs found (ignored: ${invalid.join(", ")}).` : "Paste at least one PMID.",
+        invalid.length > 0
+          ? `No valid PMIDs found (ignored: ${invalid.join(", ")}).`
+          : "Paste at least one PMID.",
       );
       return;
     }
@@ -552,34 +811,65 @@ export function CoreClaimQueue({
     URL.revokeObjectURL(url);
   }
 
+  function copyPmid(pmid: string) {
+    // jsdom (and any non-secure context) has no clipboard — the label still
+    // flips, so the button is never a dead click in tests or on http.
+    void navigator.clipboard?.writeText(pmid);
+    setCopiedPmid(pmid);
+  }
+
   // Remaining review work (decided rows stay visible for undo but don't count).
   const open = candidates.filter((c) => !decided.has(c.pmid));
   const remaining = open.length;
-  // Per-option counts, over the still-open population only — a decided row is
-  // held on screen for its undo and must not inflate a filter. These earn their
-  // place: on core 14 today "Acknowledged" and "Co-authored" both match ZERO
-  // rows, so without the count a reviewer ticks a box, gets an empty queue and
-  // has no way to tell a dead filter from a bug.
-  // ponytail: four extra passes over `open`, recomputed every render, no memo.
+  // Per-facet counts, over the still-open population only — a decided row is
+  // held on screen for its undo and must not inflate a facet. These earn their
+  // place twice over: the count tells a reviewer what a pill will do BEFORE the
+  // click, and a facet counting 0 is dropped from the row entirely rather than
+  // rendered as a pill whose only possible outcome is an empty queue.
+  // ponytail: five extra passes over `open`, recomputed every render, no memo.
   // Fine at the sizes cores actually queue, but loadCoreReviewQueue has no
   // LIMIT — if one core ever returns thousands of candidates, fold these into a
   // single reduce or wrap them in useMemo([candidates, decided]).
-  const filterCounts: Record<FilterKey, number> = {
+  const facetCounts: Record<FilterKey, number> = {
     all: open.length,
-    ack: open.filter((c) => matchesFilter(c, "ack")).length,
-    coauthored: open.filter((c) => matchesFilter(c, "coauthored")).length,
-    llm: open.filter((c) => matchesFilter(c, "llm")).length,
+    client: open.filter((c) => matchesFilter(c, "client", clientCwids)).length,
+    ack: open.filter((c) => matchesFilter(c, "ack", clientCwids)).length,
+    coauthored: open.filter((c) => matchesFilter(c, "coauthored", clientCwids)).length,
+    noprior: open.filter((c) => matchesFilter(c, "noprior", clientCwids)).length,
+    llm: open.filter((c) => matchesFilter(c, "llm", clientCwids)).length,
   };
-  // Apply the filters (but always keep a just-decided row visible so undo stays
-  // reachable), then sort. Likelihood is the loader's order; LLM re-sorts by score.
+  // Apply the facets AND the free-text query (but always keep a just-decided row
+  // visible so undo stays reachable), then sort. Likelihood is the loader's
+  // order; LLM re-sorts by score.
   const visible = candidates
-    .filter((c) => decided.has(c.pmid) || matchesFilters(c, filter))
+    .filter(
+      (c) =>
+        decided.has(c.pmid) || (matchesFilters(c, filter, clientCwids) && matchesQuery(c, query)),
+    )
     .slice()
     .sort((a, b) => compareBySort(sort, a, b));
-  // Open candidates the engine is most sure of — the one-click bulk-confirm band.
-  const highConfidencePmids = open
-    .filter((c) => c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD)
-    .map((c) => c.pmid);
+  // Rows in render order, bucketed by evidence kind when grouping is on. The
+  // bucket order follows first appearance in `visible`, so the sort still drives
+  // what a reviewer meets first.
+  const groups: { key: string; rows: CoreQueueRow[] }[] = [];
+  if (grouped) {
+    const byKey = new Map<string, CoreQueueRow[]>();
+    for (const r of visible) {
+      const k = evidenceGroupKey(r);
+      const list = byKey.get(k);
+      if (list) list.push(r);
+      else byKey.set(k, [r]);
+    }
+    for (const [key, rows] of byKey) groups.push({ key, rows });
+  } else {
+    groups.push({ key: "all", rows: visible });
+  }
+  // Intersected with `visible`, not just `decided`: a row you tick and then hide with a
+  // facet or the filter box must not be swept up by "Confirm all". Acting on rows the
+  // reviewer cannot see is precisely what removing the high-confidence sweep was for, and
+  // a Set keeps it O(n) on a queue that can carry a few hundred rows.
+  const visiblePmids = new Set(visible.map((r) => r.pmid));
+  const selectedPmids = [...selected].filter((p) => !decided.has(p) && visiblePmids.has(p));
   // Tabs only earn their place once there's history to switch to; otherwise the
   // queue is the single "To review" scroll it always was.
   const hasHistory = confirmed.length > 0 || rejected.length > 0;
@@ -610,16 +900,6 @@ export function CoreClaimQueue({
           </h2>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          {view === "review" && highConfidencePmids.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => confirmHighConfidence(highConfidencePmids)}
-              className="border-border-strong text-foreground hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
-            >
-              <CheckCheck className="size-4" aria-hidden /> Confirm {highConfidencePmids.length}{" "}
-              high-confidence
-            </button>
-          ) : null}
           {candidates.length > 0 || confirmed.length > 0 || rejected.length > 0 ? (
             <button
               type="button"
@@ -654,7 +934,10 @@ export function CoreClaimQueue({
 
       {addOpen ? (
         <div className="border-apollo-border bg-apollo-surface mb-3 rounded-lg border p-3">
-          <label htmlFor="core-claim-add-pmids" className="text-foreground mb-1.5 block text-sm font-medium">
+          <label
+            htmlFor="core-claim-add-pmids"
+            className="text-foreground mb-1.5 block text-sm font-medium"
+          >
             Claim known PMIDs directly
           </label>
           <p className="text-muted-foreground mb-2 text-xs">
@@ -714,18 +997,41 @@ export function CoreClaimQueue({
               <QueueControls
                 filter={filter}
                 onToggleFilter={toggleFilter}
-                counts={filterCounts}
+                counts={facetCounts}
+                query={query}
+                onQuery={setQuery}
                 sort={sort}
                 onSort={setSort}
+                grouped={grouped}
+                onToggleGrouped={() => setGrouped((g) => !g)}
+                selectMode={selectMode}
+                onToggleSelectMode={() => {
+                  setSelectMode((m) => !m);
+                  if (selectMode) setSelected(new Set());
+                }}
               />
             </div>
           ) : null}
 
           {candidates.length > 0 ? (
-            <p className="text-muted-foreground mb-3 text-xs">
-              Shortcuts (focused card): <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject · <Kbd>u</Kbd>{" "}
-              undo · <Kbd>↑</Kbd>/<Kbd>↓</Kbd> move.
-            </p>
+            <div className="text-muted-foreground mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span>
+                Showing {visible.length} of {candidates.length} candidates
+              </span>
+              {narrowed ? (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="text-apollo-slate underline"
+                >
+                  Clear filters
+                </button>
+              ) : null}
+              <span className="ml-auto">
+                Shortcuts (focused card): <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject · <Kbd>u</Kbd>{" "}
+                undo · <Kbd>↑</Kbd>/<Kbd>↓</Kbd> move.
+              </span>
+            </div>
           ) : null}
 
           {candidates.length === 0 ? (
@@ -735,23 +1041,55 @@ export function CoreClaimQueue({
             </p>
           ) : visible.length === 0 ? (
             <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
-              No candidates match these filters.
+              Nothing matches this filter.
             </p>
           ) : (
-            <ul className="flex flex-col gap-3">
-              {visible.map((row) => (
-                <li key={row.pmid}>
-                  <CandidateCard
-                    row={row}
-                    decided={decided.get(row.pmid)}
-                    pending={pending.has(row.pmid)}
-                    error={errors.get(row.pmid)}
-                    onDecide={(status) => send(row.pmid, status)}
-                    onUndo={() => send(row.pmid, "revoked")}
-                  />
-                </li>
-              ))}
-            </ul>
+            <div className="flex flex-col gap-4">
+              {groups.map((g) => {
+                const collapsed = collapsedGroups.has(g.key);
+                return (
+                  <div key={g.key}>
+                    {grouped ? (
+                      <GroupHeader
+                        label={evidenceGroupLabel(g.key, g.rows.length)}
+                        range={bandRange(g.rows.map((r) => r.likelihood))}
+                        collapsed={collapsed}
+                        onToggle={() => toggleIn(setCollapsedGroups, g.key)}
+                        onSelectAll={() => {
+                          setSelected((s) => new Set([...s, ...g.rows.map((r) => r.pmid)]));
+                          setSelectMode(true);
+                        }}
+                        selectLabel={`Select ${g.rows.length}`}
+                      />
+                    ) : null}
+                    {collapsed ? null : (
+                      <ul className="flex flex-col gap-3">
+                        {g.rows.map((row) => (
+                          <li key={row.pmid}>
+                            <CandidateCard
+                              row={row}
+                              clientCwids={clientCwids}
+                              decided={decided.get(row.pmid)}
+                              pending={pending.has(row.pmid)}
+                              error={errors.get(row.pmid)}
+                              expanded={expanded.has(row.pmid)}
+                              onToggleExpanded={() => toggleIn(setExpanded, row.pmid)}
+                              selectMode={selectMode}
+                              selected={selected.has(row.pmid)}
+                              onToggleSelected={() => toggleIn(setSelected, row.pmid)}
+                              copied={copiedPmid === row.pmid}
+                              onCopyPmid={() => copyPmid(row.pmid)}
+                              onDecide={(status) => send(row.pmid, status)}
+                              onUndo={() => send(row.pmid, "revoked")}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </>
       ) : null}
@@ -786,6 +1124,46 @@ export function CoreClaimQueue({
             />
           ))}
         </ul>
+      ) : null}
+
+      {view === "review" && selectedPmids.length > 0 ? (
+        <div
+          data-slot="core-queue-selection-bar"
+          className="bg-apollo-bar fixed bottom-5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3.5 rounded-xl px-4 py-2.5 text-white shadow-lg"
+          role="group"
+          aria-label="Selected publications"
+        >
+          <span className="text-[13px] font-medium">
+            {selectedPmids.length} paper{selectedPmids.length === 1 ? "" : "s"} selected
+          </span>
+          <span className="h-5 w-px bg-white/20" aria-hidden />
+          <button
+            type="button"
+            disabled={bulkPending !== null}
+            onClick={() => bulkDecide(selectedPmids, "claimed")}
+            className="inline-flex h-8 items-center rounded-full bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {bulkPending === "claimed" ? "Confirming…" : "Confirm all"}
+          </button>
+          <button
+            type="button"
+            disabled={bulkPending !== null}
+            onClick={() => bulkDecide(selectedPmids, "rejected")}
+            className="inline-flex h-8 items-center rounded-full border border-white/30 px-3 text-sm disabled:opacity-50"
+          >
+            {bulkPending === "rejected" ? "Rejecting…" : "Reject all"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelected(new Set());
+              setSelectMode(false);
+            }}
+            className="text-xs text-white/70"
+          >
+            Clear
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -832,6 +1210,51 @@ function ViewTabs({
             <span className="tabular-nums opacity-80">{t.count}</span>
           </button>
         ))}
+    </div>
+  );
+}
+
+/** The evidence-group band: a collapse caret, the vocabulary label, the group's
+ *  band range, and a "Select N" that arms selection mode on this pile. */
+function GroupHeader({
+  label,
+  range,
+  collapsed,
+  onToggle,
+  onSelectAll,
+  selectLabel,
+}: {
+  label: string;
+  range: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  onSelectAll: () => void;
+  selectLabel: string;
+}) {
+  return (
+    <div className="bg-apollo-rail border-apollo-rail-border mb-2 flex items-center gap-3 rounded-md border px-3 py-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        aria-label="Collapse or expand this group"
+        className="border-border-strong text-muted-foreground hover:text-foreground inline-flex size-5 items-center justify-center rounded border bg-background"
+      >
+        {collapsed ? (
+          <ChevronDown className="size-3" aria-hidden />
+        ) : (
+          <ChevronUp className="size-3" aria-hidden />
+        )}
+      </button>
+      <span className="text-foreground text-xs font-semibold">{label}</span>
+      {range ? <span className="text-muted-foreground text-xs">{range}</span> : null}
+      <button
+        type="button"
+        onClick={onSelectAll}
+        className="border-border-strong text-apollo-slate ml-auto inline-flex h-6 items-center rounded-full border bg-background px-2.5 text-xs"
+      >
+        {selectLabel}
+      </button>
     </div>
   );
 }
@@ -975,25 +1398,43 @@ function QueueControls({
   filter,
   onToggleFilter,
   counts,
+  query,
+  onQuery,
   sort,
   onSort,
+  grouped,
+  onToggleGrouped,
+  selectMode,
+  onToggleSelectMode,
 }: {
   filter: ReadonlySet<FilterKey>;
   onToggleFilter: (f: FilterKey) => void;
   counts: Record<FilterKey, number>;
+  query: string;
+  onQuery: (q: string) => void;
   sort: SortKey;
   onSort: (s: SortKey) => void;
+  grouped: boolean;
+  onToggleGrouped: () => void;
+  selectMode: boolean;
+  onToggleSelectMode: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter candidates">
-        {FILTERS.map((f) => {
-          // "All" is an ACTION, not a fourth box, so it gets plain button
+      {/* The pill row and the text box are both "filter candidates"; naming them
+          apart keeps two controls from answering to one accessible name. */}
+      <div
+        className="flex flex-wrap gap-1.5"
+        role="group"
+        aria-label="Filter candidates by evidence"
+      >
+        {FILTERS.filter((f) => f.key === "all" || counts[f.key] > 0).map((f) => {
+          // "All" is an ACTION, not another box, so it gets plain button
           // semantics. Giving it role="checkbox" would promise a control that
           // unticks: once it reads checked, pressing Space on it changes
           // nothing and announces nothing, which is the one thing the checkbox
-          // role guarantees it won't do. The three real filters are genuine
-          // checkboxes; native Space/Enter activation covers all four.
+          // role guarantees it won't do. The real facets are genuine
+          // checkboxes; native Space/Enter activation covers all of them.
           const isAll = f.key === "all";
           const checked = isAll ? filter.size === 0 : filter.has(f.key);
           return (
@@ -1014,6 +1455,22 @@ function QueueControls({
           );
         })}
       </div>
+      <button
+        type="button"
+        aria-pressed={grouped}
+        onClick={onToggleGrouped}
+        className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
+      >
+        {grouped ? "Grouped by evidence" : "Group by evidence"}
+      </button>
+      <button
+        type="button"
+        aria-pressed={selectMode}
+        onClick={onToggleSelectMode}
+        className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
+      >
+        {selectMode ? "Exit selection" : "Select several"}
+      </button>
       <label className="text-muted-foreground flex items-center gap-1 text-[13px]">
         <span className="sr-only">Sort by</span>
         <select
@@ -1028,6 +1485,16 @@ function QueueControls({
           ))}
         </select>
       </label>
+      {/* Placeholder names only what `searchBlob` actually searches — the
+          artboard's "or method" would promise a field this row never carries. */}
+      <Input
+        type="search"
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        placeholder="Filter by title, author, journal or PMID…"
+        aria-label="Filter candidates"
+        className="ml-auto h-8 w-[330px] max-w-full text-xs"
+      />
     </div>
   );
 }
@@ -1048,16 +1515,32 @@ const CARD_SHELL =
 
 function CandidateCard({
   row,
+  clientCwids,
   decided,
   pending,
   error,
+  expanded,
+  onToggleExpanded,
+  selectMode,
+  selected,
+  onToggleSelected,
+  copied,
+  onCopyPmid,
   onDecide,
   onUndo,
 }: {
   row: CoreQueueRow;
+  clientCwids: ReadonlySet<string>;
   decided: Decision | undefined;
   pending: boolean;
   error: string | undefined;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  selectMode: boolean;
+  selected: boolean;
+  onToggleSelected: () => void;
+  copied: boolean;
+  onCopyPmid: () => void;
   onDecide: (status: Decision) => void;
   onUndo: () => void;
 }) {
@@ -1088,9 +1571,7 @@ function CandidateCard({
     // Tint the strip so a confirm vs. reject reads at a glance, not just from the
     // icon — same pattern as opportunity-intake-panel's STATUS_STYLES.
     const tint =
-      decided === "claimed"
-        ? "border-emerald-200 bg-emerald-50"
-        : "border-red-200 bg-red-50";
+      decided === "claimed" ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50";
     return (
       <div
         className={`flex items-center justify-between gap-3 rounded-lg border p-4 ${tint} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-maroon`}
@@ -1133,7 +1614,9 @@ function CandidateCard({
   }
 
   const likelihoodPct = Math.round(row.likelihood * 100);
+  const band = likelihoodBand(row.likelihood);
   const signals = buildSignals(row);
+  const tokens = evidenceTokens(row, clientCwids);
   // A 0 on a just-published paper isn't "0 citations", it's "not cited yet".
   const recentlyPublished = row.year !== null && row.year >= new Date().getFullYear() - 1;
   return (
@@ -1147,14 +1630,35 @@ function CandidateCard({
       aria-keyshortcuts="a r ArrowUp ArrowDown"
       onKeyDown={onKeyDown}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div
+        className={`grid items-start gap-4 ${
+          selectMode
+            ? "grid-cols-[26px_minmax(0,1fr)_112px_auto]"
+            : "grid-cols-[minmax(0,1fr)_112px_auto]"
+        }`}
+      >
+        {selectMode ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelected}
+            aria-label={`Select ${row.title}`}
+            className="mt-1.5 size-4"
+          />
+        ) : null}
+
         <div className="min-w-0">
+          {row.authorAffinity === null ? (
+            <p className="mb-1.5">
+              <span className="border-border-strong text-muted-foreground bg-apollo-surface-2 inline-block rounded border px-2 py-0.5 text-[11px]">
+                No prior core usage anywhere on this byline
+              </span>
+            </p>
+          ) : null}
           <h3 className="text-foreground text-[15px] font-medium">{row.title}</h3>
-          <p className="text-muted-foreground mt-0.5 text-[13px]">
-            {[row.journal, row.year].filter(Boolean).join(" · ") || "—"}
-          </p>
-          <Byline row={row} />
           <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+            {row.journal ? <span>{row.journal}</span> : null}
+            {row.year ? <span className="tabular-nums">{row.year}</span> : null}
             {/* PMID shown verbatim (curators key off it); links to PubMed when present. */}
             {row.pubmedUrl ? (
               <a
@@ -1168,12 +1672,25 @@ function CandidateCard({
             ) : (
               <span className="tabular-nums">PMID {row.pmid}</span>
             )}
+            <button
+              type="button"
+              onClick={onCopyPmid}
+              title={copied ? "PMID copied" : "Copy PMID"}
+              aria-label={copied ? "PMID copied" : "Copy PMID"}
+              className="border-border-strong text-muted-foreground hover:text-foreground bg-apollo-surface-2 inline-flex size-5 items-center justify-center rounded border"
+            >
+              {copied ? (
+                <Check className="size-3 text-emerald-600" aria-hidden />
+              ) : (
+                <Copy className="size-3" aria-hidden />
+              )}
+            </button>
             {row.doi ? (
               <a
                 href={`https://doi.org/${row.doi}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+                className="hover:text-foreground inline-flex items-center gap-1 hover:underline"
               >
                 DOI <ExternalLink className="size-3" aria-hidden />
               </a>
@@ -1193,7 +1710,68 @@ function CandidateCard({
               </span>
             ) : null}
           </div>
+          <Byline row={row} />
+          {row.synopsis ? (
+            <p className="bg-muted/60 border-apollo-border text-muted-foreground mt-2.5 rounded-md border px-3 py-2 text-[13px] leading-snug">
+              {row.synopsis}
+            </p>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={onToggleExpanded}
+            aria-expanded={expanded}
+            className="border-border-strong bg-apollo-surface-2 mt-2.5 flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left"
+          >
+            <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
+              {tokens.length > 0 ? (
+                tokens.map((t, i) => (
+                  <span key={t.label} className="inline-flex items-baseline gap-1 text-[12.5px]">
+                    {i > 0 ? (
+                      <span className="text-muted-foreground/60 font-bold" aria-hidden>
+                        ·
+                      </span>
+                    ) : null}
+                    <span className="text-muted-foreground">{t.label}</span>
+                    <span className="text-foreground font-medium">{t.value}</span>
+                  </span>
+                ))
+              ) : (
+                <span className="text-foreground text-[12.5px]">No labelled signal.</span>
+              )}
+            </span>
+            <span
+              title={expanded ? "Hide evidence" : "Show evidence"}
+              aria-label={expanded ? "Hide evidence" : "Show evidence"}
+              className="border-border-strong text-apollo-slate bg-apollo-surface inline-flex size-7 shrink-0 items-center justify-center rounded-lg border"
+            >
+              {expanded ? (
+                <ChevronUp className="size-4" aria-hidden />
+              ) : (
+                <ChevronDown className="size-4" aria-hidden />
+              )}
+            </span>
+          </button>
         </div>
+
+        <div>
+          <div
+            className={`text-[11px] font-semibold uppercase tracking-[0.04em] ${band.text}`}
+            data-slot="core-queue-score"
+          >
+            {band.label} {likelihoodPct}%
+          </div>
+          <span className="bg-apollo-surface-2 border-apollo-border mt-1 block h-1.5 overflow-hidden rounded-full border">
+            <span
+              className={`block h-full rounded-full ${band.fill}`}
+              style={{ width: `${likelihoodPct}%` }}
+            />
+          </span>
+          <div className="text-muted-foreground mt-1 text-[10.5px]">
+            {signals.length} of {SIGNAL_COUNT} signals
+          </div>
+        </div>
+
         <div className="flex shrink-0 gap-2">
           <button
             type="button"
@@ -1207,103 +1785,28 @@ function CandidateCard({
             type="button"
             disabled={pending}
             onClick={() => onDecide("rejected")}
-            className="border-border-strong text-muted-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm hover:text-foreground disabled:opacity-50"
+            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
           >
             <X className="size-3.5" aria-hidden /> Reject
           </button>
         </div>
       </div>
 
-      {row.synopsis ? (
-        <p className="bg-muted/60 border-apollo-border text-muted-foreground mt-3 rounded-md border px-3 py-2 text-[13px] leading-snug">
-          {row.synopsis}
-        </p>
-      ) : null}
-
-      {/* Combined likelihood + the per-signal "why this surfaced" breakdown. */}
-      <div className="my-4 flex items-center gap-2.5">
-        <span className="text-muted-foreground text-[13px]">Combined likelihood</span>
-        <span className="bg-muted block h-1.5 flex-1 overflow-hidden rounded-full">
-          <span
-            className="block h-1.5 rounded-full bg-[var(--color-accent-slate)]"
-            style={{ width: `${likelihoodPct}%` }}
-          />
-        </span>
-        <span className="text-sm font-medium tabular-nums">{likelihoodPct}%</span>
-      </div>
-
-      <p className="text-muted-foreground text-xs">
-        Why this surfaced · {signals.length} of {SIGNAL_COUNT} signals fired
-      </p>
-
-      {signals.length > 0 ? (
-        <ul className="mt-1" aria-label="evidence">
-          {signals.map((s) => (
-            <SignalRow key={s.kind} signal={s} row={row} />
-          ))}
-        </ul>
-      ) : (
-        // Reachable for real: batch_screen's own screen_confidence/screen_band
-        // outputs can move the combined likelihood without any of the five
-        // displayed signals firing — those two fields still aren't mapped into
-        // SPS (see docs/core-facility-claim-queue-spec.md, "The signals").
-        <p className="text-muted-foreground mt-1 text-xs italic">
-          No displayed signal fired — the combined score moved on inputs the queue
-          doesn&apos;t label.
-        </p>
-      )}
-
-      {row.abstract || row.fullAuthorsString || row.wcmAuthors.length > 0 || row.meshTerms.length > 0 ? (
-        <details className="group mt-2.5">
-          <summary className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1 text-xs select-none">
-            <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
-            Details
-          </summary>
-          <div className="mt-2 flex flex-col gap-3 border-l border-apollo-border pl-3">
-            {row.abstract ? (
-              // Stored abstracts carry inline PubMed markup (e.g. NaN<sub>3</sub>);
-              // sanitizePubmedHtml whitelists only i/em/b/strong/sub/sup.
-              <p
-                className="text-muted-foreground text-xs leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(row.abstract) }}
-              />
-            ) : null}
-            {row.fullAuthorsString ? (
-              <p className="text-muted-foreground text-xs">
-                <span className="font-medium text-foreground">Authors: </span>
-                {row.fullAuthorsString}
-              </p>
-            ) : null}
-            {row.wcmAuthors.length > 0 ? (
-              <p className="text-muted-foreground text-xs">
-                <span className="font-medium text-foreground">WCM authors: </span>
-                {row.wcmAuthors.map((s, i) => (
-                  <span key={s.cwid}>
-                    {i > 0 ? ", " : ""}
-                    <ScholarLink scholar={s} />
-                  </span>
-                ))}
-              </p>
-            ) : null}
-            {row.meshTerms.length > 0 ? (
-              <div className="text-muted-foreground text-xs">
-                <span className="font-medium text-foreground">MeSH</span>
-                <ul className="mt-1 flex flex-wrap gap-1.5">
-                  {row.meshTerms.map((m, i) => (
-                    // index keeps the key unique — normalizeMeshTerms doesn't dedupe,
-                    // so a malformed pub could carry two null-ui terms with one label.
-                    <li
-                      key={`${m.ui ?? m.label}::${i}`}
-                      className="bg-muted text-foreground/80 rounded px-2 py-0.5 text-xs"
-                    >
-                      {m.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        </details>
+      {expanded ? (
+        <div className="border-border-strong mt-3 ml-1 border-l-2 pl-3.5">
+          {signals.length === 0 ? (
+            <p className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded-lg border px-3 py-2.5 text-[12.5px] leading-relaxed">
+              No labelled signal. The score moved on engine inputs this queue doesn&rsquo;t show;
+              judge it on the paper.
+            </p>
+          ) : (
+            <ul aria-label="evidence">
+              {signals.map((s) => (
+                <SignalRow key={s.kind} signal={s} row={row} />
+              ))}
+            </ul>
+          )}
+        </div>
       ) : null}
 
       {error ? (
@@ -1315,70 +1818,126 @@ function CandidateCard({
   );
 }
 
-/** One fired signal as an evidence row: icon · lead (+ quote/sub) · strength dots. */
+/** One fired signal: label + strength glyphs on the left, the evidence itself on
+ *  the right (a value line, a plain-language detail, and the quote when the run
+ *  captured one). */
 function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
-  const Icon = SIGNAL_ICON[signal.kind];
-  let lead: ReactNode;
-  let sub: ReactNode = null;
+  let label: string;
+  let value: string | null = null;
+  let detail: ReactNode = null;
   let quote: string | null = null;
-  let value: string | undefined; // raw secondary readout shown beneath the tier
   switch (signal.kind) {
     case "ack":
-      lead = row.ackAlias ? "Named in the acknowledgments" : "Acknowledged in text";
+      label = row.ackAlias ? "Named in the acknowledgments" : "Acknowledged in text";
       if (row.ackSnippet) quote = row.ackSnippet;
-      else if (row.ackAlias) sub = `Matched “${row.ackAlias}” in the full text`;
+      else if (row.ackAlias) detail = `Matched “${row.ackAlias}” in the full text`;
       break;
     case "coauthor":
-      lead = <CoauthorLead row={row} />;
-      if (row.coauthorScholars.length === 0) sub = "No Scholar profile yet — showing CWID";
+      label = "Staff co-author";
+      value = `${row.coauthors.length} ${row.coauthors.length === 1 ? "person" : "people"}`;
+      detail = <CoauthorDetail row={row} />;
       break;
     case "llm":
-      lead = "LLM triage";
-      sub = row.llmRationale;
+      label = "LLM read of title and abstract";
+      // The dense triage score stays visible: it is the only place a reviewer
+      // can see HOW strongly the model read the paper, and the band word above
+      // is about the combined score, not this one.
       value = `${row.llmScore}/10`;
+      detail = row.llmRationale;
       break;
     case "affinity":
       // Post-ReciterAI #382 this is a RATE, not a capped strength, so the copy has
       // to say what the percentage is a share OF — a bare number next to "Weak"
       // reads as a regression when the same paper drops from 85% to 6%.
-      lead = "Repeat user of this core";
-      sub =
-        "The largest share of any byline author's own publications that are work with this core";
+      label = "Repeat user";
       value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
+      detail =
+        "The largest share of any byline author's own publications that are work with this core";
       break;
     case "topic": {
       const { mesh, affinity } = decodeTopicalPrior(row.topicalPrior ?? 0);
-      lead =
+      label =
         mesh && affinity
           ? "MeSH match + repeat user"
           : mesh
             ? "Topical MeSH match"
             : "Prefilter prior — repeat user, no MeSH match";
-      sub =
+      value = `${Math.round((row.topicalPrior ?? 0) * 100)}%`;
+      detail =
         mesh && affinity
           ? "Carries a MeSH descriptor under this core's technique branch, and an author with prior confirmed use"
           : mesh
             ? "The paper carries a MeSH descriptor under this core's technique branch"
             : "An author has prior confirmed use of this core. No MeSH descriptor matched — the same evidence as the repeat-user row above";
-      value = `${Math.round((row.topicalPrior ?? 0) * 100)}%`;
       break;
     }
   }
   return (
-    <li className="border-apollo-border grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-3 border-t pt-3">
-      <Icon className="text-muted-foreground mt-0.5 size-4" aria-hidden />
+    <li className="border-apollo-border grid grid-cols-[200px_minmax(0,1fr)] items-start gap-3.5 border-t py-2.5">
+      <div>
+        <div className="text-foreground text-[12.5px] font-semibold leading-tight">{label}</div>
+        <div className="mt-1 flex items-center gap-1.5">
+          <StrengthGlyphs dots={signal.dots} />
+          <span className="text-muted-foreground text-[11px]">{signal.strength}</span>
+        </div>
+      </div>
       <div className="min-w-0">
-        <div className="text-foreground text-[13px]">{lead}</div>
+        {value ? (
+          <div className="text-foreground text-[12.5px] font-semibold">{value}</div>
+        ) : null}
+        {detail ? (
+          <div className="text-muted-foreground text-[12.5px] leading-relaxed">{detail}</div>
+        ) : null}
         {quote ? (
-          <p className="border-border-strong text-muted-foreground mt-1 border-l-2 pl-2 text-xs italic">
-            “{quote}”
-          </p>
-        ) : sub ? (
-          <div className="text-muted-foreground mt-0.5 text-xs">{sub}</div>
+          <blockquote className="border-border-strong bg-apollo-lock-bg text-foreground mt-1.5 rounded-r-md border-l-2 px-2.5 py-2 text-[12.5px] leading-relaxed">
+            “<QuoteWithAlias text={quote} alias={row.ackAlias} />”
+          </blockquote>
         ) : null}
       </div>
-      <StrengthDots dots={signal.dots} strength={signal.strength} value={value} />
     </li>
+  );
+}
+
+/** The acknowledgment quote with the matched alias highlighted in place — the
+ *  alias is not restated above the quote, so the highlight IS the match. */
+function QuoteWithAlias({ text, alias }: { text: string; alias: string | null }) {
+  const at = alias ? text.toLowerCase().indexOf(alias.toLowerCase()) : -1;
+  if (!alias || at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className="bg-apollo-amber-tint text-foreground rounded-sm font-semibold">
+        {text.slice(at, at + alias.length)}
+      </mark>
+      {text.slice(at + alias.length)}
+    </>
+  );
+}
+
+/** The staff co-author detail line — linked scholars (with dept) plus any bare CWIDs. */
+function CoauthorDetail({ row }: { row: CoreQueueRow }) {
+  const resolved = row.coauthorScholars;
+  const resolvedSet = new Set(resolved.map((s) => s.cwid.toLowerCase()));
+  const unresolved = row.coauthors.filter((c) => !resolvedSet.has(c.toLowerCase()));
+  if (resolved.length === 0) {
+    return (
+      <>
+        <span className="font-mono text-[12px]">{unresolved.join(", ")}</span> — no Scholar profile
+        yet, showing CWID
+      </>
+    );
+  }
+  return (
+    <>
+      {resolved.map((s, i) => (
+        <span key={s.cwid}>
+          {i > 0 ? "; " : ""}
+          <ScholarLink scholar={s} />
+          {s.dept ? <span className="text-muted-foreground"> ({s.dept})</span> : null}
+        </span>
+      ))}
+      {unresolved.length > 0 ? <span>; {unresolved.join(", ")}</span> : null}
+    </>
   );
 }
 
@@ -1438,65 +1997,19 @@ function Byline({ row }: { row: CoreQueueRow }) {
   );
 }
 
-/** "Co-authored with …" — linked scholars (with dept) plus any bare CWIDs. */
-function CoauthorLead({ row }: { row: CoreQueueRow }) {
-  const resolved = row.coauthorScholars;
-  const resolvedSet = new Set(resolved.map((s) => s.cwid.toLowerCase()));
-  const unresolved = row.coauthors.filter((c) => !resolvedSet.has(c.toLowerCase()));
-  if (resolved.length === 0) {
-    return (
-      <>
-        Co-authored with core staff <span className="font-mono text-[12.5px]">{unresolved.join(", ")}</span>
-      </>
-    );
-  }
+/** Four dots, `dots` of them filled — the fixed per-signal-type strength. */
+function StrengthGlyphs({ dots }: { dots: number }) {
   return (
-    <>
-      Co-authored with{" "}
-      {resolved.map((s, i) => (
-        <span key={s.cwid}>
-          {i > 0 ? ", " : ""}
-          <ScholarLink scholar={s} />
-          {s.dept ? <span className="text-muted-foreground"> ({s.dept})</span> : null}
-        </span>
+    <span className="flex items-center gap-1" aria-hidden>
+      {[0, 1, 2, 3].map((i) => (
+        <span
+          key={i}
+          className={`size-1.5 rounded-full border ${
+            i < dots ? "border-apollo-maroon bg-apollo-maroon" : "border-muted-foreground/40"
+          }`}
+        />
       ))}
-      {unresolved.length > 0 ? <span>, {unresolved.join(", ")}</span> : null}
-    </>
-  );
-}
-
-/** Fixed-width strength meter: dots, the tier word, and an optional raw value,
- *  vertically centered against the row and right-aligned. */
-function StrengthDots({
-  dots,
-  strength,
-  value,
-}: {
-  dots: number;
-  strength: string;
-  value?: string;
-}) {
-  return (
-    <div className="flex w-20 flex-col items-end gap-1 self-center whitespace-nowrap text-right">
-      <span className="flex items-center gap-1" aria-hidden>
-        {[0, 1, 2, 3].map((i) => (
-          <span
-            key={i}
-            className={`size-1.5 rounded-full border ${
-              i < dots
-                ? "border-muted-foreground bg-muted-foreground"
-                : "border-muted-foreground/40"
-            }`}
-          />
-        ))}
-      </span>
-      <span className="text-muted-foreground text-[11px] leading-tight">{strength}</span>
-      {value ? (
-        <span className="text-muted-foreground/70 text-[11px] leading-tight tabular-nums">
-          {value}
-        </span>
-      ) : null}
-    </div>
+    </span>
   );
 }
 

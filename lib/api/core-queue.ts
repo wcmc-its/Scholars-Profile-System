@@ -61,7 +61,12 @@ export interface CoreQueueRow {
   coauthorScholars: QueueScholar[];
   /** WCM scholars on the byline (potential core users), in author order. */
   wcmAuthors: QueueScholar[];
-  /** Raw PubMed abstract, shown collapsed behind an expander. */
+  /** Raw PubMed abstract. NOTHING RENDERS THIS any more — the Details disclosure
+   *  that showed it came out with the direction-A queue rebuild, and the only
+   *  reads left in the repo are this loader's own shape assertions in
+   *  tests/unit/core-queue.test.ts. Kept for now because a test still reads it;
+   *  drop it (with `meshTerms` below) the moment nothing does, since every queue
+   *  row otherwise ships a full abstract to the client for no consumer. */
   abstract: string | null;
   /** One-line plain-language synopsis (issue #329), when present. */
   synopsis: string | null;
@@ -94,7 +99,11 @@ export interface CoreQueueRow {
   relativeCitationRatio: number | null;
   /** NIH citation percentile (0-100), when computed. */
   nihPercentile: number | null;
-  /** Per-PMID MeSH terms ({ui, label}); `[]` when none. Shown as chips in Details. */
+  /** Per-PMID MeSH terms ({ui, label}); `[]` when none. Same standing as
+   *  `abstract` above: the Details chips that showed these are gone, so the only
+   *  reads left are this loader's shape assertions. The queue's free-text filter
+   *  deliberately does NOT search them either — a match a reviewer cannot see on
+   *  the card is worse than a miss. */
   meshTerms: Array<{ ui: string | null; label: string }>;
 }
 
@@ -140,7 +149,9 @@ type QueueReader = Pick<
 >;
 
 /** The `publication` fields a queue card needs — shared by the engine-sourced
- *  and manual-claim-only row builders below. */
+ *  and manual-claim-only row builders below. `abstract` and `meshTerms` are the
+ *  two exceptions: the card stopped rendering both when the Details disclosure
+ *  came out (see the field docs on `CoreQueueRow`). */
 const CARD_PUBLICATION_SELECT = {
   title: true,
   journal: true,
