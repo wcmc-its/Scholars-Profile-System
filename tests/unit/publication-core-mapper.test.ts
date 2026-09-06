@@ -11,13 +11,19 @@
  *   - Signal fields mapped (coauthors JSON, ack, llm, affinity) with null/JsonNull
  *     for absent optionals
  *   - Method-family / MeSH evidence carried through, order preserved, malformed
- *     upstream payloads dropped rather than thrown on
+ *     upstream payloads dropped rather than thrown on, and ABSENT written as
+ *     DbNull (true SQL NULL) so an operator's IS NOT NULL means populated
+ *   - An over-long method_tier is tallied, not silently nulled
  *   - Empty input -> all-zero result
+ * Plus the upsert payload both halves of the Block 6 write derive from.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { Prisma } from "@/lib/generated/prisma/client";
 import {
   buildPublicationCoreWrites,
+  toPubCoreUpsertPayload,
   type CoreRecordInput,
 } from "@/etl/dynamodb/publication-core-mapper";
 
@@ -160,8 +166,28 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
     // scan found 0 of 21,481 CORE# items carrying any method/MeSH attribute, so
     // every row written until the engine's next run takes this branch.
     expect(w.methodTier).toBeNull();
-    expect(w.methodEvidence).toBe(Prisma.JsonNull);
-    expect(w.meshEvidence).toBe(Prisma.JsonNull);
+    expect(w.methodEvidence).toBe(Prisma.DbNull);
+    expect(w.meshEvidence).toBe(Prisma.DbNull);
+  });
+
+  it("writes DbNull (SQL NULL), not JsonNull, for absent method/MeSH evidence", () => {
+    // Load-bearing, not a style choice. Prisma.JsonNull stores a JSON scalar
+    // null: it PASSES `IS NOT NULL` and reports JSON_LENGTH = 1. With 0 of the
+    // 21,481 live CORE# items carrying these attributes, JsonNull would make
+    // every publication_core row read as populated, and the one operator query
+    // this plumbing exists to serve - "is the engine emitting the signal yet?"
+    // - would answer yes on an empty column. DbNull is a true SQL NULL, so
+    // `method_evidence IS NOT NULL` means genuinely populated.
+    const absent = buildPublicationCoreWrites([rec()], SETS).writes[0];
+    expect(absent.methodEvidence).toBe(Prisma.DbNull);
+    expect(absent.meshEvidence).toBe(Prisma.DbNull);
+    expect(absent.methodEvidence).not.toBe(Prisma.JsonNull);
+    expect(absent.meshEvidence).not.toBe(Prisma.JsonNull);
+
+    // signalCoauthors is NOT changed with them: it is always a list the engine
+    // computed (possibly empty), so present-but-empty is a real reading there.
+    const emptyList = buildPublicationCoreWrites([rec({ signal_coauthors: [] })], SETS).writes[0];
+    expect(emptyList.signalCoauthors).toBe(Prisma.JsonNull);
   });
 
   it("carries method_tier, method_evidence and mesh_evidence onto the write in upstream order", () => {
@@ -205,7 +231,7 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
       SETS,
     );
     expect(meshOnly.writes[0].methodTier).toBeNull();
-    expect(meshOnly.writes[0].methodEvidence).toBe(Prisma.JsonNull);
+    expect(meshOnly.writes[0].methodEvidence).toBe(Prisma.DbNull);
     expect(meshOnly.writes[0].meshEvidence).toHaveLength(1);
 
     // The engine writes method_tier and method_evidence together or not at all,
@@ -213,7 +239,7 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
     const tierOnly = buildPublicationCoreWrites([rec({ method_tier: "weak" })], SETS);
     expect(tierOnly.writes).toHaveLength(1);
     expect(tierOnly.writes[0].methodTier).toBe("weak");
-    expect(tierOnly.writes[0].methodEvidence).toBe(Prisma.JsonNull);
+    expect(tierOnly.writes[0].methodEvidence).toBe(Prisma.DbNull);
   });
 
   it("tolerates a malformed method_evidence / mesh_evidence payload without emitting garbage", () => {
@@ -222,8 +248,8 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
       SETS,
     );
     expect(notAnArray.writes).toHaveLength(1);
-    expect(notAnArray.writes[0].methodEvidence).toBe(Prisma.JsonNull);
-    expect(notAnArray.writes[0].meshEvidence).toBe(Prisma.JsonNull);
+    expect(notAnArray.writes[0].methodEvidence).toBe(Prisma.DbNull);
+    expect(notAnArray.writes[0].meshEvidence).toBe(Prisma.DbNull);
 
     // A list with SOME well-formed entries keeps only those; entries missing a
     // required string key are dropped rather than written through.
@@ -246,7 +272,7 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
       { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
     ]);
     // every mesh entry was malformed (no tree_prefix) -> nothing to write
-    expect(mixed.writes[0].meshEvidence).toBe(Prisma.JsonNull);
+    expect(mixed.writes[0].meshEvidence).toBe(Prisma.DbNull);
 
     // None of this is a required field, so no skip guard trips.
     expect(notAnArray.skippedMissingFields).toBe(0);
@@ -264,6 +290,28 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
     const tooLong = buildPublicationCoreWrites([rec({ method_tier: "a".repeat(17) })], SETS);
     expect(tooLong.writes).toHaveLength(1);
     expect(tooLong.writes[0].methodTier).toBeNull();
+  });
+
+  it("tallies an over-long method_tier instead of dropping it silently", () => {
+    // Today's vocabulary is strong|moderate|weak, so this can only fire on an
+    // engine-side rename - which is exactly the change that must not reach us
+    // as an unexplained column of nulls. Every other drop in this mapper is
+    // counted; this one is now too.
+    const tooLong = buildPublicationCoreWrites(
+      [rec({ method_tier: "a".repeat(17) }), rec({ method_tier: "b".repeat(64) })],
+      SETS,
+    );
+    expect(tooLong.droppedMethodTierTooLong).toBe(2);
+    expect(tooLong.writes).toHaveLength(2); // the ROW still lands; only the field drops
+
+    // Absent, non-string and merely-empty tiers are absent, not drops.
+    expect(buildPublicationCoreWrites([rec()], SETS).droppedMethodTierTooLong).toBe(0);
+    expect(
+      buildPublicationCoreWrites([rec({ method_tier: "" })], SETS).droppedMethodTierTooLong,
+    ).toBe(0);
+    expect(
+      buildPublicationCoreWrites([rec({ method_tier: "moderate" })], SETS).droppedMethodTierTooLong,
+    ).toBe(0);
   });
 
   it("maps prefilter_prior (batch_screen topical prior) independently of the four run.py signals", () => {
@@ -293,5 +341,87 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
     expect(r.skippedMissingFields).toBe(0);
     expect(r.skippedBelowThreshold).toBe(0);
     expect(r.skippedMissingPublication).toBe(0);
+    expect(r.droppedMethodTierTooLong).toBe(0);
+  });
+});
+
+/**
+ * The Block 6 upsert used to carry two hand-maintained field lists, one in the
+ * `create` half and one in the `update` half. Nothing held them together:
+ * deleting the three method/MeSH fields from the `update` half alone left
+ * `tsc` at exit 0 and the whole suite green (proved by mutation), because every
+ * column is optional in Prisma's generated `PublicationCoreUpdateInput` - the
+ * write simply stopped happening. Both halves now derive from one payload, and
+ * these tests pin its key set plus the fact that index.ts still uses it.
+ */
+describe("toPubCoreUpsertPayload (Block 6 upsert payload)", () => {
+  /** Every publication_core column the nightly writes, besides the (pmid, coreId) key. */
+  const PAYLOAD_KEYS = [
+    "likelihood",
+    "status",
+    "signalCoauthors",
+    "signalAck",
+    "ackAlias",
+    "ackSnippet",
+    "llmScore",
+    "llmRationale",
+    "authorAffinity",
+    "topicalPrior",
+    "methodTier",
+    "methodEvidence",
+    "meshEvidence",
+    "scoredAt",
+  ] as const;
+
+  const write = buildPublicationCoreWrites(
+    [
+      rec({
+        signal_coauthors: ["djb2001"],
+        signal_ack: true,
+        ack_alias: "CBIC",
+        ack_snippet: "Imaging performed at the core.",
+        llm_score: 7,
+        llm_rationale: "advanced MRI methods described",
+        author_affinity: 0.45,
+        prefilter_prior: 0.37,
+        method_tier: "strong",
+        method_evidence: [
+          { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
+        ],
+        mesh_evidence: [
+          { descriptor_ui: "D008856", descriptor: "Microscopy, Confocal", tree_prefix: "E01" },
+        ],
+      }),
+    ],
+    SETS,
+  ).writes[0];
+
+  it("carries exactly the mapped columns - no more, no fewer", () => {
+    expect(Object.keys(toPubCoreUpsertPayload(write)).sort()).toEqual([...PAYLOAD_KEYS].sort());
+  });
+
+  it("passes each mapped value straight through", () => {
+    const payload = toPubCoreUpsertPayload(write);
+    for (const k of PAYLOAD_KEYS) {
+      expect(payload[k]).toBe(write[k]);
+    }
+  });
+
+  it("is the only place etl/dynamodb/index.ts spells the upsert columns", () => {
+    // A source check, not a style check: re-inlining a field list in either
+    // half is how the two drifted apart before, and no runtime assertion can
+    // see a field that was never sent.
+    const src = readFileSync(path.join(process.cwd(), "etl/dynamodb/index.ts"), "utf8");
+    const start = src.indexOf("db.write.publicationCore.upsert(");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("pubCoreRowsUpserted +=", start);
+    expect(end).toBeGreaterThan(start);
+    const block = src.slice(start, end);
+
+    expect(block).toMatch(/create:\s*\{[\s\S]*?\.\.\.payload[\s\S]*?\}/);
+    expect(block).toMatch(/update:\s*payload\b/);
+    for (const k of PAYLOAD_KEYS) {
+      expect(block).not.toContain(k);
+    }
   });
 });

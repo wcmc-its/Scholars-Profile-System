@@ -65,7 +65,7 @@ import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { planPublicationTopicPrune } from "./publication-topic-prune";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
-import { buildPublicationCoreWrites } from "./publication-core-mapper";
+import { buildPublicationCoreWrites, toPubCoreUpsertPayload } from "./publication-core-mapper";
 import { planPublicationCorePrune } from "./publication-core-prune";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
@@ -854,7 +854,8 @@ async function main() {
         `${coreMap.skippedMissingCore} missing core, ` +
         `${coreMap.skippedMissingPublication} missing publication, ` +
         `${coreMap.skippedMissingFields} missing required fields, ` +
-        `${coreMap.skippedBelowThreshold} below threshold).`,
+        `${coreMap.skippedBelowThreshold} below threshold; ` +
+        `dropped field: ${coreMap.droppedMethodTierTooLong} over-long method_tier).`,
     );
 
     // Idempotent upsert keyed on (pmid, coreId). Same batch shape as Block 2.
@@ -863,45 +864,19 @@ async function main() {
     for (let i = 0; i < coreMap.writes.length; i += CORE_BATCH) {
       const chunk = coreMap.writes.slice(i, i + CORE_BATCH);
       await Promise.all(
-        chunk.map((w) =>
-          db.write.publicationCore.upsert({
+        chunk.map((w) => {
+          // ONE payload, spread into both halves. Hand-maintained field lists
+          // here could drift silently: every column is optional in Prisma's
+          // generated update input, so dropping one from a single half still
+          // typechecked and still passed the suite while the write quietly
+          // stopped happening. See toPubCoreUpsertPayload.
+          const payload = toPubCoreUpsertPayload(w);
+          return db.write.publicationCore.upsert({
             where: { pmid_coreId: { pmid: w.pmid, coreId: w.coreId } },
-            create: {
-              pmid: w.pmid,
-              coreId: w.coreId,
-              likelihood: w.likelihood,
-              status: w.status,
-              signalCoauthors: w.signalCoauthors,
-              signalAck: w.signalAck,
-              ackAlias: w.ackAlias,
-              ackSnippet: w.ackSnippet,
-              llmScore: w.llmScore,
-              llmRationale: w.llmRationale,
-              authorAffinity: w.authorAffinity,
-              topicalPrior: w.topicalPrior,
-              methodTier: w.methodTier,
-              methodEvidence: w.methodEvidence,
-              meshEvidence: w.meshEvidence,
-              scoredAt: w.scoredAt,
-            },
-            update: {
-              likelihood: w.likelihood,
-              status: w.status,
-              signalCoauthors: w.signalCoauthors,
-              signalAck: w.signalAck,
-              ackAlias: w.ackAlias,
-              ackSnippet: w.ackSnippet,
-              llmScore: w.llmScore,
-              llmRationale: w.llmRationale,
-              authorAffinity: w.authorAffinity,
-              topicalPrior: w.topicalPrior,
-              methodTier: w.methodTier,
-              methodEvidence: w.methodEvidence,
-              meshEvidence: w.meshEvidence,
-              scoredAt: w.scoredAt,
-            },
-          }),
-        ),
+            create: { pmid: w.pmid, coreId: w.coreId, ...payload },
+            update: payload,
+          });
+        }),
       );
       pubCoreRowsUpserted += chunk.length;
     }

@@ -56,10 +56,41 @@ export type PubCoreWrite = {
   authorAffinity: Prisma.Decimal | null;
   topicalPrior: Prisma.Decimal | null;
   methodTier: string | null;
-  methodEvidence: Prisma.InputJsonValue | typeof Prisma.JsonNull;
-  meshEvidence: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  methodEvidence: Prisma.InputJsonValue | typeof Prisma.JsonNull | typeof Prisma.DbNull;
+  meshEvidence: Prisma.InputJsonValue | typeof Prisma.JsonNull | typeof Prisma.DbNull;
   scoredAt: Date;
 };
+
+/**
+ * The columns BOTH halves of the Block 6 `publicationCore.upsert` write, derived
+ * once from a mapped write. `create` adds only the key pair (pmid, coreId) on
+ * top of this.
+ *
+ * It exists because the two halves used to be hand-maintained field lists that
+ * could silently drift: every column here is optional in Prisma's generated
+ * `PublicationCoreUpdateInput`, so deleting a field from one half alone still
+ * typechecked and still passed the whole suite — the write just stopped
+ * happening. One object, spread into both halves, makes that drift impossible;
+ * `tests/unit/publication-core-mapper.test.ts` pins the key set.
+ */
+export function toPubCoreUpsertPayload(w: PubCoreWrite) {
+  return {
+    likelihood: w.likelihood,
+    status: w.status,
+    signalCoauthors: w.signalCoauthors,
+    signalAck: w.signalAck,
+    ackAlias: w.ackAlias,
+    ackSnippet: w.ackSnippet,
+    llmScore: w.llmScore,
+    llmRationale: w.llmRationale,
+    authorAffinity: w.authorAffinity,
+    topicalPrior: w.topicalPrior,
+    methodTier: w.methodTier,
+    methodEvidence: w.methodEvidence,
+    meshEvidence: w.meshEvidence,
+    scoredAt: w.scoredAt,
+  };
+}
 
 export type PublicationCoreMapResult = {
   /** Rows that cleared every guard and are ready to upsert. */
@@ -72,6 +103,14 @@ export type PublicationCoreMapResult = {
   skippedBelowThreshold: number;
   /** Skipped: pmid not yet in the publication table (FK guard). */
   skippedMissingPublication: number;
+  /**
+   * Dropped FIELD, not row: `method_tier` arrived longer than the VARCHAR(16)
+   * column and was nulled so it could not 1406 the batch. Today's vocabulary is
+   * strong|moderate|weak, so this can only fire if the engine renames a tier —
+   * which is precisely why it is tallied rather than trusted. Silent, it would
+   * surface as an unexplained column of nulls.
+   */
+  droppedMethodTierTooLong: number;
 };
 
 /** Engine status for a scored-but-not-surfaced (pub, core) pair. */
@@ -143,6 +182,7 @@ export function buildPublicationCoreWrites(
   let skippedMissingFields = 0;
   let skippedBelowThreshold = 0;
   let skippedMissingPublication = 0;
+  let droppedMethodTierTooLong = 0;
 
   for (const it of records) {
     const coreId = parseCoreId(it);
@@ -182,12 +222,17 @@ export function buildPublicationCoreWrites(
     // The engine writes method_tier and method_evidence together or not at all,
     // but neither is required here — a tier with no evidence (or the reverse)
     // lands as-is rather than dropping the row.
-    const methodTier =
-      typeof it.method_tier === "string" &&
-      it.method_tier.trim() &&
-      it.method_tier.trim().length <= METHOD_TIER_MAX
-        ? it.method_tier.trim()
-        : null;
+    //
+    // An over-long tier is nulled (it would 1406 the whole 100-row batch) AND
+    // tallied, like every other drop in this mapper. An absent or non-string
+    // tier is simply absent and is not counted.
+    const rawMethodTier = typeof it.method_tier === "string" ? it.method_tier.trim() : "";
+    let methodTier: string | null = null;
+    if (rawMethodTier.length > METHOD_TIER_MAX) {
+      droppedMethodTierTooLong += 1;
+    } else if (rawMethodTier) {
+      methodTier = rawMethodTier;
+    }
     const methodEvidence = evidenceEntries(it.method_evidence, METHOD_EVIDENCE_KEYS);
     const meshEvidence = evidenceEntries(it.mesh_evidence, MESH_EVIDENCE_KEYS);
 
@@ -212,8 +257,17 @@ export function buildPublicationCoreWrites(
           ? new Prisma.Decimal(it.prefilter_prior)
           : null,
       methodTier,
-      methodEvidence: methodEvidence.length ? methodEvidence : Prisma.JsonNull,
-      meshEvidence: meshEvidence.length ? meshEvidence : Prisma.JsonNull,
+      // DbNull, NOT JsonNull, and deliberately unlike `signalCoauthors` above.
+      // `Prisma.JsonNull` writes a JSON scalar null, which PASSES `IS NOT NULL`
+      // and reports `JSON_LENGTH` = 1 (see the note on `OrgUnitRole` in
+      // prisma/schema.prisma) — so with 0 of 21,481 live CORE# items carrying
+      // these attributes, every row would read as "populated" and the operator
+      // query this plumbing exists to answer ("is the engine emitting yet?")
+      // would be a false green. `signalCoauthors` is always a list the engine
+      // DID compute (possibly empty), where present-but-empty is a real
+      // finding; these two are genuinely ABSENT. Do not make them consistent.
+      methodEvidence: methodEvidence.length ? methodEvidence : Prisma.DbNull,
+      meshEvidence: meshEvidence.length ? meshEvidence : Prisma.DbNull,
       scoredAt: new Date(scoredAtMs),
     });
   }
@@ -224,5 +278,6 @@ export function buildPublicationCoreWrites(
     skippedMissingFields,
     skippedBelowThreshold,
     skippedMissingPublication,
+    droppedMethodTierTooLong,
   };
 }
