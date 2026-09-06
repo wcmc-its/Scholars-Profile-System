@@ -856,6 +856,63 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByTestId("core-claim-live").textContent).toBe("Confirmed 2 publications.");
   });
 
+  it("asks before bulk-rejecting, and posts nothing when the reviewer declines", () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const confirmMock = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", confirmMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Picked A" }), row({ pmid: "2", title: "Picked B" })]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject all" }));
+
+    expect(confirmMock).toHaveBeenCalledWith("Reject 2 publications for this core?");
+    expect(fetchMock).not.toHaveBeenCalled();
+    // the rows stay selected, so declining costs the reviewer nothing
+    expect(screen.getByText("2 papers selected")).toBeTruthy();
+  });
+
+  it("bulk-rejects once the reviewer accepts the guard", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Picked A" }), row({ pmid: "2", title: "Picked B" })]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject all" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(url).toBe("/api/edit/core-claim/bulk");
+    expect(JSON.parse(init.body)).toEqual({ coreId: "2", pmids: ["1", "2"], status: "rejected" });
+    expect(screen.getByTestId("core-claim-live").textContent).toBe("Rejected 2 publications.");
+  });
+
+  it("does not ask before bulk-confirming — only reject is guarded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const confirmMock = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirmMock);
+    render(
+      <CoreClaimQueue core={CORE} candidates={[row({ pmid: "1", title: "Picked A" })]} confirmed={[]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(confirmMock).not.toHaveBeenCalled();
+  });
+
   it("drops a selected row from the bulk post once the filter hides it", async () => {
     // Ticking a row and then narrowing the filter used to leave it in the batch: the bar
     // counted every selected pmid, visible or not. Acting on rows the reviewer cannot see

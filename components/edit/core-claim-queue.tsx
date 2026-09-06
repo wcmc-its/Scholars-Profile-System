@@ -603,6 +603,18 @@ export function CoreClaimQueue({
    */
   async function bulkDecide(pmids: string[], status: Decision) {
     if (pmids.length === 0 || bulkPending !== null) return;
+    // Only "Reject all" is guarded, and the asymmetry is the point: a wrong bulk
+    // CONFIRM shows up on the public core page where someone will notice it, while a
+    // wrong bulk REJECT just silently leaves the papers missing. Per-row reject stays
+    // unguarded — it is one visible row, and Undo sits right there.
+    if (
+      status === "rejected" &&
+      !window.confirm(
+        `Reject ${pmids.length} publication${pmids.length === 1 ? "" : "s"} for this core?`,
+      )
+    ) {
+      return;
+    }
     setBulkPending(status);
     setPending((s) => new Set([...s, ...pmids]));
     const res = await fetch("/api/edit/core-claim/bulk", {
