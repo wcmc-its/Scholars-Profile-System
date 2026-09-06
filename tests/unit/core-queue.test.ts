@@ -247,6 +247,21 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(r?.wcmAuthors.filter((w) => w.cwid === "dup001")).toHaveLength(1); // deduped
   });
 
+  it("carries core.staffCount through to the queue, and 0 through as 0", async () => {
+    // The review-queue toolbar reads this to decide between no chip (null),
+    // the "signal cannot fire" line (0), and the mockup's sentence (positive),
+    // so 0 must not arrive as null and vice versa.
+    const withStaff = (staffCount: number | null) =>
+      ({
+        ...reader([rawRow()]),
+        core: { findUnique: async () => ({ id: "2", name: "Imaging", staffCount }) },
+      }) as unknown as Parameters<typeof loadCoreReviewQueue>[1];
+
+    expect((await loadCoreReviewQueue("2", withStaff(4)))?.core.staffCount).toBe(4);
+    expect((await loadCoreReviewQueue("2", withStaff(0)))?.core.staffCount).toBe(0);
+    expect((await loadCoreReviewQueue("2", withStaff(null)))?.core.staffCount).toBeNull();
+  });
+
   it("keeps a null authorAffinity null (Number(null) would be 0)", async () => {
     const queue = await loadCoreReviewQueue(
       "2",

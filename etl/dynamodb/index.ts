@@ -67,6 +67,7 @@ import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
 import { buildPublicationCoreWrites } from "./publication-core-mapper";
 import { planPublicationCorePrune } from "./publication-core-prune";
+import { buildCoreStaffWrites } from "./core-staff-mapper";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import {
@@ -146,7 +147,8 @@ async function main() {
       `Single scan complete: ~${scanned} items examined; partitioned into ` +
         `tax=${buckets.tax.length}, topics=${buckets.topics.length}, ` +
         `faculty=${buckets.faculty.length}, impact=${buckets.impact.length}, ` +
-        `tools=${buckets.tools.length}, cores=${buckets.cores.length}.`,
+        `tools=${buckets.tools.length}, cores=${buckets.cores.length}, ` +
+        `coreStaff=${buckets.coreStaff.length}.`,
     );
 
     // ===================================================================
@@ -951,6 +953,54 @@ async function main() {
     }
 
     // ===================================================================
+    // Block 6b: CORE#/STAFF → core.staff_count  (staff roster size)
+    // ===================================================================
+    // ReciterAI publishes one item per core at PK=CORE#{core_id}, SK=STAFF
+    // carrying `staff_count`: how many CWIDs are in that core's `staff:` list
+    // in the facility dictionary. That is the population the co-author signal
+    // (signal 2) draws on, so the review queue can finally tell an owner what
+    // is behind it — "Co-author signal draws on N core staff".
+    //
+    // The COUNT ONLY, by contract. The roster itself stays in the dictionary:
+    // the consumer renders one integer, so mirroring staff CWIDs into MySQL
+    // would be PII surface bought for nothing.
+    //
+    // Note the direction. The sibling (CORE#{core_id}, CLIENTS) item runs the
+    // OTHER way — SPS writes it (lib/cores/client-writeback.ts), the engine
+    // reads it — and this block must never touch it; ./partition.ts keeps the
+    // two apart on the exact SK.
+    //
+    // ABSENT IS NOT ZERO. `update` (not `upsert`, and not a blanket
+    // updateMany-to-0 first) on ONLY the cores this run actually saw: a core
+    // with no STAFF item keeps whatever staff_count it already had, and the
+    // column stays NULL for a core the engine has never published. A
+    // fail-soft read on a path that WRITES is a wipe, and a nightly that
+    // zeroed every core the moment the producer went quiet would be exactly
+    // that. `staff_count: 0` in a present item IS written, because "the
+    // dictionary lists no staff for this core" is real, useful review state.
+    const coreStaffItems = buckets.coreStaff;
+    console.log(`Found ${coreStaffItems.length} CORE#/STAFF record(s).`);
+    const staffMap = buildCoreStaffWrites(coreStaffItems, { knownCoreIds });
+    console.log(
+      `core.staff_count candidates: ${staffMap.writes.length} (skipped: ` +
+        `${staffMap.skippedMissingCore} unresolvable core id, ` +
+        `${staffMap.skippedUnknownCore} unknown core, ` +
+        `${staffMap.skippedMissingCount} absent/invalid staff_count).`,
+    );
+    let coreStaffRowsUpdated = 0;
+    for (const w of staffMap.writes) {
+      await db.write.core.update({
+        where: { id: w.coreId },
+        data: { staffCount: w.staffCount },
+      });
+      coreStaffRowsUpdated += 1;
+    }
+    console.log(
+      `core.staff_count updates complete: ${coreStaffRowsUpdated} core(s) ` +
+        `(${knownCoreIds.size - coreStaffRowsUpdated} left untouched — no STAFF item this run).`,
+    );
+
+    // ===================================================================
     // Block 7: GRANT# → opportunity  (GrantRecs Phase 2)
     // ===================================================================
     // ReciterAI's pipeline_grants engine emits one GRANT# item per funding
@@ -989,7 +1039,8 @@ async function main() {
       scholarToolRowsInserted +
       opportunityRowsUpserted +
       coreRowsUpserted +
-      pubCoreRowsUpserted;
+      pubCoreRowsUpserted +
+      coreStaffRowsUpdated;
     await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
@@ -1002,7 +1053,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}, core_staff_count=${coreStaffRowsUpdated}`,
     );
   } catch (err) {
     await db.write.etlRun.update({

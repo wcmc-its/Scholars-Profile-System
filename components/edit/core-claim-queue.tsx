@@ -45,10 +45,17 @@
  *     single reset affordance, and it appears for a text-only narrowing as well
  *     as a ticked facet.
  *
+ *   - the mockup's "Co-author signal draws on N core staff from the facility
+ *     dictionary" lock chip is now BUILT: ReciterAI publishes the roster size
+ *     per core (PK=CORE#{id}, SK=STAFF) and etl/dynamodb Block 6b lands it on
+ *     `core.staff_count`. It renders only when the count is known — null (the
+ *     engine has not published one) draws nothing at all, and 0 gets its own
+ *     sentence, since "draws on 0 core staff" is both awkward and the single
+ *     most useful thing a reviewer could learn about such a core.
+ *
  * Drawn in the mockup, NOT built here (no data behind either):
- *   - the "Co-author signal draws on N core staff from the facility dictionary"
- *     lock chip and its "Manage staff" link — SPS ingests no core-staff
- *     dictionary count, and there is no such route;
+ *   - the chip's "Manage staff" link — the roster lives in ReciterAI's facility
+ *     dictionary and SPS has no route that edits it (see the chip below);
  *   - the "Method family identified" facet — no method data reaches
  *     `CoreQueueRow` (see `searchBlob`).
  */
@@ -60,11 +67,9 @@ import {
   ChevronUp,
   Copy,
   ExternalLink,
-  FileText,
+  Lock,
   PenLine,
-  Plus,
   Undo2,
-  Users,
   X,
 } from "lucide-react";
 import type { CoreClientRow } from "@/lib/api/core-clients";
@@ -957,23 +962,25 @@ export function CoreClaimQueue({
       <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
         {announce}
       </div>
-      {/* The mockup's top row. Its left half is the "Co-author signal draws on N
-          core staff …" lock chip + "Manage staff" link, which is NOT built: SPS
-          ingests no core-staff dictionary count and there is no such route, so
-          the row is buttons alone, right-aligned. */}
+      {/* The mockup's top row: the core-staff lock chip on the left, the button
+          group on the right. `justify-between` is the mockup's split, but the
+          button group ALSO carries `ml-auto` — the chip is absent whenever the
+          engine has published no staff count, and a lone flex child under
+          `justify-between` would slide left, moving the buttons out from under
+          the reviewer's cursor for exactly the cores with the least data. */}
       <div
         data-slot="core-queue-toolbar"
-        className="mb-2 flex flex-wrap items-center justify-end gap-2"
+        className="mb-2 flex flex-wrap items-center justify-between gap-2"
       >
-        <div className="flex flex-wrap items-center gap-2">
+        <CoreStaffChip staffCount={core.staffCount} />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setClientsOpen((v) => !v)}
             aria-pressed={clientsOpen}
-            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+            className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
           >
-            <Users className="size-4" aria-hidden /> Known clients (
-            <span className="tabular-nums">{clientRows.length}</span>)
+            Known clients (<span className="tabular-nums">{clientRows.length}</span>)
           </button>
           <button
             type="button"
@@ -982,9 +989,9 @@ export function CoreClaimQueue({
               setAddResult(null);
             }}
             aria-pressed={addOpen}
-            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+            className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
           >
-            <Plus className="size-4" aria-hidden /> Add PMIDs
+            Add PMIDs
           </button>
           {/* The mockup's third button. There IS no core reporting route in this
               repo, so it ships DISABLED with the reason on it rather than as a
@@ -1002,9 +1009,9 @@ export function CoreClaimQueue({
             aria-describedby="core-queue-reporting-why"
             onClick={(e) => e.preventDefault()}
             title="Reporting view is not built yet"
-            className="border-border-strong text-muted-foreground inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-full border bg-background px-3 text-sm opacity-50"
+            className="border-border-strong text-muted-foreground bg-background inline-flex h-8 cursor-not-allowed items-center rounded-md border px-3 text-sm opacity-50"
           >
-            <FileText className="size-4" aria-hidden /> Reporting...
+            Reporting...
           </button>
           <span id="core-queue-reporting-why" className="sr-only">
             Reporting view is not built yet
@@ -1295,6 +1302,55 @@ export function CoreClaimQueue({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The toolbar's lock chip: what the co-author signal (signal 2) actually has to
+ * work with on this core. `staffCount` is the size of the `staff:` roster in
+ * ReciterAI's facility dictionary, projected onto `core.staff_count` by
+ * etl/dynamodb Block 6b — a COUNT, never the CWIDs, which stay upstream.
+ *
+ * Three states, and the difference between the last two is the point:
+ *   - `null` — the engine has published no count for this core. Renders
+ *     NOTHING, exactly as before this shipped. Not-yet-published must look
+ *     like nothing at all, never like an empty roster; the rest of this queue
+ *     is built on the same invisible-not-broken property.
+ *   - `0` — the dictionary genuinely lists no staff for this core (three cores
+ *     are in this state). Gets its OWN sentence, because "draws on 0 core
+ *     staff" is both awkward and buries the single most useful thing a
+ *     reviewer could learn here: signal 2 cannot fire for this core at all, so
+ *     every candidate they see is carried by the other four signals.
+ *   - a positive count — the mockup's sentence, with the number emphasized.
+ *
+ * The mockup also draws a "Manage staff" link beside this chip. It is
+ * deliberately NOT built: there is no destination — the roster lives in the
+ * facility dictionary, not in SPS, and no core-staff role exists to hang an
+ * editor off. This toolbar already carries one knowingly-inert control
+ * ("Reporting..."); a second would make dead controls the pattern here. It
+ * becomes a `/roles` link the day a core-staff role exists.
+ */
+function CoreStaffChip({ staffCount }: { staffCount: number | null }) {
+  if (staffCount === null) return null;
+  return (
+    <span
+      data-slot="core-staff-chip"
+      className="border-apollo-border bg-apollo-surface-2 text-muted-foreground inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs"
+    >
+      <Lock className="size-3.5 shrink-0" aria-hidden />
+      {staffCount === 0 ? (
+        <span>
+          The facility dictionary lists no core staff, so the co-author signal cannot fire for this
+          core.
+        </span>
+      ) : (
+        <span>
+          Co-author signal draws on{" "}
+          <span className="text-foreground font-semibold">{staffCount} core staff</span> from the
+          facility dictionary
+        </span>
+      )}
+    </span>
   );
 }
 

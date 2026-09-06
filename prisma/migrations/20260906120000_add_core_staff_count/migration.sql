@@ -1,0 +1,20 @@
+-- Land ReciterAI's per-core staff-roster SIZE on `core`, so the review queue
+-- can tell an owner how many core staff the co-author signal actually draws
+-- on. The engine publishes one item per core in the shared `reciterai`
+-- DynamoDB table at `PK = CORE#{core_id}`, `SK = STAFF`, carrying a single
+-- `staff_count` attribute; etl/dynamodb Block 6b projects it here.
+--
+-- The COUNT only, deliberately: the consumer renders one integer, and
+-- mirroring the staff CWIDs into a second datastore would buy PII surface for
+-- nothing. (The sibling `SK = CLIENTS` item runs the other direction — SPS
+-- writes it, the engine reads it — and is untouched by this column.)
+--
+-- Additive only, nullable, NO default and NO backfill. NULL is a real state
+-- here: "the engine has not published a count for this core yet", which the
+-- UI renders as no chip at all. It must stay distinguishable from a genuine
+-- 0 (a core whose dictionary entry lists no staff, of which there are three),
+-- because 0 is the single most useful thing a reviewer can learn about such a
+-- core — the staff co-author signal cannot fire for it. A DEFAULT 0 would
+-- have collapsed those two states into one and made every unpublished core
+-- read as "no staff".
+ALTER TABLE `core` ADD COLUMN `staff_count` INTEGER NULL;

@@ -2366,6 +2366,15 @@ model Core {
   description String?  @db.Text
   url         String?  @db.VarChar(512)
   visible     Boolean  @default(false)
+  /// Size of the core's `staff:` CWID roster in ReciterAI's facility
+  /// dictionary — the population the co-author signal draws on. ETL-owned
+  /// (etl/dynamodb Block 6b reads `PK=CORE#{id}, SK=STAFF`); SPS never
+  /// curates it, and it is a COUNT, not a roster, so no staff CWID is copied
+  /// into this datastore. Nullable with NO default on purpose: NULL means
+  /// "the engine has not published a count for this core yet" and must stay
+  /// distinguishable from a real 0 (three cores genuinely have no staff
+  /// listed). An absent item leaves the column untouched — it never writes 0.
+  staffCount  Int?     @map("staff_count")
 
   publications PublicationCore[]
   leaders      CoreLeader[]

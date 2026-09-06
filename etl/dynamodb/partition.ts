@@ -101,6 +101,24 @@ export type CoreRecord = {
   [key: string]: unknown;
 };
 
+/**
+ * The engine's per-core staff-roster item: PK=`CORE#{core_id}`, SK=`STAFF`.
+ * One item per core carrying the SIZE of the facility dictionary's `staff:`
+ * list — not the CWIDs themselves (see etl/dynamodb/core-staff-mapper.ts).
+ *
+ * Note the key shape is the MIRROR of a CoreRecord's: the core is the
+ * PARTITION here (`PK`), where a CoreRecord puts the publication in `PK` and
+ * the core in `SK`. That is why the routing below cannot lean on the `CORE#`
+ * prefix alone.
+ */
+export type CoreStaffRecord = {
+  PK: string; // CORE#{core_id}
+  SK: string; // "STAFF"
+  core_id?: string;
+  staff_count?: number | string;
+  [key: string]: unknown;
+};
+
 export type Buckets = {
   tax: TaxonomyRecord[];
   topics: TopicRecord[];
@@ -108,6 +126,7 @@ export type Buckets = {
   impact: ImpactRecord[];
   tools: ToolRecord[];
   cores: CoreRecord[];
+  coreStaff: CoreStaffRecord[];
 };
 
 /**
@@ -120,13 +139,28 @@ export type Buckets = {
  *   Block 4 IMPACT#    -> publication         begins_with(PK, "IMPACT#pmid_")
  *   Block 5 TOOL#      -> scholar_tool        begins_with(PK, "TOOL#")
  *   Block 6 PUB#/CORE# -> core                begins_with(SK, "CORE#")   <- SK, not PK
+ *   Block 6b CORE#/STAFF -> core.staff_count  PK CORE# AND SK === "STAFF"
  *
  * The buckets are disjoint (one `continue` per match), so the union exactly
  * reproduces what the six independent filtered scans kept. Block 7 (GRANT#) is
  * NOT handled here — it delegates to grant-opportunity-etl.ts's own scan.
+ *
+ * Block 6b is the one bucket that never had a filtered scan of its own: the
+ * STAFF item is new (ReciterAI writes it, SPS reads it), and it was previously
+ * dropped as unmatched. It is matched on the EXACT `SK === "STAFF"`, not a
+ * prefix, so the sibling `SK = "CLIENTS"` item (which SPS writes and this ETL
+ * must never read back) keeps falling through unmatched exactly as before.
  */
 export function partitionRecords(items: Array<Record<string, unknown>>): Buckets {
-  const b: Buckets = { tax: [], topics: [], faculty: [], impact: [], tools: [], cores: [] };
+  const b: Buckets = {
+    tax: [],
+    topics: [],
+    faculty: [],
+    impact: [],
+    tools: [],
+    cores: [],
+    coreStaff: [],
+  };
   for (const it of items) {
     const pk = String(it.PK ?? "");
     const sk = String(it.SK ?? "");
@@ -136,6 +170,14 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     // only SK-CORE# items).
     if (sk.startsWith("CORE#")) {
       b.cores.push(it as CoreRecord);
+      continue;
+    }
+    // Block 6b keys on BOTH halves: PK=CORE#{core_id}, SK="STAFF". The SK is
+    // matched exactly rather than by prefix so the sibling PK=CORE#… item SPS
+    // writes (SK="CLIENTS", lib/cores/client-writeback.ts) stays unmatched —
+    // reading our own writeback back in would be a loop, not an ingest.
+    if (pk.startsWith("CORE#") && sk === "STAFF") {
+      b.coreStaff.push(it as CoreStaffRecord);
       continue;
     }
     if (pk.startsWith("TAXONOMY#")) {

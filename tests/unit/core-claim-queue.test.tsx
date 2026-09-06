@@ -73,7 +73,11 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
   };
 }
 
-const CORE = { id: "2", name: "Biomedical Imaging" };
+/** `staffCount: null` is the DEFAULT fixture state on purpose — the engine has
+ *  published no staff count for most cores, and every test that is not about
+ *  the chip should be rendering the queue exactly as it looked before the
+ *  chip existed. The chip tests override it. */
+const CORE = { id: "2", name: "Biomedical Imaging", staffCount: null };
 
 /** Expand the only open card's evidence strip — signal rows start collapsed. */
 function showEvidence() {
@@ -1899,6 +1903,77 @@ describe("compareBySort", () => {
   });
 });
 
+// The toolbar's core-staff lock chip. `core.staffCount` is the size of the
+// core's `staff:` roster in ReciterAI's facility dictionary, landed on
+// `core.staff_count` by etl/dynamodb Block 6b. The three states are NOT
+// interchangeable: null is "not published yet" (draw nothing), 0 is "the
+// dictionary lists no staff" (its own sentence), positive is the mockup's line.
+describe("CoreClaimQueue — core-staff lock chip", () => {
+  const chip = () => document.querySelector('[data-slot="core-staff-chip"]');
+  const chipText = () => (chip()?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+  it("renders the mockup's sentence with the count, and EMPHASISES the number", () => {
+    render(
+      <CoreClaimQueue core={{ ...CORE, staffCount: 4 }} candidates={[row()]} confirmed={[]} />,
+    );
+    expect(chipText()).toBe("Co-author signal draws on 4 core staff from the facility dictionary");
+    // the mockup bolds the number and its noun, not the whole sentence
+    const bolded = chip()?.querySelector(".font-semibold");
+    expect(bolded?.textContent).toBe("4 core staff");
+  });
+
+  it("renders NOTHING when the count is null — not-yet-published must look like nothing", () => {
+    // CORE's own staffCount is null: this is the pre-chip rendering, unchanged.
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(chip()).toBeNull();
+    expect(screen.queryByText(/core staff/)).toBeNull();
+    expect(screen.queryByText(/facility dictionary/)).toBeNull();
+  });
+
+  it("says the signal cannot fire when the count is 0 — never 'draws on 0 core staff'", () => {
+    // 0 is a real, published state (three cores are in it) and the most useful
+    // thing a reviewer can learn here: every candidate they see is carried by
+    // the other four signals.
+    render(
+      <CoreClaimQueue core={{ ...CORE, staffCount: 0 }} candidates={[row()]} confirmed={[]} />,
+    );
+    expect(chipText()).toBe(
+      "The facility dictionary lists no core staff, so the co-author signal cannot fire for this core.",
+    );
+    expect(chipText()).not.toContain("draws on 0");
+  });
+
+  it("keeps the chip and the button group in the same toolbar row, chip first", () => {
+    render(
+      <CoreClaimQueue core={{ ...CORE, staffCount: 4 }} candidates={[row()]} confirmed={[]} />,
+    );
+    const toolbar = document.querySelector('[data-slot="core-queue-toolbar"]');
+    const knownClients = screen.getByRole("button", { name: /Known clients/ });
+    expect(toolbar?.contains(chip()!)).toBe(true);
+    expect(toolbar?.contains(knownClients)).toBe(true);
+    expect(
+      chip()!.compareDocumentPosition(knownClients) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // wraps rather than overflowing on a narrow viewport
+    expect(toolbar?.className).toContain("flex-wrap");
+  });
+
+  it("offers NO 'Manage staff' control, in any state — there is no destination", () => {
+    // The mockup draws one. The roster lives in the facility dictionary, not in
+    // SPS, and this toolbar already carries one knowingly-inert control
+    // ("Reporting..."); a second would make dead controls the pattern.
+    for (const staffCount of [null, 0, 4]) {
+      const view = render(
+        <CoreClaimQueue core={{ ...CORE, staffCount }} candidates={[row()]} confirmed={[]} />,
+      );
+      expect(screen.queryByRole("button", { name: /Manage staff/i })).toBeNull();
+      expect(screen.queryByRole("link", { name: /Manage staff/i })).toBeNull();
+      expect(screen.queryByText(/Manage staff/i)).toBeNull();
+      view.unmount();
+    }
+  });
+});
+
 // "Known clients" panel (ReciterAI #383 / SPS #2607) — the panel's own
 // behavior is covered by tests/unit/core-clients-panel.test.tsx; this just
 // confirms CoreClaimQueue wires the toolbar button in with the right count.
@@ -1949,6 +2024,19 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     // the reason is in the accessibility tree, not only in a hover tooltip
     const why = document.getElementById(reporting.getAttribute("aria-describedby") ?? "");
     expect(why?.textContent).toBe("Reporting view is not built yet");
+  });
+
+  it("draws the three buttons as text-only rounded rectangles — no icons, no pills", () => {
+    // The mockup's toolbar is plain rectangles with labels; the shipped pills
+    // carried a lucide glyph each (Users / Plus / FileText). Only the SHAPE
+    // changed on "Reporting..." — its inert treatment is asserted above.
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    for (const name of [/Known clients/, /Add PMIDs/, /Reporting/]) {
+      const button = screen.getByRole("button", { name });
+      expect(button.querySelector("svg")).toBeNull();
+      expect(button.className).toContain("rounded-md");
+      expect(button.className).not.toContain("rounded-full");
+    }
   });
 
   it("keeps the CSV column contract under test while the export button is off the toolbar", () => {
@@ -2009,15 +2097,14 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(textarea).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
 
-    // The OUTER toolbar row is the justify-end container holding the three
-    // header buttons — not just the inner "flex flex-wrap items-center gap-2"
-    // button group. `toggle.closest("div")` alone would only find that inner
-    // group and miss a regression that nests the panel inside the outer row.
-    // (It was justify-BETWEEN while the view tabs shared this row; the tabs are
-    // in the queue panel now, so the buttons sit alone against the right edge.)
+    // The OUTER toolbar row is the justify-between container holding the staff
+    // chip and the three header buttons — not just the inner "flex flex-wrap
+    // items-center gap-2" button group. `toggle.closest("div")` alone would
+    // only find that inner group and miss a regression that nests the panel
+    // inside the outer row.
     const outerRow = toggle.closest('[data-slot="core-queue-toolbar"]');
     expect(outerRow).toBeTruthy();
-    expect(outerRow?.className).toContain("justify-end");
+    expect(outerRow?.className).toContain("justify-between");
     expect(outerRow?.contains(textarea)).toBe(false);
 
     // And the panel body is a later sibling in the same parent as the

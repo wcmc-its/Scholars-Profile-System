@@ -117,7 +117,17 @@ export interface CoreQueueRow {
 }
 
 export interface CoreReviewQueue {
-  core: { id: string; name: string };
+  core: {
+    id: string;
+    name: string;
+    /** Size of the core's `staff:` roster in ReciterAI's facility dictionary —
+     *  the population the co-author signal draws on (ETL-owned, projected by
+     *  etl/dynamodb Block 6b). NULL means the engine has not published a count
+     *  for this core yet, which is NOT the same as 0: 0 means the dictionary
+     *  lists no staff, so the staff co-author signal cannot fire at all. The
+     *  queue toolbar renders nothing for null and a distinct sentence for 0. */
+    staffCount: number | null;
+  };
   candidates: CoreQueueRow[];
   confirmed: CoreQueueRow[];
   /** Effective-rejected pairs (a human `rejected` claim) — the Rejected tab. */
@@ -204,7 +214,7 @@ export async function loadCoreReviewQueue(
 ): Promise<CoreReviewQueue | null> {
   const core = await client.core.findUnique({
     where: { id: coreId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, staffCount: true },
   });
   if (!core) return null;
 
@@ -410,5 +420,14 @@ export async function loadCoreReviewQueue(
     [...queueRows, ...manualRows],
     (pmid) => claims.get(pmid) ?? null,
   );
-  return { core, candidates, confirmed, rejected };
+  return {
+    // Rebuilt rather than passed straight through so `staffCount` is always
+    // present and always `number | null` — an `undefined` reaching the client
+    // would render as "not published yet" by accident rather than by the
+    // column actually being NULL.
+    core: { id: core.id, name: core.name, staffCount: core.staffCount ?? null },
+    candidates,
+    confirmed,
+    rejected,
+  };
 }

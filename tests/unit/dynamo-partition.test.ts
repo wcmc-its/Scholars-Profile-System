@@ -11,6 +11,8 @@
  * Covers:
  *   - one item of each recognized type lands in exactly its bucket
  *   - a PUB#… item whose SK is CORE#… lands in `cores` (SK-first rule)
+ *   - a CORE#…/STAFF item lands in `coreStaff`, and the sibling CORE#…/CLIENTS
+ *     item SPS itself writes stays DROPPED
  *   - a GRANT#… item and a PUB#… item WITHOUT an SK CORE# prefix are dropped
  *   - prefix boundaries: TAXONOMY# vs TOPIC#, and the required cwid_/pmid_ tails
  */
@@ -24,6 +26,7 @@ const emptyBucketSizes = () => ({
   impact: 0,
   tools: 0,
   cores: 0,
+  coreStaff: 0,
 });
 
 const sizes = (b: ReturnType<typeof partitionRecords>) => ({
@@ -33,6 +36,7 @@ const sizes = (b: ReturnType<typeof partitionRecords>) => ({
   impact: b.impact.length,
   tools: b.tools.length,
   cores: b.cores.length,
+  coreStaff: b.coreStaff.length,
 });
 
 describe("partitionRecords (#1514 single-scan partition)", () => {
@@ -43,16 +47,46 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     const impact = { PK: "IMPACT#pmid_30418319", SK: "SCORE", impact_score: 0.7 };
     const tool = { PK: "TOOL#crispr", SK: "PUB#1", pmid: 1 };
     const core = { PK: "PUB#30418319", SK: "CORE#2", core_id: "2" };
+    const coreStaff = { PK: "CORE#2", SK: "STAFF", staff_count: 4 };
 
-    const b = partitionRecords([tax, topic, faculty, impact, tool, core]);
+    const b = partitionRecords([tax, topic, faculty, impact, tool, core, coreStaff]);
 
-    expect(sizes(b)).toEqual({ tax: 1, topics: 1, faculty: 1, impact: 1, tools: 1, cores: 1 });
+    expect(sizes(b)).toEqual({
+      tax: 1,
+      topics: 1,
+      faculty: 1,
+      impact: 1,
+      tools: 1,
+      cores: 1,
+      coreStaff: 1,
+    });
     expect(b.tax[0]).toBe(tax);
     expect(b.topics[0]).toBe(topic);
     expect(b.faculty[0]).toBe(faculty);
     expect(b.impact[0]).toBe(impact);
     expect(b.tools[0]).toBe(tool);
     expect(b.cores[0]).toBe(core);
+    expect(b.coreStaff[0]).toBe(coreStaff);
+  });
+
+  it("routes a CORE#…/STAFF item into coreStaff — the key shape is the MIRROR of a core row's", () => {
+    // A CoreRecord is PK=PUB#…, SK=CORE#…; the staff item is PK=CORE#…,
+    // SK=STAFF. Same "CORE#" text, opposite halves of the key, different bucket.
+    const staff = { PK: "CORE#14", SK: "STAFF", core_id: "14", staff_count: 0 };
+    const b = partitionRecords([staff]);
+    expect(sizes(b)).toEqual({ ...emptyBucketSizes(), coreStaff: 1 });
+    expect(b.coreStaff[0]).toBe(staff);
+    // and NOT into cores — its SK does not begin with CORE#
+    expect(b.cores).toHaveLength(0);
+  });
+
+  it("keeps DROPPING the CORE#…/CLIENTS item SPS writes back to the engine", () => {
+    // lib/cores/client-writeback.ts writes (CORE#{id}, CLIENTS) — SPS -> engine.
+    // The STAFF match is on the EXACT SK, not a CORE#-PK prefix, so this item is
+    // still unmatched: ingesting our own writeback would be a loop, not a read.
+    const clients = { PK: "CORE#2", SK: "CLIENTS", client_cwids: ["aaa1001"], client_count: 1 };
+    const b = partitionRecords([clients]);
+    expect(sizes(b)).toEqual(emptyBucketSizes());
   });
 
   it("routes a PUB#… item with an SK CORE# prefix into cores (SK-first rule)", () => {
