@@ -88,6 +88,47 @@ export function parsePmidBlock(text: string): { pmids: string[]; invalid: string
   return { pmids, invalid };
 }
 
+/**
+ * The title as the card shows it: PubMed stores a sentence-final period on
+ * nearly every title, and the header reads as a heading, not a sentence.
+ *
+ * Strips ONE trailing "." and nothing else. A trailing "?" or "!" is part of
+ * the title's own voice ("Does X cause Y?") and stays, and a "." straight after
+ * an uppercase letter is the last stop of an initialism ("... in the U.S."),
+ * where dropping it would misspell the word.
+ *
+ * Display only — the stored title, the CSV citation string and `searchBlob` all
+ * keep the raw value. Pure.
+ */
+export function displayTitle(title: string): string {
+  if (!title.endsWith(".")) return title;
+  const prev = title.slice(-2, -1);
+  if (/[A-Z]/.test(prev)) return title;
+  return title.slice(0, -1);
+}
+
+/**
+ * "Added to PubMed Feb 18, 2026" from a `YYYY-MM-DD` calendar date, or null
+ * when there is no date (the caller then falls back to the publication year —
+ * an empty slot with a dangling separator is worse than neither).
+ *
+ * Formatted in UTC on purpose. `dateAddedToEntrez` is a `@db.Date`, which
+ * reaches this component as a calendar date with no zone; parsing it as UTC
+ * midnight and formatting it in the VIEWER's zone would render the previous day
+ * for everyone west of UTC — including every WCM curator. Pure.
+ */
+export function formatAddedToPubMed(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  return `Added to PubMed ${d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  })}`;
+}
+
 type Decision = "claimed" | "rejected";
 /** Which list the segmented control is showing (only when there's history). */
 type QueueView = "review" | "confirmed" | "rejected";
@@ -1617,8 +1658,34 @@ function CandidateCard({
   const band = likelihoodBand(row.likelihood);
   const signals = buildSignals(row);
   const tokens = evidenceTokens(row, clientCwids);
-  // A 0 on a just-published paper isn't "0 citations", it's "not cited yet".
-  const recentlyPublished = row.year !== null && row.year >= new Date().getFullYear() - 1;
+  // The header's meta line, middot-separated: the abbreviated journal (the full
+  // title is a paragraph for some journals), when PubMed indexed it, then the
+  // PMID. Each part is dropped when its data is missing rather than rendered
+  // empty, so the separators are built from what actually survives.
+  const journalLabel = row.journalAbbrev ?? row.journal;
+  const addedToPubMed = formatAddedToPubMed(row.dateAddedToEntrez);
+  const metaParts: Array<{ key: string; node: ReactNode }> = [];
+  if (journalLabel) metaParts.push({ key: "journal", node: <span>{journalLabel}</span> });
+  if (addedToPubMed) metaParts.push({ key: "added", node: <span>{addedToPubMed}</span> });
+  // No index date on file — the publication year is the only vintage left.
+  else if (row.year !== null)
+    metaParts.push({ key: "year", node: <span className="tabular-nums">{row.year}</span> });
+  metaParts.push({
+    key: "pmid",
+    // PMID shown verbatim (curators key off it); links to PubMed when present.
+    node: row.pubmedUrl ? (
+      <a
+        href={row.pubmedUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-foreground inline-flex items-center gap-1 tabular-nums hover:underline"
+      >
+        PMID {row.pmid} <ExternalLink className="size-3" aria-hidden />
+      </a>
+    ) : (
+      <span className="tabular-nums">PMID {row.pmid}</span>
+    ),
+  });
   return (
     <div
       className={`${CARD_SHELL} px-5 py-4`}
@@ -1655,23 +1722,18 @@ function CandidateCard({
               </span>
             </p>
           ) : null}
-          <h3 className="text-foreground text-[15px] font-medium">{row.title}</h3>
-          <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-            {row.journal ? <span>{row.journal}</span> : null}
-            {row.year ? <span className="tabular-nums">{row.year}</span> : null}
-            {/* PMID shown verbatim (curators key off it); links to PubMed when present. */}
-            {row.pubmedUrl ? (
-              <a
-                href={row.pubmedUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-foreground inline-flex items-center gap-1 tabular-nums hover:underline"
-              >
-                PMID {row.pmid} <ExternalLink className="size-3" aria-hidden />
-              </a>
-            ) : (
-              <span className="tabular-nums">PMID {row.pmid}</span>
-            )}
+          <h3 className="text-foreground text-[15px] font-medium">{displayTitle(row.title)}</h3>
+          <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+            {metaParts.map((part, i) => (
+              <span key={part.key} className="inline-flex items-center gap-1.5">
+                {i > 0 ? (
+                  <span className="text-muted-foreground/60" aria-hidden>
+                    ·
+                  </span>
+                ) : null}
+                {part.node}
+              </span>
+            ))}
             <button
               type="button"
               onClick={onCopyPmid}
@@ -1685,30 +1747,6 @@ function CandidateCard({
                 <Copy className="size-3" aria-hidden />
               )}
             </button>
-            {row.doi ? (
-              <a
-                href={`https://doi.org/${row.doi}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-foreground inline-flex items-center gap-1 hover:underline"
-              >
-                DOI <ExternalLink className="size-3" aria-hidden />
-              </a>
-            ) : null}
-            {row.citationCount > 0 ? (
-              <span className="tabular-nums">
-                {row.citationCount} citation{row.citationCount === 1 ? "" : "s"}
-              </span>
-            ) : recentlyPublished ? (
-              <span>No citations yet{row.year ? ` · published ${row.year}` : ""}</span>
-            ) : (
-              <span className="tabular-nums">0 citations</span>
-            )}
-            {row.nihPercentile !== null ? (
-              <span className="tabular-nums">
-                RCR {row.relativeCitationRatio ?? "—"} ({row.nihPercentile}th pct)
-              </span>
-            ) : null}
           </div>
           <Byline row={row} />
           {row.synopsis ? (

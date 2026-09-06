@@ -18,14 +18,17 @@ import {
   compareBySort,
   CoreClaimQueue,
   decodeTopicalPrior,
+  displayTitle,
   evidenceGroupKey,
   evidenceGroupLabel,
   evidenceTokens,
+  formatAddedToPubMed,
   likelihoodBand,
   llmVerdict,
   matchesFilters,
   matchesQuery,
   parsePmidBlock,
+  searchBlob,
 } from "@/components/edit/core-claim-queue";
 import type { FilterKey } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
@@ -34,8 +37,10 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
   return {
     pmid: "30418319",
     title: "Advanced MRI of the brain",
-    journal: "NeuroImage",
+    journal: "Synthetic Journal of Core Imaging Science",
+    journalAbbrev: "Synth J Core Imaging Sci",
     year: 2021,
+    dateAddedToEntrez: "2026-02-18",
     authorsString: "Testerson A, Fixture B",
     fullAuthorsString: "Testerson A, Fixture B, Sample C",
     abstract: "We imaged the brain in detail.",
@@ -76,6 +81,16 @@ function showEvidence() {
 /** The expanded per-signal list of the only open card. */
 function evidence() {
   return screen.getByLabelText("evidence");
+}
+
+/**
+ * The card header's meta line (the sibling right under the title), whitespace-
+ * collapsed. The middot separators carry no spaces of their own, so this reads
+ * as "<journal>·<vintage>·PMID <n>" — the copy button contributes no text.
+ */
+function metaLine(container: HTMLElement): string {
+  const el = container.querySelector("h3")?.nextElementSibling;
+  return (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 afterEach(() => {
@@ -157,16 +172,74 @@ describe("CoreClaimQueue", () => {
     expect(container.querySelector("mark")?.textContent).toBe("CBIC");
   });
 
-  it("shows the PMID verbatim (linked to PubMed), citation count, DOI, and rationale", () => {
+  it("shows the PMID verbatim (linked to PubMed) and the rationale", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     showEvidence();
     expect(screen.getByText("Acknowledges the imaging core for confocal microscopy.")).toBeTruthy();
-    expect(screen.getByText("12 citations")).toBeTruthy();
     // the PMID is shown verbatim and is the PubMed link
     const pubmed = screen.getByRole("link", { name: /PMID 30418319/ });
     expect(pubmed.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/30418319/");
-    const doi = screen.getByRole("link", { name: /doi/i });
-    expect(doi.getAttribute("href")).toBe("https://doi.org/10.1000/synthetic.2021.001");
+  });
+
+  it("reads the header meta as one middot line: abbreviated journal, PubMed date, PMID", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
+    );
+    expect(metaLine(container)).toBe(
+      "Synth J Core Imaging Sci·Added to PubMed Feb 18, 2026·PMID 30418319",
+    );
+    // the full journal title is NOT what the card shows
+    expect(screen.queryByText("Synthetic Journal of Core Imaging Science")).toBeNull();
+  });
+
+  it("falls back to the full journal title when no abbreviation is on file", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row({ journalAbbrev: null })]} confirmed={[]} />,
+    );
+    expect(metaLine(container)).toBe(
+      "Synthetic Journal of Core Imaging Science·Added to PubMed Feb 18, 2026·PMID 30418319",
+    );
+  });
+
+  it("falls back to the publication year when PubMed never indexed a date", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row({ dateAddedToEntrez: null })]} confirmed={[]} />,
+    );
+    expect(metaLine(container)).toBe("Synth J Core Imaging Sci·2021·PMID 30418319");
+    expect(metaLine(container)).not.toContain("Added to PubMed");
+  });
+
+  it("renders no vintage and no dangling separator when the row has neither date nor year", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ dateAddedToEntrez: null, year: null, journal: null, journalAbbrev: null }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    // one surviving part → no separator at all, and no "Added to PubMed —"
+    expect(metaLine(container)).toBe("PMID 30418319");
+  });
+
+  it("keeps the DOI, the citation count and the RCR readout off the card header", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ relativeCitationRatio: 2.1, nihPercentile: 0 })]}
+        confirmed={[]}
+      />,
+    );
+    const meta = metaLine(container);
+    expect(meta).not.toContain("RCR");
+    expect(meta).not.toContain("pct");
+    expect(meta).not.toContain("DOI");
+    expect(screen.queryByRole("link", { name: /doi/i })).toBeNull();
+    // the pre-existing "RCR 0 (0th pct)" case: nihPercentile is literally 0, not
+    // null, so the old header rendered it. It goes with the readout.
+    expect(screen.queryByText(/RCR/)).toBeNull();
+    expect(screen.queryByText(/citations?/i)).toBeNull();
   });
 
   it("copies the PMID and flips the button label", () => {
@@ -1180,24 +1253,6 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByText(/re-files on next load/)).toBeNull();
   });
 
-  it("suppresses a 0 on a just-published paper as 'No citations yet'", () => {
-    render(
-      <CoreClaimQueue core={CORE} candidates={[row({ citationCount: 0, year: 9999 })]} confirmed={[]} />,
-    );
-    expect(screen.getByText(/No citations yet · published 9999/)).toBeTruthy();
-  });
-
-  it("shows RCR and percentile when present", () => {
-    render(
-      <CoreClaimQueue
-        core={CORE}
-        candidates={[row({ relativeCitationRatio: 2.1, nihPercentile: 89 })]}
-        confirmed={[]}
-      />,
-    );
-    expect(screen.getByText(/RCR 2.1 \(89th pct\)/)).toBeTruthy();
-  });
-
   it("highlights the core-staff author inline in the byline (best-effort)", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     // the "Testerson A" token links to the staff profile
@@ -1361,7 +1416,7 @@ describe("CoreClaimQueue", () => {
     render(
       <CoreClaimQueue
         core={CORE}
-        candidates={[row({ pmid: "111", title: "A candidate" })]}
+        candidates={[row({ pmid: "111", title: "A candidate." })]}
         confirmed={[row({ pmid: "222", title: "A confirmed one", claimed: true })]}
       />,
     );
@@ -1373,6 +1428,13 @@ describe("CoreClaimQueue", () => {
     expect(csvText).toContain("222"); // confirmed PMID
     expect(csvText).toContain("Confirmed");
     expect(csvText).toContain("PMID: 111."); // citation string
+    // The DOI column is the export's own reader of `doi` — the card header
+    // dropped its DOI link, the CSV keeps the field.
+    expect(csvText).toContain("DOI");
+    expect(csvText).toContain("10.1000/synthetic.2021.001");
+    // ...and the Title column carries the RAW title: the trailing-period strip
+    // is a render-only concern, it must not reach the export.
+    expect(csvText).toContain("111,A candidate.,");
     clickSpy.mockRestore();
   });
 });
@@ -1758,5 +1820,79 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(commonParent?.contains(textarea)).toBe(true);
     const position = outerRow?.compareDocumentPosition(textarea) ?? 0;
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("displayTitle", () => {
+  it("drops the sentence-final period PubMed stores on nearly every title", () => {
+    expect(displayTitle("A synthetic study of core usage.")).toBe(
+      "A synthetic study of core usage",
+    );
+  });
+
+  it("leaves a title that carries no trailing period alone", () => {
+    expect(displayTitle("Advanced MRI of the brain")).toBe("Advanced MRI of the brain");
+  });
+
+  it("keeps a trailing question mark or exclamation — that punctuation is the title's own", () => {
+    expect(displayTitle("Does the assay scale?")).toBe("Does the assay scale?");
+    expect(displayTitle("It scales!")).toBe("It scales!");
+  });
+
+  it("keeps a period that closes an initialism (dropping it would misspell the word)", () => {
+    expect(displayTitle("Core facility funding in the U.S.")).toBe(
+      "Core facility funding in the U.S.",
+    );
+    expect(displayTitle("A trial run at the N.I.H.")).toBe("A trial run at the N.I.H.");
+  });
+
+  it("strips ONE period only, and survives degenerate input", () => {
+    expect(displayTitle("Ends in an ellipsis...")).toBe("Ends in an ellipsis..");
+    expect(displayTitle("")).toBe("");
+  });
+
+  it("is display-only — the raw title still reaches the free-text filter", () => {
+    // searchBlob is the card's own text; it must keep matching what curators
+    // paste in, periods and all.
+    expect(searchBlob(row({ title: "A synthetic study of core usage." }))).toContain(
+      "a synthetic study of core usage.",
+    );
+  });
+});
+
+describe("formatAddedToPubMed", () => {
+  it("reads as the mockup does", () => {
+    expect(formatAddedToPubMed("2026-02-18")).toBe("Added to PubMed Feb 18, 2026");
+  });
+
+  it("returns null with no date, so the caller renders nothing rather than an empty slot", () => {
+    expect(formatAddedToPubMed(null)).toBeNull();
+    expect(formatAddedToPubMed("")).toBeNull();
+    expect(formatAddedToPubMed("not-a-date")).toBeNull();
+  });
+
+  it("formats in UTC — a local format would show the PREVIOUS day west of UTC", () => {
+    // `dateAddedToEntrez` is a `@db.Date`: a calendar date with no zone, which
+    // parses to midnight UTC. Format that instant in New York and Feb 18 reads
+    // as Feb 17 — the exact off-by-one this pins.
+    const prev = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      // Control: proves the zone switch actually took, so this test cannot pass
+      // vacuously on a UTC runner.
+      expect(
+        new Date("2026-02-18T00:00:00Z").toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }),
+      ).toBe("Feb 17, 2026");
+      expect(formatAddedToPubMed("2026-02-18")).toBe("Added to PubMed Feb 18, 2026");
+      // and the same trap at a month boundary, where it also changes the month
+      expect(formatAddedToPubMed("2026-03-01")).toBe("Added to PubMed Mar 1, 2026");
+    } finally {
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
   });
 });

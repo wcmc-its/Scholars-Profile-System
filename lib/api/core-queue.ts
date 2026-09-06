@@ -46,7 +46,16 @@ export interface CoreQueueRow {
   pmid: string;
   title: string;
   journal: string | null;
+  /** NLM/Index Medicus abbreviation ("J Am Med Inform Assoc"). The queue card
+   *  header shows this in place of the full `journal`, falling back to it when
+   *  null — some publications have no abbreviation on file. */
+  journalAbbrev: string | null;
   year: number | null;
+  /** The date PubMed indexed the record, as `YYYY-MM-DD` (the column is
+   *  `@db.Date`, so it is a calendar date with no time or zone — kept as a
+   *  string here so nothing downstream can re-interpret it in a local zone and
+   *  slip a day). Null when never ingested; the card falls back to `year`. */
+  dateAddedToEntrez: string | null;
   authorsString: string | null;
   /** Full author list (the truncated `authorsString` drops the tail). */
   fullAuthorsString: string | null;
@@ -155,7 +164,9 @@ type QueueReader = Pick<
 const CARD_PUBLICATION_SELECT = {
   title: true,
   journal: true,
+  journalAbbrev: true,
   year: true,
+  dateAddedToEntrez: true,
   authorsString: true,
   fullAuthorsString: true,
   abstract: true,
@@ -170,6 +181,17 @@ const CARD_PUBLICATION_SELECT = {
 
 /** Cap WCM byline authors per card — mega-author papers would otherwise be a wall. */
 const WCM_AUTHORS_CAP = 12;
+
+/**
+ * A `@db.Date` column as a bare `YYYY-MM-DD` calendar date. Prisma hands one
+ * back as a JS Date pinned to midnight UTC, so slicing the ISO string is the
+ * one reading that cannot drift — `getDate()` and friends would render the
+ * PREVIOUS day for any viewer west of UTC. Same conversion
+ * `lib/api/export-publications.ts` already uses on this column.
+ */
+function isoDate(d: Date | null): string | null {
+  return d == null ? null : d.toISOString().slice(0, 10);
+}
 
 /**
  * Load the review queue for one core, or `null` when the core does not exist.
@@ -308,7 +330,9 @@ export async function loadCoreReviewQueue(
       pmid: r.pmid,
       title: r.publication.title,
       journal: r.publication.journal,
+      journalAbbrev: r.publication.journalAbbrev,
       year: r.publication.year,
+      dateAddedToEntrez: isoDate(r.publication.dateAddedToEntrez),
       authorsString: r.publication.authorsString,
       fullAuthorsString: r.publication.fullAuthorsString,
       abstract: r.publication.abstract,
@@ -349,7 +373,9 @@ export async function loadCoreReviewQueue(
     pmid: p.pmid,
     title: p.title,
     journal: p.journal,
+    journalAbbrev: p.journalAbbrev,
     year: p.year,
+    dateAddedToEntrez: isoDate(p.dateAddedToEntrez),
     authorsString: p.authorsString,
     fullAuthorsString: p.fullAuthorsString,
     abstract: p.abstract,
