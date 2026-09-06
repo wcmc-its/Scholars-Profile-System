@@ -5,7 +5,7 @@
  * Body: `{ coreId, pmids: string[], status: "claimed" | "rejected" }`.
  *
  * The scale companion to `POST /api/edit/core-claim`: the single route is fanned
- * out client-side one request per PMID, which is fine for a typical high-confidence
+ * out client-side one request per PMID, which is fine for a typical hand-picked
  * band but means N round-trips / N transactions / N partial-failure modes once a
  * band runs to many hundreds. This loops the SAME upsert + B03 audit over every
  * pmid in ONE MySQL transaction (auth/audit/writeback all reused verbatim), then
@@ -16,7 +16,7 @@
  *
  * A pmid SPS hasn't ingested is reported back as `notFound`, not written —
  * this also doubles as the manual "claim a block of known PMIDs" entry point
- * (the same endpoint the engine-sourced "Confirm N high-confidence" button
+ * (the same endpoint the queue's hand-picked selection bar
  * uses; every pmid there already has a `publication` row, so this check is a
  * no-op for that caller).
  *
@@ -42,7 +42,7 @@ import { writeBackCoreClaim } from "@/lib/cores/claim-writeback";
 const PATH = "/api/edit/core-claim/bulk";
 /** A PMID is a non-empty run of digits, no leading zero (PubMed never mints one). */
 const PMID_PATTERN = /^[1-9][0-9]*$/;
-/** Cap the batch — generous for any real high-confidence band, but a guard so a
+/** Cap the batch — generous for any real hand-picked selection, but a guard so a
  *  pathological body is a 400, not an unbounded transaction. */
 const MAX_BULK_PMIDS = 500;
 

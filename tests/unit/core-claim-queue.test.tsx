@@ -856,6 +856,38 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByTestId("core-claim-live").textContent).toBe("Confirmed 2 publications.");
   });
 
+  it("drops a selected row from the bulk post once the filter hides it", async () => {
+    // Ticking a row and then narrowing the filter used to leave it in the batch: the bar
+    // counted every selected pmid, visible or not. Acting on rows the reviewer cannot see
+    // is the exact failure that retiring the high-confidence sweep was meant to end.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Alpha imaging study" }),
+          row({ pmid: "2", title: "Beta sequencing study" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Alpha imaging study" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Beta sequencing study" }));
+    expect(screen.getByText("2 papers selected")).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter candidates" }), {
+      target: { value: "beta" },
+    });
+    expect(screen.getByText("1 paper selected")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body).pmids).toEqual(["2"]);
+  });
+
   it("surfaces the failure on every selected row when the bulk POST is refused", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);

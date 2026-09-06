@@ -514,9 +514,9 @@ export function CoreClaimQueue({
       if (!next.delete(key)) next.add(key);
       return next;
     });
-  // The text box has no clear affordance of its own, so "Clear filters" is it —
-  // one link that drops BOTH narrowings, because the count line and the empty
-  // state below report them as one.
+  // type="search" gives the box the platform's own clear button, but that only
+  // drops the text. "Clear filters" is the one link that drops BOTH narrowings,
+  // because the count line and the empty state below report them as one.
   const clearFilters = () => {
     setFilter(new Set());
     setQuery("");
@@ -852,7 +852,12 @@ export function CoreClaimQueue({
   } else {
     groups.push({ key: "all", rows: visible });
   }
-  const selectedPmids = [...selected].filter((p) => !decided.has(p));
+  // Intersected with `visible`, not just `decided`: a row you tick and then hide with a
+  // facet or the filter box must not be swept up by "Confirm all". Acting on rows the
+  // reviewer cannot see is precisely what removing the high-confidence sweep was for, and
+  // a Set keeps it O(n) on a queue that can carry a few hundred rows.
+  const visiblePmids = new Set(visible.map((r) => r.pmid));
+  const selectedPmids = [...selected].filter((p) => !decided.has(p) && visiblePmids.has(p));
   // Tabs only earn their place once there's history to switch to; otherwise the
   // queue is the single "To review" scroll it always was.
   const hasHistory = confirmed.length > 0 || rejected.length > 0;
