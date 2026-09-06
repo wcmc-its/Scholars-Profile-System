@@ -1119,14 +1119,15 @@ export const getScholarFullProfileBySlug = cache(
               meshTerms: true,
               impactScore: true,
               authors: {
-                // WCM authorship rows only. Every row is WCM today
-                // (`buildAuthorshipRows` in etl/reciter/index.ts drops authors
-                // outside `ourCwidSet`), and the chip mappers below already
-                // require `au.scholar`, so this changes no output — it is a
-                // projection guard: were non-WCM authors ingested, this read
-                // would otherwise haul the full byline of every publication in
-                // a scholar's list back over the wire only to discard most of
-                // it in JS.
+                // WCM authorship rows only — a projection guard, not a
+                // behavior change: the `wcmAuthors` mapper below already
+                // requires `au.scholar`, which a null-cwid row never has, so
+                // output is identical with or without it. Deployed data is
+                // WCM-only anyway (the ETL `buildAuthorshipRows` skips authors
+                // outside `ourCwidSet`; staging and prod each held zero
+                // null-cwid rows, 2026-09) and `seed/publications.ts` is the
+                // one writer of non-WCM rows. This keeps such rows from being
+                // hauled over the wire per publication just to be dropped.
                 where: { cwid: { not: null } },
                 orderBy: { position: "asc" },
                 include: {

@@ -137,7 +137,7 @@ exports[`buildPeopleDoc — golden snapshots > captures a sparse scholar (isComp
 exports[`buildPublicationDoc — golden snapshots > captures a fully-populated publication (every optional field set) 1`] = `
 {
   "abstract": "We study cardiac repair following acute MI.",
-  "authorNames": "Ann Researcher, Bob Senior",
+  "authorNames": "Ann Researcher, External Coauthor, Bob Senior",
   "citationCount": 17,
   "dateAddedToEntrez": 2024-06-15T00:00:00.000Z,
   "doi": "10.1234/jcard.2024.001",

@@ -322,15 +322,15 @@ export async function fetchTopicRank(
  * Authorship role of a scholar on a specific publication. Powers the role
  * pill on pub-chip / co-author surfaces.
  *
- * `cwid IS NOT NULL` restricts the scan to WCM authorship rows. That is the
- * whole population today — `buildAuthorshipRows` (etl/reciter/index.ts) skips
- * any author not in `ourCwidSet`, so every row already has a cwid — but
- * `firstCount` / `lastCount` below are counted across EVERY returned row and
- * drive the "first" vs "co-first" (and "senior" vs "co-senior") wording of the
- * role pill. If non-WCM authors are ever ingested with their own is_first /
- * is_last flags, an unfiltered count would silently reword the pill on most
- * papers. The pill is a claim about WCM co-authorship, so scope the count to
- * WCM rows explicitly rather than relying on the ingest staying WCM-only.
+ * `cwid IS NOT NULL` scopes the count to WCM authorship rows. `firstCount` /
+ * `lastCount` below count EVERY returned row and drive the "first" vs
+ * "co-first" ("senior" vs "co-senior") wording of the role pill, which is a
+ * claim about WCM co-authorship — a non-WCM byline carrying its own is_first
+ * would reword it. Deployed data is WCM-only (the ETL `buildAuthorshipRows`,
+ * etl/reciter/index.ts, skips authors outside `ourCwidSet`; staging and prod
+ * each held zero null-cwid rows, 2026-09), but `seed/publications.ts` does
+ * write non-WCM rows with is_first set, so on a seeded dev/CI database this
+ * filter changes the counts rather than being a no-op.
  */
 export async function fetchAuthorshipOnPub(
   cwid: string,
