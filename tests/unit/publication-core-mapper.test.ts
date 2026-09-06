@@ -411,13 +411,27 @@ describe("toPubCoreUpsertPayload (Block 6 upsert payload)", () => {
     // A source check, not a style check: re-inlining a field list in either
     // half is how the two drifted apart before, and no runtime assertion can
     // see a field that was never sent.
+    //
+    // The window is the whole batch LOOP, not the `db.write.publicationCore.upsert(`
+    // call. Anchored at the call it opened one line BELOW where the payload is
+    // built, so a neutralization above it was invisible:
+    //
+    //   const payload = { ...toPubCoreUpsertPayload(w), methodEvidence: undefined };
+    //
+    // typechecked at exit 0 (every column is optional in Prisma's update input),
+    // left all 22 tests in this file green, and stopped method_evidence being
+    // written for good — exactly the silent stopped-write this guard exists to
+    // catch. Starting at the loop covers the payload's construction too.
     const src = readFileSync(path.join(process.cwd(), "etl/dynamodb/index.ts"), "utf8");
-    const start = src.indexOf("db.write.publicationCore.upsert(");
+    const start = src.indexOf("for (let i = 0; i < coreMap.writes.length; i += CORE_BATCH)");
     expect(start).toBeGreaterThan(-1);
     const end = src.indexOf("pubCoreRowsUpserted +=", start);
     expect(end).toBeGreaterThan(start);
     const block = src.slice(start, end);
 
+    // Derived from the mapper's helper and used UNALTERED: no spread-and-override,
+    // no second object literal between the helper and the two halves.
+    expect(block).toMatch(/const payload = toPubCoreUpsertPayload\(w\);/);
     expect(block).toMatch(/create:\s*\{[\s\S]*?\.\.\.payload[\s\S]*?\}/);
     expect(block).toMatch(/update:\s*payload\b/);
     for (const k of PAYLOAD_KEYS) {
