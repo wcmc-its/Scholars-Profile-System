@@ -566,8 +566,11 @@ describe("CoreClaimQueue", () => {
     // absent entirely (not disabled, not zero-labelled)
     expect(screen.queryByRole("checkbox", { name: /^Client co-author/ })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: /^No prior usage/ })).toBeNull();
-    // "All" is the reset and always stands
-    expect(screen.getByRole("button", { name: /^All/ })).toBeTruthy();
+    // and every pill in the group is a genuine checkbox — the "All" reset pill
+    // is gone, so there is no button-among-checkboxes left in this row
+    expect(screen.queryByRole("button", { name: /^All\b/ })).toBeNull();
+    const facets = screen.getByRole("group", { name: "Filter candidates by evidence" });
+    expect(within(facets).queryAllByRole("button")).toEqual([]);
   });
 
   it("shows the Client co-author facet once a byline author is a known client", () => {
@@ -593,7 +596,7 @@ describe("CoreClaimQueue", () => {
     );
   });
 
-  it("treats 'All' as a reset button, not another checkbox", () => {
+  it("has NO 'All' reset pill — 'Clear filters' is the only reset, for pills and text alike", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -604,6 +607,7 @@ describe("CoreClaimQueue", () => {
             title: "Bare paper",
             signalAck: false,
             ackAlias: null,
+            ackSnippet: null,
             coauthors: [],
             coauthorScholars: [],
             llmScore: null,
@@ -614,18 +618,28 @@ describe("CoreClaimQueue", () => {
       />,
     );
     const box = (name: RegExp) => screen.getByRole("checkbox", { name });
-    const all = () => screen.getByRole("button", { name: /^All/ });
-    // "All" is an ACTION, not another checkbox: a checked box that cannot be
-    // unchecked announces nothing on Space. Only the real facets are checkboxes.
-    expect(all().getAttribute("aria-checked")).toBeNull();
+    // the pill is gone in every guise — as a button, and as a checkbox
+    expect(screen.queryByRole("button", { name: /^All\b/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /^All\b/ })).toBeNull();
 
+    // a PILL narrowing resets through "Clear filters"
     fireEvent.click(box(/^Acknowledged/));
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByText("Bare paper")).toBeNull();
-
-    fireEvent.click(all());
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByText("Bare paper")).toBeTruthy();
+
+    // ...and so does a TEXT-ONLY narrowing, which the retired "All" pill never
+    // touched: with it gone this link is the sole reset affordance on the queue.
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "acked" },
+    });
+    expect(screen.queryByText("Bare paper")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect((screen.getByLabelText("Filter candidates") as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("Bare paper")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
   });
 
   it("labels each facet with its count over the still-undecided rows", async () => {
@@ -651,7 +665,7 @@ describe("CoreClaimQueue", () => {
       />,
     );
     const label = (name: RegExp) => screen.getByRole("checkbox", { name }).textContent;
-    expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 2");
+    expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
     expect(label(/^Acknowledged/)).toBe("Acknowledged 1");
     expect(label(/^Staff co-author/)).toBe("Staff co-author 1");
     expect(label(/^LLM-flagged/)).toBe("LLM-flagged 1");
@@ -665,7 +679,9 @@ describe("CoreClaimQueue", () => {
     await waitFor(() =>
       expect(screen.queryByRole("checkbox", { name: /^Acknowledged/ })).toBeNull(),
     );
-    expect(screen.getByRole("button", { name: /^All/ }).textContent).toBe("All 1");
+    // the remaining facets fall with it — the decided row counts for nothing
+    expect(label(/^No prior usage/)).toBe("No prior usage on the byline 1");
+    expect(screen.queryByRole("checkbox", { name: /^Staff co-author/ })).toBeNull();
   });
 
   it("re-sorts by LLM score when selected", () => {
@@ -688,13 +704,34 @@ describe("CoreClaimQueue", () => {
     expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
   });
 
-  it("keeps the shipped 'Strongest signal' and 'LLM score' sort options", () => {
+  it("splits the sort control into a visible 'Sort' label and BARE option text", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const options = within(screen.getByLabelText("Sort by") as HTMLSelectElement)
+    const select = screen.getByLabelText("Sort by") as HTMLSelectElement;
+    const options = within(select)
       .getAllByRole("option")
       .map((o) => o.textContent);
-    expect(options).toContain("Sort: Strongest signal");
-    expect(options).toContain("Sort: LLM score");
+    // the label now carries the word, so no option repeats it. Order is the
+    // shipped order (unchanged by this pass); membership is what's pinned.
+    expect(options).toHaveLength(6);
+    for (const label of [
+      "Most certain first",
+      "Most uncertain first",
+      "Newest in PubMed",
+      "Most cited",
+      "Strongest signal",
+      "LLM score",
+    ]) {
+      expect(options).toContain(label);
+    }
+    expect(options.some((o) => o?.startsWith("Sort"))).toBe(false);
+
+    // the visible label is a real <label for=…> tied to the select — not loose
+    // text sitting next to it...
+    const visible = screen.getByText("Sort", { selector: "label" }) as HTMLLabelElement;
+    expect(visible.htmlFor).toBe(select.id);
+    expect(select.id).not.toBe("");
+    // ...and the select keeps the fuller accessible name the sr-only span gave it
+    expect(select.getAttribute("aria-label")).toBe("Sort by");
   });
 
   it("defaults to likelihood-desc ordering, not uncertain-first", () => {
@@ -777,14 +814,146 @@ describe("CoreClaimQueue", () => {
     expect((document.activeElement as HTMLElement)?.getAttribute("data-pmid")).toBe("2");
   });
 
+  it("moves roving focus with j (down) and k (up), the vi twins of the arrows", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "First" }),
+          row({ pmid: "2", title: "Second" }),
+          row({ pmid: "3", title: "Third" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const card = (pmid: string) =>
+      container.querySelector(`[data-card][data-pmid="${pmid}"]`) as HTMLElement;
+    const focused = () => (document.activeElement as HTMLElement)?.getAttribute("data-pmid");
+
+    fireEvent.keyDown(card("1"), { key: "j" });
+    expect(focused()).toBe("2");
+    fireEvent.keyDown(card("2"), { key: "j" });
+    expect(focused()).toBe("3");
+    fireEvent.keyDown(card("3"), { key: "k" });
+    expect(focused()).toBe("2");
+    fireEvent.keyDown(card("2"), { key: "k" });
+    expect(focused()).toBe("1");
+    // uppercase reads the same (the handler lowercases the key)
+    fireEvent.keyDown(card("1"), { key: "J" });
+    expect(focused()).toBe("2");
+  });
+
+  it("'x' ticks the focused card AND arms selection mode from the default state", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Picked A" }), row({ pmid: "2", title: "Picked B" })]}
+        confirmed={[]}
+      />,
+    );
+    const card = (pmid: string) =>
+      container.querySelector(`[data-card][data-pmid="${pmid}"]`) as HTMLElement;
+    // selection mode is OFF by default — no checkboxes, no selection bar
+    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Select Picked A" })).toBeNull();
+
+    fireEvent.keyDown(card("1"), { key: "x" });
+    // it armed the mode...
+    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
+    // ...and ticked this row, and only this row
+    expect(
+      (screen.getByRole("checkbox", { name: "Select Picked A" }) as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("checkbox", { name: "Select Picked B" }) as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(screen.getByText("1 paper selected")).toBeTruthy();
+
+    // a second 'x' TOGGLES it back off (and leaves the mode armed)
+    fireEvent.keyDown(card("1"), { key: "x" });
+    expect(
+      (screen.getByRole("checkbox", { name: "Select Picked A" }) as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(screen.queryByText(/paper[s]? selected/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
+  });
+
+  it("advertises the new keys on the card shell via aria-keyshortcuts", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
+    );
+    const shell = container.querySelector("[data-card]") as HTMLElement;
+    const keys = (shell.getAttribute("aria-keyshortcuts") ?? "").split(" ");
+    for (const k of ["a", "r", "x", "j", "k", "ArrowUp", "ArrowDown"]) expect(keys).toContain(k);
+  });
+
   it("does NOT fire a shortcut typed into a child control (the shell-only guard)", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "First" }), row({ pmid: "2", title: "Second" })]}
+        confirmed={[]}
+      />,
+    );
 
     // 'a' typed while the Confirm button (a child) is focused must NOT claim.
-    fireEvent.keyDown(screen.getByRole("button", { name: /^confirm$/i }), { key: "a" });
+    const confirm = screen.getAllByRole("button", { name: /^confirm$/i })[0];
+    fireEvent.keyDown(confirm, { key: "a" });
     expect(fetchMock).not.toHaveBeenCalled();
+    // ...nor may the new keys act from a child: no roving move, no selection.
+    fireEvent.keyDown(confirm, { key: "j" });
+    expect(container.querySelector("[data-card]:focus")).toBeNull();
+    fireEvent.keyDown(confirm, { key: "x" });
+    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
+
+    // The same holds for a child INPUT: arm selection, then type into the row's
+    // own checkbox. 'x' there must toggle nothing beyond the native control.
+    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
+    const box = screen.getByRole("checkbox", { name: "Select First" }) as HTMLInputElement;
+    fireEvent.keyDown(box, { key: "x" });
+    expect(box.checked).toBe(false);
+    fireEvent.keyDown(box, { key: "j" });
+    expect(container.querySelector("[data-card]:focus")).toBeNull();
+    fireEvent.keyDown(box, { key: "r" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT hijack j/k/x typed into the FILTER BOX", () => {
+    // The load-bearing case for the shell-only guard now that the shortcuts are
+    // ordinary printable characters and the filter box moved into the header:
+    // typing a word containing j, k or x must narrow the queue and nothing else
+    // — no focus jump, no selection mode, no claim.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Jacks, Kydd and Xu on imaging" }),
+          row({ pmid: "2", title: "Second" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    for (const key of ["j", "k", "x", "a", "r", "u", "ArrowDown", "ArrowUp"]) {
+      fireEvent.keyDown(input, { key });
+    }
+    // focus never left the box for a card, no card was decided, no mode armed
+    expect(document.activeElement).toBe(input);
+    expect(container.querySelector("[data-card]:focus")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: /^Select / })).toBeNull();
+
+    // and the box still filters, so the guard didn't cost the control anything
+    fireEvent.change(input, { target: { value: "jacks" } });
+    expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
   });
 
   it("keeps a just-decided row visible under a facet that would exclude it, so undo stays reachable", async () => {
@@ -1397,22 +1566,11 @@ describe("CoreClaimQueue", () => {
     );
   });
 
-  it("downloads the queue as a CSV citation list with PMID + status columns", () => {
-    // jsdom's Blob has no .text(); capture the CSV via the constructor instead.
-    let csvText = "";
-    vi.stubGlobal(
-      "Blob",
-      class {
-        constructor(parts: string[]) {
-          csvText = parts.join("");
-        }
-      },
-    );
-    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() });
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => undefined);
-
+  it("offers no CSV download — the button came out to match the mockup toolbar", () => {
+    // Owner decision: the header is [Known clients] [Add PMIDs] [Reporting...]
+    // and nothing else. `downloadCsv()` is deliberately KEPT in the component,
+    // uncalled, for the day a reporting view gives it an entry point again — so
+    // this asserts the BUTTON is gone, not that the export was deleted.
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1420,22 +1578,8 @@ describe("CoreClaimQueue", () => {
         confirmed={[row({ pmid: "222", title: "A confirmed one", claimed: true })]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /download csv/i }));
-
-    expect(csvText).toContain("PMID,Title,Authors"); // header row
-    expect(csvText).toContain("111"); // candidate PMID
-    expect(csvText).toContain("To review");
-    expect(csvText).toContain("222"); // confirmed PMID
-    expect(csvText).toContain("Confirmed");
-    expect(csvText).toContain("PMID: 111."); // citation string
-    // The DOI column is the export's own reader of `doi` — the card header
-    // dropped its DOI link, the CSV keeps the field.
-    expect(csvText).toContain("DOI");
-    expect(csvText).toContain("10.1000/synthetic.2021.001");
-    // ...and the Title column carries the RAW title: the trailing-period strip
-    // is a render-only concern, it must not reach the export.
-    expect(csvText).toContain("111,A candidate.,");
-    clickSpy.mockRestore();
+    expect(screen.queryByRole("button", { name: /download/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /csv/i })).toBeNull();
   });
 });
 
@@ -1757,7 +1901,7 @@ describe("compareBySort", () => {
 // behavior is covered by tests/unit/core-clients-panel.test.tsx; this just
 // confirms CoreClaimQueue wires the toolbar button in with the right count.
 describe("CoreClaimQueue — Known clients toolbar wiring", () => {
-  it("renders the Known clients button next to Add PMIDs, with the active count", () => {
+  it("renders Known clients with a PARENTHESISED count, first of the three header buttons", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1774,13 +1918,30 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
         ]}
       />,
     );
-    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
     const knownClients = screen.getByRole("button", { name: /Known clients/ });
-    expect(knownClients.textContent).toContain("1");
-    // Known clients sits right after Add PMIDs in DOM order (toolbar wiring).
+    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
+    const reporting = screen.getByRole("button", { name: /Reporting/ });
+    // "(1)", not the old bare "1"
+    expect(knownClients.textContent?.replace(/\s+/g, " ").trim()).toBe("Known clients (1)");
+    // mockup order: [Known clients (N)] [Add PMIDs] [Reporting...]
     expect(
-      addPmids.compareDocumentPosition(knownClients) & Node.DOCUMENT_POSITION_FOLLOWING,
+      knownClients.compareDocumentPosition(addPmids) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      addPmids.compareDocumentPosition(reporting) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("ships 'Reporting...' DISABLED with the reason on it — there is no reporting route", () => {
+    // An enabled control that no-ops is the failure this codebase keeps hitting.
+    // The button is drawn because the mockup draws it; it is inert and SAYS so.
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const reporting = screen.getByRole("button", { name: /Reporting/ }) as HTMLButtonElement;
+    expect(reporting.textContent).toContain("Reporting...");
+    expect(reporting.disabled).toBe(true);
+    expect(reporting.getAttribute("aria-disabled")).toBe("true");
+    // the explanation is reachable, not just a greyed-out mystery
+    expect(reporting.getAttribute("title")).toBe("Reporting view is not built yet");
   });
 
   it("renders the Known clients button with a 0 count when no clients prop is passed", () => {
@@ -1802,14 +1963,15 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(textarea).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
 
-    // The OUTER toolbar row is the justify-between container that wraps both
-    // button groups (view tabs/heading + the Add PMIDs / Known clients
-    // buttons) — not just the inner "flex flex-wrap items-center gap-2"
+    // The OUTER toolbar row is the justify-end container holding the three
+    // header buttons — not just the inner "flex flex-wrap items-center gap-2"
     // button group. `toggle.closest("div")` alone would only find that inner
     // group and miss a regression that nests the panel inside the outer row.
+    // (It was justify-BETWEEN while the view tabs shared this row; the tabs are
+    // in the queue panel now, so the buttons sit alone against the right edge.)
     const outerRow = toggle.closest('[data-slot="core-queue-toolbar"]');
     expect(outerRow).toBeTruthy();
-    expect(outerRow?.className).toContain("justify-between");
+    expect(outerRow?.className).toContain("justify-end");
     expect(outerRow?.contains(textarea)).toBe(false);
 
     // And the panel body is a later sibling in the same parent as the
@@ -1820,6 +1982,143 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(commonParent?.contains(textarea)).toBe(true);
     const position = outerRow?.compareDocumentPosition(textarea) ?? 0;
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+// The queue header as the mockup draws it: one bordered panel holding a TAB
+// STRIP (not pills), the free-text filter on the tabs' own line, the facet and
+// control rows, and a status band along the bottom.
+describe("CoreClaimQueue — header panel", () => {
+  const withHistory = (
+    <CoreClaimQueue
+      core={CORE}
+      candidates={[row({ pmid: "1" }), row({ pmid: "2" })]}
+      confirmed={[row({ pmid: "8", title: "Done pub", claimed: true })]}
+      rejected={[row({ pmid: "9", title: "Nope pub" })]}
+    />
+  );
+  const panel = (container: HTMLElement) =>
+    container.querySelector('[data-slot="core-queue-panel"]') as HTMLElement;
+
+  it("wraps the tabs, facets, controls and status strip in ONE bordered panel", () => {
+    const { container } = render(withHistory);
+    const p = panel(container);
+    expect(p).toBeTruthy();
+    expect(p.className).toContain("rounded-lg");
+    expect(p.className).toContain("border");
+    // everything the header owns lives inside it...
+    expect(p.contains(screen.getByRole("group", { name: "Queue view" }))).toBe(true);
+    expect(p.contains(screen.getByLabelText("Filter candidates"))).toBe(true);
+    expect(p.contains(screen.getByRole("group", { name: "Filter candidates by evidence" }))).toBe(
+      true,
+    );
+    expect(p.contains(screen.getByLabelText("Sort by"))).toBe(true);
+    expect(p.contains(screen.getByText(/^Showing /))).toBe(true);
+    // ...and the candidate cards do NOT
+    expect(p.querySelector("[data-card]")).toBeNull();
+  });
+
+  it("keeps the tab semantics: a Queue view group of aria-pressed buttons", () => {
+    render(withHistory);
+    const tabs = screen.getByRole("group", { name: "Queue view" });
+    const buttons = within(tabs).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirmed 1/ }));
+    expect(
+      within(screen.getByRole("group", { name: "Queue view" }))
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-pressed")),
+    ).toEqual(["false", "true", "false"]);
+    expect(screen.getByText("Done pub")).toBeTruthy();
+  });
+
+  it("renders Confirmed/Rejected tabs ONLY when their own count is above 0", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row()]}
+        confirmed={[row({ pmid: "8", title: "Done pub", claimed: true })]}
+      />,
+    );
+    const tabs = screen.getByRole("group", { name: "Queue view" });
+    expect(
+      within(tabs)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["To review1", "Confirmed1"]);
+    expect(within(tabs).queryByRole("button", { name: /Rejected/ })).toBeNull();
+  });
+
+  it("badges the ACTIVE tab's count in filled maroon and leaves inactive counts plain", () => {
+    render(withHistory);
+    const tab = (name: RegExp) =>
+      within(screen.getByRole("group", { name: "Queue view" })).getByRole("button", { name });
+    const countSpan = (el: HTMLElement) => el.querySelector("span") as HTMLElement;
+    // active: a filled circular badge
+    expect(countSpan(tab(/^To review/)).className).toContain("bg-apollo-maroon");
+    expect(countSpan(tab(/^To review/)).className).toContain("rounded-full");
+    // inactive: plain muted text, no fill
+    expect(countSpan(tab(/^Confirmed/)).className).not.toContain("bg-apollo-maroon");
+    expect(countSpan(tab(/^Confirmed/)).className).toContain("text-muted-foreground");
+  });
+
+  it("puts the filter on the tab-strip line, and promises 'method' knowingly", () => {
+    const { container } = render(withHistory);
+    const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
+    // the mockup's exact string. NOTE `searchBlob` does NOT search a method —
+    // CoreQueueRow carries none — so that word is aspirational by owner
+    // decision, not a bug. See the comment at the placeholder.
+    expect(input.placeholder).toBe("Filter by title, author, journal, PMID or method...");
+    // same row as the tabs: one shared parent, not stacked under them
+    const tabs = screen.getByRole("group", { name: "Queue view" });
+    expect(tabs.parentElement?.contains(input)).toBe(true);
+    // and the row is the first thing in the panel
+    expect(panel(container).firstElementChild?.contains(input)).toBe(true);
+  });
+
+  it("keeps the filter OFF the Confirmed and Rejected tabs, where it is inert", () => {
+    render(withHistory);
+    expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirmed 1/ }));
+    expect(screen.queryByLabelText("Filter candidates")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Filter candidates by evidence" })).toBeNull();
+    expect(screen.queryByText(/^Showing /)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Rejected 1/ }));
+    expect(screen.queryByLabelText("Filter candidates")).toBeNull();
+
+    // ...and comes back on the way home
+    fireEvent.click(screen.getByRole("button", { name: /To review/ }));
+    expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
+  });
+
+  it("bands the status strip inside the panel: count left, key legend right", () => {
+    const { container } = render(withHistory);
+    const strip = container.querySelector('[data-slot="core-queue-status"]') as HTMLElement;
+    expect(strip).toBeTruthy();
+    expect(panel(container).contains(strip)).toBe(true);
+    // a real background band, not loose text on the page
+    expect(strip.className).toContain("bg-apollo-surface-2");
+    expect(strip.className).toContain("border-t");
+    expect(within(strip).getByText("Showing 2 of 2 candidates")).toBeTruthy();
+    // the legend, verbatim
+    const legend = strip.lastElementChild as HTMLElement;
+    expect(legend.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "Keys: j/k move · a confirm · r reject · x select · u undo",
+    );
+    // it sits after the count, pushed to the right edge
+    expect(legend.className).toContain("ml-auto");
+  });
+
+  it("still shows a plain 'To review' heading (no tab strip) when there is no history", () => {
+    const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(screen.queryByRole("group", { name: "Queue view" })).toBeNull();
+    const heading = screen.getByRole("heading", { level: 2 });
+    expect(heading.textContent).toBe("To review1");
+    // and it is inside the panel, where the tab strip would be
+    expect(panel(container).contains(heading)).toBe(true);
   });
 });
 
