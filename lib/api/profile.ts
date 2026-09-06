@@ -1119,6 +1119,15 @@ export const getScholarFullProfileBySlug = cache(
               meshTerms: true,
               impactScore: true,
               authors: {
+                // WCM authorship rows only. Every row is WCM today
+                // (`buildAuthorshipRows` in etl/reciter/index.ts drops authors
+                // outside `ourCwidSet`), and the chip mappers below already
+                // require `au.scholar`, so this changes no output — it is a
+                // projection guard: were non-WCM authors ingested, this read
+                // would otherwise haul the full byline of every publication in
+                // a scholar's list back over the wire only to discard most of
+                // it in JS.
+                where: { cwid: { not: null } },
                 orderBy: { position: "asc" },
                 include: {
                   scholar: {

@@ -321,6 +321,16 @@ export async function fetchTopicRank(
 /**
  * Authorship role of a scholar on a specific publication. Powers the role
  * pill on pub-chip / co-author surfaces.
+ *
+ * `cwid IS NOT NULL` restricts the scan to WCM authorship rows. That is the
+ * whole population today — `buildAuthorshipRows` (etl/reciter/index.ts) skips
+ * any author not in `ourCwidSet`, so every row already has a cwid — but
+ * `firstCount` / `lastCount` below are counted across EVERY returned row and
+ * drive the "first" vs "co-first" (and "senior" vs "co-senior") wording of the
+ * role pill. If non-WCM authors are ever ingested with their own is_first /
+ * is_last flags, an unfiltered count would silently reword the pill on most
+ * papers. The pill is a claim about WCM co-authorship, so scope the count to
+ * WCM rows explicitly rather than relying on the ingest staying WCM-only.
  */
 export async function fetchAuthorshipOnPub(
   cwid: string,
@@ -339,6 +349,7 @@ export async function fetchAuthorshipOnPub(
       FROM publication_author
      WHERE pmid = ${pmid}
        AND is_confirmed = 1
+       AND cwid IS NOT NULL
   `.catch(() => []);
   if (rows.length === 0) return null;
   const me = rows.find((r) => r.cwid === cwid);

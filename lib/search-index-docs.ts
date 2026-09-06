@@ -484,6 +484,17 @@ export const PUBLICATION_INDEX_WHERE = {
 
 export const PUBLICATION_INDEX_INCLUDE = {
   authors: {
+    // WCM authorship rows only. `publication_author` holds nothing else today
+    // — `buildAuthorshipRows` (etl/reciter/index.ts) drops any author outside
+    // `ourCwidSet` — so this is a no-op against current data. It is here
+    // because `authorNames` in `buildPublicationDoc` is a ^2-boosted BM25
+    // field built from these rows: an ingest of non-WCM authors would multiply
+    // that field's length on every publication document, moving BM25's
+    // field-length normalization and therefore every publication's relevance
+    // score, with nothing failing. Widening the byline the index searches is a
+    // legitimate change, but it should be a decision A/B'd against
+    // scripts/search-eval/, not a side effect of an ETL change.
+    where: { cwid: { not: null } },
     orderBy: { position: "asc" },
     include: {
       scholar: {
@@ -679,7 +690,13 @@ export function buildPublicationDoc(
     .map((a) => a.scholar!.cwid);
   if (isPublicationDark(sup, p.pmid, confirmedWcmCwids)) return null;
 
+  // Second half of the `authorNames` guard (the first is `where: { cwid: ... }`
+  // on PUBLICATION_INDEX_INCLUDE.authors). Repeated here because this mapper
+  // takes any `PublicationForIndex`-shaped rows it is handed — a caller that
+  // builds its own query, or a test fixture, would otherwise reintroduce the
+  // BM25 field-length shift the include filter exists to prevent.
   const authorNames = p.authors
+    .filter((a) => a.cwid !== null)
     .map((a) => a.externalName ?? a.scholar?.preferredName ?? "")
     .filter(Boolean)
     .join(", ");

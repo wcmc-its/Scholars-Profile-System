@@ -112,6 +112,14 @@ describe("buildPublicationDoc — golden snapshots", () => {
             status: "active",
           },
         },
+        // Non-WCM author row. `publication_author` holds none of these today
+        // — `buildAuthorshipRows` (etl/reciter/index.ts) skips any author
+        // outside `ourCwidSet`, and nothing in the repo writes `externalName`
+        // — so this fixture is hypothetical. It exists to pin the shape the
+        // builder must produce IF such rows are ever ingested: the row is
+        // dropped from `authorNames` (a ^2-boosted BM25 field, whose length
+        // drives field-length normalization for every publication doc) as
+        // well as from the WCM chip / facet fields.
         {
           pmid: "12345",
           cwid: null,
