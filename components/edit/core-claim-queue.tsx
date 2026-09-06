@@ -474,14 +474,14 @@ export function matchesFilters(
  *
  * Three fields the artboard's blob searched are dropped, each because the row
  * doesn't carry it or the card doesn't show it:
- *   - method family + tool: now ON the row (`methodTier` / `methodEvidence`,
- *     plumbed from the engine's CORE# items) but deliberately not rendered yet —
- *     whether method is a sixth counted signal or an uncounted chip strip is an
- *     open owner decision, and the `SIGNAL_COUNT = 5` denominator turns on it.
- *     Nothing shows it, so searching it would be an invisible match. NOTE the
- *     filter placeholder DOES say "method" (the owner took the mockup's string)
- *     — that word stays aspirational until the card RENDERS method, not a bug
- *     in this function;
+ *   - method family + tool: the strength BAND is now on the row (`methodTier`,
+ *     plumbed from the engine's CORE# items) but the families and tools
+ *     themselves are not — `method_evidence` is free text the loader
+ *     deliberately does not select while nothing renders it. So there is still
+ *     nothing here to match on, and the band alone is not what a reviewer would
+ *     be typing. NOTE the filter placeholder DOES say "method" (the owner took
+ *     the mockup's string) — that word stays aspirational until the card
+ *     renders method, not a bug in this function;
  *   - the affinity "who": `authorAffinity` is a bare 0-1 number here, with no
  *     person attached to search on;
  *   - `meshTerms`: on the row, but nothing has rendered it since the Details

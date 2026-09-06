@@ -31,8 +31,6 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     authorAffinity: null,
     topicalPrior: null,
     methodTier: null,
-    methodEvidence: [],
-    meshEvidence: [],
     citationCount: 0,
     pubmedUrl: null,
     doi: null,
@@ -138,13 +136,6 @@ describe("loadCoreReviewQueue mapping", () => {
     authorAffinity: "0.4200",
     topicalPrior: "0.3700",
     methodTier: "strong",
-    methodEvidence: [
-      { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
-      { family: "flow cytometry" }, // malformed — dropped by the read-side narrow
-    ],
-    meshEvidence: [
-      { descriptor_ui: "D008856", descriptor: "Microscopy, Confocal", tree_prefix: "E01" },
-    ],
     publication: {
       title: "Advanced MRI",
       journal: "Synthetic Journal of Core Imaging Science",
@@ -266,34 +257,47 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(queue?.candidates[0]?.authorAffinity).toBeNull();
   });
 
-  it("narrows the method/MeSH evidence columns, dropping malformed entries", async () => {
+  it("carries methodTier through, and a null one stays null", async () => {
     const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
     expect(r?.methodTier).toBe("strong");
-    // the { family } entry has no tool/sentence and never reaches the consumer
-    expect(r?.methodEvidence).toEqual([
-      { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
-    ]);
-    expect(r?.meshEvidence).toEqual([
-      { descriptor_ui: "D008856", descriptor: "Microscopy, Confocal", tree_prefix: "E01" },
-    ]);
-  });
 
-  it("returns empty evidence lists when the JSON columns are null or not a list", async () => {
     const empty = await loadCoreReviewQueue(
       "2",
-      reader([
-        {
-          ...rawRow(),
-          methodTier: null,
-          methodEvidence: null,
-          meshEvidence: "not-a-list",
-        } as unknown as ReturnType<typeof rawRow>,
-      ]),
+      reader([{ ...rawRow(), methodTier: null } as unknown as ReturnType<typeof rawRow>]),
     );
-    const r = empty?.candidates[0];
-    expect(r?.methodTier).toBeNull();
-    expect(r?.methodEvidence).toEqual([]);
-    expect(r?.meshEvidence).toEqual([]);
+    expect(empty?.candidates[0]?.methodTier).toBeNull();
+  });
+
+  it("does not select the free-text evidence columns nothing renders", async () => {
+    // CoreClaimQueue is a "use client" component taking `candidates` as props,
+    // so every column selected here is serialized into the RSC payload for
+    // EVERY queued row — 1,281 of them on core 14 in staging. method_evidence
+    // and mesh_evidence are lists of sentences up to 500 chars each that no
+    // component reads, and `findMany` has no `take`. The ETL still writes all
+    // three columns; this only governs what crosses to the browser. Select them
+    // back in the same change that renders them, not before.
+    let selected: Record<string, unknown> = {};
+    const capturing = {
+      core: { findUnique: async () => ({ id: "2", name: "Imaging" }) },
+      publicationCore: {
+        findMany: async (args: { select: Record<string, unknown> }) => {
+          selected = args.select;
+          return [rawRow()];
+        },
+      },
+      coreClaim: { findMany: async () => [] },
+      scholar: { findMany: async () => SCHOLARS },
+      publicationAuthor: { findMany: async () => AUTHORS },
+      publication: { findMany: async () => [] },
+    } as unknown as Parameters<typeof loadCoreReviewQueue>[1];
+
+    const r = (await loadCoreReviewQueue("2", capturing))?.candidates[0];
+    expect(selected.methodTier).toBe(true);
+    expect(selected).not.toHaveProperty("methodEvidence");
+    expect(selected).not.toHaveProperty("meshEvidence");
+    // and nothing reconstitutes them further down the mapper
+    expect(r).not.toHaveProperty("methodEvidence");
+    expect(r).not.toHaveProperty("meshEvidence");
   });
 
   it("keeps a null topicalPrior null (Number(null) would be 0)", async () => {

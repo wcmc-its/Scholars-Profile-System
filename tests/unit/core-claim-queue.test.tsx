@@ -62,8 +62,6 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     authorAffinity: 0.42,
     topicalPrior: null,
     methodTier: null,
-    methodEvidence: [],
-    meshEvidence: [],
     citationCount: 12,
     pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
     doi: "10.1000/synthetic.2021.001",
