@@ -239,6 +239,36 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Retries clearing a page's cached copy after an edit, so visitors stop seeing the old version.",
     origin: "internal", // this app's own CloudFront invalidation
   },
+  // The four below are NOT imports into this site. They are the scheduled jobs
+  // in the research-AI system that PRODUCE the data several rows above depend
+  // on. They are listed here because those rows can only report whether this
+  // site's import ran -- if the research-AI job behind one stops, the import
+  // keeps succeeding on the last data it published and stays green. Each
+  // description says which of the rows above it stands behind, because that is
+  // the question somebody has when one of these turns red.
+  "ReciterAI-enrichment": {
+    label: "Research AI: Daily Summaries",
+    description:
+      "The nightly research-AI job that writes each new publication's plain-language summary and impact score.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
+  "ReciterAI-hot-path": {
+    label: "Research AI: Weekly Scoring",
+    description:
+      "The weekly research-AI job that scores new publications and files them under research areas. Stands behind Research Topics & Scores.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
+  "ReciterAI-spotlight-gate": {
+    label: "Research AI: Spotlight Check",
+    description:
+      "The monthly research-AI check that decides whether the Homepage Spotlight cards need rebuilding. Skipping is normal; not running at all is not.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
+  "ReciterAI-onboarding-detector": {
+    label: "Research AI: New Faculty Scan",
+    description: "The daily research-AI scan for faculty who have no research profile data yet.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
 };
 
 /**

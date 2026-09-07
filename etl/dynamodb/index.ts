@@ -76,6 +76,7 @@ import {
 } from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
 import { partitionRecords } from "./partition";
+import { PRODUCER_STAGES, buildProducerRunWrites } from "./producer-run-mapper";
 import { fetchExcludedTopicIds } from "./excluded-topics";
 import { planTopicPrune } from "./topic-prune";
 
@@ -148,7 +149,8 @@ async function main() {
         `tax=${buckets.tax.length}, topics=${buckets.topics.length}, ` +
         `faculty=${buckets.faculty.length}, impact=${buckets.impact.length}, ` +
         `tools=${buckets.tools.length}, cores=${buckets.cores.length}, ` +
-        `coreStaff=${buckets.coreStaff.length}.`,
+        `coreStaff=${buckets.coreStaff.length}, ` +
+        `producerRuns=${buckets.producerRuns.length}.`,
     );
 
     // ===================================================================
@@ -1002,6 +1004,47 @@ async function main() {
     await emitOpportunityCorpusFreshnessMetric(db.write, {
       log: (m) => console.log(`  ${m}`),
     });
+
+    // ===================================================================
+    // Block 8: STAGE# -> etl_run  (ReciterAI PRODUCER liveness)
+    // ===================================================================
+    // Mirrors the engine's own stage ledger into `etl_run` so /edit/etl-status
+    // grades the PRODUCER as well as this loader. See ./producer-run-mapper.ts
+    // for why that distinction matters and for the ledger's four sharp edges.
+    //
+    // Fail-soft ON PURPOSE, and safe to be: this block only ever INSERTS rows
+    // that do not exist yet, so a failure loses nothing — the next nightly reads
+    // `since` from the table and backfills whatever this run missed. That makes
+    // it the rare degrade-instead-of-throw that does not turn a blip into an
+    // outage, and it keeps an auxiliary liveness signal from failing a nightly
+    // whose real job is the projection above. Loud, because a permanently
+    // failing mirror would otherwise be exactly the silent gap it exists to
+    // detect.
+    try {
+      const producerSources = [...new Set(Object.values(PRODUCER_STAGES))];
+      const seen = await db.write.etlRun.groupBy({
+        by: ["source"],
+        where: { source: { in: producerSources } },
+        _max: { startedAt: true },
+      });
+      const since = new Map(seen.map((r) => [r.source, r._max.startedAt]));
+      const producerWrites = buildProducerRunWrites(buckets.producerRuns, since);
+      if (producerWrites.length > 0) {
+        await db.write.etlRun.createMany({ data: producerWrites });
+      }
+      const unseen = producerSources.filter((src) => !since.has(src));
+      console.log(
+        `ReciterAI producer runs: mirrored ${producerWrites.length} new run(s) across ` +
+          `${new Set(producerWrites.map((w) => w.source)).size} stage(s)` +
+          (unseen.length > 0 ? ` (first mirror for: ${unseen.join(", ")})` : ""),
+      );
+    } catch (err) {
+      console.error(
+        "ReciterAI producer-run mirror FAILED (projection unaffected; the next run " +
+          "backfills what this one missed): " +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
 
     // ===================================================================
     // Bookkeeping
