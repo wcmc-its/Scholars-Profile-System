@@ -2116,7 +2116,8 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     );
     const knownClients = screen.getByRole("button", { name: /Known clients/ });
     const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
-    const reporting = screen.getByRole("button", { name: /Reporting/ });
+    // A LINK since the core-reports widening, not a button — see the test below.
+    const reporting = screen.getByRole("link", { name: /Reporting/ });
     // "(1)", not the old bare "1"
     expect(knownClients.textContent?.replace(/\s+/g, " ").trim()).toBe("Known clients (1)");
     // mockup order: [Known clients (N)] [Add PMIDs] [Reporting...]
@@ -2128,43 +2129,43 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     ).toBeTruthy();
   });
 
-  it("ships 'Reporting...' DISABLED with the reason on it — there is no reporting route", () => {
-    // An enabled control that no-ops is the failure this codebase keeps hitting.
-    // The button is drawn because the mockup draws it; it is inert and SAYS so.
+  it("'Reporting...' now LINKS to this core's Publications report — the route it was waiting on exists", () => {
+    // It shipped inert-and-saying-so while no core reporting route existed. The
+    // core-reports widening gave cores reports 3 and 6, so the placeholder is
+    // now a real link — and it must carry BOTH `center=<coreId>` and
+    // `kind=core`: without the kind, `/edit/reports/3` resolves the code as a
+    // CENTER and 404s on the CenterProgram taxonomy gate.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const reporting = screen.getByRole("button", { name: /Reporting/ }) as HTMLButtonElement;
+    const reporting = screen.getByRole("link", { name: /Reporting/ });
     expect(reporting.textContent).toContain("Reporting...");
-    expect(reporting.getAttribute("aria-disabled")).toBe("true");
-    // NOT the native `disabled` attribute: that drops it from the tab order, which
-    // would hide the reason from exactly the keyboard and screen-reader users most
-    // likely to wonder why the button does nothing.
-    expect(reporting.disabled).toBe(false);
-    expect(reporting.getAttribute("title")).toBe("Reporting view is not built yet");
-    // the reason is in the accessibility tree, not only in a hover tooltip
-    const why = document.getElementById(reporting.getAttribute("aria-describedby") ?? "");
-    expect(why?.textContent).toBe("Reporting view is not built yet");
-    // and NOT a link: /edit/reports 404s for a scoped Owner/Curator whose only
-    // unit is a core, which is exactly who reads this page. `feat/core-reports-
-    // access` makes cores reportable and deep-links this control; until then a
-    // link here is worse than a button that says it is not built.
-    expect(screen.queryByRole("link", { name: /Reporting/ })).toBeNull();
+    expect(reporting.getAttribute("href")).toBe(
+      `/edit/reports/3?center=${encodeURIComponent(CORE.id)}&kind=core`,
+    );
+    // No leftover "not built yet" affordances.
+    expect(reporting.getAttribute("aria-disabled")).toBeNull();
+    expect(document.getElementById("core-queue-reporting-why")).toBeNull();
   });
 
-  it("draws the three buttons as text-only rounded rectangles — no icons, no pills", () => {
+  it("draws the three controls as text-only rounded rectangles — no icons, no pills", () => {
     // The mockup's toolbar is plain rectangles with labels; the shipped pills
-    // carried a lucide glyph each (Users / Plus / FileText). Only the SHAPE
-    // changed on "Reporting..." — its inert treatment is asserted above, and the
-    // three still have to MATCH on height, border and text size or the group
-    // stops reading as one.
+    // carried a lucide glyph each (Users / Plus / FileText). "Reporting..." is a
+    // LINK now that cores are reportable, so it is queried by that role — but the
+    // three still have to MATCH on height, border and text size, or the group
+    // stops reading as one. The restyle landed while the core-reports branch was
+    // open, so this is also what stops the link reinstating the old pill.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    for (const name of [/Known clients/, /Add PMIDs/, /Reporting/]) {
-      const button = screen.getByRole("button", { name });
-      expect(button.querySelector("svg")).toBeNull();
-      expect(button.className).toContain("rounded-md");
-      expect(button.className).not.toContain("rounded-full");
-      expect(button.className).toContain("h-8");
-      expect(button.className).toContain("text-sm");
-      expect(button.className).toContain("border");
+    const controls = [
+      screen.getByRole("button", { name: /Known clients/ }),
+      screen.getByRole("button", { name: /Add PMIDs/ }),
+      screen.getByRole("link", { name: /Reporting/ }),
+    ];
+    for (const control of controls) {
+      expect(control.querySelector("svg")).toBeNull();
+      expect(control.className).toContain("rounded-md");
+      expect(control.className).not.toContain("rounded-full");
+      expect(control.className).toContain("h-8");
+      expect(control.className).toContain("text-sm");
+      expect(control.className).toContain("border");
     }
   });
 

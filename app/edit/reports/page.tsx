@@ -11,12 +11,14 @@
  * / `/edit/division`) enforces — superuser, comms_steward (global
  * content-editor parity), or a unit Owner/Curator of this unit — reused
  * wholesale via `loadReportsContext` rather than re-derived, so this console
- * can't drift from the per-unit editor it replaced. The unit itself is
- * resolved server-side (never hardcoded).
+ * can't drift from the per-unit editor it replaced. A `core` resolves through
+ * the same one function to its own gate (`/edit/core/[coreId]/review`'s
+ * `getCoreOwnerRole` + `authorizeCoreClaim`). The unit itself is resolved
+ * server-side (never hardcoded).
  *
  * Reports 1/2/4/5 stay center-only (`CenterProgram`/`CenterMembership`-family
- * data with no department/division equivalent — org-unit publications reports
- * plan, 2026-08-16, "Reports 1 & 2 — considered, dropped"). Reports 3
+ * data with no department/division/core equivalent — org-unit publications
+ * reports plan, 2026-08-16, "Reports 1 & 2 — considered, dropped"). Reports 3
  * (Publications) and 6 (NIH-funded pubs) are unit-agnostic — `REPORTS_BY_KIND`
  * below is the single source of truth for which cards a unit's kind shows,
  * mirroring `REPORT_NUMBERS_BY_KIND` in `lib/edit/cancer-center-reports.ts`.
@@ -27,7 +29,8 @@
  * POTENTIALLY SEVERAL reportable units, not just "the second center once one
  * exists." With `?center=` given, behavior is unchanged (today's single-unit
  * list) for a center; an accompanying `?kind=department|division` addresses a
- * department/division instead (2026-08-16). Without `?center=`: 0 reportable
+ * department/division instead (2026-08-16), and `?kind=core` a core facility
+ * by its core id (2026-09-06). Without `?center=`: 0 reportable
  * units → 404 for a scoped Owner/Curator/comms_steward, but an empty index
  * for a superuser (Gap 5, 2026-08-14 handoff — a superuser isn't scoped to
  * any grants, so an empty roster isn't "this route doesn't exist"); exactly
@@ -50,7 +53,6 @@ import {
 } from "@/components/edit/reports-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
-import type { UnitEntityType } from "@/lib/api/manual-layer";
 import { db } from "@/lib/db";
 import {
   loadReportLiveness,
@@ -59,11 +61,12 @@ import {
   resolveReportsCenterCode,
   REPORT_NUMBERS_BY_KIND,
   type ReportLiveness,
+  type ReportableUnitKind,
+  type ReportsContext,
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
-import type { UnitEditContext } from "@/lib/api/unit-edit-context";
 
 export const dynamic = "force-dynamic";
 
@@ -95,8 +98,11 @@ const ALL_REPORTS: readonly ReportDef[] = [
   },
   {
     n: 3,
+    // Kind-neutral wording: for a core this report's set is confirmed core
+    // usages, not member publications. One shared catalog serves all four
+    // kinds, so the blurb must be true of each.
     label: "3. Publications",
-    description: "This unit's member publications, joined to Journal Impact Factor and paper-level impact-score data.",
+    description: "This unit's publications, joined to Journal Impact Factor and paper-level impact-score data.",
   },
   {
     n: 4,
@@ -111,25 +117,26 @@ const ALL_REPORTS: readonly ReportDef[] = [
   {
     n: 6,
     label: "6. NIH-funded pubs",
-    description: "This unit's member publications with a matched NIH RePORTER funding link.",
+    description: "This unit's publications with a matched NIH RePORTER funding link.",
   },
 ];
 
 /** `REPORTS_BY_KIND[kind]` — the catalog `ReportsIndex`/`SingleUnitReportsTable`
  *  render for a unit of that kind, resolved from `REPORT_NUMBERS_BY_KIND`
  *  (`lib/edit/cancer-center-reports.ts`) so the two lists can never drift.
- *  Department/division show only Publications + NIH-funded pubs — no dead
+ *  Department/division/core show only Publications + NIH-funded pubs — no dead
  *  card that 404s/empty-states when opened. */
-const REPORTS_BY_KIND: Record<UnitEntityType, readonly ReportDef[]> = {
+const REPORTS_BY_KIND: Record<ReportableUnitKind, readonly ReportDef[]> = {
   center: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.center.includes(r.n)),
   department: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.department.includes(r.n)),
   division: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.division.includes(r.n)),
+  core: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.core.includes(r.n)),
 };
 
-const REPORTABLE_KINDS: readonly UnitEntityType[] = ["center", "department", "division"];
+const REPORTABLE_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
 
-function parseKind(raw: string | undefined): UnitEntityType {
-  return raw === "department" || raw === "division" ? raw : "center";
+function parseKind(raw: string | undefined): ReportableUnitKind {
+  return raw === "department" || raw === "division" || raw === "core" ? raw : "center";
 }
 
 export default async function EditReportsIndexPage({
@@ -269,7 +276,7 @@ function serializePerReport(
 
 /** `3a` — an actor with exactly one reportable unit (the common case today).
  *  Per-report liveness for one unit, plain-serialized for the client table. */
-async function loadSingleUnitPerReport(code: string, kind: UnitEntityType): Promise<SerializedPerReport> {
+async function loadSingleUnitPerReport(code: string, kind: ReportableUnitKind): Promise<SerializedPerReport> {
   const liveness = (await loadReportLiveness([{ code, kind }], db.read)).get(code);
   return serializePerReport(liveness, REPORTS_BY_KIND[kind]);
 }
@@ -288,9 +295,9 @@ function SingleUnitReports({
   pendingSlugRequests,
   pendingHonors,
 }: {
-  ctx: UnitEditContext;
+  ctx: ReportsContext;
   code: string;
-  kind: UnitEntityType;
+  kind: ReportableUnitKind;
   perReport: SerializedPerReport;
   session: EditSession;
   pendingSlugRequests: number | null;

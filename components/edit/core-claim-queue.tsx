@@ -999,38 +999,22 @@ export function CoreClaimQueue({
           >
             Add PMIDs
           </button>
-          {/* The mockup's third button. There IS no core reporting route in this
-              repo, so it ships DISABLED with the reason on it rather than as a
-              live control that no-ops — an enabled button that does nothing is
-              the failure this codebase keeps getting burned by. */}
-          {/* DO NOT make this a plain link to /edit/reports. That console lists
-              only REPORTABLE units and cores are excluded outright
-              (`u.kind !== "core"`, lib/edit/cancer-center-reports.ts), so a
-              scoped Owner/Curator whose only unit is a core — the very user this
-              page serves — hits its notFound(). `feat/core-reports-access` makes
-              cores reportable (reports 3 and 6, gated to the core's own
-              owner/curator) and turns this into a live deep link to
-              /edit/reports/3?center=<coreId>&kind=core. Until that lands, an
-              inert button that SAYS it is not built beats a 404. */}
-          {/* aria-disabled, NOT the native `disabled` attribute. `disabled` removes the
-              button from the tab order, which would make the explanation below
-              mouse-hover-only — the keyboard and screen-reader users most likely to
-              wonder why it does nothing are exactly the ones who could never reach it.
-              Focusable + aria-disabled keeps it announced and readable; the click is a
-              no-op and the reason is in the accessible name, not just a title. */}
-          <button
-            type="button"
-            aria-disabled="true"
-            aria-describedby="core-queue-reporting-why"
-            onClick={(e) => e.preventDefault()}
-            title="Reporting view is not built yet"
-            className="border-border-strong text-muted-foreground bg-background inline-flex h-8 cursor-not-allowed items-center rounded-md border px-3 text-sm opacity-50"
+          {/* The mockup's third button. It shipped DISABLED while no core
+              reporting route existed; the core-reports widening (2026-09-06)
+              gave cores reports 3 and 6, so it is now a real link to this
+              core's Publications report. Same authz on the other side — a
+              core's owner/curator (or a superuser/comms_steward) passes, and
+              nobody else does — so this never leads a reviewer to a 403 they
+              could reach the review queue from.
+              Styling tracks its two siblings above (rounded-md, no icon): the
+              mockup toolbar restyle landed while this branch was open, and the
+              link must not quietly bring the old pill back. */}
+          <a
+            href={`/edit/reports/3?center=${encodeURIComponent(core.id)}&kind=core`}
+            className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
           >
             Reporting...
-          </button>
-          <span id="core-queue-reporting-why" className="sr-only">
-            Reporting view is not built yet
-          </span>
+          </a>
         </div>
       </div>
 

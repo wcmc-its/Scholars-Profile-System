@@ -202,3 +202,73 @@ export async function getCoreList(
     }))
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
+
+/** The read surface `loadConfirmedCorePmidsByCore` needs — the two tables the
+ *  CoreClaim merge reads, nothing else. The client is REQUIRED (no `db.read`
+ *  default, unlike the loaders above) so the `/edit/reports` suite can call it
+ *  with its own injected client and stay testable without a live DB. */
+type CoreConfirmedReader = Pick<typeof db.read, "publicationCore" | "coreClaim">;
+
+/**
+ * The effective-CONFIRMED pmids for each of `coreIds` — one batched pair of
+ * queries no matter how many cores are asked about.
+ *
+ * "Confirmed" is the SAME read-merge `getCorePage` / `getCoreList` apply and
+ * nothing else: the engine `publication_core.status` with an ACTIVE
+ * (`revokedAt IS NULL`) `CoreClaim` layered over it through
+ * `isEffectiveConfirmed` — engine `confirmed` MINUS any human `rejected`
+ * claim, PLUS every human `claimed` override. That second set is why the
+ * `activeClaims` pass below exists: a `claimed` override is effective-confirmed
+ * regardless of engine status, including a "Manual PMID add" the engine never
+ * scored (no `publication_core` row exists to iterate). An engine `candidate`
+ * or `below_threshold` row with no claim is NOT confirmed. The status strings
+ * are never re-derived here — `lib/api/core-merge.ts` owns them.
+ *
+ * The engine read is FILTERED to `status: "confirmed"` — the
+ * `@@index([coreId, status])` shape `getCoreList` already uses — rather than
+ * reading every row for these cores and discarding the rest in JS.
+ * `publication_core` is dominated by `below_threshold` and `candidate` rows,
+ * and `/edit/reports` calls this with EVERY core id on each `force-dynamic`
+ * render, so the unfiltered read was close to a full-table scan per page load.
+ * The filter is set-equivalent, not an approximation: the only non-`confirmed`
+ * engine row the merge loop below ever kept is one carrying an active
+ * `claimed` claim, and the `activeClaims` pass re-adds exactly those — it has
+ * to, since a `claimed` override can exist with no `publication_core` row at
+ * all. The `isEffectiveConfirmed` call stays, because it is what still drops
+ * an engine-`confirmed` row an active `rejected` claim has overridden.
+ *
+ * Every requested core id is a key in the returned map, `[]` when it has no
+ * confirmed usages, so a caller never has to tell "unknown core" apart from
+ * "no rows" by a missing key.
+ */
+export async function loadConfirmedCorePmidsByCore(
+  coreIds: readonly string[],
+  client: CoreConfirmedReader,
+): Promise<Map<string, string[]>> {
+  if (coreIds.length === 0) return new Map();
+  const byCore = new Map<string, Set<string>>(coreIds.map((id) => [id, new Set<string>()]));
+
+  const [rows, activeClaims] = await Promise.all([
+    client.publicationCore.findMany({
+      where: { coreId: { in: [...coreIds] }, status: "confirmed" },
+      select: { coreId: true, pmid: true, status: true },
+    }),
+    client.coreClaim.findMany({
+      where: { coreId: { in: [...coreIds] }, revokedAt: null },
+      select: { coreId: true, pmid: true, status: true },
+    }),
+  ]);
+
+  const claimByKey = new Map(activeClaims.map((c) => [claimKey(c.pmid, c.coreId), c.status]));
+  for (const r of rows) {
+    if (!isEffectiveConfirmed(r.status, claimByKey.get(claimKey(r.pmid, r.coreId)) ?? null)) continue;
+    byCore.get(r.coreId)?.add(r.pmid);
+  }
+  // Manual-claim-only pairs — see the doc comment. Re-adding a pmid the loop
+  // above already kept is a no-op (Set).
+  for (const c of activeClaims) {
+    if (c.status === "claimed") byCore.get(c.coreId)?.add(c.pmid);
+  }
+
+  return new Map([...byCore].map(([coreId, pmids]) => [coreId, [...pmids]]));
+}

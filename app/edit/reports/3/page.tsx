@@ -6,8 +6,12 @@
  * org-unit publications reports plan (2026-08-16) — same session/authz/
  * unit-resolution flow as `/edit/reports` (see that page's doc comment), now
  * kind-aware: `?center=<code>` still resolves a center exactly as it always
- * has (implied `kind=center`); `&kind=department|division` alongside it
- * addresses the other two kinds.
+ * has (implied `kind=center`); `&kind=department|division|core` alongside it
+ * addresses the other three kinds. For `kind=core` the `<code>` is the core id
+ * and BOTH the authz gate and the publication set change — a core's owner or
+ * curator passes (`loadReportsContext`), and the rows come from the core's
+ * confirmed `publication_core` usages rather than from members
+ * (`loadUnitPublicationsReport`), since a core has no membership table.
  *
  * Server-rendered summary + table shell; the table body itself
  * (`PublicationsReportTable`) is a client island for the Person-type filter
@@ -21,13 +25,16 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { PublicationsReportTable } from "@/components/edit/publications-report-table";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import type { UnitEntityType } from "@/lib/api/manual-layer";
 import {
   HIGH_IMPACT_THRESHOLD,
   loadUnitPublicationsReport,
   type PublicationsReport,
 } from "@/lib/edit/cancer-center-publications-report";
-import { loadReportsContext, resolveNumberedReportCenterCode } from "@/lib/edit/cancer-center-reports";
+import {
+  loadReportsContext,
+  resolveNumberedReportCenterCode,
+  type ReportableUnitKind,
+} from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -38,23 +45,29 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-const ALLOWED_KINDS: readonly UnitEntityType[] = ["center", "department", "division"];
+const ALLOWED_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
 
-function parseKind(raw: string | undefined): UnitEntityType | undefined {
-  return raw === "department" || raw === "division" ? raw : undefined;
+function parseKind(raw: string | undefined): ReportableUnitKind | undefined {
+  return raw === "department" || raw === "division" || raw === "core" ? raw : undefined;
 }
 
 function pct(n: number): string {
   return `${Math.round(n)}%`;
 }
 
-function ReportSummary({ report }: { report: PublicationsReport }) {
+function ReportSummary({ report, kind }: { report: PublicationsReport; kind: ReportableUnitKind }) {
   const { totalPublications, matchedPublications, matchRatePct, highImpactCount, highImpactRatePct } = report;
 
   if (totalPublications === 0) {
     return (
+      // Kind-aware copy: a core has no members, so the member phrasing would
+      // be actively misleading about WHY the report is empty (the real reason
+      // is no confirmed core usage yet — 6 of 14 staging cores have zero
+      // confirmed usages, so this is a state real cores hit, not a hypothetical).
       <p className="text-muted-foreground mt-6" data-testid="pubs-report-empty">
-        No publications with a confirmed member author were found.
+        {kind === "core"
+          ? "No publications with a confirmed use of this core were found."
+          : "No publications with a confirmed member author were found."}
       </p>
     );
   }
@@ -126,10 +139,19 @@ export default async function EditReportsPublicationsPage({
       </Link>
       <h1 className="mb-1 text-xl font-bold">3. Publications</h1>
       <p className="text-muted-foreground text-sm">
-        Every publication with a confirmed {ctx.unit.name} author, joined to Journal Impact Factor
-        data where the journal matches.
+        {kind === "core" ? (
+          <>
+            Every publication with a confirmed use of {ctx.unit.name}, joined to Journal Impact
+            Factor data where the journal matches.
+          </>
+        ) : (
+          <>
+            Every publication with a confirmed {ctx.unit.name} author, joined to Journal Impact
+            Factor data where the journal matches.
+          </>
+        )}
       </p>
-      <ReportSummary report={report} />
+      <ReportSummary report={report} kind={kind} />
       {report.totalPublications > 0 ? <PublicationsReportTable rows={report.rows} /> : null}
     </ConsoleShell>
   );

@@ -7,20 +7,24 @@
  * blurb's old "cancer-relevance tagging" claim was never true of this code
  * either way; see that plan's item 4.
  *
- * Membership: the SAME per-kind resolver every other unit-wide surface
- * uses — never re-derived. `center`: `loadActiveCenterMemberCwids`
- * (`lib/api/centers.ts`). `division`: `loadDivisionMemberCwids`
- * (`lib/api/divisions.ts`). `department`: the same
+ * MEMBERSHIP-BASED for the three classic org units, USAGE-BASED for a core —
+ * see `resolvePublicationScope` for why. `center`:
+ * `loadActiveCenterMemberCwids` (`lib/api/centers.ts`). `division`:
+ * `loadDivisionMemberCwids` (`lib/api/divisions.ts`). `department`: the same
  * `scholar: { deptCode, deletedAt: null, status: "active" }` predicate
- * `getDeptPublicationsListUncached` (`lib/api/dept-lists.ts`) uses. Publications:
- * confirmed-authorship fan-out across the member set, the same
- * `authors: { some: { isConfirmed, cwid: { in } } }` relation filter
- * `getCenterPublicationsListUncached` (`lib/api/centers.ts`) and
- * `etl/cancer-center-collab-report` use. This is an internal `/edit` review
- * surface, not a public one, so — like the collab-report precompute — it
- * does NOT layer the public-surface suppression/darkness overlay
- * (`lib/api/manual-layer.ts`); a curator reviewing coverage needs to see the
- * unit's full confirmed-authorship set, hidden-from-public or not.
+ * `getDeptPublicationsListUncached` (`lib/api/dept-lists.ts`) uses. In all
+ * three, publications are a confirmed-authorship fan-out across the member
+ * set, the same `authors: { some: { isConfirmed, cwid: { in } } }` relation
+ * filter `getCenterPublicationsListUncached` (`lib/api/centers.ts`) and
+ * `etl/cancer-center-collab-report` use. `core`: no membership table exists,
+ * so the set is the core's CONFIRMED `publication_core` usages
+ * (`loadConfirmedCorePmidsByCore`, `lib/api/cores.ts`).
+ *
+ * This is an internal `/edit` review surface, not a public one, so — like the
+ * collab-report precompute — it does NOT layer the public-surface
+ * suppression/darkness overlay (`lib/api/manual-layer.ts`); a curator
+ * reviewing coverage needs to see the unit's full set, hidden-from-public or
+ * not.
  *
  * ponytail: exact-match join on normalized journalAbbrev — publications in a
  * journal not in journal_impact_alternative, or with inconsistent
@@ -28,9 +32,10 @@
  * low: a curated ISSN/name crosswalk, not a fuzzy-match library.
  */
 import { db } from "@/lib/db";
-import type { UnitEntityType } from "@/lib/api/manual-layer";
 import { loadActiveCenterMemberCwids } from "@/lib/api/centers";
+import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
 import { loadDivisionMemberCwids } from "@/lib/api/divisions";
+import type { ReportableUnitKind } from "@/lib/edit/cancer-center-reports";
 import { normalizeJournalAbbrev } from "@/lib/journal-abbrev";
 
 /** `impactScore1` (current-year JIF) threshold for the report's "high impact"
@@ -81,13 +86,19 @@ export type PublicationsReportRow = {
   /** Distinct, non-null `Scholar.roleCategory` values among this pub's
    *  CONFIRMED unit-member authors — the Person-type filter rail's key.
    *  `[]` when every confirmed member-author's Scholar row has a null
-   *  roleCategory (rare). */
+   *  roleCategory (rare).
+   *
+   *  For a CORE the key is every CONFIRMED WCM author of the core's confirmed
+   *  publications, since "member" has no meaning for a core: a core's users
+   *  are exactly the people on the bylines of the work it enabled. Keying it
+   *  on members instead would leave the rail permanently empty. */
   authorRoleCategories: ReadonlyArray<string>;
 };
 
 export type PublicationsReport = {
-  /** Every publication with ≥1 confirmed unit-member author — the
-   *  denominator for `matchRatePct`. */
+  /** The unit's whole publication set — ≥1 confirmed unit-member author for a
+   *  center/department/division, every confirmed `publication_core` usage for
+   *  a core. The denominator for `matchRatePct`. */
   totalPublications: number;
   /** Publications whose journal matched a `JournalImpactFactor` row. */
   matchedPublications: number;
@@ -149,9 +160,13 @@ function compareDescNullsLast(a: number | null, b: number | null): number {
   return b - a;
 }
 
-/** Active member CWIDs for `kind`, via the SAME resolver every other
- *  unit-wide surface uses — see the module doc comment. */
-async function loadUnitMemberCwids(kind: UnitEntityType, code: string): Promise<string[]> {
+/** Active member CWIDs for a MEMBERSHIP-based `kind`, via the SAME resolver
+ *  every other unit-wide surface uses — see the module doc comment. Never
+ *  called for a core, which has no membership table. */
+async function loadUnitMemberCwids(
+  kind: Exclude<ReportableUnitKind, "core">,
+  code: string,
+): Promise<string[]> {
   if (kind === "center") return loadActiveCenterMemberCwids(code);
   if (kind === "division") return loadDivisionMemberCwids(code);
   const rows = await db.read.scholar.findMany({
@@ -161,10 +176,72 @@ async function loadUnitMemberCwids(kind: UnitEntityType, code: string): Promise<
   return rows.map((r) => r.cwid);
 }
 
+/** How this unit's publication set and its Person-type facet key are selected.
+ *  `null` = the unit resolves to no publications at all before any publication
+ *  query runs (no members, or no confirmed core usages) — the caller returns
+ *  `EMPTY_REPORT` without touching `publication`. */
+type PublicationScope = {
+  /** `where` for the `publication` query — this unit's whole set. */
+  pubWhere: NonNullable<Parameters<typeof db.read.publication.findMany>[0]>["where"];
+  /** `where` for the nested `authors` select that keys the Person-type rail. */
+  authorWhere: { isConfirmed: true; cwid?: { in: string[] } };
+};
+
 /**
- * Build the report for one unit: resolve active members, pull their
- * confirmed-authorship publications, join each to `JournalImpactFactor` by
+ * Kind-aware publication-set resolution — the ONE place reports 3 and 6 differ
+ * by unit kind.
+ *
+ * `center` / `department` / `division` are MEMBERSHIP-based, unchanged: resolve
+ * the unit's active member CWIDs, then take every publication with ≥1 confirmed
+ * member author.
+ *
+ * A `core` has NO membership table — there is no roster to resolve and there
+ * never will be one. Its meaningful publication set is its CONFIRMED
+ * `publication_core` usages, resolved through `loadConfirmedCorePmidsByCore`
+ * (`lib/api/cores.ts`), which applies the same `CoreClaim`-over-engine-status
+ * merge the public core page and the owner's review queue apply — engine
+ * `confirmed` minus any human `rejected` claim, plus every human `claimed`
+ * override including a manual PMID add. Nothing about that status semantics is
+ * re-derived here.
+ *
+ * The naive alternative — dropping the core exclusion and letting a core fall
+ * through the member path — would resolve zero CWIDs for EVERY core and hand
+ * every core owner a permanently empty report: "sees the report" while learning
+ * nothing. The publications-from-usages test in
+ * `tests/unit/cancer-center-publications-report.test.ts` is the assertion that
+ * catches that regression.
+ *
+ * The facet key follows the same split. For the three member kinds it stays the
+ * confirmed MEMBER authors (never the full byline, which includes non-member
+ * co-authors). For a core it is every confirmed WCM author of the core's
+ * confirmed publications — a core's "people" ARE its users, so scoping the rail
+ * to members would leave it permanently empty, which is the same failure in
+ * miniature.
+ */
+async function resolvePublicationScope(
+  kind: ReportableUnitKind,
+  code: string,
+): Promise<PublicationScope | null> {
+  if (kind === "core") {
+    const pmids = (await loadConfirmedCorePmidsByCore([code], db.read)).get(code) ?? [];
+    if (pmids.length === 0) return null;
+    return { pubWhere: { pmid: { in: pmids } }, authorWhere: { isConfirmed: true } };
+  }
+  const memberCwids = await loadUnitMemberCwids(kind, code);
+  if (memberCwids.length === 0) return null;
+  return {
+    pubWhere: { authors: { some: { isConfirmed: true, cwid: { in: memberCwids } } } },
+    authorWhere: { isConfirmed: true, cwid: { in: memberCwids } },
+  };
+}
+
+/**
+ * Build the report for one unit: resolve its publication set (members for a
+ * center/department/division, confirmed core usages for a core — see
+ * `resolvePublicationScope`), join each publication to `JournalImpactFactor` by
  * normalized `journalAbbrev`, and compute the match/high-impact stats.
+ * Everything downstream of the scope — the JIF join, the summary, the table,
+ * the sort — is kind-agnostic and runs unchanged.
  *
  * The `JournalImpactFactor` lookup is scoped to only the abbreviations this
  * unit's publications actually carry (a `findMany({ where: { in: [...] } })`
@@ -172,14 +249,14 @@ async function loadUnitMemberCwids(kind: UnitEntityType, code: string): Promise<
  * row table.
  */
 export async function loadUnitPublicationsReport(
-  kind: UnitEntityType,
+  kind: ReportableUnitKind,
   code: string,
 ): Promise<PublicationsReport> {
-  const memberCwids = await loadUnitMemberCwids(kind, code);
-  if (memberCwids.length === 0) return EMPTY_REPORT;
+  const scope = await resolvePublicationScope(kind, code);
+  if (scope === null) return EMPTY_REPORT;
 
   const pubs = await db.read.publication.findMany({
-    where: { authors: { some: { isConfirmed: true, cwid: { in: memberCwids } } } },
+    where: scope.pubWhere,
     select: {
       pmid: true,
       title: true,
@@ -189,10 +266,12 @@ export async function loadUnitPublicationsReport(
       impactScore: true,
       impactJustification: true,
       synopsis: true,
-      // Only the CONFIRMED member authors — the Person-type facet's key.
-      // Never the full author list (which includes non-member co-authors).
+      // The Person-type facet's key — see `resolvePublicationScope`. For a
+      // member kind this is only the CONFIRMED MEMBER authors, never the full
+      // author list (which includes non-member co-authors); for a core it is
+      // every confirmed WCM author of the core's confirmed publications.
       authors: {
-        where: { isConfirmed: true, cwid: { in: memberCwids } },
+        where: scope.authorWhere,
         select: { cwid: true },
       },
     },
@@ -200,15 +279,15 @@ export async function loadUnitPublicationsReport(
   const totalPublications = pubs.length;
   if (totalPublications === 0) return EMPTY_REPORT;
 
-  const memberAuthorCwids = Array.from(
+  const facetAuthorCwids = Array.from(
     new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid).filter((c): c is string => c !== null))),
   );
   const roleCategoryByCwid =
-    memberAuthorCwids.length > 0
+    facetAuthorCwids.length > 0
       ? new Map(
           (
             await db.read.scholar.findMany({
-              where: { cwid: { in: memberAuthorCwids } },
+              where: { cwid: { in: facetAuthorCwids } },
               select: { cwid: true, roleCategory: true },
             })
           ).map((s) => [s.cwid, s.roleCategory]),

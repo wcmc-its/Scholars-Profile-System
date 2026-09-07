@@ -6,11 +6,15 @@
  * are the product of NIH funding" is exactly the unit's member pubs that have
  * a `GrantPublication` row — no new data or funder filter needed.
  *
- * Unit-agnostic by construction, same membership resolver as report 3
- * (`loadUnitPublicationsReport`'s `loadUnitMemberCwids`, re-derived here to
- * avoid a cross-report import): `center` → `loadActiveCenterMemberCwids`,
- * `division` → `loadDivisionMemberCwids`, `department` →
- * `Scholar.deptCode`-filtered.
+ * Unit-agnostic by construction, same publication-set resolution as report 3
+ * (`loadUnitPublicationsReport`'s `resolvePublicationScope`, re-derived here to
+ * avoid a cross-report import — the long-standing convention in this pair):
+ * `center` → `loadActiveCenterMemberCwids`, `division` →
+ * `loadDivisionMemberCwids`, `department` → `Scholar.deptCode`-filtered, and
+ * `core` → its CONFIRMED `publication_core` usages via
+ * `loadConfirmedCorePmidsByCore`, since a core has no membership table at all
+ * (core-reports widening, 2026-09-06). The status semantics behind
+ * "confirmed" are owned by `lib/api/core-merge.ts` and never restated here.
  *
  * Row grain is one row per (publication, grant) LINK, matching
  * `GrantPublication`'s own grain — a pub co-funded by two grants gets two
@@ -24,10 +28,11 @@
  * not the grant's PI.
  */
 import { db } from "@/lib/db";
-import type { UnitEntityType } from "@/lib/api/manual-layer";
 import { loadActiveCenterMemberCwids } from "@/lib/api/centers";
+import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
 import { loadDivisionMemberCwids } from "@/lib/api/divisions";
 import { loadProjectSiblingRows, type ProjectKeyRow } from "@/lib/api/project-siblings";
+import type { ReportableUnitKind } from "@/lib/edit/cancer-center-reports";
 import { groupGrantsByProject, sortPeople } from "@/lib/funding-projection";
 
 export type NihFundedPublicationRow = {
@@ -64,9 +69,13 @@ export type NihFundedPublicationsReport = {
 
 const EMPTY_REPORT: NihFundedPublicationsReport = { totalPublications: 0, rows: [] };
 
-/** Active member CWIDs for `kind` — see the module doc comment for why this
- *  is re-derived rather than imported from the report-3 module. */
-async function loadUnitMemberCwids(kind: UnitEntityType, code: string): Promise<string[]> {
+/** Active member CWIDs for a MEMBERSHIP-based `kind` — see the module doc
+ *  comment for why this is re-derived rather than imported from the report-3
+ *  module. Never called for a core, which has no membership table. */
+async function loadUnitMemberCwids(
+  kind: Exclude<ReportableUnitKind, "core">,
+  code: string,
+): Promise<string[]> {
   if (kind === "center") return loadActiveCenterMemberCwids(code);
   if (kind === "division") return loadDivisionMemberCwids(code);
   const rows = await db.read.scholar.findMany({
@@ -74,6 +83,31 @@ async function loadUnitMemberCwids(kind: UnitEntityType, code: string): Promise<
     select: { cwid: true },
   });
   return rows.map((r) => r.cwid);
+}
+
+/**
+ * The `where` fragment selecting this unit's publication set, or `null` when
+ * the unit resolves to none before any `publication` query runs.
+ *
+ * Membership-based for the three classic org units; for a core, its CONFIRMED
+ * `publication_core` usages — a core has no roster, so the member path would
+ * resolve zero CWIDs and hand every core owner a permanently empty report.
+ * Mirrors `resolvePublicationScope` in
+ * `lib/edit/cancer-center-publications-report.ts`, minus the author-facet half
+ * (this report has no Person-type rail).
+ */
+async function resolveUnitPublicationWhere(
+  kind: ReportableUnitKind,
+  code: string,
+): Promise<{ pmid: { in: string[] } } | { authors: { some: { isConfirmed: true; cwid: { in: string[] } } } } | null> {
+  if (kind === "core") {
+    const pmids = (await loadConfirmedCorePmidsByCore([code], db.read)).get(code) ?? [];
+    return pmids.length === 0 ? null : { pmid: { in: pmids } };
+  }
+  const memberCwids = await loadUnitMemberCwids(kind, code);
+  return memberCwids.length === 0
+    ? null
+    : { authors: { some: { isConfirmed: true, cwid: { in: memberCwids } } } };
 }
 
 /** "Lower confidence" trigger — see `NihFundedPublicationRow.isLowerConfidence`. */
@@ -89,21 +123,23 @@ function isLowerConfidenceLink(gp: {
 }
 
 /**
- * Build the NIH-funded-pubs report for one unit: resolve active members,
- * pull their confirmed-authorship publications that carry ≥1
+ * Build the NIH-funded-pubs report for one unit: resolve its publication set
+ * (active members for a center/department/division, confirmed core usages for
+ * a core — see `resolveUnitPublicationWhere`), keep the ones carrying ≥1
  * `GrantPublication` row, and flatten to one row per (publication, grant)
- * link, newest-publication-year first.
+ * link, newest-publication-year first. Everything after the scope resolution
+ * is kind-agnostic and runs unchanged.
  */
 export async function loadNihFundedPublicationsReport(
-  kind: UnitEntityType,
+  kind: ReportableUnitKind,
   code: string,
 ): Promise<NihFundedPublicationsReport> {
-  const memberCwids = await loadUnitMemberCwids(kind, code);
-  if (memberCwids.length === 0) return EMPTY_REPORT;
+  const unitWhere = await resolveUnitPublicationWhere(kind, code);
+  if (unitWhere === null) return EMPTY_REPORT;
 
   const pubs = await db.read.publication.findMany({
     where: {
-      authors: { some: { isConfirmed: true, cwid: { in: memberCwids } } },
+      ...unitWhere,
       grants: { some: {} },
     },
     select: {

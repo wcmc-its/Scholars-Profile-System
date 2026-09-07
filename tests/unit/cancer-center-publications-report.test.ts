@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * collaborators at the module boundary, NO live DB:
  *   - `@/lib/api/centers` — `loadActiveCenterMemberCwids` (center membership).
  *   - `@/lib/api/divisions` — `loadDivisionMemberCwids` (division membership).
+ *   - `@/lib/api/cores` — `loadConfirmedCorePmidsByCore` (a CORE's publication
+ *     set; cores have no membership at all, so this replaces the member
+ *     resolver rather than joining it).
  *   - `@/lib/db` — `db.read.publication.findMany` / `db.read.journalImpactFactor
  *     .findMany` / `db.read.scholar.findMany` (the reads the report joins
  *     in-process — `scholar.findMany` backs both department membership and the
@@ -18,6 +21,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   mockLoadCenterMembers: vi.fn(),
   mockLoadDivisionMembers: vi.fn(),
+  mockLoadConfirmedCorePmids: vi.fn(),
   mockPubFindMany: vi.fn(),
   mockJifFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -28,6 +32,9 @@ vi.mock("@/lib/api/centers", () => ({
 }));
 vi.mock("@/lib/api/divisions", () => ({
   loadDivisionMemberCwids: hoisted.mockLoadDivisionMembers,
+}));
+vi.mock("@/lib/api/cores", () => ({
+  loadConfirmedCorePmidsByCore: hoisted.mockLoadConfirmedCorePmids,
 }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -48,6 +55,7 @@ import {
 beforeEach(() => {
   hoisted.mockLoadCenterMembers.mockReset();
   hoisted.mockLoadDivisionMembers.mockReset();
+  hoisted.mockLoadConfirmedCorePmids.mockReset();
   hoisted.mockPubFindMany.mockReset();
   hoisted.mockJifFindMany.mockReset();
   hoisted.mockScholarFindMany.mockReset();
@@ -360,6 +368,108 @@ describe("loadUnitPublicationsReport — per-kind membership resolution", () => 
     expect(hoisted.mockLoadCenterMembers).not.toHaveBeenCalled();
     expect(hoisted.mockLoadDivisionMembers).not.toHaveBeenCalled();
     expect(report.totalPublications).toBe(0);
+  });
+});
+
+describe("loadUnitPublicationsReport — core: publications come from confirmed USAGES, not members", () => {
+  /** A core's publication rows always carry a real byline — the facet key is
+   *  the confirmed WCM authors of the core's confirmed publications. */
+  const corePub = (pmid: string, over: Record<string, unknown> = {}) => ({
+    pmid,
+    title: `Paper ${pmid}`,
+    journal: "Nature",
+    journalAbbrev: "Nature",
+    year: 2025,
+    impactScore: null,
+    impactJustification: null,
+    synopsis: null,
+    authors: [{ cwid: "abc1234" }],
+    ...over,
+  });
+  const jifNature = {
+    // Normalized (trim + uppercase) on both sides of the join.
+    journalAbbrev: "NATURE",
+    journalTitle: "Nature",
+    impactScore1: 50,
+    impactScore2: 48,
+    category: "MULTIDISCIPLINARY SCIENCES|Q1|1/134",
+  };
+
+  it("resolves the publication set from confirmed publication_core rows — non-empty for a core with usages, and NO member resolver is consulted", async () => {
+    // THE regression this suite exists for. Simply dropping the `core`
+    // exclusion from the reports suite would send a core down the MEMBER path;
+    // a core has no membership table, so that resolves zero CWIDs and returns
+    // EMPTY_REPORT for every core forever — "sees the report", learns nothing.
+    // Asserting non-empty here is what catches that naive un-filter.
+    hoisted.mockLoadConfirmedCorePmids.mockResolvedValue(new Map([["14", ["111", "222"]]]));
+    hoisted.mockPubFindMany.mockResolvedValue([corePub("111"), corePub("222")]);
+    hoisted.mockJifFindMany.mockResolvedValue([jifNature]);
+
+    const report = await loadUnitPublicationsReport("core", "14");
+
+    expect(report.totalPublications).toBe(2);
+    expect(report.matchedPublications).toBe(2);
+    expect(report.rows.map((r) => r.pmid)).toEqual(["111", "222"]);
+    // Confirmed core usages, by core id.
+    expect(hoisted.mockLoadConfirmedCorePmids).toHaveBeenCalledWith(["14"], expect.anything());
+    // None of the three membership resolvers ran.
+    expect(hoisted.mockLoadCenterMembers).not.toHaveBeenCalled();
+    expect(hoisted.mockLoadDivisionMembers).not.toHaveBeenCalled();
+    expect(hoisted.mockScholarFindMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ deptCode: "14" }) }),
+    );
+    // The publication query is a pmid IN-list over that exact set — never the
+    // `authors: { some: { cwid: { in: members } } }` fan-out.
+    const where = hoisted.mockPubFindMany.mock.calls[0][0].where;
+    expect(where).toEqual({ pmid: { in: ["111", "222"] } });
+    expect(where.authors).toBeUndefined();
+  });
+
+  it("keys the Person-type rail on the confirmed WCM authors of those publications, so the rail is populated rather than empty", async () => {
+    hoisted.mockLoadConfirmedCorePmids.mockResolvedValue(new Map([["14", ["111"]]]));
+    hoisted.mockPubFindMany.mockResolvedValue([
+      corePub("111", { authors: [{ cwid: "abc1234" }, { cwid: "def5678" }] }),
+    ]);
+    hoisted.mockJifFindMany.mockResolvedValue([jifNature]);
+    hoisted.mockScholarFindMany.mockResolvedValue([
+      { cwid: "abc1234", roleCategory: "full_time_faculty" },
+      { cwid: "def5678", roleCategory: "postdoc" },
+    ]);
+
+    const report = await loadUnitPublicationsReport("core", "14");
+
+    expect([...report.rows[0].authorRoleCategories].sort()).toEqual(["full_time_faculty", "postdoc"]);
+    // The nested author select is confirmed-only with NO member cwid IN-list —
+    // scoping it to members would leave the rail permanently empty for a core.
+    expect(hoisted.mockPubFindMany.mock.calls[0][0].select.authors.where).toEqual({ isConfirmed: true });
+  });
+
+  it("a core with zero confirmed usages renders the clean empty state and never queries publications", async () => {
+    // 6 of 14 staging cores have zero confirmed usages, so an empty core is an
+    // expected state, not an error one: a zeroed report, no crash.
+    hoisted.mockLoadConfirmedCorePmids.mockResolvedValue(new Map([["7", []]]));
+
+    const report = await loadUnitPublicationsReport("core", "7");
+
+    expect(report).toEqual({
+      totalPublications: 0,
+      matchedPublications: 0,
+      matchRatePct: 0,
+      highImpactCount: 0,
+      highImpactRatePct: 0,
+      rows: [],
+    });
+    expect(hoisted.mockPubFindMany).not.toHaveBeenCalled();
+    expect(hoisted.mockJifFindMany).not.toHaveBeenCalled();
+  });
+
+  it("a core id the loader returns no entry for is treated as zero usages, not a crash", async () => {
+    hoisted.mockLoadConfirmedCorePmids.mockResolvedValue(new Map());
+
+    const report = await loadUnitPublicationsReport("core", "999");
+
+    expect(report.totalPublications).toBe(0);
+    expect(hoisted.mockPubFindMany).not.toHaveBeenCalled();
   });
 });
 
