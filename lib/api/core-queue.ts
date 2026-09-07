@@ -128,7 +128,7 @@ export interface CoreReviewQueue {
     /** Of those listed staff, how many the co-author signal can actually MATCH
      *  — the number the signal really runs on, and the one the toolbar chip
      *  leads with. It is routinely smaller than `staffCount` (the two differ on
-     *  8 of the 14 live cores) because the signal reads the core's tracked
+     *  9 of the 14 live cores) because the signal reads the core's tracked
      *  staff CWIDs, not its dictionary list, so a listed staff member with no
      *  personIdentifier upstream is invisible to it. 0 here with a positive
      *  `staffCount` is a real state: the dictionary lists staff but the signal

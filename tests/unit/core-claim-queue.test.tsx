@@ -1915,7 +1915,7 @@ describe("compareBySort", () => {
 //
 // The four states are NOT interchangeable, and the reason the tracked count
 // exists at all is that the chip must never claim the signal draws on staff it
-// cannot match: on the live dictionary the two counts differ on 8 of 14 cores,
+// cannot match: on the live dictionary the two counts differ on 9 of 14 cores,
 // core 14 (the one in the owner's mockup) lists 4 and tracks 1, and cores 8, 10
 // and 13 list staff while tracking none.
 describe("CoreClaimQueue — core-staff lock chip", () => {
@@ -2014,17 +2014,22 @@ describe("CoreClaimQueue — core-staff lock chip", () => {
   });
 
   it("never renders a bare listed count as the number the signal draws on", () => {
-    // The single property this whole revision exists for, swept over every
-    // divergent core in the live dictionary (listed/tracked).
+    // The single property this whole revision exists for, swept over the 8
+    // DISTINCT listed/tracked pairs that the 9 diverging live cores produce.
+    // 8, not 9, because core 11's 3/2 repeats core 3's, and the chip is a pure
+    // function of the pair — a ninth row would re-run an identical case, not
+    // cover another one. The other 5 cores agree: core 1 at 4/4, core 12 at
+    // 1/1, and cores 4, 6 and 7 at 0/0. The named cases above pin 4/4 and 0/0,
+    // and 1/1 takes the same branch as 4/4.
     for (const [staffCount, staffTrackedCount] of [
-      [7, 4],
-      [3, 2],
-      [5, 2],
-      [3, 0],
-      [2, 1],
-      [2, 0],
-      [1, 0],
-      [4, 1],
+      [7, 4], // core 2
+      [3, 2], // cores 3 and 11
+      [5, 2], // core 5
+      [3, 0], // core 8
+      [2, 1], // core 9
+      [2, 0], // core 10
+      [1, 0], // core 13
+      [4, 1], // core 14 — the owner's mockup
     ]) {
       const view = render(
         <CoreClaimQueue

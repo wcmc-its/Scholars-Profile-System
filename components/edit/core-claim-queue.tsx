@@ -50,7 +50,7 @@
  *     publishes both the LISTED roster size and the TRACKED subset the signal
  *     can actually match (PK=CORE#{id}, SK=STAFF_DICT), and etl/dynamodb
  *     Block 6b lands them on `core.staff_count` / `core.staff_tracked_count`.
- *     The mockup's bare N is the listed count, which is wrong on 8 of the 14
+ *     The mockup's bare N is the listed count, which is wrong on 9 of the 14
  *     live cores — the very core it draws lists 4 and tracks 1 — so the chip
  *     leads with the tracked number and says outright when the signal cannot
  *     fire at all. Unpublished counts still draw nothing (see `CoreStaffChip`).
@@ -1313,8 +1313,9 @@ export function CoreClaimQueue({
  * `staff:` key. `staffTrackedCount` is how many of those the signal can
  * actually MATCH: pipeline_cores/signals.py `coauthorship_index` reads the
  * core's tracked staff CWIDs, so a listed staff member with no personIdentifier
- * upstream is invisible to it. The two differ on 8 of the 14 live cores; the
- * largest lists four and tracks one, and three list staff while tracking none.
+ * upstream is invisible to it. The two differ on 9 of the 14 live cores; the
+ * mockup's own core lists four and tracks one, the longest roster (seven)
+ * tracks four, and three cores list staff while tracking none.
  * A chip built on the listed count alone would tell a reviewer the signal
  * "draws on 4 core staff" on exactly the core in the owner's mockup, where it
  * draws on one — the same species of false mechanism claim `decodeTopicalPrior`

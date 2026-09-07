@@ -965,7 +965,7 @@ async function main() {
     // routinely smaller: pipeline_cores/signals.py `coauthorship_index` reads
     // the core's `tracked_staff_cwids`, not its `staff:` list, so a listed
     // staff member with no personIdentifier upstream is invisible to it. The
-    // two counts differ on 8 of the 14 live cores, and three of those list
+    // two counts differ on 9 of the 14 live cores, and three of those list
     // staff while tracking none. Landing only `staff_count` would let the
     // queue tell an owner "the co-author signal draws on N core staff" for a
     // core where it cannot fire at all.

@@ -14,7 +14,7 @@
  * (pipeline_cores/signals.py `coauthorship_index`) reads the core's
  * `tracked_staff_cwids`, not its `staff:` list; a listed staff member with no
  * personIdentifier upstream is simply invisible to it. On the live dictionary
- * the two counts differ on 8 of 14 cores, and three of those list staff while
+ * the two counts differ on 9 of 14 cores, and three of those list staff while
  * tracking none. A consumer given only the listed count would put "the
  * co-author signal draws on N core staff" on screen for cores where the signal
  * cannot fire at all — a chip asserting a mechanism that is not the one behind

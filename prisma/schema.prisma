@@ -2380,7 +2380,7 @@ model Core {
   /// `staffCount`: pipeline_cores/signals.py `coauthorship_index` reads the
   /// core's `tracked_staff_cwids`, not its `staff:` list, so a listed staff
   /// member with no personIdentifier upstream is invisible to the signal. On
-  /// the live dictionary the two diverge on 8 of 14 cores, and three cores
+  /// the live dictionary the two diverge on 9 of 14 cores, and three cores
   /// list staff while tracking none — publishing only `staffCount` would put
   /// "draws on N core staff" on screen for cores where the signal cannot fire
   /// at all. Same NULL-is-not-0 rule; written in lockstep with `staffCount`.
