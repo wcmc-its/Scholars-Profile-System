@@ -1210,56 +1210,19 @@ export async function fetchWcmAuthorsForPmids(
   return byPmid;
 }
 
-/** Author tokens in a comma-separated PubMed byline: `(( ))` WCM markers
- *  stripped, trimmed, empties dropped.
- *
- *  ponytail: splits on commas, so a collective author whose own name contains
- *  one ("GBD 2019 Diseases, Injuries Collaborators") counts as two. It cancels
- *  out when the token sits in the truncated prefix and inflates N only when it
- *  falls in the dropped tail — an over-count on a cosmetic suffix, never a
- *  negative and never a wrong stored value. The repo already assumes
- *  comma-delimited authors at `etl/reciter/index.ts` (countAuthors) and
- *  `lib/api/mentoring.ts` (localAuthors); if that ever stops holding, all three
- *  need a real tokenizer, not just this one. */
-function countAuthorTokens(authors: string): number {
-  return authors
-    .replace(/\(\(|\)\)/g, "")
-    .split(/,\s*/)
-    .map((t) => t.trim())
-    .filter(Boolean).length;
-}
-
-/**
- * The byline text for one publication: the TRUNCATED `authors_string`, markers
- * stripped, followed by `+ N more` naming the authors the truncation drops.
- *
- * #2581 — `authorsString` is a known-truncated preview (documented at
- * `lib/api/core-queue.ts`), and it was being rendered as if it were the whole
- * byline. Measured on the live corpus: of the 193,662 publications carrying
- * both author fields the truncated one is shorter on 76,232 (39.4%), losing
- * 3.68 authors on average and 1,264 in the worst case — with nothing on screen
- * saying so. The truncated list is still what we SHOW (it is the preview sized
- * for a result row; `full_authors_string` is an unbounded Text column and a
- * 1,264-name byline is not a row); the suffix only makes the loss visible.
- *
- * N is a difference of AUTHOR COUNTS, not string lengths. The suffix is omitted
- * when `fullAuthorsString` is null (nothing to compare), when the counts match,
- * and when full is somehow SHORTER than the truncated list — bad upstream data,
- * never a negative count.
- */
-export function bylineWithDroppedCount(
-  authorsString: string | null,
-  fullAuthorsString: string | null,
-): string {
-  // `authors_string` marks WCM authors with `(( ))` (the substrings profile
-  // rendering overlays hyperlinks onto). The byline has no link target here,
-  // so strip the markers for clean display text.
-  if (!authorsString) return "";
-  const byline = authorsString.replace(/\(\(|\)\)/g, "").trim();
-  if (!byline || !fullAuthorsString) return byline;
-  const dropped = countAuthorTokens(fullAuthorsString) - countAuthorTokens(authorsString);
-  return dropped > 0 ? `${byline} + ${dropped} more` : byline;
-}
+/* `countAuthorTokens` / `bylineWithDroppedCount` moved to `lib/author-byline.ts`
+   so the core claim queue (a "use client" component) can import them: THIS file
+   imports `@/lib/db` at module scope, and importing the helper from here would
+   drag the mariadb driver into the browser bundle and break the Next build on
+   `fs`/`net`. Re-exported so every existing caller and test is unchanged. */
+export {
+  bylineWithDroppedCount,
+  countAuthorTokens,
+  droppedAuthorCount,
+  stripWcmMarkers,
+} from "@/lib/author-byline";
+// A re-export does not bind the name locally, and this file still calls it below.
+import { bylineWithDroppedCount } from "@/lib/author-byline";
 
 /**
  * #718 — Suppression-safe unstructured author byline for publication-search rows

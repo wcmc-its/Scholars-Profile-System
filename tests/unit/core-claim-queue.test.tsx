@@ -1434,11 +1434,62 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByText(/re-files on next load/)).toBeNull();
   });
 
-  it("highlights the core-staff author inline in the byline (best-effort)", () => {
+  it("highlights the core-staff author inline in the byline, named in FULL", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    // the "Testerson A" token links to the staff profile
-    const chip = screen.getByText("Testerson A");
+    // "Testerson A" resolves to the scholar, so the byline shows the display
+    // name rather than the PubMed initials, and links to the profile.
+    const byline = document.querySelector('[data-slot="core-queue-byline"]');
+    const chip = within(byline as HTMLElement).getByText("Alex Testerson");
     expect(chip.closest("a")?.getAttribute("href")).toBe("/alex-testerson");
+    expect(byline?.textContent).not.toContain("Testerson A");
+  });
+
+  it("leaves an author we cannot resolve in its PubMed form", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    // "Fixture B" matches no scholar — no rename, no link.
+    const el = document.querySelector('[data-slot="core-queue-byline"]');
+    expect(el?.textContent).toContain("Fixture B");
+  });
+
+  it("does NOT rename on a surname collision — it would print one person twice", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            authorsString: "Testerson A, Testerson B",
+            fullAuthorsString: "Testerson A, Testerson B",
+            coauthorScholars: [
+              { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" },
+              { cwid: "bbb1002", name: "Blair Testerson", slug: "blair-testerson", dept: "Radiology" },
+            ],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const el = document.querySelector('[data-slot="core-queue-byline"]');
+    // Both tokens keep their PubMed form; neither is rewritten to the other's name.
+    expect(el?.textContent).toContain("Testerson A");
+    expect(el?.textContent).toContain("Testerson B");
+  });
+
+  it("does NOT rename when the first initial disagrees", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            authorsString: "Testerson Z",
+            fullAuthorsString: "Testerson Z",
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const el = document.querySelector('[data-slot="core-queue-byline"]');
+    expect(el?.textContent).toContain("Testerson Z");
+    expect(el?.textContent).not.toContain("Alex Testerson");
   });
 
   it("reports how much of the queue the current filter is showing", () => {
@@ -2180,6 +2231,101 @@ describe("CoreClaimQueue — method family, on screen", () => {
     expect(matchesQuery(row({ methodTier: "strong" }), "method")).toBe(true);
     expect(matchesQuery(row({ methodTier: "strong" }), "strong")).toBe(true);
     expect(matchesQuery(row({ methodTier: null }), "method")).toBe(false);
+  });
+});
+
+// The byline, RENDERED. `authors_string` marks WCM authors with `((…))`, and the
+// card was printing that markup raw on 70.4% of core 14's live queue while the
+// truncated preview silently dropped authors on 68.4% of it.
+describe("CoreClaimQueue — byline markers and the dropped-author suffix", () => {
+  const byline = (over: Partial<CoreQueueRow>) => {
+    render(<CoreClaimQueue core={CORE} candidates={[row(over)]} confirmed={[]} />);
+    const el = document.querySelector('[data-slot="core-queue-byline"]');
+    return (el?.textContent ?? "").replace(/\s+/g, " ").trim();
+  };
+
+  it("never prints the `((…))` WCM marker on screen", () => {
+    const text = byline({
+      authorsString: "Madden K, Andy C, Sholle ET, Gerber LM, ((Traube C))",
+      fullAuthorsString: "Madden K, Andy C, Sholle ET, Gerber LM, Traube C",
+      coauthorScholars: [],
+      coauthors: [],
+    });
+    expect(text).not.toContain("((");
+    expect(text).not.toContain("))");
+    expect(text).toContain("Traube C");
+  });
+
+  it("says how many authors the truncated preview dropped", () => {
+    const text = byline({
+      authorsString: "Testerson A, Fixture B",
+      fullAuthorsString: "Testerson A, Fixture B, Sample C, Fourth D",
+      coauthorScholars: [],
+      coauthors: [],
+    });
+    expect(text).toContain("+ 2 more");
+  });
+
+  it("adds no suffix when the preview is the whole byline", () => {
+    const text = byline({
+      authorsString: "Testerson A, Fixture B",
+      fullAuthorsString: "Testerson A, Fixture B",
+      coauthorScholars: [],
+      coauthors: [],
+    });
+    expect(text).not.toContain("more");
+  });
+
+  it("highlights a core-staff author the marker used to hide", () => {
+    // The lead token of "((Traube C))" is "((traube", so the surname match could
+    // never fire — for exactly the authors the marker exists to mark.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            authorsString: "Madden K, ((Testerson A))",
+            fullAuthorsString: "Madden K, Testerson A",
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /Alex Testerson/ });
+    expect(link.getAttribute("href")).toBe("/alex-testerson");
+  });
+});
+
+// The Confirmed tab. A confirmation is not final -- the engine re-scores nightly,
+// so a row confirmed months ago may be one the evidence no longer supports. The
+// list used to show title/year/PMID and a Revoke button, and nothing to judge on.
+describe("CoreClaimQueue — Confirmed rows carry the score", () => {
+  const ev = () => document.querySelector('[data-slot="core-queue-confirmed-evidence"]');
+
+  it("shows the band, the signal count and the evidence on a confirmed row", () => {
+    render(
+      <CoreClaimQueue core={CORE} candidates={[]} confirmed={[row({ likelihood: 0.91 })]} />,
+    );
+    fireEvent.click(within(screen.getByRole("group", { name: "Queue view" })).getByText(/Confirmed/));
+    const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).toContain("Strong 91%");
+    expect(text).toContain(`of ${5} signals`);
+    expect(text).toContain("Acknowledged as");
+  });
+
+  it("gives a MANUAL add no score — it was never engine-scored", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[row({ isManual: true, likelihood: 0 })]}
+      />,
+    );
+    fireEvent.click(within(screen.getByRole("group", { name: "Queue view" })).getByText(/Confirmed/));
+    // A 0% band on a human's deliberate addition would read as the engine
+    // disagreeing, when it simply never scored it.
+    expect(ev()).toBeNull();
+    expect(screen.getByText(/Manually added/)).toBeTruthy();
   });
 });
 
