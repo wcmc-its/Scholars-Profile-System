@@ -104,9 +104,13 @@ export interface CoreQueueRow {
    *  writes all three columns regardless; add the selects back in the same
    *  change that renders them.
    *
-   *  NOT a counted signal either way: whether method becomes the 6th
-   *  claim-queue signal or an uncounted chip strip is an open owner decision,
-   *  and `SIGNAL_COUNT` is untouched until it is made. */
+   *  NOT a counted signal, decided 2026-09-07: it renders as an uncounted
+   *  tier-labelled token in the evidence strip and a strong+moderate facet, and
+   *  `SIGNAL_COUNT` stays 5. Two reasons it is not the 6th signal — it is
+   *  weighted 0.00 in the engine's `combine.WEIGHTS` so it moves no likelihood,
+   *  and 63% of rows carrying a tier are `weak`, where the measured lift inverts
+   *  to BELOW background (1.7x -> 0.7x). Counting it would assert a signal that
+   *  anti-correlates on two of every three rows that gain it. */
   methodTier: string | null;
   /** Scopus citation count for the publication. */
   citationCount: number;

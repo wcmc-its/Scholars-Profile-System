@@ -190,7 +190,7 @@ type Decision = "claimed" | "rejected";
 type QueueView = "review" | "confirmed" | "rejected";
 /** Exported for the pure-predicate tests. There is no "all" member: the empty
  *  set IS "no narrowing", and "Clear filters" is the only reset control. */
-export type FilterKey = "client" | "ack" | "coauthored" | "noprior" | "llm";
+export type FilterKey = "client" | "ack" | "coauthored" | "noprior" | "llm" | "method";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm" | "year" | "cites";
 
 type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
@@ -337,6 +337,16 @@ export function evidenceTokens(
   if (row.llmScore !== null) {
     tokens.push({ label: "LLM on title and abstract", value: llmVerdict(row.llmScore) });
   }
+  // Method family is NOT one of the five counted signals -- SIGNAL_COUNT stays 5
+  // and buildSignals does not know about it. It appears here, last, because a
+  // reviewer should see it without the score claiming to have used it: it is
+  // weighted 0.00 in the engine's combine.WEIGHTS and moves no likelihood.
+  //
+  // Always carry the TIER, never a bare "method family identified". Measured
+  // lift inside core 14's own curated list spans 399x (strong) to 1.6x (weak),
+  // and flattening that to a boolean is exactly the error per-family tiering
+  // exists to prevent.
+  if (row.methodTier) tokens.push({ label: "Method family", value: row.methodTier });
   return tokens;
 }
 
@@ -389,6 +399,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "coauthored", label: "Staff co-author" },
   { key: "noprior", label: "No prior usage on the byline" },
   { key: "llm", label: "LLM-flagged" },
+  { key: "method", label: "Method family (strong/moderate)" },
 ];
 
 const SORTS: { key: SortKey; label: string }[] = [
@@ -449,6 +460,12 @@ function matchesFilter(
       return row.authorAffinity === null;
     case "llm":
       return row.llmScore !== null;
+    // Scoped to strong+moderate on purpose. Over all surfaced rows the WEAK
+    // families invert to below background (1.7x -> 0.7x measured on core 14),
+    // and 63% of rows carrying a tier are weak -- a facet that returned them
+    // would narrow the queue TOWARDS the rows the signal argues against.
+    case "method":
+      return row.methodTier === "strong" || row.methodTier === "moderate";
   }
 }
 
@@ -481,14 +498,13 @@ export function matchesFilters(
  *
  * Three fields the artboard's blob searched are dropped, each because the row
  * doesn't carry it or the card doesn't show it:
- *   - method family + tool: the strength BAND is now on the row (`methodTier`,
- *     plumbed from the engine's CORE# items) but the families and tools
- *     themselves are not — `method_evidence` is free text the loader
- *     deliberately does not select while nothing renders it. So there is still
- *     nothing here to match on, and the band alone is not what a reviewer would
- *     be typing. NOTE the filter placeholder DOES say "method" (the owner took
- *     the mockup's string) — that word stays aspirational until the card
- *     renders method, not a bug in this function;
+ *   - method FAMILY + TOOL names: still absent. `method_evidence` is free text
+ *     the loader deliberately does not select, so the individual family and
+ *     tool strings have nothing here to match on. The BAND is a different
+ *     matter: the card now renders "Method family <tier>" as an evidence
+ *     token, so the token's own text IS searched below — the placeholder's
+ *     "method" stopped being aspirational the moment that token shipped, and
+ *     leaving it out would have broken this function's one rule;
  *   - the affinity "who": `authorAffinity` is a bare 0-1 number here, with no
  *     person attached to search on;
  *   - `meshTerms`: on the row, but nothing has rendered it since the Details
@@ -506,6 +522,11 @@ export function searchBlob(row: CoreQueueRow): string {
     row.ackSnippet,
     ...row.wcmAuthors.map((a) => a.name),
     ...row.coauthorScholars.map((a) => a.name),
+    // The evidence token's own rendered text, verbatim, so both halves a
+    // reviewer can SEE match: "method" (the placeholder's promise) and the tier
+    // word. Not `row.methodTier` alone — that would match "strong" but not the
+    // "method" the placeholder advertises.
+    row.methodTier ? `Method family ${row.methodTier}` : null,
   ]
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join(" ")
@@ -916,7 +937,7 @@ export function CoreClaimQueue({
   // place twice over: the count tells a reviewer what a pill will do BEFORE the
   // click, and a facet counting 0 is dropped from the row entirely rather than
   // rendered as a pill whose only possible outcome is an empty queue.
-  // ponytail: five extra passes over `open`, recomputed every render, no memo.
+  // ponytail: six extra passes over `open`, recomputed every render, no memo.
   // Fine at the sizes cores actually queue, but loadCoreReviewQueue has no
   // LIMIT — if one core ever returns thousands of candidates, fold these into a
   // single reduce or wrap them in useMemo([candidates, decided]).
@@ -926,6 +947,7 @@ export function CoreClaimQueue({
     coauthored: open.filter((c) => matchesFilter(c, "coauthored", clientCwids)).length,
     noprior: open.filter((c) => matchesFilter(c, "noprior", clientCwids)).length,
     llm: open.filter((c) => matchesFilter(c, "llm", clientCwids)).length,
+    method: open.filter((c) => matchesFilter(c, "method", clientCwids)).length,
   };
   // Apply the facets AND the free-text query (but always keep a just-decided row
   // visible so undo stays reachable), then sort. Likelihood is the loader's
@@ -1102,11 +1124,11 @@ export function CoreClaimQueue({
             </h2>
           )}
           {view === "review" && candidates.length > 0 ? (
-            /* "method" is ASPIRATIONAL: `searchBlob` does not search a method
-               family or tool because `CoreQueueRow` never carries one. The owner
-               chose the mockup's string over the trimmed one; the word starts
-               being true when method data reaches this row, and until then a
-               method query simply matches nothing. Not a bug — see searchBlob. */
+            /* "method" is now TRUE, not aspirational: the card renders a
+               "Method family <tier>" evidence token and `searchBlob` searches
+               that token's text. The individual family and tool NAMES are still
+               not searched (`method_evidence` stays out of the loader's
+               select) — a query for a specific tool matches nothing. */
             <Input
               type="search"
               value={query}
