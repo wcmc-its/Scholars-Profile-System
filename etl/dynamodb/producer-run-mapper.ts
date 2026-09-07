@@ -47,7 +47,7 @@
  * liveness board. Upgrade path if that question comes up: aggregate them here
  * into a failure ratio rather than adding thousands of `etl_run` rows.
  */
-import type { ProducerRunRecord } from "./partition";
+import type { DriftDayRecord, ProducerRunRecord } from "./partition";
 
 /**
  * Ledger stage -> `etl_run.source`. Deliberately NOT every stage in the ledger.
@@ -178,6 +178,72 @@ export function buildProducerRunWrites(
       completedAt: resolveCompletedAt(rec, startedAt),
       rowsProcessed: toNumber(rec.records_written),
       errorMessage: status === "failed" ? errorText(rec) : null,
+    });
+  }
+
+  writes.sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+  return writes;
+}
+
+/**
+ * The two daily drift Lambdas, keyed by their `DRIFT#` partition.
+ *
+ * These are the other half of "is the producer alive". They are scheduled
+ * (`reciterai-drift-daily` cron(0 14 * * ? *), `reciterai-taxonomy-drift-daily`
+ * cron(0 15 * * ? *), both ENABLED) and they were invisible here until now,
+ * which is the same gap the stage ledger closed for the four above.
+ */
+export const DRIFT_SOURCES: Readonly<Record<string, string>> = {
+  "DRIFT#evaluation": "ReciterAI-drift",
+  "DRIFT#taxonomy": "ReciterAI-taxonomy-drift",
+};
+
+/** `DAY#{YYYY-MM-DD}` — the only SK shape these rows use. */
+const DAY_SK = /^DAY#(\d{4}-\d{2}-\d{2})$/;
+
+/**
+ * Build `etl_run` rows for drift evaluations we have not recorded yet.
+ *
+ * A drift row carries no status and no duration, so this is a liveness-only
+ * signal: the row EXISTS, therefore the Lambda ran, therefore `success`.
+ * `severity` is not consulted on purpose — see DriftDayRecord's doc comment, and
+ * note DRIFT#evaluation has been WARN every single day of its life.
+ *
+ * ponytail: `startedAt === completedAt`, so the board's Run duration column
+ * reads 0s for these two. There is genuinely no duration in the row — this is a
+ * declared unknown rather than a measured zero, and it is the one column that is
+ * wrong for them. Upgrade path: ReciterAI adding `duration_ms` to the drift row
+ * (it already writes one on every STAGE# entry), after which this becomes the
+ * same shape as buildProducerRunWrites.
+ */
+export function buildDriftRunWrites(
+  records: readonly DriftDayRecord[],
+  since: ReadonlyMap<string, Date | null>,
+): ProducerRunWrite[] {
+  const writes: ProducerRunWrite[] = [];
+
+  for (const rec of records) {
+    const source = DRIFT_SOURCES[String(rec.PK ?? "")];
+    if (source === undefined) continue;
+
+    const day = DAY_SK.exec(String(rec.SK ?? ""));
+    if (day === null) continue;
+
+    // window_end is the instant the evaluation ran; the DAY# key is only a date,
+    // so it is the fallback and lands at midnight UTC.
+    const at = parseDate(rec.window_end) ?? parseDate(`${day[1]}T00:00:00Z`);
+    if (at === null) continue;
+
+    const seen = since.get(source);
+    if (seen != null && at.getTime() <= seen.getTime()) continue;
+
+    writes.push({
+      source,
+      status: "success",
+      startedAt: at,
+      completedAt: at,
+      rowsProcessed: 0,
+      errorMessage: null,
     });
   }
 

@@ -161,6 +161,33 @@ export type ProducerRunRecord = {
   [key: string]: unknown;
 };
 
+/**
+ * A ReciterAI drift-evaluator run. Unlike a ProducerRunRecord this is not a run
+ * LEDGER entry -- the two drift Lambdas write one findings row per day instead:
+ *
+ *   PK = `DRIFT#evaluation` | `DRIFT#taxonomy`
+ *   SK = `DAY#{YYYY-MM-DD}`
+ *
+ * There is no status, no started_at and no duration. What there is, is
+ * `window_end` -- the instant the evaluation covered up to, which in practice is
+ * the moment the Lambda ran (cron fires 14:00Z, window_end reads 14:00:50Z). So
+ * the row's EXISTENCE is the liveness signal and `window_end` is its timestamp.
+ *
+ * `severity` is deliberately NOT a run outcome. DRIFT#evaluation has read WARN
+ * on all 106 rows it has ever written -- it is reporting on the DATA, not on
+ * itself, and Teams alerting already carries that. Grading it here would paint a
+ * permanently red row for a Lambda that has never once failed to run.
+ */
+export type DriftDayRecord = {
+  PK: string; // DRIFT#evaluation | DRIFT#taxonomy
+  SK: string; // DAY#{YYYY-MM-DD}
+  severity?: string;
+  record_type?: string;
+  window_start?: string;
+  window_end?: string;
+  [key: string]: unknown;
+};
+
 export type Buckets = {
   tax: TaxonomyRecord[];
   topics: TopicRecord[];
@@ -170,6 +197,7 @@ export type Buckets = {
   cores: CoreRecord[];
   coreStaff: CoreStaffRecord[];
   producerRuns: ProducerRunRecord[];
+  driftDays: DriftDayRecord[];
 };
 
 /**
@@ -184,6 +212,7 @@ export type Buckets = {
  *   Block 6 PUB#/CORE# -> core                begins_with(SK, "CORE#")   <- SK, not PK
  *   Block 6b CORE#/STAFF_DICT -> core.staff_*  PK CORE# AND SK === "STAFF_DICT"
  *   Block 8  STAGE#    -> etl_run       begins_with(PK, "STAGE#")
+ *   Block 9  DRIFT#    -> etl_run       begins_with(PK, "DRIFT#")
  *
  * The buckets are disjoint (one `continue` per match), so the union exactly
  * reproduces what the six independent filtered scans kept. Block 7 (GRANT#) is
@@ -207,6 +236,7 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     cores: [],
     coreStaff: [],
     producerRuns: [],
+    driftDays: [],
   };
   for (const it of items) {
     const pk = String(it.PK ?? "");
@@ -256,6 +286,13 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     // mapper's business, not the router's.
     if (pk.startsWith("STAGE#")) {
       b.producerRuns.push(it as ProducerRunRecord);
+      continue;
+    }
+    // Block 9 — the two drift Lambdas, which write findings rows rather than
+    // ledger entries. Same destination as Block 8 (etl_run) but a different
+    // shape, so a different bucket; see ./producer-run-mapper.ts.
+    if (pk.startsWith("DRIFT#")) {
+      b.driftDays.push(it as DriftDayRecord);
       continue;
     }
     // else: unmatched (e.g. a GRANT# item, or a PUB# item without an SK CORE#

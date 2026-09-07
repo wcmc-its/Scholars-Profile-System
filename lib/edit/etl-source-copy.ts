@@ -264,6 +264,18 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
       "The monthly research-AI check that decides whether the Homepage Spotlight cards need rebuilding. Skipping is normal; not running at all is not.",
     origin: "external", // ReCiterAI-run job, read from its own run ledger
   },
+  "ReciterAI-drift": {
+    label: "Research AI: Quality Drift Check",
+    description:
+      "The daily research-AI check for publications its scoring is losing confidence on. A red row means the check stopped running, not that quality slipped.",
+    origin: "external", // ReCiterAI-run job, read from its daily findings row
+  },
+  "ReciterAI-taxonomy-drift": {
+    label: "Research AI: Research Area Drift Check",
+    description:
+      "The daily research-AI check that research areas still match the publications filed under them.",
+    origin: "external", // ReCiterAI-run job, read from its daily findings row
+  },
   "ReciterAI-onboarding-detector": {
     label: "Research AI: New Faculty Scan",
     description: "The daily research-AI scan for faculty who have no research profile data yet.",

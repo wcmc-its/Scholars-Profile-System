@@ -293,6 +293,14 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "ReciterAI-hot-path": { cadence: "weekly" },
   "ReciterAI-spotlight-gate": { cadence: "monthly" },
   "ReciterAI-onboarding-detector": { cadence: "nightly" },
+  // The two daily drift Lambdas. They write a findings row per day rather than a
+  // ledger entry, so the row's existence is the liveness signal -- see
+  // buildDriftRunWrites. Their `severity` is NOT graded here: DRIFT#evaluation
+  // has reported WARN every day of its life because it is describing the DATA,
+  // and Teams alerting already carries that. A red row here means the Lambda
+  // stopped running, which is a different and currently undetected event.
+  "ReciterAI-drift": { cadence: "nightly" },
+  "ReciterAI-taxonomy-drift": { cadence: "nightly" },
 };
 
 export interface SourceStatus {

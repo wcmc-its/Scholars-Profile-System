@@ -76,7 +76,12 @@ import {
 } from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
 import { partitionRecords } from "./partition";
-import { PRODUCER_STAGES, buildProducerRunWrites } from "./producer-run-mapper";
+import {
+  DRIFT_SOURCES,
+  PRODUCER_STAGES,
+  buildDriftRunWrites,
+  buildProducerRunWrites,
+} from "./producer-run-mapper";
 import { fetchExcludedTopicIds } from "./excluded-topics";
 import { planTopicPrune } from "./topic-prune";
 
@@ -150,7 +155,8 @@ async function main() {
         `faculty=${buckets.faculty.length}, impact=${buckets.impact.length}, ` +
         `tools=${buckets.tools.length}, cores=${buckets.cores.length}, ` +
         `coreStaff=${buckets.coreStaff.length}, ` +
-        `producerRuns=${buckets.producerRuns.length}.`,
+        `producerRuns=${buckets.producerRuns.length}, ` +
+        `driftDays=${buckets.driftDays.length}.`,
     );
 
     // ===================================================================
@@ -1021,14 +1027,19 @@ async function main() {
     // failing mirror would otherwise be exactly the silent gap it exists to
     // detect.
     try {
-      const producerSources = [...new Set(Object.values(PRODUCER_STAGES))];
+      const producerSources = [
+        ...new Set([...Object.values(PRODUCER_STAGES), ...Object.values(DRIFT_SOURCES)]),
+      ];
       const seen = await db.write.etlRun.groupBy({
         by: ["source"],
         where: { source: { in: producerSources } },
         _max: { startedAt: true },
       });
       const since = new Map(seen.map((r) => [r.source, r._max.startedAt]));
-      const producerWrites = buildProducerRunWrites(buckets.producerRuns, since);
+      const producerWrites = [
+        ...buildProducerRunWrites(buckets.producerRuns, since),
+        ...buildDriftRunWrites(buckets.driftDays, since),
+      ];
       if (producerWrites.length > 0) {
         await db.write.etlRun.createMany({ data: producerWrites });
       }

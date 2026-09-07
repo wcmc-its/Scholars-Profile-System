@@ -10,7 +10,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  DRIFT_SOURCES,
   PRODUCER_STAGES,
+  buildDriftRunWrites,
   buildProducerRunWrites,
   mapLedgerStatus,
 } from "../../etl/dynamodb/producer-run-mapper";
@@ -277,11 +279,106 @@ describe("buildProducerRunWrites", () => {
   });
 });
 
+describe("buildDriftRunWrites", () => {
+  it("treats the row's existence as the liveness signal and anchors on window_end", () => {
+    const [w] = buildDriftRunWrites(
+      [
+        {
+          PK: "DRIFT#evaluation",
+          SK: "DAY#2026-09-07",
+          severity: "WARN",
+          window_start: "2026-08-24T14:00:50Z",
+          window_end: "2026-09-07T14:00:50Z",
+        },
+      ],
+      NONE,
+    );
+
+    expect(w.source).toBe("ReciterAI-drift");
+    expect(w.status).toBe("success");
+    expect(w.startedAt.toISOString()).toBe("2026-09-07T14:00:50.000Z");
+  });
+
+  it("does NOT grade severity — WARN is about the data, not the run", () => {
+    // DRIFT#evaluation has read WARN on all 106 rows it has ever written. If
+    // severity drove status this row would be permanently red for a Lambda that
+    // has never failed to run.
+    const writes = buildDriftRunWrites(
+      [
+        {
+          PK: "DRIFT#evaluation",
+          SK: "DAY#2026-09-07",
+          severity: "WARN",
+          window_end: "2026-09-07T14:00:50Z",
+        },
+        {
+          PK: "DRIFT#taxonomy",
+          SK: "DAY#2026-09-07",
+          severity: "OK",
+          window_end: "2026-09-07T15:00:12Z",
+        },
+      ],
+      NONE,
+    );
+
+    expect(writes.map((w) => w.status)).toEqual(["success", "success"]);
+    expect(writes.map((w) => w.source)).toEqual(["ReciterAI-drift", "ReciterAI-taxonomy-drift"]);
+  });
+
+  it("never anchors on window_start — that is the drift window, not the run", () => {
+    // window_start is 14 days back; using it would report a 14-day-old run every
+    // day and read as permanently late.
+    const [w] = buildDriftRunWrites(
+      [
+        {
+          PK: "DRIFT#taxonomy",
+          SK: "DAY#2026-09-07",
+          window_start: "2026-08-24T14:00:50Z",
+          window_end: "2026-09-07T14:00:50Z",
+        },
+      ],
+      NONE,
+    );
+
+    expect(w.startedAt.toISOString()).not.toBe("2026-08-24T14:00:50.000Z");
+    expect(w.startedAt.toISOString()).toBe("2026-09-07T14:00:50.000Z");
+  });
+
+  it("falls back to the DAY# key when window_end is missing, and skips junk", () => {
+    const writes = buildDriftRunWrites(
+      [
+        { PK: "DRIFT#taxonomy", SK: "DAY#2026-09-07" },
+        { PK: "DRIFT#taxonomy", SK: "DAY#not-a-date" },
+        { PK: "DRIFT#unknown-kind", SK: "DAY#2026-09-07" },
+        { PK: "STAGE#hot_run#GLOBAL", SK: "RUN#2026-09-07T12:00:34Z" },
+      ],
+      NONE,
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].startedAt.toISOString()).toBe("2026-09-07T00:00:00.000Z");
+  });
+
+  it("writes only evaluations newer than what is already recorded", () => {
+    const rows = [
+      { PK: "DRIFT#evaluation", SK: "DAY#2026-09-06", window_end: "2026-09-06T14:00:50Z" },
+      { PK: "DRIFT#evaluation", SK: "DAY#2026-09-07", window_end: "2026-09-07T14:00:50Z" },
+    ];
+    expect(buildDriftRunWrites(rows, NONE)).toHaveLength(2);
+
+    const since = new Map([["ReciterAI-drift", new Date("2026-09-06T14:00:50Z")]]);
+    expect(buildDriftRunWrites(rows, since)).toHaveLength(1);
+
+    const caughtUp = new Map([["ReciterAI-drift", new Date("2026-09-07T14:00:50Z")]]);
+    expect(buildDriftRunWrites(rows, caughtUp)).toEqual([]);
+  });
+});
+
 describe("producer stage wiring", () => {
   it("every mirrored source is TRACKED — otherwise the board never asks for it", () => {
     // Mirroring runs into a source the status page does not read is the
     // "declared but never connected" failure: it looks exactly like working.
-    for (const source of Object.values(PRODUCER_STAGES)) {
+    for (const source of [...Object.values(PRODUCER_STAGES), ...Object.values(DRIFT_SOURCES)]) {
       expect(TRACKED, `${source} is mirrored but not TRACKED`).toHaveProperty(source);
     }
   });
