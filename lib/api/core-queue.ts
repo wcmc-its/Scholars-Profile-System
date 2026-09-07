@@ -92,6 +92,22 @@ export interface CoreQueueRow {
   authorAffinity: number | null;
   /** 0-1 batch_screen prefilter_prior (signal 5); null when never computed. */
   topicalPrior: number | null;
+  /** Method-family strength band from the engine's extractor
+   *  ("strong" | "moderate" | "weak"); null when it found no family.
+   *
+   *  A 16-char band and nothing more. The two JSON columns beside it in
+   *  `publication_core` — `method_evidence` and `mesh_evidence` — are
+   *  deliberately NOT selected here: `CoreClaimQueue` is a `"use client"`
+   *  component, so every selected column ships in the RSC payload for every
+   *  queued row (1,281 on core 14 in staging today), and those two are lists of
+   *  free-text sentences up to 500 chars each that nothing renders. The ETL
+   *  writes all three columns regardless; add the selects back in the same
+   *  change that renders them.
+   *
+   *  NOT a counted signal either way: whether method becomes the 6th
+   *  claim-queue signal or an uncounted chip strip is an open owner decision,
+   *  and `SIGNAL_COUNT` is untouched until it is made. */
+  methodTier: string | null;
   /** Scopus citation count for the publication. */
   citationCount: number;
   pubmedUrl: string | null;
@@ -117,7 +133,25 @@ export interface CoreQueueRow {
 }
 
 export interface CoreReviewQueue {
-  core: { id: string; name: string };
+  core: {
+    id: string;
+    name: string;
+    /** How many core staff ReciterAI's facility dictionary LISTS for this core
+     *  (ETL-owned, projected by etl/dynamodb Block 6b). NULL means the engine
+     *  has not published counts for this core yet, which is NOT the same as 0:
+     *  0 means the dictionary lists no staff at all. */
+    staffCount: number | null;
+    /** Of those listed staff, how many the co-author signal can actually MATCH
+     *  — the number the signal really runs on, and the one the toolbar chip
+     *  leads with. It is routinely smaller than `staffCount` (the two differ on
+     *  9 of the 14 live cores) because the signal reads the core's tracked
+     *  staff CWIDs, not its dictionary list, so a listed staff member with no
+     *  personIdentifier upstream is invisible to it. 0 here with a positive
+     *  `staffCount` is a real state: the dictionary lists staff but the signal
+     *  cannot fire. Written in lockstep with `staffCount`, so in practice the
+     *  two are both NULL or both set. */
+    staffTrackedCount: number | null;
+  };
   candidates: CoreQueueRow[];
   confirmed: CoreQueueRow[];
   /** Effective-rejected pairs (a human `rejected` claim) — the Rejected tab. */
@@ -204,7 +238,7 @@ export async function loadCoreReviewQueue(
 ): Promise<CoreReviewQueue | null> {
   const core = await client.core.findUnique({
     where: { id: coreId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, staffCount: true, staffTrackedCount: true },
   });
   if (!core) return null;
 
@@ -223,6 +257,10 @@ export async function loadCoreReviewQueue(
       llmRationale: true,
       authorAffinity: true,
       topicalPrior: true,
+      // methodTier only. method_evidence / mesh_evidence are free-text lists
+      // this queue does not render, and every selected column crosses the
+      // server/client boundary for all 1,281 rows. See CoreQueueRow.methodTier.
+      methodTier: true,
       publication: { select: CARD_PUBLICATION_SELECT },
     },
   });
@@ -353,6 +391,7 @@ export async function loadCoreReviewQueue(
       authorAffinity: r.authorAffinity == null ? null : Number(r.authorAffinity),
       // same nullable-Decimal guard as authorAffinity above.
       topicalPrior: r.topicalPrior == null ? null : Number(r.topicalPrior),
+      methodTier: r.methodTier,
       citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
@@ -395,6 +434,7 @@ export async function loadCoreReviewQueue(
     llmRationale: null,
     authorAffinity: null,
     topicalPrior: null,
+    methodTier: null,
     citationCount: p.citationCount,
     pubmedUrl: p.pubmedUrl,
     doi: p.doi,
@@ -410,5 +450,19 @@ export async function loadCoreReviewQueue(
     [...queueRows, ...manualRows],
     (pmid) => claims.get(pmid) ?? null,
   );
-  return { core, candidates, confirmed, rejected };
+  return {
+    // Rebuilt rather than passed straight through so both staff counts are
+    // always present and always `number | null` — an `undefined` reaching the
+    // client would render as "not published yet" by accident rather than by
+    // the column actually being NULL.
+    core: {
+      id: core.id,
+      name: core.name,
+      staffCount: core.staffCount ?? null,
+      staffTrackedCount: core.staffTrackedCount ?? null,
+    },
+    candidates,
+    confirmed,
+    rejected,
+  };
 }

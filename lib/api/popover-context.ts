@@ -321,6 +321,25 @@ export async function fetchTopicRank(
 /**
  * Authorship role of a scholar on a specific publication. Powers the role
  * pill on pub-chip / co-author surfaces.
+ *
+ * `cwid IS NOT NULL` scopes the count to WCM authorship rows. `firstCount` /
+ * `lastCount` below count EVERY returned row and drive the "first" vs
+ * "co-first" ("senior" vs "co-senior") wording of the role pill, which is a
+ * claim about WCM co-authorship — a non-WCM byline carrying its own is_first
+ * would reword it. No deployed environment holds such a row, and the reason
+ * is structural rather than a row count: the only writer that runs deployed
+ * is `buildAuthorshipRows` (etl/reciter/index.ts), which skips every author
+ * outside `ourCwidSet` and returns an `AuthorshipRow` whose `cwid` is a
+ * non-nullable `string`, and the FK that could mint one with no writer
+ * involved (`PublicationAuthor.scholar` is `onDelete: SetNull`) never fires,
+ * because no deployed path hard-deletes a `Scholar` — only `seed/index.ts`
+ * does, and departures soft-delete via `deletedAt`. Staging was counted as a
+ * check on that argument (0 null-cwid rows of 285,587, 2026-09); other
+ * environments were not counted, and the argument covers them without it.
+ * `seed/publications.ts` is the one writer of non-WCM rows and does set
+ * is_first on them, so on a seeded dev database this filter changes the
+ * counts rather than being a no-op. Nothing under .github/workflows/ runs
+ * `npm run seed`, so no CI job exercises that difference.
  */
 export async function fetchAuthorshipOnPub(
   cwid: string,
@@ -339,6 +358,7 @@ export async function fetchAuthorshipOnPub(
       FROM publication_author
      WHERE pmid = ${pmid}
        AND is_confirmed = 1
+       AND cwid IS NOT NULL
   `.catch(() => []);
   if (rows.length === 0) return null;
   const me = rows.find((r) => r.cwid === cwid);

@@ -2350,22 +2350,41 @@ model PublicationTopic {
 /// dictionary) and then FK-guards `publication_core.coreId` against it — the same
 /// "populate catalog, then guard usage rows" flow as Block 1 (TAXONOMY# → topic).
 model Core {
-  id          String   @id @db.VarChar(32) // dictionary core_id, e.g. "2" (Biomedical Imaging)
-  name        String   @db.VarChar(255) // "Biomedical Imaging"
-  facility    String?  @db.VarChar(255) // canonical facility name, e.g. "Citigroup Biomedical Imaging Center"
+  id                String   @id @db.VarChar(32) // dictionary core_id, e.g. "2" (Biomedical Imaging)
+  name              String   @db.VarChar(255) // "Biomedical Imaging"
+  facility          String?  @db.VarChar(255) // canonical facility name, e.g. "Citigroup Biomedical Imaging Center"
   // Ownership is NOT a column here: a core owner is modeled as a
   // UnitAdmin(entityType="core", entityId=id, role=owner) row in the existing RBAC
   // (Superuser-granted), the same machinery as department/division/center.
-  source      String   @db.VarChar(64) // "reciterai-core-dictionary"
-  refreshedAt DateTime @default(now()) @map("refreshed_at")
+  source            String   @db.VarChar(64) // "reciterai-core-dictionary"
+  refreshedAt       DateTime @default(now()) @map("refreshed_at")
   /// Cores-as-org-units P1 (core-as-org-unit-plan.md). Manually owned (no ETL
   /// writes these), null/default so the 13 existing cores land clean with no
   /// backfill. `visible` is the per-core curator-facing toggle — it coexists
   /// with the existing global `CORE_PAGES`/`CORE_PUB_MODAL` env flags; both
   /// must be true for a core to show publicly.
-  description String?  @db.Text
-  url         String?  @db.VarChar(512)
-  visible     Boolean  @default(false)
+  description       String?  @db.Text
+  url               String?  @db.VarChar(512)
+  visible           Boolean  @default(false)
+  /// How many core staff the facility dictionary LISTS for this core — the
+  /// length of its `staff:` key. ETL-owned (etl/dynamodb Block 6b reads
+  /// `PK=CORE#{id}, SK=STAFF_DICT`); SPS never curates it, and it is a COUNT,
+  /// not a roster, so no staff CWID is copied into this datastore. Nullable
+  /// with NO default on purpose: NULL means "the engine has not published a
+  /// count for this core yet" and must stay distinguishable from a real 0 (a
+  /// core whose dictionary entry lists no staff at all). An absent item leaves
+  /// the column untouched — it never writes 0.
+  staffCount        Int?     @map("staff_count")
+  /// Of those listed staff, how many the co-author signal can ACTUALLY match.
+  /// This is the load-bearing number, and it is routinely smaller than
+  /// `staffCount`: pipeline_cores/signals.py `coauthorship_index` reads the
+  /// core's `tracked_staff_cwids`, not its `staff:` list, so a listed staff
+  /// member with no personIdentifier upstream is invisible to the signal. On
+  /// the live dictionary the two diverge on 9 of 14 cores, and three cores
+  /// list staff while tracking none — publishing only `staffCount` would put
+  /// "draws on N core staff" on screen for cores where the signal cannot fire
+  /// at all. Same NULL-is-not-0 rule; written in lockstep with `staffCount`.
+  staffTrackedCount Int?     @map("staff_tracked_count")
 
   publications PublicationCore[]
   leaders      CoreLeader[]
@@ -2423,6 +2442,22 @@ model PublicationCore {
   llmRationale    String?  @map("llm_rationale") @db.Text // short LLM rationale
   authorAffinity  Decimal? @map("author_affinity") @db.Decimal(5, 4) // 0-1 repeat-user prior (signal 1)
   topicalPrior    Decimal? @map("topical_prior") @db.Decimal(5, 4) // 0-1 batch_screen prefilter_prior (signal 5): noisy-OR of author-affinity (0.6) + bare-descriptor MeSH E-tree membership (0.4)
+  /// Method-family evidence from the engine's `pipeline_cores` extractor.
+  /// `methodTier` is the family-strength band (strong | moderate | weak);
+  /// `methodEvidence` is the pre-ranked (strongest first) list behind it,
+  /// `[{ family, tool, sentence }]`. The engine writes the pair together or not
+  /// at all. `meshEvidence` is `[{ descriptor_ui, descriptor, tree_prefix }]`
+  /// and is written independently of the pair.
+  ///
+  /// All three are JSON/scalar columns rather than a child table — the same
+  /// shape `signalCoauthors` above uses, and the read path only ever wants the
+  /// whole list for one (pmid, coreId). Nullable and additive: absent on every
+  /// row scored before the engine started emitting them, and NOT a counted
+  /// claim-queue signal (`meshEvidence` in particular carries weight 0.00
+  /// upstream).
+  methodTier      String?  @map("method_tier") @db.VarChar(16)
+  methodEvidence  Json?    @map("method_evidence")
+  meshEvidence    Json?    @map("mesh_evidence")
   scoredAt        DateTime @map("scored_at") // engine `scored_at` ISO timestamp
 
   publication Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
