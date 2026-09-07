@@ -10,10 +10,14 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  CORES_SOURCE,
   DRIFT_SOURCES,
+  GRANTS_SOURCE,
   PRODUCER_STAGES,
   buildDriftRunWrites,
   buildProducerRunWrites,
+  buildRecencyWrite,
+  latestCoreScoredAt,
   mapLedgerStatus,
 } from "../../etl/dynamodb/producer-run-mapper";
 import { TRACKED } from "../../lib/etl/freshness-policy";
@@ -374,13 +378,95 @@ describe("buildDriftRunWrites", () => {
   });
 });
 
+describe("latestCoreScoredAt / buildRecencyWrite (the output-age tier)", () => {
+  it("takes the newest scored_at, not the last one in the array", () => {
+    const at = latestCoreScoredAt([
+      { PK: "PUB#1", SK: "CORE#14", scored_at: "2026-09-07T15:57:36Z" },
+      { PK: "PUB#2", SK: "CORE#14", scored_at: "2026-06-22T10:00:00Z" },
+      { PK: "PUB#3", SK: "CORE#14", scored_at: "2026-09-03T08:00:00Z" },
+    ]);
+
+    expect(at?.toISOString()).toBe("2026-09-07T15:57:36.000Z");
+  });
+
+  it("ignores rows with a missing or unparseable scored_at", () => {
+    expect(latestCoreScoredAt([{ PK: "PUB#1", SK: "CORE#14" }])).toBeNull();
+    expect(
+      latestCoreScoredAt([{ PK: "PUB#1", SK: "CORE#14", scored_at: "not-a-date" }]),
+    ).toBeNull();
+    expect(latestCoreScoredAt([])).toBeNull();
+  });
+
+  it("writes one row, and none at all when there is no anchor", () => {
+    expect(buildRecencyWrite(CORES_SOURCE, null, NONE)).toEqual([]);
+
+    const [w] = buildRecencyWrite(CORES_SOURCE, new Date("2026-09-07T15:57:36Z"), NONE);
+    expect(w.source).toBe(CORES_SOURCE);
+    expect(w.status).toBe("success");
+    expect(w.startedAt.toISOString()).toBe("2026-09-07T15:57:36.000Z");
+  });
+
+  it("adds NO row when the anchor has not moved — a quiet producer just ages", () => {
+    // This is what keeps it idempotent across nightlies. Writing a fresh row
+    // every night with an unchanged anchor would make a frozen producer look
+    // like it reported in daily, which is the exact failure being fixed.
+    const at = new Date("2026-09-07T05:00:00Z");
+    const caughtUp = new Map([[CORES_SOURCE, at]]);
+    expect(buildRecencyWrite(CORES_SOURCE, at, caughtUp)).toEqual([]);
+
+    const stale = new Map([[CORES_SOURCE, new Date("2026-09-08T05:00:00Z")]]);
+    expect(buildRecencyWrite(CORES_SOURCE, at, stale)).toEqual([]);
+
+    const behind = new Map([[CORES_SOURCE, new Date("2026-09-06T05:00:00Z")]]);
+    expect(buildRecencyWrite(CORES_SOURCE, at, behind)).toHaveLength(1);
+  });
+
+  it("keeps the two output-age sources independent of each other", () => {
+    const since = new Map([[CORES_SOURCE, new Date("2026-09-07T05:00:00Z")]]);
+    // Grants has no entry in `since`, so its first row still lands even though
+    // cores is caught up.
+    expect(buildRecencyWrite(GRANTS_SOURCE, new Date("2026-09-07T05:58:15Z"), since)).toHaveLength(
+      1,
+    );
+  });
+});
+
 describe("producer stage wiring", () => {
   it("every mirrored source is TRACKED — otherwise the board never asks for it", () => {
     // Mirroring runs into a source the status page does not read is the
     // "declared but never connected" failure: it looks exactly like working.
-    for (const source of [...Object.values(PRODUCER_STAGES), ...Object.values(DRIFT_SOURCES)]) {
+    for (const source of [
+      ...Object.values(PRODUCER_STAGES),
+      ...Object.values(DRIFT_SOURCES),
+      CORES_SOURCE,
+      GRANTS_SOURCE,
+    ]) {
       expect(TRACKED, `${source} is mirrored but not TRACKED`).toHaveProperty(source);
     }
+  });
+
+  it("covers all eight scheduled ReciterAI jobs", () => {
+    // The count is the point of the last three PRs. If a source is dropped here
+    // the board silently stops asking about one of the eight, which is exactly
+    // the invisible state this work exists to end.
+    const covered = new Set([
+      ...Object.values(PRODUCER_STAGES),
+      ...Object.values(DRIFT_SOURCES),
+      CORES_SOURCE,
+      GRANTS_SOURCE,
+    ]);
+    expect(covered).toEqual(
+      new Set([
+        "ReciterAI-enrichment", // reciterai-enrichment-daily
+        "ReciterAI-hot-path", // reciterai-hot-weekly
+        "ReciterAI-spotlight-gate", // reciterai-spotlight-monthly
+        "ReciterAI-onboarding-detector", // reciterai-onboarding-detector-daily
+        "ReciterAI-drift", // reciterai-drift-daily
+        "ReciterAI-taxonomy-drift", // reciterai-taxonomy-drift-daily
+        "ReciterAI-cores", // reciterai-cores-daily
+        "ReciterAI-grants", // reciterai-grants-daily
+      ]),
+    );
   });
 
   it("maps each stage to a distinct source", () => {

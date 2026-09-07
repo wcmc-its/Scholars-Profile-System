@@ -264,6 +264,21 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
       "The monthly research-AI check that decides whether the Homepage Spotlight cards need rebuilding. Skipping is normal; not running at all is not.",
     origin: "external", // ReCiterAI-run job, read from its own run ledger
   },
+  // These two say "data arrived", not "the job ran" -- the descriptions have to
+  // carry that, because it is the difference between the two kinds of row on
+  // this page and nothing else on screen shows it.
+  "ReciterAI-grants": {
+    label: "Research AI: Funding Opportunities",
+    description:
+      "When the research-AI system last published a fresh set of funding opportunities. Measures the data, not the job.",
+    origin: "external", // ReCiterAI-published S3 artifacts (manifest generated_at)
+  },
+  "ReciterAI-cores": {
+    label: "Research AI: Core Facility Usage",
+    description:
+      "When core facility usage was last scored. Measures the data, not the job, so a quiet stretch with no new publications can look like a pause.",
+    origin: "external", // derived from the ReCiterAI-published core rows
+  },
   "ReciterAI-drift": {
     label: "Research AI: Quality Drift Check",
     description:

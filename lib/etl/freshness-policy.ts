@@ -301,6 +301,23 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // stopped running, which is a different and currently undetected event.
   "ReciterAI-drift": { cadence: "nightly" },
   "ReciterAI-taxonomy-drift": { cadence: "nightly" },
+  // The last two ReciterAI jobs, and the only ones graded on the age of their
+  // OUTPUT rather than on a record of the run. Read that difference before
+  // reacting to a red row here: it means DATA STOPPED ARRIVING, which a stopped
+  // job causes but so does a job that ran and correctly had nothing to write.
+  //
+  // Grants publishes `grants/latest/manifest.json` every day without a break
+  // (verified 2026-08-25 through 2026-09-07), so `nightly` is honest for it.
+  //
+  // Cores is graded WEEKLY against a NIGHTLY schedule (reciterai-cores-daily,
+  // cron(0 5 * * ? *)) ON PURPOSE, and the mismatch is the point. Its anchor is
+  // the newest `scored_at` on the PUB#/CORE# rows, which only advances when the
+  // run finds new publications to score -- so a nightly SLA would go red on the
+  // first quiet night and teach everyone to ignore this row. 8 days is a
+  // backstop behind `reciterai-cores-run-errors`, which is what catches a
+  // crashing run in real time. Do NOT "fix" this to nightly to match the cron.
+  "ReciterAI-grants": { cadence: "nightly" },
+  "ReciterAI-cores": { cadence: "weekly" },
 };
 
 export interface SourceStatus {

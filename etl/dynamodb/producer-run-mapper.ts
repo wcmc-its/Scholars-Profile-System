@@ -47,7 +47,7 @@
  * liveness board. Upgrade path if that question comes up: aggregate them here
  * into a failure ratio rather than adding thousands of `etl_run` rows.
  */
-import type { DriftDayRecord, ProducerRunRecord } from "./partition";
+import type { CoreRecord, DriftDayRecord, ProducerRunRecord } from "./partition";
 
 /**
  * Ledger stage -> `etl_run.source`. Deliberately NOT every stage in the ledger.
@@ -249,4 +249,74 @@ export function buildDriftRunWrites(
 
   writes.sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
   return writes;
+}
+
+// ---------------------------------------------------------------------------
+// Tier C / Tier B — the two producers that keep NO run record of any kind.
+//
+// Everything above this line reads a record the producer wrote ABOUT ITSELF:
+// "I ran, here is how it went". These two have nothing of the sort, so the only
+// available signal is that their OUTPUT moved. That is a genuinely weaker claim
+// and the copy on the board says so, because conflating the two would rebuild
+// the confusion this whole effort exists to remove:
+//
+//   a job that runs and correctly writes nothing looks DEAD here.
+//
+// That is why neither carries its schedule's cadence verbatim -- see the
+// TRACKED entries, where cores is deliberately graded weekly against a nightly
+// schedule so one quiet night cannot cry wolf.
+// ---------------------------------------------------------------------------
+
+/** `pipeline_cores` writes no manifest, no ledger row, no S3 -- only PUB#/CORE# rows. */
+export const CORES_SOURCE = "ReciterAI-cores";
+
+/** `pipeline_grants` writes no ledger row; its manifest is the only trace. */
+export const GRANTS_SOURCE = "ReciterAI-grants";
+
+/**
+ * Newest `scored_at` across the core rows this scan already collected.
+ *
+ * These rows are in `buckets.cores` regardless, so this costs one pass over an
+ * array we hold anyway -- no extra read, no extra request.
+ */
+export function latestCoreScoredAt(records: readonly CoreRecord[]): Date | null {
+  let newest: Date | null = null;
+  for (const rec of records) {
+    const at = parseDate(rec.scored_at);
+    if (at !== null && (newest === null || at.getTime() > newest.getTime())) newest = at;
+  }
+  return newest;
+}
+
+/**
+ * One `etl_run` row for a producer whose only signal is the age of its output.
+ *
+ * Returns nothing when the anchor has not moved since we last recorded it,
+ * which is what keeps this idempotent across nightlies: a producer that
+ * published nothing new adds no row, and its existing row simply ages.
+ *
+ * ponytail: startedAt === completedAt, so Run duration reads 0s for these two,
+ * same declared-unknown as the drift rows. There is no duration to be had --
+ * we are timestamping an ARTIFACT, not observing a run. It stops being a
+ * approximation the day either producer writes a STAGE# row, at which point
+ * both move to buildProducerRunWrites and this helper loses two callers.
+ */
+export function buildRecencyWrite(
+  source: string,
+  latestAt: Date | null,
+  since: ReadonlyMap<string, Date | null>,
+): ProducerRunWrite[] {
+  if (latestAt === null) return [];
+  const seen = since.get(source);
+  if (seen != null && latestAt.getTime() <= seen.getTime()) return [];
+  return [
+    {
+      source,
+      status: "success",
+      startedAt: latestAt,
+      completedAt: latestAt,
+      rowsProcessed: 0,
+      errorMessage: null,
+    },
+  ];
 }
