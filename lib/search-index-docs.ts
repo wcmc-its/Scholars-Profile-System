@@ -484,6 +484,27 @@ export const PUBLICATION_INDEX_WHERE = {
 
 export const PUBLICATION_INDEX_INCLUDE = {
   authors: {
+    // WCM authorship rows only, for both callers that build a deployed index
+    // (etl/search-index/index.ts, lib/edit/search-suppression.ts). These rows
+    // feed `authorNames` in `buildPublicationDoc`, a ^2-boosted BM25 field:
+    // widening the byline multiplies that field's length on every publication
+    // doc, moving BM25 field-length normalization and so every relevance
+    // score, with nothing failing. That is a legitimate change to make — but
+    // as a decision A/B'd against scripts/search-eval/, not a side effect of
+    // an ETL change. Against deployed data it filters nothing, structurally:
+    // the only writer that runs deployed, `buildAuthorshipRows` in
+    // etl/reciter/index.ts, skips authors outside `ourCwidSet` and returns an
+    // `AuthorshipRow` whose `cwid` is a non-nullable `string`, and the FK that
+    // could mint one with no writer involved (`PublicationAuthor.scholar` is
+    // `onDelete: SetNull`) never fires, because no deployed path hard-deletes
+    // a `Scholar` — only `seed/index.ts` does, and departures soft-delete via
+    // `deletedAt`. So no deployed environment holds a null-cwid row. Staging
+    // was counted as a check on that (0 of 285,587, 2026-09); other
+    // environments were not counted. But `seed/publications.ts` writes non-WCM
+    // rows, so an index built from a seeded dev database does lose those names.
+    // `buildPublicationDoc` itself does not filter — a caller passing its own
+    // rows keeps the full byline.
+    where: { cwid: { not: null } },
     orderBy: { position: "asc" },
     include: {
       scholar: {

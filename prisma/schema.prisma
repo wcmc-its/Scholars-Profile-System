@@ -2442,6 +2442,22 @@ model PublicationCore {
   llmRationale    String?  @map("llm_rationale") @db.Text // short LLM rationale
   authorAffinity  Decimal? @map("author_affinity") @db.Decimal(5, 4) // 0-1 repeat-user prior (signal 1)
   topicalPrior    Decimal? @map("topical_prior") @db.Decimal(5, 4) // 0-1 batch_screen prefilter_prior (signal 5): noisy-OR of author-affinity (0.6) + bare-descriptor MeSH E-tree membership (0.4)
+  /// Method-family evidence from the engine's `pipeline_cores` extractor.
+  /// `methodTier` is the family-strength band (strong | moderate | weak);
+  /// `methodEvidence` is the pre-ranked (strongest first) list behind it,
+  /// `[{ family, tool, sentence }]`. The engine writes the pair together or not
+  /// at all. `meshEvidence` is `[{ descriptor_ui, descriptor, tree_prefix }]`
+  /// and is written independently of the pair.
+  ///
+  /// All three are JSON/scalar columns rather than a child table — the same
+  /// shape `signalCoauthors` above uses, and the read path only ever wants the
+  /// whole list for one (pmid, coreId). Nullable and additive: absent on every
+  /// row scored before the engine started emitting them, and NOT a counted
+  /// claim-queue signal (`meshEvidence` in particular carries weight 0.00
+  /// upstream).
+  methodTier      String?  @map("method_tier") @db.VarChar(16)
+  methodEvidence  Json?    @map("method_evidence")
+  meshEvidence    Json?    @map("mesh_evidence")
   scoredAt        DateTime @map("scored_at") // engine `scored_at` ISO timestamp
 
   publication Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)

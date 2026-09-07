@@ -92,6 +92,22 @@ export interface CoreQueueRow {
   authorAffinity: number | null;
   /** 0-1 batch_screen prefilter_prior (signal 5); null when never computed. */
   topicalPrior: number | null;
+  /** Method-family strength band from the engine's extractor
+   *  ("strong" | "moderate" | "weak"); null when it found no family.
+   *
+   *  A 16-char band and nothing more. The two JSON columns beside it in
+   *  `publication_core` — `method_evidence` and `mesh_evidence` — are
+   *  deliberately NOT selected here: `CoreClaimQueue` is a `"use client"`
+   *  component, so every selected column ships in the RSC payload for every
+   *  queued row (1,281 on core 14 in staging today), and those two are lists of
+   *  free-text sentences up to 500 chars each that nothing renders. The ETL
+   *  writes all three columns regardless; add the selects back in the same
+   *  change that renders them.
+   *
+   *  NOT a counted signal either way: whether method becomes the 6th
+   *  claim-queue signal or an uncounted chip strip is an open owner decision,
+   *  and `SIGNAL_COUNT` is untouched until it is made. */
+  methodTier: string | null;
   /** Scopus citation count for the publication. */
   citationCount: number;
   pubmedUrl: string | null;
@@ -241,6 +257,10 @@ export async function loadCoreReviewQueue(
       llmRationale: true,
       authorAffinity: true,
       topicalPrior: true,
+      // methodTier only. method_evidence / mesh_evidence are free-text lists
+      // this queue does not render, and every selected column crosses the
+      // server/client boundary for all 1,281 rows. See CoreQueueRow.methodTier.
+      methodTier: true,
       publication: { select: CARD_PUBLICATION_SELECT },
     },
   });
@@ -371,6 +391,7 @@ export async function loadCoreReviewQueue(
       authorAffinity: r.authorAffinity == null ? null : Number(r.authorAffinity),
       // same nullable-Decimal guard as authorAffinity above.
       topicalPrior: r.topicalPrior == null ? null : Number(r.topicalPrior),
+      methodTier: r.methodTier,
       citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
@@ -413,6 +434,7 @@ export async function loadCoreReviewQueue(
     llmRationale: null,
     authorAffinity: null,
     topicalPrior: null,
+    methodTier: null,
     citationCount: p.citationCount,
     pubmedUrl: p.pubmedUrl,
     doi: p.doi,
