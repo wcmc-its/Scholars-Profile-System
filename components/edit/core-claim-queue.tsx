@@ -190,7 +190,7 @@ type Decision = "claimed" | "rejected";
 type QueueView = "review" | "confirmed" | "rejected";
 /** Exported for the pure-predicate tests. There is no "all" member: the empty
  *  set IS "no narrowing", and "Clear filters" is the only reset control. */
-export type FilterKey = "client" | "ack" | "coauthored" | "noprior" | "llm";
+export type FilterKey = "client" | "ack" | "coauthored" | "noprior" | "llm" | "method";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm" | "year" | "cites";
 
 type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
@@ -337,6 +337,16 @@ export function evidenceTokens(
   if (row.llmScore !== null) {
     tokens.push({ label: "LLM on title and abstract", value: llmVerdict(row.llmScore) });
   }
+  // Method family is NOT one of the five counted signals -- SIGNAL_COUNT stays 5
+  // and buildSignals does not know about it. It appears here, last, because a
+  // reviewer should see it without the score claiming to have used it: it is
+  // weighted 0.00 in the engine's combine.WEIGHTS and moves no likelihood.
+  //
+  // Always carry the TIER, never a bare "method family identified". Measured
+  // lift inside core 14's own curated list spans 399x (strong) to 1.6x (weak),
+  // and flattening that to a boolean is exactly the error per-family tiering
+  // exists to prevent.
+  if (row.methodTier) tokens.push({ label: "Method family", value: row.methodTier });
   return tokens;
 }
 
@@ -389,6 +399,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "coauthored", label: "Staff co-author" },
   { key: "noprior", label: "No prior usage on the byline" },
   { key: "llm", label: "LLM-flagged" },
+  { key: "method", label: "Method family (strong/moderate)" },
 ];
 
 const SORTS: { key: SortKey; label: string }[] = [
@@ -449,6 +460,12 @@ function matchesFilter(
       return row.authorAffinity === null;
     case "llm":
       return row.llmScore !== null;
+    // Scoped to strong+moderate on purpose. Over all surfaced rows the WEAK
+    // families invert to below background (1.7x -> 0.7x measured on core 14),
+    // and 63% of rows carrying a tier are weak -- a facet that returned them
+    // would narrow the queue TOWARDS the rows the signal argues against.
+    case "method":
+      return row.methodTier === "strong" || row.methodTier === "moderate";
   }
 }
 
@@ -926,6 +943,7 @@ export function CoreClaimQueue({
     coauthored: open.filter((c) => matchesFilter(c, "coauthored", clientCwids)).length,
     noprior: open.filter((c) => matchesFilter(c, "noprior", clientCwids)).length,
     llm: open.filter((c) => matchesFilter(c, "llm", clientCwids)).length,
+    method: open.filter((c) => matchesFilter(c, "method", clientCwids)).length,
   };
   // Apply the facets AND the free-text query (but always keep a just-decided row
   // visible so undo stays reachable), then sort. Likelihood is the loader's

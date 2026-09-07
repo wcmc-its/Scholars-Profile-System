@@ -1730,6 +1730,27 @@ describe("evidenceTokens", () => {
       ),
     ).toEqual([]);
   });
+
+  it("carries the method-family TIER, never a bare boolean", () => {
+    for (const tier of ["strong", "moderate", "weak"]) {
+      expect(evidenceTokens(row({ methodTier: tier }))).toContainEqual({
+        label: "Method family",
+        value: tier,
+      });
+    }
+  });
+
+  it("emits no method token when the engine found no family", () => {
+    expect(evidenceTokens(row({ methodTier: null }))).not.toContainEqual(
+      expect.objectContaining({ label: "Method family" }),
+    );
+  });
+
+  it("does NOT make method a counted signal — SIGNAL_COUNT stays 5", () => {
+    // The owner decision: method is an uncounted chip. A tier must never change
+    // the "N of 5 signals" line, because it is weighted 0.00 in the engine.
+    expect(buildSignals(row({ methodTier: "strong" }))).toEqual(buildSignals(row()));
+  });
 });
 
 describe("evidenceGroupKey / evidenceGroupLabel / bandRange", () => {
@@ -1865,6 +1886,13 @@ describe("matchesFilters", () => {
   it("matches the no-prior facet on a null affinity", () => {
     expect(matchesFilters(row({ authorAffinity: null }), set("noprior"))).toBe(true);
     expect(matchesFilters(row({ authorAffinity: 0.1 }), set("noprior"))).toBe(false);
+  });
+
+  it("scopes the method facet to strong+moderate — weak inverts below background", () => {
+    expect(matchesFilters(row({ methodTier: "strong" }), set("method"))).toBe(true);
+    expect(matchesFilters(row({ methodTier: "moderate" }), set("method"))).toBe(true);
+    expect(matchesFilters(row({ methodTier: "weak" }), set("method"))).toBe(false);
+    expect(matchesFilters(row({ methodTier: null }), set("method"))).toBe(false);
   });
 });
 
