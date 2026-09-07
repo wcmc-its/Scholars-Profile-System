@@ -541,8 +541,15 @@ async function loadNonCenterActiveMemberFlags(
  * A `core` is the one kind that does NOT take that proxy: it has no
  * membership table, so the member proxy would read false for every core.
  * `loadConfirmedCorePmidsByCore` gives the real, already-batched confirmed-
- * usage set instead — the exact thing reports 3/6 read for a core — which
- * makes core liveness exact rather than approximate in both directions.
+ * usage set instead. For REPORT 3 that is exact in both directions — the
+ * report's row set IS that pmid set (`resolvePublicationScope`,
+ * `lib/edit/cancer-center-publications-report.ts`), the one residue being a
+ * claim-only pmid carrying no `Publication` row, which `CoreClaim`'s lack of an
+ * FK permits. REPORT 6 keeps a proxy: it narrows the same set with
+ * `grants: { some: {} }` (`lib/edit/nih-funded-publications-report.ts`), so a
+ * core with confirmed usages but no grant-linked publication among them is
+ * painted live here and then renders the empty state — the same false-positive
+ * class as the other kinds' member proxy, just a tighter one.
  */
 export async function loadReportLiveness(
   units: ReadonlyArray<{ code: string; kind: ReportableUnitKind }>,
@@ -576,9 +583,10 @@ export async function loadReportLiveness(
         : Promise.resolve(new Map<string, number>()),
       loadNonCenterActiveMemberFlags(db, units),
       // A core's reports 3/6 read confirmed `publication_core` usages, not
-      // members, so its liveness is the EXACT presence of that set rather than
-      // the active-member proxy the other three kinds use — the same two
-      // batched queries the report page runs, over every core at once.
+      // members, so its liveness is the presence of that set rather than the
+      // active-member proxy the other three kinds use — the same two batched
+      // queries the report page runs, over every core at once. Exact for
+      // report 3; still a proxy for report 6 (see the doc comment).
       loadConfirmedCorePmidsByCore(coreIds, db),
     ]);
 
@@ -588,10 +596,10 @@ export async function loadReportLiveness(
   for (const unit of units) {
     const { code, kind } = unit;
     const numbers = REPORT_NUMBERS_BY_KIND[kind];
-    // A core has no membership at all, so its 3/6 liveness is the exact
-    // presence of a confirmed `publication_core` usage set — NOT the
-    // active-member proxy, which would read false for every core and paint
-    // "0 of 2 live" over a core with hundreds of confirmed usages.
+    // A core has no membership at all, so its 3/6 liveness is the presence of
+    // a confirmed `publication_core` usage set — NOT the active-member proxy,
+    // which would read false for every core and paint "0 of 2 live" over a
+    // core with hundreds of confirmed usages.
     const hasPublicationSource =
       kind === "core"
         ? (confirmedPmidsByCore.get(code)?.length ?? 0) > 0

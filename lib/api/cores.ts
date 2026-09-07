@@ -224,6 +224,19 @@ type CoreConfirmedReader = Pick<typeof db.read, "publicationCore" | "coreClaim">
  * or `below_threshold` row with no claim is NOT confirmed. The status strings
  * are never re-derived here — `lib/api/core-merge.ts` owns them.
  *
+ * The engine read is FILTERED to `status: "confirmed"` — the
+ * `@@index([coreId, status])` shape `getCoreList` already uses — rather than
+ * reading every row for these cores and discarding the rest in JS.
+ * `publication_core` is dominated by `below_threshold` and `candidate` rows,
+ * and `/edit/reports` calls this with EVERY core id on each `force-dynamic`
+ * render, so the unfiltered read was close to a full-table scan per page load.
+ * The filter is set-equivalent, not an approximation: the only non-`confirmed`
+ * engine row the merge loop below ever kept is one carrying an active
+ * `claimed` claim, and the `activeClaims` pass re-adds exactly those — it has
+ * to, since a `claimed` override can exist with no `publication_core` row at
+ * all. The `isEffectiveConfirmed` call stays, because it is what still drops
+ * an engine-`confirmed` row an active `rejected` claim has overridden.
+ *
  * Every requested core id is a key in the returned map, `[]` when it has no
  * confirmed usages, so a caller never has to tell "unknown core" apart from
  * "no rows" by a missing key.
@@ -237,7 +250,7 @@ export async function loadConfirmedCorePmidsByCore(
 
   const [rows, activeClaims] = await Promise.all([
     client.publicationCore.findMany({
-      where: { coreId: { in: [...coreIds] } },
+      where: { coreId: { in: [...coreIds] }, status: "confirmed" },
       select: { coreId: true, pmid: true, status: true },
     }),
     client.coreClaim.findMany({

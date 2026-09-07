@@ -10,6 +10,7 @@ import {
   loadConfirmedCorePmidsByCore,
   selectCorePublications,
 } from "@/lib/api/cores";
+import { claimKey, isEffectiveConfirmed } from "@/lib/api/core-merge";
 
 type Row = Parameters<typeof selectCorePublications>[0][number];
 
@@ -225,5 +226,148 @@ describe("loadConfirmedCorePmidsByCore", () => {
     expect(out.size).toBe(0);
     expect(publicationCore.findMany).not.toHaveBeenCalled();
     expect(coreClaim.findMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * DIFFERENTIAL over the one thing that changed in `loadConfirmedCorePmidsByCore`:
+ * the engine read went from `where: { coreId: { in } }` (every row for these
+ * cores, non-confirmed ones discarded in JS) to
+ * `where: { coreId: { in }, status: "confirmed" }`, the index-backed shape.
+ *
+ * `legacyLoad` below is the pre-fix merge, reproduced against an UNFILTERED row
+ * list and reusing the same `core-merge` primitives, so the only difference
+ * under test is the `where`. The fake client here HONORS `where` (the fixtures
+ * in the describe above do not) — otherwise a filtered read and an unfiltered
+ * one are trivially identical and the differential proves nothing.
+ *
+ * Each side is also asserted against a hand-written expected set, so a merge
+ * bug present in BOTH implementations cannot pass as "equivalent".
+ */
+describe("loadConfirmedCorePmidsByCore — status-filtered engine read", () => {
+  type EngineRow = { coreId: string; pmid: string; status: string };
+  type ClaimRow = {
+    coreId: string;
+    pmid: string;
+    status: "claimed" | "rejected";
+    revokedAt: Date | null;
+  };
+
+  const REVOKED = new Date("2026-08-01T00:00:00Z");
+  const ASKED = ["14", "9"];
+
+  // One row per shape the merge has to get right, plus a core NOT asked about.
+  const ENGINE_ROWS: EngineRow[] = [
+    { coreId: "14", pmid: "100", status: "confirmed" }, // confirmed, no claim → IN
+    { coreId: "14", pmid: "110", status: "confirmed" }, // confirmed + active claimed → IN
+    { coreId: "14", pmid: "200", status: "confirmed" }, // confirmed + active rejected → OUT
+    { coreId: "14", pmid: "300", status: "candidate" }, // candidate + active claimed → IN
+    { coreId: "14", pmid: "500", status: "confirmed" }, // confirmed + REVOKED rejected → IN
+    { coreId: "14", pmid: "600", status: "candidate" }, // candidate + REVOKED claimed → OUT
+    { coreId: "14", pmid: "700", status: "below_threshold" }, // no claim → OUT
+    { coreId: "14", pmid: "800", status: "below_threshold" }, // + active claimed → IN
+    { coreId: "9", pmid: "900", status: "confirmed" }, // second core in the same batch
+    { coreId: "9", pmid: "910", status: "candidate" },
+    { coreId: "3", pmid: "999", status: "confirmed" }, // core not asked about → never appears
+  ];
+  const CLAIM_ROWS: ClaimRow[] = [
+    { coreId: "14", pmid: "110", status: "claimed", revokedAt: null },
+    { coreId: "14", pmid: "200", status: "rejected", revokedAt: null },
+    { coreId: "14", pmid: "300", status: "claimed", revokedAt: null },
+    { coreId: "14", pmid: "400", status: "claimed", revokedAt: null }, // manual add: NO engine row
+    { coreId: "14", pmid: "450", status: "claimed", revokedAt: REVOKED }, // revoked manual add
+    { coreId: "14", pmid: "500", status: "rejected", revokedAt: REVOKED },
+    { coreId: "14", pmid: "600", status: "claimed", revokedAt: REVOKED },
+    { coreId: "14", pmid: "800", status: "claimed", revokedAt: null },
+    { coreId: "3", pmid: "999", status: "claimed", revokedAt: null },
+  ];
+
+  const EXPECTED: Record<string, string[]> = {
+    "14": ["100", "110", "300", "400", "500", "800"],
+    "9": ["900"],
+  };
+
+  /** Records every `where` it is handed, and applies it the way MySQL would. */
+  const recordingClient = () => {
+    const seen: { publicationCore: unknown[]; coreClaim: unknown[] } = {
+      publicationCore: [],
+      coreClaim: [],
+    };
+    const client = {
+      publicationCore: {
+        findMany: async ({ where }: { where: { coreId: { in: string[] }; status?: string } }) => {
+          seen.publicationCore.push(where);
+          return ENGINE_ROWS.filter(
+            (r) =>
+              where.coreId.in.includes(r.coreId) &&
+              (where.status === undefined || r.status === where.status),
+          );
+        },
+      },
+      coreClaim: {
+        findMany: async ({ where }: { where: { coreId: { in: string[] }; revokedAt: null } }) => {
+          seen.coreClaim.push(where);
+          return CLAIM_ROWS.filter(
+            (c) =>
+              where.coreId.in.includes(c.coreId) &&
+              (where.revokedAt !== null || c.revokedAt === null),
+          );
+        },
+      },
+    } as unknown as Parameters<typeof loadConfirmedCorePmidsByCore>[1];
+    return { client, seen };
+  };
+
+  /** The pre-fix behaviour: the same merge over an UNFILTERED engine read. */
+  const legacyLoad = (coreIds: readonly string[]): Map<string, string[]> => {
+    const byCore = new Map<string, Set<string>>(coreIds.map((id) => [id, new Set<string>()]));
+    const engine = ENGINE_ROWS.filter((r) => coreIds.includes(r.coreId));
+    const active = CLAIM_ROWS.filter((c) => coreIds.includes(c.coreId) && c.revokedAt === null);
+    const claimByKey = new Map(active.map((c) => [claimKey(c.pmid, c.coreId), c.status]));
+    for (const r of engine) {
+      if (!isEffectiveConfirmed(r.status, claimByKey.get(claimKey(r.pmid, r.coreId)) ?? null)) continue;
+      byCore.get(r.coreId)?.add(r.pmid);
+    }
+    for (const c of active) if (c.status === "claimed") byCore.get(c.coreId)?.add(c.pmid);
+    return new Map([...byCore].map(([id, pmids]) => [id, [...pmids].sort()]));
+  };
+
+  const sorted = (m: Map<string, string[]>) =>
+    Object.fromEntries([...m].map(([id, pmids]) => [id, [...pmids].sort()]));
+
+  it("returns the SAME set as the unfiltered read, over every merge shape", async () => {
+    const { client } = recordingClient();
+    const filtered = sorted(await loadConfirmedCorePmidsByCore(ASKED, client));
+
+    expect(filtered).toEqual(sorted(legacyLoad(ASKED)));
+    // ...and both equal the hand-written truth, so a shared bug can't pass.
+    expect(filtered).toEqual(EXPECTED);
+    expect(sorted(legacyLoad(ASKED))).toEqual(EXPECTED);
+  });
+
+  it("asks the DB for confirmed rows only — the indexed (coreId, status) shape", async () => {
+    const { client, seen } = recordingClient();
+    await loadConfirmedCorePmidsByCore(ASKED, client);
+
+    expect(seen.publicationCore).toEqual([{ coreId: { in: ["14", "9"] }, status: "confirmed" }]);
+    expect(seen.coreClaim).toEqual([{ coreId: { in: ["14", "9"] }, revokedAt: null }]);
+  });
+
+  it("still drops an engine-confirmed row an ACTIVE rejected claim overrides", async () => {
+    // The DB filter alone would keep 200; the `isEffectiveConfirmed` pass is
+    // what removes it, so this is the assertion that the JS merge stayed.
+    const { client } = recordingClient();
+    const out = await loadConfirmedCorePmidsByCore(["14"], client);
+    expect(out.get("14")).not.toContain("200");
+  });
+
+  it("keeps every claimed-override pmid the filtered read never sees", async () => {
+    // 300 (candidate), 800 (below_threshold) and 400 (no engine row at all) are
+    // all invisible to a `status: "confirmed"` read — the activeClaims pass is
+    // the only thing carrying them, and the union depends on it.
+    const { client } = recordingClient();
+    const out = await loadConfirmedCorePmidsByCore(["14"], client);
+    expect([...(out.get("14") ?? [])].sort()).toEqual(EXPECTED["14"]);
+    for (const pmid of ["300", "400", "800"]) expect(out.get("14")).toContain(pmid);
   });
 });
