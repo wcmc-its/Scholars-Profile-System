@@ -356,6 +356,22 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
  * hole - but a guard that fires on a comment is a guard someone eventually
  * deletes, and deleting THIS one puts the silent stopped-write back on the
  * table. Quoted `//` is respected so a string is never mistaken for a comment.
+ *
+ * Two known limits, both benign for today's window but worth knowing before
+ * debugging a puzzling guard failure:
+ *
+ *  1. String literals are PRESERVED (deliberately - a field list written as
+ *     `["methodTier", ...]` must still redden the guard). So a payload key that
+ *     appears ONLY inside a string reddens it too. Relevant the day logging is
+ *     added inside the batch loop: `console.log("... methodTier ...")` fails the
+ *     guard even though nothing about the write changed.
+ *  2. Regex literals are not recognized, and escaping is only honored inside
+ *     strings. A single escaped slash survives (`/a\/b/` comes through intact),
+ *     but two ADJACENT ones put a literal `//` in the stream: `/https:\/\//`
+ *     is read as a line comment from the second backslash on, and the rest of
+ *     that line - payload construction included - is deleted before the
+ *     assertions see it. That direction is silent, not loud: it hides source
+ *     from the guard. No regex literal exists in the window today.
  */
 function stripComments(source: string): string {
   let out = "";
@@ -460,22 +476,31 @@ describe("toPubCoreUpsertPayload (Block 6 upsert payload)", () => {
     // half is how the two drifted apart before, and no runtime assertion can
     // see a field that was never sent.
     //
-    // The window is the whole batch LOOP, not the `db.write.publicationCore.upsert(`
-    // call. Anchored at the call it opened one line BELOW where the payload is
-    // built, so a neutralization above it was invisible:
+    // The window opens where the write set is BUILT, not at the batch loop and
+    // not at the `db.write.publicationCore.upsert(` call. Each narrower anchor
+    // left a live neutralization surface just above it.
+    //
+    // Anchored at the upsert call, the payload's own construction sat one line
+    // above the window:
     //
     //   const payload = { ...toPubCoreUpsertPayload(w), methodEvidence: undefined };
     //
-    // typechecked at exit 0 (every column is optional in Prisma's update input),
-    // left all 22 tests in this file green, and stopped method_evidence being
+    // Anchored at the loop, the write set could be edited three lines above it
+    // instead, between `buildPublicationCoreWrites` and the batching:
+    //
+    //   for (const cw of coreMap.writes) cw.methodTier = null;
+    //
+    // Both typecheck at exit 0 (every column is optional in Prisma's update
+    // input), left every test in this file green, and stopped a column being
     // written for good — exactly the silent stopped-write this guard exists to
-    // catch. Starting at the loop covers the payload's construction too.
+    // catch. Opening at `const coreMap = ...` covers the write set, the
+    // payload, and both upsert halves in one span.
     const src = readFileSync(path.join(process.cwd(), "etl/dynamodb/index.ts"), "utf8");
-    const start = src.indexOf("for (let i = 0; i < coreMap.writes.length; i += CORE_BATCH)");
+    const start = src.indexOf("const coreMap = buildPublicationCoreWrites(");
     expect(start).toBeGreaterThan(-1);
     const end = src.indexOf("pubCoreRowsUpserted +=", start);
     expect(end).toBeGreaterThan(start);
-    // Comments stripped: this asserts on what the loop DOES, so prose that
+    // Comments stripped: this asserts on what the block DOES, so prose that
     // happens to name a column must not be able to redden it (or, on the
     // toMatch side, to satisfy it).
     const block = stripComments(src.slice(start, end));
