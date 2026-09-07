@@ -15,16 +15,17 @@
  *     DbNull (true SQL NULL) so an operator's IS NOT NULL means populated
  *   - An over-long method_tier is tallied, not silently nulled
  *   - Empty input -> all-zero result
- * Plus the upsert payload both halves of the Block 6 write derive from.
+ * Plus projectPublicationCores, the whole Block 6 write path (map -> payload ->
+ * both upsert halves) driven against a recording writer.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { Prisma } from "@/lib/generated/prisma/client";
 import {
   buildPublicationCoreWrites,
-  toPubCoreUpsertPayload,
+  projectPublicationCores,
   type CoreRecordInput,
+  type PubCoreWrite,
+  type PubCoreWriter,
 } from "@/etl/dynamodb/publication-core-mapper";
 
 const SETS = {
@@ -346,172 +347,130 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
 });
 
 /**
- * Strip `//` line comments and block comments so the source guard below reads
- * CODE, not prose.
+ * Block 6's write path, end to end, against a writer that records its
+ * arguments.
  *
- * The guard asserts no payload key appears literally in the Block 6 batch loop.
- * Raw text cannot tell a field list from a sentence, so a benign
- * `// NOTE: status is engine-provided.` above the payload line turned it red
- * with no behavioral change at all. It fails loud, so it is not a correctness
- * hole - but a guard that fires on a comment is a guard someone eventually
- * deletes, and deleting THIS one puts the silent stopped-write back on the
- * table. Quoted `//` is respected so a string is never mistaken for a comment.
+ * This replaces a source-text guard over etl/dynamodb/index.ts. That guard read
+ * the block as a STRING — window anchors, a comment stripper, a hand-kept list
+ * of payload keys — and asserted no column name was spelled inside the window.
+ * It was widened twice and never closed the class, it only moved the boundary:
+ * with the window at the upsert call, `{ ...toPubCoreUpsertPayload(w),
+ * methodEvidence: undefined }` sat one line above it; with the window at the
+ * write set, `for (const cw of coreMap.writes) cw.methodTier = null;` sat three
+ * lines above THAT. Both typechecked at exit 0 (every column is optional in
+ * Prisma's generated update input), left the suite green, and stopped a column
+ * being written for good. It also reddened on a column name appearing inside a
+ * string, and its comment stripper silently ate the rest of any line holding
+ * `/https:\/\//`.
  *
- * Two known limits, both benign for today's window but worth knowing before
- * debugging a puzzling guard failure:
- *
- *  1. String literals are PRESERVED (deliberately - a field list written as
- *     `["methodTier", ...]` must still redden the guard). So a payload key that
- *     appears ONLY inside a string reddens it too. Relevant the day logging is
- *     added inside the batch loop: `console.log("... methodTier ...")` fails the
- *     guard even though nothing about the write changed.
- *  2. Regex literals are not recognized, and escaping is only honored inside
- *     strings. A single escaped slash survives (`/a\/b/` comes through intact),
- *     but two ADJACENT ones put a literal `//` in the stream: `/https:\/\//`
- *     is read as a line comment from the second backslash on, and the rest of
- *     that line - payload construction included - is deleted before the
- *     assertions see it. That direction is silent, not loud: it hides source
- *     from the guard. No regex literal exists in the window today.
+ * The window is gone rather than fenced: index.ts Block 6 is one call to
+ * `projectPublicationCores`, which maps and writes in the same function, so
+ * there is no statement between the mapping and the upsert to neutralize. What
+ * is asserted here is what the upsert actually RECEIVES, so a comment or a
+ * string naming a column cannot affect this test at all, and the expected
+ * column set is read off the mapper's own write object — a column added to
+ * `PubCoreWrite` and forgotten in the payload fails without anyone remembering
+ * to update a list here.
  */
-function stripComments(source: string): string {
-  let out = "";
-  let i = 0;
-  while (i < source.length) {
-    const c = source[i];
-    const next = source[i + 1];
-    if (c === '"' || c === "'" || c === "`") {
-      out += c;
-      i++;
-      while (i < source.length) {
-        if (source[i] === "\\") {
-          out += source.slice(i, i + 2);
-          i += 2;
-          continue;
-        }
-        out += source[i];
-        i++;
-        if (source[i - 1] === c) break;
-      }
-      continue;
-    }
-    if (c === "/" && next === "/") {
-      while (i < source.length && source[i] !== "\n") i++;
-      continue;
-    }
-    if (c === "/" && next === "*") {
-      const close = source.indexOf("*/", i + 2);
-      i = close === -1 ? source.length : close + 2;
-      continue;
-    }
-    out += c;
-    i++;
-  }
-  return out;
-}
-
-/**
- * The Block 6 upsert used to carry two hand-maintained field lists, one in the
- * `create` half and one in the `update` half. Nothing held them together:
- * deleting the three method/MeSH fields from the `update` half alone left
- * `tsc` at exit 0 and the whole suite green (proved by mutation), because every
- * column is optional in Prisma's generated `PublicationCoreUpdateInput` - the
- * write simply stopped happening. Both halves now derive from one payload, and
- * these tests pin its key set plus the fact that index.ts still uses it.
- */
-describe("toPubCoreUpsertPayload (Block 6 upsert payload)", () => {
-  /** Every publication_core column the nightly writes, besides the (pmid, coreId) key. */
-  const PAYLOAD_KEYS = [
-    "likelihood",
-    "status",
-    "signalCoauthors",
-    "signalAck",
-    "ackAlias",
-    "ackSnippet",
-    "llmScore",
-    "llmRationale",
-    "authorAffinity",
-    "topicalPrior",
-    "methodTier",
-    "methodEvidence",
-    "meshEvidence",
-    "scoredAt",
-  ] as const;
-
-  const write = buildPublicationCoreWrites(
-    [
-      rec({
-        signal_coauthors: ["djb2001"],
-        signal_ack: true,
-        ack_alias: "CBIC",
-        ack_snippet: "Imaging performed at the core.",
-        llm_score: 7,
-        llm_rationale: "advanced MRI methods described",
-        author_affinity: 0.45,
-        prefilter_prior: 0.37,
-        method_tier: "strong",
-        method_evidence: [
-          { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
-        ],
-        mesh_evidence: [
-          { descriptor_ui: "D008856", descriptor: "Microscopy, Confocal", tree_prefix: "E01" },
-        ],
-      }),
+describe("projectPublicationCores (Block 6 records -> publication_core upsert)", () => {
+  /** Every optional signal populated, so a dropped column reads as a value change, not null-to-null. */
+  const FULL: Partial<CoreRecordInput> = {
+    signal_coauthors: ["djb2001"],
+    signal_ack: true,
+    ack_alias: "CBIC",
+    ack_snippet: "Imaging performed at the core.",
+    llm_score: 7,
+    llm_rationale: "advanced MRI methods described",
+    author_affinity: 0.45,
+    prefilter_prior: 0.37,
+    method_tier: "strong",
+    method_evidence: [
+      { family: "confocal microscopy", tool: "LSM 880", sentence: "Imaged on an LSM 880." },
     ],
-    SETS,
-  ).writes[0];
+    mesh_evidence: [
+      { descriptor_ui: "D008856", descriptor: "Microscopy, Confocal", tree_prefix: "E01" },
+    ],
+  };
 
-  it("carries exactly the mapped columns - no more, no fewer", () => {
-    expect(Object.keys(toPubCoreUpsertPayload(write)).sort()).toEqual([...PAYLOAD_KEYS].sort());
+  type UpsertArgs = Parameters<PubCoreWriter["publicationCore"]["upsert"]>[0];
+
+  function recordingWriter() {
+    const calls: UpsertArgs[] = [];
+    const writer: PubCoreWriter = {
+      publicationCore: {
+        upsert: async (args) => {
+          calls.push(args);
+          return {};
+        },
+      },
+    };
+    return { calls, writer };
+  }
+
+  /** The mapped columns, off the write itself: `create` adds only the (pmid, coreId) key. */
+  function mappedColumns(w: PubCoreWrite): string[] {
+    return Object.keys(w).filter((k) => k !== "pmid" && k !== "coreId");
+  }
+
+  it("sends every mapped column, with its mapped value, in BOTH halves", async () => {
+    const expected = buildPublicationCoreWrites([rec(FULL)], SETS).writes[0];
+    const columns = mappedColumns(expected);
+    expect(columns.length).toBeGreaterThan(0);
+
+    const { calls, writer } = recordingWriter();
+    const result = await projectPublicationCores([rec(FULL)], SETS, writer);
+
+    expect(result.upserted).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].where).toEqual({ pmid_coreId: { pmid: "30418319", coreId: "2" } });
+
+    const create = calls[0].create as Record<string, unknown>;
+    const update = calls[0].update as Record<string, unknown>;
+    const write = expected as unknown as Record<string, unknown>;
+
+    // No column missing from either half, and none invented.
+    expect(Object.keys(update).sort()).toEqual([...columns].sort());
+    expect(Object.keys(create).sort()).toEqual([...columns, "pmid", "coreId"].sort());
+    for (const k of columns) {
+      expect(update[k]).toEqual(write[k]);
+      expect(create[k]).toEqual(write[k]);
+    }
+    expect(create.pmid).toBe("30418319");
+    expect(create.coreId).toBe("2");
   });
 
-  it("passes each mapped value straight through", () => {
-    const payload = toPubCoreUpsertPayload(write);
-    for (const k of PAYLOAD_KEYS) {
-      expect(payload[k]).toBe(write[k]);
-    }
+  it("writes the absent-signal row as DbNull, not as a dropped key", async () => {
+    // The case that actually runs today: 0 of 21,481 live CORE# items carry a
+    // method/MeSH attribute, so a column silently stopped here would look
+    // exactly like the engine not emitting yet.
+    const expected = buildPublicationCoreWrites([rec()], SETS).writes[0];
+    const { calls, writer } = recordingWriter();
+    await projectPublicationCores([rec()], SETS, writer);
+
+    const update = calls[0].update as Record<string, unknown>;
+    expect(Object.keys(update).sort()).toEqual(mappedColumns(expected).sort());
+    expect(update.methodTier).toBeNull();
+    expect(update.methodEvidence).toBe(Prisma.DbNull);
+    expect(update.meshEvidence).toBe(Prisma.DbNull);
   });
 
-  it("is the only place etl/dynamodb/index.ts spells the upsert columns", () => {
-    // A source check, not a style check: re-inlining a field list in either
-    // half is how the two drifted apart before, and no runtime assertion can
-    // see a field that was never sent.
-    //
-    // The window opens where the write set is BUILT, not at the batch loop and
-    // not at the `db.write.publicationCore.upsert(` call. Each narrower anchor
-    // left a live neutralization surface just above it.
-    //
-    // Anchored at the upsert call, the payload's own construction sat one line
-    // above the window:
-    //
-    //   const payload = { ...toPubCoreUpsertPayload(w), methodEvidence: undefined };
-    //
-    // Anchored at the loop, the write set could be edited three lines above it
-    // instead, between `buildPublicationCoreWrites` and the batching:
-    //
-    //   for (const cw of coreMap.writes) cw.methodTier = null;
-    //
-    // Both typecheck at exit 0 (every column is optional in Prisma's update
-    // input), left every test in this file green, and stopped a column being
-    // written for good — exactly the silent stopped-write this guard exists to
-    // catch. Opening at `const coreMap = ...` covers the write set, the
-    // payload, and both upsert halves in one span.
-    const src = readFileSync(path.join(process.cwd(), "etl/dynamodb/index.ts"), "utf8");
-    const start = src.indexOf("const coreMap = buildPublicationCoreWrites(");
-    expect(start).toBeGreaterThan(-1);
-    const end = src.indexOf("pubCoreRowsUpserted +=", start);
-    expect(end).toBeGreaterThan(start);
-    // Comments stripped: this asserts on what the block DOES, so prose that
-    // happens to name a column must not be able to redden it (or, on the
-    // toMatch side, to satisfy it).
-    const block = stripComments(src.slice(start, end));
+  it("upserts every write across batch boundaries, and nothing a guard skipped", async () => {
+    const pmids = Array.from({ length: 250 }, (_, i) => String(40000000 + i));
+    const sets = { knownCoreIds: SETS.knownCoreIds, knownPmidSet: new Set(pmids) };
+    const records = [
+      ...pmids.map((pmid) => rec({ pmid, PK: `PUB#${pmid}` })),
+      rec({ pmid: "40000000", PK: "PUB#40000000", status: "below_threshold" }),
+      rec({ pmid: "99999999", PK: "PUB#99999999" }),
+    ];
 
-    // Derived from the mapper's helper and used UNALTERED: no spread-and-override,
-    // no second object literal between the helper and the two halves.
-    expect(block).toMatch(/const payload = toPubCoreUpsertPayload\(w\);/);
-    expect(block).toMatch(/create:\s*\{[\s\S]*?\.\.\.payload[\s\S]*?\}/);
-    expect(block).toMatch(/update:\s*payload\b/);
-    for (const k of PAYLOAD_KEYS) {
-      expect(block).not.toContain(k);
-    }
+    const { calls, writer } = recordingWriter();
+    const result = await projectPublicationCores(records, sets, writer);
+
+    // 250 > the 100-row batch, so this also pins the chunking arithmetic.
+    expect(result.upserted).toBe(250);
+    expect(calls).toHaveLength(250);
+    expect(result.skippedBelowThreshold).toBe(1);
+    expect(result.skippedMissingPublication).toBe(1);
+    expect(new Set(calls.map((c) => c.create.pmid))).toEqual(new Set(pmids));
   });
 });

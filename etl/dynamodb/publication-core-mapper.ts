@@ -1,7 +1,10 @@
 /**
- * Pure helper for etl/dynamodb/index.ts Block 6 (PUB#/CORE# -> publication_core),
- * split out so the per-record mapping + FK/field guards can be unit-tested
- * without a DynamoDB scan — the same split as ./publication-topic-mapper.ts.
+ * etl/dynamodb/index.ts Block 6 (PUB#/CORE# -> publication_core): the pure
+ * per-record mapping + FK/field guards, and the batched upsert that writes
+ * them. Both live here so the whole records -> writes -> payload -> upsert
+ * path is unit-testable without a DynamoDB scan or a database — the same
+ * split as ./publication-topic-mapper.ts, plus the projector shape
+ * ./grant-opportunity-etl.ts uses.
  *
  * The cores inference engine (ReciterAI PR #245) writes one item per
  * (publication, core): PK=`PUB#{pmid}`, SK=`CORE#{core_id}` in the shared
@@ -70,10 +73,11 @@ export type PubCoreWrite = {
  * could silently drift: every column here is optional in Prisma's generated
  * `PublicationCoreUpdateInput`, so deleting a field from one half alone still
  * typechecked and still passed the whole suite — the write just stopped
- * happening. One object, spread into both halves, makes that drift impossible;
- * `tests/unit/publication-core-mapper.test.ts` pins the key set.
+ * happening. One object, spread into both halves, makes that drift impossible.
+ * Module-private on purpose: `projectPublicationCores` below is the only
+ * caller, so no other code path can assemble a partial payload.
  */
-export function toPubCoreUpsertPayload(w: PubCoreWrite) {
+function toPubCoreUpsertPayload(w: PubCoreWrite) {
   return {
     likelihood: w.likelihood,
     status: w.status,
@@ -280,4 +284,79 @@ export function buildPublicationCoreWrites(
     skippedMissingPublication,
     droppedMethodTierTooLong,
   };
+}
+
+/**
+ * The `db.write` surface the Block 6 projection touches — one upsert, nothing
+ * else. Declared structurally rather than as the Prisma client type so a test
+ * can hand `projectPublicationCores` a recorder and read back exactly what
+ * would have been written; `Prisma.PublicationCoreUnchecked*Input` keeps the
+ * call site as strictly typed as the version inlined in index.ts was.
+ */
+export type PubCoreWriter = {
+  publicationCore: {
+    upsert(args: {
+      where: { pmid_coreId: { pmid: string; coreId: string } };
+      create: Prisma.PublicationCoreUncheckedCreateInput;
+      update: Prisma.PublicationCoreUncheckedUpdateInput;
+    }): Promise<unknown>;
+  };
+};
+
+/** Upsert fan-out per await — same batch shape as Block 2. */
+const PUB_CORE_BATCH = 100;
+
+/**
+ * Map the CORE# scan records and write them: records -> writes -> payload ->
+ * both halves of the idempotent (pmid, coreId) upsert, in a single call.
+ *
+ * Block 6 in index.ts is now this call and nothing else, deliberately. While
+ * the mapping and the write were separate statements there, every line between
+ * them was somewhere a later edit could silently stop a column being written
+ * — `for (const cw of coreMap.writes) cw.methodTier = null;` over the write
+ * set, or a spread-and-override on the payload — with `tsc` at exit 0 (every
+ * column is optional in Prisma's generated update input) and the suite green.
+ * Two source-text guards tried to fence that window and only moved its edge.
+ * There is no window now: the whole path runs inside one function, so
+ * `tests/unit/publication-core-mapper.test.ts` asserts on the arguments the
+ * upsert actually receives.
+ */
+export async function projectPublicationCores(
+  records: ReadonlyArray<CoreRecordInput>,
+  sets: {
+    knownCoreIds: ReadonlySet<string>;
+    knownPmidSet: ReadonlySet<string>;
+  },
+  writer: PubCoreWriter,
+  opts: { log?: (msg: string) => void } = {},
+): Promise<PublicationCoreMapResult & { upserted: number }> {
+  const log = opts.log ?? (() => {});
+  const mapped = buildPublicationCoreWrites(records, sets);
+  log(
+    `publication_core candidates: ${mapped.writes.length} (skipped: ` +
+      `${mapped.skippedMissingCore} missing core, ` +
+      `${mapped.skippedMissingPublication} missing publication, ` +
+      `${mapped.skippedMissingFields} missing required fields, ` +
+      `${mapped.skippedBelowThreshold} below threshold; ` +
+      `dropped field: ${mapped.droppedMethodTierTooLong} over-long method_tier).`,
+  );
+
+  let upserted = 0;
+  for (let i = 0; i < mapped.writes.length; i += PUB_CORE_BATCH) {
+    const chunk = mapped.writes.slice(i, i + PUB_CORE_BATCH);
+    await Promise.all(
+      chunk.map((w) => {
+        const payload = toPubCoreUpsertPayload(w);
+        return writer.publicationCore.upsert({
+          where: { pmid_coreId: { pmid: w.pmid, coreId: w.coreId } },
+          create: { pmid: w.pmid, coreId: w.coreId, ...payload },
+          update: payload,
+        });
+      }),
+    );
+    upserted += chunk.length;
+  }
+  log(`publication_core upserts complete: ${upserted} rows.`);
+
+  return { ...mapped, upserted };
 }
