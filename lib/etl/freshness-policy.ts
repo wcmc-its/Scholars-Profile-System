@@ -214,14 +214,24 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // ? *) in ReciterAI infra/eventbridge.json — so the 8-day weekly SLA this
   // source used to carry could never be met and reported stale by construction.
   //
-  // Caveat for whoever reads a Spotlight staleness alert next: as of 2026-07-20
-  // that EventBridge rule and its `reciterai-spotlight-orchestrator` Lambda are
-  // DECLARED IN IaC BUT NOT DEPLOYED (describe-rule and get-function-configuration
-  // both return ResourceNotFoundException, and no log group was ever created).
-  // Every artifact published so far was a human running `cli/backfill_spotlight.py
-  // --publish` by hand, most recently 2026-06-15. So this SLA describes the
-  // INTENDED cadence; until the producer is actually deployed, expect staleness
-  // and fix it upstream rather than by widening this number again. See SPS #1813.
+  // Caveat for whoever reads a Spotlight staleness alert next -- UPDATED
+  // 2026-09-07, and the update reverses the old one. That rule is now DEPLOYED
+  // and firing: `aws events list-rules` shows reciterai-spotlight-monthly
+  // ENABLED against the ECS task `reciterai-spotlight`, and it ticked on
+  // 2026-09-01. The previous note here ("declared in IaC but not deployed", as
+  // of 2026-07-20) is therefore stale, and so is the inference that every
+  // artifact is hand-published.
+  //
+  // What replaces it is a subtler failure mode. The rule targets
+  // `pipeline_spotlight/orchestrator.py`, a CHEAP DIRTY GATE that shells out to
+  // the real publish only when thresholds trip -- so a healthy monthly tick can
+  // legitimately end in `skipped`, leaving the artifact untouched. The 09-01
+  // tick did exactly that. A stale Spotlight artifact is consequently NOT
+  // evidence of a dead producer, and a fresh one is not evidence of a live one.
+  // Read the producer's own stage ledger before concluding either: it is now
+  // mirrored into etl_run as `ReciterAI-spotlight-gate` (see
+  // etl/dynamodb/producer-run-mapper.ts), which is the row that distinguishes
+  // "the gate ran and declined" from "the gate stopped running". See SPS #1813.
   Spotlight: {
     cadence: "monthly",
     // Not a widened SLA — the comment above is explicit that widening is the
@@ -260,6 +270,29 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   CdnReconcile: { cadence: "nightly" },
   // Annual cadence (cron 0 9 1 7 ? *)
   Hierarchy: { cadence: "annual" },
+  // ---------------------------------------------------------------------
+  // ReciterAI PRODUCER liveness (not SPS imports).
+  //
+  // Every entry above grades a step THIS repo runs. These four grade steps
+  // ReciterAI runs, mirrored into `etl_run` from the engine's own stage ledger
+  // by etl/dynamodb/producer-run-mapper.ts -- which is where the stage names,
+  // the cron expressions they correspond to, and the reasoning for tracking
+  // exactly these four all live. They exist because a ReciterAI-sourced import
+  // reads green whenever OUR loader ran, whatever the producer did or did not
+  // publish, so an upstream stop is invisible from the rows above.
+  //
+  // Cadence mirrors the producer's EventBridge schedule, not our loader's: the
+  // thing being graded is the producer's tick. No `envs` restriction -- staging
+  // and prod scan the SAME `reciterai` table, so both see the same producer runs.
+  //
+  // No ack on any of them: all four were completing on schedule when this
+  // landed (2026-09-07), so each starts green and a red one is real news. If one
+  // goes red for a reason we accept, ack it deliberately with an expiry, the way
+  // Spotlight above does -- do not widen the cadence to hide it.
+  "ReciterAI-enrichment": { cadence: "nightly" },
+  "ReciterAI-hot-path": { cadence: "weekly" },
+  "ReciterAI-spotlight-gate": { cadence: "monthly" },
+  "ReciterAI-onboarding-detector": { cadence: "nightly" },
 };
 
 export interface SourceStatus {

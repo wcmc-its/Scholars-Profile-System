@@ -28,6 +28,7 @@ const emptyBucketSizes = () => ({
   tools: 0,
   cores: 0,
   coreStaff: 0,
+  producerRuns: 0,
 });
 
 const sizes = (b: ReturnType<typeof partitionRecords>) => ({
@@ -38,6 +39,7 @@ const sizes = (b: ReturnType<typeof partitionRecords>) => ({
   tools: b.tools.length,
   cores: b.cores.length,
   coreStaff: b.coreStaff.length,
+  producerRuns: b.producerRuns.length,
 });
 
 describe("partitionRecords (#1514 single-scan partition)", () => {
@@ -49,8 +51,9 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     const tool = { PK: "TOOL#crispr", SK: "PUB#1", pmid: 1 };
     const core = { PK: "PUB#30418319", SK: "CORE#2", core_id: "2" };
     const coreStaff = { PK: "CORE#2", SK: "STAFF_DICT", staff_count: 7, staff_tracked_count: 4 };
+    const producerRun = { PK: "STAGE#daily_enrichment#GLOBAL", SK: "RUN#2026-09-07T11:01:13Z" };
 
-    const b = partitionRecords([tax, topic, faculty, impact, tool, core, coreStaff]);
+    const b = partitionRecords([tax, topic, faculty, impact, tool, core, coreStaff, producerRun]);
 
     expect(sizes(b)).toEqual({
       tax: 1,
@@ -60,6 +63,7 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
       tools: 1,
       cores: 1,
       coreStaff: 1,
+      producerRuns: 1,
     });
     expect(b.tax[0]).toBe(tax);
     expect(b.topics[0]).toBe(topic);
@@ -68,6 +72,7 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     expect(b.tools[0]).toBe(tool);
     expect(b.cores[0]).toBe(core);
     expect(b.coreStaff[0]).toBe(coreStaff);
+    expect(b.producerRuns[0]).toBe(producerRun);
   });
 
   it("routes a CORE#…/STAFF_DICT item into coreStaff — the key shape is the MIRROR of a core row's", () => {
@@ -149,6 +154,18 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     const impactNoTail = { PK: "IMPACT#doi_xyz" };
     const b = partitionRecords([facultyNoTail, impactNoTail]);
     expect(sizes(b)).toEqual(emptyBucketSizes());
+  });
+
+  it("routes EVERY STAGE# row, GLOBAL or scoped — filtering scope is the mapper's job", () => {
+    const global = { PK: "STAGE#hot_run#GLOBAL", SK: "RUN#2026-09-07T12:00:34Z" };
+    const scoped = { PK: "STAGE#rollup_by_cwid#cwid:abc1001", SK: "RUN#2026-09-07T12:03:23Z" };
+    // The FAILED# SK variant is a routing no-op — it is the mapper that has to
+    // know it sorts after every RUN#<date>.
+    const failed = { PK: "STAGE#hot_run#GLOBAL", SK: "RUN#FAILED#2026-05-16T03:11:04.425Z" };
+
+    const b = partitionRecords([global, scoped, failed]);
+
+    expect(sizes(b)).toEqual({ ...emptyBucketSizes(), producerRuns: 3 });
   });
 
   it("returns all-empty buckets for empty input", () => {

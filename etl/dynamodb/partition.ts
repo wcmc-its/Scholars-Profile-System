@@ -130,6 +130,37 @@ export type CoreStaffRecord = {
   [key: string]: unknown;
 };
 
+/**
+ * A ReciterAI PRODUCER run, from the engine's own stage ledger
+ * (`utils/stage_records.py` in the ReciterAI repo):
+ *
+ *   PK = `STAGE#{stage}#{scope}`     e.g. STAGE#daily_enrichment#GLOBAL
+ *   SK = `RUN#{started_at}`          ISO8601, so lexical order is chronological
+ *
+ * This is the ONLY producer-side run record ReciterAI keeps, and it is the
+ * answer to a question `etl_run` alone cannot ask: every ReciterAI-sourced
+ * import here is graded on whether OUR loader ran, so a producer that stopped
+ * publishing reads green forever. See etl/dynamodb/producer-run-mapper.ts for
+ * the two SK shapes and the four statuses.
+ *
+ * Note `pipeline_tools`, `pipeline_grants` and `pipeline_cores` write NO stage
+ * row at all — their liveness is not observable from this table.
+ */
+export type ProducerRunRecord = {
+  PK: string; // STAGE#{stage}#{scope}
+  SK: string; // RUN#{iso} | RUN#FAILED#{iso}
+  stage?: string;
+  scope?: string;
+  status?: string; // complete | skipped | failed | partial
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number | string;
+  records_written?: number | string;
+  error_code?: string;
+  error_message?: string;
+  [key: string]: unknown;
+};
+
 export type Buckets = {
   tax: TaxonomyRecord[];
   topics: TopicRecord[];
@@ -138,6 +169,7 @@ export type Buckets = {
   tools: ToolRecord[];
   cores: CoreRecord[];
   coreStaff: CoreStaffRecord[];
+  producerRuns: ProducerRunRecord[];
 };
 
 /**
@@ -151,6 +183,7 @@ export type Buckets = {
  *   Block 5 TOOL#      -> scholar_tool        begins_with(PK, "TOOL#")
  *   Block 6 PUB#/CORE# -> core                begins_with(SK, "CORE#")   <- SK, not PK
  *   Block 6b CORE#/STAFF_DICT -> core.staff_*  PK CORE# AND SK === "STAFF_DICT"
+ *   Block 8  STAGE#    -> etl_run       begins_with(PK, "STAGE#")
  *
  * The buckets are disjoint (one `continue` per match), so the union exactly
  * reproduces what the six independent filtered scans kept. Block 7 (GRANT#) is
@@ -173,6 +206,7 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     tools: [],
     cores: [],
     coreStaff: [],
+    producerRuns: [],
   };
   for (const it of items) {
     const pk = String(it.PK ?? "");
@@ -213,6 +247,15 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     }
     if (pk.startsWith("TOOL#")) {
       b.tools.push(it as ToolRecord);
+      continue;
+    }
+    // Block 8 — the producer's own run ledger. Unlike every bucket above it,
+    // this one is not projected into a table: it is mirrored into `etl_run` so
+    // /edit/etl-status can grade the PRODUCER, not just our loader. Matched on
+    // the PK prefix alone; the per-scope split (GLOBAL vs cwid:/pmid:) is the
+    // mapper's business, not the router's.
+    if (pk.startsWith("STAGE#")) {
+      b.producerRuns.push(it as ProducerRunRecord);
       continue;
     }
     // else: unmatched (e.g. a GRANT# item, or a PUB# item without an SK CORE#
