@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  CORE_STAFF_ROLE_KEY,
   DEFAULT_ORG_UNIT_ROLES,
   DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
@@ -179,7 +180,40 @@ describe("DEFAULT_ORG_UNIT_ROLES", () => {
         sortOrder: 10,
         profileTitle: true,
       },
+      {
+        key: "staff",
+        label: "Staff",
+        group: "membership",
+        scope: "unit",
+        singleHolder: false,
+        sortOrder: 20,
+        profileTitle: false,
+      },
     ]);
+  });
+
+  it("core staff is DESCRIPTIVE — it never reaches the authorization vocabulary", () => {
+    // The whole point of the plan's framing: staff is evidence for the co-author
+    // signal, not an edit grant. If this key ever appears in UnitRole, the role
+    // has silently become an authorization one.
+    expect(CORE_STAFF_ROLE_KEY).toBe("staff");
+    expect(["owner", "curator"]).not.toContain(CORE_STAFF_ROLE_KEY);
+  });
+
+  it("core staff prints no title on a scholar profile, and is not single-holder", () => {
+    const staff = DEFAULT_ORG_UNIT_ROLES.core.find((r) => r.key === CORE_STAFF_ROLE_KEY);
+    expect(staff?.profileTitle).toBe(false);
+    expect(staff?.singleHolder).toBe(false);
+  });
+
+  it("core staff sets scope EXPLICITLY, and to the same tier its sibling director uses", () => {
+    // The column defaults to "center". A core role sitting silently at center
+    // scope is a mis-assignment surface for anything that filters on it, and the
+    // live scope vocabulary is `unit | program` -- the schema docblock's
+    // `center | program` is stale.
+    const byKey = new Map(DEFAULT_ORG_UNIT_ROLES.core.map((r) => [r.key, r]));
+    expect(byKey.get(CORE_STAFF_ROLE_KEY)?.scope).toBe("unit");
+    expect(byKey.get(CORE_STAFF_ROLE_KEY)?.scope).toBe(byKey.get("director")?.scope);
   });
 
   it("orgUnitRoleSeedRows maps group -> roleGroup, stamps source, and carries its own entityType", () => {
