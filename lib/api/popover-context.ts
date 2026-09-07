@@ -330,13 +330,16 @@ export async function fetchTopicRank(
  * is structural rather than a row count: the only writer that runs deployed
  * is `buildAuthorshipRows` (etl/reciter/index.ts), which skips every author
  * outside `ourCwidSet` and returns an `AuthorshipRow` whose `cwid` is a
- * non-nullable `string`. Staging was counted as a check on that argument
- * (0 null-cwid rows of 285,587, 2026-09); other environments were not
- * counted, and the argument covers them without it. `seed/publications.ts`
- * is the one writer of non-WCM rows and does set is_first on them, so on a
- * seeded dev database this filter changes the counts rather than being a
- * no-op. Nothing under .github/workflows/ runs `npm run seed`, so no CI job
- * exercises that difference.
+ * non-nullable `string`, and the FK that could mint one with no writer
+ * involved (`PublicationAuthor.scholar` is `onDelete: SetNull`) never fires,
+ * because no deployed path hard-deletes a `Scholar` — only `seed/index.ts`
+ * does, and departures soft-delete via `deletedAt`. Staging was counted as a
+ * check on that argument (0 null-cwid rows of 285,587, 2026-09); other
+ * environments were not counted, and the argument covers them without it.
+ * `seed/publications.ts` is the one writer of non-WCM rows and does set
+ * is_first on them, so on a seeded dev database this filter changes the
+ * counts rather than being a no-op. Nothing under .github/workflows/ runs
+ * `npm run seed`, so no CI job exercises that difference.
  */
 export async function fetchAuthorshipOnPub(
   cwid: string,
