@@ -18,6 +18,9 @@
  * Plus projectPublicationCores, the whole Block 6 write path (map -> payload ->
  * both upsert halves) driven against a recording writer.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import { Prisma } from "@/lib/generated/prisma/client";
 import {
@@ -472,5 +475,16 @@ describe("projectPublicationCores (Block 6 records -> publication_core upsert)",
     expect(result.skippedBelowThreshold).toBe(1);
     expect(result.skippedMissingPublication).toBe(1);
     expect(new Set(calls.map((c) => c.create.pmid))).toEqual(new Set(pmids));
+  });
+
+  // The behavioral tests above own every column, but they can only see writes that
+  // go THROUGH `projectPublicationCores`. Block 6 re-inlining its own upsert loop
+  // would bypass them entirely and stay green — the one case the deleted text guard
+  // did catch. Two lines restore it, without the window anchors, the comment
+  // stripper or the hand-maintained key list that made that guard unfixable.
+  it("keeps Block 6 routed through the projector", () => {
+    const src = readFileSync(join(process.cwd(), "etl/dynamodb/index.ts"), "utf8");
+    expect(src).toContain("projectPublicationCores(");
+    expect(src).not.toContain("publicationCore.upsert");
   });
 });
