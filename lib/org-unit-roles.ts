@@ -85,6 +85,18 @@ export const DIVISION_CHIEF_ROLE_KEY = "chief";
  */
 export const MEMBER_ROLE_KEY = "member";
 
+/**
+ * Stable key of the core-staff role (plan `2026-09-06-core-staff-role-plan.md`,
+ * Phase 2). DESCRIPTIVE, not authorization: a staff member is *evidence* for the
+ * co-author signal, and must not thereby gain edit rights on the core. That is
+ * why this is an `OrgUnitRole` on `CoreLeader.role` (an open `VarChar(32)`,
+ * chosen for extensibility) and NOT a third `UnitRole` enum value —
+ * `UnitAdmin` is keyed `@@id([entityType, entityId, cwid])` so a director could
+ * not also be staff, a new enum value needs a MySQL `ALTER` (the 1265 trap), and
+ * `publicRoleWhere()` is a denylist that cannot fail closed.
+ */
+export const CORE_STAFF_ROLE_KEY = "staff";
+
 /** The kind whose vocabulary the #2558 program-leadership fold-in seeds. Named
  *  the same way `CENTER_ENTITY_TYPE` is, for the same reason: a `satisfies
  *  OrgUnitRoleEntityType` constant a read/write call site can import instead
@@ -321,6 +333,28 @@ export const DEFAULT_ORG_UNIT_ROLES: Readonly<
       singleHolder: false,
       sortOrder: 10,
       profileTitle: true,
+    },
+    {
+      key: CORE_STAFF_ROLE_KEY,
+      label: "Staff",
+      // `membership`, not `leadership` — staff render below the core's leaders,
+      // and the group is what drives that placement.
+      group: "membership",
+      // EXPLICIT, and `unit` rather than the column's `center` default. `scope`
+      // answers "which tier may this be assigned at", and its live vocabulary is
+      // `unit | program` (OrgUnitRoleScope) — NOT the `center | program` the
+      // schema docblock still says. `unit` IS the core itself, and it is what
+      // `director` above already carries; a core role left silently at the
+      // `center` default is a mis-assignment surface for anything filtering on
+      // it, and a third scope value would only make the two core roles disagree.
+      scope: "unit",
+      // A core has many staff -- core 2 lists 7, core 14 lists 4.
+      singleHolder: false,
+      sortOrder: 20,
+      // Holding a core-staff role must NOT print a title on the person's public
+      // scholar profile. `coe_liaison` set this precedent and is the entire
+      // reason the column exists.
+      profileTitle: false,
     },
   ],
   center_program: [
