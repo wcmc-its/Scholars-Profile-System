@@ -129,10 +129,36 @@ describe("buildProducerRunWrites", () => {
   });
 
   it("TRAP 4: keeps GLOBAL rows and drops per-cwid / per-pmid ones", () => {
+    // The scoped rows here carry a TRACKED stage on purpose. Using an untracked
+    // stage (rollup_by_cwid, score_publications) would let the PRODUCER_STAGES
+    // lookup drop them and prove nothing about the scope filter -- a mutation
+    // that deleted the filter outright still passed that version of this test.
     const writes = buildProducerRunWrites(
       [
         { PK: "STAGE#hot_run#GLOBAL", SK: "RUN#2026-09-07T12:00:34Z", status: "complete" },
-        // Thousands of these exist; they are per-record work, not a heartbeat.
+        // Thousands of these exist upstream; they are per-record work, not a
+        // heartbeat, and one tracked stage growing them would flood etl_run.
+        {
+          PK: "STAGE#hot_run#cwid:abc1001",
+          SK: "RUN#2026-09-07T12:03:23Z",
+          status: "complete",
+        },
+        {
+          PK: "STAGE#daily_enrichment#pmid:34316629",
+          SK: "RUN#2026-09-07T11:01:13Z",
+          status: "failed",
+        },
+      ],
+      NONE,
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].source).toBe("ReciterAI-hot-path");
+  });
+
+  it("still ignores scoped rows whose stage is not tracked at all", () => {
+    const writes = buildProducerRunWrites(
+      [
         {
           PK: "STAGE#rollup_by_cwid#cwid:abc1001",
           SK: "RUN#2026-09-07T12:03:23Z",
@@ -147,8 +173,7 @@ describe("buildProducerRunWrites", () => {
       NONE,
     );
 
-    expect(writes).toHaveLength(1);
-    expect(writes[0].source).toBe("ReciterAI-hot-path");
+    expect(writes).toEqual([]);
   });
 
   it("ignores GLOBAL stages that are not tracked producers", () => {
