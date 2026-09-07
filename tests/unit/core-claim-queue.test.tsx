@@ -2064,8 +2064,8 @@ describe("CoreClaimQueue — core-staff lock chip", () => {
 
   it("offers NO 'Manage staff' control, in any state — there is no destination", () => {
     // The mockup draws one. The roster lives in the facility dictionary, not in
-    // SPS, and this toolbar already carries one knowingly-inert control
-    // ("Reporting..."); a second would make dead controls the pattern.
+    // SPS, so there is nothing for it to open — every other control in this
+    // toolbar goes somewhere, and this one could not.
     for (const [staffCount, staffTrackedCount] of [
       [null, null],
       [0, 0],
@@ -2110,7 +2110,7 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     );
     const knownClients = screen.getByRole("button", { name: /Known clients/ });
     const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
-    const reporting = screen.getByRole("button", { name: /Reporting/ });
+    const reporting = screen.getByRole("link", { name: /Reporting/ });
     // "(1)", not the old bare "1"
     expect(knownClients.textContent?.replace(/\s+/g, " ").trim()).toBe("Known clients (1)");
     // mockup order: [Known clients (N)] [Add PMIDs] [Reporting...]
@@ -2122,33 +2122,49 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     ).toBeTruthy();
   });
 
-  it("ships 'Reporting...' DISABLED with the reason on it — there is no reporting route", () => {
-    // An enabled control that no-ops is the failure this codebase keeps hitting.
-    // The button is drawn because the mockup draws it; it is inert and SAYS so.
+  it("navigates: 'Reporting...' is a real link to /edit/reports, with no inert treatment left", () => {
+    // Owner decision — Reporting takes an authorized user to the reports console.
+    // A real href (not a click handler) so middle-click and open-in-new-tab work.
+    // Note /edit/reports excludes cores (lib/edit/cancer-center-reports.ts:233),
+    // so a core-only Owner/Curator still 404s there; that is a bug in the report
+    // scope, not a reason to draw a dead control here.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const reporting = screen.getByRole("button", { name: /Reporting/ }) as HTMLButtonElement;
+    const reporting = screen.getByRole("link", { name: /Reporting/ }) as HTMLAnchorElement;
     expect(reporting.textContent).toContain("Reporting...");
-    expect(reporting.getAttribute("aria-disabled")).toBe("true");
-    // NOT the native `disabled` attribute: that drops it from the tab order, which
-    // would hide the reason from exactly the keyboard and screen-reader users most
-    // likely to wonder why the button does nothing.
-    expect(reporting.disabled).toBe(false);
-    expect(reporting.getAttribute("title")).toBe("Reporting view is not built yet");
-    // the reason is in the accessibility tree, not only in a hover tooltip
-    const why = document.getElementById(reporting.getAttribute("aria-describedby") ?? "");
-    expect(why?.textContent).toBe("Reporting view is not built yet");
+    expect(reporting.getAttribute("href")).toBe("/edit/reports");
+    // every trace of the old inert treatment is gone
+    expect(reporting.getAttribute("aria-disabled")).toBeNull();
+    expect(reporting.getAttribute("aria-describedby")).toBeNull();
+    expect(reporting.getAttribute("title")).toBeNull();
+    expect(reporting.className).not.toContain("cursor-not-allowed");
+    expect(reporting.className).not.toContain("opacity-50");
+    // ...and the sr-only excuse was deleted, not just detached from the control
+    expect(screen.queryByText(/not built yet/i)).toBeNull();
+    expect(document.getElementById("core-queue-reporting-why")).toBeNull();
+    // it is keyboard-reachable as an ordinary link (no tabindex=-1 anywhere)
+    expect(reporting.getAttribute("tabindex")).toBeNull();
   });
 
-  it("draws the three buttons as text-only rounded rectangles — no icons, no pills", () => {
+  it("draws the three controls as text-only rounded rectangles — no icons, no pills", () => {
     // The mockup's toolbar is plain rectangles with labels; the shipped pills
-    // carried a lucide glyph each (Users / Plus / FileText). Only the SHAPE
-    // changed on "Reporting..." — its inert treatment is asserted above.
+    // carried a lucide glyph each (Users / Plus / FileText). "Reporting..." is a
+    // link and its two siblings are buttons, so the three have to be asserted to
+    // MATCH — same height, same border, same text size — or the group stops
+    // reading as one.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    for (const name of [/Known clients/, /Add PMIDs/, /Reporting/]) {
-      const button = screen.getByRole("button", { name });
-      expect(button.querySelector("svg")).toBeNull();
-      expect(button.className).toContain("rounded-md");
-      expect(button.className).not.toContain("rounded-full");
+    const controls = [
+      screen.getByRole("button", { name: /Known clients/ }),
+      screen.getByRole("button", { name: /Add PMIDs/ }),
+      screen.getByRole("link", { name: /Reporting/ }),
+    ];
+    for (const control of controls) {
+      expect(control.querySelector("svg")).toBeNull();
+      expect(control.className).toContain("rounded-md");
+      expect(control.className).not.toContain("rounded-full");
+      // same height and text sizing as its siblings
+      expect(control.className).toContain("h-8");
+      expect(control.className).toContain("text-sm");
+      expect(control.className).toContain("border");
     }
   });
 
