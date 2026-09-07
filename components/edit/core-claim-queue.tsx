@@ -75,6 +75,7 @@ import {
   X,
 } from "lucide-react";
 import type { CoreClientRow } from "@/lib/api/core-clients";
+import { droppedAuthorCount, stripWcmMarkers } from "@/lib/author-byline";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 import { CoreClientsPanel } from "@/components/edit/core-clients-panel";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
@@ -1260,6 +1261,7 @@ export function CoreClaimQueue({
               revoked={revokedConfirmed.has(row.pmid)}
               pending={pending.has(row.pmid)}
               error={errors.get(row.pmid)}
+              clientCwids={clientCwids}
               onRevoke={() => revokeConfirmed(row.pmid, row.claimed, row.title)}
               onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
             />
@@ -1514,6 +1516,17 @@ function GroupHeader({
 
 // A confirmed publication with an inline Revoke (kept walk-back-able for the
 // session — the one thing this list needs to earn its place below the queue).
+//
+// It carries the SCORE and the evidence too. A confirmation is not final: the
+// engine re-scores every night, so a row confirmed months ago can be one the
+// evidence no longer supports, and until now this list showed a reviewer nothing
+// to judge that on — title, year, PMID and a Revoke button. Same band and
+// "N of 5 signals" the review queue shows, plus the evidence tokens, so
+// revisiting a confirmation and re-reviewing it use the same vocabulary.
+//
+// A MANUAL add has no engine row at all (`isManual`), so it gets the existing
+// "Manually added" note and NO score — a 0% band on a human's deliberate
+// addition would read as the engine disagreeing, when it simply never scored it.
 function ConfirmedRow({
   row,
   revoked,
@@ -1521,6 +1534,7 @@ function ConfirmedRow({
   error,
   onRevoke,
   onUndo,
+  clientCwids = new Set<string>(),
 }: {
   row: CoreQueueRow;
   revoked: boolean;
@@ -1528,6 +1542,9 @@ function ConfirmedRow({
   error: string | undefined;
   onRevoke: () => void;
   onUndo: () => void;
+  /** The core's known-client CWIDs, so the evidence line reads the same here as
+   *  it does on the review queue. */
+  clientCwids?: ReadonlySet<string>;
 }) {
   if (revoked) {
     return (
@@ -1550,18 +1567,45 @@ function ConfirmedRow({
       </li>
     );
   }
+  const band = likelihoodBand(row.likelihood);
+  const tokens = evidenceTokens(row, clientCwids);
+  const signalCount = buildSignals(row).length;
   return (
-    <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
-      <span className="flex min-w-0 items-baseline gap-2">
-        <Check className="size-3.5 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden />
-        <span className="text-foreground truncate">{row.title}</span>
-        {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
-        <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
-        {row.isManual ? (
-          <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-xs italic">
-            <PenLine className="size-3" aria-hidden /> Manually added
+    <li className="text-muted-foreground flex items-start justify-between gap-2 text-sm">
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <Check className="size-3.5 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden />
+          <span className="text-foreground truncate">{row.title}</span>
+          {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
+          <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
+          {row.isManual ? (
+            <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-xs italic">
+              <PenLine className="size-3" aria-hidden /> Manually added
+            </span>
+          ) : null}
+        </span>
+        {row.isManual ? null : (
+          <span
+            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pl-5 text-[11.5px]"
+            data-slot="core-queue-confirmed-evidence"
+          >
+            <span className={`font-semibold uppercase tracking-[0.04em] ${band.text}`}>
+              {band.label} {Math.round(row.likelihood * 100)}%
+            </span>
+            <span className="text-muted-foreground">
+              · {signalCount} of {SIGNAL_COUNT} signals
+            </span>
+            {tokens.map((t) => (
+              <span key={t.label} className="inline-flex items-baseline gap-1">
+                <span className="text-muted-foreground/60 font-bold" aria-hidden>
+                  ·
+                </span>
+                <span className="text-muted-foreground">{t.label}</span>
+                <span className="text-foreground font-medium">{t.value}</span>
+              </span>
+            ))}
           </span>
-        ) : null}
+        )}
       </span>
       <span className="flex shrink-0 items-center gap-2">
         {error ? (
@@ -2213,48 +2257,106 @@ function CoauthorDetail({ row }: { row: CoreQueueRow }) {
  */
 function Byline({ row }: { row: CoreQueueRow }) {
   if (!row.authorsString) return null;
-  const staffBySurname = new Map<string, QueueScholar>();
-  for (const s of row.coauthorScholars) {
-    const surname = s.name.trim().split(/\s+/).pop();
-    if (surname) staffBySurname.set(surname.toLowerCase(), s);
+  // `authors_string` marks WCM authors with `((…))`. STRIP BEFORE ANYTHING ELSE.
+  // Two bugs rode on not doing it, measured on core 14's live queue (1,453 rows):
+  //   - the markup printed raw on 70.4% of rows ("((Traube C))" on screen);
+  //   - the staff highlight below matches on the token's LEAD word, which for a
+  //     marked author is "((traube", never the surname — so the highlight could
+  //     not fire for exactly the authors it exists to mark. Core staff are WCM,
+  //     so they are the authors most likely to carry the marker.
+  const authors = stripWcmMarkers(row.authorsString);
+  // The truncated preview silently drops authors on 68.4% of those rows (worst
+  // case 413). Same `+ N more` suffix #2581 put on the topic feed.
+  const dropped = droppedAuthorCount(row.authorsString, row.fullAuthorsString);
+  const more = dropped > 0 ? ` + ${dropped} more` : "";
+  // Surname -> the scholar we can name in full. Core staff FIRST so they win a
+  // collision: their chip is the link back to the co-author evidence row, and a
+  // plain WCM link there would break that connection.
+  //
+  // `ambiguous` holds surnames claimed by more than one scholar. We highlight
+  // those but do NOT rewrite the name: on a "Kim J / Kim S" byline a surname-only
+  // match would print ONE person's full name over BOTH tokens, which is worse
+  // than leaving the PubMed form alone. First-initial agreement is required for
+  // the same reason.
+  const known = new Map<string, { scholar: QueueScholar; isStaff: boolean }>();
+  const ambiguous = new Set<string>();
+  for (const [list, isStaff] of [
+    [row.coauthorScholars, true],
+    [row.wcmAuthors, false],
+  ] as const) {
+    for (const sch of list) {
+      const surname = sch.name.trim().split(/\s+/).pop()?.toLowerCase();
+      if (!surname) continue;
+      const held = known.get(surname);
+      if (!held) known.set(surname, { scholar: sch, isStaff });
+      else if (held.scholar.cwid !== sch.cwid) ambiguous.add(surname);
+    }
   }
-  if (staffBySurname.size === 0) {
-    return <p className="text-muted-foreground mt-1 text-xs">{row.authorsString}</p>;
+  if (known.size === 0) {
+    return (
+      <p className="text-muted-foreground mt-1 text-xs" data-slot="core-queue-byline">
+        {authors}
+        {more}
+      </p>
+    );
   }
-  const tokens = row.authorsString.split(", ");
+  const tokens = authors.split(", ");
   return (
-    <p className="text-muted-foreground mt-1 text-xs">
+    <p className="text-muted-foreground mt-1 text-xs" data-slot="core-queue-byline">
       {tokens.map((tok, i) => {
-        const lead = tok.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-        const staff = staffBySurname.get(lead);
+        const parts = tok.trim().split(/\s+/);
+        const lead = parts[0]?.toLowerCase() ?? "";
+        const hit = known.get(lead);
+        // "Sholle ET" -> "e"; a PubMed byline puts initials last. An empty
+        // initial (a one-word collective author) never claims a scholar.
+        const initial = parts[1]?.[0]?.toLowerCase() ?? "";
+        const matches =
+          hit !== undefined &&
+          initial.length > 0 &&
+          hit.scholar.name.trim()[0]?.toLowerCase() === initial;
+        const safeToRename = matches && !ambiguous.has(lead);
+        // Full display name only when we are sure WHICH person this is.
+        const label = safeToRename && hit ? hit.scholar.name : tok;
+        if (!matches || !hit) return <span key={i}>{i > 0 ? ", " : ""}{tok}</span>;
+        const inner = hit.isStaff ? (
+          <HoverTooltip
+            text={`${hit.scholar.name} — core staff${hit.scholar.dept ? `, ${hit.scholar.dept}` : ""}`}
+          >
+            {hit.scholar.slug ? (
+              <a
+                href={`/${hit.scholar.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
+              >
+                {label}
+              </a>
+            ) : (
+              <span className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium">
+                {label}
+              </span>
+            )}
+          </HoverTooltip>
+        ) : hit.scholar.slug ? (
+          <a
+            href={`/${hit.scholar.slug}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--color-accent-slate)] hover:underline"
+          >
+            {label}
+          </a>
+        ) : (
+          <span className="text-foreground">{label}</span>
+        );
         return (
           <span key={i}>
             {i > 0 ? ", " : ""}
-            {staff ? (
-              <HoverTooltip
-                text={`${staff.name} — core staff${staff.dept ? `, ${staff.dept}` : ""}`}
-              >
-                {staff.slug ? (
-                  <a
-                    href={`/${staff.slug}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
-                  >
-                    {tok}
-                  </a>
-                ) : (
-                  <span className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium">
-                    {tok}
-                  </span>
-                )}
-              </HoverTooltip>
-            ) : (
-              tok
-            )}
+            {inner}
           </span>
         );
       })}
+      {more}
     </p>
   );
 }
