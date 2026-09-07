@@ -346,6 +346,54 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
 });
 
 /**
+ * Strip `//` line comments and block comments so the source guard below reads
+ * CODE, not prose.
+ *
+ * The guard asserts no payload key appears literally in the Block 6 batch loop.
+ * Raw text cannot tell a field list from a sentence, so a benign
+ * `// NOTE: status is engine-provided.` above the payload line turned it red
+ * with no behavioral change at all. It fails loud, so it is not a correctness
+ * hole - but a guard that fires on a comment is a guard someone eventually
+ * deletes, and deleting THIS one puts the silent stopped-write back on the
+ * table. Quoted `//` is respected so a string is never mistaken for a comment.
+ */
+function stripComments(source: string): string {
+  let out = "";
+  let i = 0;
+  while (i < source.length) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (c === '"' || c === "'" || c === "`") {
+      out += c;
+      i++;
+      while (i < source.length) {
+        if (source[i] === "\\") {
+          out += source.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        out += source[i];
+        i++;
+        if (source[i - 1] === c) break;
+      }
+      continue;
+    }
+    if (c === "/" && next === "/") {
+      while (i < source.length && source[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      const close = source.indexOf("*/", i + 2);
+      i = close === -1 ? source.length : close + 2;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+/**
  * The Block 6 upsert used to carry two hand-maintained field lists, one in the
  * `create` half and one in the `update` half. Nothing held them together:
  * deleting the three method/MeSH fields from the `update` half alone left
@@ -427,7 +475,10 @@ describe("toPubCoreUpsertPayload (Block 6 upsert payload)", () => {
     expect(start).toBeGreaterThan(-1);
     const end = src.indexOf("pubCoreRowsUpserted +=", start);
     expect(end).toBeGreaterThan(start);
-    const block = src.slice(start, end);
+    // Comments stripped: this asserts on what the loop DOES, so prose that
+    // happens to name a column must not be able to redden it (or, on the
+    // toMatch side, to satisfy it).
+    const block = stripComments(src.slice(start, end));
 
     // Derived from the mapper's helper and used UNALTERED: no spread-and-override,
     // no second object literal between the helper and the two halves.
