@@ -28,7 +28,6 @@
 import { cache } from "react";
 import { notFound } from "next/navigation";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import type { UnitEntityType } from "@/lib/api/manual-layer";
 import type { EditSession } from "@/lib/auth/superuser";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import {
@@ -37,7 +36,10 @@ import {
 } from "@/lib/edit/administrators";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { canViewUsage } from "@/lib/edit/usage-access";
-import { loadReportableUnitsForActor } from "@/lib/edit/cancer-center-reports";
+import {
+  loadReportableUnitsForActor,
+  type ReportableUnitKind,
+} from "@/lib/edit/cancer-center-reports";
 import { isNewsQueueTabVisible } from "@/lib/edit/news-queue";
 import { isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashboard";
@@ -77,9 +79,10 @@ export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
 
 /** Kinds `loadReportableUnitsForActor` should count for the `reports` tab —
  *  same widened set reports 3/6 and `/edit/reports` itself pass (org-unit
- *  publications reports plan, 2026-08-16). `core` is deliberately excluded:
- *  no reportable-unit kind exists for it yet. */
-const REPORTABLE_KINDS: readonly UnitEntityType[] = ["center", "department", "division"];
+ *  publications reports plan, 2026-08-16; core-reports widening, 2026-09-06).
+ *  `core` is included: without it a core-ONLY grant holder would reach
+ *  `/edit/reports` by link but never see the tab that leads there. */
+const REPORTABLE_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -93,11 +96,11 @@ export interface ConsoleGrants {
   /** `loadManageableUnits(...).total` — owner OR curator, any of the four unit
    *  kinds. Feeds `profiles` / `units`. */
   manageableUnitCount: number;
-  /** `loadReportableUnitsForActor(..., REPORTABLE_KINDS).length` — center,
-   *  department, and division all carry reports (org-unit publications
-   *  reports plan, 2026-08-16: reports 3/6 are kind-generic); only `core`
-   *  doesn't, so for a non-global viewer this can still be 0 while
-   *  `manageableUnitCount` isn't (a core-only grant). Feeds `reports`. */
+  /** `loadReportableUnitsForActor(..., REPORTABLE_KINDS).length` — all four
+   *  unit kinds carry reports now (org-unit publications reports plan,
+   *  2026-08-16: reports 3/6 are kind-generic; core-reports widening,
+   *  2026-09-06: a core resolves them from its confirmed `publication_core`
+   *  usages), so a core-only grant holder gets the tab too. Feeds `reports`. */
   reportableUnitCount: number;
   /** `canViewUsage(...)` — any `UnitAdmin` grant holder, either role. Already
    *  ORs in `isSuperuser`. Feeds `usage`. */

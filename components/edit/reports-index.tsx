@@ -40,7 +40,10 @@ import Link from "next/link";
 const TH_CLASS =
   "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
 
-export type ReportsIndexUnitKind = "center" | "department" | "division";
+/** Mirrors `ReportableUnitKind` (`lib/edit/cancer-center-reports.ts`). Declared
+ *  locally rather than imported: this is a client component, and that module
+ *  pulls the server-only reports data layer. */
+export type ReportsIndexUnitKind = "center" | "department" | "division" | "core";
 
 export type ReportsIndexReport = { n: 1 | 2 | 3 | 4 | 5 | 6; label: string; description: string };
 
@@ -48,8 +51,8 @@ export type ReportsIndexUnit = {
   code: string;
   kind: ReportsIndexUnitKind;
   name: string;
-  /** Only meaningful when `kind === "center"`; null for department/division
-   *  (no institute-vs-center distinction outside a center). */
+  /** Only meaningful when `kind === "center"`; null for department/division/
+   *  core (no institute-vs-center distinction outside a center). */
   centerType: "center" | "institute" | null;
   editHref: string;
   liveCount: number;
@@ -57,8 +60,8 @@ export type ReportsIndexUnit = {
   /** ISO string (plain-serializable) or null — nothing live yet. */
   lastRefreshedAt: string | null;
   /** This unit's OWN report catalog — `REPORT_NUMBERS_BY_KIND[kind]` resolved
-   *  to labels/descriptions. A center carries all six; department/division
-   *  carry only Publications + NIH-funded pubs. */
+   *  to labels/descriptions. A center carries all six; department/division/
+   *  core carry only Publications + NIH-funded pubs. */
   reports: ReadonlyArray<ReportsIndexReport>;
   perReport: ReadonlyArray<{ n: 1 | 2 | 3 | 4 | 5 | 6; live: boolean; lastRefreshedAt: string | null }>;
 };
@@ -71,12 +74,14 @@ function formatDate(iso: string | null): string {
 function typeLabel(u: { kind: ReportsIndexUnitKind; centerType: "center" | "institute" | null }): string {
   if (u.kind === "department") return "Department";
   if (u.kind === "division") return "Division";
+  if (u.kind === "core") return "Core";
   return u.centerType === "institute" ? "Institute" : "Center";
 }
 
 /** `/edit/reports/N?center=<code>` — `&kind=` is only appended for a
- *  department/division so an existing `?center=<centerCode>` bookmark (implied
- *  `kind=center`) keeps resolving exactly as it always has. */
+ *  department/division/core so an existing `?center=<centerCode>` bookmark
+ *  (implied `kind=center`) keeps resolving exactly as it always has. For a
+ *  core, `<code>` is the core id. */
 function reportHref(n: number, code: string, kind: ReportsIndexUnitKind): string {
   const params = new URLSearchParams({ center: code });
   if (kind !== "center") params.set("kind", kind);
@@ -120,6 +125,9 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   // checkbox.
   const [showDepartments, setShowDepartments] = React.useState(false);
   const [showDivisions, setShowDivisions] = React.useState(false);
+  // Same default-off posture as department/division — cores are the newest
+  // reportable kind and only a handful carry any unit_admin grant at all.
+  const [showCores, setShowCores] = React.useState(false);
   const [liveOnly, setLiveOnly] = React.useState(false);
   const [noneYetOnly, setNoneYetOnly] = React.useState(false);
 
@@ -150,6 +158,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       institutes: units.filter((u) => u.kind === "center" && u.centerType === "institute").length,
       departments: units.filter((u) => u.kind === "department").length,
       divisions: units.filter((u) => u.kind === "division").length,
+      cores: units.filter((u) => u.kind === "core").length,
       // Row-scoped (per report), not unit-scoped — a unit with 1 of 6 reports
       // live now contributes 1 row to liveOnly and 5 to noneYet, instead of
       // reading as "has a live report" and never surfacing in "In progress".
@@ -166,6 +175,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       if (r.unitKind === "center" && r.centerType === "institute" && !showInstitutes) return false;
       if (r.unitKind === "department" && !showDepartments) return false;
       if (r.unitKind === "division" && !showDivisions) return false;
+      if (r.unitKind === "core" && !showCores) return false;
       if (liveOnly && !r.live) return false;
       if (noneYetOnly && r.live) return false;
       if (trimmed.length === 0) return true;
@@ -189,7 +199,18 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
     return [...pool].sort(
       (a, b) => a.unitName.localeCompare(b.unitName) || a.reportLabel.localeCompare(b.reportLabel),
     );
-  }, [rows, query, sort, showCenters, showInstitutes, showDepartments, showDivisions, liveOnly, noneYetOnly]);
+  }, [
+    rows,
+    query,
+    sort,
+    showCenters,
+    showInstitutes,
+    showDepartments,
+    showDivisions,
+    showCores,
+    liveOnly,
+    noneYetOnly,
+  ]);
 
   return (
     <div className="flex flex-col gap-4" data-slot="reports-index-table" data-testid="reports-index-table">
@@ -227,6 +248,13 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                 label="Division"
                 count={counts.divisions}
                 testid="reports-index-filter-division"
+              />
+              <FilterCheckbox
+                checked={showCores}
+                onChange={setShowCores}
+                label="Core"
+                count={counts.cores}
+                testid="reports-index-filter-core"
               />
             </div>
           </fieldset>

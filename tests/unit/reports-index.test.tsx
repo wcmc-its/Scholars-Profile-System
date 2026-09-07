@@ -98,6 +98,21 @@ const DIVISION: ReportsIndexUnit = {
   perReport: perReport([], UNIT_REPORTS),
 };
 
+// A core facility (core-reports widening, 2026-09-06) — same 2-report catalog
+// as a department/division, addressed by core ID rather than a unit code.
+const CORE: ReportsIndexUnit = {
+  code: "14",
+  kind: "core",
+  name: "Biomedical Imaging",
+  centerType: null,
+  editHref: "/edit/core/14",
+  liveCount: 2,
+  totalCount: 2,
+  lastRefreshedAt: null,
+  reports: UNIT_REPORTS,
+  perReport: perReport([3, 6], UNIT_REPORTS),
+};
+
 describe("ReportsIndex — table mode (2a)", () => {
   it("renders one row per (unit, report) pair, not one row per unit", () => {
     render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
@@ -174,6 +189,33 @@ describe("ReportsIndex — table mode (2a)", () => {
     expect(screen.queryByTestId("reports-index-row-n001-3")).toBeNull();
     fireEvent.click(screen.getByTestId("reports-index-filter-division"));
     expect(screen.getByTestId("reports-index-row-n001-3")).toBeTruthy();
+  });
+
+  it("a core is a filterable unit type of its own, defaulting unchecked like department/division", () => {
+    render(<ReportsIndex units={[MEYER, CORE]} mode="table" />);
+    // A kind with no checkbox of its own would slip past every filter and show
+    // unconditionally — this pins that cores are actually governed by the rail.
+    expect(screen.queryByTestId("reports-index-row-14-3")).toBeNull();
+    fireEvent.click(screen.getByTestId("reports-index-filter-core"));
+    expect(screen.getByTestId("reports-index-row-14-3")).toBeTruthy();
+    expect(screen.getByTestId("reports-index-row-14-6")).toBeTruthy();
+    // Reports 1/2/4/5 are center-only — a core never gets a row for them.
+    for (const n of [1, 2, 4, 5]) {
+      expect(screen.queryByTestId(`reports-index-row-14-${n}`)).toBeNull();
+    }
+  });
+
+  it("a core row is labelled Core and its live link carries &kind=core", () => {
+    render(<ReportsIndex units={[CORE]} mode="table" />);
+    fireEvent.click(screen.getByTestId("reports-index-filter-core"));
+    expect(screen.getByTestId("reports-index-row-14-3").textContent).toContain("Core");
+    // Without &kind=core the report page resolves "14" as a CENTER code.
+    expect(screen.getByTestId("reports-index-link-14-3").getAttribute("href")).toBe(
+      "/edit/reports/3?center=14&kind=core",
+    );
+    expect(screen.getByTestId("reports-index-link-14-6").getAttribute("href")).toBe(
+      "/edit/reports/6?center=14&kind=core",
+    );
   });
 
   it("Unit type counts stay unit-scoped (not row-scoped) — a department with 2 reports still counts as 1 department", () => {

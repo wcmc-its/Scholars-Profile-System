@@ -3,8 +3,11 @@
  * 2026-08-16). This unit's member publications that carry a `GrantPublication`
  * link to NIH RePORTER (`lib/edit/nih-funded-publications-report.ts` — see
  * that module's doc comment for the row grain and confidence trigger).
- * Center, department, or division — unit-agnostic from day one, same
- * `?center=<code>[&kind=department|division]` routing convention as report 3.
+ * Center, department, division, or core — unit-agnostic from day one, same
+ * `?center=<code>[&kind=department|division|core]` routing convention as
+ * report 3. For `kind=core` the `<code>` is the core id, the gate is the
+ * core's own owner/curator gate, and the publication set is the core's
+ * confirmed `publication_core` usages rather than a member roster.
  *
  * Read-only, server-rendered — no client component, no interaction beyond
  * following a link, matching reports 1/2/4/5's tables.
@@ -17,8 +20,11 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { LowerConfidenceBadge } from "@/components/funding/expanded-grant";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import type { UnitEntityType } from "@/lib/api/manual-layer";
-import { loadReportsContext, resolveNumberedReportCenterCode } from "@/lib/edit/cancer-center-reports";
+import {
+  loadReportsContext,
+  resolveNumberedReportCenterCode,
+  type ReportableUnitKind,
+} from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { loadNihFundedPublicationsReport } from "@/lib/edit/nih-funded-publications-report";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -30,10 +36,10 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-const ALLOWED_KINDS: readonly UnitEntityType[] = ["center", "department", "division"];
+const ALLOWED_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
 
-function parseKind(raw: string | undefined): UnitEntityType | undefined {
-  return raw === "department" || raw === "division" ? raw : undefined;
+function parseKind(raw: string | undefined): ReportableUnitKind | undefined {
+  return raw === "department" || raw === "division" || raw === "core" ? raw : undefined;
 }
 
 const thClass = "px-3 py-2 font-medium";
@@ -87,12 +93,18 @@ export default async function EditReportsNihFundedPublicationsPage({
       </Link>
       <h1 className="mb-1 text-xl font-bold">6. NIH-funded pubs</h1>
       <p className="text-muted-foreground text-sm">
-        Every {ctx.unit.name} member publication with a matched NIH RePORTER funding link.
+        {kind === "core"
+          ? `Every publication with a confirmed use of ${ctx.unit.name} and a matched NIH RePORTER funding link.`
+          : `Every ${ctx.unit.name} member publication with a matched NIH RePORTER funding link.`}
       </p>
 
       {report.totalPublications === 0 ? (
+        // Kind-aware: a core has no members, so "for a confirmed member
+        // author" would misstate why the report is empty.
         <p className="text-muted-foreground mt-6" data-testid="nih-pubs-report-empty">
-          No NIH-funded publications were found for a confirmed member author.
+          {kind === "core"
+            ? "No NIH-funded publications were found among this core's confirmed usages."
+            : "No NIH-funded publications were found for a confirmed member author."}
         </p>
       ) : (
         <>

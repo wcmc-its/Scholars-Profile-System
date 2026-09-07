@@ -1922,7 +1922,8 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     );
     const knownClients = screen.getByRole("button", { name: /Known clients/ });
     const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
-    const reporting = screen.getByRole("button", { name: /Reporting/ });
+    // A LINK since the core-reports widening, not a button — see the test below.
+    const reporting = screen.getByRole("link", { name: /Reporting/ });
     // "(1)", not the old bare "1"
     expect(knownClients.textContent?.replace(/\s+/g, " ").trim()).toBe("Known clients (1)");
     // mockup order: [Known clients (N)] [Add PMIDs] [Reporting...]
@@ -1934,21 +1935,21 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     ).toBeTruthy();
   });
 
-  it("ships 'Reporting...' DISABLED with the reason on it — there is no reporting route", () => {
-    // An enabled control that no-ops is the failure this codebase keeps hitting.
-    // The button is drawn because the mockup draws it; it is inert and SAYS so.
+  it("'Reporting...' now LINKS to this core's Publications report — the route it was waiting on exists", () => {
+    // It shipped inert-and-saying-so while no core reporting route existed. The
+    // core-reports widening gave cores reports 3 and 6, so the placeholder is
+    // now a real link — and it must carry BOTH `center=<coreId>` and
+    // `kind=core`: without the kind, `/edit/reports/3` resolves the code as a
+    // CENTER and 404s on the CenterProgram taxonomy gate.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const reporting = screen.getByRole("button", { name: /Reporting/ }) as HTMLButtonElement;
+    const reporting = screen.getByRole("link", { name: /Reporting/ });
     expect(reporting.textContent).toContain("Reporting...");
-    expect(reporting.getAttribute("aria-disabled")).toBe("true");
-    // NOT the native `disabled` attribute: that drops it from the tab order, which
-    // would hide the reason from exactly the keyboard and screen-reader users most
-    // likely to wonder why the button does nothing.
-    expect(reporting.disabled).toBe(false);
-    expect(reporting.getAttribute("title")).toBe("Reporting view is not built yet");
-    // the reason is in the accessibility tree, not only in a hover tooltip
-    const why = document.getElementById(reporting.getAttribute("aria-describedby") ?? "");
-    expect(why?.textContent).toBe("Reporting view is not built yet");
+    expect(reporting.getAttribute("href")).toBe(
+      `/edit/reports/3?center=${encodeURIComponent(CORE.id)}&kind=core`,
+    );
+    // No leftover "not built yet" affordances.
+    expect(reporting.getAttribute("aria-disabled")).toBeNull();
+    expect(document.getElementById("core-queue-reporting-why")).toBeNull();
   });
 
   it("keeps the CSV column contract under test while the export button is off the toolbar", () => {

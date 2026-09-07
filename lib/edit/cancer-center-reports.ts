@@ -8,27 +8,78 @@
  *
  * Center-only through 2026-08-14. The org-unit publications reports plan
  * (2026-08-16) widened reports 3 (Publications) and 6 (NIH-funded pubs) to
- * also serve department/division units — see `REPORT_NUMBERS_BY_KIND` below
- * for which numbered reports apply to which kind, and `loadReportsContext`'s
- * doc comment for the authz thread-through. Reports 1/2/4/5 stay center-only.
+ * also serve department/division units, and the core-reports widening
+ * (2026-09-06) added CORE facilities as a fourth reportable kind — see
+ * `REPORT_NUMBERS_BY_KIND` below for which numbered reports apply to which
+ * kind, `ReportableUnitKind` for why the widening is scoped to this suite
+ * rather than to `UnitEntityType`, and `loadReportsContext`'s doc comment for
+ * the authz thread-through. Reports 1/2/4/5 stay center-only.
  */
 import { notFound, redirect } from "next/navigation";
 
 import {
   loadUnitEditContext,
-  type UnitEditContext,
   type UnitEditContextClient,
 } from "@/lib/api/unit-edit-context";
 import type { UnitEntityType } from "@/lib/api/manual-layer";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
+import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
 import type { EditSession } from "@/lib/auth/superuser";
-import { logEditDenial } from "@/lib/edit/authz";
+import {
+  authorizeCoreClaim,
+  getCoreOwnerRole,
+  logEditDenial,
+  type CoreOwnerLookup,
+} from "@/lib/edit/authz";
 import {
   loadAllUnitsDirectory,
   loadAllUnitsForFinder,
   loadManageableUnits,
 } from "@/lib/edit/manageable-units";
+
+/**
+ * The unit kinds the `/edit/reports/*` suite can report on — the three classic
+ * org units plus `core`.
+ *
+ * DELIBERATELY scoped to this suite rather than widening `UnitEntityType`
+ * itself. `UnitEntityType` is the three kinds the MANUAL LAYER covers
+ * (`lib/api/manual-layer.ts`), and every consumer of it treats a core
+ * differently on purpose:
+ *   - `loadUnitEditContext` (`lib/api/unit-edit-context.ts`) branches
+ *     `department` / `division` / `else`, so a widened `UnitEntityType` would
+ *     make `loadUnitEditContext("core", …)` silently read the CENTER table
+ *     keyed by a core id — a wrong-table read that type-checks and returns a
+ *     null the caller reports as 404/403, with no compile error anywhere.
+ *   - `loadUnitFieldOverrides` / `isUnitSuppressed` (`manual-layer.ts`) would
+ *     start accepting `entityType: "core"` for `field_override` /
+ *     `suppression` rows, neither of which a core ever carries (`Suppression`
+ *     excludes cores BY DESIGN — see `loadAllUnitsDirectory`).
+ * A core's authz, name lookup, and publication set all resolve through core-
+ * specific machinery instead (`getCoreOwnerRole` / `authorizeCoreClaim` /
+ * `loadConfirmedCorePmidsByCore`), so the union stays local to the reports
+ * modules that actually branch on it.
+ */
+export type ReportableUnitKind = UnitEntityType | "core";
+
+/** `ReportableUnitKind` minus `core` — the kinds that ARE `UnitEntityType`s,
+ *  i.e. the ones the manual-layer/`Suppression`/`loadUnitEditContext` paths
+ *  accept. Narrowing helper so those call sites need no cast. */
+function isUnitEntityType(kind: ReportableUnitKind): kind is UnitEntityType {
+  return kind !== "core";
+}
+
+/**
+ * What every `/edit/reports/*` page actually consumes from its authz load: the
+ * unit's display name. A center/department/division resolves it through the
+ * full `loadUnitEditContext` (which `UnitEditContext` structurally satisfies);
+ * a core has no `UnitEditContext` equivalent and never will — cores carry no
+ * `field_override`, no `Suppression`, no roster, and a leaders LIST rather than
+ * a single leader column. Typing the reports gate on what it needs rather than
+ * on the center editor's context is what lets both resolve through one
+ * function without a fake core "unit context".
+ */
+export type ReportsContext = { unit: { name: string } };
 
 /**
  * Resolve "the" Cancer Center's unit `code` server-side instead of hardcoding
@@ -85,26 +136,57 @@ export async function resolveReportsCenterCode(
  * `kind` defaults to `"center"` — org-unit publications reports plan
  * (2026-08-16): reports 1/2/4/5 never pass it (center-only, unchanged), so
  * every existing call site keeps resolving exactly as it always has. Reports
- * 3 and 6 (department/division-eligible) pass the resolved kind through.
+ * 3 and 6 (department/division/core-eligible) pass the resolved kind through.
+ *
+ * `kind === "core"` takes the core branch below instead: cores have no
+ * `UnitEditContext` and no dept→division cascade, so the gate is the SAME pair
+ * `/edit/core/[coreId]/review` already enforces — `getCoreOwnerRole` +
+ * `authorizeCoreClaim` (superuser / comms_steward / this core's Owner or
+ * Curator, 2026-08-26 policy widening decision #6) — reused wholesale rather
+ * than re-derived, so a core's Reports access can never drift from its review
+ * queue's. Nobody else passes: a grant on a DIFFERENT core, or on any
+ * department/division/center, confers nothing here.
  */
 export async function loadReportsContext(
   code: string,
   session: EditSession,
-  db: UnitEditContextClient,
-  kind: UnitEntityType = "center",
-): Promise<UnitEditContext | null> {
-  const ctx = await loadUnitEditContext(kind, code, session, db);
+  db: UnitEditContextClient & Pick<PrismaClient, "core">,
+  kind: ReportableUnitKind = "center",
+): Promise<ReportsContext | null> {
+  const ctx = isUnitEntityType(kind)
+    ? await loadUnitEditContext(kind, code, session, db)
+    : await loadCoreReportsContext(code, session, db);
   if (ctx === null) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: code,
       path: "/edit/reports",
-      reason: "not_curator",
+      reason: kind === "core" ? "not_core_owner" : "not_curator",
       targetEntityType: kind,
       targetEntityId: code,
     });
   }
   return ctx;
+}
+
+/**
+ * The `kind === "core"` half of `loadReportsContext`. `null` for a denied
+ * actor OR an unknown core id — the same conflation `loadUnitEditContext`
+ * already makes for the other three kinds (both render the reports console's
+ * visible 403), deliberately NOT the 404/403 split `/edit/core/[coreId]/review`
+ * draws: this suite has one code path for a code it cannot resolve, and
+ * splitting it here for cores alone would leak "this core id exists" to an
+ * actor with no grant on it.
+ */
+async function loadCoreReportsContext(
+  coreId: string,
+  session: EditSession,
+  db: Pick<PrismaClient, "unitAdmin" | "core">,
+): Promise<ReportsContext | null> {
+  const coreRole = await getCoreOwnerRole(session, coreId, db as unknown as CoreOwnerLookup);
+  if (!authorizeCoreClaim(session, coreRole).ok) return null;
+  const core = await db.core.findUnique({ where: { id: coreId }, select: { name: true } });
+  return core ? { unit: { name: core.name } } : null;
 }
 
 /**
@@ -123,19 +205,20 @@ export async function loadReportsContext(
  * `opts.allowedKinds` (org-unit publications reports plan, 2026-08-16)
  * defaults to `["center"]` — reports 1/2/4/5 call with no third argument at
  * all, so their resolution is byte-for-byte unchanged. Reports 3 and 6 (the
- * department/division-eligible pair) pass the widened set. `opts.requestedKind`
- * only matters alongside an explicit `requested` code that ISN'T a center —
- * `?center=<code>&kind=department` — since a department/division code has no
- * `resolveReportsCenterCode`-style taxonomy gate to validate against (no
- * `CenterProgram` equivalent exists for those kinds); `loadReportsContext`
- * downstream is what actually 403s/renders-not-found for a bad one.
+ * department/division/core-eligible set) pass the widened set.
+ * `opts.requestedKind` only matters alongside an explicit `requested` code
+ * that ISN'T a center — `?center=<code>&kind=department|division|core` — since
+ * those kinds have no `resolveReportsCenterCode`-style taxonomy gate to
+ * validate against (no `CenterProgram` equivalent exists for them);
+ * `loadReportsContext` downstream is what actually 403s/renders-not-found for
+ * a bad one, cores included.
  */
 export async function resolveNumberedReportCenterCode(
   session: EditSession,
   db: UnitEditContextClient & ReportsDirectoryClient,
   requested: string | undefined,
-  opts: { allowedKinds?: readonly UnitEntityType[]; requestedKind?: UnitEntityType } = {},
-): Promise<{ code: string; kind: UnitEntityType }> {
+  opts: { allowedKinds?: readonly ReportableUnitKind[]; requestedKind?: ReportableUnitKind } = {},
+): Promise<{ code: string; kind: ReportableUnitKind }> {
   const allowedKinds = opts.allowedKinds ?? ["center"];
   if (requested) {
     const kind = opts.requestedKind ?? "center";
@@ -161,21 +244,24 @@ export type ReportsDirectoryClient = Pick<
   | "centerProgram"
   | "centerCollabCandidate"
   | "cancerCenterFundingAward"
-
+  // Core liveness (reports 3/6 for a `core` unit) — the two tables
+  // `loadConfirmedCorePmidsByCore` reads.
+  | "publicationCore"
+  | "coreClaim"
   | "orgUnitRoleAssignment"
 >;
 
 /** One unit in scope for the Reports index/nav. A `center` must carry a
  *  CenterProgram taxonomy, the same data-driven gate `resolveReportsCenterCode`
- *  already applies to a single unit — `department`/`division` have no such
- *  taxonomy to gate on (org-unit publications reports plan, 2026-08-16):
- *  reports 3/6 degrade gracefully to an empty state for a unit with no
- *  members/publications rather than erroring, so any unit the actor can
- *  administer is reportable. `centerType` is only meaningful when
- *  `kind === "center"`; null otherwise. */
+ *  already applies to a single unit — `department`/`division`/`core` have no
+ *  such taxonomy to gate on (org-unit publications reports plan, 2026-08-16;
+ *  core-reports widening, 2026-09-06): reports 3/6 degrade gracefully to an
+ *  empty state for a unit with no members/publications rather than erroring,
+ *  so any unit the actor can administer is reportable. `centerType` is only
+ *  meaningful when `kind === "center"`; null otherwise. */
 export type ReportableUnit = {
   code: string;
-  kind: UnitEntityType;
+  kind: ReportableUnitKind;
   name: string;
   centerType: "center" | "institute" | null;
 };
@@ -207,36 +293,54 @@ export type ReportableUnit = {
  * `loadUnitEditContext` is specifically designed to prevent).
  *
  * `allowedKinds` (org-unit publications reports plan, 2026-08-16) defaults to
- * `["center"]`, so every existing caller (`loadConsoleGrants`, reports 1/2/4/5)
- * keeps its exact prior behavior with no call-site change. Reports 3/6 and the
- * index page pass the widened `["center", "department", "division"]` set — a
- * department/division candidate skips the CenterProgram/retirement-suppression
- * machinery below entirely (there's no equivalent taxonomy, and `loadManageableUnits`
- * already excludes a grant whose unit row is gone) and passes straight through.
+ * `["center"]`, so every existing caller (reports 1/2/4/5) keeps its exact
+ * prior behavior with no call-site change. Reports 3/6, `loadConsoleGrants`
+ * and the index page pass the widened
+ * `["center", "department", "division", "core"]` set — a
+ * department/division/core candidate skips the CenterProgram/retirement-
+ * suppression machinery below entirely (there's no equivalent taxonomy, and
+ * `loadManageableUnits` already excludes a grant whose unit row is gone) and
+ * passes straight through.
+ *
+ * Cores (core-reports widening, 2026-09-06) ride BOTH branches: the global one
+ * through `loadAllUnitsDirectory` (which has enumerated cores since
+ * cores-as-org-units P5), the actor-scoped one through the `cores` group
+ * `loadManageableUnits` already returns from the actor's
+ * `UnitAdmin(entityType="core")` grants. Note that 13 of the 14 catalog cores
+ * carry ZERO `unit_admin` rows today (staging probe, 2026-09-06: only core 14
+ * has any, 4 rows), so for almost every core the actor-scoped branch is empty
+ * until an owner/curator grant exists — expected, not a bug; the index renders
+ * its normal "no reportable units" path.
  */
 export async function loadReportableUnitsForActor(
   session: EditSession,
   db: ReportsDirectoryClient,
-  allowedKinds: readonly UnitEntityType[] = ["center"],
+  allowedKinds: readonly ReportableUnitKind[] = ["center"],
 ): Promise<ReportableUnit[]> {
   const isGlobal = session.isSuperuser || session.isCommsSteward;
-  const wantsKind = (k: UnitEntityType) => allowedKinds.includes(k);
+  const wantsKind = (k: ReportableUnitKind) => allowedKinds.includes(k);
 
-  type Candidate = { code: string; kind: UnitEntityType; name: string; centerType: "center" | "institute" | null };
+  type Candidate = {
+    code: string;
+    kind: ReportableUnitKind;
+    name: string;
+    centerType: "center" | "institute" | null;
+  };
   let candidates: Candidate[];
   if (isGlobal) {
     const all = await loadAllUnitsDirectory(db, { includeRetired: session.isSuperuser });
-    // `core` is a `ManageableUnitKind` but not a `UnitEntityType` (cores-as-
-    // org-units is out of scope for this report suite) — excluded via this
-    // type predicate so `u.kind` narrows to `UnitEntityType` with no cast.
-    const isReportableKind = (u: (typeof all)[number]): u is (typeof all)[number] & { kind: UnitEntityType } =>
-      u.kind !== "core" && wantsKind(u.kind);
-    candidates = all.filter(isReportableKind).map((u) => ({
-      code: u.code,
-      kind: u.kind,
-      name: u.name,
-      centerType: u.kind === "center" ? u.centerType : null,
-    }));
+    // `ManageableUnitKind` and `ReportableUnitKind` are the same four values,
+    // so no narrowing predicate is needed any more — `allowedKinds` alone
+    // decides, and a caller that omits `core` still gets exactly what it did
+    // before this widening.
+    candidates = all
+      .filter((u) => wantsKind(u.kind))
+      .map((u) => ({
+        code: u.code,
+        kind: u.kind,
+        name: u.name,
+        centerType: u.kind === "center" ? u.centerType : null,
+      }));
   } else {
     const manageable = await loadManageableUnits(session.cwid, db);
     candidates = [
@@ -254,16 +358,25 @@ export async function loadReportableUnitsForActor(
       ...(wantsKind("division")
         ? manageable.divisions.map((u) => ({ code: u.code, kind: "division" as const, name: u.name, centerType: null }))
         : []),
+      // The actor's own `UnitAdmin(entityType="core")` grants — owner OR
+      // curator, exactly what `loadManageableUnits` already deduped and
+      // name-resolved. A core whose catalog row is gone is dropped there.
+      ...(wantsKind("core")
+        ? manageable.cores.map((u) => ({ code: u.code, kind: "core" as const, name: u.name, centerType: null }))
+        : []),
     ];
   }
 
   if (candidates.length === 0) return [];
 
   const centerCodes = candidates.filter((c) => c.kind === "center").map((c) => c.code);
-  // Suppression covers every kind (a department/division can be retired too),
-  // so the retirement check below runs across ALL non-superuser candidates,
-  // not just centers — only the CenterProgram taxonomy gate is center-only.
-  const allCandidateCodes = candidates.map((c) => c.code);
+  // Suppression covers every kind EXCEPT core (a department/division can be
+  // retired too; `Suppression` excludes `entityType="core"` by design —
+  // `core-as-org-unit-plan.md`, see `loadAllUnitsDirectory`), so the retirement
+  // check below runs across all non-superuser, non-core candidates. Only the
+  // CenterProgram taxonomy gate is center-only.
+  const suppressibleKinds = allowedKinds.filter(isUnitEntityType);
+  const allCandidateCodes = candidates.filter((c) => c.kind !== "core").map((c) => c.code);
 
   const [programRows, centerTypeRows, retiredCodes] = await Promise.all([
     centerCodes.length > 0
@@ -281,10 +394,14 @@ export async function loadReportableUnitsForActor(
     // Only the per-grant branch needs this — `loadAllUnitsDirectory` above
     // already excluded retired units at the source for everyone but a
     // superuser.
-    isGlobal
+    isGlobal || allCandidateCodes.length === 0
       ? Promise.resolve(null)
       : db.suppression.findMany({
-          where: { entityType: { in: [...allowedKinds] }, entityId: { in: allCandidateCodes }, revokedAt: null },
+          where: {
+            entityType: { in: suppressibleKinds },
+            entityId: { in: allCandidateCodes },
+            revokedAt: null,
+          },
           select: { entityId: true },
         }),
   ]);
@@ -318,15 +435,20 @@ export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6;
  * truth `loadReportLiveness` and `app/edit/reports/page.tsx`'s catalog both
  * key off, so a unit never shows a report card it can't produce output for
  * (org-unit publications reports plan, 2026-08-16, "Report catalog by kind").
- * `center` gets the full six; `department`/`division` get only the two
+ * `center` gets the full six; `department`/`division`/`core` get only the two
  * kind-generic ones (3 Publications, 6 NIH-funded pubs) — reports 1/2/4/5 read
- * `CenterProgram`/`CenterMembership`-family tables with no department/division
- * equivalent (see the plan's "Reports 1 & 2 — considered, dropped").
+ * `CenterProgram`/`CenterMembership`-family tables with no department/division/
+ * core equivalent (see the plan's "Reports 1 & 2 — considered, dropped").
+ * `core` follows the department/division precedent exactly (core-reports
+ * widening, 2026-09-06); its reports 3/6 resolve their publication set from
+ * confirmed `publication_core` usages rather than from members, since a core
+ * has no membership table at all.
  */
-export const REPORT_NUMBERS_BY_KIND: Record<UnitEntityType, readonly ReportNumber[]> = {
+export const REPORT_NUMBERS_BY_KIND: Record<ReportableUnitKind, readonly ReportNumber[]> = {
   center: [1, 2, 3, 4, 5, 6],
   department: [3, 6],
   division: [3, 6],
+  core: [3, 6],
 };
 
 /** Size of the full (center) report catalog — six numbered reports. Kept as a
@@ -362,7 +484,7 @@ export type ReportLiveness = {
  *  ever became the real report data. */
 async function loadNonCenterActiveMemberFlags(
   db: ReportsDirectoryClient,
-  units: ReadonlyArray<{ code: string; kind: UnitEntityType }>,
+  units: ReadonlyArray<{ code: string; kind: ReportableUnitKind }>,
 ): Promise<Map<string, boolean>> {
   const result = new Map<string, boolean>();
   const deptCodes = units.filter((u) => u.kind === "department").map((u) => u.code);
@@ -415,35 +537,50 @@ async function loadNonCenterActiveMemberFlags(
  * positive, not false negative. Upgrade path: once any one of those reports
  * gets its own batched cross-unit aggregation (mirroring this function's
  * shape), swap its proxy bit for the real count.
+ *
+ * A `core` is the one kind that does NOT take that proxy: it has no
+ * membership table, so the member proxy would read false for every core.
+ * `loadConfirmedCorePmidsByCore` gives the real, already-batched confirmed-
+ * usage set instead — the exact thing reports 3/6 read for a core — which
+ * makes core liveness exact rather than approximate in both directions.
  */
 export async function loadReportLiveness(
-  units: ReadonlyArray<{ code: string; kind: UnitEntityType }>,
+  units: ReadonlyArray<{ code: string; kind: ReportableUnitKind }>,
   db: ReportsDirectoryClient,
 ): Promise<Map<string, ReportLiveness>> {
   const result = new Map<string, ReportLiveness>();
   if (units.length === 0) return result;
 
   const centerCodes = units.filter((u) => u.kind === "center").map((u) => u.code);
-  const [collabRows, fundingRows, activeCenterMembersByCode, nonCenterHasActiveMembers] = await Promise.all([
-    centerCodes.length > 0
-      ? db.centerCollabCandidate.groupBy({
-          by: ["centerCode"],
-          where: { centerCode: { in: centerCodes } },
-          _count: { _all: true },
-          _max: { lastRefreshedAt: true },
-        })
-      : Promise.resolve([]),
-    centerCodes.length > 0
-      ? db.cancerCenterFundingAward.groupBy({
-          by: ["centerCode"],
-          where: { centerCode: { in: centerCodes } },
-          _count: { _all: true },
-          _max: { lastRefreshedAt: true },
-        })
-      : Promise.resolve([]),
-    centerCodes.length > 0 ? countActiveCenterMembersByCode(db, centerCodes) : Promise.resolve(new Map<string, number>()),
-    loadNonCenterActiveMemberFlags(db, units),
-  ]);
+  const coreIds = units.filter((u) => u.kind === "core").map((u) => u.code);
+  const [collabRows, fundingRows, activeCenterMembersByCode, nonCenterHasActiveMembers, confirmedPmidsByCore] =
+    await Promise.all([
+      centerCodes.length > 0
+        ? db.centerCollabCandidate.groupBy({
+            by: ["centerCode"],
+            where: { centerCode: { in: centerCodes } },
+            _count: { _all: true },
+            _max: { lastRefreshedAt: true },
+          })
+        : Promise.resolve([]),
+      centerCodes.length > 0
+        ? db.cancerCenterFundingAward.groupBy({
+            by: ["centerCode"],
+            where: { centerCode: { in: centerCodes } },
+            _count: { _all: true },
+            _max: { lastRefreshedAt: true },
+          })
+        : Promise.resolve([]),
+      centerCodes.length > 0
+        ? countActiveCenterMembersByCode(db, centerCodes)
+        : Promise.resolve(new Map<string, number>()),
+      loadNonCenterActiveMemberFlags(db, units),
+      // A core's reports 3/6 read confirmed `publication_core` usages, not
+      // members, so its liveness is the EXACT presence of that set rather than
+      // the active-member proxy the other three kinds use — the same two
+      // batched queries the report page runs, over every core at once.
+      loadConfirmedCorePmidsByCore(coreIds, db),
+    ]);
 
   const collabByCode = new Map(collabRows.map((r) => [r.centerCode, r]));
   const fundingByCode = new Map(fundingRows.map((r) => [r.centerCode, r]));
@@ -451,16 +588,25 @@ export async function loadReportLiveness(
   for (const unit of units) {
     const { code, kind } = unit;
     const numbers = REPORT_NUMBERS_BY_KIND[kind];
-    const hasActiveMembers =
-      kind === "center" ? (activeCenterMembersByCode.get(code) ?? 0) > 0 : (nonCenterHasActiveMembers.get(code) ?? false);
+    // A core has no membership at all, so its 3/6 liveness is the exact
+    // presence of a confirmed `publication_core` usage set — NOT the
+    // active-member proxy, which would read false for every core and paint
+    // "0 of 2 live" over a core with hundreds of confirmed usages.
+    const hasPublicationSource =
+      kind === "core"
+        ? (confirmedPmidsByCore.get(code)?.length ?? 0) > 0
+        : kind === "center"
+          ? (activeCenterMembersByCode.get(code) ?? 0) > 0
+          : (nonCenterHasActiveMembers.get(code) ?? false);
     const collab = kind === "center" ? collabByCode.get(code) : undefined;
     const funding = kind === "center" ? fundingByCode.get(code) : undefined;
 
     const perReport: ReportLiveness["perReport"] = numbers.map((n) => {
       if (n === 1) return { n, live: (collab?._count._all ?? 0) > 0, lastRefreshedAt: collab?._max.lastRefreshedAt ?? null };
       if (n === 2) return { n, live: (funding?._count._all ?? 0) > 0, lastRefreshedAt: funding?._max.lastRefreshedAt ?? null };
-      // 3, 4, 5, 6 — all proxied by active-membership existence.
-      return { n, live: hasActiveMembers, lastRefreshedAt: null };
+      // 3, 4, 5, 6 — proxied by active-membership existence (center/dept/div)
+      // or by real confirmed-usage presence (core).
+      return { n, live: hasPublicationSource, lastRefreshedAt: null };
     });
 
     const lastRefreshedAt =

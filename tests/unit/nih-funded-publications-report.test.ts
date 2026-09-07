@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   mockLoadCenterMembers: vi.fn(),
   mockLoadDivisionMembers: vi.fn(),
+  mockLoadConfirmedCorePmids: vi.fn(),
   mockPubFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockLoadProjectSiblingRows: vi.fn(),
@@ -18,6 +19,10 @@ vi.mock("@/lib/api/centers", () => ({
 }));
 vi.mock("@/lib/api/divisions", () => ({
   loadDivisionMemberCwids: hoisted.mockLoadDivisionMembers,
+}));
+// A CORE's publication set — confirmed `publication_core` usages, not members.
+vi.mock("@/lib/api/cores", () => ({
+  loadConfirmedCorePmidsByCore: hoisted.mockLoadConfirmedCorePmids,
 }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -39,6 +44,7 @@ import { loadNihFundedPublicationsReport } from "@/lib/edit/nih-funded-publicati
 beforeEach(() => {
   hoisted.mockLoadCenterMembers.mockReset();
   hoisted.mockLoadDivisionMembers.mockReset();
+  hoisted.mockLoadConfirmedCorePmids.mockReset();
   hoisted.mockPubFindMany.mockReset();
   hoisted.mockScholarFindMany.mockReset();
   hoisted.mockLoadProjectSiblingRows.mockReset();
@@ -244,6 +250,57 @@ describe("loadNihFundedPublicationsReport — per-kind membership resolution", (
     });
     expect(hoisted.mockLoadCenterMembers).not.toHaveBeenCalled();
     expect(hoisted.mockLoadDivisionMembers).not.toHaveBeenCalled();
+  });
+
+  it("core: the publication set is confirmed publication_core usages — a pmid IN-list, NOT a member fan-out", async () => {
+    // Same regression guard as report 3's: a core has no membership table, so
+    // routing it down the member path would empty this report for every core.
+    hoisted.mockLoadConfirmedCorePmids.mockResolvedValue(new Map([["14", ["111", "222"]]]));
+    hoisted.mockPubFindMany.mockResolvedValue([
+      {
+        pmid: "111",
+        title: "Core-enabled, NIH-funded",
+        journal: "Nature",
+        year: 2025,
+        grants: [
+          {
+            grantId: "g1",
+            sourceReporter: true,
+            sourceReciterdb: false,
+            reciterdbFirstSeen: null,
+            grant: {
+              title: "Grant One",
+              awardNumber: "R01 AG000001",
+              externalId: "INFOED-1",
+              role: "PI",
+              cwid: "abc1234",
+            },
+          },
+        ],
+      },
+    ]);
+
+    const report = await loadNihFundedPublicationsReport("core", "14");
+
+    expect(report.totalPublications).toBe(1);
+    expect(report.rows.map((r) => r.pmid)).toEqual(["111"]);
+    expect(hoisted.mockLoadConfirmedCorePmids).toHaveBeenCalledWith(["14"], expect.anything());
+    expect(hoisted.mockPubFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { pmid: { in: ["111", "222"] }, grants: { some: {} } },
+      }),
+    );
+    expect(hoisted.mockLoadCenterMembers).not.toHaveBeenCalled();
+    expect(hoisted.mockLoadDivisionMembers).not.toHaveBeenCalled();
+  });
+
+  it("core: zero confirmed usages returns the clean empty report without querying publications", async () => {
+    hoisted.mockLoadConfirmedCorePmids.mockResolvedValue(new Map([["7", []]]));
+
+    const report = await loadNihFundedPublicationsReport("core", "7");
+
+    expect(report).toEqual({ totalPublications: 0, rows: [] });
+    expect(hoisted.mockPubFindMany).not.toHaveBeenCalled();
   });
 });
 

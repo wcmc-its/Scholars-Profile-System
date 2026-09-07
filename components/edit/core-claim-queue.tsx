@@ -986,29 +986,19 @@ export function CoreClaimQueue({
           >
             <Plus className="size-4" aria-hidden /> Add PMIDs
           </button>
-          {/* The mockup's third button. There IS no core reporting route in this
-              repo, so it ships DISABLED with the reason on it rather than as a
-              live control that no-ops — an enabled button that does nothing is
-              the failure this codebase keeps getting burned by. */}
-          {/* aria-disabled, NOT the native `disabled` attribute. `disabled` removes the
-              button from the tab order, which would make the explanation below
-              mouse-hover-only — the keyboard and screen-reader users most likely to
-              wonder why it does nothing are exactly the ones who could never reach it.
-              Focusable + aria-disabled keeps it announced and readable; the click is a
-              no-op and the reason is in the accessible name, not just a title. */}
-          <button
-            type="button"
-            aria-disabled="true"
-            aria-describedby="core-queue-reporting-why"
-            onClick={(e) => e.preventDefault()}
-            title="Reporting view is not built yet"
-            className="border-border-strong text-muted-foreground inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-full border bg-background px-3 text-sm opacity-50"
+          {/* The mockup's third button. It shipped DISABLED while no core
+              reporting route existed; the core-reports widening (2026-09-06)
+              gave cores reports 3 and 6, so it is now a real link to this
+              core's Publications report. Same authz on the other side — a
+              core's owner/curator (or a superuser/comms_steward) passes, and
+              nobody else does — so this never leads a reviewer to a 403 they
+              could reach the review queue from. */}
+          <a
+            href={`/edit/reports/3?center=${encodeURIComponent(core.id)}&kind=core`}
+            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
           >
             <FileText className="size-4" aria-hidden /> Reporting...
-          </button>
-          <span id="core-queue-reporting-why" className="sr-only">
-            Reporting view is not built yet
-          </span>
+          </a>
         </div>
       </div>
 

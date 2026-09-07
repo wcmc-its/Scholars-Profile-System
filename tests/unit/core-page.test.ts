@@ -3,8 +3,13 @@
  * selectCorePublications). The DB load is thin; this exercises the
  * effective-confirmed CoreClaim merge and the year-desc, pmid-desc ordering.
  */
-import { describe, expect, it } from "vitest";
-import { getCoreList, getCorePage, selectCorePublications } from "@/lib/api/cores";
+import { describe, expect, it, vi } from "vitest";
+import {
+  getCoreList,
+  getCorePage,
+  loadConfirmedCorePmidsByCore,
+  selectCorePublications,
+} from "@/lib/api/cores";
 
 type Row = Parameters<typeof selectCorePublications>[0][number];
 
@@ -135,5 +140,90 @@ describe("getCorePage — manual PMID add", () => {
   it("does not surface a manually-rejected pmid with no engine row (nothing to reject)", async () => {
     const page = await getCorePage("2", reader([{ pmid: "99999999", status: "rejected" }], []));
     expect(page?.publications).toEqual([]);
+  });
+});
+
+describe("loadConfirmedCorePmidsByCore", () => {
+  // Backs `/edit/reports/{3,6}` for a `core` unit (core-reports widening) and
+  // that suite's liveness. Same CoreClaim-over-engine-status merge
+  // `getCorePage`/`getCoreList` apply, batched across cores.
+  const reader = (
+    rows: Array<{ coreId: string; pmid: string; status: string }>,
+    claims: Array<{ coreId: string; pmid: string; status: "claimed" | "rejected" }> = [],
+  ) =>
+    ({
+      publicationCore: { findMany: async () => rows },
+      coreClaim: { findMany: async () => claims },
+    }) as unknown as Parameters<typeof loadConfirmedCorePmidsByCore>[1];
+
+  it("keeps engine-confirmed, drops open candidate / below_threshold, per core", async () => {
+    const out = await loadConfirmedCorePmidsByCore(
+      ["14", "9"],
+      reader([
+        { coreId: "14", pmid: "111", status: "confirmed" },
+        { coreId: "14", pmid: "222", status: "candidate" },
+        { coreId: "14", pmid: "333", status: "below_threshold" },
+        { coreId: "9", pmid: "444", status: "confirmed" },
+      ]),
+    );
+    expect(out.get("14")).toEqual(["111"]);
+    expect(out.get("9")).toEqual(["444"]);
+  });
+
+  it("an active 'claimed' promotes any engine status; an active 'rejected' removes an engine-confirmed pair", async () => {
+    const out = await loadConfirmedCorePmidsByCore(
+      ["14"],
+      reader(
+        [
+          { coreId: "14", pmid: "111", status: "confirmed" },
+          { coreId: "14", pmid: "222", status: "candidate" },
+          { coreId: "14", pmid: "333", status: "below_threshold" },
+        ],
+        [
+          { coreId: "14", pmid: "111", status: "rejected" },
+          { coreId: "14", pmid: "222", status: "claimed" },
+          { coreId: "14", pmid: "333", status: "claimed" },
+        ],
+      ),
+    );
+    expect([...(out.get("14") ?? [])].sort()).toEqual(["222", "333"]);
+  });
+
+  it("includes a manual PMID add — a claimed pair with no publication_core row at all", async () => {
+    const out = await loadConfirmedCorePmidsByCore(
+      ["14"],
+      reader([], [{ coreId: "14", pmid: "999", status: "claimed" }]),
+    );
+    expect(out.get("14")).toEqual(["999"]);
+  });
+
+  it("a claim on a core that was not asked about never leaks into another core's set", async () => {
+    const out = await loadConfirmedCorePmidsByCore(
+      ["14"],
+      reader(
+        [{ coreId: "9", pmid: "888", status: "confirmed" }],
+        [{ coreId: "9", pmid: "777", status: "claimed" }],
+      ),
+    );
+    expect(out.get("14")).toEqual([]);
+    expect(out.has("9")).toBe(false);
+  });
+
+  it("every requested core id is a key, with [] for one that has no confirmed usages", async () => {
+    const out = await loadConfirmedCorePmidsByCore(["14", "7"], reader([]));
+    expect(out.get("14")).toEqual([]);
+    expect(out.get("7")).toEqual([]);
+  });
+
+  it("issues no queries for an empty core list", async () => {
+    const publicationCore = { findMany: vi.fn() };
+    const coreClaim = { findMany: vi.fn() };
+    const out = await loadConfirmedCorePmidsByCore(
+      [],
+      { publicationCore, coreClaim } as unknown as Parameters<typeof loadConfirmedCorePmidsByCore>[1],
+    );
+    expect(out.size).toBe(0);
+    expect(publicationCore.findMany).not.toHaveBeenCalled();
+    expect(coreClaim.findMany).not.toHaveBeenCalled();
   });
 });
