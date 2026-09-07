@@ -1127,11 +1127,16 @@ export const getScholarFullProfileBySlug = cache(
                 // that runs deployed, `buildAuthorshipRows` in
                 // etl/reciter/index.ts, skips authors outside `ourCwidSet`
                 // and returns an `AuthorshipRow` whose `cwid` is a
-                // non-nullable `string`. Staging was counted as a check on
-                // that (0 of 285,587, 2026-09); other environments were not
-                // counted. `seed/publications.ts` is the one writer of
-                // non-WCM rows. This keeps such rows from being hauled over
-                // the wire per publication just to be dropped.
+                // non-nullable `string`, and the FK that could mint one with
+                // no writer involved (`PublicationAuthor.scholar` is
+                // `onDelete: SetNull`) never fires, because no deployed path
+                // hard-deletes a `Scholar` — only `seed/index.ts` does, and
+                // departures soft-delete via `deletedAt`. Staging was counted
+                // as a check on that (0 of 285,587, 2026-09); other
+                // environments were not counted. `seed/publications.ts` is
+                // the one writer of non-WCM rows. This keeps such rows from
+                // being hauled over the wire per publication just to be
+                // dropped.
                 where: { cwid: { not: null } },
                 orderBy: { position: "asc" },
                 include: {

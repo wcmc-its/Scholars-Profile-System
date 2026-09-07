@@ -494,12 +494,16 @@ export const PUBLICATION_INDEX_INCLUDE = {
     // an ETL change. Against deployed data it filters nothing, structurally:
     // the only writer that runs deployed, `buildAuthorshipRows` in
     // etl/reciter/index.ts, skips authors outside `ourCwidSet` and returns an
-    // `AuthorshipRow` whose `cwid` is a non-nullable `string`, so no deployed
-    // environment holds a null-cwid row. Staging was counted as a check on
-    // that (0 of 285,587, 2026-09); other environments were not counted. But
-    // `seed/publications.ts` writes non-WCM rows, so an index built from a
-    // seeded dev database does lose those names. `buildPublicationDoc` itself
-    // does not filter — a caller passing its own rows keeps the full byline.
+    // `AuthorshipRow` whose `cwid` is a non-nullable `string`, and the FK that
+    // could mint one with no writer involved (`PublicationAuthor.scholar` is
+    // `onDelete: SetNull`) never fires, because no deployed path hard-deletes
+    // a `Scholar` — only `seed/index.ts` does, and departures soft-delete via
+    // `deletedAt`. So no deployed environment holds a null-cwid row. Staging
+    // was counted as a check on that (0 of 285,587, 2026-09); other
+    // environments were not counted. But `seed/publications.ts` writes non-WCM
+    // rows, so an index built from a seeded dev database does lose those names.
+    // `buildPublicationDoc` itself does not filter — a caller passing its own
+    // rows keeps the full byline.
     where: { cwid: { not: null } },
     orderBy: { position: "asc" },
     include: {
