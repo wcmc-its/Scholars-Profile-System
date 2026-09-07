@@ -84,7 +84,10 @@ function findByType(node: unknown, type: unknown): El | null {
 }
 
 const QUEUE = {
-  core: { id: "2", name: "Biomedical Imaging" },
+  // Both staff counts travel on `core` (etl/dynamodb Block 6b ->
+  // loadCoreReviewQueue); null is the common case — the engine has published
+  // no counts for this core.
+  core: { id: "2", name: "Biomedical Imaging", staffCount: null, staffTrackedCount: null },
   candidates: [],
   confirmed: [],
   rejected: [],

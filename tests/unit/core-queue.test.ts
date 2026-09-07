@@ -249,6 +249,39 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(r?.wcmAuthors.filter((w) => w.cwid === "dup001")).toHaveLength(1); // deduped
   });
 
+  it("carries BOTH core staff counts through to the queue, and 0 through as 0", async () => {
+    // The review-queue toolbar reads both to pick between no chip (null), the
+    // two "signal cannot fire" lines (listed 0, or tracked 0), and the
+    // mockup's "M of N" sentence, so 0 must not arrive as null or vice versa —
+    // and the tracked count must not be collapsed into the listed one, which
+    // is the whole reason two columns exist.
+    const withStaff = (staffCount: number | null, staffTrackedCount: number | null) =>
+      ({
+        ...reader([rawRow()]),
+        core: {
+          findUnique: async () => ({ id: "2", name: "Imaging", staffCount, staffTrackedCount }),
+        },
+      }) as unknown as Parameters<typeof loadCoreReviewQueue>[1];
+
+    // core 14's live shape: lists four, the signal matches one.
+    const live = await loadCoreReviewQueue("2", withStaff(4, 1));
+    expect(live?.core.staffCount).toBe(4);
+    expect(live?.core.staffTrackedCount).toBe(1);
+
+    // listed staff, none matchable (cores 8, 10 and 13 on the live dictionary)
+    const untracked = await loadCoreReviewQueue("2", withStaff(3, 0));
+    expect(untracked?.core.staffCount).toBe(3);
+    expect(untracked?.core.staffTrackedCount).toBe(0);
+
+    const none = await loadCoreReviewQueue("2", withStaff(0, 0));
+    expect(none?.core.staffCount).toBe(0);
+    expect(none?.core.staffTrackedCount).toBe(0);
+
+    const unpublished = await loadCoreReviewQueue("2", withStaff(null, null));
+    expect(unpublished?.core.staffCount).toBeNull();
+    expect(unpublished?.core.staffTrackedCount).toBeNull();
+  });
+
   it("keeps a null authorAffinity null (Number(null) would be 0)", async () => {
     const queue = await loadCoreReviewQueue(
       "2",

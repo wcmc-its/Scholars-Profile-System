@@ -74,7 +74,16 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
   };
 }
 
-const CORE = { id: "2", name: "Biomedical Imaging" };
+/** Both staff counts null is the DEFAULT fixture state on purpose — the engine
+ *  has published none for most cores, and every test that is not about the chip
+ *  should be rendering the queue exactly as it looked before the chip existed.
+ *  The chip tests override them. */
+const CORE = {
+  id: "2",
+  name: "Biomedical Imaging",
+  staffCount: null as number | null,
+  staffTrackedCount: null as number | null,
+};
 
 /** Expand the only open card's evidence strip — signal rows start collapsed. */
 function showEvidence() {
@@ -1900,6 +1909,190 @@ describe("compareBySort", () => {
   });
 });
 
+// The toolbar's core-staff lock chip. `core.staffCount` is how many core staff
+// ReciterAI's facility dictionary LISTS; `core.staffTrackedCount` is how many
+// of those the co-author signal can actually MATCH, landed on
+// `core.staff_count` / `core.staff_tracked_count` by etl/dynamodb Block 6b.
+//
+// The four states are NOT interchangeable, and the reason the tracked count
+// exists at all is that the chip must never claim the signal draws on staff it
+// cannot match: on the live dictionary the two counts differ on 9 of 14 cores,
+// core 14 (the one in the owner's mockup) lists 4 and tracks 1, and cores 8, 10
+// and 13 list staff while tracking none.
+describe("CoreClaimQueue — core-staff lock chip", () => {
+  const chip = () => document.querySelector('[data-slot="core-staff-chip"]');
+  const chipText = () => (chip()?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+  it("renders the mockup's sentence as 'M of N', and EMPHASISES that fraction", () => {
+    // Core 14's live shape. The pre-revision chip said "draws on 4 core staff"
+    // here, which was false: the signal can match exactly one of the four.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: 1 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chipText()).toBe(
+      "Co-author signal draws on 1 of 4 core staff from the facility dictionary",
+    );
+    // the mockup bolds the number; the number here is the fraction, not the
+    // listed count alone — bolding "4" would re-tell the lie in bold.
+    const bolded = chip()?.querySelector(".font-semibold");
+    expect((bolded?.textContent ?? "").replace(/\s+/g, " ").trim()).toBe("1 of 4");
+  });
+
+  it("still says 'M of N' when every listed staff member is tracked", () => {
+    // Core 1 on the live dictionary: 4 listed, 4 tracked. The fraction stays —
+    // a bare "4" would make the reader guess which of the two numbers it is.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: 4 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chipText()).toBe(
+      "Co-author signal draws on 4 of 4 core staff from the facility dictionary",
+    );
+  });
+
+  it("renders NOTHING when the counts are null — not-yet-published must look like nothing", () => {
+    // CORE's own counts are null: this is the pre-chip rendering, unchanged.
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(chip()).toBeNull();
+    expect(screen.queryByText(/core staff/)).toBeNull();
+    expect(screen.queryByText(/facility dictionary/)).toBeNull();
+  });
+
+  it("renders NOTHING for a half-known row (listed known, tracked null)", () => {
+    // The ETL writes the pair together or not at all, so this row should not
+    // exist — and if one ever does, silence beats guessing: the chip can
+    // neither claim the signal draws on 4 nor claim it cannot fire.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: null }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chip()).toBeNull();
+    expect(screen.queryByText(/draws on/)).toBeNull();
+  });
+
+  it("says the signal cannot fire when the dictionary LISTS none — never 'draws on 0'", () => {
+    // Cores 4, 6 and 7 on the live dictionary. The most useful thing a reviewer
+    // can learn here: every candidate they see is carried by the other four
+    // signals.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 0, staffTrackedCount: 0 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chipText()).toBe(
+      "The facility dictionary lists no core staff, so the co-author signal cannot fire for this core.",
+    );
+    expect(chipText()).not.toContain("draws on");
+  });
+
+  it("says the signal cannot fire when staff are LISTED but none are tracked", () => {
+    // Cores 8 (3 listed), 10 (2) and 13 (1). This is the state the single-count
+    // chip got most wrong — it would have claimed "draws on 3 core staff" for a
+    // core where the co-author signal cannot contribute anything at all.
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 3, staffTrackedCount: 0 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    expect(chipText()).toBe(
+      "The facility dictionary lists 3 core staff, but none are resolvable, so the co-author signal cannot fire for this core.",
+    );
+    expect(chipText()).not.toContain("draws on");
+  });
+
+  it("never renders a bare listed count as the number the signal draws on", () => {
+    // The single property this whole revision exists for, swept over the 8
+    // DISTINCT listed/tracked pairs that the 9 diverging live cores produce.
+    // 8, not 9, because core 11's 3/2 repeats core 3's, and the chip is a pure
+    // function of the pair — a ninth row would re-run an identical case, not
+    // cover another one. The other 5 cores agree: core 1 at 4/4, core 12 at
+    // 1/1, and cores 4, 6 and 7 at 0/0. The named cases above pin 4/4 and 0/0,
+    // and 1/1 takes the same branch as 4/4.
+    for (const [staffCount, staffTrackedCount] of [
+      [7, 4], // core 2
+      [3, 2], // cores 3 and 11
+      [5, 2], // core 5
+      [3, 0], // core 8
+      [2, 1], // core 9
+      [2, 0], // core 10
+      [1, 0], // core 13
+      [4, 1], // core 14 — the owner's mockup
+    ]) {
+      const view = render(
+        <CoreClaimQueue
+          core={{ ...CORE, staffCount, staffTrackedCount }}
+          candidates={[row()]}
+          confirmed={[]}
+        />,
+      );
+      expect(chipText()).not.toContain(`draws on ${staffCount} core staff`);
+      if (staffTrackedCount > 0) {
+        expect(chipText()).toContain(`draws on ${staffTrackedCount} of ${staffCount} core staff`);
+      } else {
+        expect(chipText()).toContain("cannot fire");
+      }
+      view.unmount();
+    }
+  });
+
+  it("keeps the chip and the button group in the same toolbar row, chip first", () => {
+    render(
+      <CoreClaimQueue
+        core={{ ...CORE, staffCount: 4, staffTrackedCount: 1 }}
+        candidates={[row()]}
+        confirmed={[]}
+      />,
+    );
+    const toolbar = document.querySelector('[data-slot="core-queue-toolbar"]');
+    const knownClients = screen.getByRole("button", { name: /Known clients/ });
+    expect(toolbar?.contains(chip()!)).toBe(true);
+    expect(toolbar?.contains(knownClients)).toBe(true);
+    expect(
+      chip()!.compareDocumentPosition(knownClients) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // wraps rather than overflowing on a narrow viewport
+    expect(toolbar?.className).toContain("flex-wrap");
+  });
+
+  it("offers NO 'Manage staff' control, in any state — there is no destination", () => {
+    // The mockup draws one. The roster lives in the facility dictionary, not in
+    // SPS, and this toolbar already carries one knowingly-inert control
+    // ("Reporting..."); a second would make dead controls the pattern.
+    for (const [staffCount, staffTrackedCount] of [
+      [null, null],
+      [0, 0],
+      [3, 0],
+      [4, 1],
+    ] as Array<[number | null, number | null]>) {
+      const view = render(
+        <CoreClaimQueue
+          core={{ ...CORE, staffCount, staffTrackedCount }}
+          candidates={[row()]}
+          confirmed={[]}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: /Manage staff/i })).toBeNull();
+      expect(screen.queryByRole("link", { name: /Manage staff/i })).toBeNull();
+      expect(screen.queryByText(/Manage staff/i)).toBeNull();
+      view.unmount();
+    }
+  });
+});
+
 // "Known clients" panel (ReciterAI #383 / SPS #2607) — the panel's own
 // behavior is covered by tests/unit/core-clients-panel.test.tsx; this just
 // confirms CoreClaimQueue wires the toolbar button in with the right count.
@@ -1950,6 +2143,29 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     // the reason is in the accessibility tree, not only in a hover tooltip
     const why = document.getElementById(reporting.getAttribute("aria-describedby") ?? "");
     expect(why?.textContent).toBe("Reporting view is not built yet");
+    // and NOT a link: /edit/reports 404s for a scoped Owner/Curator whose only
+    // unit is a core, which is exactly who reads this page. `feat/core-reports-
+    // access` makes cores reportable and deep-links this control; until then a
+    // link here is worse than a button that says it is not built.
+    expect(screen.queryByRole("link", { name: /Reporting/ })).toBeNull();
+  });
+
+  it("draws the three buttons as text-only rounded rectangles — no icons, no pills", () => {
+    // The mockup's toolbar is plain rectangles with labels; the shipped pills
+    // carried a lucide glyph each (Users / Plus / FileText). Only the SHAPE
+    // changed on "Reporting..." — its inert treatment is asserted above, and the
+    // three still have to MATCH on height, border and text size or the group
+    // stops reading as one.
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    for (const name of [/Known clients/, /Add PMIDs/, /Reporting/]) {
+      const button = screen.getByRole("button", { name });
+      expect(button.querySelector("svg")).toBeNull();
+      expect(button.className).toContain("rounded-md");
+      expect(button.className).not.toContain("rounded-full");
+      expect(button.className).toContain("h-8");
+      expect(button.className).toContain("text-sm");
+      expect(button.className).toContain("border");
+    }
   });
 
   it("keeps the CSV column contract under test while the export button is off the toolbar", () => {
@@ -2010,15 +2226,14 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(textarea).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
 
-    // The OUTER toolbar row is the justify-end container holding the three
-    // header buttons — not just the inner "flex flex-wrap items-center gap-2"
-    // button group. `toggle.closest("div")` alone would only find that inner
-    // group and miss a regression that nests the panel inside the outer row.
-    // (It was justify-BETWEEN while the view tabs shared this row; the tabs are
-    // in the queue panel now, so the buttons sit alone against the right edge.)
+    // The OUTER toolbar row is the justify-between container holding the staff
+    // chip and the three header buttons — not just the inner "flex flex-wrap
+    // items-center gap-2" button group. `toggle.closest("div")` alone would
+    // only find that inner group and miss a regression that nests the panel
+    // inside the outer row.
     const outerRow = toggle.closest('[data-slot="core-queue-toolbar"]');
     expect(outerRow).toBeTruthy();
-    expect(outerRow?.className).toContain("justify-end");
+    expect(outerRow?.className).toContain("justify-between");
     expect(outerRow?.contains(textarea)).toBe(false);
 
     // And the panel body is a later sibling in the same parent as the
