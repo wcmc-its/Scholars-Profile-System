@@ -10,8 +10,14 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  CORES_SOURCE,
+  DRIFT_SOURCES,
+  GRANTS_SOURCE,
   PRODUCER_STAGES,
+  buildDriftRunWrites,
   buildProducerRunWrites,
+  buildRecencyWrite,
+  latestCoreScoredAt,
   mapLedgerStatus,
 } from "../../etl/dynamodb/producer-run-mapper";
 import { TRACKED } from "../../lib/etl/freshness-policy";
@@ -277,13 +283,190 @@ describe("buildProducerRunWrites", () => {
   });
 });
 
+describe("buildDriftRunWrites", () => {
+  it("treats the row's existence as the liveness signal and anchors on window_end", () => {
+    const [w] = buildDriftRunWrites(
+      [
+        {
+          PK: "DRIFT#evaluation",
+          SK: "DAY#2026-09-07",
+          severity: "WARN",
+          window_start: "2026-08-24T14:00:50Z",
+          window_end: "2026-09-07T14:00:50Z",
+        },
+      ],
+      NONE,
+    );
+
+    expect(w.source).toBe("ReciterAI-drift");
+    expect(w.status).toBe("success");
+    expect(w.startedAt.toISOString()).toBe("2026-09-07T14:00:50.000Z");
+  });
+
+  it("does NOT grade severity — WARN is about the data, not the run", () => {
+    // DRIFT#evaluation has read WARN on all 106 rows it has ever written. If
+    // severity drove status this row would be permanently red for a Lambda that
+    // has never failed to run.
+    const writes = buildDriftRunWrites(
+      [
+        {
+          PK: "DRIFT#evaluation",
+          SK: "DAY#2026-09-07",
+          severity: "WARN",
+          window_end: "2026-09-07T14:00:50Z",
+        },
+        {
+          PK: "DRIFT#taxonomy",
+          SK: "DAY#2026-09-07",
+          severity: "OK",
+          window_end: "2026-09-07T15:00:12Z",
+        },
+      ],
+      NONE,
+    );
+
+    expect(writes.map((w) => w.status)).toEqual(["success", "success"]);
+    expect(writes.map((w) => w.source)).toEqual(["ReciterAI-drift", "ReciterAI-taxonomy-drift"]);
+  });
+
+  it("never anchors on window_start — that is the drift window, not the run", () => {
+    // window_start is 14 days back; using it would report a 14-day-old run every
+    // day and read as permanently late.
+    const [w] = buildDriftRunWrites(
+      [
+        {
+          PK: "DRIFT#taxonomy",
+          SK: "DAY#2026-09-07",
+          window_start: "2026-08-24T14:00:50Z",
+          window_end: "2026-09-07T14:00:50Z",
+        },
+      ],
+      NONE,
+    );
+
+    expect(w.startedAt.toISOString()).not.toBe("2026-08-24T14:00:50.000Z");
+    expect(w.startedAt.toISOString()).toBe("2026-09-07T14:00:50.000Z");
+  });
+
+  it("falls back to the DAY# key when window_end is missing, and skips junk", () => {
+    const writes = buildDriftRunWrites(
+      [
+        { PK: "DRIFT#taxonomy", SK: "DAY#2026-09-07" },
+        { PK: "DRIFT#taxonomy", SK: "DAY#not-a-date" },
+        { PK: "DRIFT#unknown-kind", SK: "DAY#2026-09-07" },
+        { PK: "STAGE#hot_run#GLOBAL", SK: "RUN#2026-09-07T12:00:34Z" },
+      ],
+      NONE,
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].startedAt.toISOString()).toBe("2026-09-07T00:00:00.000Z");
+  });
+
+  it("writes only evaluations newer than what is already recorded", () => {
+    const rows = [
+      { PK: "DRIFT#evaluation", SK: "DAY#2026-09-06", window_end: "2026-09-06T14:00:50Z" },
+      { PK: "DRIFT#evaluation", SK: "DAY#2026-09-07", window_end: "2026-09-07T14:00:50Z" },
+    ];
+    expect(buildDriftRunWrites(rows, NONE)).toHaveLength(2);
+
+    const since = new Map([["ReciterAI-drift", new Date("2026-09-06T14:00:50Z")]]);
+    expect(buildDriftRunWrites(rows, since)).toHaveLength(1);
+
+    const caughtUp = new Map([["ReciterAI-drift", new Date("2026-09-07T14:00:50Z")]]);
+    expect(buildDriftRunWrites(rows, caughtUp)).toEqual([]);
+  });
+});
+
+describe("latestCoreScoredAt / buildRecencyWrite (the output-age tier)", () => {
+  it("takes the newest scored_at, not the last one in the array", () => {
+    const at = latestCoreScoredAt([
+      { PK: "PUB#1", SK: "CORE#14", scored_at: "2026-09-07T15:57:36Z" },
+      { PK: "PUB#2", SK: "CORE#14", scored_at: "2026-06-22T10:00:00Z" },
+      { PK: "PUB#3", SK: "CORE#14", scored_at: "2026-09-03T08:00:00Z" },
+    ]);
+
+    expect(at?.toISOString()).toBe("2026-09-07T15:57:36.000Z");
+  });
+
+  it("ignores rows with a missing or unparseable scored_at", () => {
+    expect(latestCoreScoredAt([{ PK: "PUB#1", SK: "CORE#14" }])).toBeNull();
+    expect(
+      latestCoreScoredAt([{ PK: "PUB#1", SK: "CORE#14", scored_at: "not-a-date" }]),
+    ).toBeNull();
+    expect(latestCoreScoredAt([])).toBeNull();
+  });
+
+  it("writes one row, and none at all when there is no anchor", () => {
+    expect(buildRecencyWrite(CORES_SOURCE, null, NONE)).toEqual([]);
+
+    const [w] = buildRecencyWrite(CORES_SOURCE, new Date("2026-09-07T15:57:36Z"), NONE);
+    expect(w.source).toBe(CORES_SOURCE);
+    expect(w.status).toBe("success");
+    expect(w.startedAt.toISOString()).toBe("2026-09-07T15:57:36.000Z");
+  });
+
+  it("adds NO row when the anchor has not moved — a quiet producer just ages", () => {
+    // This is what keeps it idempotent across nightlies. Writing a fresh row
+    // every night with an unchanged anchor would make a frozen producer look
+    // like it reported in daily, which is the exact failure being fixed.
+    const at = new Date("2026-09-07T05:00:00Z");
+    const caughtUp = new Map([[CORES_SOURCE, at]]);
+    expect(buildRecencyWrite(CORES_SOURCE, at, caughtUp)).toEqual([]);
+
+    const stale = new Map([[CORES_SOURCE, new Date("2026-09-08T05:00:00Z")]]);
+    expect(buildRecencyWrite(CORES_SOURCE, at, stale)).toEqual([]);
+
+    const behind = new Map([[CORES_SOURCE, new Date("2026-09-06T05:00:00Z")]]);
+    expect(buildRecencyWrite(CORES_SOURCE, at, behind)).toHaveLength(1);
+  });
+
+  it("keeps the two output-age sources independent of each other", () => {
+    const since = new Map([[CORES_SOURCE, new Date("2026-09-07T05:00:00Z")]]);
+    // Grants has no entry in `since`, so its first row still lands even though
+    // cores is caught up.
+    expect(buildRecencyWrite(GRANTS_SOURCE, new Date("2026-09-07T05:58:15Z"), since)).toHaveLength(
+      1,
+    );
+  });
+});
+
 describe("producer stage wiring", () => {
   it("every mirrored source is TRACKED — otherwise the board never asks for it", () => {
     // Mirroring runs into a source the status page does not read is the
     // "declared but never connected" failure: it looks exactly like working.
-    for (const source of Object.values(PRODUCER_STAGES)) {
+    for (const source of [
+      ...Object.values(PRODUCER_STAGES),
+      ...Object.values(DRIFT_SOURCES),
+      CORES_SOURCE,
+      GRANTS_SOURCE,
+    ]) {
       expect(TRACKED, `${source} is mirrored but not TRACKED`).toHaveProperty(source);
     }
+  });
+
+  it("covers all eight scheduled ReciterAI jobs", () => {
+    // The count is the point of the last three PRs. If a source is dropped here
+    // the board silently stops asking about one of the eight, which is exactly
+    // the invisible state this work exists to end.
+    const covered = new Set([
+      ...Object.values(PRODUCER_STAGES),
+      ...Object.values(DRIFT_SOURCES),
+      CORES_SOURCE,
+      GRANTS_SOURCE,
+    ]);
+    expect(covered).toEqual(
+      new Set([
+        "ReciterAI-enrichment", // reciterai-enrichment-daily
+        "ReciterAI-hot-path", // reciterai-hot-weekly
+        "ReciterAI-spotlight-gate", // reciterai-spotlight-monthly
+        "ReciterAI-onboarding-detector", // reciterai-onboarding-detector-daily
+        "ReciterAI-drift", // reciterai-drift-daily
+        "ReciterAI-taxonomy-drift", // reciterai-taxonomy-drift-daily
+        "ReciterAI-cores", // reciterai-cores-daily
+        "ReciterAI-grants", // reciterai-grants-daily
+      ]),
+    );
   });
 
   it("maps each stage to a distinct source", () => {

@@ -57,6 +57,7 @@
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db, disconnect } from "../../lib/db";
 import { clearTopicRebuildWindow } from "../../lib/etl-state";
@@ -76,7 +77,17 @@ import {
 } from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
 import { partitionRecords } from "./partition";
-import { PRODUCER_STAGES, buildProducerRunWrites } from "./producer-run-mapper";
+import {
+  CORES_SOURCE,
+  DRIFT_SOURCES,
+  GRANTS_SOURCE,
+  PRODUCER_STAGES,
+  buildDriftRunWrites,
+  buildProducerRunWrites,
+  buildRecencyWrite,
+  latestCoreScoredAt,
+} from "./producer-run-mapper";
+import { parseManifestGeneratedAt } from "../freshness/anchor";
 import { fetchExcludedTopicIds } from "./excluded-topics";
 import { planTopicPrune } from "./topic-prune";
 
@@ -96,6 +107,9 @@ function warnHeldCores(held: readonly { pmid: string; coreId: string }[]): void 
 }
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
+/** Shared ReciterAI artifacts bucket — same one etl/tools and etl/spotlight read. */
+const ARTIFACTS_BUCKET = process.env.ARTIFACTS_BUCKET ?? "wcmc-reciterai-artifacts";
+const GRANTS_MANIFEST_KEY = "grants/latest/manifest.json";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
 
 async function main() {
@@ -150,7 +164,8 @@ async function main() {
         `faculty=${buckets.faculty.length}, impact=${buckets.impact.length}, ` +
         `tools=${buckets.tools.length}, cores=${buckets.cores.length}, ` +
         `coreStaff=${buckets.coreStaff.length}, ` +
-        `producerRuns=${buckets.producerRuns.length}.`,
+        `producerRuns=${buckets.producerRuns.length}, ` +
+        `driftDays=${buckets.driftDays.length}.`,
     );
 
     // ===================================================================
@@ -1021,14 +1036,55 @@ async function main() {
     // failing mirror would otherwise be exactly the silent gap it exists to
     // detect.
     try {
-      const producerSources = [...new Set(Object.values(PRODUCER_STAGES))];
+      const producerSources = [
+        ...new Set([
+          ...Object.values(PRODUCER_STAGES),
+          ...Object.values(DRIFT_SOURCES),
+          CORES_SOURCE,
+          GRANTS_SOURCE,
+        ]),
+      ];
       const seen = await db.write.etlRun.groupBy({
         by: ["source"],
         where: { source: { in: producerSources } },
         _max: { startedAt: true },
       });
       const since = new Map(seen.map((r) => [r.source, r._max.startedAt]));
-      const producerWrites = buildProducerRunWrites(buckets.producerRuns, since);
+      // Tier C — cores keeps no run record at all, so its signal is the age of
+      // its own output. Free: buckets.cores is already in hand.
+      const coresAt = latestCoreScoredAt(buckets.cores);
+
+      // Tier B — grants keeps no run record either, but it publishes a manifest.
+      // Fail-soft on its own: a manifest we cannot read must not cost us the
+      // five signals above, and the next nightly retries. parseManifestGenerated
+      // At returns null (so: no row) on an absent, malformed or FUTURE stamp.
+      let grantsAt: Date | null = null;
+      try {
+        const body = await new S3Client({ region: REGION }).send(
+          new GetObjectCommand({ Bucket: ARTIFACTS_BUCKET, Key: GRANTS_MANIFEST_KEY }),
+        );
+        const manifest = JSON.parse(await body.Body!.transformToString()) as {
+          generated_at?: string;
+        };
+        grantsAt = parseManifestGeneratedAt(manifest.generated_at, Date.now());
+        if (grantsAt === null) {
+          console.warn(
+            `ReciterAI grants manifest carries no usable generated_at (${String(manifest.generated_at)}) -- no liveness row written`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `ReciterAI grants manifest unreadable (no liveness row this run): ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+
+      const producerWrites = [
+        ...buildProducerRunWrites(buckets.producerRuns, since),
+        ...buildDriftRunWrites(buckets.driftDays, since),
+        ...buildRecencyWrite(CORES_SOURCE, coresAt, since),
+        ...buildRecencyWrite(GRANTS_SOURCE, grantsAt, since),
+      ];
       if (producerWrites.length > 0) {
         await db.write.etlRun.createMany({ data: producerWrites });
       }

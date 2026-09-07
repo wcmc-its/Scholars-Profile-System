@@ -29,6 +29,7 @@ const emptyBucketSizes = () => ({
   cores: 0,
   coreStaff: 0,
   producerRuns: 0,
+  driftDays: 0,
 });
 
 const sizes = (b: ReturnType<typeof partitionRecords>) => ({
@@ -40,6 +41,7 @@ const sizes = (b: ReturnType<typeof partitionRecords>) => ({
   cores: b.cores.length,
   coreStaff: b.coreStaff.length,
   producerRuns: b.producerRuns.length,
+  driftDays: b.driftDays.length,
 });
 
 describe("partitionRecords (#1514 single-scan partition)", () => {
@@ -52,8 +54,19 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     const core = { PK: "PUB#30418319", SK: "CORE#2", core_id: "2" };
     const coreStaff = { PK: "CORE#2", SK: "STAFF_DICT", staff_count: 7, staff_tracked_count: 4 };
     const producerRun = { PK: "STAGE#daily_enrichment#GLOBAL", SK: "RUN#2026-09-07T11:01:13Z" };
+    const driftDay = { PK: "DRIFT#taxonomy", SK: "DAY#2026-09-07" };
 
-    const b = partitionRecords([tax, topic, faculty, impact, tool, core, coreStaff, producerRun]);
+    const b = partitionRecords([
+      tax,
+      topic,
+      faculty,
+      impact,
+      tool,
+      core,
+      coreStaff,
+      producerRun,
+      driftDay,
+    ]);
 
     expect(sizes(b)).toEqual({
       tax: 1,
@@ -64,6 +77,7 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
       cores: 1,
       coreStaff: 1,
       producerRuns: 1,
+      driftDays: 1,
     });
     expect(b.tax[0]).toBe(tax);
     expect(b.topics[0]).toBe(topic);
@@ -73,6 +87,7 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     expect(b.cores[0]).toBe(core);
     expect(b.coreStaff[0]).toBe(coreStaff);
     expect(b.producerRuns[0]).toBe(producerRun);
+    expect(b.driftDays[0]).toBe(driftDay);
   });
 
   it("routes a CORE#…/STAFF_DICT item into coreStaff — the key shape is the MIRROR of a core row's", () => {
@@ -166,6 +181,16 @@ describe("partitionRecords (#1514 single-scan partition)", () => {
     const b = partitionRecords([global, scoped, failed]);
 
     expect(sizes(b)).toEqual({ ...emptyBucketSizes(), producerRuns: 3 });
+  });
+
+  it("routes DRIFT# findings rows into their own bucket, not producerRuns", () => {
+    const drift = { PK: "DRIFT#evaluation", SK: "DAY#2026-09-07", severity: "WARN" };
+    const stage = { PK: "STAGE#hot_run#GLOBAL", SK: "RUN#2026-09-07T12:00:34Z" };
+
+    const b = partitionRecords([drift, stage]);
+
+    expect(sizes(b)).toEqual({ ...emptyBucketSizes(), driftDays: 1, producerRuns: 1 });
+    expect(b.driftDays[0]).toBe(drift);
   });
 
   it("returns all-empty buckets for empty input", () => {
