@@ -2124,6 +2124,65 @@ describe("CoreClaimQueue — core-staff lock chip", () => {
 // "Known clients" panel (ReciterAI #383 / SPS #2607) — the panel's own
 // behavior is covered by tests/unit/core-clients-panel.test.tsx; this just
 // confirms CoreClaimQueue wires the toolbar button in with the right count.
+// The method-family surfaces, RENDERED. The pure helpers (evidenceTokens,
+// matchesFilter) are covered above, but a helper can be correct while nothing
+// calls it: deleting the FILTERS pill, or filtering the token out of the strip,
+// leaves every pure-function test green. These are the tests that fail when
+// either surface is disconnected.
+//
+// Both assertions read the CARD, never document.body — the facet pill's own
+// label contains the words "Method family", so a body-wide match would pass
+// with the card rendering nothing at all.
+describe("CoreClaimQueue — method family, on screen", () => {
+  /** The collapsed evidence strip of the only open card, as text. */
+  const cardStrip = () =>
+    (screen.getByRole("button", { expanded: false }).textContent ?? "").replace(/\s+/g, " ");
+
+  it("paints the tier IN THE CARD, and leaves the 'N of 5 signals' line alone", () => {
+    const { unmount } = render(
+      <CoreClaimQueue core={CORE} candidates={[row({ methodTier: "strong" })]} confirmed={[]} />,
+    );
+    expect(cardStrip()).toContain("Method family");
+    expect(cardStrip()).toContain("strong");
+    const withTier = screen.getByText(/of 5 signals/).textContent;
+    unmount();
+
+    render(<CoreClaimQueue core={CORE} candidates={[row({ methodTier: null })]} confirmed={[]} />);
+    expect(cardStrip()).not.toContain("Method family");
+    // Same row, no tier: the counted-signal line must be byte-identical.
+    expect(screen.getByText(/of 5 signals/).textContent).toBe(withTier);
+  });
+
+  it("offers the facet as a pill, and ticking it drops the weak and untiered rows", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", methodTier: "strong" }),
+          row({ pmid: "2", methodTier: "moderate" }),
+          row({ pmid: "3", methodTier: "weak" }),
+          row({ pmid: "4", methodTier: null }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByText(/Method family \(strong\/moderate\)/));
+    // 2 of the 4 survive — weak and null are excluded on purpose: weak families
+    // invert to below background, so a facet returning them would narrow the
+    // queue towards the rows the signal argues against.
+    expect(screen.getByText(/Showing 2 of 4/)).toBeTruthy();
+  });
+
+  it("searches the token a reviewer can SEE — both 'method' and the tier word", () => {
+    // searchBlob's rule is "search only what the card puts on screen", and the
+    // placeholder promises "method". Both halves of the rendered token match.
+    expect(searchBlob(row({ methodTier: "strong" }))).toContain("method family strong");
+    expect(matchesQuery(row({ methodTier: "strong" }), "method")).toBe(true);
+    expect(matchesQuery(row({ methodTier: "strong" }), "strong")).toBe(true);
+    expect(matchesQuery(row({ methodTier: null }), "method")).toBe(false);
+  });
+});
+
 describe("CoreClaimQueue — Known clients toolbar wiring", () => {
   it("renders Known clients with a PARENTHESISED count, first of the three header buttons", () => {
     render(

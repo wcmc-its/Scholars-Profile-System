@@ -498,14 +498,13 @@ export function matchesFilters(
  *
  * Three fields the artboard's blob searched are dropped, each because the row
  * doesn't carry it or the card doesn't show it:
- *   - method family + tool: the strength BAND is now on the row (`methodTier`,
- *     plumbed from the engine's CORE# items) but the families and tools
- *     themselves are not — `method_evidence` is free text the loader
- *     deliberately does not select while nothing renders it. So there is still
- *     nothing here to match on, and the band alone is not what a reviewer would
- *     be typing. NOTE the filter placeholder DOES say "method" (the owner took
- *     the mockup's string) — that word stays aspirational until the card
- *     renders method, not a bug in this function;
+ *   - method FAMILY + TOOL names: still absent. `method_evidence` is free text
+ *     the loader deliberately does not select, so the individual family and
+ *     tool strings have nothing here to match on. The BAND is a different
+ *     matter: the card now renders "Method family <tier>" as an evidence
+ *     token, so the token's own text IS searched below — the placeholder's
+ *     "method" stopped being aspirational the moment that token shipped, and
+ *     leaving it out would have broken this function's one rule;
  *   - the affinity "who": `authorAffinity` is a bare 0-1 number here, with no
  *     person attached to search on;
  *   - `meshTerms`: on the row, but nothing has rendered it since the Details
@@ -523,6 +522,11 @@ export function searchBlob(row: CoreQueueRow): string {
     row.ackSnippet,
     ...row.wcmAuthors.map((a) => a.name),
     ...row.coauthorScholars.map((a) => a.name),
+    // The evidence token's own rendered text, verbatim, so both halves a
+    // reviewer can SEE match: "method" (the placeholder's promise) and the tier
+    // word. Not `row.methodTier` alone — that would match "strong" but not the
+    // "method" the placeholder advertises.
+    row.methodTier ? `Method family ${row.methodTier}` : null,
   ]
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join(" ")
@@ -933,7 +937,7 @@ export function CoreClaimQueue({
   // place twice over: the count tells a reviewer what a pill will do BEFORE the
   // click, and a facet counting 0 is dropped from the row entirely rather than
   // rendered as a pill whose only possible outcome is an empty queue.
-  // ponytail: five extra passes over `open`, recomputed every render, no memo.
+  // ponytail: six extra passes over `open`, recomputed every render, no memo.
   // Fine at the sizes cores actually queue, but loadCoreReviewQueue has no
   // LIMIT — if one core ever returns thousands of candidates, fold these into a
   // single reduce or wrap them in useMemo([candidates, decided]).
@@ -1120,11 +1124,11 @@ export function CoreClaimQueue({
             </h2>
           )}
           {view === "review" && candidates.length > 0 ? (
-            /* "method" is ASPIRATIONAL: `searchBlob` does not search a method
-               family or tool because `CoreQueueRow` never carries one. The owner
-               chose the mockup's string over the trimmed one; the word starts
-               being true when method data reaches this row, and until then a
-               method query simply matches nothing. Not a bug — see searchBlob. */
+            /* "method" is now TRUE, not aspirational: the card renders a
+               "Method family <tier>" evidence token and `searchBlob` searches
+               that token's text. The individual family and tool NAMES are still
+               not searched (`method_evidence` stays out of the loader's
+               select) — a query for a specific tool matches nothing. */
             <Input
               type="search"
               value={query}
