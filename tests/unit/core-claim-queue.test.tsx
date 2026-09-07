@@ -61,6 +61,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     llmRationale: "Acknowledges the imaging core for confocal microscopy.",
     authorAffinity: 0.42,
     topicalPrior: null,
+    methodTier: null,
     citationCount: 12,
     pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
     doi: "10.1000/synthetic.2021.001",

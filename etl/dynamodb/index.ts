@@ -65,7 +65,7 @@ import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { planPublicationTopicPrune } from "./publication-topic-prune";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
-import { buildPublicationCoreWrites } from "./publication-core-mapper";
+import { projectPublicationCores } from "./publication-core-mapper";
 import { planPublicationCorePrune } from "./publication-core-prune";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
@@ -847,59 +847,19 @@ async function main() {
     const coreItems = buckets.cores;
     console.log(`Found ${coreItems.length} CORE# records.`);
 
-    // Pure, unit-tested per-record mapping + FK guards; see ./publication-core-mapper.ts.
-    const coreMap = buildPublicationCoreWrites(coreItems, { knownCoreIds, knownPmidSet });
-    console.log(
-      `publication_core candidates: ${coreMap.writes.length} (skipped: ` +
-        `${coreMap.skippedMissingCore} missing core, ` +
-        `${coreMap.skippedMissingPublication} missing publication, ` +
-        `${coreMap.skippedMissingFields} missing required fields, ` +
-        `${coreMap.skippedBelowThreshold} below threshold).`,
+    // Map + write in one call: the per-record FK/field guards, the payload both
+    // upsert halves derive from, and the batched (pmid, coreId) upsert all live
+    // in ./publication-core-mapper.ts, where a test drives them against a
+    // recording writer. Nothing of Block 6's write path is inlined here — a
+    // statement between the mapping and the write is exactly how a column
+    // silently stopped being written before.
+    const coreMap = await projectPublicationCores(
+      coreItems,
+      { knownCoreIds, knownPmidSet },
+      db.write,
+      { log: (m) => console.log(m) },
     );
-
-    // Idempotent upsert keyed on (pmid, coreId). Same batch shape as Block 2.
-    let pubCoreRowsUpserted = 0;
-    const CORE_BATCH = 100;
-    for (let i = 0; i < coreMap.writes.length; i += CORE_BATCH) {
-      const chunk = coreMap.writes.slice(i, i + CORE_BATCH);
-      await Promise.all(
-        chunk.map((w) =>
-          db.write.publicationCore.upsert({
-            where: { pmid_coreId: { pmid: w.pmid, coreId: w.coreId } },
-            create: {
-              pmid: w.pmid,
-              coreId: w.coreId,
-              likelihood: w.likelihood,
-              status: w.status,
-              signalCoauthors: w.signalCoauthors,
-              signalAck: w.signalAck,
-              ackAlias: w.ackAlias,
-              ackSnippet: w.ackSnippet,
-              llmScore: w.llmScore,
-              llmRationale: w.llmRationale,
-              authorAffinity: w.authorAffinity,
-              topicalPrior: w.topicalPrior,
-              scoredAt: w.scoredAt,
-            },
-            update: {
-              likelihood: w.likelihood,
-              status: w.status,
-              signalCoauthors: w.signalCoauthors,
-              signalAck: w.signalAck,
-              ackAlias: w.ackAlias,
-              ackSnippet: w.ackSnippet,
-              llmScore: w.llmScore,
-              llmRationale: w.llmRationale,
-              authorAffinity: w.authorAffinity,
-              topicalPrior: w.topicalPrior,
-              scoredAt: w.scoredAt,
-            },
-          }),
-        ),
-      );
-      pubCoreRowsUpserted += chunk.length;
-    }
-    console.log(`publication_core upserts complete: ${pubCoreRowsUpserted} rows.`);
+    const pubCoreRowsUpserted = coreMap.upserted;
 
     // ----- Block 6 keyed prune (#2601) ---------------------------------
     // The upsert loop only ADDS/updates pairs. When the engine re-scores a core
