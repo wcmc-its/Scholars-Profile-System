@@ -253,4 +253,13 @@ describe("freshness acknowledgements", () => {
     expect(TRACKED.Spotlight?.ack).toBeDefined();
     expect(TRACKED.Spotlight?.cadence).toBe("monthly");
   });
+
+  // Same posture for Tools, and the second half of this assertion is the point:
+  // the ack covers a hand-run PRODUCER, while the cadence still grades OUR
+  // nightly import. Widening the cadence instead would hide a dead import,
+  // which is the response this ack exists to avoid.
+  it("Tools is acknowledged without loosening its import cadence", () => {
+    expect(TRACKED.Tools?.ack).toBeDefined();
+    expect(TRACKED.Tools?.cadence).toBe("nightly");
+  });
 });

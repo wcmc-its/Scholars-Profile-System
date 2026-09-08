@@ -143,7 +143,35 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "Identity-orcid": { cadence: "nightly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
-  Tools: { cadence: "nightly" },
+  //
+  // ACKED, and deliberately neither re-anchored nor re-cadenced. What this
+  // entry grades is OUR nightly import, which genuinely runs nightly, so
+  // `nightly` is the honest cadence and widening it would hide a dead import.
+  // What is stale is the ARTIFACT the import reads: tools.json has carried
+  // generated_at 2026-06-23 since June, because the tools PRODUCER is hand-run
+  // — it has no EventBridge schedule at all, and `pipeline_tools` writes no
+  // STAGE# ledger row either (see etl/dynamodb/producer-run-mapper.ts), so
+  // there is no producer cadence to grade it against and nothing to mirror.
+  // Flipping etl/tools/index.ts to anchor on generated_at (see the §2.1 note
+  // beside its etlRun.create) before the producer has a schedule would paint
+  // this row permanently red with no route back to green — the cry-wolf
+  // failure the ack mechanism exists to prevent, and the same failure
+  // Spotlight's ack below records. At `until`, renew it as a deliberate
+  // decision or drop it: once the producer is scheduled, the anchor can move
+  // with it and the ack becomes unnecessary.
+  Tools: {
+    cadence: "nightly",
+    ack: {
+      until: "2026-12-31",
+      // Reader-facing copy, same rule as Spotlight's below: this string is
+      // rendered to superusers on /edit/etl-status, so it stays plain English
+      // and the technical account stays in the comment above it.
+      reason:
+        "This data is refreshed by hand rather than on a schedule. The last " +
+        "hand-published refresh was 23 June 2026, and a scheduled refresh is " +
+        "not switched on yet; there is nothing to do here.",
+    },
+  },
   // #2051 part B — deployed nightly steps (cdk/lib/etl-stack.ts
   // FamilySensitivityNightly / FamilySuppressionNightly, both tier:"continue",
   // both envs, no env split) writing sources "FamilySensitivity" /
@@ -347,6 +375,17 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // grants runs 03:00 UTC, BEFORE the mirror, so it lands ~4h old and its true
   // ceiling is 28h -- inside `nightly`'s 30h, but by two hours, which one slow
   // run erases. Same cadence as its siblings rather than a permanent coin flip.
+  //
+  // That "do NOT fix it" holds while cores is anchored on OUTPUT AGE, which is
+  // no longer unconditional: SPS now maps ReciterAI's `STAGE#cores_run#GLOBAL`
+  // ledger row and PREFERS it over the output-age guess when one arrives (see
+  // PRODUCER_STAGES in etl/dynamodb/producer-run-mapper.ts and Block 8 in
+  // etl/dynamodb/index.ts). Once those rows are actually landing, the anchor is
+  // a record of the RUN and a quiet night stops looking dead — and THAT is the
+  // one condition under which tightening this toward the cron becomes correct.
+  // It is a follow-up, deliberately not bundled with the mapping: tightening
+  // before real ledger rows exist and can be judged would put a nightly SLA on
+  // an anchor that is still the age of the output.
   "ReciterAI-grants": { cadence: "nightly-mirrored" },
   "ReciterAI-cores": { cadence: "weekly" },
 };

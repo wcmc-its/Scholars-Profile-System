@@ -738,7 +738,17 @@ describe("/edit/etl-status triage layout", () => {
       /emerald|green|red/,
     );
     expect(row.textContent).toContain(spec.ack!.until);
-    expect(attention.textContent).toContain("Needs attention (1)");
+    // Every other source is healthy, so the section holds the live-acked row
+    // under test plus any source whose ack has LAPSED by `now` — a lapsed ack
+    // routes here even on fresh data (the test further down pins that). Derived
+    // rather than hardcoded to 1: with more than one ack on the books, `now` is
+    // after some of the other expiries and a literal count would be asserting
+    // how many acks happen to exist, not that the acked row lands here uncounted.
+    const lapsedElsewhere = expectedSources().filter((s) => {
+      const other = TRACKED[s]?.ack;
+      return other !== undefined && s !== source && Date.parse(other.until) <= now;
+    }).length;
+    expect(attention.textContent).toContain(`Needs attention (${1 + lapsedElsewhere})`);
     // NOT counted as a failure — but the headline must not then claim a clean
     // board, or the page reads "Needs attention (1)" directly above "All N
     // imports are current". The heading counts SECTION MEMBERSHIP; this line

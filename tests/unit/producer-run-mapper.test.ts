@@ -14,6 +14,7 @@ import {
   DRIFT_SOURCES,
   GRANTS_SOURCE,
   PRODUCER_STAGES,
+  buildCoresRecencyWrite,
   buildDriftRunWrites,
   buildProducerRunWrites,
   buildRecencyWrite,
@@ -205,6 +206,31 @@ describe("buildProducerRunWrites", () => {
     expect(writes).toEqual([]);
   });
 
+  it("maps the new cores_run stage onto the source cores is already graded under", () => {
+    // ReciterAI is only now teaching pipeline_cores to write this row. The
+    // source string has to be the SAME one the output-age tier uses, or the
+    // ledger would open a second row on the board instead of taking over the
+    // existing one — and the call-site preference below would have nothing to
+    // match on.
+    const [w] = buildProducerRunWrites(
+      [
+        {
+          PK: "STAGE#cores_run#GLOBAL",
+          SK: "RUN#2026-09-08T05:00:11Z",
+          status: "complete",
+          duration_ms: 41204,
+          records_written: 133,
+        },
+      ],
+      NONE,
+    );
+
+    expect(w.source).toBe(CORES_SOURCE);
+    expect(w.status).toBe("success");
+    expect(w.rowsProcessed).toBe(133);
+    expect(w.completedAt.getTime() - w.startedAt.getTime()).toBe(41204);
+  });
+
   it("writes only runs newer than what is already recorded", () => {
     const rows = [
       { PK: "STAGE#daily_enrichment#GLOBAL", SK: "RUN#2026-09-05T11:01:22Z", status: "complete" },
@@ -363,6 +389,55 @@ describe("buildDriftRunWrites", () => {
     expect(writes[0].startedAt.toISOString()).toBe("2026-09-07T00:00:00.000Z");
   });
 
+  it("ends the run at started + duration_ms once the producer supplies one", () => {
+    const [w] = buildDriftRunWrites(
+      [
+        {
+          PK: "DRIFT#evaluation",
+          SK: "DAY#2026-09-08",
+          window_end: "2026-09-08T14:00:50Z",
+          duration_ms: 1842,
+        },
+      ],
+      NONE,
+    );
+
+    expect(w.completedAt.getTime() - w.startedAt.getTime()).toBe(1842);
+  });
+
+  // The 106 + 33 rows already in the table predate `duration_ms`, so its absence
+  // has to stay a no-op. A junk or non-positive value takes the same path rather
+  // than writing a completion at or before the start.
+  it("keeps today's zero-length shape when duration_ms is absent or unusable", () => {
+    const rows = [
+      { PK: "DRIFT#evaluation", SK: "DAY#2026-09-08", window_end: "2026-09-08T14:00:50Z" },
+      {
+        PK: "DRIFT#taxonomy",
+        SK: "DAY#2026-09-08",
+        window_end: "2026-09-08T15:00:12Z",
+        duration_ms: "not-a-number",
+      },
+      {
+        PK: "DRIFT#taxonomy",
+        SK: "DAY#2026-09-07",
+        window_end: "2026-09-07T15:00:12Z",
+        duration_ms: 0,
+      },
+      {
+        PK: "DRIFT#taxonomy",
+        SK: "DAY#2026-09-06",
+        window_end: "2026-09-06T15:00:12Z",
+        duration_ms: -5000,
+      },
+    ];
+
+    const writes = buildDriftRunWrites(rows, NONE);
+    expect(writes).toHaveLength(4);
+    for (const w of writes) {
+      expect(w.completedAt.getTime()).toBe(w.startedAt.getTime());
+    }
+  });
+
   it("writes only evaluations newer than what is already recorded", () => {
     const rows = [
       { PK: "DRIFT#evaluation", SK: "DAY#2026-09-06", window_end: "2026-09-06T14:00:50Z" },
@@ -428,6 +503,68 @@ describe("latestCoreScoredAt / buildRecencyWrite (the output-age tier)", () => {
     expect(buildRecencyWrite(GRANTS_SOURCE, new Date("2026-09-07T05:58:15Z"), since)).toHaveLength(
       1,
     );
+  });
+});
+
+/**
+ * The double-write trap. `cores_run` and `latestCoreScoredAt` describe the same
+ * nightly job and resolve to the same `etl_run.source`, so a call site that ran
+ * both would file two rows for one run — and the output-age row would keep the
+ * watermark moving on a night the run died, which is the blind spot the whole
+ * module exists to close.
+ */
+describe("buildCoresRecencyWrite (ledger beats output age)", () => {
+  const coresAt = new Date("2026-09-08T05:41:00Z");
+
+  const ledgerRow = (at: string) =>
+    buildProducerRunWrites(
+      [{ PK: "STAGE#cores_run#GLOBAL", SK: `RUN#${at}`, status: "complete" }],
+      NONE,
+    );
+
+  it("drops the output-age row when the ledger spoke for cores this pass", () => {
+    const ledgerWrites = ledgerRow("2026-09-08T05:00:11Z");
+    expect(ledgerWrites.map((w) => w.source)).toEqual([CORES_SOURCE]);
+
+    expect(buildCoresRecencyWrite(ledgerWrites, coresAt, NONE)).toEqual([]);
+  });
+
+  it("still writes the output-age row while no ledger row exists — today's behaviour", () => {
+    // Until ReciterAI deploys, `ledgerWrites` never mentions cores, so this must
+    // be identical to the bare buildRecencyWrite call it replaced.
+    const noCores = buildDriftRunWrites(
+      [{ PK: "DRIFT#evaluation", SK: "DAY#2026-09-08", window_end: "2026-09-08T14:00:50Z" }],
+      NONE,
+    );
+
+    expect(buildCoresRecencyWrite(noCores, coresAt, NONE)).toEqual(
+      buildRecencyWrite(CORES_SOURCE, coresAt, NONE),
+    );
+    expect(buildCoresRecencyWrite([], coresAt, NONE)).toHaveLength(1);
+  });
+
+  it("keeps the watermark and the null-anchor rules it inherits", () => {
+    expect(buildCoresRecencyWrite([], null, NONE)).toEqual([]);
+    const caughtUp = new Map([[CORES_SOURCE, coresAt]]);
+    expect(buildCoresRecencyWrite([], coresAt, caughtUp)).toEqual([]);
+  });
+
+  it("is not suppressed by some OTHER producer's ledger row", () => {
+    // The guard must match on the source, not merely on the ledger being
+    // non-empty; a nightly that mirrored enrichment but not cores still needs
+    // the output-age fallback.
+    const otherProducer = buildProducerRunWrites(
+      [
+        {
+          PK: "STAGE#daily_enrichment#GLOBAL",
+          SK: "RUN#2026-09-08T11:01:13Z",
+          status: "complete",
+        },
+      ],
+      NONE,
+    );
+
+    expect(buildCoresRecencyWrite(otherProducer, coresAt, NONE)).toHaveLength(1);
   });
 });
 

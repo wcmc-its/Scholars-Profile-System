@@ -41,8 +41,8 @@
  *     but also `cwid:{cwid}` and `pmid:{pmid}` for per-record work (thousands of
  *     rows). Only GLOBAL is a pipeline heartbeat.
  *
- * ponytail: GLOBAL scope only, and only the four stages that a live EventBridge
- * rule actually drives. The per-cwid/per-pmid rows are a different question
+ * ponytail: GLOBAL scope only, and only the stages that a live EventBridge rule
+ * actually drives. The per-cwid/per-pmid rows are a different question
  * (per-record failure rates) that belongs on a data-quality surface, not a
  * liveness board. Upgrade path if that question comes up: aggregate them here
  * into a failure ratio rather than adding thousands of `etl_run` rows.
@@ -53,7 +53,10 @@ import type { CoreRecord, DriftDayRecord, ProducerRunRecord } from "./partition"
  * Ledger stage -> `etl_run.source`. Deliberately NOT every stage in the ledger.
  *
  * The bar is: a live EventBridge rule drives it, and nothing else in SPS already
- * covers it. Verified against ReciterAI's `infra/eventbridge.json` and the live
+ * covers it AS WELL as a run record would — `cores_run` is here despite cores
+ * being graded already, because what grades it is the age of its output, which
+ * is a strictly weaker claim (see the Tier C block at the foot of this file).
+ * Verified against ReciterAI's `infra/eventbridge.json` and the live
  * account (all eight rules ENABLED, 2026-09-07) — the repo's own deploy script
  * warns that a declared rule is not a deployed one, so this list was checked
  * against AWS rather than against config.
@@ -78,6 +81,17 @@ export const PRODUCER_STAGES: Readonly<Record<string, string>> = {
   spotlight_refresh: "ReciterAI-spotlight-gate",
   // cron(0 13 * * ? *) -> Lambda reciterai-onboarding-detector
   onboarding_detector: "ReciterAI-onboarding-detector",
+  // cron(0 5 * * ? *) -> ECS reciterai-cores-daily
+  //
+  // The one entry here that is FORWARD-DECLARED: ReciterAI is only now teaching
+  // `pipeline_cores` to write this row, so until that deploys the lookup below
+  // simply never matches. That is deliberate — cores is the one job SPS already
+  // grades, on the age of its output (CORES_SOURCE, further down), and output
+  // age cannot tell "ran and correctly wrote nothing" from "died". A real run
+  // record can, so the day the row appears it takes over; see the call site in
+  // etl/dynamodb/index.ts, which drops the output-age row whenever the ledger
+  // supplied one so the two paths never both write for the same job.
+  cores_run: "ReciterAI-cores",
 };
 
 /** One `etl_run` row, ready for `create`. */
@@ -119,8 +133,18 @@ export function mapLedgerStatus(status: unknown): string {
   return (s === "" ? "unknown" : s).slice(0, STATUS_MAX);
 }
 
-/** Trap 2 — prefer a real end time, then a derived one, then the start. */
-function resolveCompletedAt(rec: ProducerRunRecord, startedAt: Date): Date {
+/**
+ * Trap 2 — prefer a real end time, then a derived one, then the start.
+ *
+ * Typed structurally rather than as a ProducerRunRecord so the drift rows can
+ * use it too: they carry the same `duration_ms` and want the same fallback
+ * ladder, and a second copy of this arithmetic is how the two shapes would
+ * drift apart.
+ */
+function resolveCompletedAt(
+  rec: { completed_at?: unknown; duration_ms?: unknown },
+  startedAt: Date,
+): Date {
   const explicit = parseDate(rec.completed_at);
   if (explicit !== null && explicit.getTime() >= startedAt.getTime()) return explicit;
   const ms = toNumber(rec.duration_ms);
@@ -209,12 +233,18 @@ const DAY_SK = /^DAY#(\d{4}-\d{2}-\d{2})$/;
  * `severity` is not consulted on purpose — see DriftDayRecord's doc comment, and
  * note DRIFT#evaluation has been WARN every single day of its life.
  *
- * ponytail: `startedAt === completedAt`, so the board's Run duration column
- * reads 0s for these two. There is genuinely no duration in the row — this is a
- * declared unknown rather than a measured zero, and it is the one column that is
- * wrong for them. Upgrade path: ReciterAI adding `duration_ms` to the drift row
- * (it already writes one on every STAGE# entry), after which this becomes the
- * same shape as buildProducerRunWrites.
+ * Duration is read WHEN THE PRODUCER SUPPLIES IT: ReciterAI is adding
+ * `duration_ms` to the drift row (it already writes one on every STAGE# entry),
+ * so this now runs the same completedAt ladder as buildProducerRunWrites — and
+ * runs it whether or not that change has deployed yet.
+ *
+ * Absence is a NO-OP, not a zero, and that is load-bearing rather than tidy:
+ * none of the 106 + 33 rows already in the table carry `duration_ms`, so on
+ * every one of them `completedAt` still equals `startedAt` and the board's Run
+ * duration column still reads 0s — a declared unknown, exactly as before. A
+ * junk, zero or negative value takes the same path (toNumber floors it to 0),
+ * so a malformed producer field degrades to today's behaviour instead of
+ * writing a completion that precedes the start.
  */
 export function buildDriftRunWrites(
   records: readonly DriftDayRecord[],
@@ -241,7 +271,7 @@ export function buildDriftRunWrites(
       source,
       status: "success",
       startedAt: at,
-      completedAt: at,
+      completedAt: resolveCompletedAt(rec, at),
       rowsProcessed: 0,
       errorMessage: null,
     });
@@ -265,9 +295,25 @@ export function buildDriftRunWrites(
 // That is why neither carries its schedule's cadence verbatim -- see the
 // TRACKED entries, where cores is deliberately graded weekly against a nightly
 // schedule so one quiet night cannot cry wolf.
+//
+// Cores is leaving this tier: it is gaining the ledger row PRODUCER_STAGES
+// already maps, and the caller prefers that row over anything below. Read the
+// weaker-claim reasoning here as applying to grants unconditionally, and to
+// cores only on the nights no ledger row arrives.
 // ---------------------------------------------------------------------------
 
-/** `pipeline_cores` writes no manifest, no ledger row, no S3 -- only PUB#/CORE# rows. */
+/**
+ * `pipeline_cores` writes no manifest and no S3 -- only PUB#/CORE# rows.
+ *
+ * It is also the one member of this tier on its way OUT of it: a
+ * `STAGE#cores_run#GLOBAL` ledger row is being added upstream, and
+ * PRODUCER_STAGES already maps it. Both paths therefore resolve to this same
+ * source string, which is the trap: if both wrote, one nightly would file two
+ * `etl_run` rows for one job, and the output-age row would keep the watermark
+ * moving even on a night the run died -- rebuilding the exact blind spot this
+ * module exists to close. buildCoresRecencyWrite below is what keeps that from
+ * happening.
+ */
 export const CORES_SOURCE = "ReciterAI-cores";
 
 /** `pipeline_grants` writes no ledger row; its manifest is the only trace. */
@@ -319,4 +365,28 @@ export function buildRecencyWrite(
       errorMessage: null,
     },
   ];
+}
+
+/**
+ * Cores' output-age row, but ONLY when the ledger did not already speak for it.
+ *
+ * `cores_run` (PRODUCER_STAGES) and `latestCoreScoredAt` describe the same
+ * nightly job and resolve to the same `etl_run.source`, so running both would
+ * file two rows for one run and let the output-age watermark advance on a night
+ * the run died. A real run record beats the age of its output, so the ledger
+ * wins and this drops out.
+ *
+ * Ordering-independent by construction: it asks what the ledger PRODUCED this
+ * pass rather than what is in the table, so it needs no second query and cannot
+ * be fooled by a `since` map read before the writes existed. Until ReciterAI
+ * deploys the ledger row, `ledgerWrites` never mentions cores and this is
+ * byte-for-byte the call it replaces.
+ */
+export function buildCoresRecencyWrite(
+  ledgerWrites: readonly ProducerRunWrite[],
+  latestAt: Date | null,
+  since: ReadonlyMap<string, Date | null>,
+): ProducerRunWrite[] {
+  if (ledgerWrites.some((w) => w.source === CORES_SOURCE)) return [];
+  return buildRecencyWrite(CORES_SOURCE, latestAt, since);
 }
