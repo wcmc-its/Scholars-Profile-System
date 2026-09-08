@@ -49,7 +49,6 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     dateAddedToEntrez: "2026-02-18",
     authorsString: "Testerson A, Fixture B",
     fullAuthorsString: "Testerson A, Fixture B, Sample C",
-    abstract: "We imaged the brain in detail.",
     synopsis: "A faster MRI sequence.",
     likelihood: 0.82,
     status: "candidate",
@@ -74,7 +73,6 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     isManual: false,
     relativeCitationRatio: null,
     nihPercentile: null,
-    meshTerms: [],
     ...over,
   };
 }
@@ -531,14 +529,12 @@ describe("CoreClaimQueue", () => {
     const { container } = render(
       <CoreClaimQueue
         core={CORE}
-        candidates={[row({ meshTerms: [{ ui: "D001921", label: "Brain" }] })]}
+        candidates={[row()]}
         confirmed={[]}
       />,
     );
     expect(container.querySelector("details")).toBeNull();
     expect(screen.queryByText("Details")).toBeNull();
-    expect(screen.queryByText("We imaged the brain in detail.")).toBeNull();
-    expect(screen.queryByText("Brain")).toBeNull();
     expect(screen.queryByText(/Testerson A, Fixture B, Sample C/)).toBeNull();
   });
 
@@ -2124,7 +2120,6 @@ describe("matchesQuery", () => {
     coauthorScholars: [
       { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" },
     ],
-    meshTerms: [{ ui: "D000000", label: "Zebrafish" }],
   });
 
   it("matches on each field the card puts on screen", () => {

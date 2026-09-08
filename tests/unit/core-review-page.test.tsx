@@ -111,7 +111,6 @@ function row(pmid: string, wcmAuthors: CoreQueueRow["wcmAuthors"]): CoreQueueRow
     dateAddedToEntrez: null,
     authorsString: null,
     fullAuthorsString: null,
-    abstract: null,
     synopsis: null,
     likelihood: 0.5,
     status: "candidate",
@@ -134,7 +133,6 @@ function row(pmid: string, wcmAuthors: CoreQueueRow["wcmAuthors"]): CoreQueueRow
     isManual: false,
     relativeCitationRatio: null,
     nihPercentile: null,
-    meshTerms: [],
   };
 }
 

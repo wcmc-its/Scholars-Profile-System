@@ -27,7 +27,6 @@ import {
   isOpenCandidate,
   loadActiveCoreClaimsByCore,
 } from "@/lib/api/core-merge";
-import { normalizeMeshTerms } from "@/lib/api/profile";
 import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
 
 /** A WCM scholar resolved from a CWID, linkable to their public profile. */
@@ -85,13 +84,6 @@ export interface CoreQueueRow {
    *  core the size of core 14 (2,428 untruncated rows) saying nothing. Read it as
    *  a truthiness test, never `=== false`. */
   wcmAuthorsTruncated?: boolean;
-  /** Raw PubMed abstract. NOTHING RENDERS THIS any more — the Details disclosure
-   *  that showed it came out with the direction-A queue rebuild, and the only
-   *  reads left in the repo are this loader's own shape assertions in
-   *  tests/unit/core-queue.test.ts. Kept for now because a test still reads it;
-   *  drop it (with `meshTerms` below) the moment nothing does, since every queue
-   *  row otherwise ships a full abstract to the client for no consumer. */
-  abstract: string | null;
   /** One-line plain-language synopsis (issue #329), when present. */
   synopsis: string | null;
   /** True when a core alias matched in the full text (signal 3). */
@@ -160,12 +152,6 @@ export interface CoreQueueRow {
   relativeCitationRatio: number | null;
   /** NIH citation percentile (0-100), when computed. */
   nihPercentile: number | null;
-  /** Per-PMID MeSH terms ({ui, label}); `[]` when none. Same standing as
-   *  `abstract` above: the Details chips that showed these are gone, so the only
-   *  reads left are this loader's shape assertions. The queue's free-text filter
-   *  deliberately does NOT search them either — a match a reviewer cannot see on
-   *  the card is worse than a miss. */
-  meshTerms: Array<{ ui: string | null; label: string }>;
 }
 
 export interface CoreReviewQueue {
@@ -228,9 +214,7 @@ type QueueReader = Pick<
 >;
 
 /** The `publication` fields a queue card needs — shared by the engine-sourced
- *  and manual-claim-only row builders below. `abstract` and `meshTerms` are the
- *  two exceptions: the card stopped rendering both when the Details disclosure
- *  came out (see the field docs on `CoreQueueRow`). */
+ *  and manual-claim-only row builders below. */
 const CARD_PUBLICATION_SELECT = {
   title: true,
   journal: true,
@@ -239,14 +223,12 @@ const CARD_PUBLICATION_SELECT = {
   dateAddedToEntrez: true,
   authorsString: true,
   fullAuthorsString: true,
-  abstract: true,
   synopsis: true,
   citationCount: true,
   pubmedUrl: true,
   doi: true,
   relativeCitationRatio: true,
   nihPercentile: true,
-  meshTerms: true,
 } as const;
 
 /** Cap WCM byline authors per card — mega-author papers would otherwise be a wall. */
@@ -452,7 +434,6 @@ export async function loadCoreReviewQueue(
       dateAddedToEntrez: isoDate(r.publication.dateAddedToEntrez),
       authorsString: r.publication.authorsString,
       fullAuthorsString: r.publication.fullAuthorsString,
-      abstract: r.publication.abstract,
       synopsis: r.publication.synopsis,
       likelihood: Number(r.likelihood),
       status: r.status,
@@ -487,7 +468,6 @@ export async function loadCoreReviewQueue(
           : Number(r.publication.relativeCitationRatio),
       nihPercentile:
         r.publication.nihPercentile == null ? null : Number(r.publication.nihPercentile),
-      meshTerms: normalizeMeshTerms(r.publication.meshTerms),
     };
   });
 
@@ -500,7 +480,6 @@ export async function loadCoreReviewQueue(
     dateAddedToEntrez: isoDate(p.dateAddedToEntrez),
     authorsString: p.authorsString,
     fullAuthorsString: p.fullAuthorsString,
-    abstract: p.abstract,
     synopsis: p.synopsis,
     // No engine projection exists — likelihood/status/every signal is a
     // placeholder never read functionally (core-merge resolves purely off the
@@ -529,7 +508,6 @@ export async function loadCoreReviewQueue(
     relativeCitationRatio:
       p.relativeCitationRatio == null ? null : Number(p.relativeCitationRatio),
     nihPercentile: p.nihPercentile == null ? null : Number(p.nihPercentile),
-    meshTerms: normalizeMeshTerms(p.meshTerms),
   }));
 
   const { candidates, confirmed, rejected } = partitionCoreQueue(

@@ -16,7 +16,6 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     dateAddedToEntrez: null,
     authorsString: null,
     fullAuthorsString: null,
-    abstract: null,
     synopsis: null,
     likelihood: 0.5,
     status: "candidate",
@@ -39,7 +38,6 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     isManual: false,
     relativeCitationRatio: null,
     nihPercentile: null,
-    meshTerms: [],
     ...over,
   };
 }
@@ -158,14 +156,12 @@ describe("loadCoreReviewQueue mapping", () => {
       dateAddedToEntrez: new Date("2026-02-18T00:00:00.000Z"),
       authorsString: "Ballon D",
       fullAuthorsString: "Ballon D, Dyke J, Xiang J",
-      abstract: "We imaged the brain.",
       synopsis: "A new MRI sequence.",
       citationCount: 12,
       pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
       doi: "10.1/x",
       relativeCitationRatio: "2.1000",
       nihPercentile: "89.0",
-      meshTerms: [{ ui: "D001921", label: "Brain" }, { label: "Magnetic Resonance Imaging" }],
     },
   });
 
@@ -210,11 +206,6 @@ describe("loadCoreReviewQueue mapping", () => {
     // RCR/percentile (reciterdb.analysis_nih) coerced from Decimal strings
     expect(r?.relativeCitationRatio).toBe(2.1);
     expect(r?.nihPercentile).toBe(89);
-    // MeSH terms threaded through normalizeMeshTerms (a label without a ui → ui null)
-    expect(r?.meshTerms).toEqual([
-      { ui: "D001921", label: "Brain" },
-      { ui: null, label: "Magnetic Resonance Imaging" },
-    ]);
   });
 
   it("resolves a core-staff co-author via the byline even when absent from the direct scholar lookup (Tier 2)", async () => {
@@ -239,7 +230,6 @@ describe("loadCoreReviewQueue mapping", () => {
   it("attaches WCM byline authors in order + the publication detail fields (Tier 2)", async () => {
     const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
     expect(r?.wcmAuthors.map((s) => s.name)).toEqual(["Jonathan Dyke", "Jenny Xiang"]);
-    expect(r?.abstract).toBe("We imaged the brain.");
     expect(r?.synopsis).toBe("A new MRI sequence.");
     expect(r?.fullAuthorsString).toBe("Ballon D, Dyke J, Xiang J");
   });
@@ -340,14 +330,12 @@ describe("loadCoreReviewQueue mapping", () => {
       dateAddedToEntrez: null,
       authorsString: "Someone S",
       fullAuthorsString: "Someone S",
-      abstract: null,
       synopsis: null,
       citationCount: 0,
       pubmedUrl: null,
       doi: null,
       relativeCitationRatio: null,
       nihPercentile: null,
-      meshTerms: [],
     };
     const claims: Array<{ pmid: string; status: ClaimStatus }> = [
       { pmid: "99999999", status: "claimed" },
@@ -494,6 +482,37 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(r).not.toHaveProperty("meshEvidence");
   });
 
+  it("does not select publication.abstract or publication.meshTerms", async () => {
+    // Same payload rule as the test above, applied to the joined `publication`
+    // row. Nothing has rendered either field since the Details disclosure came
+    // out, and together they were 63% of the queue payload measured on staging
+    // (4.2 MB of 6.7 MB across 2,446 core-14 rows). Re-adding one is only worth
+    // it if a component actually reads it.
+    let selected: Record<string, unknown> = {};
+    const capturing = {
+      core: { findUnique: async () => ({ id: "2", name: "Imaging" }) },
+      publicationCore: {
+        findMany: async (args: { select: Record<string, unknown> }) => {
+          selected = args.select;
+          return [rawRow()];
+        },
+      },
+      coreClaim: { findMany: async () => [] },
+      scholar: { findMany: async () => SCHOLARS },
+      publicationAuthor: { findMany: async () => AUTHORS },
+      publication: { findMany: async () => [] },
+    } as unknown as Parameters<typeof loadCoreReviewQueue>[1];
+
+    const r = (await loadCoreReviewQueue("2", capturing))?.candidates[0];
+    const pubSelect = (selected.publication as { select: Record<string, unknown> }).select;
+    expect(pubSelect.title).toBe(true);
+    expect(pubSelect).not.toHaveProperty("abstract");
+    expect(pubSelect).not.toHaveProperty("meshTerms");
+    // and neither row builder puts them back on the emitted row
+    expect(r).not.toHaveProperty("abstract");
+    expect(r).not.toHaveProperty("meshTerms");
+  });
+
   it("keeps a null topicalPrior null (Number(null) would be 0)", async () => {
     const queue = await loadCoreReviewQueue(
       "2",
@@ -520,14 +539,12 @@ describe("loadCoreReviewQueue mapping", () => {
             dateAddedToEntrez: new Date("2019-11-04T00:00:00.000Z"),
             authorsString: "Someone S",
             fullAuthorsString: "Someone S",
-            abstract: null,
             synopsis: null,
             citationCount: 3,
             pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/99999999/",
             doi: null,
             relativeCitationRatio: null,
             nihPercentile: null,
-            meshTerms: [],
           },
         ],
       ),
