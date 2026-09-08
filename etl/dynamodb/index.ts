@@ -82,6 +82,7 @@ import {
   DRIFT_SOURCES,
   GRANTS_SOURCE,
   PRODUCER_STAGES,
+  buildCoresRecencyWrite,
   buildDriftRunWrites,
   buildProducerRunWrites,
   buildRecencyWrite,
@@ -1050,8 +1051,9 @@ async function main() {
         _max: { startedAt: true },
       });
       const since = new Map(seen.map((r) => [r.source, r._max.startedAt]));
-      // Tier C — cores keeps no run record at all, so its signal is the age of
-      // its own output. Free: buckets.cores is already in hand.
+      // Tier C — cores' FALLBACK signal, the age of its own output, for the
+      // passes where the ledger has no `cores_run` row to offer (every pass,
+      // until ReciterAI's own change deploys). Free: buckets.cores is in hand.
       const coresAt = latestCoreScoredAt(buckets.cores);
 
       // Tier B — grants keeps no run record either, but it publishes a manifest.
@@ -1079,10 +1081,19 @@ async function main() {
         );
       }
 
+      // The ledger first, then the output-age tier BEHIND it. Cores is the one
+      // job both halves can speak for -- `cores_run` and `latestCoreScoredAt`
+      // resolve to the same source -- so buildCoresRecencyWrite drops the
+      // output-age row once the ledger carries a cores run record at all. Two
+      // rows for one run would double-count, and the output-age row would keep
+      // the watermark moving even on a night the run died. It is keyed on the
+      // SCANNED rows rather than on this pass's writes for the reason set out
+      // there: an already-mirrored ledger row produces no write, which a
+      // write-keyed guard would misread as "no ledger".
       const producerWrites = [
         ...buildProducerRunWrites(buckets.producerRuns, since),
         ...buildDriftRunWrites(buckets.driftDays, since),
-        ...buildRecencyWrite(CORES_SOURCE, coresAt, since),
+        ...buildCoresRecencyWrite(buckets.producerRuns, coresAt, since),
         ...buildRecencyWrite(GRANTS_SOURCE, grantsAt, since),
       ];
       if (producerWrites.length > 0) {

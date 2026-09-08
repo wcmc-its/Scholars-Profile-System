@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 // The policy module, not `etl/freshness/index` — that script runs `main()` and
 // `$disconnect()`s both Prisma clients on import, which a test (and the
 // `/edit/etl-status` page) must never trigger just to read the SLA table.
-import { SLA_HOURS, TRACKED, ackState } from "@/lib/etl/freshness-policy";
+import { SLA_HOURS, TRACKED, ackState, gradeSource } from "@/lib/etl/freshness-policy";
 
 describe("freshness SLAs", () => {
   // Spotlight's producer lives in ReciterAI, not this repo, and publishes
@@ -252,5 +252,62 @@ describe("freshness acknowledgements", () => {
   it("Spotlight is acknowledged, not silently untracked", () => {
     expect(TRACKED.Spotlight?.ack).toBeDefined();
     expect(TRACKED.Spotlight?.cadence).toBe("monthly");
+  });
+
+  // Same posture for Tools, and the second half of this assertion is the point:
+  // the ack covers a hand-run PRODUCER, while the cadence still grades OUR
+  // nightly import. Widening the cadence instead would hide a dead import,
+  // which is the response this ack exists to avoid.
+  it("Tools is acknowledged without loosening its import cadence", () => {
+    expect(TRACKED.Tools?.ack).toBeDefined();
+    expect(TRACKED.Tools?.cadence).toBe("nightly");
+  });
+
+  /**
+   * The ack and the generated_at anchor in etl/tools/index.ts are ONE change,
+   * and this pins the HALF that is testable here: given the artifact's real age
+   * as the anchor, the ack engages. It cannot pin the anchor itself —
+   * etl/tools/index.ts runs `main()` on import, so no test may load it — so if
+   * someone reverts that file, these still pass.
+   *
+   * Worth pinning even so, because the failure this describes is silent: an ack
+   * on a source that never grades stale is INERT. `acknowledged` stays false,
+   * the reason string reaches no reader, nothing goes red, and the only symptom
+   * is a heartbeat line telling you to delete the ack you just added. The
+   * `inert` half below is that exact state, asserted so the distinction is
+   * written down rather than rediscovered.
+   *
+   * ponytail: no test on the anchor itself. Making it testable means splitting
+   * recordRun out of a module whose import has side effects — a real refactor
+   * for one assertion. The anchor is one call to parseManifestGeneratedAt,
+   * which tests/unit/freshness-anchor.test.ts already covers. Upgrade path: if
+   * etl/tools/index.ts is ever split for another reason, pin it then.
+   */
+  it("the Tools ack actually engages on the artifact's real age", () => {
+    // tools.json has carried this generated_at since June; the anchor is what
+    // puts it in front of gradeSource instead of our nightly import's clock.
+    const artifactAge = new Date("2026-06-23T00:00:00Z");
+    const now = Date.parse("2026-09-08T21:00:00Z");
+    const graded = gradeSource("Tools", TRACKED.Tools!, artifactAge, now);
+
+    expect(graded.stale).toBe(true); // the truth is still told
+    expect(graded.acknowledged).toBe(true); // ...and accepted, so no failure
+    expect(graded.ackExpired).toBe(false);
+
+    // A completedAt anchor (our import ran tonight) is the inert case: not
+    // stale, so the ack suppresses nothing and explains nothing.
+    const importRan = new Date("2026-09-08T07:12:00Z");
+    const inert = gradeSource("Tools", TRACKED.Tools!, importRan, now);
+    expect(inert.stale).toBe(false);
+    expect(inert.acknowledged).toBe(false);
+  });
+
+  it("the Tools ack expires into a real failure rather than a permanent green", () => {
+    const artifactAge = new Date("2026-06-23T00:00:00Z");
+    const afterUntil = Date.parse("2027-01-05T00:00:00Z");
+    const graded = gradeSource("Tools", TRACKED.Tools!, artifactAge, afterUntil);
+
+    expect(graded.ackExpired).toBe(true);
+    expect(graded.acknowledged).toBe(false); // counts against us again — the review trigger
   });
 });

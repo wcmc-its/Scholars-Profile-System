@@ -143,8 +143,10 @@ export type CoreStaffRecord = {
  * publishing reads green forever. See etl/dynamodb/producer-run-mapper.ts for
  * the two SK shapes and the four statuses.
  *
- * Note `pipeline_tools`, `pipeline_grants` and `pipeline_cores` write NO stage
- * row at all — their liveness is not observable from this table.
+ * Note `pipeline_tools` and `pipeline_grants` write NO stage row at all — their
+ * liveness is not observable from this table. `pipeline_cores` is mid-change:
+ * it is gaining a `STAGE#cores_run#GLOBAL` row, which the mapper already reads
+ * and prefers over the age of its output once one shows up.
  */
 export type ProducerRunRecord = {
   PK: string; // STAGE#{stage}#{scope}
@@ -168,10 +170,15 @@ export type ProducerRunRecord = {
  *   PK = `DRIFT#evaluation` | `DRIFT#taxonomy`
  *   SK = `DAY#{YYYY-MM-DD}`
  *
- * There is no status, no started_at and no duration. What there is, is
- * `window_end` -- the instant the evaluation covered up to, which in practice is
- * the moment the Lambda ran (cron fires 14:00Z, window_end reads 14:00:50Z). So
- * the row's EXISTENCE is the liveness signal and `window_end` is its timestamp.
+ * There is no status and no started_at. What there is, is `window_end` -- the
+ * instant the evaluation covered up to, which in practice is the moment the
+ * Lambda ran (cron fires 14:00Z, window_end reads 14:00:50Z). So the row's
+ * EXISTENCE is the liveness signal and `window_end` is its timestamp.
+ *
+ * `duration_ms` is OPTIONAL because it is new: none of the 106 + 33 rows
+ * already written carry it, and ReciterAI only started emitting it after the
+ * fact. buildDriftRunWrites therefore treats its absence as a no-op rather than
+ * as a zero -- see the note there.
  *
  * `severity` is deliberately NOT a run outcome. DRIFT#evaluation has read WARN
  * on all 106 rows it has ever written -- it is reporting on the DATA, not on
@@ -185,6 +192,7 @@ export type DriftDayRecord = {
   record_type?: string;
   window_start?: string;
   window_end?: string;
+  duration_ms?: number | string;
   [key: string]: unknown;
 };
 
