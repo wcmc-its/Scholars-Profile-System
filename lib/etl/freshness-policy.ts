@@ -17,7 +17,7 @@
  * one place and invisible in the other.
  */
 
-export type Cadence = "nightly" | "weekly" | "monthly" | "annual";
+export type Cadence = "nightly" | "nightly-mirrored" | "weekly" | "monthly" | "annual";
 
 export const HOUR_MS = 60 * 60 * 1000;
 
@@ -44,9 +44,32 @@ export const HOUR_MS = 60 * 60 * 1000;
  * the producer's `manifestGeneratedAt` rather than our row's `completedAt`, a
  * perfectly healthy monthly producer still reads as 38 days old just before our
  * loader next runs. An SLA at or below 38 would false-alarm every long month.
+ *
+ * `nightly-mirrored` is that same derivation for a DAILY producer we sample
+ * daily, and it exists because #2618 forgot to do it and shipped four rows that
+ * read Late every day:
+ *
+ *   24h  gap between two on-time daily producer runs
+ * + 24h  worst-case lag before OUR nightly mirrors the newest run
+ * +  6h  grace
+ * = 54h
+ *
+ * The middle term is not hypothetical, it is the common case. The SPS nightly
+ * runs cron(0 7 * * ? *); ReciterAI's daily jobs run at 11:00, 13:00, 14:00 and
+ * 15:00 UTC -- all AFTER it. So every one of those is mirrored the FOLLOWING
+ * night, arriving 16-20h old and ageing to 40-44h before the next mirror
+ * replaces it. Against `nightly`'s 30h ceiling that is a permanent false Late.
+ *
+ * Use `nightly` only when the producer runs BEFORE 07:00 UTC (as
+ * reciterai-grants-daily at 03:00 did, ceiling 28h -- and even that is 2h of
+ * headroom, which is why it moved here too). If you are tempted to widen
+ * `nightly` instead, don't: it also covers ~25 steps THIS repo runs inside the
+ * nightly chain, where a 30h ceiling is correct and 54h would hide a real outage
+ * for an extra day.
  */
 export const SLA_HOURS: Readonly<Record<Cadence, number>> = {
   nightly: 30,
+  "nightly-mirrored": 54,
   weekly: 8 * 24,
   monthly: 40 * 24,
   annual: 400 * 24,
@@ -289,18 +312,23 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // landed (2026-09-07), so each starts green and a red one is real news. If one
   // goes red for a reason we accept, ack it deliberately with an expiry, the way
   // Spotlight above does -- do not widen the cadence to hide it.
-  "ReciterAI-enrichment": { cadence: "nightly" },
+  // `nightly-mirrored`, not `nightly`: these producers run at 11:00 and 13:00
+  // UTC, AFTER the 07:00 UTC nightly that mirrors them, so each is 18-20h old
+  // the moment it lands and ages to ~44h before the next mirror. See SLA_HOURS.
+  "ReciterAI-enrichment": { cadence: "nightly-mirrored" },
   "ReciterAI-hot-path": { cadence: "weekly" },
   "ReciterAI-spotlight-gate": { cadence: "monthly" },
-  "ReciterAI-onboarding-detector": { cadence: "nightly" },
+  "ReciterAI-onboarding-detector": { cadence: "nightly-mirrored" },
   // The two daily drift Lambdas. They write a findings row per day rather than a
   // ledger entry, so the row's existence is the liveness signal -- see
   // buildDriftRunWrites. Their `severity` is NOT graded here: DRIFT#evaluation
   // has reported WARN every day of its life because it is describing the DATA,
   // and Teams alerting already carries that. A red row here means the Lambda
   // stopped running, which is a different and currently undetected event.
-  "ReciterAI-drift": { cadence: "nightly" },
-  "ReciterAI-taxonomy-drift": { cadence: "nightly" },
+  // 14:00 and 15:00 UTC, so the same mirror lag applies -- these two were the
+  // pair the eyeball caught reading Late on an entirely healthy Lambda.
+  "ReciterAI-drift": { cadence: "nightly-mirrored" },
+  "ReciterAI-taxonomy-drift": { cadence: "nightly-mirrored" },
   // The last two ReciterAI jobs, and the only ones graded on the age of their
   // OUTPUT rather than on a record of the run. Read that difference before
   // reacting to a red row here: it means DATA STOPPED ARRIVING, which a stopped
@@ -316,7 +344,10 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // first quiet night and teach everyone to ignore this row. 8 days is a
   // backstop behind `reciterai-cores-run-errors`, which is what catches a
   // crashing run in real time. Do NOT "fix" this to nightly to match the cron.
-  "ReciterAI-grants": { cadence: "nightly" },
+  // grants runs 03:00 UTC, BEFORE the mirror, so it lands ~4h old and its true
+  // ceiling is 28h -- inside `nightly`'s 30h, but by two hours, which one slow
+  // run erases. Same cadence as its siblings rather than a permanent coin flip.
+  "ReciterAI-grants": { cadence: "nightly-mirrored" },
   "ReciterAI-cores": { cadence: "weekly" },
 };
 

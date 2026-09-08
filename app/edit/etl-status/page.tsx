@@ -111,13 +111,24 @@ function expectedEvery(slaHours: number): string {
 
 const CADENCE_LABEL: Record<Cadence, string> = {
   nightly: "Every night",
+  // Reads the same to a superuser ON PURPOSE: the job really does run nightly,
+  // and the distinction from `nightly` is only about how long we wait before
+  // calling it late (it is mirrored from a system whose run lands after ours).
+  // That is a policy detail, not something to make somebody decode in a column.
+  "nightly-mirrored": "Every night",
   weekly: "Every week",
   monthly: "Every month",
   annual: "Once a year",
 };
 
 /** Fastest cadence first — the order a superuser expects, not alphabetical. */
-const CADENCE_RANK: Record<Cadence, number> = { nightly: 0, weekly: 1, monthly: 2, annual: 3 };
+const CADENCE_RANK: Record<Cadence, number> = {
+  nightly: 0,
+  "nightly-mirrored": 0,
+  weekly: 1,
+  monthly: 2,
+  annual: 3,
+};
 
 /**
  * One label + emoji + pill per state. "Known issue" is slate, not green and not
