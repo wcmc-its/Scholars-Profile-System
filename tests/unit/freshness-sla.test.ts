@@ -44,9 +44,76 @@ describe("freshness SLAs", () => {
   // Guards the ordering invariant the table depends on: a longer cadence must
   // tolerate a longer silence, or a source would alarm faster than it can run.
   it("keeps SLAs monotonic across cadences", () => {
-    expect(SLA_HOURS.nightly).toBeLessThan(SLA_HOURS.weekly);
+    expect(SLA_HOURS.nightly).toBeLessThan(SLA_HOURS["nightly-mirrored"]);
+    expect(SLA_HOURS["nightly-mirrored"]).toBeLessThan(SLA_HOURS.weekly);
     expect(SLA_HOURS.weekly).toBeLessThan(SLA_HOURS.monthly);
     expect(SLA_HOURS.monthly).toBeLessThan(SLA_HOURS.annual);
+  });
+
+  /**
+   * The regression this file existed to prevent and still shipped.
+   *
+   * #2618/#2621 gave every daily ReciterAI producer the `nightly` cadence,
+   * reasoning from the producer's own schedule alone. But we do not observe the
+   * producer, we observe our MIRROR of it, and the SPS nightly runs 07:00 UTC
+   * while four of these producers run at 11:00-15:00 UTC. Each of those is
+   * therefore mirrored the FOLLOWING night, arrives 16-20h old, and ages to
+   * 40-44h before the next mirror replaces it -- permanently past `nightly`'s
+   * 30h ceiling. Two rows were already reading Late on entirely healthy Lambdas
+   * when a human finally looked at the page; the other two were hours away.
+   *
+   * No test could see it because every test asserted against the producer's
+   * cadence, which is the number that was wrong. This one asserts against the
+   * arithmetic instead: worst observable age, derived from BOTH schedules.
+   */
+  describe("daily ReciterAI mirrors: SLA vs worst-case MIRRORED age", () => {
+    /** cron(0 7 * * ? *) -- cdk/lib/etl-stack.ts nightly schedule. */
+    const SPS_MIRROR_HOUR_UTC = 7;
+
+    /** ReciterAI infra/eventbridge.json, verified live 2026-09-08. */
+    const PRODUCER_HOUR_UTC: Readonly<Record<string, number>> = {
+      "ReciterAI-grants": 3,
+      "ReciterAI-enrichment": 11,
+      "ReciterAI-onboarding-detector": 13,
+      "ReciterAI-drift": 14,
+      "ReciterAI-taxonomy-drift": 15,
+    };
+
+    /**
+     * How old the newest producer run is at the instant we mirror it, plus the
+     * 24h it then ages before the next mirror can replace it.
+     */
+    const worstMirroredAgeHours = (producerHourUtc: number): number => {
+      const ageAtMirror =
+        producerHourUtc < SPS_MIRROR_HOUR_UTC
+          ? SPS_MIRROR_HOUR_UTC - producerHourUtc // mirrored the same morning
+          : 24 - (producerHourUtc - SPS_MIRROR_HOUR_UTC); // missed today, caught tomorrow
+      return ageAtMirror + 24;
+    };
+
+    it.each(Object.entries(PRODUCER_HOUR_UTC))(
+      "%s tolerates its full mirror lag without reading Late",
+      (source, hourUtc) => {
+        const spec = TRACKED[source];
+        expect(spec, `${source} is not TRACKED`).toBeDefined();
+        const worst = worstMirroredAgeHours(hourUtc);
+        expect(
+          SLA_HOURS[spec.cadence],
+          `${source}: producer runs ${hourUtc}:00 UTC, mirrored ${SPS_MIRROR_HOUR_UTC}:00 UTC, ` +
+            `so it reads up to ${worst}h old while perfectly healthy -- but cadence ` +
+            `"${spec.cadence}" alarms at ${SLA_HOURS[spec.cadence]}h`,
+        ).toBeGreaterThan(worst);
+      },
+    );
+
+    it("proves the arithmetic catches the bug that shipped", () => {
+      // A producer at 11:00 UTC mirrored at 07:00 UTC really is 44h stale at
+      // worst. If this drops to <= 30 the helper has been broken and every
+      // assertion above it goes vacuous.
+      expect(worstMirroredAgeHours(11)).toBe(44);
+      expect(worstMirroredAgeHours(3)).toBe(28);
+      expect(SLA_HOURS.nightly).toBeLessThan(worstMirroredAgeHours(11));
+    });
   });
 
   // Every tracked source must resolve to a cadence that exists in SLA_HOURS —
