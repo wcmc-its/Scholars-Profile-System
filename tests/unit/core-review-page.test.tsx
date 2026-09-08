@@ -10,6 +10,13 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+// Type-only, so the runtime mocks below are untouched: it is what makes the
+// QUEUE fixture a REAL queue and stops `mockLoadPaperCounts` from accepting a
+// counts row that has drifted out of shape (round-3 G6 — a fixture missing the
+// required `total` type-checked only because the mock was a bare `vi.fn()`).
+import type { CoreQueueRow, CoreReviewQueue } from "@/lib/api/core-queue";
+import type { loadCoreClientPaperCounts } from "@/lib/api/core-clients";
+
 const {
   mockGetEditSession,
   mockRedirect,
@@ -40,7 +47,7 @@ const {
   // core's active client list alongside the queue; stubbed out here since
   // this file is purely about the authorization gates above it.
   mockLoadClients: vi.fn(),
-  mockLoadPaperCounts: vi.fn(),
+  mockLoadPaperCounts: vi.fn<typeof loadCoreClientPaperCounts>(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
@@ -88,14 +95,62 @@ function findByType(node: unknown, type: unknown): El | null {
   return findByType(el.props?.children, type);
 }
 
-const QUEUE = {
+/** A WCM byline author, the only part of a queue row this page reads. */
+const author = (cwid: string) => ({ cwid, name: cwid.toUpperCase(), slug: null, dept: null });
+
+/** A queue row as `loadCoreReviewQueue` builds one. Typed, not a partial cast:
+ *  the page unions `wcmAuthors` across all three lists into the paper-counts
+ *  query, so the field it reads must not be free to drift. */
+function row(pmid: string, wcmAuthors: CoreQueueRow["wcmAuthors"]): CoreQueueRow {
+  return {
+    pmid,
+    title: `Paper ${pmid}`,
+    journal: null,
+    journalAbbrev: null,
+    year: 2021,
+    dateAddedToEntrez: null,
+    authorsString: null,
+    fullAuthorsString: null,
+    abstract: null,
+    synopsis: null,
+    likelihood: 0.5,
+    status: "candidate",
+    coauthors: [],
+    coauthorScholars: [],
+    wcmAuthors,
+    signalAck: false,
+    ackAlias: null,
+    ackSnippet: null,
+    llmScore: null,
+    llmRationale: null,
+    authorAffinity: null,
+    topicalPrior: null,
+    methodTier: null,
+    methodEvidence: [],
+    citationCount: 0,
+    pubmedUrl: null,
+    doi: null,
+    claimed: false,
+    isManual: false,
+    relativeCitationRatio: null,
+    nihPercentile: null,
+    meshTerms: [],
+  };
+}
+
+const QUEUE: CoreReviewQueue = {
   // Both staff counts travel on `core` (etl/dynamodb Block 6b ->
   // loadCoreReviewQueue); null is the common case — the engine has published
   // no counts for this core.
   core: { id: "2", name: "Biomedical Imaging", staffCount: null, staffTrackedCount: null },
-  candidates: [],
-  confirmed: [],
-  rejected: [],
+  // POPULATED, one row per list, each carrying WCM byline authors. Three empty
+  // arrays is what made the paper-counts assertion below vacuous (round-3 G6):
+  // the page's byline-author union folds over these three lists, so with them
+  // empty the union is `[]` whether the page spreads them in or not — and the
+  // whole "name the repeat user" feature could be deleted with this file green.
+  candidates: [row("1", [author("cand01"), author("cand02")])],
+  confirmed: [row("2", [author("conf01"), author("sab2028")])],
+  rejected: [row("3", [author("rej01")])],
 };
 
 beforeEach(() => {
@@ -157,10 +212,17 @@ describe("/edit/core/[coreId]/review — authorization", () => {
     });
   });
 
-  it("loads client paper counts over the CONFIRMED list and this core's client CWIDs, and passes them down", async () => {
+  it("loads client paper counts over the CONFIRMED list, this core's client CWIDs AND every WCM byline author, and passes them down", async () => {
     // The wiring, not the fold: `paperCounts` cannot be derived in the component
     // (row.wcmAuthors is capped at 12), so if the page stops passing it the
     // evidence line silently loses "18 papers, 11 recent" with nothing failing.
+    //
+    // The second half of the union is the load-bearing one and the reason this
+    // test asserts the WHOLE array rather than a `containing`: the repeat-user
+    // line has to NAME someone, and the only defensible name is a person whose
+    // confirmed count was computed here. Drop the byline spread from page.tsx
+    // and the counts map goes from 246 keys to 1 on staging core 14, taking the
+    // named "Repeat user" line off 2,183 of 2,267 candidate rows in silence.
     mockGetEditSession.mockResolvedValue({ cwid: "own001", isSuperuser: false });
     mockUnitAdminFindUnique.mockResolvedValue({ role: "owner" });
     mockLoadClients.mockResolvedValue([
@@ -168,15 +230,37 @@ describe("/edit/core/[coreId]/review — authorization", () => {
       // A name-only client has no cwid and must not reach the counts query.
       { id: "r2", cwid: null, name: "Ada", slug: null, affiliation: null, addedByName: null, addedAt: new Date(), addedBy: "rev01" },
     ]);
-    mockLoadPaperCounts.mockResolvedValue({ sab2028: { papers: 18, recent: 11 } });
+    mockLoadPaperCounts.mockResolvedValue({ sab2028: { papers: 18, recent: 11, total: 29 } });
     const result = asEl(await EditCoreReviewPage({ params: params("2") }));
     expect(mockLoadPaperCounts).toHaveBeenCalledWith(
       QUEUE.confirmed,
-      ["sab2028"],
+      // Roster CWIDs first, then the byline authors of candidates, confirmed and
+      // rejected in that order. Raw, NOT de-duped — sab2028 is both a listed
+      // client and a byline author here and appears twice on purpose: the loader
+      // lowercases and de-dupes, so paying for a second pass in the page would
+      // buy nothing.
+      ["sab2028", "cand01", "cand02", "conf01", "sab2028", "rej01"],
       expect.anything(),
     );
     const queueEl = findByType(result, mockQueueComponent);
-    expect(queueEl!.props.paperCounts).toEqual({ sab2028: { papers: 18, recent: 11 } });
+    expect(queueEl!.props.paperCounts).toEqual({
+      sab2028: { papers: 18, recent: 11, total: 29 },
+    });
+  });
+
+  it("passes the byline authors even when the core has no listed clients at all", async () => {
+    // The roster is empty on a core that has never used the client panel, and
+    // that is exactly when the byline union is the only source of names — so it
+    // gets its own case rather than riding on the roster one above.
+    mockGetEditSession.mockResolvedValue({ cwid: "own001", isSuperuser: false });
+    mockUnitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    mockLoadClients.mockResolvedValue([]);
+    await EditCoreReviewPage({ params: params("2") });
+    expect(mockLoadPaperCounts).toHaveBeenCalledWith(
+      QUEUE.confirmed,
+      ["cand01", "cand02", "conf01", "sab2028", "rej01"],
+      expect.anything(),
+    );
   });
 
   it("queue absent (core row gone between the authz check and the load) → 404", async () => {

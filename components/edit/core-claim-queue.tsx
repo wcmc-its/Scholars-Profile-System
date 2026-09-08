@@ -23,14 +23,11 @@
  *     meter. The sweep was gated on a 0.9 threshold never validated against an
  *     observed confirm rate; with it gone the tick marks nothing a curator can
  *     act on, so drawing it would imply a control that no longer exists.
- *   - the signal count says "N of 5" with all FIVE signals countable (the
- *     artboard's own numerator excluded two rows it drew, so it could never
- *     reach its own denominator).
+ *   - the signal count says "N of 4" with all FOUR signals countable (the
+ *     artboard's own numerator excluded rows it drew, so it could never reach
+ *     its own denominator).
  *   - the group header names BANDS, not "likelihood 41-94%" — the band
  *     vocabulary is the only score vocabulary this surface uses.
- *   - the prefilter prior stays a visible signal row rather than the artboard's
- *     dimmed "Not evidence" footnote: `decodeTopicalPrior` gives it a true
- *     reading here (see below), and it has to be visible to be countable.
  *   - PMID/CWID parsing keeps the shipped strict parsers and their
  *     rejected-token reporting; the artboard's split-on-any-non-digit form
  *     would silently turn "abc123def" into PMID 123.
@@ -74,8 +71,15 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import type { CoreClientPaperCount, CoreClientRow } from "@/lib/api/core-clients";
+import type { CoreClientRow } from "@/lib/api/core-clients";
+// The PURE half of `lib/api/core-clients.ts`. `excludingOwnPaper` is a VALUE
+// import, so it must not come from the loader module — that one constructs prisma
+// at module scope and would drag the mariadb driver into this client bundle.
+import { excludingOwnPaper, type CoreClientPaperCount } from "@/lib/cores/paper-counts";
 import { droppedAuthorCount, stripWcmMarkers } from "@/lib/author-byline";
+// See `nameWords`. Dependency-free by design (its own docblock says so), so it
+// imports nothing at module scope and is safe in this client bundle.
+import { extractLastNameSort, stripUnitDisambiguation } from "@/lib/name-sort";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 import { CoreClientsDialog } from "@/components/edit/core-clients-panel";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -162,9 +166,10 @@ export const CSV_HEADERS = [
 
 /** One CSV row for a queue row, given its already-resolved display status.
  *  Pure: `status` is passed in because deriving it needs component state.
- *  NOTE the two deliberate mismatches with the card: the CSV keeps the FULL journal
- *  (not `journalAbbrev`) and the RAW title (not `displayTitle`), because an export is
- *  a record, not a rendering — a stripped trailing period would corrupt a citation. */
+ *  NOTE the deliberate mismatch with the card: the CSV keeps the RAW title (not
+ *  `displayTitle`), because an export is a record, not a rendering — a stripped
+ *  trailing period would corrupt a citation. (The journal no longer differs: the
+ *  card prefers the full title too since round 2.) */
 export function csvRow(r: CoreQueueRow, status: string): (string | number)[] {
   const authors = r.fullAuthorsString ?? r.authorsString ?? "";
   // plain Vancouver-ish citation string, PMID-anchored
@@ -220,7 +225,7 @@ type QueueView = "review" | "confirmed" | "rejected";
 export type FilterKey = "client" | "ack" | "coauthored" | "noprior" | "llm" | "method";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm" | "year" | "cites";
 
-type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
+type SignalKind = "ack" | "coauthor" | "llm" | "affinity";
 interface Signal {
   kind: SignalKind;
   /** 1–4 display strength. */
@@ -228,15 +233,17 @@ interface Signal {
   strength: string;
 }
 
-/** The five core-usage signals (ack, co-author, LLM, repeat-user, prefilter prior). */
-const SIGNAL_COUNT = 5;
+/** The four counted core-usage signals (ack, co-author, LLM, repeat-user). The
+ *  prefilter prior was the fifth until round 2 demoted it: it is not evidence
+ *  about the paper, so it renders as an italic footnote under the signal list
+ *  (see `priorFootnote`) and is no longer part of this denominator. */
+const SIGNAL_COUNT = 4;
 /** Stable tie-break so equal-strength signals keep a deterministic order. */
 const KIND_ORDER: Record<SignalKind, number> = {
   ack: 0,
   coauthor: 1,
   llm: 2,
   affinity: 3,
-  topic: 4,
 };
 
 /**
@@ -261,34 +268,193 @@ export function decodeTopicalPrior(prior: number): { mesh: boolean; affinity: bo
 }
 
 /**
- * Which of the five signals fired for a row. Strength is FIXED PER SIGNAL TYPE —
- * how much that *kind* of evidence should move a reviewer — NOT the model's
- * self-score: ack = Direct (4), core-staff co-author = Strong (3),
- * LLM read = Moderate (2) regardless of score, repeat-user prior and the
- * prefilter prior = Weak (1) — both are indirect priors, not direct evidence
- * about this specific paper. Note the prefilter prior OVERLAPS the repeat-user
- * one by construction (see decodeTopicalPrior): on an author-only prior the two
- * rows are the same evidence, which is why that case says so out loud rather
- * than reading as independent corroboration. The raw value rides along as the
- * signal's value line — LLM as a score out of 10, and repeat-user as a
- * percentage whose MEANING changed with ReciterAI #382: it used to be a capped
- * strength (values piled on the 0.85 ceiling — 84% of one live queue sat exactly
- * there), and is now a rate, the share of an author's own corpus already given
- * to this core, so the same paper reads single digits where it used to read 85%.
+ * The prefilter prior as a FOOTNOTE, not a counted signal (owner, round 2). It
+ * is not evidence about this paper: on an author-only prior it is the
+ * repeat-user number a second time, and on a MeSH-only prior it is a descriptor
+ * match on the paper's own indexing, never a record of this core doing the work.
+ * Demoted, not deleted — a reviewer who can see the score cannot see what moved
+ * it unless this stays on screen.
+ *
+ * Decoded, never asserted (see `decodeTopicalPrior`). The author-only case is
+ * the common one and carries the owner's copy verbatim; a footnote that said
+ * "no mapped MeSH branch" on the rows where MeSH DID fire would repeat the exact
+ * mistake `decodeTopicalPrior` exists to prevent, so those two cases get their
+ * own honest sentence — and neither claims the prior is nothing.
+ *
+ * Null at a prior of 0 or absent: that is the prefilter saying NEITHER of its
+ * signals fired — absent evidence, which by the engine's own convention emits no
+ * key rather than a zero-valued one (pipeline_cores/combine.py
+ * evidence_features). A "0%" footnote would caption a row that has nothing to
+ * show. Pure.
+ *
+ * `repeatUserShown` is REQUIRED, and it is what the card actually rendered, not
+ * what the prior decoded to: the affinity halves of this copy point at the
+ * repeat-user row ("it only restates..."), and per-person de-duplication can
+ * take that row off the card entirely (see `repeatUserFires`). Pointing at a row
+ * that is not on screen is the same species of unchecked assertion
+ * `decodeTopicalPrior` exists to prevent, so the caller has to say.
+ */
+export function priorFootnote(prior: number | null, repeatUserShown: boolean): string | null {
+  if (prior === null || prior <= 0) return null;
+  const pct = Math.round(prior * 100);
+  const { mesh, affinity } = decodeTopicalPrior(prior);
+  if (mesh && affinity)
+    return repeatUserShown
+      ? `Not counted as evidence: the topical prior (${pct}%) blends a MeSH-branch match with the repeat-user number it already restates.`
+      : `Not counted as evidence: the topical prior (${pct}%) blends a MeSH-branch match with an author's prior use of this core.`;
+  if (mesh)
+    return `Not counted as evidence: the topical prior (${pct}%) is a MeSH-branch match on the paper's own descriptors, not a record of this core doing the work.`;
+  return repeatUserShown
+    ? `No evidence found: the topical prior (${pct}%) has no mapped MeSH branch for this core, so it only restates the repeat-user number.`
+    : `No evidence found: the topical prior (${pct}%) has no mapped MeSH branch for this core, so it rests on an author's prior use of this core rather than on this paper.`;
+}
+
+/**
+ * WHO the repeat-user prior is about, derived rather than reported.
+ *
+ * The engine publishes ONE scalar per row and never records whose it is
+ * (`author_affinity` arrives as a bare number, see
+ * etl/dynamodb/publication-core-mapper.ts). Round 2 requires the person be named
+ * on every row, so the name is computed here instead: the byline WCM author this
+ * core already holds the most CONFIRMED papers from, and their own counts are
+ * what gets printed. Name and number then come out of one computation and cannot
+ * disagree — which is also why the engine's percentage is never printed beside
+ * the derived name. Affinity is the largest SHARE, and the largest share need not
+ * belong to the largest count.
+ *
+ * EXCLUDE FIRST, THEN PICK. Anyone another evidence token already names is out of
+ * the running before the maximum is taken. Picking the maximum first and testing
+ * identity afterwards is the same code with the steps swapped, and it behaves
+ * like the rule the owner FORBADE (item 6c): core staff normally hold more of
+ * their own core's confirmed papers than anyone else on the byline, so the winner
+ * was a staff member on almost every staff-co-authored row, and the second
+ * person's independent prior use — the evidence 6c exists to protect — was thrown
+ * away with them.
+ *
+ * Ties keep byline order (first author wins), so the choice is deterministic.
+ * `paperCounts` is server-computed and uncapped; `row.wcmAuthors` is capped at 12,
+ * so a person buried past the cap is simply not nameable here — which is what the
+ * null return is for.
+ *
+ * A count of ZERO papers names nobody either. The loader never emits one, but
+ * `withoutOwnPaper` does: on the Confirmed tab a person whose only confirmed
+ * paper is the row on screen comes through at 0, and "has used the core on 0
+ * previous occasions" is not a weaker claim than one occasion, it is no claim.
+ * The key stays in the map at zero on purpose — see `withoutOwnPaper` for what
+ * reads it there. Pure.
+ */
+export function repeatUser(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
+  clientCwids: ReadonlySet<string> = new Set(),
+): { scholar: QueueScholar; counts: CoreClientPaperCount } | null {
+  if (row.authorAffinity === null) return null;
+  const named = namedByOtherEvidence(row, clientCwids);
+  let best: { scholar: QueueScholar; counts: CoreClientPaperCount } | null = null;
+  for (const a of row.wcmAuthors) {
+    const cwid = a.cwid.toLowerCase();
+    if (named.has(cwid)) continue;
+    const counts = paperCounts[cwid];
+    if (counts && counts.papers > 0 && (!best || counts.papers > best.counts.papers))
+      best = { scholar: a, counts };
+  }
+  return best;
+}
+
+/**
+ * Lowercased CWIDs the row's OTHER evidence tokens already name: every core-staff
+ * co-author, and every known client on the byline. `row.coauthors` rather than
+ * `coauthorScholars` so an unresolved staff CWID still de-duplicates;
+ * `clientCwids` arrives lowercased (see `evidenceTokens`).
+ *
+ * Both halves, because both print the person AND the same pile of papers: the
+ * "Client co-author" token carries "18 papers, 11 recent" and the repeat-user
+ * sentence carries "18 previous occasions" about the same 18. One person, one
+ * pile, once (item 6b). Pure.
+ */
+function namedByOtherEvidence(
+  row: CoreQueueRow,
+  clientCwids: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const named = new Set(row.coauthors.map((c) => c.toLowerCase()));
+  for (const a of row.wcmAuthors) {
+    const cwid = a.cwid.toLowerCase();
+    if (clientCwids.has(cwid)) named.add(cwid);
+  }
+  return named;
+}
+
+/**
+ * Does the repeat-user signal fire — as a row, as a strip token, and in the
+ * count, which is one decision made once so the three cannot disagree.
+ *
+ * It fires whenever `repeatUser` still has somebody to name. It does NOT fire
+ * when this core's counts have nothing further to say about anyone on the byline
+ * — either because every counted person is already named by another token (one
+ * person's involvement shown twice, and the rendered count DOES fall with it:
+ * owner, round 2, item 6b) or because the only counts here are the row's own
+ * paper, subtracted back out to zero. The test is PER PERSON on lowercased
+ * CWIDs, never "drop repeat-user whenever a staff co-author fired" — a DIFFERENT
+ * byline author with prior confirmed use is independent evidence and survives
+ * (6c).
+ *
+ * With no counts at all we can name nobody and nothing is de-duplicated: the
+ * engine's unnamed rate is then all that is on file, and dropping a signal on a
+ * guess is worse than the fallback sentence `evidenceTokens` prints instead.
+ */
+function repeatUserFires(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
+  clientCwids: ReadonlySet<string>,
+): boolean {
+  if (row.authorAffinity === null) return false;
+  if (repeatUser(row, paperCounts, clientCwids)) return true;
+  // Nobody left to name — two very different reasons, and only one of them is
+  // empty: somebody on this byline HAS a count here and it added nothing (drop
+  // the signal), or no byline author has a count here at all (keep it, unnamed).
+  //
+  // The test is KEY PRESENCE, never the number behind it, and never WHO holds
+  // the key. A confirmed row takes its own paper back out of these counts
+  // (`withoutOwnPaper`) and a byline author can come out at zero — "everything
+  // this core holds from them is the row you are looking at", which is not a
+  // previous occasion and not a claim to print. That is true of the PLAIN author
+  // as much as of the one a staff or client token names: an adjusted zero means
+  // nothing further to add, full stop.
+  //
+  // Reading the zero as "nobody qualifies" fired the unnamed fallback — the row
+  // counted as its own evidence, and "N of 4" going UP on the one tab that
+  // subtracts. Requiring the zero-holder to ALSO be named by another token (as
+  // this did) fixed only the half of that where somebody else had named them.
+  return !row.wcmAuthors.some((a) => paperCounts[a.cwid.toLowerCase()]);
+}
+
+/**
+ * Which of the four counted signals fired for a row. Strength is FIXED PER
+ * SIGNAL TYPE — how much that *kind* of evidence should move a reviewer — NOT
+ * the model's self-score: ack = Direct (4), core-staff co-author = Strong (3),
+ * LLM read = Moderate (2) regardless of score, repeat-user = Weak (1), an
+ * indirect prior rather than direct evidence about this specific paper. The raw
+ * value rides along as the signal's value line — LLM as a score out of 10, and
+ * repeat-user as the named person's own confirmed-paper count.
+ *
+ * `paperCounts` and `clientCwids` are what make the per-person de-duplication
+ * possible: a repeat-user prior about the very person the staff- or
+ * client-co-author token names is the same evidence twice, so `repeatUserFires`
+ * drops it here and the rendered count DOES fall (owner, round 2). Passing
+ * neither names nobody and de-duplicates nothing.
  * Pure; ordered strongest-first.
  */
-export function buildSignals(row: CoreQueueRow): Signal[] {
+export function buildSignals(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  clientCwids: ReadonlySet<string> = new Set(),
+): Signal[] {
   const out: Signal[] = [];
   if (row.signalAck || row.ackAlias) out.push({ kind: "ack", dots: 4, strength: "Direct" });
   if (row.coauthors.length > 0) out.push({ kind: "coauthor", dots: 3, strength: "Strong" });
   if (row.llmScore !== null) out.push({ kind: "llm", dots: 2, strength: "Moderate" });
-  if (row.authorAffinity !== null) out.push({ kind: "affinity", dots: 1, strength: "Weak" });
-  // A prior of 0 is the prefilter saying NEITHER of its signals fired — absent
-  // evidence, which by the engine's own convention emits no key rather than a
-  // zero-valued one (pipeline_cores/combine.py evidence_features). Rendering it
-  // would put a "0%" chip on a row that has nothing to show.
-  if (row.topicalPrior !== null && row.topicalPrior > 0)
-    out.push({ kind: "topic", dots: 1, strength: "Weak" });
+  if (repeatUserFires(row, paperCounts, clientCwids))
+    out.push({ kind: "affinity", dots: 1, strength: "Weak" });
   return out.sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 }
 
@@ -331,78 +497,136 @@ export interface EvidenceToken {
   value: string;
 }
 
-/** "Banerjee" -> "Banerjee's", "Sholles" -> "Sholles'". A straight apostrophe,
- *  matching the "an author's own work" fallback it alternates with — the two
- *  render in the same sentence slot and must not disagree typographically. Pure. */
-export function possessive(name: string): string {
-  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+/** "18 papers" / "1 paper". Pure. */
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /**
  * "Samprit Banerjee, 18 papers, 11 recent" — the person's name plus what this
  * core already holds from them. A count of zero is DROPPED rather than printed
  * as "0 papers": a client the core has nothing confirmed from yet should read
- * as a name, not as a person the core has looked at and rejected. Pure.
+ * as a name, not as a person the core has looked at and rejected.
+ *
+ * HOLDINGS, never "previous occasions": pass the core's counts as the loader
+ * built them, never `withoutOwnPaper`'s adjusted copy. The two answer different
+ * questions and the same person's number must not disagree between the Review
+ * and Confirmed tabs — see `evidenceTokens`.
+ *
+ * Through `displayName`, like every other name this file prints: the curated
+ * collision suffix is a roster disambiguation device, so the raw name put the
+ * department inside it ("Alessandro Fichera - Surgery, 18 papers"). Pure.
  */
 export function namedWithCounts(
   scholar: QueueScholar,
   counts: Readonly<Record<string, CoreClientPaperCount>>,
 ): string {
+  const name = displayName(scholar.name);
   const c = counts[scholar.cwid.toLowerCase()];
-  if (!c || c.papers === 0) return scholar.name;
-  const papers = `${c.papers} ${c.papers === 1 ? "paper" : "papers"}`;
-  return c.recent > 0
-    ? `${scholar.name}, ${papers}, ${c.recent} recent`
-    : `${scholar.name}, ${papers}`;
+  if (!c || c.papers === 0) return name;
+  const papers = plural(c.papers, "paper");
+  return c.recent > 0 ? `${name}, ${papers}, ${c.recent} recent` : `${name}, ${papers}`;
 }
 
 /**
  * The collapsed evidence line as label/value pairs, so the values carry the
  * weight rather than a run-on sentence. `clientCwids` is the core's own "Known
  * clients" list (lowercased CWIDs) — a byline author on it is a stronger read
- * than a bare WCM co-author. Pure.
+ * than a bare WCM co-author, and, because that token NAMES them, one of the two
+ * populations the repeat-user line de-duplicates against (`repeatUserFires`).
+ *
+ * TWO COUNT MAPS, because the two tokens that read them make DIFFERENT
+ * statements about the same person. `holdings` is what this core holds from
+ * them, full stop, and the client token speaks it ("Kim Client, 18 papers, 11
+ * recent"). `priorCounts` is what it held BEFORE the row on screen, and the
+ * repeat-user line speaks that ("...on 17 previous occasions"). They are the
+ * same map everywhere but the Confirmed tab, which is why `priorCounts`
+ * defaults to `holdings`: a candidate's own paper was never inside these counts.
+ * `ConfirmedRow` is the one caller that passes both, and it MUST, because
+ * handing `withoutOwnPaper`'s adjusted copy to the client token made the same
+ * person read "18 papers" on Review and "17 papers" on Confirmed.
+ * Pure.
  */
 export function evidenceTokens(
   row: CoreQueueRow,
   clientCwids: ReadonlySet<string> = new Set(),
-  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  holdings: Readonly<Record<string, CoreClientPaperCount>> = {},
+  priorCounts: Readonly<Record<string, CoreClientPaperCount>> = holdings,
 ): EvidenceToken[] {
   const tokens: EvidenceToken[] = [];
   if (row.ackAlias) tokens.push({ label: "Acknowledged as", value: `“${row.ackAlias}”` });
   else if (row.signalAck) tokens.push({ label: "Acknowledged", value: "in the full text" });
+  // The ONE identity this token puts on screen. `coauthorScholars` is a subset of
+  // `coauthors` (a staff CWID with no Scholar row stays only in the latter), so
+  // the fallback prints the bare CWID rather than nothing.
+  const staffNamed = (row.coauthorScholars[0]?.cwid ?? row.coauthors[0] ?? "").toLowerCase();
   if (row.coauthors.length > 0) {
-    const named = row.coauthorScholars[0]?.name ?? row.coauthors[0];
-    tokens.push({ label: "Staff co-author", value: named });
+    tokens.push({
+      label: "Staff co-author",
+      value: row.coauthorScholars[0] ? displayName(row.coauthorScholars[0].name) : row.coauthors[0],
+    });
   }
-  const clients = row.wcmAuthors.filter((a) => clientCwids.has(a.cwid.toLowerCase()));
+  // STAFF WINS when one person is both, and the client token drops them rather
+  // than the other way round — the same collision the byline chip resolves the
+  // same way, and for the same reason: "Staff co-author" is the stronger read
+  // (3 dots against a client's 0 — the client token is not even a counted
+  // signal), and it is the label the expanded card's own evidence row speaks.
+  // Printing "Dana Both" under both labels is one person's involvement shown
+  // twice, which item 6b forbids as flatly here as it does for the repeat-user
+  // line.
+  //
+  // The suppression is EXACTLY the person the token above names, and not one
+  // person wider. Dropping every `row.coauthors` entry was the wider rule, and
+  // it deleted people: the token only ever names the FIRST staff member, so a
+  // both-flavour client listed second was suppressed here and named nowhere in
+  // the strip — off it entirely, with the 40 confirmed papers the client token
+  // would have carried. "Shown twice" is a claim about what is on screen, so
+  // what is on screen is what it has to be measured against.
+  //
+  // The expanded card is unaffected: `CoauthorDetail` lists every staff
+  // co-author there, and `namedByOtherEvidence` — a different question, "who
+  // does this card name anywhere" — still de-duplicates the repeat-user line
+  // against the whole list.
+  //
+  // The `client` FACET is deliberately untouched: it answers "is a known client
+  // on this byline", which stays true of a person the strip credits as staff.
+  const clients = row.wcmAuthors.filter(
+    (a) => clientCwids.has(a.cwid.toLowerCase()) && a.cwid.toLowerCase() !== staffNamed,
+  );
   if (clients.length > 0) {
     tokens.push({
       label: clients.length > 1 ? "Client co-authors" : "Client co-author",
-      value: clients.map((c) => namedWithCounts(c, paperCounts)).join("; "),
+      value: clients.map((c) => namedWithCounts(c, holdings)).join("; "),
     });
   }
-  if (row.authorAffinity !== null) {
-    // NAME the person when — and only when — the byline leaves no doubt who it
-    // is. The engine publishes ONE scalar per row and never records which author
-    // it is about (`author_affinity` arrives as a bare number, see
-    // etl/dynamodb/publication-core-mapper.ts), so on a byline with two WCM
-    // authors a name here would be a coin flip printed as a fact. With exactly
-    // one WCM author there is nobody else it can be about, and it is named.
+  if (repeatUserFires(row, priorCounts, clientCwids)) {
+    // ALWAYS name the person (owner, round 2). This REVERSES #2620, which named
+    // one only on a single-WCM-author byline on the grounds that a name for the
+    // engine's scalar would otherwise be a coin flip printed as a fact. The
+    // resolution is not to guess harder but to stop reporting the scalar: the
+    // name and the numbers below both come out of `repeatUser`, which derives
+    // them from the counts this core actually holds, so they cannot disagree.
     //
-    // This is the same discipline `Byline` applies before rewriting a token to
-    // a full name, and the same error "Topical MeSH match" made by asserting a
-    // specific reading of a blended signal.
-    const sole = row.wcmAuthors.length === 1 ? row.wcmAuthors[0] : null;
-    const whose = sole ? `${possessive(sole.name)} own work` : "an author's own work";
+    // The fallback keeps the OLD unnamed sentence rather than inventing a name:
+    // when no byline author has a confirmed paper here (nobody past the 12-author
+    // cap is nameable, and a first-time byline has no counts at all) the engine's
+    // percentage is all we honestly have, and it is about "an author" because we
+    // do not know which.
+    const who = repeatUser(row, priorCounts, clientCwids);
     tokens.push({
       label: "Repeat user",
-      value: `${Math.round(row.authorAffinity * 100)}% of ${whose}`,
+      value: who
+        ? `${displayName(who.scholar.name)} has used the core on ${plural(who.counts.papers, "previous occasion")} (out of ${plural(who.counts.total, "publication")}).`
+        : // `?? 0` is unreachable — `repeatUserFires` already required a non-null
+          // affinity — and is here only because the guard now lives in that
+          // function rather than in a condition TypeScript can narrow on.
+          `${Math.round((row.authorAffinity ?? 0) * 100)}% of an author's own work`,
     });
   }
   if (row.llmScore !== null) {
     tokens.push({ label: "LLM on title and abstract", value: llmVerdict(row.llmScore) });
   }
-  // Method family is NOT one of the five counted signals -- SIGNAL_COUNT stays 5
+  // Method family is NOT one of the four counted signals -- SIGNAL_COUNT stays 4
   // and buildSignals does not know about it. It appears here, last, because a
   // reviewer should see it without the score claiming to have used it: it is
   // weighted 0.00 in the engine's combine.WEIGHTS and moves no likelihood.
@@ -417,24 +641,32 @@ export function evidenceTokens(
 
 /**
  * Which evidence KINDS fired on a row, as a stable grouping key ("ack+coauthor",
- * "llm", "none"). The prefilter prior is left out on purpose: by construction it
- * restates the repeat-user prior (see decodeTopicalPrior), so grouping on it
- * would split one pile of evidence into two under different names. Pure.
+ * "llm", "none"). Straight off `buildSignals`, so the group header can never
+ * name a pile the card itself does not show: the prefilter prior is absent
+ * because it is no longer a signal at all, and a repeat-user prior about a
+ * person the staff- or client-co-author token already names collapses into that
+ * token's own group — one person, one pile, which is exactly what that group
+ * then contains. Pure.
  */
-export function evidenceGroupKey(row: CoreQueueRow): string {
-  const kinds = buildSignals(row)
-    .map((s) => s.kind)
-    .filter((k) => k !== "topic");
+export function evidenceGroupKey(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  clientCwids: ReadonlySet<string> = new Set(),
+): string {
+  const kinds = buildSignals(row, paperCounts, clientCwids).map((s) => s.kind);
   return kinds.length === 0 ? "none" : kinds.join("+");
 }
 
-/** The evidence vocabulary a group header speaks. */
+/** The evidence vocabulary a group header speaks. "no counted signal" rather
+ *  than "no labelled signal": a method-family row lands in this group and DOES
+ *  carry a label — its chips, its strip token and its "Methods used" quote are
+ *  all on the card. What it does not carry is anything inside the denominator. */
 const GROUP_NAMES: Record<string, string> = {
   ack: "acknowledgment",
   coauthor: "staff co-author",
   llm: "LLM read",
   affinity: "repeat user",
-  none: "no labelled signal",
+  none: "no counted signal",
 };
 
 /** "3 papers · acknowledgment + staff co-author" — singular-safe. Pure. */
@@ -443,7 +675,7 @@ export function evidenceGroupLabel(key: string, count: number): string {
     .split("+")
     .map((k) => GROUP_NAMES[k] ?? k)
     .join(" + ");
-  return `${count} ${count === 1 ? "paper" : "papers"} · ${kinds}`;
+  return `${plural(count, "paper")} · ${kinds}`;
 }
 
 /**
@@ -476,7 +708,12 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "cites", label: "Most cited" },
 ];
 
-/** Highest single-signal strength on a row (0 when nothing fired). */
+/** Highest single-signal strength on a row (0 when nothing fired). Deliberately
+ *  un-de-duplicated: it is a SORT key, and one that moved with the known-clients
+ *  roster would reshuffle the queue on an edit that changed no evidence. The
+ *  de-dup can only ever drop the 1-dot repeat-user signal, so the maximum shifts
+ *  only on a row carrying nothing else — 1 against 0, where every ordering is as
+ *  arbitrary as the next. */
 function maxSignalDots(row: CoreQueueRow): number {
   return buildSignals(row).reduce((m, s) => Math.max(m, s.dots), 0);
 }
@@ -561,15 +798,13 @@ export function matchesFilters(
  * synopsis, the byline, the acknowledgment alias and its captured quote — plus
  * the WCM-byline and core-staff names the evidence rows resolve on expand.
  *
- * Three fields the artboard's blob searched are dropped, each because the row
- * doesn't carry it or the card doesn't show it:
- *   - method FAMILY + TOOL names: still absent. `method_evidence` is free text
- *     the loader deliberately does not select, so the individual family and
- *     tool strings have nothing here to match on. The BAND is a different
- *     matter: the card now renders "Method family <tier>" as an evidence
- *     token, so the token's own text IS searched below — the placeholder's
- *     "method" stopped being aspirational the moment that token shipped, and
- *     leaving it out would have broken this function's one rule;
+ * Of the fields the artboard's blob searched, method FAMILY names are now here
+ * (round 2 selects `methodEvidence` and chips the families at the card top) and
+ * the method BAND rides along as the evidence token's own rendered text. Three
+ * are still dropped, each because the row doesn't carry it or the card doesn't
+ * show it:
+ *   - method TOOL names: carried on the row but never rendered — the chips are
+ *     one per family, and the tool appears nowhere a reviewer can point at;
  *   - the affinity "who": `authorAffinity` is a bare 0-1 number here, with no
  *     person attached to search on;
  *   - `meshTerms`: on the row, but nothing has rendered it since the Details
@@ -592,6 +827,14 @@ export function searchBlob(row: CoreQueueRow): string {
     // word. Not `row.methodTier` alone — that would match "strong" but not the
     // "method" the placeholder advertises.
     row.methodTier ? `Method family ${row.methodTier}` : null,
+    // The chips at the card top, by the same rule: a reviewer who can READ
+    // "Flow cytometry" on the card must be able to filter on it. Gated on
+    // `methodTier` because the chips are — an untiered row carries families the
+    // card never draws, and searching those would put rows back that the
+    // reviewer cannot see a reason for. The extractor's quoted sentence is
+    // deliberately left out: 500 chars of free text per row would match on words
+    // that appear nowhere a reviewer can point at.
+    ...(row.methodTier ? row.methodEvidence.map((m) => m.family) : []),
   ]
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join(" ")
@@ -702,18 +945,28 @@ export function CoreClaimQueue({
   // reviewer has not been shown first.
   const [addCheck, setAddCheck] = useState<PmidCheck | null>(null);
   const [addChecking, setAddChecking] = useState(false);
-  // "Known clients" (ReciterAI #383 / SPS #2607) — the panel's open/closed
-  // state and its list live here (not in CoreClientsPanel), the same
-  // controlled-child pattern as Add PMIDs above, so the panel body can render
-  // as a toolbar sibling instead of a toolbar child (see the render below).
+  // "Known clients" (ReciterAI #383 / SPS #2607) — the panel's OPEN/CLOSED
+  // state lives here (not in CoreClientsPanel), the same controlled-child
+  // pattern as Add PMIDs above, so the panel body can render as a toolbar
+  // sibling instead of a toolbar child (see the render below).
+  //
+  // The LIST does not. It is read straight off the `clients` prop, exactly as
+  // candidates/confirmed/rejected are, and for the same reason: every write in
+  // the dialog ends in `router.refresh()`, and a refresh re-renders the Server
+  // Component and hands this component a NEW prop without clearing its state.
+  // `clients` was the one prop in this file cached in `useState` — seeded once
+  // and never re-seeded — so that refreshed roster was discarded on arrival: a
+  // client a co-owner or a second tab had added could never show up here, and
+  // `clientCwids` below could drift out of step with the server-computed
+  // `paperCounts` it has to agree with (a byline flagged as a client
+  // co-author, with no counts to print for them).
   const [clientsOpen, setClientsOpen] = useState(false);
-  const [clientRows, setClientRows] = useState<CoreClientRow[]>(clients);
   const router = useRouter();
 
   // Name-only clients carry no cwid, so they never join this set — they cannot
   // flag a byline, which is exactly what the modal tells the owner up front.
   const clientCwids: ReadonlySet<string> = new Set(
-    clientRows.flatMap((c) => (c.cwid ? [c.cwid.toLowerCase()] : [])),
+    clients.flatMap((c) => (c.cwid ? [c.cwid.toLowerCase()] : [])),
   );
 
 
@@ -1108,7 +1361,7 @@ export function CoreClaimQueue({
   if (grouped) {
     const byKey = new Map<string, CoreQueueRow[]>();
     for (const r of visible) {
-      const k = evidenceGroupKey(r);
+      const k = evidenceGroupKey(r, paperCounts, clientCwids);
       const list = byKey.get(k);
       if (list) list.push(r);
       else byKey.set(k, [r]);
@@ -1150,7 +1403,7 @@ export function CoreClaimQueue({
             aria-pressed={clientsOpen}
             className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
           >
-            Known clients (<span className="tabular-nums">{clientRows.length}</span>)
+            Known clients (<span className="tabular-nums">{clients.length}</span>)
           </button>
           <button
             type="button"
@@ -1302,8 +1555,7 @@ export function CoreClaimQueue({
       <CoreClientsDialog
         coreId={core.id}
         open={clientsOpen}
-        clients={clientRows}
-        onClientsChange={setClientRows}
+        clients={clients}
         onClose={() => setClientsOpen(false)}
       />
 
@@ -1567,7 +1819,8 @@ export function CoreClaimQueue({
  *     queue is built on the same invisible-not-broken property.
  *   - listed 0 — the dictionary lists no staff at all for this core. Its own
  *     sentence: the signal cannot fire, so every candidate the reviewer sees is
- *     carried by the other four signals.
+ *     carried by the other three signals (round 2 dropped the prefilter prior to
+ *     a footnote, so `SIGNAL_COUNT` is 4 and this is one of them).
  *   - listed > 0, tracked 0 — the dictionary lists staff but none of them
  *     resolve. Same conclusion, different cause, and the cause is worth saying:
  *     this one is fixable upstream, "lists none" is not.
@@ -1724,6 +1977,48 @@ function GroupHeader({
   );
 }
 
+/**
+ * `paperCounts` with a CONFIRMED row's own paper taken back out of every byline
+ * author's numbers, so "previous occasions" means occasions BEFORE this one.
+ *
+ * `loadCoreClientPaperCounts` counts over `queue.confirmed` and the Confirmed tab
+ * renders those same rows, so each of them sits inside its own evidence line: on
+ * staging core 14 one person's 46 confirmed cards each read "46 previous
+ * occasions" (45), and the 247 people with a single confirmed paper read "1
+ * previous occasion" on that very paper, where the truth is none.
+ *
+ * A person left at zero is never PRINTED as "0 previous occasions" — no previous
+ * occasion is not a weak claim, it is no claim — but the key STAYS IN THE MAP at
+ * zero, and that distinction is the whole point of this function's shape. A
+ * missing key means "this core holds nothing from them"; a zero means "everything
+ * it holds from them is the row you are looking at". `repeatUser` and
+ * `namedWithCounts` both print nothing off a zero, so the strip falls back exactly
+ * as it did when the key was deleted — to the bare name on the client token.
+ *
+ * `repeatUserFires` is the one reader that needs the difference, and DELETING the
+ * key lied to it: it reads presence as "somebody the other tokens already name has
+ * a pile here", and with the key gone it saw "nobody on this byline qualifies at
+ * all" and fired the unnamed fallback UNDER the staff or client token naming that
+ * very person — the F1/F5 duplicate re-opened, with "N of 4" rising on the one tab
+ * that subtracts.
+ *
+ * Only `row.wcmAuthors` is adjusted — nobody else can be named from it — and those
+ * come from the same `isConfirmed` byline read the counts do, so the paper really
+ * is in there. Pure.
+ */
+function withoutOwnPaper(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
+): Readonly<Record<string, CoreClientPaperCount>> {
+  const out = { ...paperCounts };
+  for (const a of row.wcmAuthors) {
+    const key = a.cwid.toLowerCase();
+    const held = out[key];
+    if (held) out[key] = excludingOwnPaper(held, row.year);
+  }
+  return out;
+}
+
 // A confirmed publication with an inline Revoke (kept walk-back-able for the
 // session — the one thing this list needs to earn its place below the queue).
 //
@@ -1731,7 +2026,7 @@ function GroupHeader({
 // engine re-scores every night, so a row confirmed months ago can be one the
 // evidence no longer supports, and until now this list showed a reviewer nothing
 // to judge that on — title, year, PMID and a Revoke button. Same band and
-// "N of 5 signals" the review queue shows, plus the evidence tokens, so
+// "N of 4 signals" the review queue shows, plus the evidence tokens, so
 // revisiting a confirmation and re-reviewing it use the same vocabulary.
 //
 // A MANUAL add has no engine row at all (`isManual`), so it gets the existing
@@ -1781,8 +2076,23 @@ function ConfirmedRow({
     );
   }
   const band = likelihoodBand(row.likelihood);
-  const tokens = evidenceTokens(row, clientCwids, paperCounts);
-  const signalCount = buildSignals(row).length;
+  // THIS row is inside its own counts — they are computed over `queue.confirmed`,
+  // which is the very list being rendered — so every byline author here carries
+  // this paper in their own "previous occasions". It comes back out before the
+  // strip prints anything. Candidates and rejected rows are untouched: the counts
+  // never saw their pmids.
+  const ownCounts = withoutOwnPaper(row, paperCounts);
+  // BOTH maps, and they go to different tokens. "Previous occasions" is about
+  // the papers before this one (`ownCounts`); "18 papers, 11 recent" on the
+  // client token is what this core HOLDS from them, which the row on screen is
+  // part of. Handing the subtracted copy to both made one person's number
+  // disagree with itself across the two tabs — Review "18 papers", Confirmed
+  // "17" — for a token whose whole job is to state a holding.
+  const tokens = evidenceTokens(row, clientCwids, paperCounts, ownCounts);
+  // The signal count is the repeat-user question alone, so it reads the
+  // subtracted map: a person whose only confirmed paper is this one adds no
+  // previous occasion and the count must not rise on the tab that subtracts.
+  const signalCount = buildSignals(row, ownCounts, clientCwids).length;
   return (
     <li className="text-muted-foreground flex items-start justify-between gap-2 text-sm">
       <span className="flex min-w-0 flex-col gap-0.5">
@@ -2140,13 +2450,55 @@ function CandidateCard({
 
   const likelihoodPct = Math.round(row.likelihood * 100);
   const band = likelihoodBand(row.likelihood);
-  const signals = buildSignals(row);
+  const signals = buildSignals(row, paperCounts, clientCwids);
   const tokens = evidenceTokens(row, clientCwids, paperCounts);
-  // The header's meta line, middot-separated: the abbreviated journal (the full
-  // title is a paragraph for some journals), when PubMed indexed it, then the
-  // PMID. Each part is dropped when its data is missing rather than rendered
-  // empty, so the separators are built from what actually survives.
-  const journalLabel = row.journalAbbrev ?? row.journal;
+  // Gated on the repeat-user row being ON SCREEN, not on the prior's own decode:
+  // the affinity copy points at that row, and per-person de-duplication can drop
+  // it, which left the footnote saying "it only restates the repeat-user number"
+  // with no such row anywhere on the card (round 2).
+  const footnote = priorFootnote(
+    row.topicalPrior,
+    signals.some((s) => s.kind === "affinity"),
+  );
+  // Method-family chips at the card top plus the "Methods used" evidence row
+  // (mockup). ONE CHIP PER FAMILY: the extractor emits an entry per
+  // (family, tool) pair, so a paper that used two tools from the same family
+  // would otherwise carry the same chip twice. Only the top-ranked entry carries
+  // a `sentence` — that is how lib/api/core-queue.ts bounds the RSC payload — so
+  // `find` is the top-ranked one, never an arbitrary pick.
+  //
+  // Both are gated on `methodTier`, because both must print it: a chip that said
+  // only "Flow cytometry" would be the bare "method family identified" the
+  // per-family tiering exists to prevent (399x lift at strong, 1.6x at weak).
+  const methodFamilies = row.methodTier
+    ? [...new Set(row.methodEvidence.map((m) => m.family))]
+    : [];
+  const methodQuote = row.methodTier
+    ? (row.methodEvidence.find((m) => m.sentence)?.sentence ?? null)
+    : null;
+  // What the card shows OUTSIDE the four counted signals, in the words the card
+  // itself uses. The 0-signal empty state names these instead of asserting that
+  // nothing is shown: a method-only row rendered "No labelled signal." with its
+  // own green chips directly above it and a fully rendered "Methods used" quote
+  // directly below — three statements about one row, two of them false (round 2).
+  const uncounted = [
+    row.methodTier ? "method family" : null,
+    footnote ? "prefilter prior" : null,
+  ].filter((s): s is string => s !== null);
+  // The header's meta line, middot-separated: the journal, when PubMed indexed
+  // it, then the PMID. Each part is dropped when its data is missing rather than
+  // rendered empty, so the separators are built from what actually survives.
+  //
+  // FULL title first, the abbreviation only as a fallback (owner, round 2). This
+  // REVERSES #2620, whose comment argued the other way — the full title really is
+  // a paragraph for a few journals — but "Proc Natl Acad Sci U S A" is not a
+  // venue a reviewer can identify at a glance, and identifying the venue is the
+  // whole job of this line. The row is `flex-wrap`, so the longest title in
+  // PubMed ("Proceedings of the National Academy of Sciences of the United
+  // States of America", ~475px at this size) still fits the card's first column
+  // beside the date and PMID, and a narrower card moves the later parts onto a
+  // second line rather than overflowing.
+  const journalLabel = row.journal ?? row.journalAbbrev;
   const addedToPubMed = formatAddedToPubMed(row.dateAddedToEntrez);
   const metaParts: Array<{ key: string; node: ReactNode }> = [];
   if (journalLabel) metaParts.push({ key: "journal", node: <span>{journalLabel}</span> });
@@ -2199,6 +2551,27 @@ function CandidateCard({
         ) : null}
 
         <div className="min-w-0">
+          {methodFamilies.length > 0 ? (
+            // Green pills at the top of the card, mockup parity. The tier rides
+            // WITH them, and the caveat is on screen rather than in a `title`
+            // attribute a touch user can never open: these labels come from an
+            // extractor reading the paper's own methods text, so they say what
+            // the PAPER did — never that this core did it. Uncounted by design;
+            // `evidenceTokens` carries the same reasoning at length.
+            <p className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              {methodFamilies.map((f) => (
+                <span
+                  key={f}
+                  className="border-apollo-green-tint-border bg-apollo-green-tint text-apollo-green-foreground inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                >
+                  {f}
+                </span>
+              ))}
+              <span className="text-muted-foreground text-[11px]">
+                {row.methodTier} method match — what the paper did, not whether this core did it
+              </span>
+            </p>
+          ) : null}
           {row.authorAffinity === null ? (
             <p className="mb-1.5">
               <span className="border-border-strong text-muted-foreground bg-apollo-surface-2 inline-block rounded border px-2 py-0.5 text-[11px]">
@@ -2274,6 +2647,74 @@ function CandidateCard({
               )}
             </span>
           </button>
+
+          {/* Inside the FIRST GRID COLUMN, not a sibling of the grid. As a
+              sibling it spanned the whole card, so it ran past the right edge of
+              the collapsed strip it expands — past the score meter and the
+              Confirm/Reject buttons — and the two blocks never lined up (round 2,
+              item 7). Same column, same width, no `ml-1`: the border rule now
+              starts on the strip's own left edge and reads as its continuation. */}
+          {expanded ? (
+            <div className="border-border-strong mt-3 border-l-2 pl-3.5">
+              {signals.length === 0 ? (
+                <p className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded-lg border px-3 py-2.5 text-[12.5px] leading-relaxed">
+                  {/* "counted", not "labelled": the row can carry labels this panel
+                      does not count — a method family is chipped, tokened and quoted
+                      on the very same card. So the ending names whatever IS on
+                      screen, and only the genuinely bare row says the queue is
+                      showing nothing. */}
+                  No counted signal.{" "}
+                  {uncounted.length > 0
+                    ? `The ${uncounted.join(" and ")} on this card ${uncounted.length > 1 ? "are" : "is"} all it carries; judge it on the paper.`
+                    : "The score moved on engine inputs this queue doesn’t show; judge it on the paper."}
+                </p>
+              ) : (
+                <ul aria-label="evidence">
+                  {signals.map((s) => (
+                    <SignalRow
+                      key={s.kind}
+                      signal={s}
+                      row={row}
+                      paperCounts={paperCounts}
+                      clientCwids={clientCwids}
+                    />
+                  ))}
+                </ul>
+              )}
+              {methodQuote ? (
+                // Deliberately NOT an <li> inside the evidence list and NOT in
+                // `buildSignals`: the method family is weighted 0.00 in the
+                // engine's combine.WEIGHTS and 63% of tiered rows are "weak",
+                // where the measured lift inverts to BELOW background. So it is
+                // shown in full, always with its tier, and never counted toward
+                // SIGNAL_COUNT — the same reasoning as the strip token.
+                <div className="border-apollo-border grid grid-cols-[200px_minmax(0,1fr)] items-start gap-3.5 border-t py-2.5">
+                  <div>
+                    <div className="text-foreground text-[12.5px] leading-tight font-semibold">
+                      Methods used
+                    </div>
+                    <div className="text-muted-foreground mt-1 text-[11px]">
+                      {row.methodTier} · not counted
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <blockquote className="border-border-strong bg-apollo-lock-bg text-foreground rounded-r-md border-l-2 px-2.5 py-2 text-[12.5px] leading-relaxed">
+                      “{methodQuote}”
+                    </blockquote>
+                    <p className="text-muted-foreground mt-1.5 text-[12px] leading-relaxed">
+                      Read out of the paper’s own methods text: it says what the paper did, not
+                      whether this core did it.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+              {footnote ? (
+                <p className="text-muted-foreground mt-2 text-[12px] leading-relaxed italic">
+                  {footnote}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div>
@@ -2314,23 +2755,6 @@ function CandidateCard({
         </div>
       </div>
 
-      {expanded ? (
-        <div className="border-border-strong mt-3 ml-1 border-l-2 pl-3.5">
-          {signals.length === 0 ? (
-            <p className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded-lg border px-3 py-2.5 text-[12.5px] leading-relaxed">
-              No labelled signal. The score moved on engine inputs this queue doesn&rsquo;t show;
-              judge it on the paper.
-            </p>
-          ) : (
-            <ul aria-label="evidence">
-              {signals.map((s) => (
-                <SignalRow key={s.kind} signal={s} row={row} />
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
-
       {error ? (
         <p className="mt-2 text-xs text-red-600" role="alert">
           Could not save: {error}
@@ -2343,7 +2767,19 @@ function CandidateCard({
 /** One fired signal: label + strength glyphs on the left, the evidence itself on
  *  the right (a value line, a plain-language detail, and the quote when the run
  *  captured one). */
-function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
+function SignalRow({
+  signal,
+  row,
+  paperCounts,
+  clientCwids,
+}: {
+  signal: Signal;
+  row: CoreQueueRow;
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
+  /** The same set `buildSignals` de-duplicated against — without it this row
+   *  would name a person the strip above already excluded. */
+  clientCwids: ReadonlySet<string>;
+}) {
   let label: string;
   let value: string | null = null;
   let detail: ReactNode = null;
@@ -2356,7 +2792,7 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
       break;
     case "coauthor":
       label = "Staff co-author";
-      value = `${row.coauthors.length} ${row.coauthors.length === 1 ? "person" : "people"}`;
+      value = plural(row.coauthors.length, "person", "people");
       detail = <CoauthorDetail row={row} />;
       break;
     case "llm":
@@ -2367,30 +2803,35 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
       value = `${row.llmScore}/10`;
       detail = row.llmRationale;
       break;
-    case "affinity":
-      // Post-ReciterAI #382 this is a RATE, not a capped strength, so the copy has
-      // to say what the percentage is a share OF — a bare number next to "Weak"
-      // reads as a regression when the same paper drops from 85% to 6%.
+    case "affinity": {
       label = "Repeat user";
-      value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
-      detail =
-        "The largest share of any byline author's own publications that are work with this core";
-      break;
-    case "topic": {
-      const { mesh, affinity } = decodeTopicalPrior(row.topicalPrior ?? 0);
-      label =
-        mesh && affinity
-          ? "MeSH match + repeat user"
-          : mesh
-            ? "Topical MeSH match"
-            : "Prefilter prior — repeat user, no MeSH match";
-      value = `${Math.round((row.topicalPrior ?? 0) * 100)}%`;
-      detail =
-        mesh && affinity
-          ? "Carries a MeSH descriptor under this core's technique branch, and an author with prior confirmed use"
-          : mesh
-            ? "The paper carries a MeSH descriptor under this core's technique branch"
-            : "An author has prior confirmed use of this core. No MeSH descriptor matched — the same evidence as the repeat-user row above";
+      const who = repeatUser(row, paperCounts, clientCwids);
+      if (who) {
+        // The person's OWN counts, not the engine's scalar: `repeatUser` derives
+        // both the name and these numbers from the same query, so the sentence
+        // can be read as one fact. "last three years" tracks RECENT_PAPER_YEARS
+        // (lib/api/core-clients.ts) — spelt out because the row is prose; if that
+        // window moves, this word moves with it.
+        value = plural(who.counts.papers, "confirmed paper");
+        const dept = who.scholar.dept ? `, ${who.scholar.dept}` : "";
+        const recent =
+          who.counts.recent > 0 ? `, ${who.counts.recent} in the last three years` : "";
+        // Through `displayName`, like the byline, the card and the strip: the
+        // curated collision suffix already CARRIES a department, so the raw name
+        // printed it twice in one sentence — "Alessandro Fichera - Surgery,
+        // Surgery. 18 of their 29 publications...".
+        detail = `${displayName(who.scholar.name)}${dept}. ${who.counts.papers} of their ${plural(who.counts.total, "publication")} ${who.counts.papers === 1 ? "is" : "are"} confirmed work with this core${recent}.`;
+      } else {
+        // Nobody on the byline has a confirmed paper here, so there is no name to
+        // print and no derived count to print it with. Fall back to what the
+        // engine actually published — a RATE post-ReciterAI #382, not a capped
+        // strength, which is why the copy says what the percentage is a share OF:
+        // a bare number next to "Weak" reads as a regression when the same paper
+        // drops from 85% to 6%.
+        value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
+        detail =
+          "The largest share of any byline author's own publications that are work with this core";
+      }
       break;
     }
   }
@@ -2436,7 +2877,11 @@ function QuoteWithAlias({ text, alias }: { text: string; alias: string | null })
   );
 }
 
-/** The staff co-author detail line — linked scholars (with dept) plus any bare CWIDs. */
+/** The staff co-author detail line — linked scholars plus any bare CWIDs. The
+ *  department follows the name behind a COMMA, not in parentheses: the mockup
+ *  reads this row as "1 person / Evan Sholle, Information Technologies &
+ *  Services", and the parenthesised form made the department look like an aside
+ *  rather than half of the identification. */
 function CoauthorDetail({ row }: { row: CoreQueueRow }) {
   const resolved = row.coauthorScholars;
   const resolvedSet = new Set(resolved.map((s) => s.cwid.toLowerCase()));
@@ -2455,7 +2900,7 @@ function CoauthorDetail({ row }: { row: CoreQueueRow }) {
         <span key={s.cwid}>
           {i > 0 ? "; " : ""}
           <ScholarLink scholar={s} />
-          {s.dept ? <span className="text-muted-foreground"> ({s.dept})</span> : null}
+          {s.dept ? <span className="text-muted-foreground">, {s.dept}</span> : null}
         </span>
       ))}
       {unresolved.length > 0 ? <span>; {unresolved.join(", ")}</span> : null}
@@ -2463,21 +2908,36 @@ function CoauthorDetail({ row }: { row: CoreQueueRow }) {
   );
 }
 
-/** Initials for the hovercard avatar: first + last token, so "Samprit Banerjee"
- *  reads "SB" and a single-token collective author reads one letter. Pure. */
+/** Initials for the hovercard avatar: first + last NAME token, so "Samprit
+ *  Banerjee" reads "SB" and a single-token collective author reads one letter.
+ *  Via `nameWords`, because a curated disambiguation suffix is not part of
+ *  anyone's initials — "Alessandro Fichera - Surgery" is AF, not AS. Pure. */
 export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const parts = nameWords(name);
   if (parts.length === 0) return "?";
   const first = parts[0][0] ?? "";
   const last = parts.length > 1 ? (parts[parts.length - 1][0] ?? "") : "";
   return (first + last).toUpperCase();
 }
 
+/** Why a byline name carries a card. Every resolvable WCM author gets one; the
+ *  role is what the card's last line says about them. */
+type PersonRole = "staff" | "client" | "wcm";
+
 /**
  * The byline hovercard: avatar initials, full name + CWID, department, and the
- * one line that says WHY this name is marked — "Core staff" or "Known client of
- * this core". That role line is the whole point of the card; without it a
- * reviewer sees a highlighted name and has to guess which signal it belongs to.
+ * one line that says WHY this name is marked — "Core staff", "Known client of
+ * this core", or, for every other resolvable WCM author, that they are NEITHER.
+ * That role line is the whole point of the card; without it a reviewer sees a
+ * highlighted name and has to guess which signal it belongs to.
+ *
+ * The `wcm` role exists because the card used to mount on core staff and known
+ * clients only: measured on staging, 29 of the page's 3,497 byline anchors
+ * carried one, so a reviewer hovering essentially any name got nothing and
+ * reasonably read hover as broken (round 2, item 1). Its line must not imply
+ * core usage — a WCM colleague on this byline is a person we can identify, not
+ * evidence about this paper, and the whole point of naming the role is that the
+ * card never asserts more than it knows.
  *
  * `HoverCard` (not `HoverTooltip`) because the content is a small record, not a
  * sentence — a tooltip's single text line cannot carry four fields.
@@ -2496,7 +2956,7 @@ function PersonHoverCard({
   children,
 }: {
   scholar: QueueScholar;
-  role: "staff" | "client";
+  role: PersonRole;
   children: ReactNode;
 }) {
   return (
@@ -2511,14 +2971,18 @@ function PersonHoverCard({
           </Avatar>
           <div className="min-w-0">
             <p className="text-foreground text-sm font-semibold">
-              {scholar.name}{" "}
+              {displayName(scholar.name)}{" "}
               <span className="text-muted-foreground font-normal">({scholar.cwid})</span>
             </p>
             {scholar.dept ? (
               <p className="text-muted-foreground mt-0.5 text-sm">{scholar.dept}</p>
             ) : null}
             <p className="text-foreground mt-2 text-sm">
-              {role === "staff" ? "Core staff" : "Known client of this core"}
+              {role === "staff"
+                ? "Core staff"
+                : role === "client"
+                  ? "Known client of this core"
+                  : "WCM co-author on this paper — not core staff, and not a known client of this core"}
             </p>
           </div>
         </div>
@@ -2528,28 +2992,134 @@ function PersonHoverCard({
 }
 
 /**
- * Author byline with the core-staff author(s) highlighted as a tinted, linked
- * chip + tooltip — the connection back to the co-author evidence row below.
+ * The words of a Scholar's `preferredName` that are actually the name:
+ * everything up to and including the surname, lowercased, with the trailing
+ * curated collision suffixes dropped — "Alessandro Fichera - Surgery" (#2049),
+ * "Jane Doe (Radiology)" (#2214), plus a generational "John Smith III".
+ * Untreated, those scholars registered the DEPARTMENT as their surname key
+ * ("surgery", "fichera - surgery", never "fichera"), so their byline token could
+ * never be expanded or carded — a live counterexample to "every WCM author is
+ * expanded", and the reason the avatar read "AS" for Alessandro Fichera.
+ *
+ * `extractLastNameSort` already strips all three forms and is dependency-free.
+ * Its anchor is LOCATED in the word list rather than used on its own, so a
+ * compound surname's leading words survive. A name whose punctuation stops the
+ * anchor being found falls back to the raw words, which is what this did before.
+ *
+ * THE ANCHOR MUST NOT BE THE FIRST WORD, and that is not a nicety: the suffix
+ * list behind `extractLastNameSort` counts "V", "VI" and "I" as generational, so
+ * it reads "Hoang Vi" as the surname "hoang" — leaving one word, from which the
+ * key loop below registers NO keys at all and the avatar reads "H". Every Vi,
+ * Anh V and Tran I on the roster became permanently unexpandable and uncardable.
+ * A generational suffix on a two-word name is not a suffix.
+ *
+ * NOT for a PubMed byline token: that suffix list treats "I" and "V" as
+ * generational, which would swallow the initials of every Ivanova and Volkov.
+ * See `BYLINE_SUFFIX`.
+ */
+function nameWords(name: string): string[] {
+  const words = name.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const at = words.lastIndexOf(extractLastNameSort(name));
+  return at >= 1 ? words.slice(0, at + 1) : words;
+}
+
+/**
+ * The name as the byline and its card PRINT it. The curated collision suffixes
+ * are a disambiguation device for a roster listing, not part of anybody's name:
+ * unstripped, the byline read "Alessandro Fichera - Surgery, Other B" and the
+ * card printed the department twice, once inside the name and once on the
+ * department line under it. Falls back to the raw name because a name that is
+ * ENTIRELY a parenthetical strips to "" (`stripUnitDisambiguation`'s contract).
+ */
+function displayName(name: string): string {
+  return stripUnitDisambiguation(name) || name;
+}
+
+/**
+ * Generational suffixes as PUBMED writes them, which is not how `NAME_SUFFIXES`
+ * in `lib/name-sort.ts` writes them: PubMed normalises the numerals to
+ * "Anderson JW 3rd", never "III", and its roman-numeral entries ("I", "V", "VI")
+ * are indistinguishable from a real first initial — reusing that list here would
+ * refuse to expand every "Ivanova I" and "Volkov V" on the page. None of these
+ * can be an initials group, so this list is the safe half of that one.
+ *
+ * CASE-SENSITIVE, AND TESTED AGAINST THE RAW WORD. Case is the ONLY thing that
+ * separates the suffix "Jr" from the initials group "JR", and the loop below
+ * used to lowercase the token before testing — destroying the one signal, which
+ * cut both ways on the same line: "Garcia Martinez SR" lost "SR" and matched
+ * Maria Garcia off the leading word, while "Smith JR" lost its whole initials
+ * group and could not reach James Smith at all.
+ */
+const BYLINE_SUFFIX = /^(Jr|Sr|2nd|3rd|4th)\.?$/;
+
+/**
+ * An initials group as PubMed writes it: 1-3 UPPER-CASE letters ("S", "ET",
+ * "JW"), which is also raw-cased for the reason above. The token loop used to
+ * assume its last word WAS the initials with no check at all, so any two-word
+ * token whose second word is a real word looked its FIRST word up as a surname:
+ * "Wang Xiaoming" reached the scholar Xin Wang (initial "x", key "wang") and
+ * "Kim Group" reached Gina Kim — each renamed, linked and carded as a person
+ * who is not that author. A token with no initials group has no first initial
+ * to agree with, so it must claim nobody.
+ *
+ * `\p{Lu}` rather than `[A-Z]` so an accented initial ("Á") is still an initial.
+ *
+ * THREE IS A DELIBERATE UNDER-MATCH, and it costs us real authors. This repo's
+ * own `deriveInitials` (etl/reciter/index.ts) emits ONE LETTER PER GIVEN-NAME
+ * PART, so "Maria de los Angeles Rodriguez" composes the token "Rodriguez MDLA"
+ * and is left in PubMed form here. Widening to five was tried and reverted: an
+ * all-caps given name ("Kim JOHN") is the SAME SHAPE as a four-letter initials
+ * group, so the wider class resolved "Kim JOHN" to the scholar Jane Kim — a
+ * card asserting the wrong person's CWID and department. Across this whole
+ * matcher a missed expansion is an acceptable cost and a wrong name is not, so
+ * the cap stays where the ambiguity starts. Raise it only alongside a signal
+ * that actually separates the two, not a longer length.
+ */
+const BYLINE_INITIALS = /^\p{Lu}{1,3}$/u;
+
+/**
+ * Lower-case and strip combining marks, so a PubMed byline that dropped the
+ * diacritics still reaches the scholar who carries them: "Nino de Rivera S"
+ * against "Sara Niño de Rivera". Applied to BOTH sides — the key map and the
+ * token's lookup phrase — and to the first-initial comparison, so it is a
+ * normalisation and not a fallback: the token still looks up its COMPLETE
+ * surname phrase and nothing shorter. Two scholars who differ only by a
+ * diacritic now share a key, which `ambiguous` already refuses to resolve.
+ */
+function foldName(word: string): string {
+  return word.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+}
+
+/**
+ * Author byline with EVERY resolvable WCM author named in full, linked and
+ * carded, and core staff additionally highlighted as a tinted chip — the
+ * connection back to the co-author evidence row below.
  * ponytail: best-effort surname match against the flat `authorsString` (the data
  * carries no per-author byline token; this mirrors how profile author-links are
  * overlaid). Unresolved core-staff CWIDs aren't in the byline, so they show only
  * in the evidence row.
+ *
+ * The byline is therefore MIXED by construction, and the owner accepted that:
+ * `publication_author` has rows only for matched WCM authors and its
+ * `external_name` is NULL on every row, so there is no stored full name for a
+ * non-WCM author anywhere in SPS. They keep the PubMed form because it is the
+ * only form we hold.
  */
 function Byline({
   row,
   clientCwids = new Set<string>(),
 }: {
   row: CoreQueueRow;
-  /** The core's known-client CWIDs (lowercased) — a client gets the same
-   *  hovercard treatment as core staff, reading "Known client of this core". */
+  /** The core's known-client CWIDs (lowercased) — a client's card reads "Known
+   *  client of this core" instead of the plain WCM co-author line. */
   clientCwids?: ReadonlySet<string>;
 }) {
   if (!row.authorsString) return null;
   // `authors_string` marks WCM authors with `((…))`. STRIP BEFORE ANYTHING ELSE.
   // Two bugs rode on not doing it, measured on core 14's live queue (1,453 rows):
   //   - the markup printed raw on 70.4% of rows ("((Traube C))" on screen);
-  //   - the staff highlight below matches on the token's LEAD word, which for a
-  //     marked author is "((traube", never the surname — so the highlight could
+  //   - the staff highlight below matches on the token's LEADING words, which for
+  //     a marked author start "((traube", never the surname — so the highlight could
   //     not fire for exactly the authors it exists to mark. Core staff are WCM,
   //     so they are the authors most likely to carry the marker.
   const authors = stripWcmMarkers(row.authorsString);
@@ -2565,15 +3135,36 @@ function Byline({
         , +{dropped} more
       </span>
     ) : null;
-  // Surname -> the scholar we can name in full. Core staff FIRST so they win a
-  // collision: their chip is the link back to the co-author evidence row, and a
-  // plain WCM link there would break that connection.
+  // Surname phrase -> the scholar we can name in full. Core staff FIRST so they
+  // win a collision: their chip is the link back to the co-author evidence row,
+  // and a plain WCM link there would break that connection.
   //
-  // `ambiguous` holds surnames claimed by more than one scholar. We highlight
-  // those but do NOT rewrite the name: on a "Kim J / Kim S" byline a surname-only
-  // match would print ONE person's full name over BOTH tokens, which is worse
-  // than leaving the PubMed form alone. First-initial agreement is required for
-  // the same reason.
+  // MULTI-WORD SURNAMES: each scholar registers their last word, last two and
+  // last three, so a compound surname is reachable whole — PubMed writes
+  // "Niño de Rivera S", and keying the scholar "Sara Niño de Rivera" on "rivera"
+  // alone left exactly the authors whose names most need expanding unmatched
+  // (round 2, item 3). Three words is where real compound surnames stop; the
+  // loop also stops one short of the whole name, so a first name can never
+  // become a surname key.
+  //
+  // ONLY THE SCHOLAR SIDE SLICES. A token looks up its COMPLETE surname phrase
+  // and nothing shorter (see the token loop). Two consecutive rounds tried to
+  // widen the match with a fallback to the phrase's shorter tails, and both
+  // produced the same brand-new false positive: "Perez Garcia M" fell through to
+  // a one-word key — "perez" in one build, "garcia" in the next — and was
+  // renamed, linked and CARDED as an unrelated Maria. A shorter tail of a
+  // compound surname is a DIFFERENT surname. Registering the scholar's last
+  // one, two and three words is what makes "van der Berg J" reach Jan van der
+  // Berg; a fallback on the token side is not needed for it and never was.
+  //
+  // `ambiguous` holds phrases claimed by more than one scholar IN THIS ROW'S OWN
+  // LISTS. Those tokens are left exactly as PubMed wrote them: on a "Kim J /
+  // Kim S" byline a surname-only match would print ONE person's full name over
+  // BOTH tokens, which is worse than leaving the PubMed form alone. First-initial
+  // agreement is required for the same reason. A phrase nothing looks up costs
+  // nothing to mark ambiguous. It cannot see a namesake who is NOT in these
+  // lists, which is every non-WCM one — that is what the second pass below is
+  // for, and why it has to run on the tokens rather than here.
   const known = new Map<string, { scholar: QueueScholar; isStaff: boolean }>();
   const ambiguous = new Set<string>();
   for (const [list, isStaff] of [
@@ -2581,11 +3172,22 @@ function Byline({
     [row.wcmAuthors, false],
   ] as const) {
     for (const sch of list) {
-      const surname = sch.name.trim().split(/\s+/).pop()?.toLowerCase();
-      if (!surname) continue;
-      const held = known.get(surname);
-      if (!held) known.set(surname, { scholar: sch, isStaff });
-      else if (held.scholar.cwid !== sch.cwid) ambiguous.add(surname);
+      const words = nameWords(sch.name).map(foldName);
+      // `Math.max(1, …)` because a ONE-WORD preferredName ("Sukarno") made this
+      // `Math.min(3, 0)` and registered NO keys at all: the loop body never ran,
+      // so mononymous scholars were silently unreachable, unlinkable and
+      // uncardable. The `length - 1` is still what stops a first name becoming a
+      // surname key on every longer name.
+      for (let n = 1; n <= Math.min(3, Math.max(1, words.length - 1)); n++) {
+        const key = words.slice(-n).join(" ");
+        const held = known.get(key);
+        if (!held) known.set(key, { scholar: sch, isStaff });
+        // Lowercased on both sides, as every other CWID comparison in this
+        // feature is: a case difference between the two lists would otherwise
+        // read as two people and mark a phrase ambiguous that only one holds.
+        else if (held.scholar.cwid.toLowerCase() !== sch.cwid.toLowerCase())
+          ambiguous.add(key);
+      }
     }
   }
   if (known.size === 0) {
@@ -2597,51 +3199,144 @@ function Byline({
     );
   }
   const tokens = authors.split(", ");
+  // PASS 1 — who each token names, or `undefined` for one we leave exactly as
+  // PubMed wrote it. Resolved up front because pass 2 has to see every token's
+  // answer before any of them is rendered.
+  const resolveToken = (tok: string) => {
+    // "Sholle ET" -> "e", "Niño de Rivera S" -> "s"; a PubMed byline puts the
+    // initials LAST, so everything before them is the surname phrase. A
+    // one-word token (a collective author) leaves no initial and no surname,
+    // and never claims a scholar. A generational suffix is dropped first
+    // because it is not the initials group: "Smith AB Jr" reads its initial
+    // off "AB". Left in, it took the initial off "Jr" — "j", which agrees
+    // with every John Smith on the roster and renamed, linked and carded the
+    // token as him — and it pushed "ab" onto the end of the surname phrase,
+    // so the real A.B. Smith could not be reached either.
+    //
+    // SPLIT RAW, and only fold to the lookup form afterwards: both the suffix
+    // strip and the initials test read UPPER-CASE as the thing that says "this
+    // is an initials group, not a word". Lowercasing first threw that away.
+    const raw = tok
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w && !BYLINE_SUFFIX.test(w));
+    // The trailing block has to LOOK like initials before it is treated as
+    // them; otherwise the token carries no initials at all and, having nothing
+    // to agree with, claims nobody. See `BYLINE_INITIALS`.
+    const tail = raw.length > 1 ? raw[raw.length - 1] : "";
+    const initial = BYLINE_INITIALS.test(tail) ? foldName(tail[0]) : "";
+    // The token's COMPLETE surname phrase, and NOTHING SHORTER — see the key map
+    // above for why there is no fallback here.
+    const key = raw.slice(0, -1).map(foldName).join(" ");
+    const hit = known.get(key);
+    // On an ambiguous phrase we do not know WHICH person this token is, so it
+    // resolves to nobody and keeps the PubMed form: no rename, no card, and —
+    // round 2, item 1b — no LINK either. A link is an assertion too, and the one
+    // it used to make was wrong by construction: it pointed at whichever
+    // colliding scholar was inserted into `known` first.
+    if (!hit || initial.length === 0 || ambiguous.has(key)) return undefined;
+    if (foldName(hit.scholar.name.trim()[0] ?? "") !== initial) return undefined;
+    // A truncated row (see `wcmAuthorsTruncated`) is the same doubt one step
+    // back: `wcmAuthors` is only a PREFIX of the byline, so `ambiguous` was
+    // built from an incomplete population and a second holder of this surname
+    // past the cap is invisible. CHOSEN: refuse the WCM half of `known` on
+    // those rows — the token keeps the PubMed form rather than assert one
+    // specific person's name, CWID and department.
+    //
+    // Core staff are the deliberate exception, and NOT because the cap is
+    // harmless to them — a hidden namesake could be theirs too. It is that the
+    // cap does not touch what identifies them: `coauthorScholars` is uncapped
+    // and independent, so the card names a person we know for certain is a WCM
+    // co-author of THIS paper, and the worst the cap can do is tint the wrong
+    // one of two identically written tokens (pass 2 catches that whenever both
+    // are on screen). Against that, the chip is the byline's only link back to
+    // the co-author evidence row, and big-consortium papers — the only ones that
+    // truncate — are exactly where a reviewer needs it most.
+    if (row.wcmAuthorsTruncated && !hit.isStaff) return undefined;
+    return hit;
+  };
+  const hits = tokens.map(resolveToken);
+  // PASS 2 — a scholar claimed by MORE THAN ONE token identifies NEITHER of
+  // them. "Kim J, Kim J, Doe A" with one WCM Jane Kim on the row printed her
+  // name, her link and her card over BOTH Kim tokens; two same-surname,
+  // same-initial tokens cannot be one person, so at least one of those cards
+  // stated the wrong CWID and department.
+  // `ambiguous` cannot catch this and never could: it is built from `known`, and
+  // `publication_author` holds rows ONLY for matched WCM authors — so the
+  // namesake who makes the byline ambiguous is, whenever they are not WCM,
+  // absent by construction from every list this component receives. The
+  // duplicate is only visible on the TOKEN side, after resolution.
+  //
+  // SWEEPS BOTH POPULATIONS, AND UNIONS THEM. The preview drops authors on
+  // 68.4% of core 14's rows, so a namesake past the cut is invisible to a
+  // preview-only sweep and the one visible "Kim J" gets renamed, linked and
+  // carded as a specific person — on nothing but where PubMed happened to cut.
+  // `wcmAuthorsTruncated` does not cover it: that fires on 12 DISTINCT WCM
+  // authors, and the row this was found on had exactly one.
+  //
+  // But the full list cannot REPLACE the preview either, which is the trap the
+  // first attempt fell into. `authors_string` and `full_authors_string` come
+  // from two different producers — the former is ReCiterDB's pre-composed
+  // `analysis_summary_author.authors`, the latter is composed here by
+  // `composeAuthorString` — so neither is a subset of the other. An author whose
+  // given name is null composes to a BARE surname, a one-word token this
+  // resolver deliberately refuses, so a namesake VISIBLE twice on screen can be
+  // absent from the full list. Sweeping only the full list then restored the
+  // original defect with cards attached. A person is overclaimed when EITHER
+  // population shows them more than once.
+  const countByCwid = (list: ReadonlyArray<ReturnType<typeof resolveToken>>) => {
+    const n = new Map<string, number>();
+    for (const hit of list) {
+      if (!hit) continue;
+      const cwid = hit.scholar.cwid.toLowerCase();
+      n.set(cwid, (n.get(cwid) ?? 0) + 1);
+    }
+    return n;
+  };
+  const overclaimed = new Set<string>();
+  for (const counts of [
+    countByCwid(hits),
+    // Split the way `countAuthorTokens` does, not on a literal ", " — the two
+    // disagreeing meant a namesake written "Doe A,Kim J" merged into its
+    // neighbour and the sweep never saw it.
+    countByCwid(
+      row.fullAuthorsString
+        ? stripWcmMarkers(row.fullAuthorsString).split(/,\s*/).map(resolveToken)
+        : [],
+    ),
+  ]) {
+    for (const [cwid, n] of counts) if (n > 1) overclaimed.add(cwid);
+  }
   return (
     <p className="text-muted-foreground mt-1 text-xs" data-slot="core-queue-byline">
       {tokens.map((tok, i) => {
-        const parts = tok.trim().split(/\s+/);
-        const lead = parts[0]?.toLowerCase() ?? "";
-        const hit = known.get(lead);
-        // "Sholle ET" -> "e"; a PubMed byline puts initials last. An empty
-        // initial (a one-word collective author) never claims a scholar.
-        const initial = parts[1]?.[0]?.toLowerCase() ?? "";
-        const matches =
-          hit !== undefined &&
-          initial.length > 0 &&
-          hit.scholar.name.trim()[0]?.toLowerCase() === initial;
-        const safeToRename = matches && !ambiguous.has(lead);
-        // Full display name only when we are sure WHICH person this is.
-        const label = safeToRename && hit ? hit.scholar.name : tok;
-        if (!matches || !hit) return <span key={i}>{i > 0 ? ", " : ""}{tok}</span>;
+        const hit = hits[i];
+        if (!hit || overclaimed.has(hit.scholar.cwid.toLowerCase()))
+          return <span key={i}>{i > 0 ? ", " : ""}{tok}</span>;
         // Staff wins over client when a person is both: the tinted chip is the
         // link back to the co-author evidence row, and demoting it to a plain
         // client link would break that connection (same reason staff win the
-        // surname collision above).
-        //
-        // `safeToRename` gates the card, not just the name. On an ambiguous
-        // surname we do not know WHICH person this token is, and the card is a
-        // far stronger assertion than the rewrite it was computed to prevent —
-        // it states a full name, a CWID, a department and a role. Marking the
-        // wrong colleague as "Known client of this core" is exactly the claim
-        // this guard exists to stop, so an ambiguous token gets no card at all.
-        const role: "staff" | "client" | null = !safeToRename
-          ? null
-          : hit.isStaff
-            ? "staff"
-            : clientCwids.has(hit.scholar.cwid.toLowerCase())
-              ? "client"
-              : null;
-        // A name the core has a REASON to mark gets the record card; a plain WCM
-        // co-author is still a link, but a card there would say nothing the
-        // byline does not already show.
+        // surname collision above). Everyone else we could identify is `wcm` —
+        // every name that survives to here is one we are sure of, so every one
+        // of them gets a card (round 2, item 1a).
+        const role: PersonRole = hit.isStaff
+          ? "staff"
+          : clientCwids.has(hit.scholar.cwid.toLowerCase())
+            ? "client"
+            : "wcm";
+        // Full display name: we know WHICH person this token is. Through
+        // `displayName`, because the curated collision suffix is a roster
+        // device, not part of the name — unstripped this byline read
+        // "Alessandro Fichera - Surgery, Other B".
+        const label = displayName(hit.scholar.name);
         const nameNode = hit.scholar.slug ? (
           <a
             href={`/${hit.scholar.slug}`}
             target="_blank"
             rel="noopener noreferrer"
             // See PersonHoverCard: on iOS the hover trigger eats this anchor's
-            // own click. Harmless on a name that carries no card.
+            // own click. Every name that reaches here carries a card now, so
+            // this is the only thing keeping the profile link tappable.
             onTouchEnd={(e) => {
               e.preventDefault();
               e.currentTarget.click();
@@ -2655,7 +3350,11 @@ function Byline({
                     // identically to any other WCM co-author and the marking is
                     // invisible exactly where hover does not exist.
                     "text-[var(--color-accent-slate)] underline decoration-dotted underline-offset-2"
-                  : "text-[var(--color-accent-slate)] hover:underline"
+                  : // Slate is the shared "this name carries a card" colour. A
+                    // byline token we could NOT identify never gets it — it keeps
+                    // the paragraph's muted grey — so the colour, not the hover,
+                    // tells a reviewer which names are worth pointing at.
+                    "text-[var(--color-accent-slate)] hover:underline"
             }
           >
             {label}
@@ -2665,26 +3364,22 @@ function Byline({
             className={
               role === "staff"
                 ? "bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
-                : role === "client"
-                  ? "text-foreground underline decoration-dotted underline-offset-2"
-                  : "text-foreground"
+                : // ED-only: no profile to link, so NOT slate — that colour reads
+                  // as a link everywhere else on this line. The dotted underline
+                  // is what marks the card, for a client and a plain WCM
+                  // co-author alike; the card itself says which they are.
+                  "text-foreground underline decoration-dotted underline-offset-2"
             }
           >
             {label}
           </span>
         );
-        const inner =
-          role === null ? (
-            nameNode
-          ) : (
-            <PersonHoverCard scholar={hit.scholar} role={role}>
-              {nameNode}
-            </PersonHoverCard>
-          );
         return (
           <span key={i}>
             {i > 0 ? ", " : ""}
-            {inner}
+            <PersonHoverCard scholar={hit.scholar} role={role}>
+              {nameNode}
+            </PersonHoverCard>
           </span>
         );
       })}
@@ -2709,10 +3404,13 @@ function StrengthGlyphs({ dots }: { dots: number }) {
   );
 }
 
-/** Link to a scholar's public profile (`/{slug}`), opening in a new tab. */
+/** Link to a scholar's public profile (`/{slug}`), opening in a new tab.
+ *  Through `displayName`, like the byline and the person card: the curated
+ *  collision suffix is a roster disambiguation device, so the co-author detail
+ *  row printed "Alessandro Fichera - Surgery" with the department beside it. */
 function ScholarLink({ scholar }: { scholar: QueueScholar }) {
   // ED-only staff (no Scholar row) have no profile to link to — name only.
-  if (!scholar.slug) return <span className="text-foreground">{scholar.name}</span>;
+  if (!scholar.slug) return <span className="text-foreground">{displayName(scholar.name)}</span>;
   return (
     <a
       href={`/${scholar.slug}`}
@@ -2720,7 +3418,7 @@ function ScholarLink({ scholar }: { scholar: QueueScholar }) {
       rel="noopener noreferrer"
       className="text-foreground hover:underline"
     >
-      {scholar.name}
+      {displayName(scholar.name)}
     </a>
   );
 }

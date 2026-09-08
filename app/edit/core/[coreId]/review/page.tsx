@@ -88,12 +88,24 @@ export default async function EditCoreReviewPage({
   if (!queue) notFound();
 
   const clients = await loadCoreClients(coreId, db.read as unknown as CoreClientLookup);
-  // What this core already holds from each known client, for the queue's evidence
-  // line ("Client co-author Samprit Banerjee, 18 papers, 11 recent"). Scoped to
-  // the roster's own CWIDs, so it stays a small read and a small RSC payload.
+  // What this core already holds from each person the queue may have to NAME, for
+  // its evidence lines ("Samprit Banerjee, 18 papers, 11 recent"; "18 of their 29
+  // publications"). Two populations, one query: the known-client roster, and every
+  // WCM byline author across all three lists — the repeat-user line has to name
+  // someone, and the only defensible name is the one whose confirmed count was
+  // computed here rather than guessed beside the engine's anonymous scalar. The
+  // loader de-dupes, and drops everyone this core holds nothing from, so what
+  // reaches the client is only people with a confirmed paper here — 246 on
+  // staging core 14, out of the 1,456 distinct byline authors (7,443 seats)
+  // passed in.
   const paperCounts = await loadCoreClientPaperCounts(
     queue.confirmed,
-    clients.flatMap((c) => (c.cwid ? [c.cwid] : [])),
+    [
+      ...clients.flatMap((c) => (c.cwid ? [c.cwid] : [])),
+      ...[...queue.candidates, ...queue.confirmed, ...queue.rejected].flatMap((r) =>
+        r.wcmAuthors.map((a) => a.cwid),
+      ),
+    ],
     db.read as unknown as CoreClientPaperCountLookup,
   );
 

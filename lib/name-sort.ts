@@ -27,8 +27,14 @@ const STRIP_PASSES = 4;
  * so the two strips run to a fixed point rather than in one fixed order.
  * `STRIP_PASSES` bounds it; each pass that changes anything removes at least
  * one suffix, so real names (zero suffixes) exit after the first pass.
+ *
+ * Exported because these suffixes must not be PRINTED either: the core claim
+ * queue's byline was reading "Alessandro Fichera - Surgery, Other B" and
+ * repeating the department on the card's own department line. Returns "" for a
+ * name that is entirely a parenthetical — callers that display the result fall
+ * back to the raw name, as {@link extractLastNameSort} does.
  */
-function stripUnitDisambiguation(name: string): string {
+export function stripUnitDisambiguation(name: string): string {
   let s = name.trim();
   for (let i = 0; i < STRIP_PASSES; i++) {
     const before = s;

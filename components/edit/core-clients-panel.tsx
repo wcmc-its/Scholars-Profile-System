@@ -3,19 +3,29 @@
 /**
  * "Known clients" MODAL — the core owner's roster of people they know use this
  * facility, recorded independently of any publication evidence (ReciterAI #383
- * / SPS #2607, widened here with an ED lookup step and name-only clients).
+ * / SPS #2607, widened here with name-only clients).
  *
  * `CoreClaimQueue` owns the open/closed state and the toolbar button; this
- * renders the dialog body as a controlled child, and folds the server's own
- * `added`/removed rows back into the parent's list through `onClientsChange` —
- * no local `clients` state here.
+ * renders the dialog body as a controlled child. The roster it lists is the
+ * `clients` PROP and nothing else — no copy here, and (since HANDOFF-11 round 4)
+ * none in the parent either. Every write below ends in `router.refresh()`, which
+ * re-renders the Server Component and delivers a fresh `clients`; while the
+ * parent cached that prop in `useState` the refreshed roster was discarded on
+ * arrival, so a row a co-owner or a second tab had added could never appear and
+ * this dialog's list could only ever move through a fold-back channel that
+ * synthesised its rows. One source of truth, the same one the queue's
+ * candidates/confirmed/rejected already use.
  *
  * Three things happen in here, in the order the reviewer meets them:
- *   1. paste CWIDs -> "Look up CWIDs" resolves them against Scholars, then the
- *      enterprise directory, and shows WHO was found before anything is
- *      written. The lookup is a real server round-trip through the same
- *      authorization gate as the add (`mode: "lookup"`), not a client-side
- *      preview — so what it shows is what the add will do.
+ *   1. paste CWIDs -> "Add clients" resolves them against Scholars, then the
+ *      enterprise directory, AND writes the roster rows in ONE round-trip, then
+ *      lists who was recorded. This was
+ *      two steps until HANDOFF-11 #2 — a "Look up CWIDs" preview, then a commit
+ *      button in the footer, which sits below the name-only band and the entire
+ *      roster inside a `max-h-[85vh]` scrolling shell. A reviewer looked up
+ *      a CWID, read the preview row as the roster row it looks like, never
+ *      scrolled to the footer, and no `core_client` row was ever written. One
+ *      button cannot be half-pressed.
  *   2. "Or add someone without a CWID" -> a NAME-ONLY client. Roster-only by
  *      construction: with no CWID there is nothing for the byline match to key
  *      on, which the helper text says outright rather than leaving a reviewer to
@@ -43,21 +53,29 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-/** One looked-up person as `mode: "lookup"` reports them. */
-interface ResolvedPerson {
+/** One person the add just WROTE, as the route's `added[]` reports them.
+ *  `source` is which store held the name — Scholars, then the enterprise
+ *  directory for the staff accounts Scholars has no row for. `null` means BOTH
+ *  were asked and neither knew the CWID, which is the ONLY case the receipt may
+ *  call "not found"; the row is still recorded on purpose. `"unavailable"` means
+ *  the directory never answered (down, or past the route's budget), so nothing
+ *  is known about this person either way — a state that used to arrive as `null`
+ *  and get printed as "not found" about someone the directory does know. */
+interface AddedPerson {
+  id: string | null;
   cwid: string;
   name: string | null;
-  dept: string | null;
   slug: string | null;
-  source: "scholars" | "directory" | null;
-  alreadyPresent: boolean;
+  affiliation: string | null;
+  source: "scholars" | "directory" | "unavailable" | null;
 }
 
 interface CoreClientsDialogProps {
   coreId: string;
   open: boolean;
+  /** The core's active roster as the SERVER last rendered it. Read-only here:
+   *  writes go to the route and come back through `router.refresh()`. */
   clients: CoreClientRow[];
-  onClientsChange: (next: CoreClientRow[]) => void;
   onClose: () => void;
 }
 
@@ -76,138 +94,141 @@ function formatAdded(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export function CoreClientsDialog({
-  coreId,
-  open,
-  clients,
-  onClientsChange,
-  onClose,
-}: CoreClientsDialogProps) {
+/** The receipt's right-hand note: which store named this person, or why none
+ *  did. "not found" is a claim about the PERSON, and is reserved for the case
+ *  where BOTH stores answered and neither held the CWID. A directory that never
+ *  answered has said nothing about them, so it gets its own wording instead —
+ *  the row is written either way, and this receipt is the only place a directory
+ *  name is ever shown (the roster below resolves names from Scholars alone). */
+function sourceNote(source: AddedPerson["source"]): string {
+  switch (source) {
+    case "scholars":
+      return "added from Scholars";
+    case "directory":
+      return "added from the directory";
+    case "unavailable":
+      return "added — directory unavailable, name unknown";
+    default:
+      return "added — not found, recorded anyway";
+  }
+}
+
+export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClientsDialogProps) {
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  // The lookup step's outcome. `null` = not looked up yet; the "Add clients"
-  // footer button stays disabled until it holds something addable, so a reviewer
-  // cannot commit a paste they have not seen resolved.
-  const [resolved, setResolved] = useState<ResolvedPerson[] | null>(null);
-  const [lookupPending, setLookupPending] = useState(false);
+  // Each band reports its OWN outcome, under its own button. Both used to share
+  // one line in the DialogFooter — which sits below the name-only band and the
+  // whole roster inside a `max-h-[85vh]` scroller, i.e. the very surface
+  // HANDOFF-11 #2 found reviewers never reach. An add that wrote NOTHING (all
+  // already listed, or a failed POST) renders no receipt either, so that footer
+  // line was the only thing saying so.
+  const [addResult, setAddResult] = useState<string | null>(null);
+  const [nameResult, setNameResult] = useState<string | null>(null);
+  // The last add's receipt: who was actually written. `null` = nothing added in
+  // this session yet. Not a preview — every row it holds is already on the
+  // roster below, which is why the wording is past tense.
+  const [added, setAdded] = useState<AddedPerson[] | null>(null);
   const [name, setName] = useState("");
   const [affiliation, setAffiliation] = useState("");
   const [namePending, setNamePending] = useState(false);
-  const [removing, setRemoving] = useState<Set<string>>(new Set());
+  // Rows this session has asked the server to remove: `"sending"` while the
+  // DELETE is in flight, `"done"` once it returned 200. `"done"` is TERMINAL and
+  // keeps the button disabled: the roster is the server's list now, so the row
+  // only leaves it when the refreshed payload drops it, and a live Remove button
+  // on a row that is already gone earns a 404 and a false "Could not remove".
+  const [removing, setRemoving] = useState<Map<string, "sending" | "done">>(new Map());
   const [rowErrors, setRowErrors] = useState<Map<string, string>>(new Map());
   const router = useRouter();
-
-  /** Everything the current lookup would actually write. */
-  const addable = (resolved ?? []).filter((r) => !r.alreadyPresent);
 
   /** Clear EVERY field the dialog owns. The Dialog stays mounted while closed
    *  (it is rendered unconditionally with `open` as a prop), so anything not
    *  reset here survives a close and is still sitting there on the next open —
    *  a half-typed name, or a stale "Could not remove" against a row that is no
-   *  longer on the roster. */
+   *  longer on the roster.
+   *
+   *  `removing` is deliberately NOT among them: a row whose DELETE returned 200
+   *  is gone server-side whether this dialog is open or shut, and re-enabling
+   *  its button on the next open — while a raced payload still lists it — buys
+   *  nothing but a second 404. */
   function resetAll() {
     setText("");
-    setResolved(null);
-    setResult(null);
+    setAdded(null);
+    setAddResult(null);
+    setNameResult(null);
     setName("");
     setAffiliation("");
     setRowErrors(new Map());
   }
 
-  async function lookUp() {
+  /** ONE round-trip: a POST with no `mode` resolves the pasted block AND writes
+   *  the roster rows in the same request, so there is nothing left to confirm
+   *  afterwards. The block is still parsed here first, purely so a paste with no
+   *  well-formed CWID in it never becomes a 400. */
+  async function submitAdd() {
     const { cwids, invalid } = parseCwidBlock(text);
     if (cwids.length === 0) {
-      setResolved(null);
-      setResult(
+      setAdded(null);
+      setAddResult(
         invalid.length > 0
           ? `No valid CWIDs found (ignored: ${invalid.join(", ")}).`
           : "Paste at least one CWID.",
       );
       return;
     }
-    setLookupPending(true);
-    setResult(null);
-    const res = await fetch("/api/edit/core-client", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ coreId, cwids, mode: "lookup" }),
-    }).catch(() => null);
-    setLookupPending(false);
-    if (!res?.ok) {
-      setResult("Could not look these up — try again.");
-      return;
-    }
-    const data = (await res.json().catch(() => ({}))) as {
-      resolved?: ResolvedPerson[];
-      invalid?: string[];
-    };
-    setResolved(data.resolved ?? []);
-    const allInvalid = [...invalid, ...(data.invalid ?? [])];
-    setResult(allInvalid.length > 0 ? `Not a CWID: ${allInvalid.join(", ")}.` : null);
-  }
-
-  async function submitAdd() {
-    if (addable.length === 0) return;
     setPending(true);
-    setResult(null);
+    setAddResult(null);
     const res = await fetch("/api/edit/core-client", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ coreId, cwids: addable.map((r) => r.cwid) }),
+      body: JSON.stringify({ coreId, cwids }),
     }).catch(() => null);
     setPending(false);
     if (!res?.ok) {
-      setResult("Could not save — try again.");
+      setAddResult("Could not save — try again.");
       return;
     }
     const data = (await res.json().catch(() => ({}))) as {
-      added?: Array<{
-        id: string | null;
-        cwid: string;
-        name: string | null;
-        slug: string | null;
-        affiliation: string | null;
-      }>;
+      added?: AddedPerson[];
       alreadyPresent?: string[];
       invalid?: string[];
     };
-    const added = data.added ?? [];
+    const addedRows = data.added ?? [];
     const alreadyPresent = data.alreadyPresent ?? [];
-    const invalid = data.invalid ?? [];
-    const parts = [`Added ${added.length}.`];
+    // The route re-parses the block server-side (it never trusts this one), so a
+    // malformed token can be reported at either end. Show both.
+    const allInvalid = [...invalid, ...(data.invalid ?? [])];
+    const parts = [`Added ${addedRows.length}.`];
     if (alreadyPresent.length > 0) parts.push(`Already listed: ${alreadyPresent.join(", ")}.`);
-    if (invalid.length > 0) parts.push(`Not a CWID: ${invalid.join(", ")}.`);
-    setResult(parts.join(" "));
+    if (allInvalid.length > 0) parts.push(`Not a CWID: ${allInvalid.join(", ")}.`);
+    setAddResult(parts.join(" "));
+    setAdded(addedRows);
     setText("");
-    setResolved(null);
-    if (added.length > 0) {
-      const existing = new Set(clients.flatMap((c) => (c.cwid ? [c.cwid.toLowerCase()] : [])));
-      const newRows: CoreClientRow[] = added
-        .filter((a) => !existing.has(a.cwid.toLowerCase()))
-        .map((a) => ({
-          // The route returns the row id it just wrote; the cwid is the fallback
-          // key only if that read raced, and Remove would then 400 rather than
-          // silently remove the wrong row.
-          id: a.id ?? a.cwid,
-          cwid: a.cwid,
-          name: a.name,
-          slug: a.slug ?? null,
-          affiliation: a.affiliation ?? null,
-          addedAt: new Date(),
-          addedBy: "",
-          addedByName: null,
-        }));
-      onClientsChange([...clients, ...newRows]);
-      router.refresh();
+    // Re-adding a client REVIVES the row it had before (the route upserts on
+    // (coreId, cwid) and clears `removedAt`), so it comes back under the very id
+    // a remove earlier in this session parked in `removing` — and would come
+    // back wearing a dead "Removed" button. Drop exactly what this add wrote.
+    if (addedRows.length > 0) {
+      setRemoving((m) => {
+        const next = new Map(m);
+        for (const a of addedRows) if (a.id) next.delete(a.id);
+        return next;
+      });
     }
+    // `alreadyPresent` earns a refresh just as much as `added` does: it is the
+    // server saying those CWIDs are on the roster already, and if they are not
+    // in `clients` then somebody else put them there (a second tab, a co-owner)
+    // and every server-rendered surface on this page is stale. Refreshing only
+    // on a write left that reviewer reading "Already listed: jx2001" above a
+    // roster with no jx2001 in it. A route that reported neither has told us
+    // nothing new about the server, so it earns nothing.
+    if (addedRows.length > 0 || alreadyPresent.length > 0) router.refresh();
   }
 
   async function submitName() {
     const trimmed = name.trim();
     if (trimmed.length === 0) return;
     setNamePending(true);
-    setResult(null);
+    setNameResult(null);
     const res = await fetch("/api/edit/core-client", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -220,7 +241,7 @@ export function CoreClientsDialog({
     }).catch(() => null);
     setNamePending(false);
     if (!res?.ok) {
-      setResult("Could not save — try again.");
+      setNameResult("Could not save — try again.");
       return;
     }
     const data = (await res.json().catch(() => ({}))) as {
@@ -229,25 +250,13 @@ export function CoreClientsDialog({
     };
     const added = data.added ?? [];
     if (added.length === 0) {
-      setResult(`Already on the roster: ${(data.alreadyPresent ?? [trimmed]).join(", ")}.`);
+      setNameResult(`Already on the roster: ${(data.alreadyPresent ?? [trimmed]).join(", ")}.`);
       return;
     }
-    setResult(`Added ${added[0].name}.`);
+    setNameResult(`Added ${added[0].name}.`);
     setName("");
     setAffiliation("");
-    onClientsChange([
-      ...clients,
-      {
-        id: added[0].id,
-        cwid: null,
-        name: added[0].name,
-        slug: null,
-        affiliation: added[0].affiliation,
-        addedAt: new Date(),
-        addedBy: "",
-        addedByName: null,
-      },
-    ]);
+    // The written row reaches the roster the same way every other write does.
     router.refresh();
   }
 
@@ -257,23 +266,27 @@ export function CoreClientsDialog({
       next.delete(row.id);
       return next;
     });
-    setRemoving((s) => new Set(s).add(row.id));
+    setRemoving((m) => new Map(m).set(row.id, "sending"));
     const res = await fetch("/api/edit/core-client", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       // Always by row id — a name-only row has no cwid to key on.
       body: JSON.stringify({ coreId, id: row.id }),
     }).catch(() => null);
-    setRemoving((s) => {
-      const next = new Set(s);
-      next.delete(row.id);
-      return next;
-    });
     if (!res?.ok) {
+      // Nothing was removed, so the row is live again and must be re-clickable.
+      setRemoving((m) => {
+        const next = new Map(m);
+        next.delete(row.id);
+        return next;
+      });
       setRowErrors((m) => new Map(m).set(row.id, "Could not remove — try again."));
       return;
     }
-    onClientsChange(clients.filter((c) => c.id !== row.id));
+    setRemoving((m) => new Map(m).set(row.id, "done"));
+    // The receipt is past tense, but "added" stops being true the moment the row
+    // comes off the roster — drop the person removed, and only them.
+    setAdded((a) => a?.filter((p) => p.cwid !== row.cwid && p.id !== row.id) ?? null);
     router.refresh();
   }
 
@@ -303,7 +316,7 @@ export function CoreClientsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* --- 1. paste + look up --- */}
+        {/* --- 1. paste + add --- */}
         <div className="border-apollo-border border-b px-6 py-5">
           <label
             htmlFor="core-clients-cwids"
@@ -316,8 +329,11 @@ export function CoreClientsDialog({
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              // The old resolution described a paste that no longer exists.
-              setResolved(null);
+              // The receipt and status line below describe a paste that no longer
+              // exists, and sitting under a fresh one they read as what is about
+              // to be added.
+              setAdded(null);
+              setAddResult(null);
             }}
             placeholder="djb2001, jx2001&#10;ab1234 cd5678"
             rows={3}
@@ -326,45 +342,51 @@ export function CoreClientsDialog({
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              disabled={lookupPending || text.trim().length === 0}
-              onClick={lookUp}
+              disabled={pending || text.trim().length === 0}
+              onClick={submitAdd}
               className="bg-apollo-maroon inline-flex h-9 shrink-0 items-center rounded-md px-3.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {lookupPending ? "Looking up…" : "Look up CWIDs"}
+              {pending ? "Adding…" : "Add clients"}
             </button>
             <p className="text-muted-foreground min-w-0 text-xs">
               Separated by commas, spaces or new lines. Each one is looked up in Scholars, then the
-              enterprise directory.
+              enterprise directory, and added to the roster straight away; a CWID neither holds is
+              still recorded.
             </p>
           </div>
 
-          {resolved !== null ? (
-            resolved.length === 0 ? (
-              <p className="text-muted-foreground mt-4 text-xs">Nothing to look up.</p>
-            ) : (
-              <ul className="mt-4 flex flex-col gap-2" data-slot="core-clients-resolved">
-                {resolved.map((r) => (
-                  <li key={r.cwid} className="flex items-baseline justify-between gap-3 text-sm">
-                    <span className="min-w-0">
-                      <span className="text-foreground font-medium">{r.name ?? r.cwid}</span>{" "}
-                      <span className="text-muted-foreground font-mono text-xs">{r.cwid}</span>
-                      {r.dept ? (
-                        <span className="text-muted-foreground"> · {r.dept}</span>
-                      ) : null}
-                    </span>
-                    <span className="text-muted-foreground shrink-0 text-xs">
-                      {r.alreadyPresent
-                        ? "already listed"
-                        : r.source === "scholars"
-                          ? "Scholars"
-                          : r.source === "directory"
-                            ? "enterprise directory"
-                            : "not found — will still be recorded"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )
+          {/* The outcome of the add, under the button that caused it — including
+              every outcome that WROTE NOTHING (all already listed, an
+              unparseable paste, a failed POST), which renders no receipt below
+              and would otherwise leave a cleared textarea as its only trace. */}
+          {addResult ? (
+            <p className="text-muted-foreground mt-3 text-xs" role="status">
+              {addResult}
+            </p>
+          ) : null}
+
+          {/* What the add WROTE, not what it would write. A CWID NEITHER store
+              holds has no name to print and is recorded anyway — the same
+              deliberate behaviour the preview used to announce up front, stated
+              here after the fact. An add that wrote nothing renders no list at
+              all: the status line above already says why. */}
+          {added !== null && added.length > 0 ? (
+            <ul className="mt-4 flex flex-col gap-2" data-slot="core-clients-added">
+              {added.map((a) => (
+                <li key={a.cwid} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="min-w-0">
+                    <span className="text-foreground font-medium">{a.name ?? a.cwid}</span>{" "}
+                    <span className="text-muted-foreground font-mono text-xs">{a.cwid}</span>
+                    {a.affiliation ? (
+                      <span className="text-muted-foreground"> · {a.affiliation}</span>
+                    ) : null}
+                  </span>
+                  <span className="text-muted-foreground shrink-0 text-xs">
+                    {sourceNote(a.source)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           ) : null}
         </div>
 
@@ -397,6 +419,11 @@ export function CoreClientsDialog({
               {namePending ? "Adding…" : "Add by name"}
             </button>
           </div>
+          {nameResult ? (
+            <p className="text-muted-foreground mt-3 text-xs" role="status">
+              {nameResult}
+            </p>
+          ) : null}
           <p className="text-muted-foreground mt-2 text-xs">
             A name-only client can&rsquo;t flag a byline automatically; it&rsquo;s recorded for the
             roster.
@@ -461,13 +488,16 @@ export function CoreClientsDialog({
                         {rowErrors.get(c.id)}
                       </span>
                     ) : null}
+                    {/* A removed row stays listed until the refreshed payload
+                        drops it — so the button says so, rather than sitting
+                        there looking like the click did nothing. */}
                     <button
                       type="button"
                       disabled={removing.has(c.id)}
                       onClick={() => remove(c)}
                       className="text-muted-foreground hover:text-foreground text-sm underline-offset-2 hover:underline disabled:opacity-50"
                     >
-                      Remove
+                      {removing.get(c.id) === "done" ? "Removed" : "Remove"}
                     </button>
                   </span>
                 </li>
@@ -477,11 +507,6 @@ export function CoreClientsDialog({
         </div>
 
         <DialogFooter className="border-apollo-border bg-apollo-surface-2 border-t px-6 py-4">
-          {result ? (
-            <p className="text-muted-foreground mr-auto self-center text-xs" role="status">
-              {result}
-            </p>
-          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -490,15 +515,7 @@ export function CoreClientsDialog({
             }}
             className="border-border-strong text-foreground hover:bg-apollo-surface inline-flex h-9 items-center rounded-md border bg-background px-3.5 text-sm"
           >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={pending || addable.length === 0}
-            onClick={submitAdd}
-            className="bg-apollo-maroon inline-flex h-9 items-center rounded-md px-3.5 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {pending ? "Adding…" : "Add clients"}
+            Close
           </button>
         </DialogFooter>
       </DialogContent>

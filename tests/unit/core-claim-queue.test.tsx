@@ -29,7 +29,8 @@ import {
   matchesFilters,
   matchesQuery,
   parsePmidBlock,
-  possessive,
+  priorFootnote,
+  repeatUser,
   searchBlob,
   CSV_HEADERS,
   csvRow,
@@ -65,6 +66,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     authorAffinity: 0.42,
     topicalPrior: null,
     methodTier: null,
+    methodEvidence: [],
     citationCount: 12,
     pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
     doi: "10.1000/synthetic.2021.001",
@@ -121,7 +123,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Moderate 82%")).toBeTruthy();
     expect(screen.queryByText("Combined likelihood")).toBeNull();
     expect(screen.queryByText(/Evidence score/)).toBeNull();
-    expect(screen.getByText(/4 of 5 signals/)).toBeTruthy();
+    expect(screen.getByText(/4 of 4 signals/)).toBeTruthy();
   });
 
   it("names each band at its exact threshold, and just below it", () => {
@@ -153,8 +155,9 @@ describe("CoreClaimQueue", () => {
     expect(strip.textContent).toContain("Acknowledged as");
     expect(strip.textContent).toContain("“CBIC”");
     expect(strip.textContent).toContain("Alex Testerson");
-    // ONE wcmAuthor on this fixture, so the repeat-user prior is named.
-    expect(strip.textContent).toContain("42% of Casey Sample's own work");
+    // No paperCounts passed, so nobody is nameable and the strip falls back to
+    // the engine's own unnamed rate rather than inventing a person.
+    expect(strip.textContent).toContain("42% of an author's own work");
     expect(strip.textContent).toContain("possibly core work"); // llmScore 7
     // the signal rows themselves stay closed until asked for
     expect(screen.queryByLabelText("evidence")).toBeNull();
@@ -171,11 +174,56 @@ describe("CoreClaimQueue", () => {
     expect(list.getByText("Moderate")).toBeTruthy(); // LLM is Moderate regardless of 7/10
     expect(list.getByText("7/10")).toBeTruthy(); // raw score still shown
     expect(list.getByText("Repeat user")).toBeTruthy();
-    expect(list.getByText("42%")).toBeTruthy(); // affinity readout
-    // the readout is a RATE post-ReciterAI #382, and the copy has to say so
+    // No counts passed, so nobody is nameable and the row falls back to the
+    // engine's own scalar — a RATE post-ReciterAI #382, so the copy says so.
+    expect(list.getByText("42%")).toBeTruthy();
     expect(
       list.getByText(
         "The largest share of any byline author's own publications that are work with this core",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("names the repeat user and prints THAT person's numbers once counts are on hand", () => {
+    // The mockup's row, verbatim: "Repeat user / 18 confirmed papers / Samprit
+    // Banerjee, Population Health Sciences. 18 of their 29 publications are
+    // confirmed work with this core, 11 in the last three years."
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row()]}
+        confirmed={[]}
+        paperCounts={{ ccc1003: { papers: 18, recent: 11, total: 29 } }}
+      />,
+    );
+    showEvidence();
+    const list = within(evidence());
+    expect(list.getByText("18 confirmed papers")).toBeTruthy();
+    expect(
+      list.getByText(
+        "Casey Sample, Genomics. 18 of their 29 publications are confirmed work with this core, 11 in the last three years.",
+      ),
+    ).toBeTruthy();
+    // the engine's own scalar is NOT printed beside a derived name — affinity is
+    // the largest SHARE, which need not belong to the largest COUNT
+    expect(list.queryByText("42%")).toBeNull();
+  });
+
+  it("drops the recent clause and reads singular at one paper", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row()]}
+        confirmed={[]}
+        paperCounts={{ ccc1003: { papers: 1, recent: 0, total: 1 } }}
+      />,
+    );
+    showEvidence();
+    const list = within(evidence());
+    expect(list.getByText("1 confirmed paper")).toBeTruthy();
+    expect(
+      list.getByText(
+        "Casey Sample, Genomics. 1 of their 1 publication is confirmed work with this core.",
       ),
     ).toBeTruthy();
   });
@@ -197,23 +245,24 @@ describe("CoreClaimQueue", () => {
     expect(pubmed.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/30418319/");
   });
 
-  it("reads the header meta as one middot line: abbreviated journal, PubMed date, PMID", () => {
+  it("reads the header meta as one middot line: FULL journal title, PubMed date, PMID", () => {
     const { container } = render(
       <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
     );
-    expect(metaLine(container)).toBe(
-      "Synth J Core Imaging Sci·Added to PubMed Feb 18, 2026·PMID 30418319",
-    );
-    // the full journal title is NOT what the card shows
-    expect(screen.queryByText("Synthetic Journal of Core Imaging Science")).toBeNull();
-  });
-
-  it("falls back to the full journal title when no abbreviation is on file", () => {
-    const { container } = render(
-      <CoreClaimQueue core={CORE} candidates={[row({ journalAbbrev: null })]} confirmed={[]} />,
-    );
+    // Round 2 reversed #2620: the abbreviation is not a venue a reviewer can
+    // identify at a glance, so it is now only the fallback.
     expect(metaLine(container)).toBe(
       "Synthetic Journal of Core Imaging Science·Added to PubMed Feb 18, 2026·PMID 30418319",
+    );
+    expect(screen.queryByText("Synth J Core Imaging Sci")).toBeNull();
+  });
+
+  it("falls back to the abbreviation when no full title is on file", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[row({ journal: null })]} confirmed={[]} />,
+    );
+    expect(metaLine(container)).toBe(
+      "Synth J Core Imaging Sci·Added to PubMed Feb 18, 2026·PMID 30418319",
     );
   });
 
@@ -221,7 +270,9 @@ describe("CoreClaimQueue", () => {
     const { container } = render(
       <CoreClaimQueue core={CORE} candidates={[row({ dateAddedToEntrez: null })]} confirmed={[]} />,
     );
-    expect(metaLine(container)).toBe("Synth J Core Imaging Sci·2021·PMID 30418319");
+    expect(metaLine(container)).toBe(
+      "Synthetic Journal of Core Imaging Science·2021·PMID 30418319",
+    );
     expect(metaLine(container)).not.toContain("Added to PubMed");
   });
 
@@ -294,33 +345,85 @@ describe("CoreClaimQueue", () => {
     expect(list.queryByText(/Named in the acknowledgments|Acknowledged in text/)).toBeNull();
   });
 
+  it("chips the method families at the card top and quotes the extractor, UNCOUNTED", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            methodTier: "weak",
+            methodEvidence: [
+              // Two tools, ONE family — one chip, not two.
+              { family: "Flow cytometry", tool: "FACSAria", sentence: "Cells were sorted on a." },
+              { family: "Flow cytometry", tool: "CytoFLEX", sentence: null },
+              { family: "Mass spectrometry", tool: "Orbitrap", sentence: null },
+            ],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const card = container.querySelector("[data-card]") as HTMLElement;
+    expect(within(card).getAllByText("Flow cytometry")).toHaveLength(1);
+    expect(within(card).getByText("Mass spectrometry")).toBeTruthy();
+    // The tier always rides along, and the caveat is on screen, not in a title.
+    expect(card.textContent).toContain(
+      "weak method match — what the paper did, not whether this core did it",
+    );
+    showEvidence();
+    expect(within(card).getByText("Methods used")).toBeTruthy();
+    expect(card.textContent).toContain("“Cells were sorted on a.”");
+    // Weighted 0.00 in the engine, and the lift inverts on weak rows — so it is
+    // shown but never counted: four signals fire here, and the denominator is 4.
+    expect(within(card).queryByLabelText("evidence")?.textContent).not.toContain("Methods used");
+    expect(card.textContent).toContain("4 of 4 signals");
+  });
+
+  it("renders the prefilter prior as a footnote, NOT as a counted signal row", () => {
+    // Owner decision, round 2: the prior is not evidence about the paper, so it
+    // comes out of the denominator and off the signal list — but stays on screen,
+    // because a reviewer who can see the score has to be able to see what moved it.
+    render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.6 })]} confirmed={[]} />);
+    showEvidence();
+    expect(within(evidence()).queryByText(/prior/i)).toBeNull();
+    expect(
+      screen.getByText(
+        "No evidence found: the topical prior (60%) has no mapped MeSH branch for this core, so it only restates the repeat-user number.",
+      ),
+    ).toBeTruthy();
+    // and the prior no longer inflates the count: four signals, four fired
+    expect(screen.getByText("4 of 4 signals")).toBeTruthy();
+  });
+
   it("does not claim a MeSH descriptor on an author-only prefilter prior", () => {
     // The bug this pins: every prefilter_prior rendered "The paper carries a MeSH
     // descriptor under this core's technique branch". On prod 2026-09-04 that was
     // false on 7,332 of 9,352 live chips, and core 14's entire backfill is 0.60
     // (author-only, MeSH membership zero) — so it would have been false on every
-    // row of the queue that actually gets reviewed.
+    // row of the queue that actually gets reviewed. Demoting the row to a footnote
+    // does not retire the trap: the footnote asserts a MeSH branch too.
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.6 })]} confirmed={[]} />);
     showEvidence();
-    expect(screen.queryByText(/MeSH descriptor under this core's technique branch/)).toBeNull();
-    expect(screen.getByText(/Prefilter prior — repeat user, no MeSH match/)).toBeTruthy();
+    expect(screen.queryByText(/is a MeSH-branch match/)).toBeNull();
+    expect(screen.getByText(/has no mapped MeSH branch for this core/)).toBeTruthy();
   });
 
-  it("keeps the MeSH wording when the MeSH signal actually fired", () => {
+  it("does not say 'no mapped MeSH branch' on the rows where MeSH DID fire", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.4 })]} confirmed={[]} />);
     showEvidence();
-    expect(screen.getByText("Topical MeSH match")).toBeTruthy();
+    expect(screen.queryByText(/no mapped MeSH branch/)).toBeNull();
+    expect(screen.getByText(/is a MeSH-branch match on the paper's own descriptors/)).toBeTruthy();
   });
 
-  it("names both signals when the prior is the noisy-OR of the two", () => {
+  it("names both halves when the prior is the noisy-OR of the two", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.76 })]} confirmed={[]} />);
     showEvidence();
-    expect(screen.getByText("MeSH match + repeat user")).toBeTruthy();
+    expect(screen.getByText(/blends a MeSH-branch match with the repeat-user number/)).toBeTruthy();
   });
 
-  it("counts all five signals, so the numerator can reach its own denominator", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.76 })]} confirmed={[]} />);
-    expect(screen.getByText("5 of 5 signals")).toBeTruthy();
+  it("counts all four signals, so the numerator can reach its own denominator", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(screen.getByText("4 of 4 signals")).toBeTruthy();
   });
 
   it("renders the synopsis and links resolved core-staff co-authors to their profile", () => {
@@ -329,7 +432,12 @@ describe("CoreClaimQueue", () => {
     showEvidence();
     const staff = within(evidence()).getByRole("link", { name: "Alex Testerson" });
     expect(staff.getAttribute("href")).toBe("/alex-testerson");
-    expect(screen.getByText(/\(Radiology\)/)).toBeTruthy();
+    // "1 person" over "Alex Testerson, Radiology" — the mockup's two-line form.
+    // The department follows a COMMA, not parentheses: it identifies the person
+    // rather than annotating them.
+    expect(within(evidence()).getByText("1 person")).toBeTruthy();
+    expect(screen.getByText(", Radiology")).toBeTruthy();
+    expect(screen.queryByText(/\(Radiology\)/)).toBeNull();
   });
 
   it("shows an unresolved core-staff CWID as bare text", () => {
@@ -363,6 +471,60 @@ describe("CoreClaimQueue", () => {
     expect(screen.getAllByText("Robin Placeholder").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Robin Placeholder" })).toBeNull();
     expect(screen.queryByText(/bbb9001/)).toBeNull();
+  });
+
+  it("names a staff co-author WITHOUT their curated disambiguation suffix", () => {
+    // The byline and the person card already strip it (#2049); the co-author
+    // detail row did not, so this line read "Alessandro Fichera - Surgery,
+    // Surgery" — the department inside the name and again beside it. The suffix
+    // is a roster disambiguation device, not part of anybody's name.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            coauthors: ["zqf9101"],
+            coauthorScholars: [
+              {
+                cwid: "zqf9101",
+                name: "Alessandro Fichera - Surgery",
+                slug: "alessandro-fichera",
+                dept: "Surgery",
+              },
+            ],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    showEvidence();
+    const link = within(evidence()).getByRole("link", { name: "Alessandro Fichera" });
+    expect(link.getAttribute("href")).toBe("/alessandro-fichera");
+    expect(evidence().textContent).not.toContain("Fichera - Surgery");
+    // The department still identifies him, once, behind the comma.
+    expect(within(evidence()).getByText(", Surgery")).toBeTruthy();
+  });
+
+  it("names an ED-only staff co-author without the suffix either", () => {
+    // Same strip on the unlinked branch — an ED-only scholar has no profile, so
+    // this is the only place their name is printed.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            coauthors: ["bbb9002"],
+            coauthorScholars: [
+              { cwid: "bbb9002", name: "Robin Placeholder (CBIC)", slug: null, dept: "CBIC" },
+            ],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    showEvidence();
+    expect(within(evidence()).getByText("Robin Placeholder")).toBeTruthy();
+    expect(evidence().textContent).not.toContain("Placeholder (CBIC)");
   });
 
   it("no longer offers the abstract/MeSH Details disclosure", () => {
@@ -436,11 +598,176 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.getByText(/0 of 5 signals/)).toBeTruthy();
+    expect(screen.getByText(/0 of 4 signals/)).toBeTruthy();
     // the collapsed strip says so too, before anything is opened
     expect(screen.getByText("No labelled signal.")).toBeTruthy();
     showEvidence();
     expect(screen.getByText(/The score moved on engine inputs this queue doesn’t show/)).toBeTruthy();
+  });
+
+  it("does not claim it can show nothing when a METHOD FAMILY is the only thing on the row", () => {
+    // Three statements about one row, two of them false: the strip showed a
+    // "Method family" token, the panel showed "No labelled signal.", and a fully
+    // rendered "Methods used" block sat directly under that panel. The family is
+    // uncounted, which is what the panel is about — it is not invisible.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            pmid: "1",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+            methodTier: "strong",
+            methodEvidence: [{ family: "Flow cytometry", tool: "FACSAria", sentence: "Sorted." }],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText(/0 of 4 signals/)).toBeTruthy();
+    // the strip is not empty — it carries the method token — so it never said this
+    expect(screen.queryByText("No labelled signal.")).toBeNull();
+    showEvidence();
+    expect(screen.queryByText(/engine inputs this queue doesn’t show/)).toBeNull();
+    expect(screen.getByText(/The method family on this card is all it carries/)).toBeTruthy();
+    expect(screen.getByText("Methods used")).toBeTruthy();
+  });
+
+  it("keeps a DIFFERENT person's repeat-user row when core staff outrank them on the byline", () => {
+    // The whole signal used to vanish here: the maximum paper count on the byline
+    // belongs to the staff co-author, and identity was tested only after he had
+    // won. Reads 3 of 4, with the second person's own numbers.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            signalAck: false,
+            ackAlias: null,
+            wcmAuthors: [
+              { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" },
+              { cwid: "bbb2028", name: "Blake Fixture", slug: "blake-fixture", dept: "Genomics" },
+            ],
+          }),
+        ]}
+        confirmed={[]}
+        paperCounts={{
+          aaa1001: { papers: 120, recent: 40, total: 300 },
+          bbb2028: { papers: 18, recent: 11, total: 29 },
+        }}
+      />,
+    );
+    expect(screen.getByText(/3 of 4 signals/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Show evidence/ }).textContent).toContain(
+      "Blake Fixture has used the core on 18 previous occasions (out of 29 publications).",
+    );
+    showEvidence();
+    expect(within(evidence()).getByText("Repeat user")).toBeTruthy();
+    expect(within(evidence()).getByText("18 confirmed papers")).toBeTruthy();
+  });
+
+  it("does not print the department TWICE in the named repeat-user sentence", () => {
+    // The named sentence is new in round 2 — master's affinity row printed only
+    // the engine percentage — so it arrived with the curated collision suffix
+    // still on the name, and that suffix IS a department: "Alessandro Fichera -
+    // Surgery, Surgery. 18 of their 29 publications...". Every other surface that
+    // prints a scholar goes through `displayName`; this one now does too.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            wcmAuthors: [
+              {
+                cwid: "afi1007",
+                name: "Alessandro Fichera - Surgery",
+                slug: "alessandro-fichera",
+                dept: "Surgery",
+              },
+            ],
+          }),
+        ]}
+        confirmed={[]}
+        paperCounts={{ afi1007: { papers: 18, recent: 11, total: 29 } }}
+      />,
+    );
+    // The collapsed token first — it names him too.
+    const strip = screen.getByRole("button", { name: /Show evidence/ }).textContent ?? "";
+    expect(strip).toContain(
+      "Alessandro Fichera has used the core on 18 previous occasions (out of 29 publications).",
+    );
+    expect(strip).not.toContain("Fichera - Surgery");
+    showEvidence();
+    const ev = evidence();
+    expect(
+      within(ev).getByText(
+        "Alessandro Fichera, Surgery. 18 of their 29 publications are confirmed work with this core, 11 in the last three years.",
+      ),
+    ).toBeTruthy();
+    expect(ev.textContent).not.toContain("Fichera - Surgery");
+  });
+
+  it("stops footnoting the repeat-user row once de-duplication has taken it off the card", () => {
+    // The footnote's author-only sentence points at a row ("it only restates the
+    // repeat-user number"). Here the only counted byline author IS the staff
+    // co-author, so that row is gone and the sentence has to stop naming it.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            topicalPrior: 0.6,
+            wcmAuthors: [
+              { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" },
+            ],
+          })
+        ]}
+        confirmed={[]}
+        paperCounts={{ aaa1001: { papers: 6, recent: 2, total: 30 } }}
+      />,
+    );
+    showEvidence();
+    expect(within(evidence()).queryByText("Repeat user")).toBeNull();
+    expect(screen.queryByText(/only restates the repeat-user number/)).toBeNull();
+    expect(screen.getByText(/rests on an author's prior use of this core/)).toBeTruthy();
+  });
+
+  it("does not claim it can show nothing when the prior IS the only thing on the row", () => {
+    // The prior stopped being a counted signal, so a prior-only row now reads as
+    // 0 of 4 — but the footnote right underneath shows exactly what moved the
+    // score, and the empty state must not contradict the line below it.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            pmid: "1",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+            topicalPrior: 0.6,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText(/0 of 4 signals/)).toBeTruthy();
+    showEvidence();
+    expect(screen.queryByText(/engine inputs this queue doesn’t show/)).toBeNull();
+    expect(screen.getByText(/The prefilter prior on this card is all it carries/)).toBeTruthy();
+    expect(screen.getByText(/the topical prior \(60%\)/)).toBeTruthy();
   });
 
   it("surfaces an error and keeps the row when the POST is refused", async () => {
@@ -1031,7 +1358,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByText(/likelihood \d/)).toBeNull();
   });
 
-  it("labels a group with no evidence kinds 'no labelled signal'", () => {
+  it("labels a group with no COUNTED evidence kinds 'no counted signal'", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1049,7 +1376,9 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.getByText("1 paper · no labelled signal")).toBeTruthy();
+    // "counted", not "labelled": a method-family row groups here too, and its
+    // chips, strip token and quote are all labels the card draws.
+    expect(screen.getByText("1 paper · no counted signal")).toBeTruthy();
   });
 
   it("collapses and re-expands a group", () => {
@@ -1514,10 +1843,15 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const el = document.querySelector('[data-slot="core-queue-byline"]');
+    const el = document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement;
     // Both tokens keep their PubMed form; neither is rewritten to the other's name.
-    expect(el?.textContent).toContain("Testerson A");
-    expect(el?.textContent).toContain("Testerson B");
+    expect(el.textContent).toContain("Testerson A");
+    expect(el.textContent).toContain("Testerson B");
+    // And neither is a LINK or a card. We do not know which person the token is,
+    // so the href we used to emit pointed at whichever colliding scholar landed
+    // in the map first — a wrong link by construction (round 2, item 1b).
+    expect(el.querySelectorAll("a")).toHaveLength(0);
+    expect(el.querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
   });
 
   it("does NOT rename when the first initial disagrees", () => {
@@ -1536,6 +1870,91 @@ describe("CoreClaimQueue", () => {
     const el = document.querySelector('[data-slot="core-queue-byline"]');
     expect(el?.textContent).toContain("Testerson Z");
     expect(el?.textContent).not.toContain("Alex Testerson");
+  });
+
+  it("expands a MULTI-WORD surname, which the last-word key could never match", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            // PubMed's lead word here is "Niño"; the scholar's last word is
+            // "Rivera", so before round 2 these two could never meet.
+            authorsString: "Niño de Rivera S, Fixture B",
+            fullAuthorsString: "Niño de Rivera S, Fixture B",
+            wcmAuthors: [
+              {
+                cwid: "snr1004",
+                name: "Sara Niño de Rivera",
+                slug: "sara-nino-de-rivera",
+                dept: "Population Health Sciences",
+              },
+            ],
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const byline = document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement;
+    const named = within(byline).getByText("Sara Niño de Rivera");
+    expect(named.closest("a")?.getAttribute("href")).toBe("/sara-nino-de-rivera");
+    expect(byline.textContent).not.toContain("Niño de Rivera S");
+  });
+
+  it("cards EVERY resolvable WCM author, not just core staff and known clients", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            authorsString: "Testerson A, Sample C, Fixture B",
+            fullAuthorsString: "Testerson A, Sample C, Fixture B",
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const byline = document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement;
+    // Casey Sample is neither core staff nor a known client — a plain WCM
+    // co-author — and still gets the full name, the link and a card. Before
+    // round 2, 29 of the live page's 3,497 byline anchors carried one.
+    const casey = within(byline).getByText("Casey Sample");
+    expect(casey.getAttribute("data-slot")).toBe("hover-card-trigger");
+    expect(within(byline).getByText("Alex Testerson").getAttribute("data-slot")).toBe(
+      "hover-card-trigger",
+    );
+    // "Fixture B" resolves to nobody, so it stays PubMed's, uncarded and unlinked.
+    expect(byline.querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(2);
+    expect(byline.textContent).toContain("Fixture B");
+  });
+
+  it("says on the card that a plain WCM co-author is NOT staff and NOT a client", async () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            authorsString: "Sample C, Fixture B",
+            fullAuthorsString: "Sample C, Fixture B",
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const byline = document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement;
+    // Radix opens on the synthetic pointerenter React derives from pointerover,
+    // after the wrapper's 200ms openDelay — hence pointerOver, not pointerEnter.
+    fireEvent.pointerOver(within(byline).getByText("Casey Sample"));
+    const card = (await screen.findByText(/WCM co-author on this paper/)).closest(
+      '[data-slot="core-queue-person-card"]',
+    ) as HTMLElement;
+    // The role line must identify, never imply core usage — Casey Sample has no
+    // staff row and is on no client list, and the card has to say so rather than
+    // leave a reviewer to read the card's existence as evidence.
+    expect(card.textContent).toContain("not core staff, and not a known client of this core");
+    expect(card.textContent).not.toContain("Core staff");
+    expect(card.textContent).not.toContain("Known client of this core"); // the client line, capitalised
+    expect(card.textContent).toContain("ccc1003");
   });
 
   it("reports how much of the queue the current filter is showing", () => {
@@ -1718,6 +2137,16 @@ describe("matchesQuery", () => {
     expect(matchesQuery(searchable, "imaging facility")).toBe(true); // acknowledgment quote
     expect(matchesQuery(searchable, "Casey Sample")).toBe(true); // WCM byline scholar
     expect(matchesQuery(searchable, "Alex Testerson")).toBe(true); // core-staff co-author
+    // the method chips at the card top, but NOT the extractor's quote behind them
+    const chipped = row({
+      methodTier: "weak",
+      methodEvidence: [{ family: "Flow cytometry", tool: "FACSAria", sentence: "Sorted on a." }],
+    });
+    expect(matchesQuery(chipped, "flow cytometry")).toBe(true);
+    expect(matchesQuery(chipped, "Sorted on a")).toBe(false);
+    // ...and no chips are drawn on an untiered row, so its families are not
+    // searched either — a hit there would be one a reviewer cannot see a reason for
+    expect(matchesQuery(row({ ...chipped, methodTier: null }), "flow cytometry")).toBe(false);
   });
 
   it("narrows nothing on a blank query, and misses what the row doesn't carry", () => {
@@ -1798,7 +2227,7 @@ describe("evidenceTokens", () => {
     expect(evidenceTokens(row())).toEqual([
       { label: "Acknowledged as", value: "“CBIC”" },
       { label: "Staff co-author", value: "Alex Testerson" },
-      { label: "Repeat user", value: "42% of Casey Sample's own work" },
+      { label: "Repeat user", value: "42% of an author's own work" },
       { label: "LLM on title and abstract", value: "possibly core work" },
     ]);
   });
@@ -1813,23 +2242,224 @@ describe("evidenceTokens", () => {
     );
   });
 
-  it("does NOT name the repeat-user prior when the byline has more than one WCM author", () => {
-    // The engine publishes one scalar for the row and never says which author it
-    // is about; with two candidates a name would be a coin flip printed as fact.
+  it("ALWAYS names the repeat user, even on a byline with several WCM authors", () => {
+    // Round 2 reverses #2620's "name only a sole WCM author" rule. The name is
+    // not a guess at whose scalar the engine published — it is the byline author
+    // this core holds the most confirmed papers from, and the numbers printed
+    // beside it are that same person's, so the two cannot disagree.
     const two = row({
       wcmAuthors: [
         { cwid: "ccc1003", name: "Casey Sample", slug: "casey-sample", dept: "Genomics" },
         { cwid: "ddd1004", name: "Dana Second", slug: "dana-second", dept: "Genomics" },
       ],
     });
-    expect(evidenceTokens(two)).toContainEqual({
+    const counts = {
+      ccc1003: { papers: 3, recent: 1, total: 40 },
+      ddd1004: { papers: 8, recent: 2, total: 210 },
+    };
+    expect(evidenceTokens(two, new Set(), counts)).toContainEqual({
+      label: "Repeat user",
+      value: "Dana Second has used the core on 8 previous occasions (out of 210 publications).",
+    });
+  });
+
+  it("is singular-safe at one occasion and one publication", () => {
+    const counts = { ccc1003: { papers: 1, recent: 0, total: 1 } };
+    expect(evidenceTokens(row(), new Set(), counts)).toContainEqual({
+      label: "Repeat user",
+      value: "Casey Sample has used the core on 1 previous occasion (out of 1 publication).",
+    });
+  });
+
+  it("names nobody rather than inventing one when no byline author has a count", () => {
+    // The engine flagged affinity but every candidate is past the 12-author cap
+    // or new to this core. The honest reading is the engine's own unnamed rate.
+    expect(evidenceTokens(row(), new Set(), {})).toContainEqual({
       label: "Repeat user",
       value: "42% of an author's own work",
     });
   });
 
+  it("drops the repeat-user token when it is ABOUT the staff co-author already named", () => {
+    // Same person, so the same evidence — "Staff co-author" already counts it.
+    const same = row({
+      wcmAuthors: [{ cwid: "aaa1001", name: "Alex Testerson", slug: "a", dept: "Radiology" }],
+    });
+    const counts = { aaa1001: { papers: 6, recent: 2, total: 30 } };
+    expect(evidenceTokens(same, new Set(), counts)).not.toContainEqual(
+      expect.objectContaining({ label: "Repeat user" }),
+    );
+    expect(evidenceTokens(same, new Set(), counts)).toContainEqual({
+      label: "Staff co-author",
+      value: "Alex Testerson",
+    });
+  });
+
+  it("keeps the repeat-user token when it is about a DIFFERENT person from the staff co-author", () => {
+    // Independent evidence: a second person with prior confirmed use is not the
+    // co-author signal restated, and de-duplicating it would erase a real read.
+    const counts = { ccc1003: { papers: 6, recent: 2, total: 30 } };
+    expect(evidenceTokens(row(), new Set(), counts)).toContainEqual({
+      label: "Repeat user",
+      value: "Casey Sample has used the core on 6 previous occasions (out of 30 publications).",
+    });
+  });
+
+  it("keeps that person even when the staff co-author OUTRANKS them on paper count", () => {
+    // The de-dup EXCLUDES first and picks the maximum second. Picking first and
+    // testing identity after is the same code with the steps swapped, and it
+    // silently dropped the whole signal on the normal case: core staff hold more
+    // of their own core's confirmed papers than anyone else on the byline, so the
+    // maximum was a staff member on nearly every staff-co-authored row and the
+    // second person's independent prior use went with them (item 6c forbids it).
+    const outranked = row({
+      signalAck: false,
+      ackAlias: null,
+      wcmAuthors: [
+        { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" },
+        { cwid: "bbb2028", name: "Blake Fixture", slug: "blake-fixture", dept: "Genomics" },
+      ],
+    });
+    const counts = {
+      aaa1001: { papers: 120, recent: 40, total: 300 },
+      bbb2028: { papers: 18, recent: 11, total: 29 },
+    };
+    expect(evidenceTokens(outranked, new Set(), counts)).toContainEqual({
+      label: "Repeat user",
+      value: "Blake Fixture has used the core on 18 previous occasions (out of 29 publications).",
+    });
+    // ...and the count keeps it: co-author + LLM + repeat user, 3 of 4
+    expect(buildSignals(outranked, counts).map((sig) => sig.kind)).toEqual([
+      "coauthor",
+      "llm",
+      "affinity",
+    ]);
+  });
+
+  it("drops the repeat-user token when the CLIENT co-author token already named that person", () => {
+    // One person, one pile of 18 papers, printed twice: "Client co-author: Casey
+    // Sample, 18 papers, 11 recent" and "Repeat user: Casey Sample has used the
+    // core on 18 previous occasions". Item 6b says never twice, and the de-dup is
+    // over every token that NAMES someone, not just the staff one.
+    const clientOnly = row({ signalAck: false, ackAlias: null, coauthors: [], coauthorScholars: [] });
+    const counts = { ccc1003: { papers: 18, recent: 11, total: 29 } };
+    const clients = new Set(["ccc1003"]);
+    expect(evidenceTokens(clientOnly, clients, counts)).toContainEqual({
+      label: "Client co-author",
+      value: "Casey Sample, 18 papers, 11 recent",
+    });
+    expect(evidenceTokens(clientOnly, clients, counts)).not.toContainEqual(
+      expect.objectContaining({ label: "Repeat user" }),
+    );
+    // the rendered count falls with it, on the same rule as the staff case
+    expect(buildSignals(clientOnly, counts, clients).map((sig) => sig.kind)).toEqual(["llm"]);
+  });
+
+  it("prints a person who is BOTH staff and a known client once — under Staff co-author", () => {
+    // Item 6b, the last place it was not applied: the staff and client tokens
+    // de-duplicated against the repeat-user line but never against each other, so
+    // one person came out as "Staff co-author: Dana Both" AND "Client co-author:
+    // Dana Both, 40 papers, 10 recent". Staff wins the collision — it is the
+    // stronger read, the only one of the two that is a counted signal, and the
+    // same way the byline chip already resolves a person who is both.
+    const both = row({
+      signalAck: false,
+      ackAlias: null,
+      coauthors: ["aaa1001"],
+      coauthorScholars: [
+        { cwid: "aaa1001", name: "Dana Both", slug: "dana-both", dept: "Radiology" },
+      ],
+      wcmAuthors: [
+        { cwid: "aaa1001", name: "Dana Both", slug: "dana-both", dept: "Radiology" },
+        { cwid: "ccc3003", name: "Cleo Client", slug: "cleo-client", dept: "Genomics" },
+        { cwid: "bbb2002", name: "Rae Second", slug: "rae-second", dept: "Genomics" },
+      ],
+    });
+    const counts = {
+      aaa1001: { papers: 40, recent: 10, total: 100 },
+      ccc3003: { papers: 7, recent: 2, total: 30 },
+      bbb2002: { papers: 5, recent: 1, total: 20 },
+    };
+    const tokens = evidenceTokens(both, new Set(["aaa1001", "ccc3003"]), counts);
+    expect(tokens).toContainEqual({ label: "Staff co-author", value: "Dana Both" });
+    // The OTHER client is untouched — the de-dup is per person, so the token
+    // survives naming only her, and goes singular with her.
+    expect(tokens).toContainEqual({
+      label: "Client co-author",
+      value: "Cleo Client, 7 papers, 2 recent",
+    });
+    expect(JSON.stringify(tokens)).not.toContain("Dana Both, 40 papers");
+    // ...and a THIRD person's independent prior use still survives both (6c).
+    expect(tokens).toContainEqual({
+      label: "Repeat user",
+      value: "Rae Second has used the core on 5 previous occasions (out of 20 publications).",
+    });
+  });
+
+  it("keeps the client token for a both-flavour person the staff token does NOT name", () => {
+    // "Staff wins" only wins where staff SPEAKS. The collapsed token names
+    // `coauthorScholars[0]` and nobody else, so suppressing EVERY staff CWID
+    // deleted the second one: Dana Both, a roster client on this byline with 40
+    // confirmed papers, was named nowhere in the strip and her count went with
+    // her. The suppression is now exactly the one person the token prints — the
+    // test above, where she IS first-listed, still suppresses her.
+    const both = row({
+      signalAck: false,
+      ackAlias: null,
+      coauthors: ["zzz9999", "aaa1001"],
+      coauthorScholars: [
+        { cwid: "zzz9999", name: "Zed Ninety", slug: "zed-ninety", dept: "Radiology" },
+        { cwid: "aaa1001", name: "Dana Both", slug: "dana-both", dept: "Radiology" },
+      ],
+      wcmAuthors: [
+        { cwid: "aaa1001", name: "Dana Both", slug: "dana-both", dept: "Radiology" },
+        { cwid: "bbb2002", name: "Rae Second", slug: "rae-second", dept: "Genomics" },
+      ],
+    });
+    const counts = {
+      aaa1001: { papers: 40, recent: 10, total: 60 },
+      bbb2002: { papers: 5, recent: 1, total: 20 },
+    };
+    const tokens = evidenceTokens(both, new Set(["aaa1001"]), counts);
+    expect(tokens).toContainEqual({ label: "Staff co-author", value: "Zed Ninety" });
+    expect(tokens).toContainEqual({
+      label: "Client co-author",
+      value: "Dana Both, 40 papers, 10 recent",
+    });
+    // The repeat-user line is a different question — "does this card name them
+    // ANYWHERE", including the expanded co-author list — so it still de-duplicates
+    // against every staff CWID, and a third person's own prior use survives (6c).
+    expect(tokens).toContainEqual({
+      label: "Repeat user",
+      value: "Rae Second has used the core on 5 previous occasions (out of 20 publications).",
+    });
+  });
+
+  it("prints a curated collision suffix on NEITHER the client nor the repeat-user token", () => {
+    // The suffix IS a department, so leaving it on printed the department twice:
+    // "Alessandro Fichera - Surgery, 18 papers". Both tokens go through
+    // `displayName`, like the byline label and the person card.
+    const fichera = {
+      cwid: "afi1007",
+      name: "Alessandro Fichera - Surgery",
+      slug: "alessandro-fichera",
+      dept: "Surgery",
+    };
+    const counts = { afi1007: { papers: 18, recent: 11, total: 29 } };
+    const asClient = row({ coauthors: [], coauthorScholars: [], wcmAuthors: [fichera] });
+    expect(evidenceTokens(asClient, new Set(["afi1007"]), counts)).toContainEqual({
+      label: "Client co-author",
+      value: "Alessandro Fichera, 18 papers, 11 recent",
+    });
+    expect(evidenceTokens(asClient, new Set(), counts)).toContainEqual({
+      label: "Repeat user",
+      value:
+        "Alessandro Fichera has used the core on 18 previous occasions (out of 29 publications).",
+    });
+  });
+
   it("carries the paper counts this core already holds from a named client", () => {
-    const counts = { ccc1003: { papers: 18, recent: 11 } };
+    const counts = { ccc1003: { papers: 18, recent: 11, total: 29 } };
     expect(evidenceTokens(row(), new Set(["ccc1003"]), counts)).toContainEqual({
       label: "Client co-author",
       value: "Casey Sample, 18 papers, 11 recent",
@@ -1837,7 +2467,7 @@ describe("evidenceTokens", () => {
   });
 
   it("drops a zero count rather than printing '0 papers'", () => {
-    const counts = { ccc1003: { papers: 0, recent: 0 } };
+    const counts = { ccc1003: { papers: 0, recent: 0, total: 4 } };
     expect(evidenceTokens(row(), new Set(["ccc1003"]), counts)).toContainEqual({
       label: "Client co-author",
       value: "Casey Sample",
@@ -1845,7 +2475,7 @@ describe("evidenceTokens", () => {
   });
 
   it("omits the recent clause when nothing recent, and is singular-safe at one paper", () => {
-    const counts = { ccc1003: { papers: 1, recent: 0 } };
+    const counts = { ccc1003: { papers: 1, recent: 0, total: 1 } };
     expect(evidenceTokens(row(), new Set(["ccc1003"]), counts)).toContainEqual({
       label: "Client co-author",
       value: "Casey Sample, 1 paper",
@@ -1882,9 +2512,9 @@ describe("evidenceTokens", () => {
     );
   });
 
-  it("does NOT make method a counted signal — SIGNAL_COUNT stays 5", () => {
+  it("does NOT make method a counted signal — SIGNAL_COUNT stays 4", () => {
     // The owner decision: method is an uncounted chip. A tier must never change
-    // the "N of 5 signals" line, because it is weighted 0.00 in the engine.
+    // the "N of 4 signals" line, because it is weighted 0.00 in the engine.
     expect(buildSignals(row({ methodTier: "strong" }))).toEqual(buildSignals(row()));
   });
 });
@@ -1892,7 +2522,7 @@ describe("evidenceTokens", () => {
 describe("evidenceGroupKey / evidenceGroupLabel / bandRange", () => {
   it("keys a row by which evidence kinds fired, prior excluded", () => {
     expect(evidenceGroupKey(row())).toBe("ack+coauthor+llm+affinity");
-    // the prefilter prior restates the repeat-user prior, so it never splits a pile
+    // the prefilter prior is no longer a signal at all, so it never splits a pile
     expect(evidenceGroupKey(row({ topicalPrior: 0.6 }))).toBe("ack+coauthor+llm+affinity");
     expect(
       evidenceGroupKey(
@@ -1914,7 +2544,9 @@ describe("evidenceGroupKey / evidenceGroupLabel / bandRange", () => {
     expect(evidenceGroupLabel("coauthor", 2)).toBe("2 papers · staff co-author");
     expect(evidenceGroupLabel("llm", 2)).toBe("2 papers · LLM read");
     expect(evidenceGroupLabel("affinity", 2)).toBe("2 papers · repeat user");
-    expect(evidenceGroupLabel("none", 2)).toBe("2 papers · no labelled signal");
+    // "no counted signal", not "no labelled signal": a method-only row lands in
+    // this group and DOES carry a label the card draws.
+    expect(evidenceGroupLabel("none", 2)).toBe("2 papers · no counted signal");
     expect(evidenceGroupLabel("ack+coauthor", 2)).toBe("2 papers · acknowledgment + staff co-author");
   });
 
@@ -1934,22 +2566,42 @@ describe("buildSignals", () => {
     expect(signals.at(-1)).toMatchObject({ kind: "affinity", dots: 1, strength: "Weak" });
   });
 
-  it("adds the prefilter prior as a fifth signal, ordered after affinity", () => {
-    const signals = buildSignals(row({ topicalPrior: 0.4 }));
-    expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity", "topic"]);
-    expect(signals.at(-1)).toMatchObject({ kind: "topic", dots: 1, strength: "Weak" });
+  it("counts NO signal for the prefilter prior, whatever it reads", () => {
+    // Demoted to a footnote in round 2, so no value of it can move the count.
+    for (const topicalPrior of [null, 0, 0.4, 0.6, 0.76]) {
+      expect(buildSignals(row({ topicalPrior })).map((s) => s.kind)).toEqual([
+        "ack",
+        "coauthor",
+        "llm",
+        "affinity",
+      ]);
+    }
   });
 
-  it("leaves the four-signal behavior unchanged when topicalPrior is null", () => {
-    const signals = buildSignals(row({ topicalPrior: null }));
-    expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
-    expect(signals).toHaveLength(4);
+  it("drops the repeat-user signal — and the COUNT — when it is about the staff co-author", () => {
+    // Per-person de-dup: the owner decided the rendered count DOES fall, because
+    // showing one person's involvement twice is what makes 4-of-4 a lie.
+    const same = row({
+      wcmAuthors: [{ cwid: "aaa1001", name: "Alex Testerson", slug: "a", dept: "Radiology" }],
+    });
+    const counts = { aaa1001: { papers: 6, recent: 2, total: 30 } };
+    expect(buildSignals(same, counts).map((s) => s.kind)).toEqual(["ack", "coauthor", "llm"]);
+    // ...and a DIFFERENT person is independent evidence that has to survive
+    const counts2 = { ccc1003: { papers: 6, recent: 2, total: 30 } };
+    expect(buildSignals(row(), counts2).map((s) => s.kind)).toEqual([
+      "ack",
+      "coauthor",
+      "llm",
+      "affinity",
+    ]);
   });
 
-  it("does not render a chip for a prior of 0 (neither prefilter signal fired)", () => {
-    // Absent evidence, not weak evidence — a "0%" chip claims a readout it has none of.
-    const signals = buildSignals(row({ topicalPrior: 0 }));
-    expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
+  it("de-duplicates nothing when it has no counts to name anybody with", () => {
+    // Dropping a signal on a guess is worse than counting it twice.
+    const same = row({
+      wcmAuthors: [{ cwid: "aaa1001", name: "Alex Testerson", slug: "a", dept: "Radiology" }],
+    });
+    expect(buildSignals(same).map((s) => s.kind)).toContain("affinity");
   });
 
   it("omits a signal that did not fire", () => {
@@ -1989,6 +2641,94 @@ describe("decodeTopicalPrior", () => {
     // rendered "carries a MeSH descriptor". Core 14's MeSH membership is zero, so
     // every row of its backfill lands here.
     expect(decodeTopicalPrior(0.6).mesh).toBe(false);
+  });
+});
+
+describe("repeatUser", () => {
+  const A = { cwid: "ccc1003", name: "Casey Sample", slug: "casey-sample", dept: "Genomics" };
+  const B = { cwid: "ddd1004", name: "Dana Second", slug: "dana-second", dept: "Genomics" };
+
+  it("names the byline author this core holds the MOST confirmed papers from", () => {
+    // Not the first author, and not whoever the engine's scalar was about — the
+    // derivation is what makes the name and the number one fact.
+    const two = row({ wcmAuthors: [A, B] });
+    const counts = {
+      ccc1003: { papers: 3, recent: 1, total: 40 },
+      ddd1004: { papers: 8, recent: 2, total: 210 },
+    };
+    expect(repeatUser(two, counts)?.scholar.name).toBe("Dana Second");
+    expect(repeatUser(two, counts)?.counts.papers).toBe(8);
+  });
+
+  it("breaks a tie on byline order, so the choice is deterministic", () => {
+    const two = row({ wcmAuthors: [A, B] });
+    const tied = {
+      ccc1003: { papers: 5, recent: 0, total: 9 },
+      ddd1004: { papers: 5, recent: 0, total: 60 },
+    };
+    expect(repeatUser(two, tied)?.scholar.name).toBe("Casey Sample");
+  });
+
+  it("names nobody when the engine flagged no affinity, or when no one has a count", () => {
+    expect(
+      repeatUser(row({ authorAffinity: null }), { ccc1003: { papers: 3, recent: 0, total: 4 } }),
+    ).toBeNull();
+    expect(repeatUser(row(), {})).toBeNull();
+  });
+
+  it("excludes everyone another token already names BEFORE taking the maximum", () => {
+    // The staff co-author holds the most papers, so the maximum over EVERYONE is
+    // him — and testing his identity afterwards returned null for the whole row.
+    // Excluding first leaves the one person the card can still honestly name.
+    const STAFF = { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Radiology" };
+    const withStaff = row({ wcmAuthors: [STAFF, B] }); // row()'s coauthors is ["aaa1001"]
+    const counts = {
+      aaa1001: { papers: 120, recent: 40, total: 300 },
+      ddd1004: { papers: 8, recent: 2, total: 210 },
+    };
+    expect(repeatUser(withStaff, counts)?.scholar.name).toBe("Dana Second");
+    // a known client is excluded on exactly the same footing as core staff
+    const withClient = row({ coauthors: [], coauthorScholars: [], wcmAuthors: [A, B] });
+    const clientLeads = {
+      ccc1003: { papers: 120, recent: 40, total: 300 },
+      ddd1004: { papers: 8, recent: 2, total: 210 },
+    };
+    expect(repeatUser(withClient, clientLeads, new Set(["ccc1003"]))?.scholar.name).toBe(
+      "Dana Second",
+    );
+  });
+});
+
+describe("priorFootnote", () => {
+  it("carries the owner's copy on the common author-only prior", () => {
+    expect(priorFootnote(0.6, true)).toBe(
+      "No evidence found: the topical prior (60%) has no mapped MeSH branch for this core, so it only restates the repeat-user number.",
+    );
+  });
+
+  it("never says 'no mapped MeSH branch' on a prior where MeSH DID fire", () => {
+    // Same discipline as decodeTopicalPrior: the footnote asserts a MeSH fact of
+    // its own, so it must decode rather than assume the common case.
+    expect(priorFootnote(0.4, true)).not.toContain("no mapped MeSH branch");
+    expect(priorFootnote(0.4, true)).toContain("is a MeSH-branch match");
+    expect(priorFootnote(0.76, true)).not.toContain("no mapped MeSH branch");
+    expect(priorFootnote(0.76, true)).toContain("blends a MeSH-branch match");
+  });
+
+  it("stops pointing at a repeat-user row the card is not showing", () => {
+    // Same discipline again, one surface further out: both affinity sentences
+    // name a row ("it only restates the repeat-user number"), and per-person
+    // de-duplication can take that row off the card. The claim has to follow.
+    expect(priorFootnote(0.6, false)).not.toContain("repeat-user");
+    expect(priorFootnote(0.6, false)).toContain("no mapped MeSH branch");
+    expect(priorFootnote(0.76, false)).not.toContain("restates");
+    // the MeSH-only sentence never mentioned the repeat user, so it does not move
+    expect(priorFootnote(0.4, false)).toBe(priorFootnote(0.4, true));
+  });
+
+  it("footnotes nothing at a prior of 0 or absent — that is no evidence, not weak evidence", () => {
+    expect(priorFootnote(0, true)).toBeNull();
+    expect(priorFootnote(null, true)).toBeNull();
   });
 });
 
@@ -2274,19 +3014,19 @@ describe("CoreClaimQueue — method family, on screen", () => {
   const cardStrip = () =>
     (screen.getByRole("button", { expanded: false }).textContent ?? "").replace(/\s+/g, " ");
 
-  it("paints the tier IN THE CARD, and leaves the 'N of 5 signals' line alone", () => {
+  it("paints the tier IN THE CARD, and leaves the 'N of 4 signals' line alone", () => {
     const { unmount } = render(
       <CoreClaimQueue core={CORE} candidates={[row({ methodTier: "strong" })]} confirmed={[]} />,
     );
     expect(cardStrip()).toContain("Method family");
     expect(cardStrip()).toContain("strong");
-    const withTier = screen.getByText(/of 5 signals/).textContent;
+    const withTier = screen.getByText(/of 4 signals/).textContent;
     unmount();
 
     render(<CoreClaimQueue core={CORE} candidates={[row({ methodTier: null })]} confirmed={[]} />);
     expect(cardStrip()).not.toContain("Method family");
     // Same row, no tier: the counted-signal line must be byte-identical.
-    expect(screen.getByText(/of 5 signals/).textContent).toBe(withTier);
+    expect(screen.getByText(/of 4 signals/).textContent).toBe(withTier);
   });
 
   it("offers the facet as a pill, and ticking it drops the weak and untiered rows", () => {
@@ -2394,8 +3134,199 @@ describe("CoreClaimQueue — Confirmed rows carry the score", () => {
     fireEvent.click(within(screen.getByRole("group", { name: "Queue view" })).getByText(/Confirmed/));
     const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
     expect(text).toContain("Strong 91%");
-    expect(text).toContain(`of ${5} signals`);
+    expect(text).toContain(`of ${4} signals`);
     expect(text).toContain("Acknowledged as");
+  });
+
+  it("takes a confirmed row's OWN paper out of its 'previous occasions'", () => {
+    // `loadCoreClientPaperCounts` counts over queue.confirmed, and this list IS
+    // queue.confirmed, so the paper on screen was inside its own evidence line:
+    // 18 read as 18 previous occasions when the truth is 17, out of 28 not 29.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[row({ year: 2026 })]}
+        paperCounts={{ ccc1003: { papers: 18, recent: 11, total: 29 } }}
+      />,
+    );
+    fireEvent.click(within(screen.getByRole("group", { name: "Queue view" })).getByText(/Confirmed/));
+    const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).toContain(
+      "Casey Sample has used the core on 17 previous occasions (out of 28 publications).",
+    );
+    expect(text).not.toContain("18 previous occasions");
+  });
+
+  it("says nothing at all rather than '0 previous occasions' on a person's only paper", () => {
+    // The 247 people on staging core 14 with exactly one confirmed paper: it is
+    // this one, so there is no PREVIOUS occasion — not a weak claim, no claim.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[row({ year: 2026 })]}
+        paperCounts={{ ccc1003: { papers: 1, recent: 1, total: 1 } }}
+      />,
+    );
+    fireEvent.click(within(screen.getByRole("group", { name: "Queue view" })).getByText(/Confirmed/));
+    const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).not.toContain("previous occasion");
+    // ...and it does NOT fall through to the unnamed fallback either. This
+    // assertion is REVERSED from round 3, which read the zero as "nobody on this
+    // byline qualifies" and printed the engine's rate underneath it. The zero
+    // does not mean that: it means this core holds exactly one paper from her and
+    // it is the one on screen, so the row would be counting itself as its own
+    // prior evidence — and "N of 4" rising on the one tab that subtracts. Casey
+    // Sample is a PLAIN author here (not staff, not on the clients roster), which
+    // is the half of the rule "already named by another token" never covered.
+    expect(text).not.toContain("of an author's own work");
+    expect(text).toContain("3 of 4 signals");
+  });
+
+  // The pair below is the ONE distinction the own-paper subtraction has to keep:
+  // "this person's adjusted count is 0, so there is nothing FURTHER to add about
+  // somebody already named" is not the state "nobody on this byline qualifies".
+  // Collapsing the two (by deleting the zeroed key instead of keeping it) fired
+  // the unnamed fallback directly underneath the token that had just named the
+  // person — their prior use restated, and the counted total going UP on the one
+  // tab that subtracts. Both cases below are single-WCM-author confirmed rows
+  // whose sole author holds exactly this paper, which is the shape the subtraction
+  // zeroes; strip the `paperCounts` prop and neither can fail.
+  const onlyOnce = { cwid: "cli5005", name: "Only Once", slug: "only-once", dept: "Genomics" };
+  const soleAuthorRow = (over: Partial<CoreQueueRow> = {}) =>
+    row({
+      signalAck: false,
+      ackAlias: null,
+      coauthors: [],
+      coauthorScholars: [],
+      wcmAuthors: [onlyOnce],
+      year: 2021,
+      ...over,
+    });
+  const openConfirmed = () =>
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Queue view" })).getByText(/Confirmed/),
+    );
+
+  it("does not restate a CLIENT co-author's prior use when the row IS their only paper", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[soleAuthorRow()]}
+        clients={[
+          {
+            id: "client-cli5005",
+            cwid: "cli5005",
+            name: "Only Once",
+            slug: "only-once",
+            affiliation: null,
+            addedByName: null,
+            addedAt: new Date("2026-01-01"),
+            addedBy: "aaa1001",
+          },
+        ]}
+        paperCounts={{ cli5005: { papers: 1, recent: 1, total: 4 } }}
+      />,
+    );
+    openConfirmed();
+    const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
+    // The client token names her, so the repeat-user line has nothing to add —
+    // and the count is the LLM read alone.
+    expect(text).toContain("Client co-author");
+    expect(text).toContain("Only Once");
+    expect(text).not.toContain("Repeat user");
+    expect(text).not.toContain("of an author's own work");
+    expect(text).toContain("1 of 4 signals");
+  });
+
+  it("does not restate a STAFF co-author's prior use when the row IS their only paper", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[soleAuthorRow({ coauthors: ["cli5005"], coauthorScholars: [onlyOnce] })]}
+        paperCounts={{ cli5005: { papers: 1, recent: 1, total: 4 } }}
+      />,
+    );
+    openConfirmed();
+    const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
+    // Staff co-author + LLM. The affinity signal must not come back as the
+    // unnamed fallback about the very person the staff token names.
+    expect(text).toContain("Staff co-author");
+    expect(text).not.toContain("Repeat user");
+    expect(text).not.toContain("of an author's own work");
+    expect(text).toContain("2 of 4 signals");
+  });
+
+  it("does not restate a PLAIN author's prior use when the row IS their only paper", () => {
+    // The half of the rule round 3 left out. This person is on no roster and is
+    // not core staff, so nothing else on the card names her — and the guard read
+    // that as "nobody on this byline qualifies" and fired the unnamed fallback:
+    // the row counted as its own prior evidence, and "N of 4" going UP on the one
+    // tab that subtracts. An adjusted count of zero means nothing FURTHER to add,
+    // whoever holds it. The LLM read is the only signal here.
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[soleAuthorRow()]}
+        paperCounts={{ cli5005: { papers: 1, recent: 1, total: 4 } }}
+      />,
+    );
+    openConfirmed();
+    const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).not.toContain("Repeat user");
+    expect(text).not.toContain("of an author's own work");
+    expect(text).toContain("1 of 4 signals");
+  });
+
+  it("gives a client the SAME paper count on both tabs — it is a holding, not a history", () => {
+    // Two statements, two maps. "18 papers, 11 recent" is what this core holds
+    // from her, and the paper on screen is part of it; "17 previous occasions" is
+    // what it held BEFORE this one. Feeding the subtracted map to both made the
+    // same person's number disagree with itself between the tabs.
+    const roster = [
+      {
+        id: "client-ccc1003",
+        cwid: "ccc1003",
+        name: "Casey Sample",
+        slug: "casey-sample",
+        affiliation: null,
+        addedByName: null,
+        addedAt: new Date("2026-01-01"),
+        addedBy: "aaa1001",
+      },
+    ];
+    const counts = { ccc1003: { papers: 18, recent: 11, total: 29 } };
+    const { unmount } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ year: 2026 })]}
+        confirmed={[]}
+        clients={roster}
+        paperCounts={counts}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Show evidence/ }).textContent).toContain(
+      "Casey Sample, 18 papers, 11 recent",
+    );
+    unmount();
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[row({ year: 2026 })]}
+        clients={roster}
+        paperCounts={counts}
+      />,
+    );
+    openConfirmed();
+    const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).toContain("Casey Sample, 18 papers, 11 recent");
+    expect(text).not.toContain("17 papers");
+    expect(text).not.toContain("10 recent");
   });
 
   it("gives a MANUAL add no score — it was never engine-scored", () => {
@@ -2521,7 +3452,7 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     // RAW title, period intact — an export is a record, not a rendering
     expect(cells[1]).toBe("A candidate.");
     expect(cells[2]).toBe("Testerson A, Sample C, Placeholder R");
-    // FULL journal, not the abbreviation the card now shows
+    // FULL journal — the same one the card shows since round 2
     expect(cells[3]).toBe("Journal of Synthetic Results");
     expect(cells[5]).toBe("10.1000/xyz");
     expect(cells[6]).toBe("To review");
@@ -2563,7 +3494,9 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     const toggle = screen.getByRole("button", { name: /Known clients/ });
     fireEvent.click(toggle);
     fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // The footer button, not Radix's own sr-only close icon — both say "Close".
+    const footer = document.querySelector('[data-slot="dialog-footer"]') as HTMLElement;
+    fireEvent.click(within(footer).getByRole("button", { name: "Close" }));
     expect(screen.queryByLabelText("Paste CWIDs")).toBeNull();
     fireEvent.click(toggle);
     expect((screen.getByLabelText("Paste CWIDs") as HTMLTextAreaElement).value).toBe("");
@@ -2781,19 +3714,23 @@ describe("formatAddedToPubMed", () => {
   });
 });
 
-describe("possessive", () => {
-  it("uses a bare apostrophe after a trailing s, and 's otherwise", () => {
-    expect(possessive("Testerson")).toBe("Testerson's");
-    expect(possessive("Sanders")).toBe("Sanders'");
-  });
-});
-
 describe("initialsOf", () => {
   it("takes first + last initial, and one letter for a single-token name", () => {
     expect(initialsOf("Casey Sample")).toBe("CS");
     expect(initialsOf("Alex Q Testerson")).toBe("AT");
     expect(initialsOf("Cher")).toBe("C");
     expect(initialsOf("   ")).toBe("?");
+    // A curated disambiguation suffix is not part of anyone's initials.
+    expect(initialsOf("Alessandro Fichera - Surgery")).toBe("AF");
+    expect(initialsOf("Jane Doe (Radiology)")).toBe("JD");
+    // A REAL generational suffix still is not.
+    expect(initialsOf("John Smith III")).toBe("JS");
+    // ...but a two-word name whose surname merely LOOKS generational keeps both
+    // words: "Vi", "V" and "I" are surnames and first names here, and reading
+    // them as suffixes left this avatar showing a single "H".
+    expect(initialsOf("Hoang Vi")).toBe("HV");
+    expect(initialsOf("Anh V")).toBe("AV");
+    expect(initialsOf("Tran I")).toBe("TI");
   });
 });
 
@@ -2867,7 +3804,11 @@ describe("CoreClaimQueue — byline person cards", () => {
     expect(marked.className).toContain("decoration-dotted");
   });
 
-  it("a plain WCM co-author gets NO card — it would repeat what the byline shows", async () => {
+  it("a plain WCM co-author is NOT marked as a client — the dotted underline is theirs", async () => {
+    // Every resolvable WCM author carries a card now (item 1a), so the card is
+    // no longer what distinguishes a client. The MARKING is: a client keeps the
+    // dotted underline a touch user can see without hovering, and its card is
+    // the only one that says "Known client of this core".
     renderByline({
       authorsString: "Sample C",
       fullAuthorsString: "Sample C",
@@ -2920,6 +3861,559 @@ describe("CoreClaimQueue — byline person cards", () => {
     // ...and no card: the trigger is a plain span, with nothing to hover.
     expect(byline.querySelector("[data-slot='hover-card-trigger']")).toBeNull();
     expect(screen.queryByText("Core staff")).toBeNull();
+  });
+
+  // Round-2 regressions. Each of these renamed a byline token to a DIFFERENT
+  // person, then linked and carded them — the failure the ambiguity guard above
+  // exists to prevent, and item 1(a) raised its cost by putting that person's
+  // CWID and department on screen beside the wrong name. Every assertion is
+  // scoped to the byline element: the evidence strip below names people too, so
+  // a document-wide query passes for the wrong reason.
+  const byline = () => document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement;
+
+  it("does NOT claim a scholar from the FRONT of a longer surname", () => {
+    // Keys go into the map as the scholar's TRAILING words, so a token must be
+    // matched on its trailing words too. Matched on its leading ones,
+    // "Perez Garcia M" fell back to the key "perez" and the byline read
+    // "Maria Perez, Maria Perez, Doe J" — one person over two people's tokens.
+    renderByline({
+      authorsString: "Perez M, Perez Garcia M, Doe J",
+      fullAuthorsString: "Perez M, Perez Garcia M, Doe J",
+      wcmAuthors: [
+        { cwid: "map1001", name: "Maria Perez", slug: "maria-perez", dept: "Neurology" },
+      ],
+    });
+    // The token that IS hers still expands...
+    const hers = within(byline()).getByText("Maria Perez");
+    expect(hers.closest("a")?.getAttribute("href")).toBe("/maria-perez");
+    // ...and the one that is not keeps PubMed's form, unlinked and uncarded.
+    expect(byline().textContent).toContain("Perez Garcia M");
+    expect(byline().querySelectorAll("a")).toHaveLength(1);
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(1);
+  });
+
+  it("reaches a surname behind name particles — 'van der Berg J' is Jan van der Berg", () => {
+    // The scholar side is what reaches it: "Jan van der Berg" registers "berg",
+    // "der berg" AND "van der berg", so the token's whole surname phrase — the
+    // only key it ever looks up — finds him.
+    renderByline({
+      authorsString: "van der Berg J, Other B",
+      fullAuthorsString: "van der Berg J, Other B",
+      wcmAuthors: [
+        { cwid: "jbe1005", name: "Jan van der Berg", slug: "jan-van-der-berg", dept: "Pathology" },
+      ],
+    });
+    expect(within(byline()).getByText("Jan van der Berg").closest("a")?.getAttribute("href")).toBe(
+      "/jan-van-der-berg",
+    );
+    expect(byline().textContent).not.toContain("van der Berg J");
+  });
+
+  // ── The token side does not slice ────────────────────────────────────────
+  // Two consecutive rounds widened the match by falling back to the surname
+  // phrase's shorter tails, and each time the widening renamed, linked and
+  // CARDED a real person who is not the author. A shorter tail of a compound
+  // surname is a different surname; these four pin that.
+
+  it("does NOT claim a scholar whose whole surname is the LAST word of a compound token", () => {
+    // The round-2 shape, mirrored: keys and token now slice from the same end,
+    // so "Perez Garcia M" fell back to "garcia" and rendered as Maria Garcia —
+    // her name, her /maria-garcia link, and a card asserting her CWID and
+    // department, on a token belonging to someone SPS has never heard of.
+    renderByline({
+      authorsString: "Perez Garcia M, Other B",
+      fullAuthorsString: "Perez Garcia M, Other B",
+      wcmAuthors: [
+        { cwid: "mga1011", name: "Maria Garcia", slug: "maria-garcia", dept: "Neurology" },
+      ],
+    });
+    expect(byline().textContent).toContain("Perez Garcia M");
+    expect(within(byline()).queryByText("Maria Garcia")).toBeNull();
+    expect(byline().querySelectorAll("a")).toHaveLength(0);
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  it("does not spread ONE compound token across two different scholars' surnames", () => {
+    // Both tails are held, by two different people: "perez" by Maria Perez and
+    // "garcia" by Maria Garcia. With a fallback the byline read "Maria Perez,
+    // Maria Garcia, Maria Garcia" — the third token is neither of them.
+    renderByline({
+      authorsString: "Perez M, Garcia M, Perez Garcia M",
+      fullAuthorsString: "Perez M, Garcia M, Perez Garcia M",
+      wcmAuthors: [
+        { cwid: "mpe1010", name: "Maria Perez", slug: "maria-perez", dept: "Surgery" },
+        { cwid: "mga1011", name: "Maria Garcia", slug: "maria-garcia", dept: "Neurology" },
+      ],
+    });
+    // The two tokens that ARE theirs expand, once each...
+    expect(within(byline()).getByText("Maria Perez").closest("a")?.getAttribute("href")).toBe(
+      "/maria-perez",
+    );
+    expect(within(byline()).getByText("Maria Garcia").closest("a")?.getAttribute("href")).toBe(
+      "/maria-garcia",
+    );
+    // ...and the compound one is left alone.
+    expect(byline().textContent).toContain("Perez Garcia M");
+    expect(byline().querySelectorAll("a")).toHaveLength(2);
+  });
+
+  it("does NOT reach a scholar who holds only a TAIL of the token's surname", () => {
+    // "van der Berg J" above resolves because that scholar registers the whole
+    // phrase. A scholar recorded as plain "Jan Berg" holds "berg" only, and
+    // "berg" is not the surname this token wrote.
+    renderByline({
+      authorsString: "van der Berg J, Other B",
+      fullAuthorsString: "van der Berg J, Other B",
+      wcmAuthors: [{ cwid: "jbe1005", name: "Jan Berg", slug: "jan-berg", dept: "Pathology" }],
+    });
+    expect(byline().textContent).toContain("van der Berg J");
+    expect(within(byline()).queryByText("Jan Berg")).toBeNull();
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  it("names ONE person on ONE token only — two tokens claiming a scholar identify neither", () => {
+    // `ambiguous` cannot see this and never could: it is built from the row's own
+    // scholar lists, and `publication_author` holds rows ONLY for matched WCM
+    // authors, so a non-WCM Kim is absent from them by construction. Both tokens
+    // therefore resolved to the one WCM Jane Kim and BOTH printed her name, her
+    // link and her card — at least one of which states the wrong CWID and
+    // department, since two same-surname same-initial tokens are two people.
+    renderByline({
+      authorsString: "Kim J, Kim J, Doe A",
+      fullAuthorsString: "Kim J, Kim J, Doe A",
+      wcmAuthors: [{ cwid: "jki1012", name: "Jane Kim", slug: "jane-kim", dept: "Pathology" }],
+    });
+    expect(byline().textContent).toContain("Kim J, Kim J");
+    expect(within(byline()).queryByText("Jane Kim")).toBeNull();
+    expect(byline().querySelectorAll("a")).toHaveLength(0);
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  it("fires on a repeated PERSON, not on a byline that merely resolves twice", () => {
+    // The guard must not degrade into "more than one name on this byline is
+    // suspicious": two DIFFERENT people, one token each, both still expand.
+    renderByline({
+      authorsString: "Kim J, Park S, Other B",
+      fullAuthorsString: "Kim J, Park S, Other B",
+      wcmAuthors: [
+        { cwid: "jki1012", name: "Jane Kim", slug: "jane-kim", dept: "Pathology" },
+        { cwid: "spa1014", name: "Sam Park", slug: "sam-park", dept: "Surgery" },
+      ],
+    });
+    expect(within(byline()).getByText("Jane Kim")).toBeTruthy();
+    expect(within(byline()).getByText("Sam Park")).toBeTruthy();
+    expect(byline().querySelectorAll("a")).toHaveLength(2);
+  });
+
+  it("expands a scholar whose LAST NAME WORD looks like a generational suffix", () => {
+    // `NAME_SUFFIXES` counts "V", "VI" and "I" as generational, so running it
+    // over the SCHOLAR's name read "Hoang Vi" as the surname "hoang" — one word,
+    // from which the key loop registers NONE, and Hoang Vi could never be
+    // expanded or carded. Same for Anh V, Tran I and every Nguyen Vi.
+    renderByline({
+      authorsString: "Vi H, Other B",
+      fullAuthorsString: "Vi H, Other B",
+      wcmAuthors: [{ cwid: "hvi1013", name: "Hoang Vi", slug: "hoang-vi", dept: "Pediatrics" }],
+    });
+    const named = within(byline()).getByText("Hoang Vi");
+    expect(named.closest("a")?.getAttribute("href")).toBe("/hoang-vi");
+    expect(named.getAttribute("data-slot")).toBe("hover-card-trigger");
+  });
+
+  it("reads a first initial past a generational suffix, not off it", () => {
+    // "Smith AB Jr" is A.B. Smith. Reading the LAST word gave "j", which agrees
+    // with a John Smith and renamed, linked and carded the token as him — and
+    // with the suffix left inside the name the real A.B. Smith is unreachable
+    // too, since her surname key is then "ab".
+    const { unmount } = renderByline({
+      authorsString: "Smith AB Jr, Other B",
+      fullAuthorsString: "Smith AB Jr, Other B",
+      wcmAuthors: [{ cwid: "jsm1006", name: "John Smith", slug: "john-smith", dept: "Surgery" }],
+    });
+    expect(byline().textContent).toContain("Smith AB Jr");
+    expect(within(byline()).queryByText("John Smith")).toBeNull();
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+    unmount();
+    renderByline({
+      authorsString: "Smith AB Jr, Other B",
+      fullAuthorsString: "Smith AB Jr, Other B",
+      wcmAuthors: [{ cwid: "abs1009", name: "Alice Smith", slug: "alice-smith", dept: "Surgery" }],
+    });
+    expect(within(byline()).getByText("Alice Smith").closest("a")?.getAttribute("href")).toBe(
+      "/alice-smith",
+    );
+  });
+
+  it("still expands an author whose first initial IS a roman numeral", () => {
+    // The suffix strip must not eat the initials group: `NAME_SUFFIXES` counts
+    // "I" and "V" as generational, so reusing it here would silently stop
+    // expanding every Ivanova and Volkov on the page.
+    renderByline({
+      authorsString: "Ivanova I, Other B",
+      fullAuthorsString: "Ivanova I, Other B",
+      wcmAuthors: [
+        { cwid: "iiv1007", name: "Irina Ivanova", slug: "irina-ivanova", dept: "Neurology" },
+      ],
+    });
+    expect(within(byline()).getByText("Irina Ivanova")).toBeTruthy();
+  });
+
+  it("expands a scholar carrying a curated disambiguation suffix, WITHOUT printing it", async () => {
+    // "Alessandro Fichera - Surgery" (#2049) registered "surgery" and
+    // "fichera - surgery" as his surname keys — never "fichera" — so his own
+    // byline token could never reach him. Same for "Jane Doe (Radiology)".
+    // Reachable, the raw preferredName then printed INSIDE the byline
+    // ("Alessandro Fichera - Surgery, Other B") and again on the card, where the
+    // department already has a line of its own.
+    renderByline({
+      authorsString: "Fichera A, Other B",
+      fullAuthorsString: "Fichera A, Other B",
+      wcmAuthors: [
+        {
+          cwid: "zqf9101",
+          name: "Alessandro Fichera - Surgery",
+          slug: "alessandro-fichera",
+          dept: "Surgery",
+        },
+      ],
+    });
+    const named = within(byline()).getByText("Alessandro Fichera");
+    expect(named.closest("a")?.getAttribute("href")).toBe("/alessandro-fichera");
+    expect(named.getAttribute("data-slot")).toBe("hover-card-trigger");
+    expect(byline().textContent).not.toContain("Fichera A,");
+    // The suffix is a roster disambiguation device, not part of his name.
+    expect(byline().textContent).not.toContain(" - Surgery");
+    // ...and the card names him the same way, with the department below it.
+    fireEvent.pointerEnter(named);
+    await screen.findByText("(zqf9101)");
+    const card = document.querySelector('[data-slot="core-queue-person-card"]') as HTMLElement;
+    expect(within(card).getByText("Alessandro Fichera")).toBeTruthy();
+    expect(card.textContent).not.toContain(" - Surgery");
+    expect(within(card).getByText("Surgery")).toBeTruthy();
+  });
+
+  it("refuses to name a plain WCM author on a TRUNCATED byline", () => {
+    // `wcmAuthors` is capped at WCM_AUTHORS_CAP, so on a truncated row the
+    // ambiguity check ran over a prefix of the byline: a second Sample past the
+    // cap is invisible, and the card would assert this one's CWID and
+    // department on what may be someone else.
+    //
+    // Core staff are the deliberate exception. NOT because the cap cannot hide a
+    // namesake of theirs — it can — but because it does not touch what
+    // identifies them: `coauthorScholars` is uncapped and independent of the
+    // dropped authors (the loader `continue`s those before they ever reach this
+    // component), so the card names someone we know for certain co-authored this
+    // paper, and the chip is the byline's only link back to the co-author
+    // evidence row. Flip the guard to cover staff and this assertion inverts.
+    renderByline({
+      authorsString: "Testerson A, Sample C",
+      fullAuthorsString: "Testerson A, Sample C",
+      coauthorScholars: [STAFF],
+      coauthors: [STAFF.cwid],
+      wcmAuthors: [CLIENT],
+      wcmAuthorsTruncated: true,
+    });
+    expect(byline().textContent).toContain("Sample C");
+    expect(within(byline()).queryByText("Casey Sample")).toBeNull();
+    expect(within(byline()).getByText("Alex Testerson").getAttribute("data-slot")).toBe(
+      "hover-card-trigger",
+    );
+  });
+
+  // ── A generational suffix and an initials group differ only by CASE ────────
+  // `BYLINE_SUFFIX` used to be tested against an already-lowercased word, so
+  // "JR" (the initials J.R.) and "Jr" (the suffix) were the same string by the
+  // time it saw them. That single lost signal produced a false positive AND a
+  // false negative, one on each side of the strip.
+
+  it("does NOT read an all-caps initials group as a generational suffix", () => {
+    // "SR" is S.R., not "Senior". Stripped as a suffix it left ["garcia",
+    // "martinez"], which reads the initial off "martinez" ("m") and looks up the
+    // LEADING word "garcia" — so the byline printed Maria Garcia's name, her
+    // link and a card asserting her CWID and department on a token belonging to
+    // someone SPS has never heard of. Verbatim the compound-surname defect the
+    // four tests above pin, arriving by a different route.
+    renderByline({
+      authorsString: "Garcia Martinez SR, Other B",
+      fullAuthorsString: "Garcia Martinez SR, Other B",
+      wcmAuthors: [
+        { cwid: "mga1011", name: "Maria Garcia", slug: "maria-garcia", dept: "Neurology" },
+      ],
+    });
+    expect(byline().textContent).toContain("Garcia Martinez SR");
+    expect(within(byline()).queryByText("Maria Garcia")).toBeNull();
+    expect(byline().querySelectorAll("a")).toHaveLength(0);
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  it("reads the first initial OFF an all-caps 'JR', which is initials and not 'Junior'", () => {
+    // The same bug's other direction: stripping "JR" left the one word "Smith",
+    // which carries no initials group at all, so the token could never resolve
+    // and James Smith went unexpanded on his own paper.
+    const { unmount } = renderByline({
+      authorsString: "Smith JR, Other B",
+      fullAuthorsString: "Smith JR, Other B",
+      wcmAuthors: [{ cwid: "jsm1015", name: "James Smith", slug: "james-smith", dept: "Surgery" }],
+    });
+    const named = within(byline()).getByText("James Smith");
+    expect(named.closest("a")?.getAttribute("href")).toBe("/james-smith");
+    expect(named.getAttribute("data-slot")).toBe("hover-card-trigger");
+    unmount();
+    // ...while the TITLE-CASE suffix is still a suffix, and a surname left with
+    // no initials group beside it claims nobody.
+    renderByline({
+      authorsString: "Smith Jr, Other B",
+      fullAuthorsString: "Smith Jr, Other B",
+      wcmAuthors: [{ cwid: "jsm1015", name: "James Smith", slug: "james-smith", dept: "Surgery" }],
+    });
+    expect(byline().textContent).toContain("Smith Jr");
+    expect(within(byline()).queryByText("James Smith")).toBeNull();
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  // ── The trailing block has to LOOK like initials ──────────────────────────
+
+  it("does NOT treat a REAL WORD after the surname as an initials group", () => {
+    // "Wang Xiaoming" is a whole name in Chinese order, not "Wang X." — but the
+    // loop took the last word as initials with no check, read "x" off
+    // "xiaoming" and looked up "wang", printing Xin Wang's name, link and card
+    // on it. A token with no initials group has no first initial to agree with,
+    // so it must claim nobody.
+    const { unmount } = renderByline({
+      authorsString: "Wang Xiaoming, Other B",
+      fullAuthorsString: "Wang Xiaoming, Other B",
+      wcmAuthors: [{ cwid: "xwa1110", name: "Xin Wang", slug: "xin-wang", dept: "Biochemistry" }],
+    });
+    expect(byline().textContent).toContain("Wang Xiaoming");
+    expect(within(byline()).queryByText("Xin Wang")).toBeNull();
+    expect(byline().querySelectorAll("a")).toHaveLength(0);
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+    unmount();
+    // ...and a genuine multi-letter initials group still resolves, so this is a
+    // shape test and not a ban on two-word tokens.
+    renderByline({
+      authorsString: "Wang XY, Other B",
+      fullAuthorsString: "Wang XY, Other B",
+      wcmAuthors: [{ cwid: "xwa1110", name: "Xin Wang", slug: "xin-wang", dept: "Biochemistry" }],
+    });
+    expect(within(byline()).getByText("Xin Wang").closest("a")?.getAttribute("href")).toBe(
+      "/xin-wang",
+    );
+  });
+
+  it("does NOT resolve a COLLECTIVE author written as 'Surname Group'", () => {
+    // "Kim Group" is a consortium byline, not a person. It reached Gina Kim off
+    // the initial "g" of "group" — her name, her link and her card.
+    renderByline({
+      authorsString: "Kim Group, Other B",
+      fullAuthorsString: "Kim Group, Other B",
+      wcmAuthors: [{ cwid: "gki1016", name: "Gina Kim", slug: "gina-kim", dept: "Pathology" }],
+    });
+    expect(byline().textContent).toContain("Kim Group");
+    expect(within(byline()).queryByText("Gina Kim")).toBeNull();
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  // ── The duplicate-person guard must see past the preview cut ──────────────
+
+  it("sees a namesake HIDDEN BY THE PREVIEW CUT, not just the visible tokens", () => {
+    // `authors_string` is a preview: it drops authors on 68.4% of core 14's
+    // rows. The guard was built from that preview, so the second "Kim J" — past
+    // the cut, and invisible to `wcmAuthors` too because it is not WCM — was
+    // never counted, and the one visible token printed Jane Kim's name, link and
+    // card. Whether a real person's identity landed on a stranger's token
+    // depended on nothing but where PubMed happened to cut.
+    renderByline({
+      authorsString: "Kim J, Doe A",
+      fullAuthorsString: "Kim J, Doe A, Kim J",
+      wcmAuthors: [{ cwid: "jki1012", name: "Jane Kim", slug: "jane-kim", dept: "Pathology" }],
+    });
+    expect(byline().textContent).toContain("Kim J");
+    expect(within(byline()).queryByText("Jane Kim")).toBeNull();
+    expect(byline().querySelectorAll("a")).toHaveLength(0);
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+    // The dropped author is still only COUNTED, never printed.
+    expect(byline().textContent).toContain(", +1 more");
+    expect(byline().textContent).not.toContain("Doe A, Kim J");
+  });
+
+  it("sees a namesake VISIBLE TWICE that the full list does not repeat", () => {
+    // The first attempt at the guard REPLACED the preview sweep with the full
+    // list instead of unioning them, which restored the original defect with
+    // cards attached. The two strings come from different producers — an author
+    // with a null given name composes to a BARE surname in `full_authors_string`
+    // ("Kim"), a one-word token the resolver refuses — so a namesake standing
+    // twice ON SCREEN can be absent from the full list.
+    renderByline({
+      authorsString: "Kim J, Kim J, Doe A",
+      fullAuthorsString: "Kim J, Kim, Doe A, Park S",
+      wcmAuthors: [{ cwid: "jki1012", name: "Jane Kim", slug: "jane-kim", dept: "Pathology" }],
+    });
+    expect(within(byline()).queryByText("Jane Kim")).toBeNull();
+    expect(byline().querySelectorAll("a")).toHaveLength(0);
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  it("splits the full list the way countAuthorTokens does, not on a literal comma-space", () => {
+    // `dropped` counts on /,\s*/ while the sweep split on ", ", so a namesake
+    // written without the space merged into its neighbour and went unseen.
+    renderByline({
+      authorsString: "Kim J, Doe A",
+      fullAuthorsString: "Kim J, Doe A,Kim J",
+      wcmAuthors: [{ cwid: "jki1012", name: "Jane Kim", slug: "jane-kim", dept: "Pathology" }],
+    });
+    expect(within(byline()).queryByText("Jane Kim")).toBeNull();
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  it("leaves a >3-letter initials group unexpanded — the accepted cost of the cap", () => {
+    // `deriveInitials` emits one letter per given-name part, so "Maria de los
+    // Angeles Rodriguez" composes "Rodriguez MDLA" and is NOT expanded here.
+    // Widening the cap to reach it was tried and reverted: "Kim JOHN" is the
+    // same shape, and the wider class carded the scholar Jane Kim on it. This
+    // test pins the miss so the tradeoff is a decision, not a surprise — see
+    // BYLINE_INITIALS.
+    renderByline({
+      authorsString: "Rodriguez MDLA, Other B",
+      wcmAuthors: [
+        { cwid: "mro1050", name: "Maria Rodriguez", slug: "maria-rodriguez", dept: "Medicine" },
+      ],
+    });
+    expect(within(byline()).queryByText("Maria Rodriguez")).toBeNull();
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+  it("still expands when the hidden authors are NOT namesakes — a cut is not a veto", () => {
+    // The widened sweep must not degrade into "any truncated byline resolves
+    // nobody": the guard fires on a REPEATED PERSON, wherever they sit.
+    renderByline({
+      authorsString: "Kim J, Doe A",
+      fullAuthorsString: "Kim J, Doe A, Park S",
+      wcmAuthors: [{ cwid: "jki1012", name: "Jane Kim", slug: "jane-kim", dept: "Pathology" }],
+    });
+    expect(within(byline()).getByText("Jane Kim").closest("a")?.getAttribute("href")).toBe(
+      "/jane-kim",
+    );
+    expect(byline().textContent).toContain(", +1 more");
+  });
+
+  // ── One-word names, on either side ────────────────────────────────────────
+
+  it("expands a MONONYMOUS scholar — one word is still a surname", () => {
+    // `Math.min(3, words.length - 1)` is 0 for a one-word preferredName, so the
+    // key loop never ran and mononymous scholars registered NOTHING: no rename,
+    // no link, no card, and no staff chip on their own paper. Master named them.
+    renderByline({
+      authorsString: "Sukarno S, Other B",
+      fullAuthorsString: "Sukarno S, Other B",
+      coauthorScholars: [{ cwid: "suk1061", name: "Sukarno", slug: "sukarno", dept: "Medicine" }],
+      coauthors: ["suk1061"],
+    });
+    // Scoped to the byline: the evidence strip below names staff too.
+    const named = within(byline()).getByText("Sukarno");
+    expect(named.closest("a")?.getAttribute("href")).toBe("/sukarno");
+    expect(named.getAttribute("data-slot")).toBe("hover-card-trigger");
+  });
+
+  it("reaches a scholar whose diacritics PubMed dropped, without any shorter-tail fallback", () => {
+    // Nothing normalised diacritics on either side, so "Nino de Rivera S" — the
+    // form PubMed actually publishes — missed "Sara Niño de Rivera" and stayed
+    // in its abbreviated form, narrowing "expand EVERY WCM author". Folding is
+    // applied to the key map and the lookup alike, so the token still looks up
+    // its COMPLETE surname phrase and nothing shorter — a scholar holding only
+    // the tail "Rivera" must still not be reached by it.
+    const { unmount } = renderByline({
+      authorsString: "Nino de Rivera S, Other B",
+      fullAuthorsString: "Nino de Rivera S, Other B",
+      wcmAuthors: [
+        {
+          cwid: "snr1017",
+          name: "Sara Niño de Rivera",
+          slug: "sara-nino-de-rivera",
+          dept: "Neurology",
+        },
+      ],
+    });
+    expect(
+      within(byline()).getByText("Sara Niño de Rivera").closest("a")?.getAttribute("href"),
+    ).toBe("/sara-nino-de-rivera");
+    unmount();
+    renderByline({
+      authorsString: "Nino de Rivera S, Other B",
+      fullAuthorsString: "Nino de Rivera S, Other B",
+      wcmAuthors: [
+        { cwid: "sri1018", name: "Sara Rivera", slug: "sara-rivera", dept: "Neurology" },
+      ],
+    });
+    expect(byline().textContent).toContain("Nino de Rivera S");
+    expect(within(byline()).queryByText("Sara Rivera")).toBeNull();
+    expect(byline().querySelectorAll('[data-slot="hover-card-trigger"]')).toHaveLength(0);
+  });
+
+
+  // ── The token-shape table ────────────────────────────────────────────────
+  // Every shape the loop can meet, and what it is allowed to do with it. Four
+  // rounds of this matcher each shipped a fix that renamed, linked and carded
+  // the wrong person on a shape no test covered, so the shapes are enumerated
+  // here rather than sampled. A shape that resolves to NOBODY renders PubMed's
+  // own text with no link and no card, which is always safe; only a resolved
+  // shape can assert a CWID and a department.
+  it("resolves each byline TOKEN SHAPE the same way every time", () => {
+    const KIM = { cwid: "jki1012", name: "Jane Kim", slug: "jane-kim", dept: "Pathology" };
+    const BERG = {
+      cwid: "jbe1005",
+      name: "Jan van der Berg",
+      slug: "jan-van-der-berg",
+      dept: "Pathology",
+    };
+    const HYPHEN = {
+      cwid: "asj1020",
+      name: "Ann Smith-Jones",
+      slug: "ann-smith-jones",
+      dept: "Surgery",
+    };
+    // [token, the scholar on the row, the name the byline ends up printing]
+    const shapes: Array<[string, CoreQueueRow["wcmAuthors"][number], string]> = [
+      // ONE WORD — a collective author. No initials group, so nobody.
+      ["Kim", KIM, "Kim"],
+      ["THE CONSORTIUM", KIM, "THE CONSORTIUM"],
+      // WORD + INITIALS — the ordinary case, and the only one that resolves.
+      ["Kim J", KIM, "Jane Kim"],
+      // WORD + WORD — a name in Chinese order, or a collective. Not initials.
+      ["Kim Group", KIM, "Kim Group"],
+      // ...including an ALL-CAPS given name: upper case alone is not enough,
+      // an initials group is also SHORT.
+      ["Kim JOHN", KIM, "Kim JOHN"],
+      // COMPOUND SURNAME + INITIALS — reached whole, never by a shorter tail.
+      ["van der Berg J", BERG, "Jan van der Berg"],
+      // COMPOUND + "JR" — upper case, so an initials group, not "Junior".
+      ["van der Berg JR", BERG, "Jan van der Berg"],
+      // COMPOUND + "Jr" — title case, so the suffix; nothing is left to read an
+      // initial off, and the token resolves to nobody.
+      ["van der Berg Jr", BERG, "van der Berg Jr"],
+      // HYPHENATED SURNAME — one word, matched whole.
+      ["Smith-Jones A", HYPHEN, "Ann Smith-Jones"],
+      // HYPHENATED INITIALS — deliberately NOT an initials group: no sample in
+      // this corpus writes them, and widening on a guess is what the four
+      // rounds were. Costs a non-expansion, never a wrong name.
+      ["Kim J-H", KIM, "Kim J-H"],
+    ];
+    for (const [token, scholar, expected] of shapes) {
+      const authorsString = `${token}, Other B`;
+      const { unmount } = renderByline({
+        authorsString,
+        fullAuthorsString: authorsString,
+        wcmAuthors: [scholar],
+      });
+      const resolved = expected !== token;
+      expect([token, byline().textContent]).toEqual([token, `${expected}, Other B`]);
+      expect([token, byline().querySelectorAll("a").length]).toEqual([token, resolved ? 1 : 0]);
+      expect([
+        token,
+        byline().querySelectorAll('[data-slot="hover-card-trigger"]').length,
+      ]).toEqual([token, resolved ? 1 : 0]);
+      unmount();
+    }
   });
 
   it("renders ', +N more' as its own node in BOTH byline branches", () => {
