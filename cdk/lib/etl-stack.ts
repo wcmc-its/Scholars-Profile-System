@@ -472,6 +472,7 @@ export class EtlStack extends Stack {
     //   etl:scholar-tool (nightly) s3:GetObject   wcmc-reciterai-artifacts/tools/*
     //   etl:hierarchy    (annual)  s3:GetObject   wcmc-reciterai-hierarchy/*
     //   etl:ed:import-email-visibility (bridge) s3:GetObject wcmc-reciterai-artifacts/ed/*
+    //   etl:dynamodb     (nightly) s3:GetObject   wcmc-reciterai-artifacts/grants/*
     //
     // Read-only: the steps Scan the table and GetObject the artifacts; they
     // never write back to ReciterAI's (account-shared) stores. The bucket
@@ -521,6 +522,22 @@ export class EtlStack extends Stack {
             // NDJSON (reciterdb exported from a reachable client) from here (#443
             // workaround, same shape as the ed/ and mentoring/ bridges).
             "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
+            // #2618 — etl:dynamodb reads grants/latest/manifest.json for its
+            // `generated_at`, which is the only liveness trace
+            // reciterai-grants-daily leaves (that pipeline writes no STAGE#
+            // ledger row, unlike the six stages mirrored alongside it).
+            //
+            // Added AFTER #2618 shipped, and the miss is worth recording: the
+            // grants read was written on the assumption that the ETL already
+            // "had the bucket" because etl:scholar-tool reads tools/ from it.
+            // It does not. EVERY entry in this list is PREFIX-scoped on
+            // purpose, so the first nightly logged AccessDenied and the
+            // ReciterAI-grants row read `never-ran` in both envs. The read is
+            // fail-soft, so the cost was one false red row rather than the
+            // nightly -- but a new prefix here is a cdk deploy, never just a
+            // merge, and #2618's claim of "no new IAM" was only true of the
+            // DynamoDB-sourced tiers.
+            "arn:aws:s3:::wcmc-reciterai-artifacts/grants/*",
             "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
           ],
         }),

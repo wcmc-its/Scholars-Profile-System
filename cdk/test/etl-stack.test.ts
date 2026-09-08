@@ -1372,7 +1372,7 @@ describe("EtlStack", () => {
         expect(serialized).not.toMatch(/\*/);
       });
 
-      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight + tools + ed + mentoring + citations + clinical-trials prefixes + hierarchy bucket (no bare *, no ListBucket)", () => {
+      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight + tools + ed + mentoring + citations + clinical-trials + grants prefixes + hierarchy bucket (no bare *, no ListBucket)", () => {
         const policy = etlTaskRolePolicy();
         expect(policy).toBeDefined();
         const statements = policy?.Properties?.PolicyDocument
@@ -1394,7 +1394,14 @@ describe("EtlStack", () => {
         // dedicated hierarchy bucket. ed/* is the email-visibility bridge artifact;
         // mentoring/* is the mentee co-pub bridge (#443, etl:mentoring:import-copubs);
         // citations/* is the publication cited-by bridge (#928/#938);
-        // clinical-trials/* is the clinical-trials bridge (etl:clinical-trials:import).
+        // clinical-trials/* is the clinical-trials bridge (etl:clinical-trials:import);
+        // grants/* is the opportunities manifest etl:dynamodb reads for producer
+        // liveness (#2618) -- added after that PR shipped, because the read was
+        // written assuming the ETL "had the bucket" from tools/* when in fact
+        // every entry here is prefix-scoped, and the first nightly hit
+        // AccessDenied. THIS assertion is what makes the next such addition a
+        // deliberate one: it fails on any new prefix, which is correct, because
+        // a new prefix is a cdk deploy rather than a merge.
         // Order matches the policy.
         const resources = Array.isArray(s3Stmt?.Resource)
           ? (s3Stmt?.Resource as string[])
@@ -1406,6 +1413,7 @@ describe("EtlStack", () => {
           "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
+          "arn:aws:s3:::wcmc-reciterai-artifacts/grants/*",
           "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
         ]);
       });
