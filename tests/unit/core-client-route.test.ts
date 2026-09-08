@@ -14,7 +14,6 @@ const {
   mockTxFindMany,
   mockClientFindFirst,
   mockClientCreate,
-  mockReadClientFindMany,
   mockFetchDirectory,
   mockScholarFindMany,
   mockUnitAdminFindUnique,
@@ -30,7 +29,6 @@ const {
   mockTxFindMany: vi.fn(),
   mockClientFindFirst: vi.fn(),
   mockClientCreate: vi.fn(),
-  mockReadClientFindMany: vi.fn(),
   mockFetchDirectory: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockUnitAdminFindUnique: vi.fn(),
@@ -54,7 +52,6 @@ vi.mock("@/lib/db", () => ({
       core: { findUnique: mockCoreFindUnique },
       scholar: { findMany: mockScholarFindMany },
       unitAdmin: { findUnique: mockUnitAdminFindUnique },
-      coreClient: { findMany: mockReadClientFindMany },
     },
     write: {
       $transaction: mockTransaction,
@@ -114,7 +111,6 @@ beforeEach(() => {
   mockTxFindMany.mockResolvedValue([]); // empty in-tx mirror list by default
   mockClientFindFirst.mockResolvedValue({ id: "row-1", cwid: "djb2001", removedAt: null }); // an active row exists (DELETE default)
   mockScholarFindMany.mockResolvedValue([]);
-  mockReadClientFindMany.mockResolvedValue([]); // no active roster rows (lookup + POST id read)
   mockFetchDirectory.mockResolvedValue([]); // ED knows nobody by default
   mockClientCreate.mockResolvedValue({ id: "row-new" });
   mockClientUpsert.mockResolvedValue({ id: "row-upserted" });
@@ -193,7 +189,7 @@ describe("POST /api/edit/core-client", () => {
     const res = await post({ cwids: ["DJB2001"] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      added: [{ cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon" }],
+      added: [{ cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", source: "scholars" }],
       alreadyPresent: [],
       invalid: [],
     });
@@ -377,66 +373,140 @@ describe("DELETE /api/edit/core-client", () => {
   });
 });
 
-describe('POST /api/edit/core-client — mode: "lookup"', () => {
-  it("resolves Scholars first, falls back to the enterprise directory, and WRITES NOTHING", async () => {
-    mockScholarFindMany.mockResolvedValue([
-      { cwid: "djb2001", preferredName: "Doug Ballon", slug: "doug-ballon", primaryDepartment: "Radiology" },
-    ]);
-    mockFetchDirectory.mockResolvedValue([
-      { cwid: "ab1234", name: "Al Best", dept: "Research Computing", title: null, firstName: null, lastName: null, email: null },
-    ]);
-    const res = await post({ cwids: ["djb2001", "ab1234"], mode: "lookup" });
+describe("POST /api/edit/core-client — name resolution on the add path", () => {
+  // These cover what `mode: "lookup"` used to: Scholars first, then the
+  // enterprise directory. Collapsing the two steps into one button dropped the
+  // directory half, so an ED-only staff account — a core's most ordinary
+  // non-faculty client — was written and then reported as "not found".
+  const AL_BEST = {
+    cwid: "ab1234",
+    name: "Al Best",
+    dept: "Research Computing",
+    title: null,
+    firstName: null,
+    lastName: null,
+    email: null,
+  };
+
+  it("names a written CWID from the enterprise directory when Scholars has no row", async () => {
+    mockFetchDirectory.mockResolvedValue([AL_BEST]);
+    const res = await post({ cwids: ["ab1234"] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      mode: "lookup",
-      resolved: [
-        { cwid: "djb2001", name: "Doug Ballon", dept: "Radiology", source: "scholars", alreadyPresent: false },
-        { cwid: "ab1234", name: "Al Best", dept: "Research Computing", slug: null, source: "directory", alreadyPresent: false },
+      added: [
+        {
+          cwid: "ab1234",
+          name: "Al Best",
+          affiliation: "Research Computing",
+          slug: null,
+          source: "directory",
+        },
       ],
     });
-    // The whole point of a lookup: no transaction, no upsert, no mirror.
-    expect(mockTransaction).not.toHaveBeenCalled();
-    expect(mockClientUpsert).not.toHaveBeenCalled();
-    expect(mockWriteBack).not.toHaveBeenCalled();
+    // The row is written either way — the directory fixes the LABEL, not the write.
+    expect(mockClientUpsert).toHaveBeenCalledTimes(1);
   });
 
-  it("only asks the directory about CWIDs Scholars did not resolve", async () => {
+  it("takes Scholars first and asks the directory only about the rest", async () => {
     mockScholarFindMany.mockResolvedValue([
-      { cwid: "djb2001", preferredName: "Doug Ballon", slug: "doug-ballon", primaryDepartment: null },
+      {
+        cwid: "djb2001",
+        preferredName: "Doug Ballon",
+        slug: "doug-ballon",
+        primaryDepartment: "Radiology",
+      },
     ]);
-    await post({ cwids: ["djb2001", "ab1234"], mode: "lookup" });
+    const res = await post({ cwids: ["djb2001", "ab1234"] });
+    expect(await res.json()).toMatchObject({
+      added: [
+        { cwid: "djb2001", name: "Doug Ballon", affiliation: "Radiology", source: "scholars" },
+        { cwid: "ab1234", name: null, source: null },
+      ],
+    });
     expect(mockFetchDirectory).toHaveBeenCalledWith(["ab1234"]);
   });
 
   it("skips the directory entirely when Scholars resolved everyone", async () => {
     mockScholarFindMany.mockResolvedValue([
-      { cwid: "djb2001", preferredName: "Doug Ballon", slug: "doug-ballon", primaryDepartment: null },
+      {
+        cwid: "djb2001",
+        preferredName: "Doug Ballon",
+        slug: "doug-ballon",
+        primaryDepartment: null,
+      },
     ]);
-    await post({ cwids: ["djb2001"], mode: "lookup" });
+    await post({ cwids: ["djb2001"] });
     expect(mockFetchDirectory).not.toHaveBeenCalled();
   });
 
-  it("degrades to Scholars-only when the directory throws — a lookup must not fail on an ED outage", async () => {
-    mockScholarFindMany.mockResolvedValue([]);
+  it("resolves only what it WROTE — an already-listed CWID is looked up nowhere", async () => {
+    mockClientFindMany.mockResolvedValueOnce([{ cwid: "djb2001" }]);
+    await post({ cwids: ["djb2001"] });
+    expect(mockScholarFindMany).not.toHaveBeenCalled();
+    expect(mockFetchDirectory).not.toHaveBeenCalled();
+  });
+
+  it("degrades to Scholars-only when the directory throws — the rows are already committed", async () => {
+    // A degraded resolve is reported as `"unavailable"`, NOT as `null`: the two
+    // used to collapse, and `null` is what the panel prints as "not found,
+    // recorded anyway" — a statement about a person the directory may well know.
+    // Whoever Scholars DID name keeps their real source through the outage.
+    mockScholarFindMany.mockResolvedValue([
+      {
+        cwid: "djb2001",
+        preferredName: "Doug Ballon",
+        slug: "doug-ballon",
+        primaryDepartment: "Radiology",
+      },
+    ]);
     mockFetchDirectory.mockRejectedValue(new Error("ldap down"));
-    const res = await post({ cwids: ["ab1234"], mode: "lookup" });
+    const res = await post({ cwids: ["djb2001", "ab1234"] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      resolved: [{ cwid: "ab1234", name: null, source: null }],
+      added: [
+        { cwid: "djb2001", name: "Doug Ballon", source: "scholars" },
+        { cwid: "ab1234", name: null, source: "unavailable" },
+      ],
     });
+    expect(mockClientUpsert).toHaveBeenCalledTimes(2);
   });
 
-  it("flags a CWID already on this core's active roster", async () => {
-    mockScholarFindMany.mockResolvedValue([
-      { cwid: "djb2001", preferredName: "Doug Ballon", slug: "doug-ballon", primaryDepartment: null },
-    ]);
-    mockReadClientFindMany.mockResolvedValue([{ cwid: "djb2001" }]);
-    const res = await post({ cwids: ["djb2001"], mode: "lookup" });
-    expect(await res.json()).toMatchObject({ resolved: [{ alreadyPresent: true }] });
+  it("keeps `source: null` for a CWID the directory ANSWERED about and did not hold", async () => {
+    // The other half of the pair above: this is the ONLY case that means "not
+    // found", so the degraded marker must not have swallowed it.
+    mockFetchDirectory.mockResolvedValue([]);
+    const res = await post({ cwids: ["zz9999"] });
+    expect(await res.json()).toMatchObject({
+      added: [{ cwid: "zz9999", name: null, source: null }],
+    });
+    expect(mockFetchDirectory).toHaveBeenCalledWith(["zz9999"]);
   });
 
-  it("still runs the authorization gate — a lookup is not a public directory probe", async () => {
-    const res = await post({ cwids: ["djb2001"], mode: "lookup" }, { isSuperuser: false });
+  it("abandons a directory that never answers at the budget instead of holding the response", async () => {
+    // `openLdap` allows 10s to connect plus 30s per search, across as many
+    // searches as the batch needs — and this call runs AFTER the rows are
+    // committed. CloudFront kills a silent response at 30s, so an unbudgeted
+    // directory would leave the panel saying "Could not save — try again." about
+    // an add that wrote every row.
+    vi.useFakeTimers();
+    try {
+      mockFetchDirectory.mockImplementation(() => new Promise(() => {}));
+      const pending = post({ cwids: ["ab1234"] });
+      await vi.advanceTimersByTimeAsync(0); // let the route reach the directory call
+      await vi.advanceTimersByTimeAsync(10_000); // then burn the budget
+      const res = await pending;
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        added: [{ cwid: "ab1234", name: null, source: "unavailable" }],
+      });
+      expect(mockClientUpsert).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still runs the authorization gate before any directory probe", async () => {
+    const res = await post({ cwids: ["ab1234"] }, { isSuperuser: false });
     expect(res.status).toBe(403);
     expect(mockFetchDirectory).not.toHaveBeenCalled();
   });
@@ -539,7 +609,6 @@ describe("regressions found in adversarial review", () => {
     // read there raced replica lag in prod (staging has no reader), came back
     // empty, and left the row keyed on its cwid so Remove 404'd forever.
     mockClientUpsert.mockResolvedValue({ id: "row-from-write" });
-    mockReadClientFindMany.mockResolvedValue([]); // a fully lagged replica
     const res = await post({ cwids: ["djb2001"] });
     expect(await res.json()).toMatchObject({ added: [{ cwid: "djb2001", id: "row-from-write" }] });
     // The upsert must ask for the id, or there is nothing to take.
@@ -565,8 +634,8 @@ describe("regressions found in adversarial review", () => {
 
   it("caps the PARSED cwid count, not just the array length", async () => {
     // One array element can carry a whole pasted block, so the array-length cap
-    // alone let 500 strings x 100 cwids through — and in lookup mode that fans
-    // out to that many sequential LDAP searches.
+    // alone let 500 strings x 100 cwids through — and the directory half of the
+    // name resolution then fans out across every one of them.
     const oneBigBlock = [Array.from({ length: 501 }, (_, i) => `ab${1000 + i}`).join(" ")];
     const res = await post({ cwids: oneBigBlock });
     expect(res.status).toBe(400);

@@ -70,6 +70,21 @@ export interface CoreQueueRow {
   coauthorScholars: QueueScholar[];
   /** WCM scholars on the byline (potential core users), in author order. */
   wcmAuthors: QueueScholar[];
+  /** True when `WCM_AUTHORS_CAP` cut a DISTINCT WCM author off the end of
+   *  `wcmAuthors` — the list is a prefix of the byline, not the byline.
+   *
+   *  It exists because the card decides a byline surname is unambiguous by
+   *  looking at this list: a second holder of that surname past the cap is
+   *  invisible, and the card would then rename a token and attach one specific
+   *  person's CWID, name and department to it. A truncated row must refuse that,
+   *  since the assertion is wrong rather than merely absent.
+   *
+   *  Absent means "not truncated", and the loader writes the key ONLY when it is
+   *  true — truncation is the rare case, and `CoreClaimQueue` is a client
+   *  component, so a `false` on every ordinary row is ~64 KB of RSC payload on a
+   *  core the size of core 14 (2,428 untruncated rows) saying nothing. Read it as
+   *  a truthiness test, never `=== false`. */
+  wcmAuthorsTruncated?: boolean;
   /** Raw PubMed abstract. NOTHING RENDERS THIS any more — the Details disclosure
    *  that showed it came out with the direction-A queue rebuild, and the only
    *  reads left in the repo are this loader's own shape assertions in
@@ -90,28 +105,45 @@ export interface CoreQueueRow {
   llmRationale: string | null;
   /** 0-1 repeat-user prior (signal 1); null when never computed. */
   authorAffinity: number | null;
-  /** 0-1 batch_screen prefilter_prior (signal 5); null when never computed. */
+  /** 0-1 batch_screen prefilter_prior; null when never computed. The engine's
+   *  fifth signal, but NOT one of the four the UI counts: round 2 demoted it to
+   *  an italic footnote under the evidence panel (`SIGNAL_COUNT` is 4). It
+   *  blends a MeSH-branch match on the paper's own descriptors with the
+   *  repeat-user number it already restates, so counting it would count that
+   *  number twice — see `priorFootnote` for the wording each case earns. */
   topicalPrior: number | null;
   /** Method-family strength band from the engine's extractor
    *  ("strong" | "moderate" | "weak"); null when it found no family.
    *
-   *  A 16-char band and nothing more. The two JSON columns beside it in
-   *  `publication_core` — `method_evidence` and `mesh_evidence` — are
-   *  deliberately NOT selected here: `CoreClaimQueue` is a `"use client"`
-   *  component, so every selected column ships in the RSC payload for every
-   *  queued row (1,281 on core 14 in staging today), and those two are lists of
-   *  free-text sentences up to 500 chars each that nothing renders. The ETL
-   *  writes all three columns regardless; add the selects back in the same
-   *  change that renders them.
+   *  `method_evidence` beside it IS now selected — the card renders a chip per
+   *  family and a "Methods used" evidence row — bounded as `methodEvidence`
+   *  below describes. `mesh_evidence` stays deliberately unselected: nothing
+   *  renders it, and `CoreClaimQueue` is a `"use client"` component, so every
+   *  selected column ships in the RSC payload for every queued row (1,281 on
+   *  core 14 in staging today) — and that one is a list of free-text sentences
+   *  up to 500 chars each. The ETL writes all three columns regardless.
    *
    *  NOT a counted signal, decided 2026-09-07: it renders as an uncounted
    *  tier-labelled token in the evidence strip and a strong+moderate facet, and
-   *  `SIGNAL_COUNT` stays 5. Two reasons it is not the 6th signal — it is
+   *  `SIGNAL_COUNT` is untouched by it (4 since round 2 demoted the prefilter
+   *  prior to a footnote). Two reasons it is not a counted signal — it is
    *  weighted 0.00 in the engine's `combine.WEIGHTS` so it moves no likelihood,
    *  and 63% of rows carrying a tier are `weak`, where the measured lift inverts
    *  to BELOW background (1.7x -> 0.7x). Counting it would assert a signal that
    *  anti-correlates on two of every three rows that gain it. */
   methodTier: string | null;
+  /** The extractor entries behind `methodTier`, pre-ranked strongest first;
+   *  `[]` when the engine wrote none (every row scored before it started
+   *  emitting the column).
+   *
+   *  `family`/`tool` are short labels and ride along on EVERY entry — the card
+   *  puts one chip per family at the top. `sentence` is the extractor's quoted
+   *  free text, up to 500 chars, and rides on the TOP-RANKED entry ONLY: it is
+   *  the only one the evidence row quotes, and this list crosses to the client
+   *  for all 1,281 rows. Dropping the sentences nothing renders is how the
+   *  payload is bounded — the one that IS rendered is never truncated, so the
+   *  quote can't end mid-word the way `llmRationale` does. */
+  methodEvidence: Array<{ family: string; tool: string; sentence: string | null }>;
   /** Scopus citation count for the publication. */
   citationCount: number;
   pubmedUrl: string | null;
@@ -232,6 +264,35 @@ function isoDate(d: Date | null): string | null {
 }
 
 /**
+ * `publication_core.method_evidence` reduced to what the card renders: the
+ * `family`/`tool` of every well-formed entry, but the `sentence` of the
+ * top-ranked one only (the column arrives pre-ranked strongest first, so that
+ * is entry 0). See `CoreQueueRow.methodEvidence` for why the payload is bounded
+ * this way rather than by cutting the sentence short.
+ *
+ * The column is `Json?` and absent on every row scored before the engine
+ * emitted it, so this must degrade rather than throw: a null, a non-array, or
+ * an entry missing either short label yields no method evidence at all.
+ */
+function methodEvidenceForCard(value: unknown): CoreQueueRow["methodEvidence"] {
+  if (!Array.isArray(value)) return [];
+  const out: CoreQueueRow["methodEvidence"] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const rec = entry as Record<string, unknown>;
+    if (typeof rec.family !== "string" || typeof rec.tool !== "string") continue;
+    out.push({
+      family: rec.family,
+      tool: rec.tool,
+      // Empty `out` means this is the strongest entry that parsed — the one
+      // whose sentence the evidence row quotes.
+      sentence: out.length === 0 && typeof rec.sentence === "string" ? rec.sentence : null,
+    });
+  }
+  return out;
+}
+
+/**
  * Load the review queue for one core, or `null` when the core does not exist.
  * Rows are FK-joined to their publication and ranked by likelihood descending;
  * `partitionCoreQueue` then splits them by effective status.
@@ -261,10 +322,11 @@ export async function loadCoreReviewQueue(
       llmRationale: true,
       authorAffinity: true,
       topicalPrior: true,
-      // methodTier only. method_evidence / mesh_evidence are free-text lists
-      // this queue does not render, and every selected column crosses the
+      // methodTier + method_evidence, which the card now renders. mesh_evidence
+      // stays out: nothing renders it, and every selected column crosses the
       // server/client boundary for all 1,281 rows. See CoreQueueRow.methodTier.
       methodTier: true,
+      methodEvidence: true,
       publication: { select: CARD_PUBLICATION_SELECT },
     },
   });
@@ -319,6 +381,8 @@ export async function loadCoreReviewQueue(
 
   // WCM scholars on each paper's byline (potential core users), in author order.
   const wcmByPmid = new Map<string, QueueScholar[]>();
+  // Papers whose byline ran past WCM_AUTHORS_CAP — see `wcmAuthorsTruncated`.
+  const truncatedPmids = new Set<string>();
   if (pmids.length > 0) {
     const authors = await client.publicationAuthor.findMany({
       where: { pmid: { in: pmids }, cwid: { not: null }, isConfirmed: true },
@@ -331,6 +395,7 @@ export async function loadCoreReviewQueue(
     });
     for (const a of authors) {
       if (!a.cwid || !a.scholar) continue;
+      const cwidLc = a.cwid.toLowerCase();
       const scholar: QueueScholar = {
         cwid: a.cwid,
         name: a.scholar.preferredName,
@@ -340,7 +405,17 @@ export async function loadCoreReviewQueue(
       // byline authors also resolve core-staff co-author CWIDs (case-insensitively)
       putScholar(scholar);
       const list = wcmByPmid.get(a.pmid) ?? [];
-      if (list.length >= WCM_AUTHORS_CAP || list.some((w) => w.cwid === a.cwid)) continue;
+      // A repeat of someone already listed is not truncation — they are on the
+      // card either way — so the dedupe is tested BEFORE the cap. Compared
+      // LOWERCASED, like every other CWID comparison in this loader: nothing
+      // constrains `publication_author.cwid` to one casing per person, and a
+      // casing variant slipping past here both double-lists them on the card and
+      // (at the cap) flags a byline as truncated that lost nobody.
+      if (list.some((w) => w.cwid.toLowerCase() === cwidLc)) continue;
+      if (list.length >= WCM_AUTHORS_CAP) {
+        truncatedPmids.add(a.pmid);
+        continue;
+      }
       list.push(scholar);
       wcmByPmid.set(a.pmid, list);
     }
@@ -386,6 +461,9 @@ export async function loadCoreReviewQueue(
         .map((c) => scholarByCwidLc.get(c))
         .filter((s): s is QueueScholar => s !== undefined),
       wcmAuthors: wcmByPmid.get(r.pmid) ?? [],
+      // Written only when true — see the field's docblock: absent IS "not
+      // truncated", and this row ships to a client component.
+      ...(truncatedPmids.has(r.pmid) ? { wcmAuthorsTruncated: true } : {}),
       signalAck: r.signalAck,
       ackAlias: r.ackAlias,
       ackSnippet: r.ackSnippet,
@@ -396,6 +474,7 @@ export async function loadCoreReviewQueue(
       // same nullable-Decimal guard as authorAffinity above.
       topicalPrior: r.topicalPrior == null ? null : Number(r.topicalPrior),
       methodTier: r.methodTier,
+      methodEvidence: methodEvidenceForCard(r.methodEvidence),
       citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
@@ -431,6 +510,8 @@ export async function loadCoreReviewQueue(
     coauthors: [],
     coauthorScholars: [],
     wcmAuthors: wcmByPmid.get(p.pmid) ?? [],
+    // same "only when true" rule as the engine builder above.
+    ...(truncatedPmids.has(p.pmid) ? { wcmAuthorsTruncated: true } : {}),
     signalAck: false,
     ackAlias: null,
     ackSnippet: null,
@@ -439,6 +520,7 @@ export async function loadCoreReviewQueue(
     authorAffinity: null,
     topicalPrior: null,
     methodTier: null,
+    methodEvidence: [],
     citationCount: p.citationCount,
     pubmedUrl: p.pubmedUrl,
     doi: p.doi,

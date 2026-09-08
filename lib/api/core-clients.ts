@@ -7,14 +7,16 @@
  * `lib/api/core-queue.ts`'s case-insensitive CWID join (the engine's/owner's
  * casing is not guaranteed to match `scholar.cwid`'s stored casing).
  *
- * `parseCwidBlock` is re-exported from `lib/cores/cwid-block.ts` (the pure
- * parsing half, shared with `components/edit/core-clients-panel.tsx` — see
- * that module's comment for why the parser lives apart from this one, which
- * imports `@/lib/db` at module scope).
+ * `parseCwidBlock` and the paper-count shape/arithmetic are re-exported from
+ * their pure modules under `lib/cores/` (shared with the panel and the review
+ * queue, both client components — see those modules' comments for why they live
+ * apart from this one, which imports `@/lib/db` at module scope).
  */
 import { db } from "@/lib/db";
+import { recentFloorYear, type CoreClientPaperCount } from "@/lib/cores/paper-counts";
 
 export { parseCwidBlock } from "@/lib/cores/cwid-block";
+export type { CoreClientPaperCount } from "@/lib/cores/paper-counts";
 
 /** One resolved "known clients" row for the panel. */
 export interface CoreClientRow {
@@ -152,17 +154,7 @@ export async function loadCoreClients(
   });
 }
 
-/** How many years back "N recent" counts. Five calendar years INCLUSIVE of the
- *  current one, so 2026 spans 2022-2026. */
-export const RECENT_PAPER_YEARS = 5;
-
-/** What this core already holds from one person. */
-export interface CoreClientPaperCount {
-  papers: number;
-  recent: number;
-}
-
-/** Minimal Prisma surface for the counts query — mock-friendly for unit tests. */
+/** Minimal Prisma surface for the counts queries — mock-friendly for unit tests. */
 export type CoreClientPaperCountLookup = {
   publicationAuthor: {
     findMany: (args: {
@@ -173,23 +165,42 @@ export type CoreClientPaperCountLookup = {
       };
       select: { pmid: true; cwid: true };
     }) => Promise<Array<{ pmid: string; cwid: string | null }>>;
+    groupBy: (args: {
+      by: ["cwid"];
+      where: { cwid: { in: string[] }; isConfirmed: true };
+      _count: { pmid: true };
+    }) => Promise<Array<{ cwid: string | null; _count: { pmid: number } }>>;
   };
 };
 
 /**
- * Per-person counts of the papers this core ALREADY holds from each of its known
- * clients — the "18 papers, 11 recent" half of the queue's client evidence token.
+ * Per-person counts behind the queue's evidence lines: how many papers this core
+ * ALREADY holds from a person ("18 papers, 11 recent") and how much of their
+ * whole output that is ("18 of their 29 publications").
  *
- * Counted over the CONFIRMED list only, and deliberately so: counting candidates
- * would make a row's own evidence line quote the very pile it is asking the
- * reviewer to judge.
+ * `cwids` is EVERY person the queue may have to name — the "Known clients"
+ * roster PLUS every WCM byline author on a queue row. The repeat-user line names
+ * a person, and the only name that cannot disagree with the number printed
+ * beside it is the one whose own count was computed here: the engine publishes
+ * `author_affinity` as a bare scalar and never records whose it is, so naming
+ * from the engine's number would be a guess dressed as a fact.
+ *
+ * `papers`/`recent` are counted over the CONFIRMED list only, and deliberately
+ * so: counting candidates would make a row's own evidence line quote the very
+ * pile it is asking the reviewer to judge. `total` is deliberately NOT scoped to
+ * this core — it is the denominator, so it counts everything.
+ *
+ * A CONFIRMED row is inside its own counts, so the Confirmed tab must take that
+ * one paper back out before it says "previous occasions" — `excludingOwnPaper`
+ * in `lib/cores/paper-counts.ts`. Doing it here instead would key the map by
+ * (person, row) rather than by person, which is the whole queue squared.
  *
  * WHY THIS IS A QUERY and not a fold over `CoreQueueRow.wcmAuthors`, which is
  * already in hand: that field is capped at `WCM_AUTHORS_CAP` (12) per paper, so
  * folding it silently drops a client who is the 13th WCM author on a large
  * consortium paper — and the count renders as a bare fact ("18 papers"), the kind
  * of number a curator has no way to notice is short. This reads the byline table
- * directly, uncapped, and only for the handful of CWIDs actually on the roster.
+ * directly, uncapped.
  *
  * Keyed by LOWERCASED cwid. `now` is injected so the recency window is testable.
  */
@@ -202,38 +213,94 @@ export async function loadCoreClientPaperCounts(
   const wanted = [...new Set(cwids.map((c) => c.toLowerCase()).filter((c) => c.length > 0))];
   if (wanted.length === 0 || confirmed.length === 0) return {};
 
+  // Case-insensitive the same way `loadCoreClients` is — a stored cwid's casing
+  // is not guaranteed to match `publication_author.cwid` — and de-duped across
+  // BOTH casings: `cwids` now arrives with one entry per byline seat in the whole
+  // queue, so the as-is half would otherwise repeat a name hundreds of times in
+  // one `IN` list for no extra matching.
+  const eitherCasing = [...new Set([...wanted, ...cwids.filter((c) => c.length > 0)])];
+
   // Year per pmid, so recency needs no second read. A pmid with no year on file
   // counts as a paper but never as a recent one.
   const yearByPmid = new Map(confirmed.map((r) => [r.pmid, r.year]));
   const rows = await client.publicationAuthor.findMany({
-    // Case-insensitive the same way `loadCoreClients` is: a stored cwid's casing
-    // is not guaranteed to match `publication_author.cwid`.
     where: {
       pmid: { in: [...yearByPmid.keys()] },
-      cwid: { in: [...wanted, ...cwids] },
+      cwid: { in: eitherCasing },
       isConfirmed: true,
     },
     select: { pmid: true, cwid: true },
   });
 
-  const floor = now.getFullYear() - (RECENT_PAPER_YEARS - 1);
-  const out: Record<string, CoreClientPaperCount> = {};
+  const floor = recentFloorYear(now);
+  const held = new Map<string, { papers: number; recent: number }>();
+  // The cwid casings this core's own bylines actually carry — the denominator's
+  // IN list below, and nothing wider.
+  const casings = new Set<string>();
   // Dedupe (person, paper): a byline listing someone twice must not count the
   // paper twice.
   const seen = new Set<string>();
   for (const row of rows) {
     if (!row.cwid) continue;
-    const key = row.cwid.toLowerCase();
     if (!yearByPmid.has(row.pmid)) continue;
+    const key = row.cwid.toLowerCase();
+    casings.add(row.cwid);
+    casings.add(key);
     const pair = `${key} ${row.pmid}`;
     if (seen.has(pair)) continue;
     seen.add(pair);
     const year = yearByPmid.get(row.pmid) ?? null;
-    const held = out[key] ?? { papers: 0, recent: 0 };
-    out[key] = {
-      papers: held.papers + 1,
-      recent: held.recent + (year !== null && year >= floor ? 1 : 0),
-    };
+    const prior = held.get(key) ?? { papers: 0, recent: 0 };
+    held.set(key, {
+      papers: prior.papers + 1,
+      recent: prior.recent + (year !== null && year >= floor ? 1 : 0),
+    });
+  }
+  // A key only exists once a confirmed paper landed on it, so `papers` is >= 1 on
+  // every entry. That is the point — a zero would both print as "0 papers" (a
+  // person the core looked at and rejected, which is not what it means) and grow
+  // this map by a row for every WCM author in the institution who ever shared a
+  // byline with a queued paper. Empty here means there is also no denominator
+  // worth reading: nothing survives for one to attach to.
+  if (held.size === 0) return {};
+
+  // The denominator is unscoped by pmid, so it is a groupBy and not a second row
+  // read — over every publication these people have, the rows ARE the count.
+  //
+  // Scoped to the people the read above actually found a confirmed paper for,
+  // NOT to `cwids`: `total` is only ever read off a key that survives into the
+  // returned map, and only these keys do, so a wider list buys nothing and costs
+  // a great deal. `cwids` now arrives with one entry per byline SEAT in the whole
+  // queue — 7,443 seats, 1,456 distinct CWIDs on staging core 14, against the 246
+  // people that core has actually confirmed a paper from. Measured there
+  // 2026-09-08: the wide groupBy 1,742ms, the narrow one 132ms on top of the
+  // 44ms pmid-scoped read, so the page loses ~1.5s. It is index-covered either
+  // way (`@@index([cwid, isConfirmed])`); the cost is rows, not a missing index,
+  // so the only lever is asking about fewer people. Serial rather than the
+  // `Promise.all` this used to be — the narrow list is not knowable until the
+  // read above returns, and 44+132 still beats 1,742.
+  //
+  // (`_count` has no DISTINCT and there is no unique constraint on (pmid, cwid),
+  // so a byline listing someone twice inflates `total` by one where `papers`
+  // de-dupes it. `total` is printed as a denominator, never as a claim about a
+  // specific paper.)
+  const totals = await client.publicationAuthor.groupBy({
+    by: ["cwid"],
+    where: { cwid: { in: [...casings] }, isConfirmed: true },
+    _count: { pmid: true },
+  });
+  // Fold both casings onto one lowercased key: the `IN` above asks for both, and
+  // a case-sensitive collation would hand back two groups for the same person.
+  const totalByCwid = new Map<string, number>();
+  for (const t of totals) {
+    if (!t.cwid) continue;
+    const key = t.cwid.toLowerCase();
+    totalByCwid.set(key, (totalByCwid.get(key) ?? 0) + t._count.pmid);
+  }
+
+  const out: Record<string, CoreClientPaperCount> = {};
+  for (const [key, counts] of held) {
+    out[key] = { ...counts, total: totalByCwid.get(key) ?? 0 };
   }
   return out;
 }

@@ -5,11 +5,7 @@
  * panel with CWIDs only for this first pass; name-based / fuzzy resolution is
  * explicitly out of scope).
  *
- * POST carries THREE modes, chosen by `mode` (absent = the original add):
- *   - `mode: "lookup"` — resolve a pasted block against Scholars, then the
- *     enterprise directory for anything Scholars does not hold, and return what
- *     was found. WRITES NOTHING. This is the modal's "Look up CWIDs" step, so a
- *     reviewer sees who they are about to add before they add them.
+ * POST carries TWO modes, chosen by `mode` (absent = the original add):
  *   - `mode: "name"` — record a NAME-ONLY client (`{ displayName, affiliation? }`):
  *     someone the owner knows uses the core but who has no CWID. The row is
  *     roster-only — it cannot flag a byline (the match is by CWID) and is never
@@ -17,15 +13,28 @@
  *     comparison against the core's active list, because the (coreId, cwid)
  *     unique index cannot dedupe rows whose cwid is NULL (MySQL permits any
  *     number of NULLs in a unique index).
- *   - default — the CWID add below.
+ *   - default — the CWID add below: it resolves the pasted block AND writes the
+ *     roster rows in one round-trip. A third mode, `mode: "lookup"`, used to
+ *     serve the modal's "Look up CWIDs" preview; HANDOFF-11 #2 collapsed that
+ *     two-step flow into one button and the mode lost its last caller. Its
+ *     Scholars-then-enterprise-directory resolution did NOT go with it —
+ *     `resolvePeople` below is that same order, naming the rows the add has
+ *     just written.
  *
  * POST body: `{ coreId: string; cwids: string[] }` — a pasted, already
  * client-parsed block. Re-parsed here too (via `parseCwidBlock`, never
  * trusting the client) so a malformed token never reaches `core_client`;
  * malformed tokens are reported back as `invalid`, not rejected outright — a
  * paste of 40 CWIDs with one typo should not throw the other 39 away.
- * Response: `{ added: Array<{cwid, name: string|null, slug: string|null}>,
- * alreadyPresent: string[], invalid: string[] }`.
+ * Response: `{ added: Array<{id, cwid, name, slug, affiliation, source}>,
+ * alreadyPresent: string[], invalid: string[] }`, where `source` names the store
+ * the name came from: `"scholars"`, `"directory"`, `null` for a CWID BOTH stores
+ * were asked about and neither holds (recorded anyway, and the ONLY case the
+ * panel may label "not found"), or `"unavailable"` when the directory could not
+ * be asked at all — it threw, or it outran the budget below. `"unavailable"` is
+ * a name we could not look up, NOT a name that does not exist: the two used to
+ * collapse into `null`, so a directory outage printed "not found, recorded
+ * anyway" about people the directory knows perfectly well.
  *
  * DELETE body: `{ coreId: string; cwid: string }` — soft-removes one active
  * row. `{ removed: true }`, or 404 when there is no active row for that CWID.
@@ -71,6 +80,14 @@ const PATH = "/api/edit/core-client";
 const MAX_CWIDS = 500;
 /** A name-only client's typed fields, capped to the column widths. */
 const MAX_NAME_LEN = 255;
+/** How long the add will wait on the enterprise directory before giving up and
+ *  reporting the resolve as DEGRADED. The rows are already committed by the time
+ *  it runs, so this call can only add latency to a response that is otherwise
+ *  ready — and `openLdap` allows 10s to connect plus 30s per search, across as
+ *  many searches as the batch needs (100 CWIDs each). CloudFront kills a silent
+ *  response at 30s, so an unbudgeted directory could turn an add that WROTE
+ *  every row into "Could not save — try again." on the panel. */
+const DIRECTORY_BUDGET_MS = 5_000;
 
 /** Mirror a core's FULL active client list to the engine, best-effort. Never
  *  throws — a mirror failure must not fail the write it follows. `cwids` must
@@ -102,7 +119,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof coreId !== "string" || coreId.length === 0 || coreId.length > 32) {
     return editError(400, "invalid_core_id", "coreId");
   }
-  const isLookup = mode === "lookup";
   const isNameOnly = mode === "name";
 
   // --- name-only add: no cwids at all, a typed name instead ---
@@ -151,18 +167,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { cwids: parsedCwids, invalid } = parseCwidBlock(cwids.join("\n"));
   // MAX_CWIDS above caps the ARRAY length; this caps what that array parsed OUT
   // to. One element can carry a whole pasted block, so 500 strings of 100 CWIDs
-  // each would otherwise reach 50,000 — and in lookup mode fan out to that many
-  // sequential LDAP searches.
+  // each would otherwise reach 50,000 rows written — and fan the directory half
+  // of the name resolution below out across every one of them.
   if (parsedCwids.length > MAX_CWIDS) {
     return editError(400, "invalid_cwids", "cwids");
-  }
-
-  // --- "Look up CWIDs": resolve and report, write nothing. Every check above
-  //     (shape, core existence, authorization) has already run, so this is the
-  //     same gate the real add passes — not a client-side preview. ---
-  if (isLookup) {
-    const resolved = await resolvePeople(coreId, parsedCwids);
-    return editOk({ mode: "lookup", resolved, invalid });
   }
 
   const activeRows =
@@ -233,27 +241,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     writeback = await mirrorActiveClients(coreId, mirrorCwids);
   }
 
-  // --- resolve names + slugs for the newly-added cwids only (case-insensitive,
-  //     same convention as loadCoreClients — never reject a well-formed CWID
-  //     for having no Scholar row, just report name/slug: null). ---
-  const scholars =
-    toWrite.length > 0
-      ? await db.read.scholar.findMany({
-          where: { cwid: { in: toWrite } },
-          select: { cwid: true, preferredName: true, slug: true, primaryDepartment: true },
-        })
-      : [];
-  const byLowerCwid = new Map(scholars.map((s) => [s.cwid.toLowerCase(), s]));
-  // Name/slug resolution stays on `db.read` on purpose: `scholar` is ETL-owned
-  // and was not written by this request, so there is nothing to race.
+  // --- resolve names for the newly-added cwids only: Scholars first, then the
+  //     enterprise directory for whoever Scholars does not hold — a core's
+  //     clients include staff accounts that have no Scholar row at all. A CWID
+  //     neither store knows is still written, and only that case comes back with
+  //     `source: null`, which is what makes the panel's "recorded anyway" label
+  //     true when it prints it. When the directory never answered, an unresolved
+  //     CWID is `"unavailable"` instead: nothing was learned about that person,
+  //     so nothing may be asserted about them. ---
+  const { people, directoryUnavailable } = await resolvePeople(toWrite);
   const added = toWrite.map((cwid) => {
-    const scholar = byLowerCwid.get(cwid);
+    const person = people.get(cwid);
     return {
       id: idByCwid.get(cwid) ?? null,
       cwid,
-      name: scholar?.preferredName ?? null,
-      slug: scholar?.slug ?? null,
-      affiliation: scholar?.primaryDepartment ?? null,
+      name: person?.name ?? null,
+      slug: person?.slug ?? null,
+      affiliation: person?.dept ?? null,
+      source: person?.source ?? (directoryUnavailable ? ("unavailable" as const) : null),
     };
   });
 
@@ -372,80 +377,93 @@ function normalizeNameKey(value: string | null): string {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-/** One looked-up person, as the "Look up CWIDs" step reports them. */
+/** One resolved person. A CWID neither store knows is simply absent from the
+ *  map below, so `source` is never "nowhere" — that is what absence means. */
 interface ResolvedPerson {
-  cwid: string;
-  name: string | null;
+  name: string;
   dept: string | null;
+  /** Profile slug — always `null` for a directory hit, which has no profile. */
   slug: string | null;
-  /** Where the name came from — `null` when neither store knows this CWID. */
-  source: "scholars" | "directory" | null;
-  /** Already on this core's active roster; adding again is a no-op. */
-  alreadyPresent: boolean;
+  source: "scholars" | "directory";
+}
+
+/** What a resolve knew, and whether it got to ask everyone. `directoryUnavailable`
+ *  is the difference between "the directory says there is no such person" and
+ *  "the directory did not answer" — absence from `people` means the first ONLY
+ *  when this is false. */
+interface ResolveOutcome {
+  people: Map<string, ResolvedPerson>;
+  directoryUnavailable: boolean;
 }
 
 /**
- * Resolve a block of CWIDs for the lookup step: Scholars first, then the
- * enterprise directory for whatever Scholars does not hold — the order the
- * modal states, and the same order `loadCoreReviewQueue` uses to name core
- * staff.
+ * Resolve names for a block of CWIDs, keyed by the (lowercase) cwid passed in:
+ * Scholars first, then the enterprise directory for whatever Scholars does not
+ * hold — the same order `loadCoreReviewQueue` uses to name core staff.
  *
- * An ED failure is caught and logged, never thrown: a directory outage must
- * degrade the lookup to "Scholars only" (unresolved names come back with
- * `source: null`), not fail the modal. A CWID that resolves nowhere is still
- * addable — a legitimate non-faculty core user may precede their Scholar row,
- * which is why the add path never rejects a well-formed CWID for being unknown.
+ * An ED failure — a throw, or simply outrunning `DIRECTORY_BUDGET_MS` — is
+ * caught and logged, never thrown: a directory outage must degrade the naming to
+ * "Scholars only", never fail an add whose rows are already committed. It is
+ * reported as `directoryUnavailable` rather than swallowed, because the caller
+ * cannot otherwise tell a degraded resolve from a genuine miss and the panel
+ * prints one of them as a statement about the person. A CWID that resolves
+ * nowhere is still added — a legitimate non-faculty core user may precede their
+ * Scholar row, which is why the add path never rejects a well-formed CWID for
+ * being unknown.
+ *
+ * The Scholar read stays on `db.read`: `scholar` is ETL-owned and was not
+ * written by this request, so there is nothing to race.
  */
-async function resolvePeople(coreId: string, cwids: string[]): Promise<ResolvedPerson[]> {
-  if (cwids.length === 0) return [];
-  const [scholars, activeRows] = await Promise.all([
-    db.read.scholar.findMany({
-      where: { cwid: { in: cwids } },
-      select: { cwid: true, preferredName: true, slug: true, primaryDepartment: true },
-    }),
-    db.read.coreClient.findMany({
-      where: { coreId, cwid: { in: cwids }, removedAt: null },
-      select: { cwid: true },
-    }),
-  ]);
-  const byCwid = new Map(scholars.map((x) => [x.cwid.toLowerCase(), x]));
-  const active = new Set(activeRows.flatMap((r) => (r.cwid ? [r.cwid.toLowerCase()] : [])));
-
-  const unresolved = cwids.filter((c) => !byCwid.has(c));
-  const fromEd = new Map<string, { name: string; dept: string | null }>();
-  if (unresolved.length > 0) {
-    try {
-      for (const person of await fetchDirectoryPeopleByCwid(unresolved)) {
-        fromEd.set(person.cwid.toLowerCase(), { name: person.name, dept: person.dept });
-      }
-    } catch (err) {
-      // Degrade to Scholars-only rather than failing the lookup.
-      logEditFailure(`${PATH}#lookup-ed`, err);
-    }
+async function resolvePeople(cwids: string[]): Promise<ResolveOutcome> {
+  const resolved = new Map<string, ResolvedPerson>();
+  if (cwids.length === 0) return { people: resolved, directoryUnavailable: false };
+  const scholars = await db.read.scholar.findMany({
+    where: { cwid: { in: cwids } },
+    select: { cwid: true, preferredName: true, slug: true, primaryDepartment: true },
+  });
+  for (const scholar of scholars) {
+    resolved.set(scholar.cwid.toLowerCase(), {
+      name: scholar.preferredName,
+      dept: scholar.primaryDepartment,
+      slug: scholar.slug,
+      source: "scholars",
+    });
   }
 
-  return cwids.map((cwid) => {
-    const scholar = byCwid.get(cwid);
-    if (scholar) {
-      return {
-        cwid,
-        name: scholar.preferredName,
-        dept: scholar.primaryDepartment,
-        slug: scholar.slug,
-        source: "scholars" as const,
-        alreadyPresent: active.has(cwid),
-      };
+  const unresolved = cwids.filter((c) => !resolved.has(c));
+  if (unresolved.length === 0) return { people: resolved, directoryUnavailable: false };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // Race the directory against the budget. The loser keeps running to its own
+    // unbind (`Promise.race` stays subscribed, so a late rejection is handled),
+    // it just stops being anything this response waits for.
+    const people = await Promise.race([
+      fetchDirectoryPeopleByCwid(unresolved),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`directory budget exceeded (${DIRECTORY_BUDGET_MS}ms)`)),
+          DIRECTORY_BUDGET_MS,
+        );
+      }),
+    ]);
+    for (const person of people) {
+      resolved.set(person.cwid.toLowerCase(), {
+        name: person.name,
+        dept: person.dept,
+        slug: null,
+        source: "directory",
+      });
     }
-    const ed = fromEd.get(cwid);
-    return {
-      cwid,
-      name: ed?.name ?? null,
-      dept: ed?.dept ?? null,
-      slug: null,
-      source: ed ? ("directory" as const) : null,
-      alreadyPresent: active.has(cwid),
-    };
-  });
+  } catch (err) {
+    // Degrade to Scholars-only rather than failing a write that has committed —
+    // and SAY it degraded, so the receipt does not call these people "not found".
+    logEditFailure(`${PATH}#directory`, err);
+    return { people: resolved, directoryUnavailable: true };
+  } finally {
+    clearTimeout(timer);
+  }
+  return { people: resolved, directoryUnavailable: false };
 }
 
 /**
