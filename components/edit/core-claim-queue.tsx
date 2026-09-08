@@ -61,7 +61,7 @@
  *   - the "Method family identified" facet — no method data reaches
  *     `CoreQueueRow` (see `searchBlob`).
  */
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check,
@@ -74,13 +74,39 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import type { CoreClientRow } from "@/lib/api/core-clients";
+import type { CoreClientPaperCount, CoreClientRow } from "@/lib/api/core-clients";
 import { droppedAuthorCount, stripWcmMarkers } from "@/lib/author-byline";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
-import { CoreClientsPanel } from "@/components/edit/core-clients-panel";
-import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { CoreClientsDialog } from "@/components/edit/core-clients-panel";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { toCsv } from "@/lib/csv";
+
+/** Server-side batch cap on `POST /api/edit/core-claim/bulk` (MAX_BULK_PMIDS).
+ *  Mirrored here so an over-long paste is caught before the round-trip, and so
+ *  the modal can state the limit. */
+export const MAX_CLAIM_PMIDS = 500;
+
+/** What the "Check PMIDs" dry run found. */
+interface PmidCheck {
+  /** PMIDs a claim would actually write. */
+  wouldWrite: number;
+  /** Already claimed for this core — writing them again is a no-op. */
+  skipped: number;
+  /** Not ingested by SPS; a claim skips these rather than inventing a row. */
+  notFound: string[];
+  /** Tokens the paste-parser rejected before the request. */
+  invalid: string[];
+}
 
 /** A pasted block of PMIDs, split on any run of whitespace/commas. Digit-only
  *  tokens are candidates; anything else is reported back so a typo isn't
@@ -305,6 +331,31 @@ export interface EvidenceToken {
   value: string;
 }
 
+/** "Banerjee" -> "Banerjee's", "Sholles" -> "Sholles'". A straight apostrophe,
+ *  matching the "an author's own work" fallback it alternates with — the two
+ *  render in the same sentence slot and must not disagree typographically. Pure. */
+export function possessive(name: string): string {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
+/**
+ * "Samprit Banerjee, 18 papers, 11 recent" — the person's name plus what this
+ * core already holds from them. A count of zero is DROPPED rather than printed
+ * as "0 papers": a client the core has nothing confirmed from yet should read
+ * as a name, not as a person the core has looked at and rejected. Pure.
+ */
+export function namedWithCounts(
+  scholar: QueueScholar,
+  counts: Readonly<Record<string, CoreClientPaperCount>>,
+): string {
+  const c = counts[scholar.cwid.toLowerCase()];
+  if (!c || c.papers === 0) return scholar.name;
+  const papers = `${c.papers} ${c.papers === 1 ? "paper" : "papers"}`;
+  return c.recent > 0
+    ? `${scholar.name}, ${papers}, ${c.recent} recent`
+    : `${scholar.name}, ${papers}`;
+}
+
 /**
  * The collapsed evidence line as label/value pairs, so the values carry the
  * weight rather than a run-on sentence. `clientCwids` is the core's own "Known
@@ -314,6 +365,7 @@ export interface EvidenceToken {
 export function evidenceTokens(
   row: CoreQueueRow,
   clientCwids: ReadonlySet<string> = new Set(),
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
 ): EvidenceToken[] {
   const tokens: EvidenceToken[] = [];
   if (row.ackAlias) tokens.push({ label: "Acknowledged as", value: `“${row.ackAlias}”` });
@@ -326,13 +378,25 @@ export function evidenceTokens(
   if (clients.length > 0) {
     tokens.push({
       label: clients.length > 1 ? "Client co-authors" : "Client co-author",
-      value: clients.map((c) => c.name).join("; "),
+      value: clients.map((c) => namedWithCounts(c, paperCounts)).join("; "),
     });
   }
   if (row.authorAffinity !== null) {
+    // NAME the person when — and only when — the byline leaves no doubt who it
+    // is. The engine publishes ONE scalar per row and never records which author
+    // it is about (`author_affinity` arrives as a bare number, see
+    // etl/dynamodb/publication-core-mapper.ts), so on a byline with two WCM
+    // authors a name here would be a coin flip printed as a fact. With exactly
+    // one WCM author there is nobody else it can be about, and it is named.
+    //
+    // This is the same discipline `Byline` applies before rewriting a token to
+    // a full name, and the same error "Topical MeSH match" made by asserting a
+    // specific reading of a blended signal.
+    const sole = row.wcmAuthors.length === 1 ? row.wcmAuthors[0] : null;
+    const whose = sole ? `${possessive(sole.name)} own work` : "an author's own work";
     tokens.push({
       label: "Repeat user",
-      value: `${Math.round(row.authorAffinity * 100)}% of an author's own work`,
+      value: `${Math.round(row.authorAffinity * 100)}% of ${whose}`,
     });
   }
   if (row.llmScore !== null) {
@@ -552,6 +616,11 @@ interface CoreClaimQueueProps {
    *  set; defaults to empty so the panel still renders (with nothing listed)
    *  when a caller doesn't pass it. */
   clients?: CoreClientRow[];
+  /** Papers this core already holds from each known client, keyed by LOWERCASED
+   *  cwid — server-computed by `loadCoreClientPaperCounts`. NOT derivable here:
+   *  `row.wcmAuthors` is capped at 12 per paper, so folding it would undercount
+   *  a client buried in a long byline and print the short number as a fact. */
+  paperCounts?: Readonly<Record<string, CoreClientPaperCount>>;
 }
 
 export function CoreClaimQueue({
@@ -560,6 +629,7 @@ export function CoreClaimQueue({
   confirmed,
   rejected = [],
   clients = [],
+  paperCounts = {},
 }: CoreClaimQueueProps) {
   const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -618,8 +688,20 @@ export function CoreClaimQueue({
   // independent of the engine queue (POST /api/edit/core-claim/bulk).
   const [addOpen, setAddOpen] = useState(false);
   const [addText, setAddText] = useState("");
+  // Mirror of `addText` readable from inside an in-flight async handler, where
+  // the captured state value is whatever it was when the handler started.
+  const addTextRef = useRef("");
+  const setAddTextTracked = (next: string) => {
+    addTextRef.current = next;
+    setAddText(next);
+  };
   const [addPending, setAddPending] = useState(false);
   const [addResult, setAddResult] = useState<string | null>(null);
+  // The dry-run outcome. `null` until "Check PMIDs" has run — "Claim
+  // publications" stays disabled until then, so nothing is written that the
+  // reviewer has not been shown first.
+  const [addCheck, setAddCheck] = useState<PmidCheck | null>(null);
+  const [addChecking, setAddChecking] = useState(false);
   // "Known clients" (ReciterAI #383 / SPS #2607) — the panel's open/closed
   // state and its list live here (not in CoreClientsPanel), the same
   // controlled-child pattern as Add PMIDs above, so the panel body can render
@@ -628,7 +710,12 @@ export function CoreClaimQueue({
   const [clientRows, setClientRows] = useState<CoreClientRow[]>(clients);
   const router = useRouter();
 
-  const clientCwids: ReadonlySet<string> = new Set(clientRows.map((c) => c.cwid.toLowerCase()));
+  // Name-only clients carry no cwid, so they never join this set — they cannot
+  // flag a byline, which is exactly what the modal tells the owner up front.
+  const clientCwids: ReadonlySet<string> = new Set(
+    clientRows.flatMap((c) => (c.cwid ? [c.cwid.toLowerCase()] : [])),
+  );
+
 
   // Tick/untick one facet. Resetting is "Clear filters" below — the only one.
   const toggleFilter = (key: FilterKey) =>
@@ -781,6 +868,59 @@ export function CoreClaimQueue({
   // claimed anyway, and the server-side existence check catches anything SPS
   // hasn't ingested. Refresh (not local state) so the page re-fetches the newly
   // manual-confirmed rows with their real title/journal/etc.
+  /** "Check PMIDs" — a `dryRun` bulk claim. Same route, same authorization, same
+   *  reads; it just stops before the transaction, so what it reports is what a
+   *  claim would actually do rather than a client-side guess. */
+  async function checkAddPmids() {
+    const { pmids, invalid } = parsePmidBlock(addText);
+    if (pmids.length === 0) {
+      setAddCheck(null);
+      setAddResult(
+        invalid.length > 0
+          ? `No valid PMIDs found (ignored: ${invalid.join(", ")}).`
+          : "Paste at least one PMID.",
+      );
+      return;
+    }
+    if (pmids.length > MAX_CLAIM_PMIDS) {
+      setAddCheck(null);
+      setAddResult(`Up to ${MAX_CLAIM_PMIDS} at a time — that paste has ${pmids.length}.`);
+      return;
+    }
+    // The exact text this check describes. A reviewer can edit the textarea
+    // while the request is in flight; when it lands we compare against what is
+    // in the box NOW and drop the result if it has moved on. Without this the
+    // late response re-armed "Claim publications" for a paste that was never
+    // checked, and the claim then posted the NEW text.
+    const checkedText = addText;
+    setAddChecking(true);
+    setAddResult(null);
+    const res = await fetch("/api/edit/core-claim/bulk", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ coreId: core.id, pmids, status: "claimed", dryRun: true }),
+    }).catch(() => null);
+    if (checkedText !== addTextRef.current) return; // stale — the paste changed
+    setAddChecking(false);
+    if (!res?.ok) {
+      setAddResult("Could not check these — try again.");
+      return;
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      wouldWrite?: number;
+      skipped?: number;
+      notFound?: string[];
+    };
+    if (checkedText !== addTextRef.current) return; // stale — the paste changed
+    setAddCheck({
+      wouldWrite: data.wouldWrite ?? 0,
+      skipped: data.skipped ?? 0,
+      notFound: data.notFound ?? [],
+      invalid,
+    });
+    setAddResult(null);
+  }
+
   async function submitAddPmids() {
     const { pmids, invalid } = parsePmidBlock(addText);
     if (pmids.length === 0) {
@@ -814,7 +954,8 @@ export function CoreClaimQueue({
     if (invalid.length > 0) parts.push(`Ignored: ${invalid.join(", ")}.`);
     setAddResult(parts.join(" "));
     setAnnounce(parts.join(" "));
-    setAddText("");
+    setAddTextTracked("");
+    setAddCheck(null);
     if ((data.written ?? 0) > 0) router.refresh();
   }
 
@@ -1041,63 +1182,130 @@ export function CoreClaimQueue({
         </div>
       </div>
 
-      {addOpen ? (
-        <div className="border-apollo-border bg-apollo-surface mb-3 rounded-lg border p-3">
-          <label
-            htmlFor="core-claim-add-pmids"
-            className="text-foreground mb-1.5 block text-sm font-medium"
-          >
-            Claim known PMIDs directly
-          </label>
-          <p className="text-muted-foreground mb-2 text-xs">
-            One per line, or comma/space-separated. Independent of the review queue — use this for
-            a paper you know used this core that our signals never surfaced.
-          </p>
-          <textarea
-            id="core-claim-add-pmids"
-            value={addText}
-            onChange={(e) => setAddText(e.target.value)}
-            placeholder="39812345, 38209981&#10;37102244"
-            rows={3}
-            className="border-border-strong text-foreground bg-apollo-surface focus-visible:ring-apollo-maroon w-full rounded-md border px-2.5 py-2 text-sm focus-visible:outline-none focus-visible:ring-2"
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              disabled={addPending || addText.trim().length === 0}
-              onClick={submitAddPmids}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-accent-slate)] px-3 text-sm text-white disabled:opacity-50"
+      {/* Both toolbar panels are MODALS, not inline drawers: each is a task with
+          its own commit step, and an inline panel pushed the queue down the page
+          while it was open — the reviewer lost their place in the list they were
+          about to act on. Padding lives on the bands inside `DialogContent`
+          (which is `p-0`), so the header and footer rules run full-bleed. */}
+      <Dialog
+        open={addOpen}
+        onOpenChange={(next) => {
+          setAddOpen(next);
+          if (!next) {
+            setAddTextTracked("");
+            setAddResult(null);
+            setAddCheck(null);
+          }
+        }}
+      >
+        <DialogContent
+          data-slot="core-claim-pmid-dialog"
+          className="gap-0 p-0 sm:max-w-2xl"
+        >
+          <DialogHeader className="border-apollo-border border-b px-6 py-5">
+            <DialogTitle>Claim publications by PMID</DialogTitle>
+            <DialogDescription>
+              For papers you know used this core that the engine never scored. These are recorded
+              as your decision, with no evidence trail behind them.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="px-6 py-5">
+            <label
+              htmlFor="core-claim-add-pmids"
+              className="text-foreground mb-2 block text-sm font-medium"
             >
-              {addPending ? "Claiming…" : "Claim"}
-            </button>
+              Paste PMIDs
+            </label>
+            <textarea
+              id="core-claim-add-pmids"
+              value={addText}
+              onChange={(e) => {
+                setAddTextTracked(e.target.value);
+                // The old check described a paste that no longer exists.
+                setAddCheck(null);
+              }}
+              placeholder="38771290, 37845512&#10;36990455 39914402"
+              rows={3}
+              className="border-border-strong text-foreground bg-background focus-visible:ring-apollo-maroon w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:outline-none focus-visible:ring-2"
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={addChecking || addText.trim().length === 0}
+                onClick={checkAddPmids}
+                className="bg-apollo-maroon inline-flex h-9 shrink-0 items-center rounded-md px-3.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {addChecking ? "Checking…" : "Check PMIDs"}
+              </button>
+              <p className="text-muted-foreground min-w-0 text-xs">
+                Up to {MAX_CLAIM_PMIDS} at a time. Each is checked against Scholars before anything
+                is written.
+              </p>
+            </div>
+
+            {addCheck ? (
+              <ul
+                className="text-muted-foreground mt-4 flex flex-col gap-1 text-xs"
+                data-slot="core-claim-pmid-check"
+              >
+                <li className="text-foreground">
+                  <span className="tabular-nums font-medium">{addCheck.wouldWrite}</span> ready to
+                  claim.
+                </li>
+                {addCheck.skipped > 0 ? (
+                  <li>
+                    <span className="tabular-nums">{addCheck.skipped}</span> already claimed for
+                    this core.
+                  </li>
+                ) : null}
+                {addCheck.notFound.length > 0 ? (
+                  <li>Not in Scholars, will be skipped: {addCheck.notFound.join(", ")}.</li>
+                ) : null}
+                {addCheck.invalid.length > 0 ? (
+                  <li>Not a PMID: {addCheck.invalid.join(", ")}.</li>
+                ) : null}
+              </ul>
+            ) : null}
+          </div>
+
+          <DialogFooter className="border-apollo-border bg-apollo-surface-2 border-t px-6 py-4">
+            {addResult ? (
+              <p className="text-muted-foreground mr-auto self-center text-xs" role="status">
+                {addResult}
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={() => {
                 setAddOpen(false);
-                setAddText("");
+                setAddTextTracked("");
                 setAddResult(null);
+                setAddCheck(null);
               }}
-              className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-background px-3 text-sm"
+              className="border-border-strong text-foreground hover:bg-apollo-surface inline-flex h-9 items-center rounded-md border bg-background px-3.5 text-sm"
             >
               Cancel
             </button>
-          </div>
-          {addResult ? (
-            <p className="text-muted-foreground mt-2 text-xs" role="status">
-              {addResult}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+            <button
+              type="button"
+              disabled={addPending || !addCheck || addCheck.wouldWrite === 0}
+              onClick={submitAddPmids}
+              className="bg-apollo-maroon inline-flex h-9 items-center rounded-md px-3.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {addPending ? "Claiming…" : "Claim publications"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {clientsOpen ? (
-        <CoreClientsPanel
-          coreId={core.id}
-          clients={clientRows}
-          onClientsChange={setClientRows}
-          onClose={() => setClientsOpen(false)}
-        />
-      ) : null}
+      <CoreClientsDialog
+        coreId={core.id}
+        open={clientsOpen}
+        clients={clientRows}
+        onClientsChange={setClientRows}
+        onClose={() => setClientsOpen(false)}
+      />
 
       {/* One bordered panel holding the tab strip, the facets, the controls and
           the status strip, so the active tab reads as connected to the body it
@@ -1219,6 +1427,7 @@ export function CoreClaimQueue({
                             <CandidateCard
                               row={row}
                               clientCwids={clientCwids}
+              paperCounts={paperCounts}
                               decided={decided.get(row.pmid)}
                               pending={pending.has(row.pmid)}
                               error={errors.get(row.pmid)}
@@ -1262,6 +1471,7 @@ export function CoreClaimQueue({
               pending={pending.has(row.pmid)}
               error={errors.get(row.pmid)}
               clientCwids={clientCwids}
+                              paperCounts={paperCounts}
               onRevoke={() => revokeConfirmed(row.pmid, row.claimed, row.title)}
               onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
             />
@@ -1535,6 +1745,7 @@ function ConfirmedRow({
   onRevoke,
   onUndo,
   clientCwids = new Set<string>(),
+  paperCounts = {},
 }: {
   row: CoreQueueRow;
   revoked: boolean;
@@ -1545,6 +1756,8 @@ function ConfirmedRow({
   /** The core's known-client CWIDs, so the evidence line reads the same here as
    *  it does on the review queue. */
   clientCwids?: ReadonlySet<string>;
+  /** Per-person confirmed-paper counts for this core (see `clientPaperCounts`). */
+  paperCounts?: Readonly<Record<string, CoreClientPaperCount>>;
 }) {
   if (revoked) {
     return (
@@ -1568,7 +1781,7 @@ function ConfirmedRow({
     );
   }
   const band = likelihoodBand(row.likelihood);
-  const tokens = evidenceTokens(row, clientCwids);
+  const tokens = evidenceTokens(row, clientCwids, paperCounts);
   const signalCount = buildSignals(row).length;
   return (
     <li className="text-muted-foreground flex items-start justify-between gap-2 text-sm">
@@ -1814,6 +2027,7 @@ const CARD_SHELL =
 function CandidateCard({
   row,
   clientCwids,
+  paperCounts,
   decided,
   pending,
   error,
@@ -1830,6 +2044,8 @@ function CandidateCard({
 }: {
   row: CoreQueueRow;
   clientCwids: ReadonlySet<string>;
+  /** Per-person confirmed-paper counts for this core (see `clientPaperCounts`). */
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
   decided: Decision | undefined;
   pending: boolean;
   error: string | undefined;
@@ -1925,7 +2141,7 @@ function CandidateCard({
   const likelihoodPct = Math.round(row.likelihood * 100);
   const band = likelihoodBand(row.likelihood);
   const signals = buildSignals(row);
-  const tokens = evidenceTokens(row, clientCwids);
+  const tokens = evidenceTokens(row, clientCwids, paperCounts);
   // The header's meta line, middot-separated: the abbreviated journal (the full
   // title is a paragraph for some journals), when PubMed indexed it, then the
   // PMID. Each part is dropped when its data is missing rather than rendered
@@ -2016,7 +2232,7 @@ function CandidateCard({
               )}
             </button>
           </div>
-          <Byline row={row} />
+          <Byline row={row} clientCwids={clientCwids} />
           {row.synopsis ? (
             <p className="bg-muted/60 border-apollo-border text-muted-foreground mt-2.5 rounded-md border px-3 py-2 text-[13px] leading-snug">
               {row.synopsis}
@@ -2247,6 +2463,70 @@ function CoauthorDetail({ row }: { row: CoreQueueRow }) {
   );
 }
 
+/** Initials for the hovercard avatar: first + last token, so "Samprit Banerjee"
+ *  reads "SB" and a single-token collective author reads one letter. Pure. */
+export function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1][0] ?? "") : "";
+  return (first + last).toUpperCase();
+}
+
+/**
+ * The byline hovercard: avatar initials, full name + CWID, department, and the
+ * one line that says WHY this name is marked — "Core staff" or "Known client of
+ * this core". That role line is the whole point of the card; without it a
+ * reviewer sees a highlighted name and has to guess which signal it belongs to.
+ *
+ * `HoverCard` (not `HoverTooltip`) because the content is a small record, not a
+ * sentence — a tooltip's single text line cannot carry four fields.
+ *
+ * TOUCH: Radix's HoverCardTrigger preventDefaults `touchstart`, which on iOS
+ * cancels the synthesized click — a wrapped name would highlight and then do
+ * nothing when tapped. The fix is #2588's, verbatim (see `matcha-tab.tsx`): the
+ * NAME ITSELF carries `onTouchEnd` — the one trigger event Radix leaves alone —
+ * and re-issues the click the browser was denied, so the anchor's own href and
+ * target stay the single source of truth. `composeEventHandlers` cannot opt out
+ * of Radix's preventDefault; there is no un-prevent.
+ */
+function PersonHoverCard({
+  scholar,
+  role,
+  children,
+}: {
+  scholar: QueueScholar;
+  role: "staff" | "client";
+  children: ReactNode;
+}) {
+  return (
+    <HoverCard>
+      <HoverCardTrigger asChild>{children}</HoverCardTrigger>
+      <HoverCardContent className="w-auto max-w-[19rem] p-4" data-slot="core-queue-person-card">
+        <div className="flex items-start gap-3">
+          <Avatar>
+            <AvatarFallback className="text-[11px] font-medium">
+              {initialsOf(scholar.name)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <p className="text-foreground text-sm font-semibold">
+              {scholar.name}{" "}
+              <span className="text-muted-foreground font-normal">({scholar.cwid})</span>
+            </p>
+            {scholar.dept ? (
+              <p className="text-muted-foreground mt-0.5 text-sm">{scholar.dept}</p>
+            ) : null}
+            <p className="text-foreground mt-2 text-sm">
+              {role === "staff" ? "Core staff" : "Known client of this core"}
+            </p>
+          </div>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
 /**
  * Author byline with the core-staff author(s) highlighted as a tinted, linked
  * chip + tooltip — the connection back to the co-author evidence row below.
@@ -2255,7 +2535,15 @@ function CoauthorDetail({ row }: { row: CoreQueueRow }) {
  * overlaid). Unresolved core-staff CWIDs aren't in the byline, so they show only
  * in the evidence row.
  */
-function Byline({ row }: { row: CoreQueueRow }) {
+function Byline({
+  row,
+  clientCwids = new Set<string>(),
+}: {
+  row: CoreQueueRow;
+  /** The core's known-client CWIDs (lowercased) — a client gets the same
+   *  hovercard treatment as core staff, reading "Known client of this core". */
+  clientCwids?: ReadonlySet<string>;
+}) {
   if (!row.authorsString) return null;
   // `authors_string` marks WCM authors with `((…))`. STRIP BEFORE ANYTHING ELSE.
   // Two bugs rode on not doing it, measured on core 14's live queue (1,453 rows):
@@ -2268,7 +2556,15 @@ function Byline({ row }: { row: CoreQueueRow }) {
   // The truncated preview silently drops authors on 68.4% of those rows (worst
   // case 413). Same `+ N more` suffix #2581 put on the topic feed.
   const dropped = droppedAuthorCount(row.authorsString, row.fullAuthorsString);
-  const more = dropped > 0 ? ` + ${dropped} more` : "";
+  // Rendered as its own node, NOT appended to the author text: ", +2 more" is a
+  // count of names withheld, and a reader scanning a comma-separated byline
+  // reads a bare trailing " + 2 more" as one more author.
+  const more =
+    dropped > 0 ? (
+      <span className="text-muted-foreground/80 whitespace-nowrap">
+        , +{dropped} more
+      </span>
+    ) : null;
   // Surname -> the scholar we can name in full. Core staff FIRST so they win a
   // collision: their chip is the link back to the co-author evidence row, and a
   // plain WCM link there would break that connection.
@@ -2318,37 +2614,73 @@ function Byline({ row }: { row: CoreQueueRow }) {
         // Full display name only when we are sure WHICH person this is.
         const label = safeToRename && hit ? hit.scholar.name : tok;
         if (!matches || !hit) return <span key={i}>{i > 0 ? ", " : ""}{tok}</span>;
-        const inner = hit.isStaff ? (
-          <HoverTooltip
-            text={`${hit.scholar.name} — core staff${hit.scholar.dept ? `, ${hit.scholar.dept}` : ""}`}
-          >
-            {hit.scholar.slug ? (
-              <a
-                href={`/${hit.scholar.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
-              >
-                {label}
-              </a>
-            ) : (
-              <span className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium">
-                {label}
-              </span>
-            )}
-          </HoverTooltip>
-        ) : hit.scholar.slug ? (
+        // Staff wins over client when a person is both: the tinted chip is the
+        // link back to the co-author evidence row, and demoting it to a plain
+        // client link would break that connection (same reason staff win the
+        // surname collision above).
+        //
+        // `safeToRename` gates the card, not just the name. On an ambiguous
+        // surname we do not know WHICH person this token is, and the card is a
+        // far stronger assertion than the rewrite it was computed to prevent —
+        // it states a full name, a CWID, a department and a role. Marking the
+        // wrong colleague as "Known client of this core" is exactly the claim
+        // this guard exists to stop, so an ambiguous token gets no card at all.
+        const role: "staff" | "client" | null = !safeToRename
+          ? null
+          : hit.isStaff
+            ? "staff"
+            : clientCwids.has(hit.scholar.cwid.toLowerCase())
+              ? "client"
+              : null;
+        // A name the core has a REASON to mark gets the record card; a plain WCM
+        // co-author is still a link, but a card there would say nothing the
+        // byline does not already show.
+        const nameNode = hit.scholar.slug ? (
           <a
             href={`/${hit.scholar.slug}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[var(--color-accent-slate)] hover:underline"
+            // See PersonHoverCard: on iOS the hover trigger eats this anchor's
+            // own click. Harmless on a name that carries no card.
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              e.currentTarget.click();
+            }}
+            className={
+              role === "staff"
+                ? "bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium hover:underline"
+                : role === "client"
+                  ? // A client is marked in the byline itself, not only by a card
+                    // a touch user can never open: without this it renders
+                    // identically to any other WCM co-author and the marking is
+                    // invisible exactly where hover does not exist.
+                    "text-[var(--color-accent-slate)] underline decoration-dotted underline-offset-2"
+                  : "text-[var(--color-accent-slate)] hover:underline"
+            }
           >
             {label}
           </a>
         ) : (
-          <span className="text-foreground">{label}</span>
+          <span
+            className={
+              role === "staff"
+                ? "bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
+                : role === "client"
+                  ? "text-foreground underline decoration-dotted underline-offset-2"
+                  : "text-foreground"
+            }
+          >
+            {label}
+          </span>
         );
+        const inner =
+          role === null ? (
+            nameNode
+          ) : (
+            <PersonHoverCard scholar={hit.scholar} role={role}>
+              {nameNode}
+            </PersonHoverCard>
+          );
         return (
           <span key={i}>
             {i > 0 ? ", " : ""}

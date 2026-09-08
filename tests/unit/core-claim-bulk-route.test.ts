@@ -283,3 +283,49 @@ describe("POST /api/edit/core-claim/bulk", () => {
     expect(await res.json()).toMatchObject({ error: "write_failed" });
   });
 });
+
+describe("POST /api/edit/core-claim/bulk — dryRun", () => {
+  it("runs every check and then writes NOTHING", async () => {
+    const res = await call({ dryRun: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      dryRun: true,
+      written: 0,
+      wouldWrite: 3,
+      skipped: 0,
+      notFound: [],
+      writebackOk: 0,
+    });
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockClaimUpsert).not.toHaveBeenCalled();
+    expect(mockAppendAuditRow).not.toHaveBeenCalled();
+    expect(mockWriteBack).not.toHaveBeenCalled();
+  });
+
+  it("reports the same notFound/skipped split the real call would act on", async () => {
+    // "3" was never ingested; "1" is already claimed.
+    mockPublicationFindMany.mockResolvedValue([{ pmid: "1" }, { pmid: "2" }]);
+    mockClaimFindMany.mockResolvedValue([{ pmid: "1", coreId: "2", status: "claimed" }]);
+    const res = await call({ dryRun: true });
+    expect(await res.json()).toMatchObject({ wouldWrite: 1, skipped: 1, notFound: ["3"] });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("still enforces authorization — a dry run is not a way around the gate", async () => {
+    const res = await call({ dryRun: true }, { isSuperuser: false });
+    expect(res.status).toBe(403);
+  });
+
+  it("still rejects a malformed batch", async () => {
+    expect((await call({ dryRun: true, pmids: ["abc"] })).status).toBe(400);
+    expect((await call({ dryRun: true, pmids: [] })).status).toBe(400);
+  });
+
+  it("a NON-true truthy dryRun writes for real — a stray value must not silently no-op", async () => {
+    const res = await call({ dryRun: "yes" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ written: 3 });
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+

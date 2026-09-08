@@ -28,7 +28,12 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { CoreClaimQueue } from "@/components/edit/core-claim-queue";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { loadCoreClients, type CoreClientLookup } from "@/lib/api/core-clients";
+import {
+  loadCoreClientPaperCounts,
+  loadCoreClients,
+  type CoreClientLookup,
+  type CoreClientPaperCountLookup,
+} from "@/lib/api/core-clients";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -83,6 +88,14 @@ export default async function EditCoreReviewPage({
   if (!queue) notFound();
 
   const clients = await loadCoreClients(coreId, db.read as unknown as CoreClientLookup);
+  // What this core already holds from each known client, for the queue's evidence
+  // line ("Client co-author Samprit Banerjee, 18 papers, 11 recent"). Scoped to
+  // the roster's own CWIDs, so it stays a small read and a small RSC payload.
+  const paperCounts = await loadCoreClientPaperCounts(
+    queue.confirmed,
+    clients.flatMap((c) => (c.cwid ? [c.cwid] : [])),
+    db.read as unknown as CoreClientPaperCountLookup,
+  );
 
   return (
     <div className="min-h-screen bg-apollo-page" data-slot="edit-core-review-page">
@@ -130,6 +143,7 @@ export default async function EditCoreReviewPage({
           confirmed={queue.confirmed}
           rejected={queue.rejected}
           clients={clients}
+          paperCounts={paperCounts}
         />
       </main>
     </div>

@@ -7,7 +7,7 @@
  * PMIDs. Nothing in this file is a real person or a real record.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
@@ -23,17 +23,20 @@ import {
   evidenceGroupLabel,
   evidenceTokens,
   formatAddedToPubMed,
+  initialsOf,
   likelihoodBand,
   llmVerdict,
   matchesFilters,
   matchesQuery,
   parsePmidBlock,
+  possessive,
   searchBlob,
   CSV_HEADERS,
   csvRow,
 } from "@/components/edit/core-claim-queue";
 import type { FilterKey } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
+import type { CoreClientRow } from "@/lib/api/core-clients";
 
 function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
   return {
@@ -150,7 +153,8 @@ describe("CoreClaimQueue", () => {
     expect(strip.textContent).toContain("Acknowledged as");
     expect(strip.textContent).toContain("“CBIC”");
     expect(strip.textContent).toContain("Alex Testerson");
-    expect(strip.textContent).toContain("42% of an author's own work");
+    // ONE wcmAuthor on this fixture, so the repeat-user prior is named.
+    expect(strip.textContent).toContain("42% of Casey Sample's own work");
     expect(strip.textContent).toContain("possibly core work"); // llmScore 7
     // the signal rows themselves stay closed until asked for
     expect(screen.queryByLabelText("evidence")).toBeNull();
@@ -593,9 +597,12 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
         clients={[
           {
+            id: "client-ccc1003",
             cwid: "ccc1003",
             name: "Casey Sample",
             slug: "casey-sample",
+            affiliation: null,
+            addedByName: null,
             addedAt: new Date("2026-01-01"),
             addedBy: "aaa1001",
           },
@@ -1253,19 +1260,40 @@ describe("CoreClaimQueue", () => {
   });
 
   it("claims a pasted block of PMIDs via the bulk endpoint and refreshes on success", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ written: 2, skipped: 0, notFound: [] }),
-    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ dryRun: true, wouldWrite: 2, skipped: 0, notFound: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ written: 2, skipped: 0, notFound: [] }),
+      });
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
-    fireEvent.change(screen.getByLabelText("Claim known PMIDs directly"), {
+    fireEvent.change(screen.getByLabelText("Paste PMIDs"), {
       target: { value: "111, 222\n222" }, // dupe collapses client-side
     });
-    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    // Step 1: the dry run. Nothing is written by it.
+    fireEvent.click(screen.getByRole("button", { name: "Check PMIDs" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body)).toEqual({
+      coreId: "2",
+      pmids: ["111", "222"],
+      status: "claimed",
+      dryRun: true,
+    });
+    // Step 2: the real claim, which the check has now enabled.
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Claim publications" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Claim publications" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const [url, init] = fetchMock.mock.calls[1] as [string, { body: string }];
     expect(url).toBe("/api/edit/core-claim/bulk");
     expect(JSON.parse(init.body)).toEqual({ coreId: "2", pmids: ["111", "222"], status: "claimed" });
     // "Claimed 2." lands in both the result line and the aria-live announcer —
@@ -1275,17 +1303,31 @@ describe("CoreClaimQueue", () => {
   });
 
   it("reports skipped/not-found pmids and does NOT refresh when nothing new was written", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ written: 0, skipped: 1, notFound: ["999"] }),
-    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        // wouldWrite 1 so the footer button enables; the real call then finds
+        // the row already claimed and writes nothing.
+        json: async () => ({ dryRun: true, wouldWrite: 1, skipped: 1, notFound: ["999"] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ written: 0, skipped: 1, notFound: ["999"] }),
+      });
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
-    fireEvent.change(screen.getByLabelText("Claim known PMIDs directly"), {
+    fireEvent.change(screen.getByLabelText("Paste PMIDs"), {
       target: { value: "1 999" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check PMIDs" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Claim publications" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Claim publications" }));
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toMatch(
         /Already claimed: 1\..*Not found in SPS: 999\./,
@@ -1298,12 +1340,16 @@ describe("CoreClaimQueue", () => {
     vi.stubGlobal("fetch", vi.fn());
     render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
-    fireEvent.change(screen.getByLabelText("Claim known PMIDs directly"), {
+    fireEvent.change(screen.getByLabelText("Paste PMIDs"), {
       target: { value: "abc, def" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check PMIDs" }));
     expect(screen.getByText(/No valid PMIDs found \(ignored: abc, def\)\./)).toBeTruthy();
     expect(fetch).not.toHaveBeenCalled();
+    // And with nothing checked, the commit button never enables.
+    expect(
+      (screen.getByRole("button", { name: "Claim publications" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("revokes a human-claimed Confirmed row with 'revoked' and offers undo", async () => {
@@ -1752,7 +1798,7 @@ describe("evidenceTokens", () => {
     expect(evidenceTokens(row())).toEqual([
       { label: "Acknowledged as", value: "“CBIC”" },
       { label: "Staff co-author", value: "Alex Testerson" },
-      { label: "Repeat user", value: "42% of an author's own work" },
+      { label: "Repeat user", value: "42% of Casey Sample's own work" },
       { label: "LLM on title and abstract", value: "possibly core work" },
     ]);
   });
@@ -1765,6 +1811,45 @@ describe("evidenceTokens", () => {
     expect(evidenceTokens(row(), new Set(["nobody0001"]))).not.toContainEqual(
       expect.objectContaining({ label: "Client co-author" }),
     );
+  });
+
+  it("does NOT name the repeat-user prior when the byline has more than one WCM author", () => {
+    // The engine publishes one scalar for the row and never says which author it
+    // is about; with two candidates a name would be a coin flip printed as fact.
+    const two = row({
+      wcmAuthors: [
+        { cwid: "ccc1003", name: "Casey Sample", slug: "casey-sample", dept: "Genomics" },
+        { cwid: "ddd1004", name: "Dana Second", slug: "dana-second", dept: "Genomics" },
+      ],
+    });
+    expect(evidenceTokens(two)).toContainEqual({
+      label: "Repeat user",
+      value: "42% of an author's own work",
+    });
+  });
+
+  it("carries the paper counts this core already holds from a named client", () => {
+    const counts = { ccc1003: { papers: 18, recent: 11 } };
+    expect(evidenceTokens(row(), new Set(["ccc1003"]), counts)).toContainEqual({
+      label: "Client co-author",
+      value: "Casey Sample, 18 papers, 11 recent",
+    });
+  });
+
+  it("drops a zero count rather than printing '0 papers'", () => {
+    const counts = { ccc1003: { papers: 0, recent: 0 } };
+    expect(evidenceTokens(row(), new Set(["ccc1003"]), counts)).toContainEqual({
+      label: "Client co-author",
+      value: "Casey Sample",
+    });
+  });
+
+  it("omits the recent clause when nothing recent, and is singular-safe at one paper", () => {
+    const counts = { ccc1003: { papers: 1, recent: 0 } };
+    expect(evidenceTokens(row(), new Set(["ccc1003"]), counts)).toContainEqual({
+      label: "Client co-author",
+      value: "Casey Sample, 1 paper",
+    });
   });
 
   it("returns nothing when no signal fired", () => {
@@ -2263,7 +2348,7 @@ describe("CoreClaimQueue — byline markers and the dropped-author suffix", () =
       coauthorScholars: [],
       coauthors: [],
     });
-    expect(text).toContain("+ 2 more");
+    expect(text).toContain(", +2 more");
   });
 
   it("adds no suffix when the preview is the whole byline", () => {
@@ -2338,9 +2423,12 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
         confirmed={[]}
         clients={[
           {
+            id: "client-aaa1001",
             cwid: "aaa1001",
             name: "Alex Testerson",
             slug: "alex-testerson",
+            affiliation: null,
+            addedByName: null,
             addedAt: new Date("2026-01-01"),
             addedBy: "rev01",
           },
@@ -2446,38 +2534,39 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(screen.getByRole("button", { name: /Known clients/ }).textContent).toContain("0");
   });
 
-  it("opens the panel body as a sibling of the toolbar (not nested inside it) on click", () => {
+  it("opens the roster as a MODAL, portalled clear of the toolbar, on click", () => {
     render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
-    // absent before the click
-    expect(screen.queryByLabelText("CWIDs")).toBeNull();
+    // absent before the click — a closed Dialog renders no content at all
+    expect(screen.queryByLabelText("Paste CWIDs")).toBeNull();
 
     const toggle = screen.getByRole("button", { name: /Known clients/ });
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(toggle);
 
-    // present after, and NOT a descendant of the toolbar row the button lives in
-    const textarea = screen.getByLabelText("CWIDs");
+    const textarea = screen.getByLabelText("Paste CWIDs");
     expect(textarea).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("dialog")).toBeTruthy();
 
-    // The OUTER toolbar row is the justify-between container holding the staff
-    // chip and the three header buttons — not just the inner "flex flex-wrap
-    // items-center gap-2" button group. `toggle.closest("div")` alone would
-    // only find that inner group and miss a regression that nests the panel
-    // inside the outer row.
+    // The modal is portalled, so it can never be nested inside the toolbar row
+    // — the property the old inline panel had to be positioned to achieve.
     const outerRow = toggle.closest('[data-slot="core-queue-toolbar"]');
     expect(outerRow).toBeTruthy();
-    expect(outerRow?.className).toContain("justify-between");
     expect(outerRow?.contains(textarea)).toBe(false);
+    // ...and clear of the queue panel too, so opening it cannot push the list.
+    const queuePanel = document.querySelector('[data-slot="core-queue-panel"]');
+    expect(queuePanel?.contains(textarea)).toBe(false);
+  });
 
-    // And the panel body is a later sibling in the same parent as the
-    // Add PMIDs block sits in — not merely "somewhere outside" the toolbar.
-    const addPmids = screen.getByRole("button", { name: /Add PMIDs/ });
-    const commonParent = outerRow?.parentElement;
-    expect(commonParent?.contains(addPmids)).toBe(true);
-    expect(commonParent?.contains(textarea)).toBe(true);
-    const position = outerRow?.compareDocumentPosition(textarea) ?? 0;
-    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  it("closing the modal drops what was typed, so the next open starts clean", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    const toggle = screen.getByRole("button", { name: /Known clients/ });
+    fireEvent.click(toggle);
+    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Paste CWIDs")).toBeNull();
+    fireEvent.click(toggle);
+    expect((screen.getByLabelText("Paste CWIDs") as HTMLTextAreaElement).value).toBe("");
   });
 });
 
@@ -2689,5 +2778,231 @@ describe("formatAddedToPubMed", () => {
       if (prev === undefined) delete process.env.TZ;
       else process.env.TZ = prev;
     }
+  });
+});
+
+describe("possessive", () => {
+  it("uses a bare apostrophe after a trailing s, and 's otherwise", () => {
+    expect(possessive("Testerson")).toBe("Testerson's");
+    expect(possessive("Sanders")).toBe("Sanders'");
+  });
+});
+
+describe("initialsOf", () => {
+  it("takes first + last initial, and one letter for a single-token name", () => {
+    expect(initialsOf("Casey Sample")).toBe("CS");
+    expect(initialsOf("Alex Q Testerson")).toBe("AT");
+    expect(initialsOf("Cher")).toBe("C");
+    expect(initialsOf("   ")).toBe("?");
+  });
+});
+
+describe("CoreClaimQueue — byline person cards", () => {
+  const STAFF = { cwid: "aaa1001", name: "Alex Testerson", slug: "alex-testerson", dept: "Genomics" };
+  const CLIENT = { cwid: "ccc1003", name: "Casey Sample", slug: "casey-sample", dept: "Population Health Sciences" };
+
+  function renderByline(over: Partial<CoreQueueRow> = {}, clients: CoreClientRow[] = []) {
+    return render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ coauthorScholars: [], coauthors: [], wcmAuthors: [], ...over })]}
+        confirmed={[]}
+        clients={clients}
+      />,
+    );
+  }
+
+  function clientRow(cwid: string): CoreClientRow {
+    return {
+      id: `c-${cwid}`,
+      cwid,
+      name: null,
+      slug: null,
+      affiliation: null,
+      addedByName: null,
+      addedAt: new Date("2026-01-01"),
+      addedBy: "rev01",
+    };
+  }
+
+  it("marks a CORE STAFF byline name and names the role in its card", async () => {
+    renderByline({
+      authorsString: "Testerson A, Other B",
+      fullAuthorsString: "Testerson A, Other B",
+      coauthorScholars: [STAFF],
+      coauthors: [STAFF.cwid],
+    });
+    const name = screen.getByRole("link", { name: "Alex Testerson" });
+    fireEvent.pointerEnter(name);
+    // The role line is the whole point of the card — without it a reviewer sees
+    // a highlighted name and has to guess which signal it belongs to.
+    expect(await screen.findByText("Core staff")).toBeTruthy();
+    expect(screen.getByText("Genomics")).toBeTruthy();
+    expect(screen.getByText("(aaa1001)")).toBeTruthy();
+    expect(screen.getByText("AT")).toBeTruthy(); // avatar initials
+  });
+
+  it("marks a KNOWN CLIENT byline name with the client role, not the staff role", async () => {
+    renderByline(
+      {
+        authorsString: "Sample C, Other B",
+        fullAuthorsString: "Sample C, Other B",
+        wcmAuthors: [CLIENT],
+      },
+      [clientRow("ccc1003")],
+    );
+    const name = screen.getByRole("link", { name: "Casey Sample" });
+    fireEvent.pointerEnter(name);
+    expect(await screen.findByText("Known client of this core")).toBeTruthy();
+    expect(screen.queryByText("Core staff")).toBeNull();
+  });
+
+  it("gives a client a VISIBLE marking, not only a card a touch user cannot open", () => {
+    renderByline(
+      { authorsString: "Sample C", fullAuthorsString: "Sample C", wcmAuthors: [CLIENT] },
+      [clientRow("ccc1003")],
+    );
+    const marked = screen.getByRole("link", { name: "Casey Sample" });
+    expect(marked.className).toContain("underline");
+    expect(marked.className).toContain("decoration-dotted");
+  });
+
+  it("a plain WCM co-author gets NO card — it would repeat what the byline shows", async () => {
+    renderByline({
+      authorsString: "Sample C",
+      fullAuthorsString: "Sample C",
+      wcmAuthors: [CLIENT], // on the byline, but NOT on the clients roster
+    });
+    const name = screen.getByRole("link", { name: "Casey Sample" });
+    fireEvent.pointerEnter(name);
+    await Promise.resolve();
+    expect(screen.queryByText("Known client of this core")).toBeNull();
+    expect(screen.queryByText("Core staff")).toBeNull();
+    expect(name.className).not.toContain("decoration-dotted");
+  });
+
+  it("staff WINS over client when a person is both — the chip links back to the evidence row", async () => {
+    renderByline(
+      {
+        authorsString: "Testerson A",
+        fullAuthorsString: "Testerson A",
+        coauthorScholars: [STAFF],
+        coauthors: [STAFF.cwid],
+        wcmAuthors: [STAFF],
+      },
+      [clientRow("aaa1001")],
+    );
+    fireEvent.pointerEnter(screen.getByRole("link", { name: "Alex Testerson" }));
+    expect(await screen.findByText("Core staff")).toBeTruthy();
+    expect(screen.queryByText("Known client of this core")).toBeNull();
+  });
+
+  it("attaches NO card to an AMBIGUOUS surname — it must not assert which colleague this is", async () => {
+    // Two scholars share "Kim" AND the first initial, so the byline token cannot
+    // be resolved to one person. Asserting a name, CWID, department and role on
+    // a coin flip is exactly what the ambiguity guard exists to prevent.
+    const kimA = { cwid: "kkk1001", name: "Kelly Kimball", slug: "kelly-kimball", dept: "Genomics" };
+    const kimB = { cwid: "kkk1002", name: "Kim Kimball", slug: "kim-kimball", dept: "Pathology" };
+    renderByline({
+      authorsString: "Kimball K, Other B",
+      fullAuthorsString: "Kimball K, Other B",
+      coauthorScholars: [kimA],
+      coauthors: [kimA.cwid],
+      wcmAuthors: [kimA, kimB],
+    });
+    // Scoped to the BYLINE: "Kelly Kimball" also appears in the evidence strip below
+    // ("Staff co-author Kelly Kimball"), which is correct there and would make a
+    // document-wide assertion pass for the wrong reason.
+    const byline = document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement;
+    // The raw PubMed token survives — no rewrite...
+    expect(byline.textContent).toContain("Kimball K");
+    expect(within(byline).queryByText("Kelly Kimball")).toBeNull();
+    // ...and no card: the trigger is a plain span, with nothing to hover.
+    expect(byline.querySelector("[data-slot='hover-card-trigger']")).toBeNull();
+    expect(screen.queryByText("Core staff")).toBeNull();
+  });
+
+  it("renders ', +N more' as its own node in BOTH byline branches", () => {
+    // no known names -> the early-return branch
+    const { unmount } = renderByline({
+      authorsString: "Alpha A, Beta B",
+      fullAuthorsString: "Alpha A, Beta B, Gamma C, Delta D",
+    });
+    expect(document.querySelector('[data-slot="core-queue-byline"]')!.textContent).toContain(", +2 more");
+    unmount();
+    // a known name -> the mapped branch
+    renderByline({
+      authorsString: "Testerson A, Beta B",
+      fullAuthorsString: "Testerson A, Beta B, Gamma C, Delta D",
+      coauthorScholars: [STAFF],
+      coauthors: [STAFF.cwid],
+    });
+    expect(document.querySelector('[data-slot="core-queue-byline"]')!.textContent).toContain(", +2 more");
+  });
+});
+
+describe("CoreClaimQueue — stale 'Check PMIDs' response", () => {
+  it("a check that lands after the paste changed must NOT arm Claim for the new text", async () => {
+    // Without the guard the late response re-armed the footer button for a paste
+    // that was never checked, and the claim then posted the NEW text.
+    let resolveCheck: (v: unknown) => void = () => {};
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolveCheck = r;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
+    const paste = screen.getByLabelText("Paste PMIDs");
+    fireEvent.change(paste, { target: { value: "111" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check PMIDs" }));
+    // The reviewer edits while the check is in flight...
+    fireEvent.change(paste, { target: { value: "111 222" } });
+    // ...and only now does the old check land.
+    resolveCheck({
+      ok: true,
+      json: async () => ({ dryRun: true, wouldWrite: 1, skipped: 0, notFound: [] }),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const claim = screen.getByRole("button", { name: "Claim publications" }) as HTMLButtonElement;
+    expect(claim.disabled).toBe(true);
+  });
+
+  it("also drops a check whose BODY parse finished after the paste changed", async () => {
+    // The second staleness check earns its keep in this window only: the fetch
+    // resolved while the text was still current, and the edit landed during
+    // res.json(). One check after the first await cannot see this.
+    let resolveJson: (v: unknown) => void = () => {};
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        new Promise((r) => {
+          resolveJson = r;
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
+    const paste = screen.getByLabelText("Paste PMIDs");
+    fireEvent.change(paste, { target: { value: "111" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check PMIDs" }));
+    // Let the fetch settle while the text is still "111"...
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // ...then edit, and only now let the body parse finish.
+    fireEvent.change(paste, { target: { value: "111 222" } });
+    resolveJson({ dryRun: true, wouldWrite: 1, skipped: 0, notFound: [] });
+    // Flush the pending microtasks/state before asserting. `waitFor` is wrong
+    // here: it passes on its FIRST poll, which happens before the late response
+    // could have applied — so it would go green even with the guard removed.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(
+      (screen.getByRole("button", { name: "Claim publications" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    // And nothing describing the abandoned check is on screen.
+    expect(document.querySelector('[data-slot="core-claim-pmid-check"]')).toBeNull();
   });
 });

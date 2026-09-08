@@ -2,7 +2,15 @@
  * POST /api/edit/core-claim/bulk — a core owner (or Superuser) claims or rejects
  * MANY (publication, core) candidates in one request.
  *
- * Body: `{ coreId, pmids: string[], status: "claimed" | "rejected" }`.
+ * Body: `{ coreId, pmids: string[], status: "claimed" | "rejected", dryRun?: true }`.
+ *
+ * `dryRun: true` runs every check — shape, core existence, authorization, the
+ * `publication` existence probe and the already-at-this-status comparison — and
+ * then returns WITHOUT opening the write transaction. It is what the queue's
+ * "Check PMIDs" step calls so the modal can show a reviewer exactly what a
+ * claim would do before they commit it. It is a real check, not a client-side
+ * guess: the same route, the same authorization, the same reads. `written` is
+ * reported as `0` and `wouldWrite` carries the count the real call would write.
  *
  * The scale companion to `POST /api/edit/core-claim`: the single route is fanned
  * out client-side one request per PMID, which is fine for a typical hand-picked
@@ -57,7 +65,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { session, realCwid, impersonatedCwid, requestId, body } = req.ctx;
 
   // --- body shape ---
-  const { coreId, pmids, status } = body;
+  const { coreId, pmids, status, dryRun } = body;
+  // Strictly `true` — a truthy-but-not-true value (a stray string) must not
+  // silently turn a real claim into a no-op the caller thinks succeeded.
+  const isDryRun = dryRun === true;
   if (typeof coreId !== "string" || coreId.length === 0 || coreId.length > 32) {
     return editError(400, "invalid_core_id", "coreId");
   }
@@ -111,6 +122,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const known = targetPmids.filter((p) => knownPmids.has(p));
   const toWrite = known.filter((p) => active.get(p) !== status);
   const skipped = known.length - toWrite.length;
+
+  // Every check above has run; a dry run stops here, before the transaction.
+  if (isDryRun) {
+    return editOk({
+      coreId,
+      status,
+      dryRun: true,
+      written: 0,
+      wouldWrite: toWrite.length,
+      skipped,
+      notFound,
+      writebackOk: 0,
+    });
+  }
 
   if (toWrite.length > 0) {
     const now = new Date();

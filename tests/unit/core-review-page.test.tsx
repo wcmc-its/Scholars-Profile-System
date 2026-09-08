@@ -21,6 +21,7 @@ const {
   mockForbidden,
   mockQueueComponent,
   mockLoadClients,
+  mockLoadPaperCounts,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -39,12 +40,16 @@ const {
   // core's active client list alongside the queue; stubbed out here since
   // this file is purely about the authorization gates above it.
   mockLoadClients: vi.fn(),
+  mockLoadPaperCounts: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/api/core-queue", () => ({ loadCoreReviewQueue: mockLoadQueue }));
-vi.mock("@/lib/api/core-clients", () => ({ loadCoreClients: mockLoadClients }));
+vi.mock("@/lib/api/core-clients", () => ({
+  loadCoreClients: mockLoadClients,
+  loadCoreClientPaperCounts: mockLoadPaperCounts,
+}));
 vi.mock("@/lib/auth/authz-events", () => ({ logAuthzDenied: mockLogAuthzDenied }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -97,6 +102,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLoadQueue.mockResolvedValue(QUEUE);
   mockLoadClients.mockResolvedValue([]);
+  mockLoadPaperCounts.mockResolvedValue({});
 });
 
 describe("/edit/core/[coreId]/review — authorization", () => {
@@ -149,6 +155,28 @@ describe("/edit/core/[coreId]/review — authorization", () => {
       confirmed: QUEUE.confirmed,
       rejected: QUEUE.rejected,
     });
+  });
+
+  it("loads client paper counts over the CONFIRMED list and this core's client CWIDs, and passes them down", async () => {
+    // The wiring, not the fold: `paperCounts` cannot be derived in the component
+    // (row.wcmAuthors is capped at 12), so if the page stops passing it the
+    // evidence line silently loses "18 papers, 11 recent" with nothing failing.
+    mockGetEditSession.mockResolvedValue({ cwid: "own001", isSuperuser: false });
+    mockUnitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    mockLoadClients.mockResolvedValue([
+      { id: "r1", cwid: "sab2028", name: "S B", slug: null, affiliation: null, addedByName: null, addedAt: new Date(), addedBy: "rev01" },
+      // A name-only client has no cwid and must not reach the counts query.
+      { id: "r2", cwid: null, name: "Ada", slug: null, affiliation: null, addedByName: null, addedAt: new Date(), addedBy: "rev01" },
+    ]);
+    mockLoadPaperCounts.mockResolvedValue({ sab2028: { papers: 18, recent: 11 } });
+    const result = asEl(await EditCoreReviewPage({ params: params("2") }));
+    expect(mockLoadPaperCounts).toHaveBeenCalledWith(
+      QUEUE.confirmed,
+      ["sab2028"],
+      expect.anything(),
+    );
+    const queueEl = findByType(result, mockQueueComponent);
+    expect(queueEl!.props.paperCounts).toEqual({ sab2028: { papers: 18, recent: 11 } });
   });
 
   it("queue absent (core row gone between the authz check and the load) → 404", async () => {
