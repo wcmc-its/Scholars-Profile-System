@@ -44,6 +44,7 @@ import { useRouter } from "next/navigation";
 
 import type { CoreClientRow } from "@/lib/api/core-clients";
 import { parseCwidBlock } from "@/lib/cores/cwid-block";
+import { stripUnitDisambiguation } from "@/lib/name-sort";
 import {
   Dialog,
   DialogContent,
@@ -85,7 +86,7 @@ interface CoreClientsDialogProps {
 function addedByLabel(c: CoreClientRow): string | null {
   if (!c.addedBy) return null;
   return c.addedByName
-    ? `added by ${c.addedByName} (${c.addedBy})`
+    ? `added by ${stripUnitDisambiguation(c.addedByName)} (${c.addedBy})`
     : `added by ${c.addedBy}`;
 }
 
@@ -375,6 +376,10 @@ export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClient
               {added.map((a) => (
                 <li key={a.cwid} className="flex items-baseline justify-between gap-3 text-sm">
                   <span className="min-w-0">
+                    {/* ponytail: RAW, same rule as the roster's name-only branch above —
+                        this is the ED `displayName` straight through `projectDirectoryPerson`,
+                        which does not apply `stripUnitQualifier`. Strip it with the ED rule if
+                        the " - <Unit>" suffix ever becomes the common case here. */}
                     <span className="text-foreground font-medium">{a.name ?? a.cwid}</span>{" "}
                     <span className="text-muted-foreground font-mono text-xs">{a.cwid}</span>
                     {a.affiliation ? (
@@ -454,9 +459,23 @@ export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClient
                             rel="noopener noreferrer"
                             className="text-foreground font-semibold hover:underline"
                           >
-                            {c.name}
+                            {stripUnitDisambiguation(c.name)}
                           </a>
                         ) : (
+                          /* ponytail: RAW on purpose — no strip here. A null `slug` means no
+                             Scholar resolved, so `c.name` is `row.displayName`: operator-typed
+                             free text (`lib/api/core-clients.ts`, `scholar?.preferredName ??
+                             row.displayName`). The route deliberately allows two same-name
+                             name-only rows, deduping on name PLUS affiliation, so an owner who
+                             disambiguates in the NAME — "Ada Lovelace (Ithaca)" vs "Ada
+                             Lovelace (Cornell Tech)", affiliation blank — gets two rows that
+                             `stripUnitDisambiguation` would render identically, with a Remove
+                             button behind each. It also cuts unconditionally at " - ", which
+                             renames the records whose surname follows the dash — the measured
+                             reason `lib/sources/ldap.ts` refuses to reuse it on a displayed
+                             name. Curated suffixes only ever arrive via `preferredName`, i.e.
+                             the linked branch above, so nothing is missed by leaving this one
+                             alone. */
                           <span className="text-foreground font-semibold">{c.name}</span>
                         )
                       ) : (

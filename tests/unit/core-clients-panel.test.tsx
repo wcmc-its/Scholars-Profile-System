@@ -111,6 +111,50 @@ describe("CoreClientsDialog", () => {
     expect(screen.getByText(/name only — no byline match/)).toBeTruthy();
   });
 
+  it("strips the curated unit suffix from a linked roster name and from 'added by'", () => {
+    open({
+      clients: [
+        client({
+          name: "Doug Ballon - Radiology",
+          addedByName: "Doug Ballon - Radiology",
+        }),
+      ],
+    });
+    // Both names come from `scholar.preferredName`, which is where the curated
+    // tables' " - <Unit>" disambiguator lives. Same treatment the queue card
+    // already gives it (tests/unit/core-claim-queue.test.tsx).
+    expect(screen.getByRole("link", { name: "Doug Ballon" })).toBeTruthy();
+    expect(rosterText()).not.toContain("Ballon - Radiology");
+    expect(screen.getByText(/added by Doug Ballon \(djb2001\)/)).toBeTruthy();
+  });
+
+  it("leaves an operator-typed name-only row VERBATIM, so two near-duplicates stay tellable apart", () => {
+    // The route deliberately permits both rows (it dedupes on name PLUS
+    // affiliation), and each carries its own Remove button. Stripping here would
+    // render them identically and put the owner on a 50/50 guess — the exact
+    // defect the write path was hardened against. A name-only row has no Scholar
+    // behind it, so its name is owner free text, not a curated suffix.
+    open({
+      clients: [
+        client({ id: "a", cwid: null, slug: null, affiliation: null, name: "Ada Lovelace (Ithaca)" }),
+        client({
+          id: "b",
+          cwid: null,
+          slug: null,
+          affiliation: null,
+          name: "Ada Lovelace (Cornell Tech)",
+        }),
+      ],
+    });
+    expect(screen.getByText("Ada Lovelace (Ithaca)")).toBeTruthy();
+    expect(screen.getByText("Ada Lovelace (Cornell Tech)")).toBeTruthy();
+    // and a surname that legitimately follows a dash is not cut in half
+    open({
+      clients: [client({ id: "c", cwid: null, slug: null, name: "Grace Testerson - Hopper" })],
+    });
+    expect(screen.getByText("Grace Testerson - Hopper")).toBeTruthy();
+  });
+
   it("'Add clients' POSTs the parsed block with NO mode, and reports what was written", async () => {
     const fetchMock = addResponse([
       {
