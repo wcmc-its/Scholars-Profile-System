@@ -515,29 +515,18 @@ describe("latestCoreScoredAt / buildRecencyWrite (the output-age tier)", () => {
  */
 describe("buildCoresRecencyWrite (ledger beats output age)", () => {
   const coresAt = new Date("2026-09-08T05:41:00Z");
+  const coresLedger = [
+    { PK: "STAGE#cores_run#GLOBAL", SK: "RUN#2026-09-08T05:00:11Z", status: "complete" },
+  ];
 
-  const ledgerRow = (at: string) =>
-    buildProducerRunWrites(
-      [{ PK: "STAGE#cores_run#GLOBAL", SK: `RUN#${at}`, status: "complete" }],
-      NONE,
-    );
-
-  it("drops the output-age row when the ledger spoke for cores this pass", () => {
-    const ledgerWrites = ledgerRow("2026-09-08T05:00:11Z");
-    expect(ledgerWrites.map((w) => w.source)).toEqual([CORES_SOURCE]);
-
-    expect(buildCoresRecencyWrite(ledgerWrites, coresAt, NONE)).toEqual([]);
+  it("drops the output-age row once the ledger carries a cores run record", () => {
+    expect(buildCoresRecencyWrite(coresLedger, coresAt, NONE)).toEqual([]);
   });
 
   it("still writes the output-age row while no ledger row exists — today's behaviour", () => {
-    // Until ReciterAI deploys, `ledgerWrites` never mentions cores, so this must
+    // Until ReciterAI deploys, the scan contains no cores_run row, so this must
     // be identical to the bare buildRecencyWrite call it replaced.
-    const noCores = buildDriftRunWrites(
-      [{ PK: "DRIFT#evaluation", SK: "DAY#2026-09-08", window_end: "2026-09-08T14:00:50Z" }],
-      NONE,
-    );
-
-    expect(buildCoresRecencyWrite(noCores, coresAt, NONE)).toEqual(
+    expect(buildCoresRecencyWrite([], coresAt, NONE)).toEqual(
       buildRecencyWrite(CORES_SOURCE, coresAt, NONE),
     );
     expect(buildCoresRecencyWrite([], coresAt, NONE)).toHaveLength(1);
@@ -550,21 +539,45 @@ describe("buildCoresRecencyWrite (ledger beats output age)", () => {
   });
 
   it("is not suppressed by some OTHER producer's ledger row", () => {
-    // The guard must match on the source, not merely on the ledger being
-    // non-empty; a nightly that mirrored enrichment but not cores still needs
-    // the output-age fallback.
-    const otherProducer = buildProducerRunWrites(
-      [
-        {
-          PK: "STAGE#daily_enrichment#GLOBAL",
-          SK: "RUN#2026-09-08T11:01:13Z",
-          status: "complete",
-        },
-      ],
-      NONE,
-    );
-
+    // The guard must match on the cores PK, not merely on the ledger being
+    // non-empty; a scan carrying enrichment but not cores still needs the
+    // output-age fallback.
+    const otherProducer = [
+      { PK: "STAGE#daily_enrichment#GLOBAL", SK: "RUN#2026-09-08T11:01:13Z", status: "complete" },
+    ];
     expect(buildCoresRecencyWrite(otherProducer, coresAt, NONE)).toHaveLength(1);
+  });
+
+  it("is not suppressed by a cores ledger row under a NON-GLOBAL scope", () => {
+    // Only GLOBAL is a pipeline heartbeat (trap 4). A per-record row must not
+    // retire the fallback.
+    const scoped = [
+      { PK: "STAGE#cores_run#pmid:123", SK: "RUN#2026-09-08T05:00:11Z", status: "complete" },
+    ];
+    expect(buildCoresRecencyWrite(scoped, coresAt, NONE)).toHaveLength(1);
+  });
+
+  // ---- the two scenarios a writes-keyed guard got wrong -------------------
+  // Both turn on the same fact: buildProducerRunWrites drops a ledger row at or
+  // below the watermark, so "the ledger produced no write this pass" does NOT
+  // mean "there is no ledger". Keying on the scanned rows is what fixes them.
+
+  it("files no second row when the nightly is re-run the same day", () => {
+    // Pass 1 mirrored the 05:00 ledger row, so `since` now sits at its
+    // startedAt. `scored_at` on the rows that same run wrote is LATER, so an
+    // output-age row would clear the watermark and double-count one run.
+    const since = new Map([[CORES_SOURCE, new Date("2026-09-08T05:00:11Z")]]);
+    expect(buildProducerRunWrites(coresLedger, since)).toEqual([]); // already mirrored
+    expect(buildCoresRecencyWrite(coresLedger, coresAt, since)).toEqual([]);
+  });
+
+  it("files no success row on a night cores died", () => {
+    // No NEW ledger row, and yesterday's scored_at still sits above the
+    // watermark — so the fallback would file a `success` for a run that never
+    // happened. That is the blind spot this module exists to close.
+    const since = new Map([[CORES_SOURCE, new Date("2026-09-07T05:00:11Z")]]);
+    const staleAnchor = new Date("2026-09-07T05:41:00Z");
+    expect(buildCoresRecencyWrite(coresLedger, staleAnchor, since)).toEqual([]);
   });
 });
 

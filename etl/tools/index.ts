@@ -49,6 +49,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
 import { processStartedAt } from "../../lib/etl-run";
+import { parseManifestGeneratedAt } from "../freshness/anchor";
 import { repairEncoding, repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
@@ -146,6 +147,18 @@ async function recordRun(args: {
   manifest?: ToolsManifest;
   errorMessage?: string;
 }): Promise<void> {
+  // §2.1: the ARTIFACT's publish moment, so freshness measures content age
+  // rather than the liveness of our own import. Same call as Spotlight and
+  // Hierarchy; null (→ freshness falls back to completedAt) on a
+  // missing/malformed/future timestamp, with a WARN so a manifest-bearing
+  // source whose anchor went inert stays distinguishable from a manifest-less
+  // one.
+  const manifestGeneratedAt = parseManifestGeneratedAt(args.manifest?.generated_at, Date.now());
+  if (args.manifest && manifestGeneratedAt === null) {
+    log("manifest_generated_at_unusable", {
+      generated_at: args.manifest.generated_at ?? null,
+    });
+  }
   await db.write.etlRun.create({
     data: {
       source: SOURCE,
@@ -160,12 +173,24 @@ async function recordRun(args: {
       // displayed; readable provenance stays in manifestTaxonomyVersion.
       manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
       manifestTaxonomyVersion: args.manifest?.version ?? null,
-      // §2.1 note: Tools is deliberately NOT generated_at-anchored here. Its
-      // freshness SLA is nightly (30h — the IMPORT cadence), but the tools
-      // PRODUCER is hand-run (~weekly at best), so anchoring on generated_at
-      // would false-alarm even when healthy. Tools stays completedAt-anchored;
-      // recalibrating its SLA to the producer cadence is part of the deferred
-      // tools-cadence decision (handoff P2).
+      // §2.1: Tools IS generated_at-anchored, as of the tools-cadence decision.
+      //
+      // It was not, for a real reason: the tools producer is hand-run, so this
+      // anchor makes the row read stale whenever nobody has republished — which
+      // is most of the time, and which is a false alarm about OUR import. What
+      // changed is not that reason but the ANSWER to it. Anchoring here alone
+      // would paint a permanently red row with no route back to green, so it
+      // lands together with the `Tools` FreshnessAck in lib/etl/freshness-policy.ts,
+      // which accepts that staleness until a dated expiry. The two are one
+      // change and must not be separated: the ack suppresses only a source that
+      // grades STALE, so without this anchor it is inert (and the heartbeat's
+      // own anti-clutter rule would tell you to delete it); and without the ack
+      // this anchor is the cry-wolf the ack exists to prevent.
+      //
+      // What this buys: a frozen artifact is now VISIBLE and dated on
+      // /edit/etl-status instead of hidden behind a green row that only ever
+      // reported that our nightly import ran. The expiry is when someone has to
+      // look again.
     },
   });
 }

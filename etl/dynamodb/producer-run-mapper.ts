@@ -271,7 +271,11 @@ export function buildDriftRunWrites(
       source,
       status: "success",
       startedAt: at,
-      completedAt: resolveCompletedAt(rec, at),
+      // `duration_ms` ONLY. Passing `rec` whole would also expose `completed_at`
+      // through DriftDayRecord's index signature -- a field these rows do not
+      // carry and whose meaning here is unestablished. The narrow object keeps
+      // the ladder to the one field ReciterAI actually added.
+      completedAt: resolveCompletedAt({ duration_ms: rec.duration_ms }, at),
       rowsProcessed: 0,
       errorMessage: null,
     });
@@ -367,26 +371,56 @@ export function buildRecencyWrite(
   ];
 }
 
+/** The ledger PK that retires cores from the output-age tier, once it exists. */
+const CORES_LEDGER_PK = "STAGE#cores_run#GLOBAL";
+
 /**
- * Cores' output-age row, but ONLY when the ledger did not already speak for it.
+ * Does the producer keep a run record for cores AT ALL?
+ *
+ * Asked of the SCANNED ROWS, deliberately, and not of the writes this pass
+ * produced. Those are different questions and only this one is stable:
+ * `buildProducerRunWrites` drops any ledger row at or below the `since`
+ * watermark, so on every pass after the first the ledger produces NO write for
+ * a run it has already mirrored -- and a guard keyed on the writes would then
+ * conclude the ledger is absent and fall back to output age. Two ways that
+ * bites, both observed in verification:
+ *
+ *   1. An operator re-runs the nightly the same day. The 05:00 ledger row is
+ *      already mirrored so it yields no write, while `scored_at` on the rows
+ *      THAT SAME RUN wrote is always LATER than its `started_at` -- so the
+ *      output-age row clears `since` and files a SECOND `etl_run` success for
+ *      one run.
+ *   2. Cores dies on a night it was due. No new ledger row, so again no ledger
+ *      write -- and the previous run's `scored_at` still sits above the
+ *      watermark, so a `success` row is filed for a run that never happened.
+ *      That is verbatim the blind spot this module exists to close.
+ *
+ * The scan holds the ledger's whole history (that is what gives the board real
+ * durations on day one), so this reads "has cores ever recorded a run", which
+ * is the honest retirement condition: the day the producer starts keeping a run
+ * record, the weaker signal is done for good rather than per-pass.
+ */
+export function coresLedgerExists(records: readonly ProducerRunRecord[]): boolean {
+  return records.some((rec) => String(rec.PK ?? "") === CORES_LEDGER_PK);
+}
+
+/**
+ * Cores' output-age row, but ONLY while the ledger has nothing to say for it.
  *
  * `cores_run` (PRODUCER_STAGES) and `latestCoreScoredAt` describe the same
  * nightly job and resolve to the same `etl_run.source`, so running both would
  * file two rows for one run and let the output-age watermark advance on a night
  * the run died. A real run record beats the age of its output, so the ledger
- * wins and this drops out.
+ * wins and this drops out -- permanently, from the first ledger row onward.
  *
- * Ordering-independent by construction: it asks what the ledger PRODUCED this
- * pass rather than what is in the table, so it needs no second query and cannot
- * be fooled by a `since` map read before the writes existed. Until ReciterAI
- * deploys the ledger row, `ledgerWrites` never mentions cores and this is
- * byte-for-byte the call it replaces.
+ * Fail-safe: until ReciterAI deploys the ledger row, `producerRuns` contains no
+ * `STAGE#cores_run#GLOBAL` and this is byte-for-byte the call it replaces.
  */
 export function buildCoresRecencyWrite(
-  ledgerWrites: readonly ProducerRunWrite[],
+  producerRuns: readonly ProducerRunRecord[],
   latestAt: Date | null,
   since: ReadonlyMap<string, Date | null>,
 ): ProducerRunWrite[] {
-  if (ledgerWrites.some((w) => w.source === CORES_SOURCE)) return [];
+  if (coresLedgerExists(producerRuns)) return [];
   return buildRecencyWrite(CORES_SOURCE, latestAt, since);
 }

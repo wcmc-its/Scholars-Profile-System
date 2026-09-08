@@ -144,21 +144,32 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
   //
-  // ACKED, and deliberately neither re-anchored nor re-cadenced. What this
-  // entry grades is OUR nightly import, which genuinely runs nightly, so
-  // `nightly` is the honest cadence and widening it would hide a dead import.
-  // What is stale is the ARTIFACT the import reads: tools.json has carried
-  // generated_at 2026-06-23 since June, because the tools PRODUCER is hand-run
-  // — it has no EventBridge schedule at all, and `pipeline_tools` writes no
-  // STAGE# ledger row either (see etl/dynamodb/producer-run-mapper.ts), so
-  // there is no producer cadence to grade it against and nothing to mirror.
-  // Flipping etl/tools/index.ts to anchor on generated_at (see the §2.1 note
-  // beside its etlRun.create) before the producer has a schedule would paint
-  // this row permanently red with no route back to green — the cry-wolf
-  // failure the ack mechanism exists to prevent, and the same failure
-  // Spotlight's ack below records. At `until`, renew it as a deliberate
-  // decision or drop it: once the producer is scheduled, the anchor can move
-  // with it and the ack becomes unnecessary.
+  // RE-ANCHORED AND ACKED, as one change. etl/tools/index.ts now stores the
+  // artifact's `generated_at` (§2.1), so this row finally grades the CONTENT
+  // rather than the liveness of our own import — and tools.json has carried
+  // generated_at 2026-06-23 since June, so it grades stale immediately. The ack
+  // is what makes that landable: the staleness becomes an accepted decision
+  // with a review date instead of a permanently red row nobody can fix, which
+  // is the cry-wolf failure the ack mechanism exists to prevent and the same
+  // shape as Spotlight's ack below.
+  //
+  // Neither half works alone, which is why they are not separable:
+  //   - anchor without ack -> a red row with no route to green;
+  //   - ack without anchor -> INERT. `gradeSource` sets `acknowledged` from
+  //     `stale && ack active`, and a completedAt-anchored Tools is never stale,
+  //     so nothing is suppressed, the reason string reaches no reader, and
+  //     etl/freshness/index.ts's anti-clutter rule logs "ack is no longer
+  //     needed — remove it" on every heartbeat.
+  //
+  // `nightly` is kept, not widened: it is the honest cadence for our import,
+  // and no cadence would be honest for the producer, which has no EventBridge
+  // schedule at all and writes no STAGE# ledger row (see
+  // etl/dynamodb/producer-run-mapper.ts) — there is nothing to grade it
+  // against. The ack, not the cadence, is carrying the staleness.
+  //
+  // At `until`: renew as a deliberate decision, or drop BOTH halves. Once the
+  // producer is scheduled the ack becomes unnecessary and the anchor stands on
+  // its own.
   Tools: {
     cadence: "nightly",
     ack: {

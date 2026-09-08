@@ -1084,16 +1084,16 @@ async function main() {
       // The ledger first, then the output-age tier BEHIND it. Cores is the one
       // job both halves can speak for -- `cores_run` and `latestCoreScoredAt`
       // resolve to the same source -- so buildCoresRecencyWrite drops the
-      // output-age row on any pass where the ledger produced a real run record
-      // for it. Two rows for one run would double-count, and the output-age row
-      // would keep the watermark moving even on a night the run died.
-      const ledgerWrites = [
+      // output-age row once the ledger carries a cores run record at all. Two
+      // rows for one run would double-count, and the output-age row would keep
+      // the watermark moving even on a night the run died. It is keyed on the
+      // SCANNED rows rather than on this pass's writes for the reason set out
+      // there: an already-mirrored ledger row produces no write, which a
+      // write-keyed guard would misread as "no ledger".
+      const producerWrites = [
         ...buildProducerRunWrites(buckets.producerRuns, since),
         ...buildDriftRunWrites(buckets.driftDays, since),
-      ];
-      const producerWrites = [
-        ...ledgerWrites,
-        ...buildCoresRecencyWrite(ledgerWrites, coresAt, since),
+        ...buildCoresRecencyWrite(buckets.producerRuns, coresAt, since),
         ...buildRecencyWrite(GRANTS_SOURCE, grantsAt, since),
       ];
       if (producerWrites.length > 0) {
