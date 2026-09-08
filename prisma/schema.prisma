@@ -2522,7 +2522,23 @@ model CoreClaim {
 model CoreClient {
   id        String    @id @default(uuid()) @db.VarChar(64)
   coreId    String    @map("core_id") @db.VarChar(32)
-  cwid      String    @db.VarChar(32)
+  /// NULL for a NAME-ONLY client: someone the owner knows uses the core but who
+  /// has no CWID (an outside collaborator, a departed trainee). Such a row is
+  /// roster-only — it can never flag a byline (the byline match is by CWID) and
+  /// is never mirrored to the engine (see lib/cores/client-writeback.ts).
+  ///
+  /// NOTE the @@unique below does NOT dedupe these: MySQL permits unlimited
+  /// NULLs in a unique index, so (coreId, NULL) never collides. Duplicate
+  /// name-only rows are prevented in the route by a case-insensitive
+  /// displayName check against the core's active list, not by the index.
+  cwid        String?  @db.VarChar(32)
+  /// Owner-typed display name. Set ONLY on a name-only row (where it is
+  /// required); a CWID row resolves its name from Scholar/ED at read time, so
+  /// storing one here would be a second copy free to go stale.
+  displayName String?  @map("display_name") @db.VarChar(255)
+  /// Owner-typed affiliation for a name-only client. Always optional — the
+  /// modal offers it as a disambiguator, not a required field.
+  affiliation String?  @db.VarChar(255)
   /// EFFECTIVE actor cwid (the impersonation target while "View as" is live,
   /// else the real user) — same convention as CoreClaim.claimedBy.
   addedBy   String    @map("added_by") @db.VarChar(32)
