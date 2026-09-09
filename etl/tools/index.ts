@@ -49,7 +49,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
 import { processStartedAt } from "../../lib/etl-run";
-import { parseManifestGeneratedAt } from "../freshness/anchor";
+import { buildToolsRunRecord } from "./run-record";
 import { repairEncoding, repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
@@ -147,52 +147,31 @@ async function recordRun(args: {
   manifest?: ToolsManifest;
   errorMessage?: string;
 }): Promise<void> {
-  // §2.1: the ARTIFACT's publish moment, so freshness measures content age
-  // rather than the liveness of our own import. Same call as Spotlight and
-  // Hierarchy; null (→ freshness falls back to completedAt) on a
-  // missing/malformed/future timestamp, with a WARN so a manifest-bearing
-  // source whose anchor went inert stays distinguishable from a manifest-less
-  // one.
-  const manifestGeneratedAt = parseManifestGeneratedAt(args.manifest?.generated_at, Date.now());
-  if (args.manifest && manifestGeneratedAt === null) {
+  const record = buildToolsRunRecord({
+    source: SOURCE,
+    status: args.status,
+    startedAt: processStartedAt,
+    completedAt: new Date(),
+    rowsProcessed: args.rowsProcessed,
+    errorMessage: args.errorMessage,
+    manifest: args.manifest,
+    // The composite signature (all object shas), not just tools.json's
+    // top-level sha — so the next run's short-circuit detects a single-object
+    // republish (e.g. tool_context.json only, ReciterAI#238). Compared, never
+    // displayed; readable provenance stays in manifestTaxonomyVersion.
+    manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
+    now: Date.now(),
+  });
+  // WARN when a manifest-bearing run produced no anchor, so a source whose
+  // freshness quietly fell back to completedAt is distinguishable from one that
+  // never had a manifest. See etl/tools/run-record.ts for why the anchor lives
+  // there rather than inline.
+  if (args.manifest && record.manifestGeneratedAt === null) {
     log("manifest_generated_at_unusable", {
       generated_at: args.manifest.generated_at ?? null,
     });
   }
-  await db.write.etlRun.create({
-    data: {
-      source: SOURCE,
-      status: args.status,
-      startedAt: processStartedAt,
-      completedAt: new Date(),
-      rowsProcessed: args.rowsProcessed,
-      errorMessage: args.errorMessage ?? null,
-      // Store the composite signature (all object shas), not just tools.json's
-      // top-level sha — so the next run's short-circuit detects a single-object
-      // republish (e.g. tool_context.json only, ReciterAI#238). Compared, never
-      // displayed; readable provenance stays in manifestTaxonomyVersion.
-      manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
-      manifestTaxonomyVersion: args.manifest?.version ?? null,
-      // §2.1: Tools IS generated_at-anchored, as of the tools-cadence decision.
-      //
-      // It was not, for a real reason: the tools producer is hand-run, so this
-      // anchor makes the row read stale whenever nobody has republished — which
-      // is most of the time, and which is a false alarm about OUR import. What
-      // changed is not that reason but the ANSWER to it. Anchoring here alone
-      // would paint a permanently red row with no route back to green, so it
-      // lands together with the `Tools` FreshnessAck in lib/etl/freshness-policy.ts,
-      // which accepts that staleness until a dated expiry. The two are one
-      // change and must not be separated: the ack suppresses only a source that
-      // grades STALE, so without this anchor it is inert (and the heartbeat's
-      // own anti-clutter rule would tell you to delete it); and without the ack
-      // this anchor is the cry-wolf the ack exists to prevent.
-      //
-      // What this buys: a frozen artifact is now VISIBLE and dated on
-      // /edit/etl-status instead of hidden behind a green row that only ever
-      // reported that our nightly import ran. The expiry is when someone has to
-      // look again.
-    },
-  });
+  await db.write.etlRun.create({ data: record });
 }
 
 // ---------------------------------------------------------------------------
