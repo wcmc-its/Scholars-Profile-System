@@ -529,6 +529,9 @@ export function MatchaPanel({
   // The extractor's essence title (org + focus). Stable across slider/preference edits — only
   // a new search replaces it — so the header does not churn as the officer tunes the ranking.
   const [titleSummary, setTitleSummary] = useState<string | undefined>(undefined);
+  /** When the server answered from a persisted earlier run: that run's ISO timestamp. Undefined
+   *  ⇒ computed for this request. Labels the results; Re-run forces a fresh computation. */
+  const [asOf, setAsOf] = useState<string | undefined>(undefined);
   // #1654 — the sponsor's non-topical asks, and which of them the officer is honouring.
   // Keyed by label: an extractor that fires twice on the same ask would emit one entry.
   const [preferences, setPreferences] = useState<MatchaPreference[]>([]);
@@ -621,7 +624,7 @@ export function MatchaPanel({
    *  collapses: an already-read ask is still the officer's context, and hiding it was the gripe. */
   async function runSearch(
     text: string,
-    opts: { include?: readonly string[] } = {},
+    opts: { include?: readonly string[]; fresh?: boolean } = {},
   ) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
@@ -646,6 +649,7 @@ export function MatchaPanel({
       setCulled([]);
       setIncluded([]);
       setTitleSummary(undefined);
+      setAsOf(undefined);
       setPreferences([]);
       setActivePrefs(new Set());
       setShowFullText(false); // D11 — a new paste starts clamped
@@ -662,6 +666,9 @@ export function MatchaPanel({
           description: text,
           include: opts.include ?? [],
           target,
+          // Re-run: skip the persisted answer and compute now. Omitted on every other path so a
+          // replay from Recent is served from the stored run when one exists.
+          ...(opts.fresh ? { fresh: true } : {}),
           // Grant Matcha — ask the spine to hydrate `measures.esiEligible`. Sent ONLY when this
           // panel was handed an opportunity's requirements; the route re-checks GRANT_MATCHA as
           // the real boundary, and omitting the key leaves `/edit/matcha` byte-unchanged.
@@ -687,6 +694,7 @@ export function MatchaPanel({
           setCulled(data.culled ?? []);
           if (!opts.include) setIncluded([]);
           setTitleSummary(data.titleSummary);
+          setAsOf(undefined); // the grant branch never serves a stored run
           setMatchedText(text);
           setEditing(false);
           setShowFullText(false);
@@ -713,6 +721,7 @@ export function MatchaPanel({
         // and the click handler already set `included` to the new set — don't clobber it.
         if (!opts.include) setIncluded([]);
         setTitleSummary(data.titleSummary);
+        setAsOf(data.asOf);
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
         setShowFullText(false); // D11 — new paste starts clamped
@@ -1734,6 +1743,20 @@ export function MatchaPanel({
                   ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                  {asOf ? (
+                    /* Served from a persisted earlier run — say so, next to the button that
+                       forces a fresh one. */
+                    <span
+                      data-slot="matcha-as-of"
+                      className="text-muted-foreground mr-1 text-[12px] whitespace-nowrap"
+                    >
+                      Results from{" "}
+                      {new Date(asOf).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  ) : null}
                   {allowEditPaste ? (
                     <Button type="button" variant="outline" onClick={() => setEditing(true)}>
                       Edit paste
@@ -1749,7 +1772,9 @@ export function MatchaPanel({
                         variant="outline"
                         size="icon"
                         disabled={pending}
-                        onClick={() => void runSearch(matchedText, { include: included })}
+                        onClick={() =>
+                          void runSearch(matchedText, { include: included, fresh: true })
+                        }
                         title="Match researchers again"
                         aria-label="Match researchers again"
                       >
@@ -1761,7 +1786,9 @@ export function MatchaPanel({
                       <Button
                         type="button"
                         disabled={pending}
-                        onClick={() => void runSearch(matchedText, { include: included })}
+                        onClick={() =>
+                          void runSearch(matchedText, { include: included, fresh: true })
+                        }
                         className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
                       >
                         {pending ? "Ranking…" : "Re-run match"}

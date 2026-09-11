@@ -1041,9 +1041,11 @@ describe("rankResearchersForDescriptionSpine", () => {
       q === "minor" ? people(["m"]) : people(["p"]),
     );
 
-    const { candidates: out } = await rankResearchersForDescriptionSpine("some sponsor prose");
+    const { candidates: out, degraded } =
+      await rankResearchersForDescriptionSpine("some sponsor prose");
 
     expect(mockExtractSponsorConcepts).toHaveBeenCalledWith("some sponsor prose");
+    expect(degraded).toBeUndefined(); // the LLM answered — a persistable run
     expect(out.map((r) => r.cwid)).toEqual(["p", "m"]);
     expect(out[0].fusedScore).toBeGreaterThan(out[1].fusedScore);
     // Primary path: the LLM terms are resolved directly; the taxonomy-label vocab is
@@ -1061,13 +1063,16 @@ describe("rankResearchersForDescriptionSpine", () => {
     ]);
     mockSearchPeople.mockResolvedValue(people(["a"]));
 
-    const { candidates: out } = await rankResearchersForDescriptionSpine("cancer research program");
+    const { candidates: out, degraded } =
+      await rankResearchersForDescriptionSpine("cancer research program");
 
     expect(mockExtractSponsorConcepts).toHaveBeenCalledTimes(1);
     // Dictionary fallback engaged: the vocab loaded and its label match drove retrieval.
     expect(mockTopicFindMany).toHaveBeenCalled();
     expect(mockSearchPeople).toHaveBeenCalledTimes(1);
     expect(out.map((r) => r.cwid)).toEqual(["a"]);
+    // ...and the run says so, so the route never persists a Bedrock outage as the answer.
+    expect(degraded).toBe(true);
   });
 
   it("returns [] when BOTH the LLM and the dictionary fallback yield nothing", async () => {
