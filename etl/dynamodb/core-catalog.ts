@@ -9,12 +9,23 @@
  * FK-guards `publication_core.coreId` against it — the same "populate the
  * catalog, then guard the usage rows" flow Block 1 uses for `topic`.
  *
- * Keep in sync with the dictionary as cores are resolved. All 14 WCM cores in the
- * dictionary are now mirrored here. Cores with no firing staff/alias signal yet
+ * Keep in sync with the dictionary as cores are resolved. Cores 1-14 mirror a
+ * resolved dictionary entry. Cores with no firing staff/alias signal yet
  * (6 Institutional Biorepository, 7 Metabolic Phenotyping, 8 Microbiome, 10 Human
  * Immune Monitoring) seed a catalog row but currently project zero usage rows — an
  * empty core page until the upstream ReCiter target feed surfaces their staff. That
  * is harmless: the FK guard simply has no usage rows to attach.
+ *
+ * Cores 15 (Data Core) and 16 (Scientific Computing Unit) are catalog-ONLY: they
+ * have no `core_dictionary.yaml` entry yet, because that file's loader RAISES on a
+ * core with no `aliases:` (pipeline_cores/dictionary.py `_validate`) and validates
+ * the WHOLE file on every load — so seeding them upstream without confirmed
+ * acknowledgement strings would fail the nightly cores run for all 14 resolved
+ * cores, not just these two. Seeding them HERE is the safe half: the row exists, so
+ * the core is claimable / ownable / editable on /edit/core, and it projects zero
+ * usage rows until the dictionary entry lands (the same harmless state cores 6/7/8/
+ * 10 sit in today). `source` stays the dictionary constant because that is where
+ * these two are headed, not where they are.
  */
 export type CoreCatalogEntry = {
   /** Dictionary `core_id`, e.g. "2". Stable string key (the DynamoDB SK suffix). */
@@ -43,4 +54,6 @@ export const CORE_CATALOG: ReadonlyArray<CoreCatalogEntry> = [
   { id: "12", name: "Nuclear Magnetic Resonance", facility: "Nuclear Magnetic Resonance (NMR) Core Facility" },
   { id: "13", name: "Proteomics and Metabolomics", facility: "Proteomics & Metabolomics Core Facility" },
   { id: "14", name: "Research Informatics", facility: "Research Informatics" },
+  { id: "15", name: "Data Core", facility: "Data Core" },
+  { id: "16", name: "Scientific Computing Unit", facility: "Scientific Computing Unit" },
 ];
