@@ -626,6 +626,24 @@ describe("POST /api/edit/matcha (route)", () => {
       expect(data.resultKey).toBeUndefined();
     });
 
+    it("never persists a DEGRADED (dictionary-fallback) answer, even one with candidates", async () => {
+      // A Bedrock blip makes the spine answer from the dictionary extractor. That ranking can be
+      // non-empty, so the empty check passes — but stored with no expiry it would be the answer
+      // for every later replay of this paste. The RAM cache forgets it in 30 min; the row must not
+      // remember it at all.
+      mockRankSpine.mockResolvedValue({
+        concepts: [concept],
+        candidates: [candidate],
+        degraded: true,
+      });
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(resp.status).toBe(200);
+      expect((await resp.json()).candidates).toEqual([candidate]); // still served
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.result).toBeUndefined();
+      expect(data.resultKey).toBeUndefined();
+    });
+
     it("serves a persisted answer WITHOUT running the engine, labelled with its date", async () => {
       mockSubmissionFindFirst.mockResolvedValue({
         result: { concepts: [concept], candidates: [candidate], titleSummary: "Stored — Acme" },

@@ -150,11 +150,11 @@ export const dynamic = "force-dynamic";
  * ponytail: reuses `cachedReasonAgg` — a bounded Map + TTL + inflight-dedup + FIFO eviction
  * that is generic in its value type; only its NAME is reason-agg specific (a rename would
  * churn six call sites in the search hot path, so it is left for a janitorial PR). Its
- * 30-minute staleness ceiling is also the answer to "when does a cached match go stale?":
- * the People index is rebuilt nightly, and an entry that cannot outlive 30 minutes can never
- * outlive an ETL run. Ceiling — the cache is per-task and prod runs 2-6 tasks with no ALB
- * stickiness, so the hit rate is ~1/N, not 1. It is never a loss (a miss is exactly today's
- * behaviour); make it shared only if the Bedrock spend ever justifies the infrastructure.
+ * 30-minute ceiling bounds what THIS layer can serve stale; the persisted answer on the
+ * retention row has no such bound and is instead labelled `asOf` with Re-run one click away
+ * (module doc). The RAM layer is per-task and prod runs 2-6 tasks with no ALB stickiness, so
+ * its hit rate is ~1/N — it now mostly dedups in-flight duplicates and same-minute re-submits;
+ * the cross-task, cross-day hit is the persisted row.
  */
 function sponsorInputHash(engineInput: string): string {
   return createHash("sha256").update(engineInput, "utf8").digest("hex");
@@ -177,6 +177,11 @@ type MatchaEngineResult = {
   /** #1780 Phase 2 — the culled tail for the include chips. Cached with the result (it is a
    *  function of description + include, which is exactly the cache key). Absent on bespoke. */
   culled?: CulledConcept[];
+  /** The spine answered from its dictionary fallback because the LLM extraction came back empty
+   *  (see `SpineRankResult.degraded`). Such a run can still have candidates, so it passes the
+   *  in-RAM cache's empty check — but it must never be PERSISTED, or a ten-second Bedrock blip
+   *  becomes the stored answer for every later replay. */
+  degraded?: true;
 };
 
 /**
@@ -372,7 +377,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             });
     const storedResult = (stored?.result ?? null) as MatchaEngineResult | null;
 
-    const { concepts, candidates, titleSummary, culled } =
+    const { concepts, candidates, titleSummary, culled, degraded } =
       storedResult ??
       (await cachedReasonAgg<MatchaEngineResult>(
         cacheKey,
@@ -389,12 +394,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         },
         isCacheableResult,
       ));
-    // Persist the answer only when the engine ran AND produced a cacheable result — the same
-    // "never memoise an empty" rule as the in-RAM cache, for the same reason (a Bedrock blip
-    // must not become a stored empty). A row written while serving a stored result carries no
-    // answer of its own; the older row still holds it.
+    // Persist the answer only when the engine ran, produced a cacheable result, AND was not the
+    // dictionary fallback — the in-RAM cache's "never memoise an empty" rule plus its missing
+    // half: a Bedrock blip can also produce a NON-empty degraded ranking, and with no expiry
+    // that would be the stored answer until someone happened to click Re-run. A row written
+    // while serving a stored result carries no answer of its own; the older row still holds it.
     const engineResult: MatchaEngineResult = { concepts, candidates, titleSummary, culled };
-    const persist = storedResult === null && isCacheableResult(engineResult);
+    const persist = storedResult === null && isCacheableResult(engineResult) && !degraded;
 
     // The search's handle. The essence + org come from the extractor's `titleSummary` (written
     // in the SAME extraction call, not a second one); `askTitleFrom` prefers it and falls
@@ -435,7 +441,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ask,
       titleSummary,
       culled,
-      ...(stored ? { asOf: stored.createdAt.toISOString() } : {}),
+      // Labelled from the same predicate that skipped the engine — never from the row alone.
+      ...(storedResult && stored ? { asOf: stored.createdAt.toISOString() } : {}),
     });
   } catch (err) {
     logEditFailure(PATH, err);

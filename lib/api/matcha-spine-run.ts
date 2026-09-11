@@ -261,6 +261,10 @@ export type SpineRankResult = {
   /** #1780 Phase 2 — the extractor's concepts the cut did NOT search, for the click-to-include
    *  chips. [] on the dictionary-fallback path (no LLM tail) and the empty short-circuits. */
   culled?: CulledConcept[];
+  /** True when the LLM extraction returned nothing (Bedrock outage/throttle/malformed) and the
+   *  dictionary fallback answered instead — uniform centrality, no gloss, no tail. The route
+   *  must not PERSIST such a run: it would freeze a transient outage into every later replay. */
+  degraded?: true;
 };
 
 /**
@@ -942,7 +946,8 @@ export async function rankResearchersForDescriptionSpine(
     : undefined;
   const allFused = rrfFuse(rankings, DEFAULT_K, recencyWeightByCwid);
   const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
-  if (fused.length === 0) return { concepts, candidates: [], titleSummary, culled };
+  const degraded = llmPath ? {} : { degraded: true as const };
+  if (fused.length === 0) return { concepts, candidates: [], titleSummary, culled, ...degraded };
 
   // technologyCount — CTL officers care whether the researcher already holds CTL IP.
   // Same inline groupBy the bespoke engine and `rankResearchersForOpportunity` use
@@ -1096,5 +1101,5 @@ export async function rankResearchersForDescriptionSpine(
       ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };
   });
-  return { concepts, candidates, titleSummary, culled };
+  return { concepts, candidates, titleSummary, culled, ...degraded };
 }
