@@ -36,6 +36,23 @@
  *
  * The engine is part of the key — spine and bespoke answer the same paste differently.
  *
+ * THE ANSWER IS NOW PERSISTED TOO (`SponsorMatchSubmission.result`), because the in-RAM cache
+ * could not do the one thing officers actually wanted from it: replay a saved search later.
+ * That Map is per task (prod runs 2+, no stickiness), fresh for 5 minutes, gone at 30, and
+ * emptied by every deploy — so a "Northlake" replayed from Recent the next day was always a
+ * full cold run: Sonnet extraction + eight OpenSearch searches, ~13-15 s, one Bedrock call.
+ * The paste is already retained in full, so storing its answer beside it changes nothing
+ * about what DELETE must erase — the row goes, the answer goes with it.
+ *
+ * Lookup: newest row with THIS request's full cache key (`resultKey`), served with `asOf` so
+ * the console can label it and offer Re-run. `fresh: true` (the Re-run button) skips the
+ * lookup, runs the engine, and writes a newer row — so an explicit re-run always wins.
+ * `preferences` is still recomputed per request (pure, and verbatim paste slices).
+ *
+ * ponytail: no expiry. A stored answer predates the nightly People-index rebuild by design;
+ * it is labelled with its date and one click away from fresh. Add a max-age if a stale
+ * ranking ever misleads someone who did not read the label.
+ *
  * THE RESPONSE IS DECOMPOSED, NOT SCALAR. `concepts[]` carries each merged concept's
  * editable `centrality` and fixed `weightFactor`; `candidates[].contributions[]` carries every
  * (concept, rank) pair the fusion summed. The console re-ranks LIVE in the browser from
@@ -338,8 +355,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       (include.length > 0
         ? `${baseCacheKey}:inc:${sponsorInputHash(JSON.stringify(include))}`
         : baseCacheKey) + (wantSignals ? ":elig" : "");
+    // The persisted answer for this exact key, unless the officer asked for a fresh run. Read
+    // fail-soft: a replica blip means a cold run, which is exactly yesterday's behaviour.
+    const stored =
+      body.fresh === true
+        ? null
+        : await db.read.sponsorMatchSubmission
+            .findFirst({
+              where: { descriptionHash: engineInputHash, resultKey: cacheKey },
+              orderBy: { createdAt: "desc" },
+              select: { result: true, createdAt: true },
+            })
+            .catch((err: unknown) => {
+              logEditFailure(`${PATH}#stored`, err);
+              return null;
+            });
+    const storedResult = (stored?.result ?? null) as MatchaEngineResult | null;
+
     const { concepts, candidates, titleSummary, culled } =
-      await cachedReasonAgg<MatchaEngineResult>(
+      storedResult ??
+      (await cachedReasonAgg<MatchaEngineResult>(
         cacheKey,
         async () => {
           if (useSpine)
@@ -353,7 +388,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           return { concepts: [], candidates: researchers.map(bespokeToCandidate) };
         },
         isCacheableResult,
-      );
+      ));
+    // Persist the answer only when the engine ran AND produced a cacheable result — the same
+    // "never memoise an empty" rule as the in-RAM cache, for the same reason (a Bedrock blip
+    // must not become a stored empty). A row written while serving a stored result carries no
+    // answer of its own; the older row still holds it.
+    const engineResult: MatchaEngineResult = { concepts, candidates, titleSummary, culled };
+    const persist = storedResult === null && isCacheableResult(engineResult);
 
     // The search's handle. The essence + org come from the extractor's `titleSummary` (written
     // in the SAME extraction call, not a second one); `askTitleFrom` prefers it and falls
@@ -376,13 +417,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           engine,
           candidateCount: candidates.length,
           submittedBy: session.cwid,
+          // JSON round-trip drops the `undefined` optionals (titleSummary/culled) Prisma's JSON
+          // input type does not accept; it is also exactly what the client would have received.
+          ...(persist
+            ? { result: JSON.parse(JSON.stringify(engineResult)), resultKey: cacheKey }
+            : {}),
         },
       });
     } catch (err) {
       logEditFailure(`${PATH}#retain`, err);
     }
 
-    return editOk({ concepts, candidates, preferences, ask, titleSummary, culled });
+    return editOk({
+      concepts,
+      candidates,
+      preferences,
+      ask,
+      titleSummary,
+      culled,
+      ...(stored ? { asOf: stored.createdAt.toISOString() } : {}),
+    });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "match_unavailable");

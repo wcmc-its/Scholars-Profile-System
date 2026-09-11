@@ -171,6 +171,8 @@ function stubFetch(payload: {
   preferences?: MatchaPreference[];
   /** #1780 Phase 2 — the culled tail, for the click-to-include chips. */
   culled?: CulledConcept[];
+  /** Served from a persisted earlier run — that run's ISO timestamp. */
+  asOf?: string;
   submissions?: Submission[];
   /** §9 — the SERVER's verdict on whose searches this list holds. Defaults to `"own"`, which is
    *  what every non-superuser gets and therefore the right default for a fixture. `"omit"` sends
@@ -2890,6 +2892,23 @@ describe("MatchaPanel", () => {
     const body = JSON.parse(String((sent[sent.length - 1][1] as { body: string }).body));
     expect(body.description).toBe("We fund cardiac fibrosis work.");
     expect(body.include).toEqual([]); // A's term must not ride into B's ranking
+  });
+
+  it("labels a persisted answer with its date, and only Re-run asks for a fresh run", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, asOf: "2026-09-04T16:30:38Z" });
+    await renderAndSearch();
+
+    const posts = () =>
+      fetchMock.mock.calls
+        .filter((c) => (c[1] as { method?: string } | undefined)?.method === "POST")
+        .map((c) => JSON.parse(String((c[1] as { body: string }).body)));
+    // A submitted search never asks for `fresh` — a stored run is exactly what it wants.
+    expect(posts()[0].fresh).toBeUndefined();
+    expect(screen.getByText(/^Results from /).textContent).toMatch(/Results from Sep 4/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+    expect(posts()[1].fresh).toBe(true);
   });
 
   describe("history scope (§9) and the submitter (§10)", () => {

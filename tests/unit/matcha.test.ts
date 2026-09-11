@@ -33,6 +33,7 @@ const {
   mockSubmissionDeleteMany,
   mockSubmissionFindMany,
   mockSubmissionFindUnique,
+  mockSubmissionFindFirst,
   mockGetEffectiveEditSession,
   mockCachedReasonAgg,
 } = vi.hoisted(() => ({
@@ -50,6 +51,7 @@ const {
   mockSubmissionDeleteMany: vi.fn(),
   mockSubmissionFindMany: vi.fn(),
   mockSubmissionFindUnique: vi.fn(),
+  mockSubmissionFindFirst: vi.fn(),
   mockGetEffectiveEditSession: vi.fn(),
   // #1780 Phase 2 — the real `cachedReasonAgg` BYPASSES its cache under VITEST (returns `load()`
   // directly), so the route's cache KEY is never exercised by default. This capturing stub keeps
@@ -72,6 +74,7 @@ vi.mock("@/lib/db", () => ({
       sponsorMatchSubmission: {
         findMany: mockSubmissionFindMany,
         findUnique: mockSubmissionFindUnique,
+        findFirst: mockSubmissionFindFirst,
       },
     },
     write: {
@@ -140,6 +143,7 @@ beforeEach(() => {
   mockTopicFindMany.mockResolvedValue([]);
   mockRankForDescription.mockResolvedValue([]);
   mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
+  mockSubmissionFindFirst.mockResolvedValue(null); // no persisted answer unless a test plants one
 });
 
 describe("rankResearchersForDescription (engine)", () => {
@@ -564,6 +568,104 @@ describe("POST /api/edit/matcha (route)", () => {
       expect(keyOf(0)).toBe(keyOf(2)); // ["a"] === ["a"]
       expect(keyOf(0)).not.toBe(keyOf(3)); // ["a"] ≠ ["a","b"]
       expect(keyOf(3)).toBe(keyOf(4)); // ["a","b"] === ["b","a"] (sanitize sorts to one key)
+    });
+  });
+
+  describe("persisted results (replay without re-running the engine)", () => {
+    const concept = {
+      term: "cancer metabolism",
+      kind: "concept",
+      members: [],
+      centrality: 0.9,
+      weightFactor: 1,
+    };
+    const candidate = {
+      cwid: "a",
+      name: "A",
+      profileSlug: "a",
+      title: null,
+      department: null,
+      fusedScore: 0.1,
+      contributions: [],
+      technologyCount: 0,
+    };
+    beforeEach(() => {
+      process.env.MATCHA_SPINE = "on";
+      mockRankSpine.mockResolvedValue({
+        concepts: [concept],
+        candidates: [candidate],
+        titleSummary: "Cancer metabolism — Acme",
+      });
+    });
+
+    it("persists the engine's answer with the run, under the route's full cache key", async () => {
+      await POST(postRequest(developerCtx, { description: "x", include: ["organoids"] }));
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.result).toEqual({
+        concepts: [concept],
+        candidates: [candidate],
+        titleSummary: "Cancer metabolism — Acme",
+      });
+      // The SAME key the in-RAM cache used — include/eligibility variants stay distinct.
+      expect(data.resultKey).toBe(String(mockCachedReasonAgg.mock.calls[0][0]));
+      expect(data.resultKey).toMatch(/^sponsor:spine:[0-9a-f]{64}:inc:[0-9a-f]{64}$/);
+      // The lookup that preceded it asked for exactly that key on this paste's hash.
+      expect(mockSubmissionFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { descriptionHash: data.descriptionHash, resultKey: data.resultKey },
+          orderBy: { createdAt: "desc" },
+        }),
+      );
+    });
+
+    it("never persists an EMPTY answer — the same rule as the in-RAM cache", async () => {
+      mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
+      await POST(postRequest(developerCtx, { description: "x" }));
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.result).toBeUndefined();
+      expect(data.resultKey).toBeUndefined();
+    });
+
+    it("serves a persisted answer WITHOUT running the engine, labelled with its date", async () => {
+      mockSubmissionFindFirst.mockResolvedValue({
+        result: { concepts: [concept], candidates: [candidate], titleSummary: "Stored — Acme" },
+        createdAt: new Date("2026-09-04T16:30:38Z"),
+      });
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(resp.status).toBe(200);
+      const body = await resp.json();
+      expect(body.candidates).toEqual([candidate]);
+      expect(body.titleSummary).toBe("Stored — Acme");
+      expect(body.asOf).toBe("2026-09-04T16:30:38.000Z");
+      expect(mockRankSpine).not.toHaveBeenCalled();
+      expect(mockCachedReasonAgg).not.toHaveBeenCalled();
+      // The ask is still recorded — but this row carries no answer of its own.
+      expect(mockSubmissionCreate).toHaveBeenCalledTimes(1);
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.candidateCount).toBe(1);
+      expect(data.result).toBeUndefined();
+      expect(data.resultKey).toBeUndefined();
+    });
+
+    it("`fresh: true` skips the stored answer, runs the engine, and persists the new run", async () => {
+      mockSubmissionFindFirst.mockResolvedValue({
+        result: { concepts: [], candidates: [candidate] },
+        createdAt: new Date("2026-09-04T16:30:38Z"),
+      });
+      const resp = await POST(postRequest(developerCtx, { description: "x", fresh: true }));
+      const body = await resp.json();
+      expect(mockSubmissionFindFirst).not.toHaveBeenCalled();
+      expect(mockRankSpine).toHaveBeenCalledTimes(1);
+      expect(body.asOf).toBeUndefined();
+      expect(mockSubmissionCreate.mock.calls[0][0].data.resultKey).toMatch(/^sponsor:spine:/);
+    });
+
+    it("a failed lookup is a cold run, not an error", async () => {
+      mockSubmissionFindFirst.mockRejectedValue(new Error("replica down"));
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(resp.status).toBe(200);
+      expect(mockRankSpine).toHaveBeenCalledTimes(1);
+      expect((await resp.json()).asOf).toBeUndefined();
     });
   });
 

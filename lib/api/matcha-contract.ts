@@ -783,6 +783,10 @@ export type MatchaResponse = {
    *  click-to-include chips. Absent/[] when nothing was culled (few-concept asks) or on the
    *  bespoke engine (no extraction). */
   culled?: CulledConcept[];
+  /** Present when the answer was served from a persisted earlier run rather than computed
+   *  now: that run's ISO timestamp. The console labels the results with it and lets the
+   *  officer force a fresh run. Absent ⇒ computed for this request. */
+  asOf?: string;
 };
 
 /**

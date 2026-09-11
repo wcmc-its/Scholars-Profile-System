@@ -3808,6 +3808,24 @@ model SponsorMatchSubmission {
   submittedBy String   @map("submitted_by") @db.VarChar(32) // actor cwid
   createdAt   DateTime @default(now()) @map("created_at")
 
+  /// The engine's answer for THIS run — `{ concepts, candidates, titleSummary, culled }` — so a
+  /// replay from Recent (or a re-run days later) is served from here instead of re-running Sonnet
+  /// and eight OpenSearch searches. The in-RAM route cache is per task and dies at 30 min, so
+  /// before this every replay on a later day was a full cold run.
+  ///
+  /// NULL when the run was not cacheable (zero candidates = a degraded/empty result the route
+  /// deliberately never memoises) and on rows written while serving a stored result (those rows
+  /// record the ask, the older row still holds the answer). `preferences` is NOT stored — it is
+  /// verbatim paste slices, recomputed per request, and pure.
+  ///
+  /// Erased with the paste: DELETE removes every row of a `descriptionHash`, results included.
+  result Json?
+
+  /// The route's FULL cache key for `result` (`sponsor:<engine>:<hash>[:inc:<hash>][:elig]`), so
+  /// an include-chip or eligibility variant never serves the base result and vice versa. Set
+  /// only alongside a non-null `result`; the lookup filters on it and needs no JSON-null test.
+  resultKey String? @map("result_key") @db.VarChar(200)
+
   @@index([createdAt]) // the list view: newest first
   @@index([submittedBy])
   @@index([descriptionHash])
