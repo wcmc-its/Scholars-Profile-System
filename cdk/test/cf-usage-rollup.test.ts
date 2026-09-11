@@ -113,6 +113,9 @@ describe("buildRollupInsert", () => {
   it("excludes CloudFront-Function synthetic 200s (/edge-ip) from the profile arms", () => {
     const guards = sql.match(/x_edge_result_type <> 'FunctionGeneratedResponse'/g) ?? [];
     expect(guards).toHaveLength(2);
+    // ...and by name: a client hang-up mid-response is logged Error/ClientCommError, not
+    // FunctionGeneratedResponse, so the structural guard alone let 10 of 267 hits through.
+    expect(sql).toContain("'edge-ip'");
   });
 
   it("restricts the two profile arms to 2xx, leaves the traffic arms at <=3xx (#1476)", () => {

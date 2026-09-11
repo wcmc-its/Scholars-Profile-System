@@ -154,6 +154,11 @@ const RESERVED_ROOT_SEGMENTS = [
   "og",
   "readiness",
   "sitemap",
+  // The CloudFront Function IP echo (cdk/lib/edge-stack.ts EDGE_IP_PATH). PROFILE_SUCCESS_GET
+  // already drops it structurally via x_edge_result_type = 'FunctionGeneratedResponse', but a
+  // client that hangs up mid-response is logged as Error/ClientCommError with sc_status 200
+  // (10 of 267 hits in prod's first 30 days), so the path needs naming too.
+  "edge-ip",
 ]
   .map((s) => `'${s}'`)
   .join(", ");
