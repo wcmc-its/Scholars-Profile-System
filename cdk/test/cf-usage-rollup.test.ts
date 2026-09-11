@@ -102,6 +102,19 @@ describe("buildRollupInsert", () => {
     expect(sql).toContain("NOT IN ('about', 'browse'");
   });
 
+  it("counts searches at the /search results page, not the typeahead/api paths", () => {
+    // /api/search/suggest fires per keystroke and /api/search/key-paper is a
+    // Matcha evidence fetch -- neither is a search. Real searches land on
+    // /search?q= (document + RSC soft-nav).
+    expect(sql).toContain("cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200");
+    expect(sql).not.toContain("/api/search");
+  });
+
+  it("excludes CloudFront-Function synthetic 200s (/edge-ip) from the profile arms", () => {
+    const guards = sql.match(/x_edge_result_type <> 'FunctionGeneratedResponse'/g) ?? [];
+    expect(guards).toHaveLength(2);
+  });
+
   it("restricts the two profile arms to 2xx, leaves the traffic arms at <=3xx (#1476)", () => {
     // A profile pageview must be a 2xx (content rendered); a 3xx redirect --
     // e.g. bot probes to /docs, /actuator getting a 301 -- is not a view and

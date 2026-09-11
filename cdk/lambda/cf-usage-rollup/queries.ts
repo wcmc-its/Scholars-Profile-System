@@ -56,8 +56,18 @@ const SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 399`;
  * 3xx range counted as a "profile pageview" and polluted the top-profiles list
  * (#1476). A 3xx redirect renders nothing, so it is not a view. Excludes 304
  * too -- negligible for these dynamic (no-store) profile HTML pages.
+ *
+ * Also excludes responses a CloudFront Function synthesized at the edge
+ * (`x_edge_result_type = 'FunctionGeneratedResponse'`): `/edge-ip`, the IP echo
+ * the off-network block page fetches, is a single-segment 200 that never
+ * reaches the origin, and it topped the profile list with hundreds of "views".
+ * Structural rather than a reserved-list entry so the next synthetic path
+ * cannot repeat it.
  */
-const PROFILE_SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 299`;
+const PROFILE_SUCCESS_GET = [
+  "cs_method = 'GET' AND sc_status BETWEEN 200 AND 299",
+  "    AND x_edge_result_type <> 'FunctionGeneratedResponse'",
+].join("\n");
 
 /**
  * Coarse continent from the CloudFront edge-location IATA prefix
@@ -212,11 +222,21 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     "  UNION ALL",
 
     // (3) search_term -- dimension = decoded/normalized q=, cnt = searches.
+    // Counted at the results page (`/search?q=`, the router.push target of a
+    // submitted query), NOT under `/api/search%`: the browser never calls
+    // `/api/search?q=` -- the only `/api/search/*` callers are the typeahead
+    // (`/api/search/suggest`, every >=2-char keystroke) and the per-evidence
+    // key-paper fetch, so the old arm listed typing prefixes ("sch", "ma") and
+    // Matcha's internal lookups, and zero actual searches. Both the document
+    // load and the RSC soft-navigation carry q=, so both count.
+    // ponytail: pagination / tab switches re-request /search?q= and count as
+    // another search of the same term; there is no session key to dedupe on
+    // (cs_cookie is not logged). Accept the over-count.
     `  SELECT 'search_term' AS metric, ${SEARCH_TERM_EXPR} AS dimension,`,
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day}`,
-    "    AND cs_uri_stem LIKE '/api/search%'",
+    "    AND cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200",
     "    AND cs_uri_query IS NOT NULL AND cs_uri_query <> '-'",
     "    AND url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL",
     `  GROUP BY ${SEARCH_TERM_EXPR}`,
