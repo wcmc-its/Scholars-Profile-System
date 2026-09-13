@@ -33,5 +33,6 @@ describe("personNameKey", () => {
   it("drops initials so displayName and given+sn forms collide", () => {
     expect(personNameKey("M. Cary Reid")).toBe("cary reid");
     expect(personNameKey("Sallie R. Permar")).toBe(personNameKey("Sallie Permar"));
+    expect(personNameKey("Bernhard Kühn")).toBe("bernhard kuhn");
   });
 });

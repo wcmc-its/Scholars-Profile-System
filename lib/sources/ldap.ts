@@ -859,10 +859,13 @@ export function parseManagerCwid(dn: string | null | undefined): string | null {
   return cwid.length > 0 ? cwid : null;
 }
 
-/** Lowercase a person name to a comparison key, dropping initials
- *  ("Jeffrey P. Greenfield" → "jeffrey greenfield"). */
+/** Lowercase a person name to a comparison key, folding diacritics and
+ *  dropping initials ("Jeffrey P. Greenfield" → "jeffrey greenfield",
+ *  "Bernhard Kühn" → "bernhard kuhn" — HR types the lab unit without the umlaut). */
 export function personNameKey(name: string): string {
   return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .split(/\s+/)
     .filter((t) => t.replace(/\./g, "").length > 1)
