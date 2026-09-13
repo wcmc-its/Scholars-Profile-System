@@ -59,6 +59,8 @@ import {
   fetchAllPostdocEmploymentRecords,
   fetchDoctoralStudents,
   fetchPersonNamesByCwid,
+  labPiNameKey,
+  personNameKey,
   openLdap,
 } from "@/lib/sources/ldap";
 
@@ -1617,6 +1619,47 @@ async function main() {
     // Gated on the employee-SOR fetch actually succeeding: the fetch failure
     // above is swallowed (best-effort), and running this pass against an
     // empty managerByCwid would mass-null every mentor pointer (audit PR-3).
+    //
+    // Mentor resolution (shared with the issue-#183 pass below): the role
+    // record's `manager` DN is the PI for most postdocs, but HR points some
+    // at a lab administrator, and the PI then appears only in the level3 org
+    // unit name ("Sallie Permar Research"). When the manager isn't a known
+    // scholar, resolve that name against active full-time faculty — an
+    // unambiguous hit wins, anything else keeps the manager as-is.
+    const knownCwids = new Set(
+      (
+        await db.write.scholar.findMany({
+          where: { deletedAt: null, status: "active" },
+          select: { cwid: true },
+        })
+      ).map((s) => s.cwid),
+    );
+    // ponytail: full_time_faculty only; widen to emeritus if a named lab ever misses.
+    const facultyByNameKey = new Map<string, string | null>();
+    for (const f of await db.write.scholar.findMany({
+      where: { deletedAt: null, status: "active", roleCategory: "full_time_faculty" },
+      select: { cwid: true, preferredName: true, fullName: true },
+    })) {
+      const full = personNameKey(f.fullName).split(" ");
+      for (const key of new Set([
+        personNameKey(f.preferredName),
+        full.join(" "),
+        `${full[0]} ${full[full.length - 1]}`,
+      ])) {
+        if (key.split(" ").length < 2) continue;
+        const prev = facultyByNameKey.get(key);
+        // null = ambiguous (two faculty share the key) — never resolves.
+        facultyByNameKey.set(key, prev === undefined || prev === f.cwid ? f.cwid : null);
+      }
+    }
+    const resolveMentor = (
+      managerCwid: string | null,
+      labUnitName: string | null,
+    ): string | null => {
+      if (managerCwid && knownCwids.has(managerCwid)) return managerCwid;
+      const key = labPiNameKey(labUnitName);
+      return (key && facultyByNameKey.get(key)) || managerCwid;
+    };
     if (!employeeFetchSucceeded) {
       console.warn(
         "[ED] postdoctoral mentor pass skipped — employee SOR fetch failed; existing pointers retained",
@@ -1626,18 +1669,13 @@ async function main() {
         where: { roleCategory: "postdoc", deletedAt: null, status: "active" },
         select: { cwid: true },
       });
-      const knownCwids = new Set(
-        (
-          await db.write.scholar.findMany({
-            where: { deletedAt: null, status: "active" },
-            select: { cwid: true },
-          })
-        ).map((s) => s.cwid),
-      );
       let mentorAssignments = 0;
       let mentorOrphans = 0;
+      let mentorViaLabUnit = 0;
       for (const p of postdocs) {
-        const managerCwid = managerByCwid.get(p.cwid) ?? null;
+        const emp = employeeByCwid.get(p.cwid);
+        const managerCwid = resolveMentor(emp?.managerCwid ?? null, emp?.labUnitName ?? null);
+        if (managerCwid && managerCwid !== emp?.managerCwid) mentorViaLabUnit += 1;
         let nextMentorCwid: string | null = null;
         if (managerCwid && knownCwids.has(managerCwid)) {
           nextMentorCwid = managerCwid;
@@ -1661,7 +1699,8 @@ async function main() {
       });
       console.log(
         `[ED] postdoctoral mentor: ${mentorAssignments} assigned across ${postdocs.length} active postdocs (` +
-          `${mentorOrphans} manager DNs not in scholar table; ${cleared.count} stale pointers cleared)`,
+          `${mentorViaLabUnit} via lab-unit name; ${mentorOrphans} manager DNs not in scholar table; ` +
+          `${cleared.count} stale pointers cleared)`,
       );
     }
 
@@ -1720,9 +1759,11 @@ async function main() {
       }
 
       if (postdocRoleRecords.length > 0) {
-        // Drop rows with no manager DN — no PI = no relationship to record.
-        // Counted separately for the summary log.
-        const withMentor = postdocRoleRecords.filter((r) => r.managerCwid);
+        // Drop rows with no resolvable PI (no manager DN and no named lab
+        // unit) — nothing to record. Counted separately for the summary log.
+        const withMentor = postdocRoleRecords
+          .map((r) => ({ ...r, mentorCwid: resolveMentor(r.managerCwid, r.labUnitName) }))
+          .filter((r) => r.mentorCwid);
         const orphanRoleRecords = postdocRoleRecords.length - withMentor.length;
 
         // Name resolution. Existing Scholar rows provide names for active
@@ -1789,7 +1830,7 @@ async function main() {
             where: { externalId },
             create: {
               externalId,
-              mentorCwid: r.managerCwid!,
+              mentorCwid: r.mentorCwid!,
               menteeCwid: r.cwid,
               menteeFirstName: name?.firstName ?? null,
               menteeLastName: name?.lastName ?? null,
@@ -1801,7 +1842,7 @@ async function main() {
               source: "ED-EMPLOYEE-SOR",
             },
             update: {
-              mentorCwid: r.managerCwid!,
+              mentorCwid: r.mentorCwid!,
               menteeCwid: r.cwid,
               menteeFirstName: name?.firstName ?? null,
               menteeLastName: name?.lastName ?? null,
@@ -1849,7 +1890,8 @@ async function main() {
         console.log(
           `[ED] postdoc mentees: ${upserted} relationships upserted ` +
             `(${activeCount} active, ${expiredCount} alumni; ` +
-            `${orphanRoleRecords} role records skipped — no manager DN; ` +
+            `${withMentor.filter((r) => r.mentorCwid !== r.managerCwid).length} via lab-unit name; ` +
+            `${orphanRoleRecords} role records skipped — no manager DN or named lab unit; ` +
             `${alumniCwids.length} alumni names resolved from ou=people; ` +
             `${deleted} stale rows tombstoned)`,
         );
