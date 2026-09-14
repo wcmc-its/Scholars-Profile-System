@@ -31,6 +31,7 @@ type FakeClient = {
   orgUnitRoleAssignment: { findFirst: AnyMock };
   coiActivity: { findMany: AnyMock };
   coiGapCandidate: { findMany: AnyMock };
+  menteeSuggestion: { findMany: AnyMock };
   publication: { findMany: AnyMock };
   publicationConflictStatement: { findMany: AnyMock };
   scholarTechnology: { findMany: AnyMock };
@@ -75,6 +76,9 @@ function fakeClient(): FakeClient {
     // COI-gap candidates — default to "none". Only queried when the loader is
     // called with `{ includeCoiGap: true }` (the self-only gate).
     coiGapCandidate: { findMany: vi.fn().mockResolvedValue([]) },
+    // #2634 mentee suggestions — default "none"; only queried with
+    // `{ includeMenteeSuggestions: true }`.
+    menteeSuggestion: { findMany: vi.fn().mockResolvedValue([]) },
     // Publications — the COI-gap loader joins this by pmid for the per-source
     // year + sort date. Default to "no rows" (year/ts fall back to null/0).
     publication: { findMany: vi.fn().mockResolvedValue([]) },
@@ -1241,6 +1245,109 @@ describe("loadEditContext — mentees (suppressible)", () => {
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => []);
     expect(ctx!.mentees).toEqual([]);
+  });
+});
+
+describe("loadEditContext — mentee suggestions (#2634 gate + exclusion + evidence join)", () => {
+  const suggRow = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    mentorCwid: SELF,
+    menteeCwid: "pxr4012",
+    menteeName: "Priya Raman",
+    menteeTitle: "Postdoctoral Associate",
+    menteeUnit: "Pediatrics",
+    kind: "postdoc",
+    tier: "presumptive",
+    nCoPubs: 2,
+    nMentorLastAuthor: 1,
+    nMenteeFirstAuthor: 1,
+    firstYear: 2024,
+    lastYear: 2026,
+    menteeFirstPublishedYear: 2021,
+    strong: true,
+    evidence: [
+      { id: "41022331", year: 2026, menteeRank: 1, mentorRank: 9, total: 9 },
+      { id: "40118872", year: 2025, menteeRank: 1, mentorRank: 7, total: 7 },
+    ],
+    computedAt: new Date("2026-09-14T05:00:00Z"),
+    dismissedAt: null,
+    dismissedBy: null,
+    dismissReason: null,
+    ...over,
+  });
+
+  it("never queries mentee_suggestion without the opt-in", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => []);
+    expect(ctx!.menteeSuggestions).toEqual([]);
+    expect(c.menteeSuggestion.findMany).not.toHaveBeenCalled();
+  });
+
+  it("drops already-listed mentees (sourced + hand-entered), keeps dismissed rows, joins + caps evidence", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockImplementation((args: { where?: { cwid?: string }; select?: unknown }) =>
+      Promise.resolve(args.where?.cwid === SELF ? scholarRow() : null),
+    );
+    c.fieldOverride.findUnique.mockImplementation((args: {
+      where: { entityType_entityId_fieldName: { fieldName: string } };
+    }) =>
+      Promise.resolve(
+        args.where.entityType_entityId_fieldName.fieldName === "manualMentees"
+          ? { value: JSON.stringify([{ name: "Rowan Ellis", cwid: "rce4001" }]) }
+          : null,
+      ),
+    );
+    c.menteeSuggestion.findMany.mockResolvedValue([
+      suggRow(),
+      // Sourced mentee → excluded.
+      suggRow({ id: 2, menteeCwid: "src4002", menteeName: "Sourced Mentee" }),
+      // Hand-entered mentee → excluded.
+      suggRow({ id: 3, menteeCwid: "rce4001", menteeName: "Rowan Ellis" }),
+      // Dismissed → kept, with the reason.
+      suggRow({
+        id: 4,
+        menteeCwid: "kao4007",
+        menteeName: "Kate Ojo",
+        dismissedAt: new Date("2026-09-01T00:00:00Z"),
+        dismissedBy: SELF,
+        dismissReason: "colleague",
+        evidence: Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, year: 2020, menteeRank: 1, mentorRank: 2, total: 2 })),
+      }),
+    ]);
+    c.publication.findMany.mockResolvedValue([
+      { pmid: "41022331", title: "Single-cell atlas", journal: "J Clin Invest", year: 2026 },
+    ]);
+    const ctx = await loadEditContext(
+      SELF,
+      asClient(c),
+      undefined,
+      async () => [{ cwid: "src4002", fullName: "Sourced Mentee", programName: null, programType: null, manualOnly: false }],
+      { includeMenteeSuggestions: true },
+    );
+    expect(c.menteeSuggestion.findMany.mock.calls[0][0].where).toEqual({ mentorCwid: SELF });
+    expect(ctx!.menteeSuggestions.map((s) => s.id)).toEqual([1, 4]);
+    const [priya, kate] = ctx!.menteeSuggestions;
+    expect(priya).toMatchObject({
+      menteeCwid: "pxr4012",
+      kind: "postdoc",
+      tier: "presumptive",
+      strong: true,
+      dismissedAt: null,
+      dismissReason: null,
+    });
+    // Title/journal joined from Publication; a missing pub leaves them null but
+    // keeps the ETL-snapshotted year and ranks.
+    expect(priya.evidence).toEqual([
+      { id: "41022331", year: 2026, title: "Single-cell atlas", journal: "J Clin Invest", menteeRank: 1, mentorRank: 9, total: 9 },
+      { id: "40118872", year: 2025, title: null, journal: null, menteeRank: 1, mentorRank: 7, total: 7 },
+    ]);
+    expect(kate.dismissedAt).toBe("2026-09-01T00:00:00.000Z");
+    expect(kate.dismissReason).toBe("colleague");
+    expect(kate.evidence).toHaveLength(10);
+    // The publication join is scoped to the (capped) evidence ids.
+    const pubWhere = c.publication.findMany.mock.calls[0][0].where;
+    expect(pubWhere.pmid.in).toHaveLength(12); // 2 + 10 capped
   });
 });
 

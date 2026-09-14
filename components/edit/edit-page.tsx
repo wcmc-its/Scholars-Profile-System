@@ -8,12 +8,15 @@
  * Which attributes appear (and whether editable) is the only thing that differs
  * by actor; the data contract and write calls are layout-independent.
  */
+import Link from "next/link";
+
 import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
 import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
 import { HonorsCard } from "@/components/edit/honors-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
+import { MenteeSuggestionsCard } from "@/components/edit/mentee-suggestions-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -91,6 +94,7 @@ type AttrKey =
   | "coi-gap"
   | "reporter-profile"
   | "mentees"
+  | "mentee-suggestions"
   | "profile-url"
   | "proxy-editors";
 
@@ -166,6 +170,11 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
   { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
+  // Mentees › From your publications (#2634, SELF_EDIT_MENTEE_SUGGESTIONS) —
+  // co-authors who hold a trainee-type appointment, offered for the mentor to
+  // add (or dismiss). Self OR superuser; never a proxy / unit-admin (excluded in
+  // `attrsForMode`). The rail item appears only when the loader returned rows.
+  { key: "mentee-suggestions", label: "From your publications", modes: ["self", "superuser"] },
   // Conflicts of interest — read-only; managed in the Weill Research Gateway.
   { key: "coi", label: "Conflicts of Interest", readonly: true, modes: ["self", "superuser"] },
   // From your publications (#SELF_EDIT_COI_GAP_HINT) — a sensitive advisory:
@@ -264,6 +273,7 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.key !== "profile-url" &&
         a.key !== "coi-gap" &&
         a.key !== "reporter-profile" && // self/superuser-only advisory, like coi-gap
+        a.key !== "mentee-suggestions" && // #2634 — self/superuser-only, like coi-gap
         a.key !== "proxy-editors", // a proxy / unit admin can never manage the proxy list (CD-2)
     );
   }
@@ -321,6 +331,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "news",
   "datasets",
   "mentees",
+  "mentee-suggestions",
   "coi",
   "coi-gap",
   // "Services" group — owner-facing tools (#917 v5/v6), rendered LAST per operator
@@ -359,6 +370,7 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   honors: "owned",
   education: "sourced",
   mentees: "sourced",
+  "mentee-suggestions": "sourced",
   "name-title": "readonly",
   email: "readonly",
   photo: "readonly",
@@ -405,6 +417,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "news",
   "datasets",
   "mentees",
+  "mentee-suggestions",
   "coi",
   "coi-gap",
   "biosketch",
@@ -434,6 +447,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   datasets: { group: RAIL_V2_WCM_GROUP },
   "reporter-profile": { group: RAIL_V2_WCM_GROUP },
   mentees: { group: RAIL_V2_WCM_GROUP },
+  "mentee-suggestions": { group: RAIL_V2_WCM_GROUP },
   coi: { group: RAIL_V2_WCM_GROUP },
   "coi-gap": { group: RAIL_V2_WCM_GROUP },
   biosketch: { group: "Tools" },
@@ -494,6 +508,8 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // authorships with hide/show + reject, acted on the scholar's behalf.
   "publications",
   "mentees",
+  // #2634 — nested under Mentees; present only when the loader returned rows.
+  "mentee-suggestions",
   "coi",
   // COI-gap advisory — superuser-visible too (operator decision), with a UI nag.
   // Present only when there are candidates AND the flag is on.
@@ -595,6 +611,7 @@ export function visibleAttrKeys(
   hasTechnologies = false,
   hasNews = false,
   hasDatasets = false,
+  hasMenteeSuggestions = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -648,6 +665,10 @@ export function visibleAttrKeys(
       // dropped from the rail and the valid-attr set, so `?attr=datasets`
       // canonicalizes away.
       .filter((a) => a.key !== "datasets" || hasDatasets)
+      // #2634 — "Mentees › From your publications" exists only when the loader
+      // returned rows (flag on + self/superuser); `?attr=mentee-suggestions`
+      // with none canonicalizes away.
+      .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
       .map((a) => a.key)
   );
 }
@@ -695,6 +716,13 @@ export function EditPage({
   const hasReporterProfile =
     (mode === "self" || isSuperuserLike(mode)) &&
     (ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0);
+  // #2634 — "Mentees › From your publications" is present for self OR superuser
+  // when the loader returned ANY row (active or dismissed — a dismissed-only
+  // history still surfaces the item, to restore). The rail badge and the
+  // Mentees-tab pointer count only ACTIVE (non-dismissed) rows.
+  const hasMenteeSuggestions =
+    (mode === "self" || isSuperuserLike(mode)) && ctx.menteeSuggestions.length > 0;
+  const activeMenteeSuggestions = activeMenteeSuggestionCount(ctx);
   // Available technologies — CTL is the SOR and the row is public info (visible to
   // every edit mode, like publications/coi), so the ONLY gate is "has ≥1 invention".
   // The loader already gates the array on AVAILABLE_TECHNOLOGIES_SECTION, so a
@@ -726,6 +754,7 @@ export function EditPage({
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
+    .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
@@ -753,6 +782,7 @@ export function EditPage({
   const railCount = (k: AttrKey): number | undefined => {
     if (k === "coi-gap") return ctx.unmatchedPubmedCoi.length || undefined;
     if (k === "reporter-profile") return ctx.reporterProfileCandidates.length || undefined;
+    if (k === "mentee-suggestions") return activeMenteeSuggestions || undefined;
     return undefined;
   };
 
@@ -760,7 +790,8 @@ export function EditPage({
   // rather than reading as flat siblings: "From your publications" under
   // Conflicts of Interest, and "Is this you?" under Funding. Each immediately
   // follows its parent in every *_RAIL_ORDER and shares its rail group.
-  const isNestedSubview = (k: AttrKey) => k === "coi-gap" || k === "reporter-profile";
+  const isNestedSubview = (k: AttrKey) =>
+    k === "coi-gap" || k === "reporter-profile" || k === "mentee-suggestions";
 
   const railItems: RailItem[] = railRestructureEnabled
     ? RAIL_V2_ORDER.flatMap((k) => {
@@ -895,6 +926,16 @@ export function EditPage({
       )}
     </EditShell>
   );
+}
+
+/** #2634 — non-dismissed suggestion rows: the rail badge + Mentees pointer count. */
+function activeMenteeSuggestionCount(ctx: EditContext): number {
+  return ctx.menteeSuggestions.filter((s) => s.dismissedAt === null).length;
+}
+
+/** "3 co-authors look like trainees" / "1 co-author looks like a trainee". */
+function menteeSuggestionPointer(n: number): string {
+  return n === 1 ? "1 co-author looks like a trainee" : `${n} co-authors look like trainees`;
 }
 
 function renderPanel(
@@ -1275,6 +1316,20 @@ function renderPanel(
             initial={ctx.manualMentees}
             unresolvedCwids={ctx.manualMenteeUnresolvedCwids}
           />
+          {/* #2634 — one muted pointer to the nested sub-view when there are
+              active suggestions; the loader only populates the array for an
+              allowed actor behind the flag, so a count here implies both. */}
+          {activeMenteeSuggestionCount(ctx) > 0 && (
+            <p className="text-muted-foreground text-sm" data-testid="mentee-suggestions-pointer">
+              {menteeSuggestionPointer(activeMenteeSuggestionCount(ctx))} &mdash; review them under{" "}
+              <Link
+                href={`${detailBase}?attr=mentee-suggestions`}
+                className="text-apollo-slate font-medium hover:underline"
+              >
+                Mentees &rsaquo; From your publications
+              </Link>
+            </p>
+          )}
           <MenteesCard
             cwid={cwid}
             mode={voiceMode}
@@ -1282,6 +1337,19 @@ function renderPanel(
             mentees={ctx.mentees}
           />
         </div>
+      );
+    case "mentee-suggestions":
+      // #2634 — self or superuser; the loader populates the array only for an
+      // allowed actor behind the flag, and the rail item is dropped when empty.
+      return (
+        <MenteeSuggestionsCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          scholarSlug={ctx.scholar.slug}
+          suggestions={ctx.menteeSuggestions}
+          manualMentees={ctx.manualMentees}
+        />
       );
     case "coi":
       return (

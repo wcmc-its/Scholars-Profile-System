@@ -128,6 +128,9 @@ const ctx: EditContext = {
   // above is what the hide-only panel renders.
   manualMentees: [],
   manualMenteeUnresolvedCwids: [],
+  // #2634 — empty by default (loader returns [] unless SELF_EDIT_MENTEE_SUGGESTIONS
+  // is on for a genuine self/superuser viewer); a describe block below populates it.
+  menteeSuggestions: [],
   // SELF_EDIT_COI_GAP_HINT — empty by default (loader returns [] unless the
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.
@@ -583,6 +586,84 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(screen.getByTestId("coi-gap-back").getAttribute("href")).toBe(
       "/edit/scholar/other7?attr=coi",
     );
+  });
+});
+
+describe("EditPage router — mentee-suggestions rail + Mentees pointer (#2634)", () => {
+  const sugg = (id: number, over: Partial<EditContext["menteeSuggestions"][number]> = {}) => ({
+    id,
+    menteeCwid: `mnt${id}`,
+    menteeName: `Mentee ${id}`,
+    menteeTitle: null,
+    menteeUnit: null,
+    kind: "postdoc" as const,
+    tier: "presumptive" as const,
+    nCoPubs: 3,
+    nMentorLastAuthor: 2,
+    firstYear: 2024,
+    lastYear: 2026,
+    menteeFirstPublishedYear: 2022,
+    strong: false,
+    dismissedAt: null,
+    dismissReason: null,
+    evidence: [],
+    ...over,
+  });
+  const withSugg: EditContext = {
+    ...ctx,
+    menteeSuggestions: [sugg(1), sugg(2), sugg(3, { dismissedAt: "2026-09-01T00:00:00.000Z", dismissReason: "colleague" })],
+  };
+
+  it("no rows → no rail item, and ?attr=mentee-suggestions canonicalizes away", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="mentee-suggestions" />);
+    expect(screen.queryByTestId("rail-mentee-suggestions")).toBeNull();
+    expect(document.querySelector('[data-slot="mentee-suggestions-panel"]')).toBeNull();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
+  });
+
+  it("rows → nested child right after Mentees, badge = ACTIVE (non-dismissed) count", () => {
+    render(<EditPage ctx={withSugg} mode="self" />);
+    const item = screen.getByTestId("rail-mentee-suggestions");
+    expect(item.textContent).toContain("From your publications");
+    expect(item.className).toContain("pl-7");
+    expect(item.querySelector('[aria-label="2 to review"]')?.textContent).toBe("2");
+    // Immediately follows Mentees in the rail (it nests under the preceding item).
+    const keys = Array.from(document.querySelectorAll('[data-testid^="rail-"]')).map((el) =>
+      el.getAttribute("data-testid"),
+    );
+    expect(keys.indexOf("rail-mentee-suggestions")).toBe(keys.indexOf("rail-mentees") + 1);
+    expect(keys.indexOf("rail-coi")).toBe(keys.indexOf("rail-mentee-suggestions") + 1);
+  });
+
+  it("a dismissed-only history still surfaces the item, without a badge or a Mentees pointer", () => {
+    const goneOnly: EditContext = { ...ctx, menteeSuggestions: [withSugg.menteeSuggestions[2]] };
+    render(<EditPage ctx={goneOnly} mode="self" attr="mentees" />);
+    const item = screen.getByTestId("rail-mentee-suggestions");
+    expect(item.querySelector('[aria-label$="to review"]')).toBeNull();
+    expect(screen.queryByTestId("mentee-suggestions-pointer")).toBeNull();
+  });
+
+  it("Mentees tab shows one pointer line linking to the sub-view on the ACTIVE surface", () => {
+    render(<EditPage ctx={withSugg} mode="self" attr="mentees" />);
+    const p = screen.getByTestId("mentee-suggestions-pointer");
+    expect(p.textContent).toContain("2 co-authors look like trainees");
+    expect(p.querySelector("a")?.getAttribute("href")).toBe("/edit?attr=mentee-suggestions");
+  });
+
+  it("?attr=mentee-suggestions renders the card; superuser gets the scholar-named add button + superuser hrefs", () => {
+    const suCtx: EditContext = { ...superuserCtx, menteeSuggestions: withSugg.menteeSuggestions };
+    render(<EditPage ctx={suCtx} mode="superuser" attr="mentee-suggestions" />);
+    expect(document.querySelector('[data-slot="mentee-suggestions-panel"]')).not.toBeNull();
+    expect(screen.getByTestId("mentee-suggestion-add-1").textContent).toBe("Add for Alex Other");
+    expect(screen.getByTestId("mentee-suggestions-back").getAttribute("href")).toBe(
+      "/edit/scholar/other7?attr=mentees",
+    );
+  });
+
+  it("is never offered to a proxy", () => {
+    render(<EditPage ctx={withSugg} mode="proxy" attr="mentee-suggestions" />);
+    expect(screen.queryByTestId("rail-mentee-suggestions")).toBeNull();
+    expect(document.querySelector('[data-slot="mentee-suggestions-panel"]')).toBeNull();
   });
 });
 

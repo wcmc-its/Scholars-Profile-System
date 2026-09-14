@@ -30,8 +30,10 @@ import { Input } from "@/components/ui/input";
 import { isCwid } from "@/lib/cwid";
 import { MAX_MANUAL_MENTEES, type ManualMentee } from "@/lib/edit/manual-mentee";
 
-/** The editable draft the add / edit form works on (strings, blank = unset). */
-type Draft = {
+/** The editable draft the add / edit form works on (strings, blank = unset).
+ *  Exported (with `MenteeForm` / `draftToEntry` / `mapErrorToMessage`) so the
+ *  #2634 suggestions card can prefill the same form and write the same array. */
+export type Draft = {
   name: string;
   cwid: string;
   programLabel: string;
@@ -276,7 +278,7 @@ export function ManualMenteesCard({
  * stays optional on purpose: the trainees this card exists for are the ones
  * least likely to have a CWID the mentor can produce.
  */
-function MenteeForm({
+export function MenteeForm({
   idPrefix,
   initial,
   submitLabel,
@@ -392,7 +394,7 @@ function metaLine(row: ManualMentee): string {
 }
 
 /** Blank optional strings drop out entirely — the validator stores no empty keys. */
-function draftToEntry(d: Draft): ManualMentee {
+export function draftToEntry(d: Draft): ManualMentee {
   const entry: ManualMentee = { name: d.name.trim() };
   const cwid = d.cwid.trim().toLowerCase();
   if (cwid) entry.cwid = cwid;
@@ -412,7 +414,7 @@ function entryToDraft(row: ManualMentee): Draft {
   };
 }
 
-function mapErrorToMessage(code: string): string {
+export function mapErrorToMessage(code: string): string {
   switch (code) {
     case "invalid_name":
       return "A name is required.";
