@@ -170,6 +170,15 @@ describe("validateManualMentees", () => {
     const r = validateManualMentees([{ name: "A", programLabel: "  " }]);
     expect(r.ok && JSON.stringify(r.value)).toBe('[{"name":"A"}]');
   });
+
+  it("accepts a programType from the sourced vocabulary only (#2634 accept flow)", () => {
+    const ok = validateManualMentees([{ name: "A", programType: "POSTDOC" }]);
+    expect(ok.ok && ok.value[0].programType).toBe("POSTDOC");
+    expect(validateManualMentees([{ name: "A", programType: "Postdoc" }])).toEqual({
+      ok: false,
+      error: "invalid_value",
+    });
+  });
 });
 
 describe("getMenteesForMentor — manual mentees (#2011)", () => {
@@ -199,10 +208,19 @@ describe("getMenteesForMentor — manual mentees (#2011)", () => {
     expect(mentees[0]).toMatchObject({
       fullName: "Rowan Ellis",
       programName: "Visiting student",
+      programType: null,
       graduationYear: 2019,
       copublicationCount: 0,
       scholar: null,
     });
+  });
+
+  it("buckets a manual entry by its programType so an accepted postdoc is a Postdoc mentee, not 'other'", async () => {
+    storeManual([{ name: "Priya Raman", cwid: "pxr4012", programLabel: "Postdoctoral Associate", programType: "POSTDOC" }]);
+
+    const { mentees } = await getMenteesForMentor(MENTOR);
+
+    expect(mentees[0]).toMatchObject({ fullName: "Priya Raman", programType: "POSTDOC" });
   });
 
   it("never queries a co-pub source when every mentee is CWID-less", async () => {

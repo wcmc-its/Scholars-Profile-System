@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyMenteeKind, tierOf } from "@/lib/mentee-suggestions/kind";
+import { classifyMenteeKind, programTypeForKind, tierOf } from "@/lib/mentee-suggestions/kind";
 
 describe("classifyMenteeKind", () => {
   it("picks the most specific trainee type over the paid-student employee type", () => {
@@ -33,5 +33,15 @@ describe("classifyMenteeKind", () => {
       "ambiguous",
     );
     expect(tierOf(classifyMenteeKind(["academic-inactive"]))).toBe("unknown");
+  });
+
+  it("maps trainee kinds to the public degree buckets; the rest stay 'other'", () => {
+    expect(programTypeForKind("postdoc")).toBe("POSTDOC");
+    expect(programTypeForKind("alumni_phd")).toBe("PhD");
+    expect(programTypeForKind("md_phd")).toBe("MD-PhD");
+    expect(programTypeForKind("md_student")).toBe("AOC");
+    for (const k of ["volunteer", "resident", "research_staff", "alumni_md", "masters"] as const) {
+      expect(programTypeForKind(k), k).toBeUndefined();
+    }
   });
 });

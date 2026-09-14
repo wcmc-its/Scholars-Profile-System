@@ -296,7 +296,12 @@ describe("MenteeSuggestionsCard", () => {
         fieldName: "manualMentees",
         value: [
           { name: "Rowan Ellis", cwid: "rce4001", programLabel: "Visiting student", year: 2024 },
-          { name: "Priya Raman", cwid: "pxr4012", programLabel: "Postdoctoral Associate" },
+          {
+            name: "Priya Raman",
+            cwid: "pxr4012",
+            programLabel: "Postdoctoral Associate",
+            programType: "POSTDOC",
+          },
         ],
       },
     });

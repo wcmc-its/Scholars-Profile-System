@@ -50,6 +50,7 @@ const NAV: NavGroup[] = [
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
       { id: "showcase", label: "Spotlight & Selected research" },
+      { id: "mentees", label: "Mentees" },
       { id: "profile-url", label: "Your profile URL" },
       { id: "requests", label: "Requesting changes" },
     ],
@@ -585,6 +586,21 @@ export default function DocsPage() {
                 <td>Request a change (routes to the Graduate School)</td>
               </tr>
               <tr>
+                <td>Mentees</td>
+                <td>
+                  Jenzabar (PhD thesis advisors); Medical Education records (MD scholarly-project
+                  mentors); Employee Central via the Enterprise Directory (postdoc supervisors);
+                  entries you add yourself. Co-authors of yours who hold a trainee-type
+                  appointment are suggested to you in the console from ReCiter&apos;s curated
+                  publications; a suggestion appears publicly only after you add it.
+                </td>
+                <td>Nightly</td>
+                <td>
+                  Hide any mentee; add or remove your own entries; Request a change for a
+                  Jenzabar or Employee Central record
+                </td>
+              </tr>
+              <tr>
                 <td>Education record</td>
                 <td>ASMS</td>
                 <td>Nightly</td>
@@ -777,6 +793,15 @@ export default function DocsPage() {
                 <td>A Graduate School appointment or mentor/mentee</td>
                 <td>Jenzabar</td>
                 <td>Request a change (routes to the Graduate School)</td>
+              </tr>
+              <tr>
+                <td>A mentee is missing</td>
+                <td>Scholars</td>
+                <td>
+                  Add them under Mentees in the console. Co-authors with a trainee-type
+                  appointment are listed there under &ldquo;From your publications&rdquo; for you
+                  to accept or dismiss.
+                </td>
               </tr>
               <tr>
                 <td>Your hospital position</td>
@@ -1366,6 +1391,61 @@ export default function DocsPage() {
           all, which is a privacy choice, and they appear only as plain-text names where a mentor or
           co-author relationship refers to them.
         </p>
+
+        <h2 id="mentees">Mentees</h2>
+        <p>
+          The Mentoring section of a profile is assembled from four records, each covering a
+          different kind of trainee, plus anything the mentor adds. Current and former mentees both
+          appear; an alumnus shows the years of the relationship rather than &ldquo;since&rdquo;.
+          Each mentee chip carries the number of publications you co-authored with them, and the
+          section header switches to a breakdown by program (MD, MD-PhD, PhD, postdoc, early career,
+          other) once the list is long enough for that to be useful.
+        </p>
+        <ul>
+          <li>
+            <strong>PhD and MD-PhD students</strong> come from Jenzabar, the Graduate School&apos;s
+            system: the thesis advisor of record for each student, including graduates. Corrections
+            go to the Graduate School through Request a change.
+          </li>
+          <li>
+            <strong>MD students and early-career trainees</strong> come from Medical
+            Education&apos;s scholarly-project records (Areas of Concentration and the related
+            programs), including past classes.
+          </li>
+          <li>
+            <strong>Postdocs</strong> come from Employee Central through the Enterprise Directory:
+            the supervisor named on the postdoctoral appointment, current and expired. When the
+            supervisor of record is a lab administrator rather than the PI, Scholars uses the PI
+            named in the appointment&apos;s lab unit instead. Corrections are routed to ITS support,
+            who fix a sync issue or escalate to HR.
+          </li>
+          <li>
+            <strong>Mentees you add yourself</strong> under Mentees › Added by you in the console:
+            visiting students, trainees from another institution, or anyone who predates the systems
+            above. A name is enough; a CWID, program, and completion year are optional.
+          </li>
+        </ul>
+        <p>
+          Because every one of those records can miss someone, the console also{" "}
+          <strong>suggests mentees from your publications</strong>. Nightly, Scholars looks at the
+          co-authors of your ReCiter-curated papers who hold a trainee-type appointment at WCM,
+          namely students, postdocs, fellows, residents, and volunteers, and lists them under
+          Mentees › From your publications, ranked by how often you are the paper&apos;s last
+          author. Research staff are listed with their title so a colleague is easy to tell from a
+          trainee; co-authors whose career stage the directory cannot establish are set aside rather
+          than suggested. Each suggestion shows the shared papers, and you accept it with one click
+          or mark it &ldquo;not a mentee&rdquo; so it does not return. An accepted suggestion
+          becomes one of your own entries and is grouped by program on the profile like a sourced
+          one.
+        </p>
+        <Callout variant="note" heading="Suggestions are private until you act on them">
+          <p>
+            Nothing under From your publications is visible to anyone but you (and an administrator
+            working on your behalf) until you add it. Hiding a mentee, from any source, is likewise
+            display-only and reversible: it removes them from your public profile and every
+            mentoring page without changing the underlying record.
+          </p>
+        </Callout>
 
         <h2 id="profile-url">Your profile URL</h2>
         <p>

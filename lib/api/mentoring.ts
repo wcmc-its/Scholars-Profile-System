@@ -620,7 +620,7 @@ export async function getMenteesForMentor(
   // suppressed — so the churn is invisible. Store a minted id per entry if a
   // durable reference ever appears.
   manualRows.forEach((m, i) => {
-    upsert(m.cwid ?? `${MANUAL_MENTEE_ID_PREFIX}${i}`, m.name, null, m.year ?? null);
+    upsert(m.cwid ?? `${MANUAL_MENTEE_ID_PREFIX}${i}`, m.name, m.programType ?? null, m.year ?? null);
   });
 
   const cwids = [...byCwid.keys()];
