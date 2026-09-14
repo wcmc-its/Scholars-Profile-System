@@ -435,7 +435,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_MENTEE_SUGGESTIONS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_GRANT_RECS",
