@@ -271,6 +271,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         label: taxonomyMatch.meshResolution.name,
         descriptorUi: taxonomyMatch.meshResolution.descriptorUi,
         definition: taxonomyMatch.meshResolution.scopeNote,
+        secondaryLabel: taxonomyMatch.meshResolution.secondaryConcept?.name ?? null,
       }
     : null;
   const scopeHrefs = {

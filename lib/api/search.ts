@@ -1561,6 +1561,14 @@ function buildGradedAreaBoostFunctions(
 export async function getConceptScholarConcentration(
   descendantUis: string[],
   limit: number,
+  /**
+   * Two-concept queries (`SEARCH_MESH_SECONDARY_CONCEPT`): when given, the on-topic
+   * count is publications tagged in THIS subtree AND `descendantUis` — true
+   * co-occurrence, one extra `terms` filter on the same agg. The denominator
+   * (author total) and the concentration formula are unchanged, so a scholar
+   * is tiered by how much of their output sits at the intersection.
+   */
+  secondaryDescendantUis: string[] = [],
 ): Promise<{ cwid: string; total: number }[]> {
   if (descendantUis.length === 0 || limit <= 0) return [];
   // ADR-011 B1 — resolved OUTSIDE the cached closure and folded into the cache
@@ -1568,8 +1576,16 @@ export async function getConceptScholarConcentration(
   // so two requests for the same descendant set at different alpha values
   // must not collide on one cached score list.
   const alpha = resolveConceptConcentrationAlpha();
+  const onTopicFilter = [
+    { terms: { meshDescriptorUi: descendantUis } },
+    ...(secondaryDescendantUis.length > 0
+      ? [{ terms: { meshDescriptorUi: secondaryDescendantUis } }]
+      : []),
+  ];
+  const secondaryKey =
+    secondaryDescendantUis.length > 0 ? `+${[...secondaryDescendantUis].sort().join(",")}` : "";
   return cachedReasonAgg<{ cwid: string; total: number }[]>(
-    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}:${alpha}`,
+    `concept-concentration:${[...descendantUis].sort().join(",")}${secondaryKey}:${limit}:${alpha}`,
     async () => {
       const authorBuckets = (resp: unknown): { key: string; doc_count: number }[] =>
         (
@@ -1584,7 +1600,7 @@ export async function getConceptScholarConcentration(
         index: PUBLICATIONS_INDEX,
         body: {
           size: 0,
-          query: { bool: { filter: [{ terms: { meshDescriptorUi: descendantUis } }] } },
+          query: { bool: { filter: onTopicFilter } },
           aggs: { byAuthor: { terms: { field: "wcmAuthorCwids", size: limit } } },
         } as object,
       });

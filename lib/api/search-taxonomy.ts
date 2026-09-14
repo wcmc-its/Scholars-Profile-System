@@ -52,6 +52,7 @@ import {
   resolveSearchSuggestMeshConcept,
   resolveMeshResolutionFallbackEnabled,
   resolveMeshTokenCoverageEnabled,
+  resolveMeshSecondaryConceptEnabled,
   resolveMeshQueryNormalizationEnabled,
   resolveAcronymSenseGuardEnabled,
   resolveGenericTermMode,
@@ -222,6 +223,24 @@ export type MeshResolution = {
    * the resolver always populates it.
    */
   ambiguous?: boolean;
+  /**
+   * Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`). Set ONLY when this
+   * resolution is `partial` — the fallback matched a word-window — and the tokens the
+   * window did NOT cover resolve, as a whole, to a second descriptor through the
+   * verbatim path (name / entry term / curated alias / singularize; never another
+   * window guess, never a deprioritized filler word like `biology` or `medicine`).
+   * `pancreatic cancer immunotherapy` → primary Pancreatic Neoplasms, secondaryConcept
+   * Immunotherapy. Named to stay clear of `TaxonomyMatchResult.secondary` (callout rows). Consumed by `resolveAreaConcentration` to key the concentration
+   * boost on publications tagged in BOTH subtrees (reorder-only). Absent = one concept.
+   * ponytail: exactly two concepts; every measured prod case is two-concept.
+   */
+  secondaryConcept?: {
+    descriptorUi: string;
+    name: string;
+    matchedForm: string;
+    confidence: "exact" | "entry-term";
+    descendantUis: string[];
+  };
 };
 
 export type TaxonomyMatchResult =
@@ -1584,9 +1603,13 @@ export async function resolveMeshDescriptor(
     // The whole query matched nothing. When the fallback flag is on, retry against
     // the query's contiguous word-windows (decompose-and-resolve). Off ⇒ null, exactly
     // as before.
-    return resolveMeshResolutionFallbackEnabled()
-      ? resolveByWindowFallback(map, query)
-      : null;
+    if (!resolveMeshResolutionFallbackEnabled()) return null;
+    const primary = resolveByWindowFallback(map, query);
+    if (primary && resolveMeshSecondaryConceptEnabled()) {
+      const secondary = resolveSecondaryConcept(map, query, primary);
+      if (secondary) primary.secondaryConcept = secondary;
+    }
+    return primary;
   }
 
   const winner = candidates[0];
@@ -1731,6 +1754,56 @@ function queryConjuncts(query: string): string[][] {
     .split(/\s*(?:[&/,]|\band\b)\s*/)
     .map((seg) => seg.split(/[^a-z0-9]+/).filter(Boolean))
     .filter((seg) => seg.length > 0);
+}
+
+/**
+ * Two-concept resolution — resolve what the `partial` window LEFT OVER.
+ *
+ * Residual = the query's tokens minus the matched window's tokens (first occurrence,
+ * so `cancer immunotherapy` → window `immunotherapy` → residual `cancer`), joined
+ * back into one string and pushed through the verbatim resolver only: whole-form
+ * name / entry-term / curated-alias lookup, then the #1342 singularize retry. NOT the
+ * window fallback again — a guess on top of a guess is how `crispr base editing liver`
+ * would come back as `Liver`. The measured prod residuals are single words or short
+ * phrases that resolve at name/entry-term (`immunotherapy`, `diabetes`, `crispr`,
+ * `gene therapy`, `innate immunity`, `interferon`), so that is the only tier needed.
+ *
+ * Refused: a residual that is all deprioritized filler (`biology`, `medicine`,
+ * `research` — 29 of those are exact MeSH names and every one is a wrong second
+ * concept); and the same descriptor as the primary. The #1346 acronym guard is not
+ * re-applied: a residual short enough to be an acronym normalizes under the 3-char
+ * floor or is a real content token (`car t`, `covid`).
+ */
+function resolveSecondaryConcept(
+  map: MeshMap,
+  query: string,
+  primary: MeshResolution,
+): MeshResolution["secondaryConcept"] | undefined {
+  const tokens = queryConjuncts(query).flat();
+  const residual = [...tokens];
+  for (const w of queryConjuncts(primary.matchedForm).flat()) {
+    const i = residual.indexOf(w);
+    if (i >= 0) residual.splice(i, 1);
+  }
+  if (residual.length === 0 || residual.length === tokens.length) return undefined;
+  const surface = residual.join(" ");
+  if (isAllDeprioritized(surface)) return undefined;
+  const normalized = normalizeForMatch(surface);
+  if (normalized.length < MIN_QUERY_LEN) return undefined;
+  let cands = rankedDescriptorCandidates(map, normalized);
+  if (cands.length === 0 && resolveMeshQueryNormalizationEnabled()) {
+    const singular = singularizeForMatch(normalized);
+    if (singular !== normalized) cands = rankedDescriptorCandidates(map, singular);
+  }
+  const top = cands[0];
+  if (!top || top.row.descriptorUi === primary.descriptorUi) return undefined;
+  return {
+    descriptorUi: top.row.descriptorUi,
+    name: top.row.name,
+    matchedForm: top.matchedForm,
+    confidence: top.confidence,
+    descendantUis: getOrComputeDescendants(map, top.row.descriptorUi),
+  };
 }
 
 function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
