@@ -137,7 +137,6 @@ function renderCard(over: Partial<React.ComponentProps<typeof MenteeSuggestionsC
       cwid="self01"
       mode="self"
       scholarName="Alex Self"
-      scholarSlug="alex-self"
       suggestions={ROWS}
       manualMentees={[
         { name: "Rowan Ellis", cwid: "rce4001", programLabel: "Visiting student", year: 2024 },
@@ -208,9 +207,7 @@ describe("MenteeSuggestionsCard", () => {
   it("evidence: first 3 pubs + Show more, PMID link vs Scopus text, byline from ranks, full-title toggle", () => {
     renderCard();
     const pubs = within(screen.getByTestId("mentee-suggestion-pubs-1"));
-    expect(pubs.getByTestId("mentee-suggestion-copubs-link-1").getAttribute("href")).toBe(
-      "/scholars/alex-self/co-pubs/pxr4012",
-    );
+    expect(pubs.queryByTestId("mentee-suggestion-copubs-link-1")).toBeNull();
     expect(pubs.getByTestId("mentee-suggestion-pub-link-41022331").getAttribute("href")).toBe(
       "https://pubmed.ncbi.nlm.nih.gov/41022331/",
     );
@@ -228,6 +225,9 @@ describe("MenteeSuggestionsCard", () => {
     const title = pubs.getByTestId("mentee-suggestion-pub-title-41022331");
     expect(title.className).toContain("line-clamp-2");
     const toggle = pubs.getByTestId("mentee-suggestion-pub-toggle-41022331");
+    // A toggle INSIDE the clamped block is clipped by the overflow it exists to
+    // reveal (verifier's headless-Chromium probe); it must be a sibling.
+    expect(title.contains(toggle)).toBe(false);
     expect(toggle.textContent).toBe("[full ›]");
     fireEvent.click(toggle);
     expect(toggle.textContent).toBe("[less ‹]");
@@ -306,6 +306,17 @@ describe("MenteeSuggestionsCard", () => {
         within(screen.getByTestId("mentee-suggestions-list")).queryByTestId("mentee-suggestion-1"),
       ).toBeNull(),
     );
+    // A second add BEFORE router.refresh() re-renders the prop must still carry
+    // the first add — a full-array write from the stale prop would drop Priya.
+    fireEvent.click(screen.getByTestId("mentee-suggestion-add-2"));
+    fireEvent.click(
+      within(screen.getByTestId("mentee-suggestion-add-form-2")).getByTestId(
+        "manual-mentee-submit-sugg-2",
+      ),
+    );
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    const second = postedBody(1).body as { value: Array<{ cwid?: string }> };
+    expect(second.value.map((v) => v.cwid)).toEqual(["rce4001", "pxr4012", "wez4003"]);
   });
 
   it("a failed dismiss rolls the row back and shows inline error text", async () => {

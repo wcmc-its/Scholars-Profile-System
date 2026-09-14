@@ -138,9 +138,11 @@ describe("writeSuggestions guards", () => {
     const out = await writeSuggestions(fresh, db as unknown as Client);
     expect(out).toEqual({ upserted: 5, pruned: 1 });
     const update = db.menteeSuggestion.upsert.mock.calls[0][0].update;
-    expect(Object.keys(update)).not.toEqual(
-      expect.arrayContaining(["dismissedAt", "dismissedBy", "dismissReason"]),
-    );
+    // Each key individually — arrayContaining(all three) only failed when ALL
+    // three leaked, so a single leaked key kept the suite green.
+    for (const k of ["dismissedAt", "dismissedBy", "dismissReason"]) {
+      expect(update).not.toHaveProperty(k);
+    }
     expect(db.menteeSuggestion.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [2] } } });
   });
 });

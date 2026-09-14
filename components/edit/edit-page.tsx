@@ -1346,7 +1346,6 @@ function renderPanel(
           cwid={cwid}
           mode={voiceMode}
           scholarName={scholarName}
-          scholarSlug={ctx.scholar.slug}
           suggestions={ctx.menteeSuggestions}
           manualMentees={ctx.manualMentees}
         />

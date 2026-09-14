@@ -369,8 +369,9 @@ export async function buildMenteeSuggestions(): Promise<Summary> {
       mentorCwid: r.mentorCwid,
       menteeCwid: r.menteeCwid,
       menteeName: [p.firstName, p.lastName].filter(Boolean).join(" ") || r.menteeCwid,
-      menteeTitle: p.title ?? null,
-      menteeUnit: p.primaryOrganizationalUnit ?? null,
+      // ReCiterDB stores '' for a missing title/unit; null so `??` fallbacks work.
+      menteeTitle: p.title?.trim() || null,
+      menteeUnit: p.primaryOrganizationalUnit?.trim() || null,
       kind,
       tier: tierOf(kind),
       nCoPubs: r.nCoPubs,

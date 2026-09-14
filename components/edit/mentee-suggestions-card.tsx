@@ -42,8 +42,6 @@ export type MenteeSuggestionsCardProps = {
   cwid: string;
   mode?: "self" | "superuser";
   scholarName?: string;
-  /** The mentor's profile slug — the co-pubs page is keyed on it. */
-  scholarSlug: string;
   suggestions: ReadonlyArray<EditContextMenteeSuggestion>;
   /** The mentor's stored hand-entered mentees; "Add as mentee" appends to this
    *  array and POSTs the WHOLE thing (the #2011 full-array contract). */
@@ -58,9 +56,6 @@ const REASON_LABEL: Record<DismissReason, string> = {
 };
 
 const PUBS_SHOWN = 3;
-// ponytail: a length threshold stands in for measuring a 2-line overflow — a
-// title under this never needs the [full ›] toggle at any sane column width.
-const CLAMP_CHARS = 80;
 const GENERIC_ERROR = "We couldn’t update this just now. Please try again.";
 
 function lastNameOf(full: string): string {
@@ -105,7 +100,6 @@ export function MenteeSuggestionsCard({
   cwid,
   mode = "self",
   scholarName = "",
-  scholarSlug,
   suggestions,
   manualMentees,
 }: MenteeSuggestionsCardProps) {
@@ -118,6 +112,11 @@ export function MenteeSuggestionsCard({
   // truth on reload (`router.refresh()` after an add re-renders from it).
   const [dismissed, setDismissed] = React.useState<Map<number, DismissReason | null>>(new Map());
   const [added, setAdded] = React.useState<Set<number>>(new Set());
+  // Entries written this session. The prop goes stale until router.refresh()
+  // re-renders, and a full-array write from the stale prop would drop the
+  // previous add — so every POST merges these in (deduped by cwid once the
+  // refreshed prop carries them).
+  const [addedEntries, setAddedEntries] = React.useState<ManualMentee[]>([]);
   const [errors, setErrors] = React.useState<Map<number, string>>(new Map());
   const [busy, setBusy] = React.useState<Set<number>>(new Set());
 
@@ -197,7 +196,11 @@ export function MenteeSuggestionsCard({
           entityType: "scholar",
           entityId: cwid,
           fieldName: "manualMentees",
-          value: [...manualMentees, draftToEntry(draft)],
+          value: [
+            ...manualMentees,
+            ...addedEntries.filter((a) => !manualMentees.some((m) => m.cwid === a.cwid)),
+            draftToEntry(draft),
+          ],
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -206,6 +209,7 @@ export function MenteeSuggestionsCard({
         return false;
       }
       setAdded((a) => new Set(a).add(s.id));
+      setAddedEntries((a) => [...a, draftToEntry(draft)]);
       router.refresh();
       return true;
     } catch {
@@ -221,7 +225,6 @@ export function MenteeSuggestionsCard({
     you,
     su,
     scholarName,
-    scholarSlug,
     busy: busy.has(s.id),
     error: errors.get(s.id) ?? null,
     onAdd: (draft: Draft) => addAsMentee(s, draft),
@@ -336,7 +339,6 @@ function SuggestionRow({
   you,
   su,
   scholarName,
-  scholarSlug,
   busy,
   error,
   onAdd,
@@ -346,7 +348,6 @@ function SuggestionRow({
   you: string;
   su: boolean;
   scholarName: string;
-  scholarSlug: string;
   busy: boolean;
   error: string | null;
   onAdd: (draft: Draft) => Promise<unknown>;
@@ -356,7 +357,7 @@ function SuggestionRow({
   const [reason, setReason] = React.useState<DismissReason | null>(null);
   const [showAll, setShowAll] = React.useState(false);
   const surname = lastNameOf(s.menteeName);
-  const title = s.menteeTitle ?? KIND_LABEL[s.kind];
+  const title = s.menteeTitle || KIND_LABEL[s.kind];
   const pubs = showAll ? s.evidence : s.evidence.slice(0, PUBS_SHOWN);
   const years =
     s.firstYear != null && s.lastYear != null
@@ -394,7 +395,8 @@ function SuggestionRow({
           .join(" · ")}
         {s.tier === "ambiguous" && (
           <span className="ml-2" data-testid={`mentee-suggestion-hint-${s.id}`}>
-            ⓘ staff role — may be a colleague rather than a trainee
+            ⓘ {s.kind === "alumni_md" ? "MD alum" : "staff role"} — may be a colleague rather than a
+            trainee; check the title and first publication year
           </span>
         )}
       </p>
@@ -407,19 +409,14 @@ function SuggestionRow({
       {s.evidence.length > 0 && (
         <details data-testid={`mentee-suggestion-pubs-${s.id}`}>
           <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
-            Co-authored publications ({s.nCoPubs}){" "}
-            {/* Inside the summary the link's own activation wins, so clicking it
-                navigates without toggling; the rest of the summary still toggles.
-                ponytail: this page 404s until the pair is a recorded mentorship
-                (`getMentorMenteePair`), so it only works once the mentee is added. */}
-            <Link
-              href={`/scholars/${scholarSlug}/co-pubs/${encodeURIComponent(s.menteeCwid)}`}
-              className="text-xs hover:underline"
-              aria-label={`All co-authored publications with ${s.menteeName}`}
-              data-testid={`mentee-suggestion-copubs-link-${s.id}`}
-            >
-              all ›
-            </Link>
+            Co-authored publications ({s.nCoPubs})
+            {s.nCoPubs > s.evidence.length && (
+              <span className="text-muted-foreground text-xs font-normal">
+                {" "}
+                · {s.evidence.length} most recent shown; the full list appears on the profile once
+                added
+              </span>
+            )}
           </summary>
           <ul className="mt-2 flex flex-col gap-2">
             {pubs.map((e) => (
@@ -539,32 +536,41 @@ function PubRow({
 }) {
   const [full, setFull] = React.useState(false);
   const title = e.title ?? "(title unavailable)";
-  const clampable = title.length > CLAMP_CHARS;
+  // Offer the toggle only when the clamped title really overflows — measured,
+  // so a one-line title never carries a dead "[full ›]". Test environments
+  // without layout (jsdom) fall back to a length guess.
+  const titleRef = React.useRef<HTMLParagraphElement>(null);
+  const [clampable, setClampable] = React.useState(title.length > 80);
+  React.useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el || full || el.clientHeight === 0) return;
+    setClampable(el.scrollHeight > el.clientHeight);
+  }, [title, full]);
   const cite = citationIdentifier(e.id);
   return (
     <li className="flex gap-3 text-sm" data-testid={`mentee-suggestion-pub-${e.id}`}>
       <span className="text-muted-foreground w-10 shrink-0">{e.year ?? ""}</span>
       <div className="min-w-0 flex-1">
+        {/* The toggle sits OUTSIDE the clamped block: inside it, an overflowing
+            title clips the button itself — exactly the case the toggle is for. */}
         <p
+          ref={titleRef}
           className={full ? "" : "line-clamp-2"}
           data-testid={`mentee-suggestion-pub-title-${e.id}`}
         >
           {title}
-          {clampable && (
-            <>
-              {" "}
-              <button
-                type="button"
-                onClick={() => setFull((v) => !v)}
-                className="text-apollo-slate text-xs font-medium hover:underline"
-                aria-expanded={full}
-                data-testid={`mentee-suggestion-pub-toggle-${e.id}`}
-              >
-                {full ? "[less ‹]" : "[full ›]"}
-              </button>
-            </>
-          )}
         </p>
+        {clampable && (
+          <button
+            type="button"
+            onClick={() => setFull((v) => !v)}
+            className="text-apollo-slate text-xs font-medium hover:underline"
+            aria-expanded={full}
+            data-testid={`mentee-suggestion-pub-toggle-${e.id}`}
+          >
+            {full ? "[less ‹]" : "[full ›]"}
+          </button>
+        )}
         <p className="text-muted-foreground text-xs">
           {e.journal ? `${e.journal} · ` : ""}
           {bylineOf(e, surname, you)} ·{" "}

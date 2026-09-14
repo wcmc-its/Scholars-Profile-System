@@ -7,8 +7,9 @@
  * The person type alone does not establish career stage for everyone, so a
  * kind carries a TIER:
  *   presumptive — students, postdocs, fellows, volunteers: shown by default.
- *   ambiguous   — research staff (a technician or a biostatistician): shown
- *                 with the ED title visible and a "may be a colleague" hint.
+ *   ambiguous   — research staff (a technician or a biostatistician) and MD
+ *                 alumni (may be a peer physician now): shown with the ED
+ *                 title visible and a "may be a colleague" hint.
  *   unknown     — collaborators, bare affiliates, unclassified: collapsed,
  *                 never a default suggestion.
  * Professors are excluded upstream (never a row) — see the ETL builder.
@@ -22,6 +23,9 @@ export type MenteeKind =
   | "masters"
   | "student_employee"
   | "volunteer"
+  | "resident"
+  | "alumni_phd"
+  | "alumni_md"
   | "research_staff"
   | "collaborator"
   | "unknown";
@@ -42,6 +46,13 @@ const RULES: ReadonlyArray<[MenteeKind, (t: string) => boolean]> = [
   ["masters", (t) => t === "student-masters"],
   ["student_employee", (t) => t === "employee-student-paid"],
   ["volunteer", (t) => t === "affiliate-volunteer"],
+  ["resident", (t) => t === "affiliate-nyp-resident"],
+  // Departed trainees: 80% of live rows had no current-appointment type at all
+  // (measured 09-14). PhD alumni co-publishing within the window are trainees
+  // by construction; MD alumni may be peer physicians now, so they're ambiguous.
+  // `academic-inactive` carries no career-stage information and stays unknown.
+  ["alumni_phd", (t) => t === "affiliate-alumni-phd" || t === "affiliate-alumni-md-phd"],
+  ["alumni_md", (t) => t === "affiliate-alumni-md"],
   ["research_staff", (t) => t === "academic-nonfaculty"],
   ["collaborator", (t) => t === "affiliate-collaborator"],
 ];
@@ -52,7 +63,7 @@ export function classifyMenteeKind(personTypes: readonly string[]): MenteeKind {
 }
 
 export function tierOf(kind: MenteeKind): MenteeTier {
-  if (kind === "research_staff") return "ambiguous";
+  if (kind === "research_staff" || kind === "alumni_md") return "ambiguous";
   if (kind === "collaborator" || kind === "unknown") return "unknown";
   return "presumptive";
 }
@@ -66,6 +77,9 @@ export const KIND_LABEL: Record<MenteeKind, string> = {
   masters: "Masters student",
   student_employee: "Student",
   volunteer: "Volunteer",
+  resident: "Resident",
+  alumni_phd: "PhD alum",
+  alumni_md: "MD alum",
   research_staff: "Research staff",
   collaborator: "Collaborator",
   unknown: "Career stage unknown",
