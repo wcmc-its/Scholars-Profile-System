@@ -2402,7 +2402,7 @@ export class AppStack extends Stack {
         SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: "off",
         // Two-concept resolution (term-resolution-gap spec, 2026-09-14). A `partial`
         //   primary's residual tokens are resolved once more; a hit becomes
-        //   `MeshResolution.secondary`, and the concept-concentration boost is keyed on
+        //   `MeshResolution.secondaryConcept`, and the concept-concentration boost is keyed on
         //   pubs tagged in BOTH subtrees. Reorder-only, no admission change. STAGING ON
         //   to eval the 32 measured prod two-concept queries (Projects
         //   probe-secondary-concept-eval.py); PROD OFF until the result pages are read.

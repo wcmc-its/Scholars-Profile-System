@@ -45,6 +45,13 @@ const NEOPLASMS = row("D009369", "Neoplasms", ["Cancer"], "C04");
 const STEM_CELLS = row("D013234", "Stem Cells", ["Stem Cell"], "A11.872");
 const BIOLOGY = row("D001695", "Biology", [], "H01.158");
 const OBESITY = row("D009765", "Obesity", [], "C18.654.726.500");
+// #1346 fixtures — real deployed entry terms (tests/unit/search-taxonomy.test.ts).
+const AUTOMOBILES = row("D001334", "Automobiles", ["Car"], "J01.897.280.500.100");
+const LYMPHOMA = row("D008223", "Lymphoma", [], "C04.557.386");
+const BLOOD = row("D001769", "Blood", [], "A12.207.152");
+const LEUKEMIA = row("D007938", "Leukemia", [], "C04.557.337");
+const LUNG_NEOPLASMS = row("D008175", "Lung Neoplasms", ["Lung Cancer"], "C04.588.894.797.520");
+const NEOPLASMS_C04 = { ...row("D009369", "Neoplasms", ["Cancer", "Tumors"], "C04") };
 
 beforeEach(() => {
   _resetMeshMapForTests();
@@ -104,6 +111,39 @@ describe("resolveMeshDescriptor — secondaryConcept (SEARCH_MESH_SECONDARY_CONC
     const r = await resolveMeshDescriptor("glioblastoma immunotherapy");
     expect(r?.name).toBe("Immunotherapy");
     expect(r?.secondaryConcept).toBeUndefined();
+  });
+
+  it("flag ON: the #1346 acronym guard applies to the residual (`lymphoma CAR` ≠ Automobiles)", async () => {
+    process.env.SEARCH_ACRONYM_SENSE_GUARD = "on";
+    try {
+      mockMeshFindMany.mockResolvedValue([LYMPHOMA, AUTOMOBILES]);
+      const r = await resolveMeshDescriptor("lymphoma CAR");
+      expect(r?.name).toBe("Lymphoma");
+      expect(r?.secondaryConcept).toBeUndefined();
+    } finally {
+      delete process.env.SEARCH_ACRONYM_SENSE_GUARD;
+    }
+  });
+
+  it("flag ON: a one-word residual on the generic list is refused (`leukemia blood` ≠ Blood)", async () => {
+    mockMeshFindMany.mockResolvedValue([LEUKEMIA, BLOOD]);
+    const r = await resolveMeshDescriptor("leukemia blood");
+    expect(r?.name).toBe("Leukemia");
+    expect(r?.secondaryConcept).toBeUndefined();
+  });
+
+  it("flag ON: an ancestor of the primary is not a second concept (`lung cancer tumors` ≠ Neoplasms)", async () => {
+    mockMeshFindMany.mockResolvedValue([LUNG_NEOPLASMS, NEOPLASMS_C04]);
+    const r = await resolveMeshDescriptor("lung cancer tumors");
+    expect(r?.name).toBe("Lung Neoplasms");
+    expect(r?.secondaryConcept).toBeUndefined();
+  });
+
+  it("flag ON: deprioritized filler is stripped from the residual before resolving", async () => {
+    mockMeshFindMany.mockResolvedValue([IMMUNOTHERAPY, NEOPLASMS]);
+    const r = await resolveMeshDescriptor("cancer immunotherapy research");
+    expect(r?.name).toBe("Immunotherapy");
+    expect(r?.secondaryConcept?.name).toBe("Neoplasms");
   });
 
   it("flag ON: a verbatim (non-partial) resolution never gets a secondary — nothing is left over", async () => {

@@ -1619,21 +1619,31 @@ export async function resolveMeshDescriptor(
   // medical-center search. Returning null degrades to BM25, like 2-char acronyms.
   // Internal-caps acronym entry terms (COPD/EHR) and exact NAME matches (DNA/RNA,
   // confidence `exact`) are kept. Flag-off ⇒ byte-identical.
-  const rawQuery = query.trim();
-  if (
-    resolveAcronymSenseGuardEnabled() &&
-    winner.confidence === "entry-term" &&
-    /^[A-Z]{3,5}$/.test(rawQuery) &&
-    !/[A-Z]/.test(winner.matchedForm.trim().slice(1))
-  ) {
-    return null;
-  }
+  if (acronymSenseGuardRejects(query, winner)) return null;
   return buildMeshResolution(map, winner, {
     matchedForm: winner.matchedForm,
     confidence: winner.confidence,
     // #726 — more than one candidate descriptor normalized to this query key.
     ambiguous: candidates.length > 1,
   });
+}
+
+/**
+ * #1346 — the acronym wrong-sense predicate, shared by the primary resolver and the
+ * two-concept residual path so a short all-caps token (CAR / PET) that resolves ONLY
+ * via a plain Title-case entry term (Car → Automobiles, Pet → Pets) is refused in
+ * both places. Flag-off ⇒ never rejects.
+ */
+function acronymSenseGuardRejects(
+  raw: string,
+  cand: { confidence: string; matchedForm: string },
+): boolean {
+  return (
+    resolveAcronymSenseGuardEnabled() &&
+    cand.confidence === "entry-term" &&
+    /^[A-Z]{3,5}$/.test(raw.trim()) &&
+    !/[A-Z]/.test(cand.matchedForm.trim().slice(1))
+  );
 }
 
 /** Assemble a `MeshResolution` from a ranked candidate, with overridable
@@ -1759,37 +1769,52 @@ function queryConjuncts(query: string): string[][] {
 /**
  * Two-concept resolution — resolve what the `partial` window LEFT OVER.
  *
- * Residual = the query's tokens minus the matched window's tokens (first occurrence,
- * so `cancer immunotherapy` → window `immunotherapy` → residual `cancer`), joined
- * back into one string and pushed through the verbatim resolver only: whole-form
- * name / entry-term / curated-alias lookup, then the #1342 singularize retry. NOT the
- * window fallback again — a guess on top of a guess is how `crispr base editing liver`
- * would come back as `Liver`. The measured prod residuals are single words or short
- * phrases that resolve at name/entry-term (`immunotherapy`, `diabetes`, `crispr`,
- * `gene therapy`, `innate immunity`, `interferon`), so that is the only tier needed.
+ * Residual = the query's tokens (case preserved) minus the matched window's tokens
+ * (first occurrence, so `cancer immunotherapy` → window `immunotherapy` → residual
+ * `cancer`), with deprioritized filler stripped (`immunotherapy research` →
+ * `immunotherapy`), joined back into one string and pushed through the verbatim
+ * resolver only: whole-form name / entry-term / curated-alias lookup, then the #1342
+ * singularize retry. NOT the window fallback again — a guess on top of a guess is how
+ * `crispr base editing liver` would come back as `Liver`. The measured prod residuals
+ * are single words or short phrases that resolve at name/entry-term (`immunotherapy`,
+ * `diabetes`, `crispr`, `gene therapy`, `innate immunity`, `interferon`), so that is
+ * the only tier needed.
  *
- * Refused: a residual that is all deprioritized filler (`biology`, `medicine`,
+ * Refused, in order: nothing left after filler is stripped (`biology`, `medicine`,
  * `research` — 29 of those are exact MeSH names and every one is a wrong second
- * concept); and the same descriptor as the primary. The #1346 acronym guard is not
- * re-applied: a residual short enough to be an acronym normalizes under the 3-char
- * floor or is a real content token (`car t`, `covid`).
+ * concept); a one-word residual on the #1348 generic list (`blood`, `disease` —
+ * accepted by the verbatim path but rejected as a window, and the window is the
+ * stricter judgement for a lone common word); the #1346 acronym wrong-sense case
+ * (`lymphoma CAR` must not pair with Automobiles); and a secondary that is the
+ * primary itself or its ancestor/descendant by tree number (`lung cancer tumors` →
+ * Neoplasms is not a second concept, it is the first one's parent — and its 200-capped
+ * subtree would make the "co-occurrence" an arbitrary prefix of C04).
  */
 function resolveSecondaryConcept(
   map: MeshMap,
   query: string,
   primary: MeshResolution,
 ): MeshResolution["secondaryConcept"] | undefined {
-  const tokens = queryConjuncts(query).flat();
-  const residual = [...tokens];
+  // Case-preserving tokenization (same delimiters as `queryConjuncts`) so the
+  // acronym guard below can still see `CAR` / `PET`.
+  const residual = query
+    .split(/\s*(?:[&/,]|\band\b)\s*/i)
+    .flatMap((seg) => seg.split(/[^A-Za-z0-9]+/))
+    .filter(Boolean);
+  const total = residual.length;
   for (const w of queryConjuncts(primary.matchedForm).flat()) {
-    const i = residual.indexOf(w);
+    const i = residual.findIndex((r) => r.toLowerCase() === w);
     if (i >= 0) residual.splice(i, 1);
   }
-  if (residual.length === 0 || residual.length === tokens.length) return undefined;
-  const surface = residual.join(" ");
-  if (isAllDeprioritized(surface)) return undefined;
+  if (residual.length === 0 || residual.length === total) return undefined;
+  // `stripDeprioritized` keeps an ALL-filler query intact (never strips to empty),
+  // so the all-filler case has to be refused explicitly first.
+  const joined = residual.join(" ");
+  if (isAllDeprioritized(joined)) return undefined;
+  const surface = stripDeprioritized(joined).contentQuery.trim();
   const normalized = normalizeForMatch(surface);
   if (normalized.length < MIN_QUERY_LEN) return undefined;
+  if (!/\s/.test(surface) && GENERIC_DESCRIPTOR_NAMES.has(normalized)) return undefined;
   let cands = rankedDescriptorCandidates(map, normalized);
   if (cands.length === 0 && resolveMeshQueryNormalizationEnabled()) {
     const singular = singularizeForMatch(normalized);
@@ -1797,6 +1822,13 @@ function resolveSecondaryConcept(
   }
   const top = cands[0];
   if (!top || top.row.descriptorUi === primary.descriptorUi) return undefined;
+  if (acronymSenseGuardRejects(surface, top)) return undefined;
+  const primaryTrees = map.byUi.get(primary.descriptorUi)?.treeNumbers ?? [];
+  const primaryAncestors = new Set(primary.ancestorTreeNumbers ?? []);
+  const related = top.row.treeNumbers.some(
+    (tn) => primaryAncestors.has(tn) || primaryTrees.some((p) => tn.startsWith(p + ".")),
+  );
+  if (related) return undefined;
   return {
     descriptorUi: top.row.descriptorUi,
     name: top.row.name,
