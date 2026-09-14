@@ -433,6 +433,10 @@ export type EdEmployeeRecord = {
   managerCwid: string | null;
   sorId: string;
   isPrimary: boolean;
+  /** `weillCornellEduOrgUnit;level3` — HR's lab unit ("Sallie Permar
+   *  Research"). Fallback PI signal when `manager` is a lab administrator
+   *  rather than the PI; see `labPiNameKey`. */
+  labUnitName: string | null;
 };
 
 const EMPLOYEE_SOR_ATTRS = [
@@ -441,6 +445,7 @@ const EMPLOYEE_SOR_ATTRS = [
   "weillCornellEduStatus",
   "weillCornellEduSORID",
   "weillCornellEduPrimaryEntry",
+  "weillCornellEduOrgUnit;level3",
 ] as const;
 
 /** Fetch all currently-active employee SOR records in one paginated search.
@@ -471,6 +476,7 @@ export async function fetchActiveEmployeeRecords(
       managerCwid: parseManagerCwid(managerDn),
       sorId,
       isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
+      labUnitName: firstString((e as Record<string, unknown>)["weillCornellEduOrgUnit;level3"]),
     });
   }
   return out;
@@ -559,6 +565,8 @@ export type EdPostdocEmploymentRecord = {
   startDate: Date | null;
   endDate: Date | null;
   isPrimary: boolean;
+  /** See `EdEmployeeRecord.labUnitName`. */
+  labUnitName: string | null;
 };
 
 const POSTDOC_EMPLOYMENT_ATTRS = [
@@ -571,6 +579,7 @@ const POSTDOC_EMPLOYMENT_ATTRS = [
   "weillCornellEduRoleCode",
   "title",
   "weillCornellEduPrimaryEntry",
+  "weillCornellEduOrgUnit;level3",
 ] as const;
 
 /** Active + expired postdoc role records. The role-code branch is the
@@ -626,6 +635,7 @@ export async function fetchAllPostdocEmploymentRecords(): Promise<
         startDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduStartDate)),
         endDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduEndDate)),
         isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
+        labUnitName: firstString((e as Record<string, unknown>)["weillCornellEduOrgUnit;level3"]),
       });
     }
     return out;
@@ -847,6 +857,35 @@ export function parseManagerCwid(dn: string | null | undefined): string | null {
   if (!m) return null;
   const cwid = m[1].trim().toLowerCase();
   return cwid.length > 0 ? cwid : null;
+}
+
+/** Lowercase a person name to a comparison key, folding diacritics and
+ *  dropping initials ("Jeffrey P. Greenfield" → "jeffrey greenfield",
+ *  "Bernhard Kühn" → "bernhard kuhn" — HR types the lab unit without the umlaut). */
+export function personNameKey(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.replace(/\./g, "").length > 1)
+    .join(" ");
+}
+
+/** HR names a PI's lab unit `<Given Surname> Research` (also Lab /
+ *  Laboratory / Program / Start Up variants). Returns the PI portion as a
+ *  `personNameKey`, or null when the unit isn't of that shape
+ *  ("Basic Science Research", "MRI Research Institute"). The caller decides
+ *  whether the key names exactly one faculty member. */
+export function labPiNameKey(unit: string | null | undefined): string | null {
+  const m = unit
+    ?.trim()
+    .match(/^(.+?)\s+(?:clinical\s+)?(?:research(?:\s+program)?|lab(?:oratory|s)?|program|start\s?up)$/i);
+  // ponytail: two-token floor only rejects "Research" / "Clinical Research";
+  // generic two-word units ("Basic Science Research") fall through and rely on
+  // the caller's faculty lookup missing. Add a stoplist if one ever hits.
+  const key = m ? personNameKey(m[1]) : "";
+  return key.split(" ").length >= 2 ? key : null;
 }
 
 /** Collapse multiple employee SOR rows per CWID into a single best-row map.
