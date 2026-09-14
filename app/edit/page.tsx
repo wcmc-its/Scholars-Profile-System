@@ -30,6 +30,7 @@ import {
 } from "@/lib/edit/unit-scholar-authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
@@ -80,6 +81,9 @@ export default async function EditSelfPage({
   // `includeCoiGap` is true, so a false here means they are never even read.
   const genuineSelf = editCwid === session.cwid;
   const includeCoiGap = isCoiGapHintEnabled() && genuineSelf;
+  // #2634 — mentee suggestions share the COI-gap actor rule on this surface:
+  // genuine self only, never under a "View as" overlay.
+  const includeMenteeSuggestions = isMenteeSuggestionsEnabled() && genuineSelf;
   // #836 — on THIS (self) surface the manual-Highlights editor loads only for a
   // genuine self viewer with the flag on — never under a "View as" overlay. A
   // superuser curating another scholar's Highlights does so on the superuser
@@ -102,6 +106,7 @@ export default async function EditSelfPage({
     includeCoiGap,
     includeHighlights,
     includeReporterProfile,
+    includeMenteeSuggestions,
   });
   if (!ctx) {
     // A comms_steward with no Scholar row of their own has no self-profile to
@@ -217,6 +222,9 @@ export default async function EditSelfPage({
     // Datasets is valid only when the scholar has ≥1 deposit (the loader gates
     // the array on DATA_SHARING_SECTION).
     ctx.datasets.length > 0,
+    // #2634 — "Mentees › From your publications" is valid when the loader
+    // returned any row (active or dismissed), mirroring the rail rule.
+    ctx.menteeSuggestions.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");

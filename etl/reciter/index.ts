@@ -50,6 +50,7 @@ import {
   planAuthorshipReconcile,
   type IncomingAuthorship,
 } from "./change-detection";
+import { buildMenteeSuggestions } from "./mentee-suggestions";
 import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
@@ -1070,6 +1071,16 @@ async function main() {
     console.log(
       `ReciterDB ETL complete in ${elapsed}s: publications=${pubRows.length}, authorships=${authorshipRows.length}`,
     );
+
+    // #2634 — best-effort: a mentee_suggestion failure must never fail the run.
+    try {
+      await buildMenteeSuggestions();
+    } catch (err) {
+      console.error(
+        "[mentee-suggestions] failed (non-fatal):",
+        err instanceof Error ? err.message : err,
+      );
+    }
   } catch (err) {
     await db.write.etlRun.update({
       where: { id: run.id },

@@ -35,6 +35,7 @@ import {
 } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
+import type { DismissReason, MenteeKind, MenteeTier } from "@/lib/mentee-suggestions/kind";
 import { rankForSelectedHighlights } from "@/lib/ranking";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -62,6 +63,7 @@ type EditContextReadClient = Pick<
   | "department"
   | "coiActivity"
   | "coiGapCandidate"
+  | "menteeSuggestion"
   | "publication"
   | "publicationConflictStatement"
   | "reporterProfileCandidate"
@@ -480,6 +482,49 @@ export type EditContextMentee = {
   suppressionId: string | null;
 };
 
+/** #2634 — one shared publication on a mentee-suggestion row. `id` is the SPS
+ *  `Publication.pmid` key (a PubMed pmid, or a source-prefixed article id). The
+ *  ranks are 1-based byline positions; `total` is the byline length. */
+export type EditContextMenteeSuggestionEvidence = {
+  id: string;
+  year: number | null;
+  title: string | null;
+  journal: string | null;
+  menteeRank: number;
+  mentorRank: number;
+  total: number;
+};
+
+/**
+ * #2634 — a co-authorship-derived mentee suggestion for the "Mentees › From your
+ * publications" sub-view (`SELF_EDIT_MENTEE_SUGGESTIONS`). Populated ONLY when
+ * `loadEditContext` is called with `opts.includeMenteeSuggestions === true`
+ * (self page: genuine self; superuser page: self or genuine superuser). Rows
+ * whose mentee is ALREADY a mentee — sourced (`mentees`) or hand-entered
+ * (`manualMentees`) — are excluded server-side, so the card never re-suggests
+ * someone the mentor has listed. Dismissed rows are included (the card renders
+ * them collapsed with Restore). Evidence is capped at 10 per row.
+ */
+export type EditContextMenteeSuggestion = {
+  id: number;
+  menteeCwid: string;
+  menteeName: string;
+  menteeTitle: string | null;
+  menteeUnit: string | null;
+  kind: MenteeKind;
+  tier: MenteeTier;
+  nCoPubs: number;
+  nMentorLastAuthor: number;
+  firstYear: number | null;
+  lastYear: number | null;
+  menteeFirstPublishedYear: number | null;
+  strong: boolean;
+  /** ISO timestamp, or null while active. */
+  dismissedAt: string | null;
+  dismissReason: DismissReason | null;
+  evidence: ReadonlyArray<EditContextMenteeSuggestionEvidence>;
+};
+
 /**
  * The Highlights-editor state (#836). Surfaced ONLY when `loadEditContext` is
  * called with `opts.includeHighlights === true`, which the self page sets behind
@@ -641,6 +686,12 @@ export type EditContext = {
    * actually does.
    */
   manualMenteeUnresolvedCwids: ReadonlyArray<string>;
+  /**
+   * #2634 — co-authorship-derived mentee suggestions (active AND dismissed), the
+   * mentor's already-listed mentees excluded. Populated only with
+   * `opts.includeMenteeSuggestions === true`; empty for every other caller.
+   */
+  menteeSuggestions: ReadonlyArray<EditContextMenteeSuggestion>;
   /**
    * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
    * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
@@ -805,7 +856,12 @@ export async function loadEditContext(
   client: EditContextReadClient,
   now: Date = new Date(),
   loadMentees: LoadMentees = defaultLoadMentees,
-  opts?: { includeCoiGap?: boolean; includeHighlights?: boolean; includeReporterProfile?: boolean },
+  opts?: {
+    includeCoiGap?: boolean;
+    includeHighlights?: boolean;
+    includeReporterProfile?: boolean;
+    includeMenteeSuggestions?: boolean;
+  },
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -1657,6 +1713,76 @@ export async function loadEditContext(
     };
   });
 
+  // #2634 — co-authorship-derived mentee suggestions. The opt-in IS the gate
+  // (same posture as COI-gap): only the self / superuser pages pass
+  // `includeMenteeSuggestions: true`, behind `SELF_EDIT_MENTEE_SUGGESTIONS`.
+  // Anyone already on the mentor's list — a sourced mentee (`externalId` is
+  // `{mentorCwid}:{menteeCwid}`) or a hand-entered one — is dropped here, so
+  // adding a suggestion makes it vanish on the next render. Dismissed rows are
+  // kept (the card shows them collapsed, with Restore).
+  const menteeSuggestions: EditContextMenteeSuggestion[] = [];
+  if (opts?.includeMenteeSuggestions === true) {
+    const listed = new Set<string>([
+      ...mentees.map((m) => m.externalId.slice(cwid.length + 1)),
+      ...manualMenteeRows.map((m) => m.cwid).filter((c): c is string => !!c),
+    ]);
+    const rows = (
+      await client.menteeSuggestion.findMany({
+        where: { mentorCwid: cwid },
+        orderBy: { menteeName: "asc" },
+      })
+    ).filter((r) => !listed.has(r.menteeCwid));
+    // Evidence is a Json column — narrow, cap at 10 per row, then join the
+    // publication for title / journal (the ETL snapshot carries only ids + ranks).
+    const evidenceOf = (v: unknown) =>
+      (Array.isArray(v) ? v : [])
+        .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
+        .filter((e) => typeof e.id === "string")
+        .slice(0, 10);
+    const evidenceIds = [...new Set(rows.flatMap((r) => evidenceOf(r.evidence).map((e) => e.id as string)))];
+    const pubs =
+      evidenceIds.length > 0
+        ? await client.publication.findMany({
+            where: { pmid: { in: evidenceIds } },
+            select: { pmid: true, title: true, journal: true, year: true },
+          })
+        : [];
+    const pubById = new Map(pubs.map((p) => [p.pmid, p]));
+    const num = (v: unknown) => (typeof v === "number" ? v : 0);
+    for (const r of rows) {
+      menteeSuggestions.push({
+        id: r.id,
+        menteeCwid: r.menteeCwid,
+        menteeName: r.menteeName,
+        menteeTitle: r.menteeTitle,
+        menteeUnit: r.menteeUnit,
+        kind: r.kind as MenteeKind,
+        tier: r.tier as MenteeTier,
+        nCoPubs: r.nCoPubs,
+        nMentorLastAuthor: r.nMentorLastAuthor,
+        firstYear: r.firstYear,
+        lastYear: r.lastYear,
+        menteeFirstPublishedYear: r.menteeFirstPublishedYear,
+        strong: r.strong,
+        dismissedAt: r.dismissedAt ? r.dismissedAt.toISOString() : null,
+        dismissReason: r.dismissReason as DismissReason | null,
+        evidence: evidenceOf(r.evidence).map((e) => {
+          const id = e.id as string;
+          const pub = pubById.get(id);
+          return {
+            id,
+            year: typeof e.year === "number" ? e.year : (pub?.year ?? null),
+            title: pub?.title ?? null,
+            journal: pub?.journal ?? null,
+            menteeRank: num(e.menteeRank),
+            mentorRank: num(e.mentorRank),
+            total: num(e.total),
+          };
+        }),
+      });
+    }
+  }
+
   // One bounded suppression query across all three entity types, keyed on the
   // stable externalId. Whole-entity only (`contributorCwid IS NULL` — PR-A/PR-B
   // reject a contributor for these). Per-request, never cached — the ADR-005
@@ -1798,6 +1924,7 @@ export async function loadEditContext(
       mentees,
       manualMentees: manualMenteeRows,
       manualMenteeUnresolvedCwids,
+      menteeSuggestions,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
@@ -1968,6 +2095,7 @@ export async function loadEditContext(
     mentees,
     manualMentees: manualMenteeRows,
     manualMenteeUnresolvedCwids,
+    menteeSuggestions,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,

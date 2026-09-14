@@ -113,6 +113,14 @@ export type AuditAction =
    *  after carry `{ active: boolean }`. Requires the `scholars_audit` action
    *  ENUM be extended — see `scripts/sql/audit-log.sql`. */
   | "core_client_remove"
+  /** #2634 — a mentor (or a superuser on their behalf) dismissed a
+   *  co-authorship-derived mentee suggestion on /edit "Mentees › From your
+   *  publications"; `targetEntityId` is the `"{mentorCwid}:{menteeCwid}"` pair,
+   *  after carries `{ reason }` (colleague | never_worked | private). Requires
+   *  the `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
+  | "mentee_suggestion_dismiss"
+  /** #2634 — reverses `mentee_suggestion_dismiss`. */
+  | "mentee_suggestion_restore"
   /** a scholar (or a genuine superuser on their behalf) confirmed a RePORTER
    *  PMID-overlap "Is this you?" match (`REPORTER_MATCH_V2`); writes the
    *  `person_nih_profile` row whose grants materialize next nightly.
@@ -298,7 +306,11 @@ export type AuditEntityType =
    *  updates; `targetEntityId` is the `"{centerCode}:{programCode}"` pair.
    *  Requires the `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
-  | "center_program";
+  | "center_program"
+  /** #2634 — a `mentee_suggestion` queue row; `targetEntityId` is the
+   *  `"{mentorCwid}:{menteeCwid}"` pair. Requires the `scholars_audit`
+   *  target_entity_type ENUM be extended, see `scripts/sql/audit-log.sql`. */
+  | "mentee_suggestion";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

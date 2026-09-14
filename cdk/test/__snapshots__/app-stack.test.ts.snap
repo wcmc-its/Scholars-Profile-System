@@ -434,6 +434,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SELF_EDIT_MENTEE_SUGGESTIONS",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_GRANT_RECS",
                 "Value": "off",
               },
@@ -4890,6 +4894,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_MENTEE_SUGGESTIONS",
                 "Value": "on",
               },
               {
