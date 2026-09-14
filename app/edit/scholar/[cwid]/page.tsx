@@ -35,6 +35,7 @@ import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
@@ -120,6 +121,9 @@ export default async function EditScholarPage({
   const selfOrSuperuser = isSelf || session.isSuperuser || session.isCommsSteward;
   const includeHighlights = isManualHighlightsEnabled() && selfOrSuperuser;
   const includeCoiGap = isCoiGapHintEnabled() && (isSelf || session.isSuperuser);
+  // #2634 — mentee suggestions: same actor rule as COI-gap (self or a genuine
+  // superuser; never a steward / proxy / unit-admin).
+  const includeMenteeSuggestions = isMenteeSuggestionsEnabled() && (isSelf || session.isSuperuser);
   // RePORTER "Is this you?" matches — superuser parity with the COI-gap gate
   // above (self OR a genuine superuser; the confirm/revoke routes re-authorize).
   const includeReporterProfile =
@@ -135,6 +139,7 @@ export default async function EditScholarPage({
     includeHighlights,
     includeCoiGap,
     includeReporterProfile,
+    includeMenteeSuggestions,
   });
   if (!ctx) {
     // The scholar row does not exist (or is soft-deleted). A 404 keeps the
@@ -200,6 +205,9 @@ export default async function EditScholarPage({
     // Datasets is valid only when the scholar has ≥1 deposit (the loader gates
     // the array on DATA_SHARING_SECTION).
     ctx.datasets.length > 0,
+    // #2634 — "Mentees › From your publications" is valid when the loader
+    // returned any row (active or dismissed), mirroring the rail rule.
+    ctx.menteeSuggestions.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);

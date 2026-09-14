@@ -154,6 +154,7 @@ function fakeCtx(cwid: string, roleCategory: string | null) {
     unmatchedPubmedCoiReviewed: [],
     reporterProfileCandidates: [],
     reporterProfileConfirmed: [],
+    menteeSuggestions: [], // #2634
     highlights: null,
     technologies: [],
     news: [],
