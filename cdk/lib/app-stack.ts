@@ -1425,9 +1425,9 @@ export class AppStack extends Stack {
         // publications" rail sub-view: co-authorship-derived mentee suggestions
         // (ReCiterDB analysis_summary_author_list self-join, built nightly by
         // etl:reciter into `mentee_suggestion`) with Add / Not-a-mentee. Read via
-        // isMenteeSuggestionsEnabled() (=== "on"). Staging first for the eyeball;
-        // prod flips on a later approval-gated `cdk deploy Sps-App-prod`.
-        SELF_EDIT_MENTEE_SUGGESTIONS: env === "staging" ? "on" : "off",
+        // isMenteeSuggestionsEnabled() (=== "on"). Staging eyeballed 2026-09-14;
+        // prod ON the same day (approval-gated `cdk deploy Sps-App-prod`).
+        SELF_EDIT_MENTEE_SUGGESTIONS: "on",
         // SELF_EDIT_GRANT_RECS (GrantRecs Phase 3) — the owner-facing "Grants for
         // me" rail item + panel on /edit (self) and /edit/scholar/[cwid]
         // (superuser), surfacing the Phase-2 forward matcher
