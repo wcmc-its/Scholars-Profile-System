@@ -14,6 +14,8 @@
  *                 never a default suggestion.
  * Professors are excluded upstream (never a row) — see the ETL builder.
  */
+import type { ManualMenteeProgramType } from "@/lib/edit/manual-mentee";
+
 export type MenteeKind =
   | "postdoc"
   | "fellow"
@@ -66,6 +68,27 @@ export function tierOf(kind: MenteeKind): MenteeTier {
   if (kind === "research_staff" || kind === "alumni_md") return "ambiguous";
   if (kind === "collaborator" || kind === "unknown") return "unknown";
   return "presumptive";
+}
+
+/** Degree bucket an accepted suggestion should occupy on the public Mentoring
+ *  section (`ManualMentee.programType`); undefined = the "other" bucket with the
+ *  row's title as subtitle. Residents, masters, volunteers, staff and MD alumni
+ *  have no bucket of their own. */
+export function programTypeForKind(kind: MenteeKind): ManualMenteeProgramType | undefined {
+  switch (kind) {
+    case "postdoc":
+    case "fellow":
+      return "POSTDOC";
+    case "doctoral":
+    case "alumni_phd":
+      return "PhD";
+    case "md_phd":
+      return "MD-PhD";
+    case "md_student":
+      return "AOC";
+    default:
+      return undefined;
+  }
 }
 
 export const KIND_LABEL: Record<MenteeKind, string> = {

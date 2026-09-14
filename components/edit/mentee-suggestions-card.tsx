@@ -36,7 +36,13 @@ import type {
 } from "@/lib/api/edit-context";
 import { citationIdentifier } from "@/lib/citation";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
-import { DISMISS_REASONS, KIND_LABEL, type DismissReason } from "@/lib/mentee-suggestions/kind";
+import {
+  DISMISS_REASONS,
+  KIND_LABEL,
+  programTypeForKind,
+  type DismissReason,
+  type MenteeKind,
+} from "@/lib/mentee-suggestions/kind";
 
 export type MenteeSuggestionsCardProps = {
   cwid: string;
@@ -184,6 +190,14 @@ export function MenteeSuggestionsCard({
     }
   }
 
+  /** The manual entry an accepted suggestion becomes: the form's fields plus
+   *  the degree bucket its kind implies, so it files under Postdoc/PhD/MD on
+   *  the public profile instead of "other". */
+  function entryFor(s: EditContextMenteeSuggestion, draft: Draft): ManualMentee {
+    const programType = programTypeForKind(s.kind as MenteeKind);
+    return programType ? { ...draftToEntry(draft), programType } : draftToEntry(draft);
+  }
+
   /** Append to the mentor's hand-entered list and POST the whole array. */
   async function addAsMentee(s: EditContextMenteeSuggestion, draft: Draft): Promise<boolean> {
     setErr(s.id, null);
@@ -199,7 +213,7 @@ export function MenteeSuggestionsCard({
           value: [
             ...manualMentees,
             ...addedEntries.filter((a) => !manualMentees.some((m) => m.cwid === a.cwid)),
-            draftToEntry(draft),
+            entryFor(s, draft),
           ],
         }),
       });
@@ -209,7 +223,7 @@ export function MenteeSuggestionsCard({
         return false;
       }
       setAdded((a) => new Set(a).add(s.id));
-      setAddedEntries((a) => [...a, draftToEntry(draft)]);
+      setAddedEntries((a) => [...a, entryFor(s, draft)]);
       router.refresh();
       return true;
     } catch {

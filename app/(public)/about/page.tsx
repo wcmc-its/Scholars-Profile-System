@@ -585,6 +585,21 @@ export default function DocsPage() {
                 <td>Request a change (routes to the Graduate School)</td>
               </tr>
               <tr>
+                <td>Mentees</td>
+                <td>
+                  Jenzabar (PhD thesis advisors); Medical Education records (MD scholarly-project
+                  mentors); Employee Central via the Enterprise Directory (postdoc supervisors);
+                  entries you add yourself. Co-authors of yours who hold a trainee-type
+                  appointment are suggested to you in the console from ReCiter&apos;s curated
+                  publications; a suggestion appears publicly only after you add it.
+                </td>
+                <td>Nightly</td>
+                <td>
+                  Hide any mentee; add or remove your own entries; Request a change for a
+                  Jenzabar or Employee Central record
+                </td>
+              </tr>
+              <tr>
                 <td>Education record</td>
                 <td>ASMS</td>
                 <td>Nightly</td>
@@ -777,6 +792,15 @@ export default function DocsPage() {
                 <td>A Graduate School appointment or mentor/mentee</td>
                 <td>Jenzabar</td>
                 <td>Request a change (routes to the Graduate School)</td>
+              </tr>
+              <tr>
+                <td>A mentee is missing</td>
+                <td>Scholars</td>
+                <td>
+                  Add them under Mentees in the console. Co-authors with a trainee-type
+                  appointment are listed there under &ldquo;From your publications&rdquo; for you
+                  to accept or dismiss.
+                </td>
               </tr>
               <tr>
                 <td>Your hospital position</td>
