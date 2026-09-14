@@ -177,7 +177,7 @@ describe("MenteeSuggestionsCard", () => {
     expect(list.getByTestId("mentee-suggestion-strong-1").textContent).toBe("Strong match");
     expect(list.queryByTestId("mentee-suggestion-strong-2")).toBeNull();
     // Ambiguous tier shows the ED title on the right and the staff-role hint.
-    expect(list.getByTestId("mentee-suggestion-2").textContent).toContain("Research Associate");
+    expect(list.getByTestId("mentee-suggestion-title-2").textContent).toBe("Research Associate");
     expect(list.getByTestId("mentee-suggestion-hint-2").textContent).toMatch(/may be a colleague/);
     expect(list.queryByTestId("mentee-suggestion-hint-1")).toBeNull();
     // Evidence line.

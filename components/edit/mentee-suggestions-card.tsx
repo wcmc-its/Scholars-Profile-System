@@ -368,20 +368,25 @@ function SuggestionRow({
 
   return (
     <li className="flex flex-col gap-2 p-4" data-testid={`mentee-suggestion-${s.id}`}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="text-[15px] font-medium">{s.menteeName}</span>
-          <span className="text-muted-foreground text-xs">{s.menteeCwid}</span>
-          {s.strong && (
-            <span
-              className="border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber rounded-full border px-2 py-0.5 text-[11px] font-medium"
-              data-testid={`mentee-suggestion-strong-${s.id}`}
-            >
-              Strong match
-            </span>
-          )}
-        </div>
-        <span className="text-muted-foreground text-sm">{title}</span>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="text-[15px] font-medium">{s.menteeName}</span>
+        <span className="text-muted-foreground text-xs">{s.menteeCwid}</span>
+        {/* The role is the career-stage tell, so it sits with the name as a
+            chip rather than as muted text at the far edge of the row. */}
+        <span
+          className="border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate rounded-full border px-2 py-0.5 text-[11px] font-medium"
+          data-testid={`mentee-suggestion-title-${s.id}`}
+        >
+          {title}
+        </span>
+        {s.strong && (
+          <span
+            className="border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber rounded-full border px-2 py-0.5 text-[11px] font-medium"
+            data-testid={`mentee-suggestion-strong-${s.id}`}
+          >
+            Strong match
+          </span>
+        )}
       </div>
 
       <p className="text-muted-foreground text-sm">
