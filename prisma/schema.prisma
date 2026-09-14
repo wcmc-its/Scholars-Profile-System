@@ -387,6 +387,52 @@ model PostdocMentorRelationship {
   @@map("postdoc_mentor_relationship")
 }
 
+/// #2634 — co-authorship-derived mentee SUGGESTIONS for the mentor's /edit
+/// "Mentees › From your publications" sub-view. Built nightly by
+/// `etl/reciter/mentee-suggestions.ts` from ReCiterDB's
+/// `analysis_summary_author_list` self-join and UPSERTED by (mentor, mentee) so
+/// the dismissal columns survive the rebuild. A row is a queue item, never a
+/// relationship: nothing is public until the mentor accepts, and accepting
+/// writes the #2011 manual-mentee array, not this table.
+model MenteeSuggestion {
+  id                       Int       @id @default(autoincrement())
+  mentorCwid               String    @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid               String    @map("mentee_cwid") @db.VarChar(32)
+  /// Display metadata snapshotted from ReCiterDB `person` at build time so the
+  /// edit page needs no live LDAP. Title is the career-stage tell for staff.
+  menteeName               String    @map("mentee_name") @db.VarChar(255)
+  menteeTitle              String?   @map("mentee_title") @db.VarChar(255)
+  menteeUnit               String?   @map("mentee_unit") @db.VarChar(255)
+  /// `MenteeKind` — see lib/mentee-suggestions/kind.ts.
+  kind                     String    @db.VarChar(24)
+  /// `MenteeTier`: presumptive | ambiguous | unknown — see lib/mentee-suggestions/kind.ts.
+  tier                     String    @db.VarChar(16)
+  /// Counts over the WINDOWED shared publications (last 8 years).
+  nCoPubs                  Int       @map("n_co_pubs")
+  nMentorLastAuthor        Int       @map("n_mentor_last_author")
+  nMenteeFirstAuthor       Int       @map("n_mentee_first_author")
+  firstYear                Int?      @map("first_year")
+  lastYear                 Int?      @map("last_year")
+  /// Min articleYear across ALL the mentee's authorships (unwindowed) — the
+  /// seniority proxy shown on the row.
+  menteeFirstPublishedYear Int?      @map("mentee_first_published_year")
+  /// Top faculty co-author by last-author count with >=2 last-author co-pubs
+  /// and >=2x the runner-up (88% precision vs ED manager, issue #2634).
+  strong                   Boolean   @default(false)
+  /// Shared publications, most recent first, capped at 50:
+  /// `[{ id, year, menteeRank, mentorRank, total }]` where `id` is the SPS
+  /// `Publication.pmid` key (PubMed pmid, or the source-prefixed article_id).
+  evidence                 Json
+  computedAt               DateTime  @map("computed_at")
+  dismissedAt              DateTime? @map("dismissed_at")
+  dismissedBy              String?   @map("dismissed_by") @db.VarChar(32)
+  /// colleague | never_worked | private — see lib/mentee-suggestions/kind.ts.
+  dismissReason            String?   @map("dismiss_reason") @db.VarChar(24)
+
+  @@unique([mentorCwid, menteeCwid])
+  @@map("mentee_suggestion")
+}
+
 /// Issue #443 — Pre-computed per-(mentor, mentee) co-publication counts, bridged
 /// from WCM ReciterDB via S3 because the SPS VPC can't reach ReciterDB to run the
 /// live co-pub query at request time (`getMenteesForMentor`). The export step
