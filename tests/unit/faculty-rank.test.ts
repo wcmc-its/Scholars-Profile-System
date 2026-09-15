@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   deriveProfessorialRank,
+  isProfessorialTitle,
   stripGradSchoolChairDesignation,
   normalizeGradSchoolFacultyTitle,
 } from "@/lib/faculty-rank";
@@ -193,4 +194,26 @@ describe("normalizeGradSchoolFacultyTitle — combined Rule A + Rule B (the #103
       ).toBe(c.expected);
     });
   }
+});
+
+describe("isProfessorialTitle — ED faculty SOR expired-record titles", () => {
+  it("matches every professor variant and none of the trainee/staff title codes", () => {
+    for (const t of [
+      "Professor of Medicine",
+      "Assistant Professor of Health Services Research in Radiology (Interim)",
+      "Clinical Associate Professor",
+      "Associate Research Professor",
+      "University Professor",
+    ])
+      expect(isProfessorialTitle(t)).toBe(true);
+    for (const t of [
+      "Fellow",
+      "Postdoctoral Associate",
+      "Instructor in Medicine",
+      "Clinical Instructor",
+      "Senior Clinical Associate",
+      "Visiting Graduate Assistant",
+    ])
+      expect(isProfessorialTitle(t)).toBe(false);
+  });
 });

@@ -11,7 +11,13 @@
  *
  *   mentor  = personType 'academic-faculty-weillfulltime'
  *   mentee  = any matched author who is NOT full-time, NOT professor-ranked
- *             (assistant/associate/full) and NOT an SPS full-time scholar
+ *             (assistant/associate/full, now or in an expired ED faculty SOR
+ *             record via `former_faculty_role`), NOT an SPS full-time scholar,
+ *             not an external-institution test identity (`ucsf_…`: any `_`
+ *             in the identifier — WCM CWIDs never carry one), and classified
+ *             to a presumptive/ambiguous kind — from ReCiterDB person types,
+ *             or from an expired Fellow / Postdoctoral Associate SOR record
+ *             for the departed. Unknown-tier co-authors are never a row.
  *   window  = articleYear >= runYear - 8 for everything counted or listed
  *   keep    = nCoPubs >= 2 OR nMentorLastAuthor >= 1
  *   strong  = the mentee's top faculty co-author by last-author count, with
@@ -26,6 +32,7 @@ import { assertPruneVolume } from "@/lib/etl-guard";
 import {
   classifyMenteeKind,
   tierOf,
+  type FormerFacultyRole,
   type MenteeKind,
   type MenteeTier,
 } from "@/lib/mentee-suggestions/kind";
@@ -137,6 +144,7 @@ export async function queryPairStats(
        JOIN (SELECT pmid, MAX(\`rank\`) AS maxRank FROM analysis_summary_author_list GROUP BY pmid) mx
          ON mx.pmid = me.pmid
       WHERE me.personIdentifier <> ''
+        AND LOCATE('_', me.personIdentifier) = 0
         AND EXISTS (SELECT 1 FROM person_person_type ft
                      WHERE ft.personIdentifier = mt.personIdentifier AND ft.personType = ?)
         ${menteeFilter}
@@ -274,6 +282,13 @@ export async function buildMenteeSuggestions(): Promise<Summary> {
     select: { cwid: true },
   });
   for (const s of spsFaculty) excluded.add(s.cwid);
+  // Departed people carry no ReCiterDB person type; etl:ed mirrors what their
+  // expired ED faculty-SOR records say into former_faculty_role.
+  const formerRole = new Map<string, FormerFacultyRole>();
+  for (const f of await db.write.formerFacultyRole.findMany({ select: { cwid: true, role: true } })) {
+    formerRole.set(f.cwid, f.role as FormerFacultyRole);
+    if (f.role === "professor") excluded.add(f.cwid);
+  }
   const eligible = pairs.filter((p) => !excluded.has(p.menteeCwid));
   log(`${eligible.length} pairs after excluding faculty/professor-ranked mentees`);
 
@@ -357,6 +372,7 @@ export async function buildMenteeSuggestions(): Promise<Summary> {
 
   // 5. Assemble rows.
   let skippedNoPerson = 0;
+  let skippedUnknown = 0;
   const rows: SuggestionRow[] = [];
   for (const r of ranked) {
     const p = person.get(r.menteeCwid);
@@ -364,7 +380,16 @@ export async function buildMenteeSuggestions(): Promise<Summary> {
       skippedNoPerson++; // ponytail: no `person` row => no display name; drop rather than invent one
       continue;
     }
-    const kind = classifyMenteeKind(types.get(r.menteeCwid) ?? []);
+    let kind = classifyMenteeKind(types.get(r.menteeCwid) ?? []);
+    const former = formerRole.get(r.menteeCwid);
+    if (kind === "unknown" && former && former !== "professor") kind = former;
+    if (tierOf(kind) === "unknown") {
+      // ponytail: dropped AFTER the per-mentor cap, so an unknown co-author can
+      // still take one of a mentor's 50 slots; classify before rankPairs if a
+      // mentor ever hits the cap.
+      skippedUnknown++;
+      continue;
+    }
     rows.push({
       mentorCwid: r.mentorCwid,
       menteeCwid: r.menteeCwid,
@@ -387,6 +412,7 @@ export async function buildMenteeSuggestions(): Promise<Summary> {
   }
   if (skippedNoPerson > 0)
     log(`${skippedNoPerson} rows skipped: mentee has no reciterdb person row`);
+  if (skippedUnknown > 0) log(`${skippedUnknown} rows skipped: unknown career stage`);
 
   // 6. Write.
   const { upserted, pruned } = await writeSuggestions(rows);

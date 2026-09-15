@@ -102,15 +102,6 @@ const ROWS: EditContextMenteeSuggestion[] = [
       },
     ],
   }),
-  // Unknown tier → collapsed footer, never the default list.
-  row({
-    id: 3,
-    menteeCwid: "sxo4009",
-    menteeName: "Sam Okafor",
-    kind: "collaborator",
-    tier: "unknown",
-    nCoPubs: 3,
-  }),
   // One co-authored paper → "weaker matches" footer.
   row({
     id: 4,
@@ -184,13 +175,7 @@ describe("MenteeSuggestionsCard", () => {
     expect(list.getByTestId("mentee-suggestion-evidence-1").textContent).toBe(
       "7 co-authored · 5 with you as last author · 2023–2026",
     );
-    // Footers hold the unknown-tier, weak, and dismissed rows.
-    expect(
-      within(screen.getByTestId("mentee-suggestions-unknown")).getByTestId("mentee-suggestion-3"),
-    ).toBeTruthy();
-    expect(
-      screen.getByTestId("mentee-suggestions-unknown").querySelector("summary")?.textContent,
-    ).toMatch(/1 other co-author whose career stage/);
+    // Footers hold the weak and dismissed rows.
     expect(
       within(screen.getByTestId("mentee-suggestions-weak")).getByTestId("mentee-suggestion-4"),
     ).toBeTruthy();

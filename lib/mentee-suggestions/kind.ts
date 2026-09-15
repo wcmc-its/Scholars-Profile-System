@@ -10,11 +10,19 @@
  *   ambiguous   — research staff (a technician or a biostatistician) and MD
  *                 alumni (may be a peer physician now): shown with the ED
  *                 title visible and a "may be a colleague" hint.
- *   unknown     — collaborators, bare affiliates, unclassified: collapsed,
- *                 never a default suggestion.
+ *   unknown     — collaborators, bare affiliates, NYP-only clinicians,
+ *                 non-academic staff, unclassified: the builder drops these,
+ *                 they are never a row.
  * Professors are excluded upstream (never a row) — see the ETL builder.
+ *
+ * Departed people carry no ReCiterDB person type at all. For them the ED
+ * faculty SOR's expired role records are the signal (`former_faculty_role`,
+ * written by etl:ed): a professor-ranked title excludes, a Fellow /
+ * Postdoctoral Associate title classifies as that kind (no "former" kinds —
+ * the row's first-published year and co-pub span already date it).
  */
 import type { ManualMenteeProgramType } from "@/lib/edit/manual-mentee";
+import { isProfessorialTitle } from "@/lib/faculty-rank";
 
 export type MenteeKind =
   | "postdoc"
@@ -58,6 +66,22 @@ const RULES: ReadonlyArray<[MenteeKind, (t: string) => boolean]> = [
   ["research_staff", (t) => t === "academic-nonfaculty"],
   ["collaborator", (t) => t === "affiliate-collaborator"],
 ];
+
+/** What an EXPIRED faculty-SOR role record says about its holder now. Title
+ *  strings there are "<TitleCode> in|of <dept>", so the kinds anchor at the
+ *  start: "Fellow in Medicine", "Visiting Fellow in …", "Postdoctoral Associate
+ *  in …". Instructor / Clinical Associate / Research Associate / Lecturer say
+ *  nothing about trainee-ness and map to null. Census 2026-09-15 over 42,327
+ *  expired records: /fellow/i hit only the Fellow + Visiting Fellow codes (+2
+ *  strays), /postdoctoral/i only Postdoctoral Associate. */
+export type FormerFacultyRole = "professor" | "fellow" | "postdoc";
+
+export function formerFacultyRole(title: string): FormerFacultyRole | null {
+  if (isProfessorialTitle(title)) return "professor";
+  if (/^(distinguished )?(visiting )?fellow\b/i.test(title)) return "fellow";
+  if (/^postdoctoral associate\b/i.test(title)) return "postdoc";
+  return null;
+}
 
 export function classifyMenteeKind(personTypes: readonly string[]): MenteeKind {
   for (const [kind, test] of RULES) if (personTypes.some(test)) return kind;

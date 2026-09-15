@@ -31,6 +31,7 @@ import {
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import { DEPARTMENT_NAMES } from "@/lib/department-names";
 import { deriveProfessorialRank } from "@/lib/faculty-rank";
+import { formerFacultyRole } from "@/lib/mentee-suggestions/kind";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
@@ -790,6 +791,29 @@ async function main() {
       console.warn(
         "[ED] Historical appointment refresh skipped — fetch succeeded but returned 0 rows (suspected truncated read); existing rows retained",
       );
+    }
+    // former_faculty_role — every CWID whose expired SOR records still say
+    // professor / fellow / postdoc, one row per CWID with professor winning, for
+    // the mentee-suggestion builder (sources task def, no LDAP). Same gate as
+    // the per-scholar reconcile: a failed or empty fetch leaves the table.
+    if (historicalReconcileEligible) {
+      const byCwid = new Map<string, { cwid: string; role: string; title: string }>();
+      for (const a of historicalAppointments) {
+        const role = formerFacultyRole(a.title);
+        if (!role) continue;
+        const prev = byCwid.get(a.cwid);
+        if (!prev || (role === "professor" && prev.role !== "professor")) {
+          byCwid.set(a.cwid, { cwid: a.cwid, role, title: a.title });
+        }
+      }
+      const rows = [...byCwid.values()];
+      await db.write.$transaction(async (tx) => {
+        await tx.formerFacultyRole.deleteMany({});
+        for (let i = 0; i < rows.length; i += 1000) {
+          await tx.formerFacultyRole.createMany({ data: rows.slice(i, i + 1000) });
+        }
+      });
+      console.log(`former_faculty_role rewritten: ${rows.length} CWIDs.`);
     }
 
     // Phase 4 — employee SOR for the manager graph. Used by:

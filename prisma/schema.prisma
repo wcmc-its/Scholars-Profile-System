@@ -394,6 +394,24 @@ model PostdocMentorRelationship {
 /// the dismissal columns survive the rebuild. A row is a queue item, never a
 /// relationship: nothing is public until the mentor accepts, and accepting
 /// writes the #2011 manual-mentee array, not this table.
+/// CWIDs whose ED faculty SOR holds an EXPIRED role record that still tells
+/// career stage — `FormerFacultyRole` (lib/mentee-suggestions/kind.ts):
+/// `professor` (any professor-ranked title; excluded from mentee suggestions)
+/// or `fellow` / `postdoc` (a departed trainee, suggested under that kind).
+/// One row per CWID, professor winning. Rewritten nightly by etl/ed/index.ts
+/// (the LDAP task def); read by the mentee-suggestion builder on the sources
+/// task def, which has ReCiterDB but no LDAP. Departed people carry no
+/// ReCiterDB person type at all, so this is the only career-stage signal for
+/// them. Current appointments are classified from ReCiterDB types upstream.
+model FormerFacultyRole {
+  cwid      String   @id @db.VarChar(32)
+  role      String   @db.VarChar(16)
+  title     String   @db.VarChar(255)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("former_faculty_role")
+}
+
 model MenteeSuggestion {
   id                       Int       @id @default(autoincrement())
   mentorCwid               String    @map("mentor_cwid") @db.VarChar(32)
