@@ -1771,18 +1771,17 @@ function queryConjuncts(query: string): string[][] {
  *
  * Residual = the query's tokens (case preserved) minus the matched window's tokens
  * (first occurrence, so `cancer immunotherapy` → window `immunotherapy` → residual
- * `cancer`), with deprioritized filler stripped (`immunotherapy research` →
- * `immunotherapy`), joined back into one string and pushed through the verbatim
- * resolver only: whole-form name / entry-term / curated-alias lookup, then the #1342
- * singularize retry. NOT the window fallback again — a guess on top of a guess is how
+ * `cancer`), joined back into one string and pushed through the verbatim resolver
+ * only: whole-form name / entry-term / curated-alias lookup, then the #1342
+ * singularize retry — first as typed, then with deprioritized filler stripped if the
+ * whole form missed (`immunotherapy research` → `immunotherapy`). NOT the window fallback again — a guess on top of a guess is how
  * `crispr base editing liver` would come back as `Liver`. The measured prod residuals
  * are single words or short phrases that resolve at name/entry-term (`immunotherapy`,
  * `diabetes`, `crispr`, `gene therapy`, `innate immunity`, `interferon`), so that is
  * the only tier needed.
  *
- * Refused, in order: nothing left after filler is stripped (`biology`, `medicine`,
- * `research` — 29 of those are exact MeSH names and every one is a wrong second
- * concept); a one-word residual on the #1348 generic list (`blood`, `disease` —
+ * Refused, in order: a lone filler word (`biology`, `medicine`, `research` — 29 of
+ * those are exact MeSH names and every one is a wrong second concept); a one-word residual on the #1348 generic list (`blood`, `disease` —
  * accepted by the verbatim path but rejected as a window, and the window is the
  * stricter judgement for a lone common word); the #1346 acronym wrong-sense case
  * (`lymphoma CAR` must not pair with Automobiles); and a secondary that is the
@@ -1810,15 +1809,30 @@ function resolveSecondaryConcept(
   // `stripDeprioritized` keeps an ALL-filler query intact (never strips to empty),
   // so the all-filler case has to be refused explicitly first.
   const joined = residual.join(" ");
-  if (isAllDeprioritized(joined)) return undefined;
-  const surface = stripDeprioritized(joined).contentQuery.trim();
-  const normalized = normalizeForMatch(surface);
-  if (normalized.length < MIN_QUERY_LEN) return undefined;
-  if (!/\s/.test(surface) && GENERIC_DESCRIPTOR_NAMES.has(normalized)) return undefined;
-  let cands = rankedDescriptorCandidates(map, normalized);
-  if (cands.length === 0 && resolveMeshQueryNormalizationEnabled()) {
-    const singular = singularizeForMatch(normalized);
-    if (singular !== normalized) cands = rankedDescriptorCandidates(map, singular);
+  // A LONE filler word is never a second concept even when it is an exact MeSH name
+  // (`stem cell biology` → Biology; 29 such). A multi-word residual is tried WHOLE
+  // first and filler-stripped only on a miss: stripping first gutted the measured
+  // prod residuals whose filler word is part of the descriptor's own form —
+  // `radiation therapy` → `radiation` → Radiation (G01, not Radiotherapy), `gene
+  // therapy` (both words filler) → refused, `regenerative medicine` → `regenerative`
+  // → nothing. The strip still earns `thrombectomy outcomes` → Thrombectomy.
+  if (!/\s/.test(joined) && isAllDeprioritized(joined)) return undefined;
+  const stripped = stripDeprioritized(joined).contentQuery.trim();
+  let surface = joined;
+  let cands: ReturnType<typeof rankedDescriptorCandidates> = [];
+  for (const s of stripped === joined ? [joined] : [joined, stripped]) {
+    const normalized = normalizeForMatch(s);
+    if (normalized.length < MIN_QUERY_LEN) continue;
+    if (!/\s/.test(s) && GENERIC_DESCRIPTOR_NAMES.has(normalized)) continue;
+    cands = rankedDescriptorCandidates(map, normalized);
+    if (cands.length === 0 && resolveMeshQueryNormalizationEnabled()) {
+      const singular = singularizeForMatch(normalized);
+      if (singular !== normalized) cands = rankedDescriptorCandidates(map, singular);
+    }
+    if (cands.length > 0) {
+      surface = s;
+      break;
+    }
   }
   const top = cands[0];
   if (!top || top.row.descriptorUi === primary.descriptorUi) return undefined;
