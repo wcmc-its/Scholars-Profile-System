@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { classifyMenteeKind, programTypeForKind, tierOf } from "@/lib/mentee-suggestions/kind";
+import {
+  classifyMenteeKind,
+  formerFacultyRole,
+  programTypeForKind,
+  tierOf,
+} from "@/lib/mentee-suggestions/kind";
 
 describe("classifyMenteeKind", () => {
   it("picks the most specific trainee type over the paid-student employee type", () => {
@@ -43,5 +48,26 @@ describe("classifyMenteeKind", () => {
     for (const k of ["volunteer", "resident", "research_staff", "alumni_md", "masters"] as const) {
       expect(programTypeForKind(k), k).toBeUndefined();
     }
+  });
+});
+
+describe("formerFacultyRole — expired ED faculty-SOR titles for the departed", () => {
+  it("professor-ranked titles exclude; Fellow / Postdoctoral Associate classify; the rest say nothing", () => {
+    expect(formerFacultyRole("Professor of Medicine")).toBe("professor");
+    expect(
+      formerFacultyRole("Assistant Professor of Health Services Research in Radiology (Interim)"),
+    ).toBe("professor");
+    expect(formerFacultyRole("Visiting Assistant Professor of Pediatrics")).toBe("professor");
+    expect(formerFacultyRole("Fellow in Medicine")).toBe("fellow");
+    expect(formerFacultyRole("Visiting Fellow in Neuroscience")).toBe("fellow");
+    expect(formerFacultyRole("Postdoctoral Associate in Physiology and Biophysics")).toBe("postdoc");
+    for (const t of [
+      "Instructor in Medicine",
+      "Clinical Associate in Surgery",
+      "Research Associate in Medicine",
+      "Lecturer in Public Health",
+      "Fellowship Director",
+    ])
+      expect(formerFacultyRole(t)).toBeNull();
   });
 });

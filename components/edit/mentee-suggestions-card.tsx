@@ -12,8 +12,8 @@
  * handed. A superuser sees the same card with third-person copy.
  *
  * Default list = presumptive / ambiguous tier, ≥2 co-pubs, not dismissed.
- * Three collapsed footers hold the rest: 1-paper matches, unknown-tier
- * co-authors, and dismissed rows (with Restore).
+ * Two collapsed footers hold the rest: 1-paper matches and dismissed rows
+ * (with Restore). Unknown-tier co-authors never reach the table (builder).
  */
 "use client";
 
@@ -146,7 +146,6 @@ export function MenteeSuggestionsCard({
   const weak = view.filter(
     (s) => s.dismissedAt === null && s.tier !== "unknown" && s.nCoPubs === 1,
   );
-  const unknown = view.filter((s) => s.dismissedAt === null && s.tier === "unknown");
   const gone = view.filter((s) => s.dismissedAt !== null);
 
   function setErr(id: number, msg: string | null) {
@@ -289,20 +288,6 @@ export function MenteeSuggestionsCard({
             </summary>
             <ul className="border-apollo-border divide-apollo-border mt-2 divide-y rounded-md border">
               {weak.sort(byStrength).map((s) => (
-                <SuggestionRow key={s.id} {...rowProps(s)} />
-              ))}
-            </ul>
-          </details>
-        )}
-
-        {unknown.length > 0 && (
-          <details data-testid="mentee-suggestions-unknown">
-            <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
-              {unknown.length} other {unknown.length === 1 ? "co-author" : "co-authors"} whose
-              career stage we can’t tell
-            </summary>
-            <ul className="border-apollo-border divide-apollo-border mt-2 divide-y rounded-md border">
-              {unknown.sort(byStrength).map((s) => (
                 <SuggestionRow key={s.id} {...rowProps(s)} />
               ))}
             </ul>

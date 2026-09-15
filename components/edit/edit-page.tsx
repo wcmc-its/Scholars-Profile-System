@@ -928,13 +928,9 @@ export function EditPage({
   );
 }
 
-/** #2634 — non-dismissed suggestion rows that look like trainees: the rail badge
- *  + Mentees pointer count. Unknown-tier rows (a collapsed footer on the card)
- *  don't count — "3 co-authors look like trainees" must not mean three
- *  former colleagues we couldn't place. */
+/** #2634 — non-dismissed suggestion rows: the rail badge + Mentees pointer count. */
 function activeMenteeSuggestionCount(ctx: EditContext): number {
-  return ctx.menteeSuggestions.filter((s) => s.dismissedAt === null && s.tier !== "unknown")
-    .length;
+  return ctx.menteeSuggestions.filter((s) => s.dismissedAt === null).length;
 }
 
 /** "3 co-authors look like trainees" / "1 co-author looks like a trainee". */
