@@ -1192,6 +1192,38 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
 const COVID = "D000086382";
 
 describe("searchPeople — two-concept `secondary` count on the tagged lead", () => {
+  // The STACKED path (`selectEvidenceLines`, what the deployed page renders under
+  // SEARCH_EVIDENCE_REASON_COUNTS=on) builds its own tagged line — it shipped
+  // without `secondary` while the single-evidence path had it, and this suite
+  // was green. Assert both.
+  it("stacked lines: the secondary rides on the tagged lead too", async () => {
+    process.env.SEARCH_EVIDENCE_REASON_COUNTS = "on";
+    try {
+      hitSourcePatch = { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 } };
+      process.env[EVIDENCE] = "on";
+      const result = await searchPeople({
+        q: "microbiome",
+        relevanceMode: "v3",
+        shape: "topic",
+        matchExplain: true,
+        reasonFromDoc: true,
+        meshDescriptorUi: MICROBIOTA,
+        meshDescriptorName: "Microbiota",
+        meshDescendantUis: [MICROBIOTA, MYCOBIOME],
+        matchAwareContext: { methodFamily: null, topics: [] },
+        meshSecondary: { descriptorUi: COVID, name: "COVID-19" },
+      });
+      const lines = result.hits[0].evidenceLines;
+      expect(lines).toBeDefined();
+      expect(lines?.find((l) => l.kind === "publications")).toMatchObject({
+        strength: "tagged",
+        secondary: { term: "COVID-19", count: 4 },
+      });
+    } finally {
+      delete process.env.SEARCH_EVIDENCE_REASON_COUNTS;
+    }
+  });
+
   it("attaches the secondary term + the scholar's own count under it", async () => {
     const ev = await leadEvidenceFor(
       { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 } },
