@@ -2403,10 +2403,10 @@ export class AppStack extends Stack {
         // Two-concept resolution (term-resolution-gap spec, 2026-09-14). A `partial`
         //   primary's residual tokens are resolved once more; a hit becomes
         //   `MeshResolution.secondaryConcept`, and the concept-concentration boost is keyed on
-        //   pubs tagged in BOTH subtrees. Reorder-only, no admission change. STAGING ON
-        //   to eval the 32 measured prod two-concept queries (Projects
-        //   probe-secondary-concept-eval.py); PROD OFF until the result pages are read.
-        SEARCH_MESH_SECONDARY_CONCEPT: env === "staging" ? "on" : "off",
+        //   pubs tagged in BOTH subtrees. Reorder-only, no admission change. Staging eval
+        //   read 2026-09-14/15 (Projects probe-secondary-concept-eval.py: 27/35 paired, 11
+        //   reordered, none demoted); PROD ON 2026-09-15 alongside #2645-#2648.
+        SEARCH_MESH_SECONDARY_CONCEPT: "on",
         // SEARCH_MESH_ENTRY_TIER_PARITY -- entry-term tier parity. When ON, meshMatchTier
         //   promotes an entry-term resolution to the `exact` tier IF the user's WHOLE
         //   query is the entry term that matched. Same descriptor => same tier => same
