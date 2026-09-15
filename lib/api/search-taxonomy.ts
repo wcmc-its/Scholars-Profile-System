@@ -1629,6 +1629,8 @@ export async function resolveMeshDescriptor(
     // the query's contiguous word-windows (decompose-and-resolve). Off ⇒ null, exactly
     // as before.
     if (!resolveMeshResolutionFallbackEnabled()) return null;
+    const compound = resolveByCompoundForm(map, query);
+    if (compound) return compound;
     const primary = resolveByWindowFallback(map, query);
     if (primary && resolveMeshSecondaryConceptEnabled()) {
       const secondary = resolveSecondaryConcept(map, query, primary);
@@ -1875,6 +1877,56 @@ function resolveSecondaryConcept(
     confidence: top.confidence,
     descendantUis: getOrComputeDescendants(map, top.row.descriptorUi),
   };
+}
+
+/**
+ * Compound-form retry — `covid vaccines` → COVID-19 Vaccines.
+ *
+ * MeSH names a compound descriptor by its parent's OWN name (`COVID-19 Vaccines`,
+ * `COVID-19 Testing`), so a query that spells the parent by an entry term (`covid`)
+ * misses verbatim; the window fallback then latches onto the OTHER word (`vaccines` →
+ * Vaccines, 95 descendants) and the specific descriptor carrying the scholar's own tags
+ * is never named — the row read "26 of 190 tagged under Vaccines" for a COVID-vaccine
+ * epidemiologist. Runs before the window fallback: for each proper sub-window that
+ * resolves to some descriptor D, splice D's name and each entry term in for the window
+ * and look the whole compound up verbatim (then singularized, as #1342). A hit is a
+ * verbatim resolution of the WHOLE query, so it carries the hit's confidence and, being
+ * >= MESH_RANK_VERBATIM, also suppresses the #692 strip retry that shrank `covid
+ * testing` to COVID-19.
+ *
+ * Bounded: windows × (1 + entryTerms) Map gets. No descendant guard on purpose: the
+ * compound must be a real MeSH form with the user's remaining tokens in place, which is
+ * the stronger constraint (COVID-19 Testing is not under COVID-19 by tree number and
+ * would have been refused). The 35-query pair eval was byte-identical with this on.
+ */
+function resolveByCompoundForm(map: MeshMap, query: string): MeshResolution | null {
+  const tokens = queryConjuncts(query).flat();
+  if (tokens.length < 2) return null;
+  for (let size = tokens.length - 1; size >= 1; size--) {
+    for (let i = 0; i + size <= tokens.length; i++) {
+      const key = normalizeForMatch(tokens.slice(i, i + size).join(" "));
+      if (key.length < MIN_QUERY_LEN) continue;
+      const win = rankedDescriptorCandidates(map, key)[0];
+      if (!win) continue;
+      for (const form of [win.row.name, ...win.row.entryTerms]) {
+        const joined = normalizeForMatch(
+          [...tokens.slice(0, i), form, ...tokens.slice(i + size)].join(" "),
+        );
+        let cands = rankedDescriptorCandidates(map, joined);
+        if (cands.length === 0 && resolveMeshQueryNormalizationEnabled()) {
+          const singular = singularizeForMatch(joined);
+          if (singular !== joined) cands = rankedDescriptorCandidates(map, singular);
+        }
+        if (cands.length === 0) continue;
+        return buildMeshResolution(map, cands[0], {
+          matchedForm: cands[0].matchedForm,
+          confidence: cands[0].confidence,
+          ambiguous: cands.length > 1,
+        });
+      }
+    }
+  }
+  return null;
 }
 
 function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
