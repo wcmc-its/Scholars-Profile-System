@@ -832,7 +832,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_SECONDARY_CONCEPT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_MESH_ENTRY_TIER_PARITY",
