@@ -48,6 +48,7 @@ import {
   singularizeForMatch,
 } from "@/lib/api/normalize";
 import { dedupeFirstByKey } from "@/lib/api/search-ranking";
+import meshRedirects from "@/data/search/mesh-redirects.json";
 import {
   resolveSearchSuggestMeshConcept,
   resolveMeshResolutionFallbackEnabled,
@@ -1467,6 +1468,21 @@ const HARD_OVERRIDE_BY_FORM: ReadonlyMap<
 );
 
 /**
+ * Descriptor-level redirects for NEW MeSH descriptors with ~no local tags — the
+ * older literature is indexed under the tree parent and NLM never re-tags, so
+ * `uveal melanoma` resolved to Uveal Melanoma (1 local pub) while the 141 uveal
+ * pubs sit under Uveal Neoplasms. Keyed on the RESOLVED UI, not the surface form,
+ * so every route in (name, entry term, singular, window residual) is covered.
+ * `confidence` and `matchedForm` stay those of the row the query actually hit;
+ * only `row` is swapped. Data: `data/search/mesh-redirects.json` (each `to` is a
+ * tree parent whose pool is clinically the same thing). A missing `to` (MeSH
+ * full-replace) leaves the original row — never throws.
+ */
+const REDIRECT_BY_UI: ReadonlyMap<string, string> = new Map(
+  meshRedirects.redirects.map((r) => [r.from, r.to]),
+);
+
+/**
  * #259 / #878 — rank the descriptor candidates for an already-normalized query
  * key against the in-memory MeSH map. Shared by `resolveMeshDescriptor` (which
  * takes the winner) and `suggestMeshConcepts` (which lists them), so the two
@@ -1543,7 +1559,16 @@ function rankedDescriptorCandidates(
     return a.row.descriptorUi.localeCompare(b.row.descriptorUi);
   });
 
-  return candidates;
+  // New-descriptor redirect (see REDIRECT_BY_UI): swap the row, keep how it was hit.
+  // Dedupe in rank order so two forms redirected to one parent yield one candidate.
+  const seen = new Set<string>();
+  return candidates.flatMap((c) => {
+    const to = REDIRECT_BY_UI.get(c.row.descriptorUi);
+    const row = (to && map.byUi.get(to)) || c.row;
+    if (seen.has(row.descriptorUi)) return [];
+    seen.add(row.descriptorUi);
+    return [row === c.row ? c : { ...c, row }];
+  });
 }
 
 /**
