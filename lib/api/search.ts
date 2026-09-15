@@ -1781,6 +1781,16 @@ export async function searchPeople(opts: {
    */
   meshDescriptorUi?: string;
   /**
+   * Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`) — the second descriptor
+   * (`meshResolution.secondaryConcept`), so the tagged evidence line can add the
+   * scholar's own count under it ("· 41 under COVID-19"), read O(1) from the same
+   * `_source.meshSubtreeCounts` map as the primary. Per-descriptor, NOT co-occurrence:
+   * the pair count that drives the concentration boost is not on the people doc.
+   * ponytail: thread the pair agg's per-cwid `n` if the eval says "on both" matters.
+   * Reason-from-doc path only; absent ⇒ the line is byte-identical.
+   */
+  meshSecondary?: { descriptorUi: string; name: string };
+  /**
    * Search reason-from-doc — `SEARCH_PEOPLE_REASON_FROM_DOC` resolved by the
    * route. When true (and `matchExplain` is on and a concept resolved), the tagged
    * reason count is read from the precomputed people-doc `meshSubtreeCounts`
@@ -3708,7 +3718,14 @@ export async function searchPeople(opts: {
   // reads it for ranking.
   const reasonCounts = new Map<
     string,
-    { tagged: number; mention: number; taggedLatest?: number; mentionLatest?: number }
+    {
+      tagged: number;
+      mention: number;
+      taggedLatest?: number;
+      mentionLatest?: number;
+      /** Two-concept: the scholar's count under the SECONDARY descriptor (doc path only). */
+      taggedSecondary?: number;
+    }
   >();
   // Issue #967 / rep-papers disclosure — representative pubs per cwid, keyed by
   // which reason branch they belong to (tagged vs mention), up to 3 each.
@@ -3835,9 +3852,13 @@ export async function searchPeople(opts: {
     // into `meshSubtreeCounts` — a reindex, deliberately out of scope here.
     // 1) Doc-sourced tagged counts. Cap is applied in `composeMatchReason`.
     for (const h of r.hits.hits) {
+      const taggedSecondary = opts.meshSecondary
+        ? taggedCountFromDoc(h._source.meshSubtreeCounts, opts.meshSecondary.descriptorUi)
+        : 0;
       reasonCounts.set(h._source.cwid, {
         tagged: taggedCountFromDoc(h._source.meshSubtreeCounts, resolvedConceptUi),
         mention: 0,
+        ...(taggedSecondary > 0 ? { taggedSecondary } : {}),
       });
     }
     // 2) Mention-only fallback. The literal-query title/abstract scan can't be
@@ -4268,6 +4289,16 @@ export async function searchPeople(opts: {
         // #2094 — year of the most recent COUNTED publication. Absent ⇒ unknown.
         ...(counts.taggedLatest != null ? { latestYear: counts.taggedLatest } : {}),
         ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
+        // Two-concept: the scholar's own count under the second descriptor, so the line
+        // names both concepts the ScopeNote says the query matched. Omitted at 0.
+        ...(opts.meshSecondary && counts.taggedSecondary
+          ? {
+              secondary: {
+                term: opts.meshSecondary.name,
+                count: Math.min(counts.taggedSecondary, pubCount),
+              },
+            }
+          : {}),
       };
     if (counts && counts.mention > 0)
       pub.mention = {

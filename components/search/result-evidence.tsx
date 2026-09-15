@@ -591,6 +591,18 @@ export function ResultEvidence({
               </span>
             </>
           ) : null}
+          {/* Two-concept resolution — the scholar's own count under the second
+              descriptor, same weight and underline as the primary term so the line
+              names both concepts the ScopeNote claimed. "under" repeats line 1's verb
+              phrase by ellipsis ("tagged under X · N under Y"); no co-occurrence claim. */}
+          {evidence.kind === "publications" && evidence.secondary ? (
+            <>
+              <span className={muted}> · {evidence.secondary.count} under</span>{" "}
+              <span className={`font-semibold ${anchor} ${ENTITY_UNDERLINE}`}>
+                {evidence.secondary.term}
+              </span>
+            </>
+          ) : null}
         </MatchAwareReason>
       );
     }

@@ -1184,3 +1184,41 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
     expect(body._source).not.toContain("clinicalExpertise");
   });
 });
+
+// Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`) — the second descriptor's
+// per-scholar count rides on the counted `tagged` lead as `secondary`, read from the
+// same `meshSubtreeCounts` map as the primary. Same hop as #1955 above: only
+// `lib/api/search.ts` attaches it, so only a `searchPeople` assertion covers it.
+const COVID = "D000086382";
+
+describe("searchPeople — two-concept `secondary` count on the tagged lead", () => {
+  it("attaches the secondary term + the scholar's own count under it", async () => {
+    const ev = await leadEvidenceFor(
+      { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 } },
+      { meshSecondary: { descriptorUi: COVID, name: "COVID-19" } },
+    );
+    expect(ev).toMatchObject({
+      kind: "publications",
+      strength: "tagged",
+      term: "Microbiota",
+      secondary: { term: "COVID-19", count: 4 },
+    });
+  });
+
+  it("omits `secondary` when the scholar has nothing under the second descriptor", async () => {
+    const ev = await leadEvidenceFor(
+      { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12 } },
+      { meshSecondary: { descriptorUi: COVID, name: "COVID-19" } },
+    );
+    expect(ev).toMatchObject({ strength: "tagged", term: "Microbiota" });
+    expect(ev).not.toHaveProperty("secondary");
+  });
+
+  it("no secondary concept ⇒ byte-identical lead (no `secondary` key)", async () => {
+    const ev = await leadEvidenceFor({
+      publicationMeshUi: [MICROBIOTA],
+      meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 },
+    });
+    expect(ev).not.toHaveProperty("secondary");
+  });
+});

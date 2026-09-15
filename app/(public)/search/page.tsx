@@ -519,6 +519,13 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           // When on and a concept resolved, the tagged reason count is served
           // from the precomputed doc field instead of the publications-index agg.
           meshDescriptorUi: meshOff ? undefined : taxonomyMatch.meshResolution?.descriptorUi,
+          meshSecondary:
+            !meshOff && taxonomyMatch.meshResolution?.secondaryConcept
+              ? {
+                  descriptorUi: taxonomyMatch.meshResolution.secondaryConcept.descriptorUi,
+                  name: taxonomyMatch.meshResolution.secondaryConcept.name,
+                }
+              : undefined,
           reasonFromDoc: resolvePeopleReasonFromDoc(),
           matchExplain: peopleMatchExplain,
           // Issue #967 — representative matching publication in the reason line.
