@@ -230,6 +230,12 @@ async function handleSearch(request: NextRequest) {
     taxonomyMatch.meshResolution?.descendantUis.length ?? null;
   const descendantTruncated =
     descendantCount !== null && descendantCount >= DESCENDANT_HARD_CAP;
+  // Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`) — the residual's
+  // descriptor, or null. Logged on every branch below as `meshSecondaryDescriptorUi`
+  // so the prod `search_query` stream shows how often a pair actually fires.
+  const meshSecondaryDescriptorUi =
+    taxonomyMatch.meshResolution?.secondaryConcept?.descriptorUi ?? null;
+  const secondaryConceptLabel = taxonomyMatch.meshResolution?.secondaryConcept?.name ?? null;
   const searchInterpretation = {
     scope,
     conceptLabel,
@@ -237,6 +243,7 @@ async function handleSearch(request: NextRequest) {
     meshConfidence: meshResolutionConfidence,
     descendantCount,
     descendantTruncated,
+    secondaryConceptLabel,
   };
 
   // Issue #78 — Funding tab. Multi-select facets are repeated params,
@@ -294,6 +301,7 @@ async function handleSearch(request: NextRequest) {
         filters,
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
+        meshSecondaryDescriptorUi,
         // Issue #295 — funding concept-clause telemetry.
         meshConceptClauseFired,
         // SPEC §7.5 — resolver scope. Logged on every branch so a resolver
@@ -459,6 +467,7 @@ async function handleSearch(request: NextRequest) {
         filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole, department, meshOnly },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
+        meshSecondaryDescriptorUi,
         // Issue #259 §5.4.2 / SPEC §7.5. Bucketed in the post-flip retro plot
         // to attribute recall lift to descendant-set size (small subtree →
         // small lift, broad descriptor → big lift). `null` when resolution
@@ -758,6 +767,7 @@ async function handleSearch(request: NextRequest) {
       },
       meshResolutionDescriptorUi,
       meshResolutionConfidence,
+      meshSecondaryDescriptorUi,
       meshDescendantSetSize: peopleDescendantSetSize,
       // #2094 — did the expansion hit DESCENDANT_HARD_CAP? Null EXACTLY when the
       // size above is null, so the truncation rate over the query log is
@@ -871,4 +881,6 @@ type SearchInterpretation = {
   /** #2094 — the walk hit DESCENDANT_HARD_CAP, so the subtree is INCOMPLETE and
    *  every downstream count/clause built from it undercounts. */
   descendantTruncated: boolean;
+  /** Two-concept resolution: the second descriptor's name, or null. */
+  secondaryConceptLabel: string | null;
 };

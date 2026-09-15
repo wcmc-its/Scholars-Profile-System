@@ -630,6 +630,29 @@ describe("getConceptScholarConcentration — #1343 concept-axis source", () => {
     expect(total.aggs.byAuthor.terms.include).toEqual(["a"]);
   });
 
+  it("two-concept query: a second `terms` filter makes the on-topic agg a co-occurrence count", async () => {
+    conceptBuckets = [{ key: "a", doc_count: 6 }];
+    totalBuckets = [{ key: "a", doc_count: 12 }];
+    const pair = await getConceptScholarConcentration(["D1"], 200, ["D9", "D8"]);
+    expect(pair.map((o) => o.cwid)).toEqual(["a"]);
+    const onTopic = capturedBodies[0] as {
+      query: { bool: { filter: { terms: Record<string, string[]> }[] } };
+    };
+    expect(onTopic.query.bool.filter).toEqual([
+      { terms: { meshDescriptorUi: ["D1"] } },
+      { terms: { meshDescriptorUi: ["D9", "D8"] } },
+    ]);
+    // The same primary WITHOUT the secondary still builds the single-filter body.
+    // (The cache key also differs — `+<secondary uis>` — but `cachedReasonAgg` is
+    // bypassed under vitest, so that is asserted by reading the key builder, not here.)
+    capturedBodies.length = 0;
+    await getConceptScholarConcentration(["D1"], 200);
+    const single = capturedBodies[0] as {
+      query: { bool: { filter: { terms: Record<string, string[]> }[] } };
+    };
+    expect(single.query.bool.filter).toEqual([{ terms: { meshDescriptorUi: ["D1"] } }]);
+  });
+
   it("all authors floored → [] and no total-pub round-trip", async () => {
     conceptBuckets = [{ key: "x", doc_count: 1 }];
     const out = await getConceptScholarConcentration(["D1"], 200);

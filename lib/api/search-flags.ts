@@ -1199,6 +1199,28 @@ export function resolveMeshTokenCoverageEnabled(): boolean {
 }
 
 /**
+ * Two-concept resolution. When ON, a query the decompose-and-resolve fallback
+ * interpreted as a `partial` window (e.g. `pancreatic cancer immunotherapy` →
+ * Pancreatic Neoplasms) has its RESIDUAL tokens (`immunotherapy`) resolved once more
+ * through the whole-form path; a hit becomes `MeshResolution.secondaryConcept`. Consumed by
+ * `resolveAreaConcentration`, which then keys the concentration boost on publications
+ * tagged in BOTH subtrees (true co-occurrence, one extra `terms` filter on the agg the
+ * concept arm already runs). Reorder-only: no admission, filter, or facet changes. The
+ * secondary is never used for a single-token query and never when the primary resolved
+ * verbatim (nothing left over). Flag OFF ⇒ `secondaryConcept` is never populated,
+ * byte-identical. Inert (never worse than one concept) unless
+ * `SEARCH_PEOPLE_CONCEPT_ARM_FIRST` is also on — the pair arm lives inside that arm.
+ *
+ * Measured need (prod `search_query`, 90 d to 2026-09-14): 32 of 68 distinct `partial`
+ * resolutions carried a residual that itself resolves cleanly — 77 searches, the largest
+ * class in the term-resolution-gap census — and on every one the second concept was
+ * inert (`pancreatic cancer immunotherapy` ranked identically to `pancreatic cancer`).
+ */
+export function resolveMeshSecondaryConceptEnabled(): boolean {
+  return process.env.SEARCH_MESH_SECONDARY_CONCEPT === "on";
+}
+
+/**
  * Entry-term tier parity. When ON, `meshMatchTier` promotes an entry-term resolution to
  * the `exact` tier IF the user's WHOLE query is the entry term that matched
  * (`isFullQueryMeshMatch`, `@/lib/api/normalize`). Same descriptor ⇒ same tier ⇒ same

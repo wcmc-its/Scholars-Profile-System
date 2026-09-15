@@ -831,6 +831,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_MESH_SECONDARY_CONCEPT",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_MESH_ENTRY_TIER_PARITY",
                 "Value": "on",
               },
@@ -5292,6 +5296,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_MESH_RESOLVE_TOKEN_COVERAGE",
                 "Value": "off",
+              },
+              {
+                "Name": "SEARCH_MESH_SECONDARY_CONCEPT",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_MESH_ENTRY_TIER_PARITY",

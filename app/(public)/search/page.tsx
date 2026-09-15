@@ -271,6 +271,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         label: taxonomyMatch.meshResolution.name,
         descriptorUi: taxonomyMatch.meshResolution.descriptorUi,
         definition: taxonomyMatch.meshResolution.scopeNote,
+        // People tab only: the pair keys the people concentration boost and nothing
+        // else, so the other tabs must not claim to be "matching" it.
+        secondaryLabel:
+          type === "people" ? (taxonomyMatch.meshResolution.secondaryConcept?.name ?? null) : null,
       }
     : null;
   const scopeHrefs = {

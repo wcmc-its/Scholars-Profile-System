@@ -57,7 +57,17 @@ export async function resolveAreaConcentration(input: {
 
   let concentration: AreaConcentration | undefined;
 
-  if (conceptFirst) {
+  // Two-concept queries (`SEARCH_MESH_SECONDARY_CONCEPT`, set by the resolver only when
+  // the flag is on): key the boost on pubs tagged in BOTH subtrees. Empty (no scholar
+  // clears CONCEPT_CONCENTRATION_MIN_PUBS at the intersection) falls through to the
+  // single-concept arms below exactly as if there were no secondary — so a pair with
+  // no co-occurring literature ranks as the primary alone, never worse.
+  const secondaryUis = taxonomyMatch.meshResolution?.secondaryConcept?.descendantUis ?? [];
+  if (conceptFirst && secondaryUis.length > 0) {
+    concentration = await getConceptScholarConcentration(descendantUis, topN, secondaryUis);
+  }
+
+  if (!concentration?.length && conceptFirst) {
     concentration = await getConceptScholarConcentration(descendantUis, topN);
   }
 
