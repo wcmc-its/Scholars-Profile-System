@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { fetchKeyPaper } from "@/lib/api/search";
 import { resolvePeopleReasonFromDoc } from "@/lib/api/search-flags";
+import { DESCENDANT_HARD_CAP } from "@/lib/api/search-taxonomy";
 
 export const dynamic = "force-dynamic";
 
@@ -35,11 +36,15 @@ export async function GET(request: NextRequest) {
   // descriptor UIs, and at most a card's worth of exclude pmids.
   const cwid = (params.get("cwid") ?? "").slice(0, 32);
   const contentQuery = (params.get("q") ?? "").slice(0, 300);
+  // The card sends the resolved concept's full `descendantUis`, which the page
+  // already bounds at DESCENDANT_HARD_CAP (200). A tighter cap here silently
+  // truncates broad subtrees — Vaccines has 95 descendants and COVID-19 Vaccines
+  // sits at index 65, so a 50-cap returned [] for every COVID-vaccine scholar.
   const descriptorUis = (params.get("descriptorUis") ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
-    .slice(0, 50);
+    .slice(0, DESCENDANT_HARD_CAP);
   // #1351 — the resolved concept display name, so the title highlight can mark the
   // concept term (not just the literal query) on a descriptor-tagged key paper.
   const conceptLabel = (params.get("label") ?? "").slice(0, 300);
