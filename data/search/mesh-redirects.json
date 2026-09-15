@@ -1,0 +1,22 @@
+{
+  "_doc": "Descriptor-level redirects for NEW MeSH descriptors (9-digit UIs, 2018+) that have ~no local tags because the older literature is indexed under the tree PARENT and NLM never re-tags. Applied AFTER a query resolves (any surface form: name, entry term, singular, window residual): the resolved descriptor is swapped for `to`, which must be a tree parent whose pool is clinically the same thing (Uveal Melanoma ~ Uveal Neoplasms), never a different-scale concept (Spatial Transcriptomics -> Gene Expression Profiling is NOT this). Counts are folded local pubs on staging, 2026-09-15 (Projects/probe-new-descriptor-parents.ts). A curated.csv alias cannot do this: aliases never override a native name/entry term.",
+  "redirects": [
+    { "from": "D000098943", "fromName": "Uveal Melanoma", "to": "D014604", "toName": "Uveal Neoplasms", "note": "1 local pub vs 141 under the parent; Melanoma (1,682) is the other parent and too broad." },
+    { "from": "D000096142", "fromName": "Cutaneous Malignant Melanoma", "to": "D008545", "toName": "Melanoma", "note": "28 vs 1,682. MeSH Melanoma IS cutaneous melanoma by default; Skin Neoplasms (3,176) is the other parent and includes non-melanoma." },
+    { "from": "D000092004", "fromName": "Tyrosine Kinase Inhibitors", "to": "D047428", "toName": "Protein Kinase Inhibitors", "note": "1 vs 644; sole parent. TKI papers were tagged Protein Kinase Inhibitors until the 2022 descriptor." },
+    { "from": "D000088442", "fromName": "MINOCA", "to": "D009203", "toName": "Myocardial Infarction", "note": "0 vs 1,096; sole parent." },
+    { "from": "D000096003", "fromName": "Hypertensive Crisis", "to": "D006973", "toName": "Hypertension", "note": "1 vs 1,730; sole parent." },
+    { "from": "D000099316", "fromName": "Transcatheter Mitral Valve Replacement", "to": "D019918", "toName": "Heart Valve Prosthesis Implantation", "note": "0 vs 610. Endovascular Procedures (2,314) is the other parent and too broad." },
+    { "from": "D000098968", "fromName": "Community-Acquired Pneumonia", "to": "D011014", "toName": "Pneumonia", "note": "2 vs 2,893. Community-Acquired Infections (92) is the other parent; CAP papers carry both tags and the head noun is the pool a searcher wants." },
+    { "from": "D000098650", "fromName": "Guttate Psoriasis", "to": "D011565", "toName": "Psoriasis", "note": "0 vs 387; sole parent." },
+    { "from": "D000092183", "fromName": "Apical Hypertrophic Cardiomyopathy", "to": "D002312", "toName": "Cardiomyopathy, Hypertrophic", "note": "0 vs 112. Hypertrophy, Left Ventricular (332) is the other parent and the wrong disease." },
+    { "from": "D000094625", "fromName": "Aneurysm, Ascending Aorta", "to": "D017545", "toName": "Aortic Aneurysm, Thoracic", "note": "0 vs 250; sole parent." },
+    { "from": "D000094626", "fromName": "Aneurysm, Aortic Arch", "to": "D017545", "toName": "Aortic Aneurysm, Thoracic", "note": "0 vs 250; sole parent." },
+    { "from": "D000094627", "fromName": "Descending Thoracic Aortic Aneurysm", "to": "D017545", "toName": "Aortic Aneurysm, Thoracic", "note": "0 vs 250; sole parent." },
+    { "from": "D000094628", "fromName": "Aortic Root Aneurysm", "to": "D017545", "toName": "Aortic Aneurysm, Thoracic", "note": "0 vs 250; sole parent." },
+    { "from": "D000099142", "fromName": "Radioembolization, Therapeutic", "to": "D004621", "toName": "Embolization, Therapeutic", "note": "0 vs 438; sole parent. Y-90 papers are tagged Embolization, Therapeutic + Yttrium Radioisotopes." },
+    { "from": "D000098465", "fromName": "Remote Patient Monitoring", "to": "D017216", "toName": "Telemedicine", "note": "0 vs 418; sole parent." },
+    { "from": "D000090663", "fromName": "Schizophrenia, Treatment-Resistant", "to": "D012559", "toName": "Schizophrenia", "note": "1 vs 470; sole parent." },
+    { "from": "D000094384", "fromName": "Trained Immunity", "to": "D007113", "toName": "Immunity, Innate", "note": "1 vs 400; sole parent." }
+  ]
+}

@@ -122,6 +122,9 @@ data/seo/*
 !data/search/
 data/search/*
 !data/search/deprioritized-terms.json
+# Exception: new-descriptor redirects (Uveal Melanoma -> Uveal Neoplasms) — hand-curated
+# from a staging coverage probe, resolver-side, reviewed by PR like the list above.
+!data/search/mesh-redirects.json
 # #594 §3: the specific-subtopic LLM basket (derived from the DB subtopic taxonomy),
 # the corrected "WCM presence" instrument alongside the broad flagship queries.
 !data/seo/specific-queries.json
