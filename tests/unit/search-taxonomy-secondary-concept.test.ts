@@ -57,6 +57,9 @@ const RADIATION = row("D011827", "Radiation", [], "G01.750.770");
 const RADIOTHERAPY = row("D011878", "Radiotherapy", ["Radiation Therapy"], "E02.815");
 const SICKLE_CELL = row("D000755", "Anemia, Sickle Cell", ["Sickle Cell"], "C15.378.071.141.150.150");
 const GENETIC_THERAPY = row("D015316", "Genetic Therapy", ["Gene Therapy"], "E02.095.375");
+const ORGANOIDS = row("D000072", "Organoids", [], "A11.872.700");
+const CRISPR_CAS = row("D064113", "CRISPR-Cas Systems", ["CRISPR-Cas System"], "G05.308.203.374.394");
+const CRISPR_REPEATS = row("D064112", "Clustered Regularly Interspaced Short Palindromic Repeats", ["CRISPR"], "G02.111.570.080.708.800.325.500");
 
 beforeEach(() => {
   _resetMeshMapForTests();
@@ -72,6 +75,21 @@ afterEach(() => {
 });
 
 describe("resolveMeshDescriptor — secondaryConcept (SEARCH_MESH_SECONDARY_CONCEPT)", () => {
+  it("function words in the residual are dropped: `crispr in organoids` pairs like `crispr organoids`", async () => {
+    mockMeshFindMany.mockResolvedValue([ORGANOIDS, CRISPR_CAS, CRISPR_REPEATS]);
+    const withIn = await resolveMeshDescriptor("crispr in organoids");
+    const bare = await resolveMeshDescriptor("crispr organoids");
+    expect(withIn?.name).toBe("Organoids");
+    expect(withIn?.secondaryConcept?.name).toBe("CRISPR-Cas Systems"); // the #2088 override, not the Repeats owner of `CRISPR`
+    expect(withIn?.secondaryConcept).toEqual(bare?.secondaryConcept);
+  });
+
+  it("a residual that is ONLY function words is no second concept", async () => {
+    mockMeshFindMany.mockResolvedValue([ORGANOIDS, CRISPR_CAS, CRISPR_REPEATS]);
+    const r = await resolveMeshDescriptor("the organoids");
+    expect(r?.secondaryConcept).toBeUndefined();
+  });
+
   it("flag OFF: a partial resolution carries no secondaryConcept (byte-identical)", async () => {
     delete process.env.SEARCH_MESH_SECONDARY_CONCEPT;
     mockMeshFindMany.mockResolvedValue([IMMUNOTHERAPY, NEOPLASMS]);

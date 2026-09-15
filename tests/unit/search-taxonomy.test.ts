@@ -1551,6 +1551,17 @@ describe("resolveMeshDescriptor — #2088 hard override beats a genuine NLM entr
     expect(r?.descriptorUi).toBe("D008279");
   });
 
+  it("'crispr' resolves to CRISPR-Cas Systems, not the Repeats descriptor that owns the entry term", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      { ...D_MRI, descriptorUi: "D064112", name: "Clustered Regularly Interspaced Short Palindromic Repeats", entryTerms: ["CRISPR"], treeNumbers: ["G02.111.570.080.708.800.325.500"] },
+      { ...D_MRI, descriptorUi: "D064113", name: "CRISPR-Cas Systems", entryTerms: ["CRISPR-Cas System"], treeNumbers: ["G05.308.203.374.394"] },
+    ]);
+    mockMeshAliasFindMany.mockResolvedValue([]);
+    const r = await resolveMeshDescriptor("CRISPR");
+    expect(r?.descriptorUi).toBe("D064113");
+    expect(r?.confidence).toBe("entry-term");
+  });
+
   it("falls through to the normal entry-term hit if the override's target UI is absent (stale)", async () => {
     // Functional Neuroimaging (D059907) missing from this load — the override
     // must not error, it should behave as if it weren't there.
