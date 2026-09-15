@@ -1464,6 +1464,13 @@ const HARD_OVERRIDE_BY_FORM: ReadonlyMap<
   [
     { matchedForm: "functional mri", descriptorUi: "D059907" },
     { matchedForm: "fmri", descriptorUi: "D059907" },
+    // Bare `CRISPR` is an NLM entry term of D064112 "Clustered Regularly Interspaced
+    // Short Palindromic Repeats" — the DNA element — not of D064113 "CRISPR-Cas
+    // Systems", the technique the word means on a medical-center search. Local
+    // coverage D064113 0.00028 vs D064112 0.00009; on staging `crispr` put a CRISPR
+    // lab (Dow) at 4 of 103 tagged. Every route in (query, window, residual) hits
+    // this key, so the pair label reads "CRISPR-Cas Systems" too.
+    { matchedForm: "CRISPR", descriptorUi: "D064113" },
   ].map((e) => [normalizeForMatch(e.matchedForm), e]),
 );
 
@@ -1816,6 +1823,8 @@ function queryConjuncts(query: string): string[][] {
  * Neoplasms is not a second concept, it is the first one's parent — and its 200-capped
  * subtree would make the "co-occurrence" an arbitrary prefix of C04).
  */
+const RESIDUAL_STOPWORDS = new Set(["a", "an", "the", "in", "of", "on", "for", "to", "with", "by"]);
+
 function resolveSecondaryConcept(
   map: MeshMap,
   query: string,
@@ -1823,10 +1832,15 @@ function resolveSecondaryConcept(
 ): MeshResolution["secondaryConcept"] | undefined {
   // Case-preserving tokenization (same delimiters as `queryConjuncts`) so the
   // acronym guard below can still see `CAR` / `PET`.
+  // Function words are dropped before anything is counted: `crispr in organoids`
+  // left `crispr in`, which is tried whole (miss) and then filler-stripped — but
+  // `in`/`of`/`the` are not filler in `deprioritized-terms.json`, so the strip was a
+  // no-op and the pair never fired, while `crispr organoids` paired. Not applied to
+  // the primary window scan, which keys on the user's contiguous words on purpose.
   const residual = query
     .split(/\s*(?:[&/,]|\band\b)\s*/i)
     .flatMap((seg) => seg.split(/[^A-Za-z0-9]+/))
-    .filter(Boolean);
+    .filter((t) => t && !RESIDUAL_STOPWORDS.has(t.toLowerCase()));
   const total = residual.length;
   for (const w of queryConjuncts(primary.matchedForm).flat()) {
     const i = residual.findIndex((r) => r.toLowerCase() === w);
