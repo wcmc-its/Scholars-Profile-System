@@ -11,7 +11,10 @@
  *
  *   mentor  = personType 'academic-faculty-weillfulltime'
  *   mentee  = any matched author who is NOT full-time, NOT professor-ranked
- *             (assistant/associate/full) and NOT an SPS full-time scholar
+ *             (assistant/associate/full, now or in an expired ED faculty SOR
+ *             record via `former_professor`), NOT an SPS full-time scholar,
+ *             and not an external-institution test identity (`ucsf_…`: any
+ *             `_` in the identifier — WCM CWIDs never carry one)
  *   window  = articleYear >= runYear - 8 for everything counted or listed
  *   keep    = nCoPubs >= 2 OR nMentorLastAuthor >= 1
  *   strong  = the mentee's top faculty co-author by last-author count, with
@@ -137,6 +140,7 @@ export async function queryPairStats(
        JOIN (SELECT pmid, MAX(\`rank\`) AS maxRank FROM analysis_summary_author_list GROUP BY pmid) mx
          ON mx.pmid = me.pmid
       WHERE me.personIdentifier <> ''
+        AND LOCATE('_', me.personIdentifier) = 0
         AND EXISTS (SELECT 1 FROM person_person_type ft
                      WHERE ft.personIdentifier = mt.personIdentifier AND ft.personType = ?)
         ${menteeFilter}
@@ -274,6 +278,10 @@ export async function buildMenteeSuggestions(): Promise<Summary> {
     select: { cwid: true },
   });
   for (const s of spsFaculty) excluded.add(s.cwid);
+  // Departed professors carry no ReCiterDB person type; etl:ed mirrors the
+  // ED faculty SOR's expired professor-ranked records into former_professor.
+  const formerProfessors = await db.write.formerProfessor.findMany({ select: { cwid: true } });
+  for (const f of formerProfessors) excluded.add(f.cwid);
   const eligible = pairs.filter((p) => !excluded.has(p.menteeCwid));
   log(`${eligible.length} pairs after excluding faculty/professor-ranked mentees`);
 

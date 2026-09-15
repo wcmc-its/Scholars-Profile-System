@@ -88,8 +88,10 @@ export function stripGradSchoolChairDesignation(title: string): string {
  *  "Assistant Professor", "Associate Professor", "Adjunct Professor", "Adjunct
  *  Associate Professor", "Adjunct Assistant") and not the non-professorial ones
  *  ("Instructor", "Lecturer", "Librarian", "Course Director", "Associate Dean",
- *  "Dean", "Retired"). */
-function isProfessorialTitle(title: string): boolean {
+ *  "Dean", "Retired"). Also the ED ETL's test for an expired faculty-SOR role
+ *  record (`former_professor`): matches every professor variant there and none
+ *  of Fellow / Postdoctoral Associate / Instructor / Clinical Associate. */
+export function isProfessorialTitle(title: string): boolean {
   return /professor/i.test(title) || /\badjunct\s+(assistant|associate)\b/i.test(title);
 }
 

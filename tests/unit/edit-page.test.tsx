@@ -635,6 +635,16 @@ describe("EditPage router — mentee-suggestions rail + Mentees pointer (#2634)"
     expect(keys.indexOf("rail-coi")).toBe(keys.indexOf("rail-mentee-suggestions") + 1);
   });
 
+  it("unknown-tier rows never count toward the badge or the pointer", () => {
+    const unknownOnly: EditContext = {
+      ...ctx,
+      menteeSuggestions: [sugg(4, { kind: "unknown", tier: "unknown" })],
+    };
+    render(<EditPage ctx={unknownOnly} mode="self" attr="mentees" />);
+    expect(screen.getByTestId("rail-mentee-suggestions").querySelector('[aria-label$="to review"]')).toBeNull();
+    expect(screen.queryByTestId("mentee-suggestions-pointer")).toBeNull();
+  });
+
   it("a dismissed-only history still surfaces the item, without a badge or a Mentees pointer", () => {
     const goneOnly: EditContext = { ...ctx, menteeSuggestions: [withSugg.menteeSuggestions[2]] };
     render(<EditPage ctx={goneOnly} mode="self" attr="mentees" />);
