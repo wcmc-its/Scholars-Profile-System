@@ -816,6 +816,7 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
         ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0
           ? { pubs: input.pub.tagged.pubs }
           : {}),
+        ...(input.pub.tagged.secondary ? { secondary: input.pub.tagged.secondary } : {}),
         count: input.pub.tagged.count,
       }
     : undefined;
