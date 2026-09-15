@@ -500,6 +500,9 @@ export function EvidenceLine({
     if (!keyPaperMentionOnly && keyPaperConfig!.glossTerms) {
       params.set("glossTerms", keyPaperConfig!.glossTerms);
     }
+    if (!keyPaperMentionOnly && keyPaperConfig!.secondaryDescriptorUis?.length) {
+      params.set("secondaryUis", keyPaperConfig!.secondaryDescriptorUis.join(","));
+    }
     const ex = Array.from(claimedPmids).join(",");
     if (ex) params.set("exclude", ex);
     fetch(`/api/search/key-paper?${params.toString()}`)

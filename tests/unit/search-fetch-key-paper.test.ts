@@ -254,6 +254,44 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     expect(q.bool).toBeDefined();
   });
 
+  it("two-concept pair — `secondaryDescriptorUis` adds a boosted `should` terms clause; admission (filter) UNCHANGED", async () => {
+    captured.length = 0;
+    const args = { cwid: "abc1234", descriptorUis: ["Dpanc", "Dpanc1"], contentQuery: "pancreatic cancer immunotherapy" };
+    await fetchKeyPaper(args);
+    await fetchKeyPaper({ ...args, secondaryDescriptorUis: ["Dimmuno", "Dimmuno1"] });
+    const base = boolOf(captured[0].query);
+    const paired = boolOf(captured[1].query);
+    expect(paired.filter).toEqual(base.filter); // same admitted set
+    const terms = (paired.should ?? []).find((c) => JSON.stringify(c).includes("Dimmuno")) as
+      | { terms: { meshDescriptorUi: string[]; boost: number } }
+      | undefined;
+    expect(terms?.terms.meshDescriptorUi).toEqual(["Dimmuno", "Dimmuno1"]);
+    expect(terms?.terms.boost).toBeGreaterThan(1);
+    expect((paired.should ?? []).length).toBe((base.should ?? []).length + 1); // keyword clause kept
+  });
+
+  it("two-concept pair — absent / empty secondary ⇒ today's request; ignored on the free-text path", async () => {
+    captured.length = 0;
+    const args = { cwid: "abc1234", descriptorUis: ["Dpanc"], contentQuery: "pancreatic cancer" };
+    await fetchKeyPaper(args);
+    await fetchKeyPaper({ ...args, secondaryDescriptorUis: [] });
+    expect(captured[1]).toEqual(captured[0]);
+    // No primary concept ⇒ free-text admission; a stray secondary must not sneak a clause in.
+    await fetchKeyPaper({ cwid: "abc1234", descriptorUis: [], contentQuery: "pancreatic cancer" });
+    await fetchKeyPaper({ cwid: "abc1234", descriptorUis: [], contentQuery: "pancreatic cancer", secondaryDescriptorUis: ["Dimmuno"] });
+    expect(captured[3]).toEqual(captured[2]);
+  });
+
+  it("two-concept pair — the secondary buckets the cache key (ordering is part of the cached value)", async () => {
+    capturedCacheKeys.length = 0;
+    const args = { cwid: "abc1234", descriptorUis: ["Dpanc"], contentQuery: "pancreatic cancer" };
+    await fetchKeyPaper(args);
+    await fetchKeyPaper({ ...args, secondaryDescriptorUis: ["Dimmuno"] });
+    await fetchKeyPaper({ ...args, secondaryDescriptorUis: [] });
+    expect(capturedCacheKeys[1]).not.toBe(capturedCacheKeys[0]);
+    expect(capturedCacheKeys[2]).toBe(capturedCacheKeys[0]);
+  });
+
   it("returns [] when there is neither a concept nor a query (nothing to fetch)", async () => {
     captured.length = 0;
     const pubs = await fetchKeyPaper({ cwid: "abc1234", descriptorUis: [], contentQuery: "" });
