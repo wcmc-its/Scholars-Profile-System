@@ -52,6 +52,11 @@ const BLOOD = row("D001769", "Blood", [], "A12.207.152");
 const LEUKEMIA = row("D007938", "Leukemia", [], "C04.557.337");
 const LUNG_NEOPLASMS = row("D008175", "Lung Neoplasms", ["Lung Cancer"], "C04.588.894.797.520");
 const NEOPLASMS_C04 = { ...row("D009369", "Neoplasms", ["Cancer", "Tumors"], "C04") };
+const BREAST_NEOPLASMS = row("D001943", "Breast Neoplasms", ["Breast Cancer"], "C04.588.180");
+const RADIATION = row("D011827", "Radiation", [], "G01.750.770");
+const RADIOTHERAPY = row("D011878", "Radiotherapy", ["Radiation Therapy"], "E02.815");
+const SICKLE_CELL = row("D000755", "Anemia, Sickle Cell", ["Sickle Cell"], "C15.378.071.141.150.150");
+const GENETIC_THERAPY = row("D015316", "Genetic Therapy", ["Gene Therapy"], "E02.095.375");
 
 beforeEach(() => {
   _resetMeshMapForTests();
@@ -139,7 +144,21 @@ describe("resolveMeshDescriptor — secondaryConcept (SEARCH_MESH_SECONDARY_CONC
     expect(r?.secondaryConcept).toBeUndefined();
   });
 
-  it("flag ON: deprioritized filler is stripped from the residual before resolving", async () => {
+  it("flag ON: the WHOLE residual is tried before filler is stripped (`radiation therapy` → Radiotherapy, not Radiation)", async () => {
+    mockMeshFindMany.mockResolvedValue([BREAST_NEOPLASMS, RADIATION, RADIOTHERAPY]);
+    const r = await resolveMeshDescriptor("breast cancer radiation therapy");
+    expect(r?.name).toBe("Breast Neoplasms");
+    expect(r?.secondaryConcept?.name).toBe("Radiotherapy");
+  });
+
+  it("flag ON: an all-filler multi-word residual still resolves WHOLE (`gene therapy` → Genetic Therapy)", async () => {
+    mockMeshFindMany.mockResolvedValue([SICKLE_CELL, GENETIC_THERAPY]);
+    const r = await resolveMeshDescriptor("sickle cell gene therapy");
+    expect(r?.name).toBe("Anemia, Sickle Cell");
+    expect(r?.secondaryConcept?.name).toBe("Genetic Therapy");
+  });
+
+  it("flag ON: deprioritized filler is stripped from the residual when the whole residual misses", async () => {
     mockMeshFindMany.mockResolvedValue([IMMUNOTHERAPY, NEOPLASMS]);
     const r = await resolveMeshDescriptor("cancer immunotherapy research");
     expect(r?.name).toBe("Immunotherapy");
