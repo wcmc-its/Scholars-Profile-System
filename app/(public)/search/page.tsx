@@ -585,6 +585,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           descriptorUis: meshOff
             ? []
             : (taxonomyMatch.meshResolution?.descendantUis ?? []),
+          // Two-concept pair — so the key papers under the primary lead with the ones
+          // ALSO tagged under the secondary (the row says "ranked by work also under X").
+          ...(!meshOff && taxonomyMatch.meshResolution?.secondaryConcept
+            ? { secondaryDescriptorUis: taxonomyMatch.meshResolution.secondaryConcept.descendantUis }
+            : {}),
           contentQuery,
           // #1351 — resolved concept name, so the key-paper title highlight can mark
           // the concept term (not just the literal query) on a tagged match.

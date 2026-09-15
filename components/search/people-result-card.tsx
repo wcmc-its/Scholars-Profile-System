@@ -34,6 +34,9 @@ import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
  */
 export type KeyPaperConfig = {
   descriptorUis: string[];
+  /** Two-concept pair — the secondary concept's subtree; papers tagged under both lead
+   *  the key-paper list. Absent when the query resolved a single concept. */
+  secondaryDescriptorUis?: string[];
   contentQuery: string;
   /** #1351 — resolved concept name, so a tagged key paper's title highlights the
    *  concept term (not just the literal query). Empty for a free-text-only query. */

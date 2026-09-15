@@ -25,4 +25,12 @@ describe("GET /api/search/key-paper descriptorUis cap", () => {
     expect(sent.descriptorUis[65]).toBe("D65");
     expect(sent.descriptorUis[94]).toBe("D94");
   });
+
+  it("forwards the two-concept `secondaryUis` param under the same cap", async () => {
+    const { GET } = await import("@/app/api/search/key-paper/route");
+    fetchKeyPaper.mockClear();
+    await GET(new NextRequest("http://x/api/search/key-paper?cwid=a&descriptorUis=D1,D2&secondaryUis=D7,%20D8,"));
+    const sent = (fetchKeyPaper.mock.calls[0] as unknown[])[0] as { secondaryDescriptorUis: string[] };
+    expect(sent.secondaryDescriptorUis).toEqual(["D7", "D8"]);
+  });
 });

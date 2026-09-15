@@ -60,6 +60,12 @@ export async function GET(request: NextRequest) {
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 50);
+  // Two-concept pair — the secondary concept's subtree, same bound as the primary's.
+  const secondaryDescriptorUis = (params.get("secondaryUis") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, DESCENDANT_HARD_CAP);
 
   const pubs = await fetchKeyPaper({
     cwid,
@@ -68,6 +74,7 @@ export async function GET(request: NextRequest) {
     conceptLabel,
     glossTerms,
     exclude,
+    secondaryDescriptorUis,
   });
   return NextResponse.json({ pubs });
 }

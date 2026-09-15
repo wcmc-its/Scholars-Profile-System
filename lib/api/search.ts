@@ -699,6 +699,13 @@ const KEY_PAPER_RECENCY_WEIGHT = 0.4;
 const KEY_PAPER_RECENCY_HALF_LIFE_YEARS = 8; // a paper N years old scores 0.5^(N/8) on recency
 const KEY_PAPER_IMPACT_MIN_CITATIONS = 50;
 const KEY_PAPER_IMPACT_BOOST = 0.05;
+// Two-concept pair — a `should` boost on the SECONDARY concept's subtree so papers tagged
+// under both concepts fill the pool and lead the blend. A `terms` clause scores 1×boost
+// (constant); 100 dwarfs any BM25 title score, so `rel` ≈ 1 for a co-tagged paper and
+// ≈ 0 for the rest — and 0.6·rel beats 0.4·recency, so a co-tagged 2015 paper still
+// outranks an untagged 2026 one. Ordering only, never admission: a scholar with zero
+// co-tagged papers gets the same list as before.
+const KEY_PAPER_SECONDARY_BOOST = 100;
 /** How many keyword-ranked candidates to pull before the app-side blend re-rank. */
 const KEY_PAPER_CANDIDATE_POOL = 50;
 
@@ -766,6 +773,9 @@ export async function fetchKeyPaper(args: {
    *  the QUERY level (`must_not`) so this line pulls its top-N from the NON-claimed
    *  pool, instead of fetching then post-filtering (which could empty the panel). */
   exclude?: string[];
+  /** Two-concept pair — the SECONDARY concept's descendant UIs. Papers tagged under both
+   *  concepts rank first (`KEY_PAPER_SECONDARY_BOOST`); admission is unchanged. */
+  secondaryDescriptorUis?: string[];
 }): Promise<RepresentativePub[]> {
   const cwid = args.cwid?.trim();
   const contentQuery = args.contentQuery?.trim() ?? "";
@@ -773,6 +783,7 @@ export async function fetchKeyPaper(args: {
   const glossTerms = args.glossTerms?.trim() ?? "";
   const descriptorUis = args.descriptorUis ?? [];
   const exclude = args.exclude ?? [];
+  const secondaryUis = descriptorUis.length > 0 ? (args.secondaryDescriptorUis ?? []) : [];
   if (!cwid) return [];
   // Need at least one way to identify a relevant pub: a resolved concept subtree
   // OR a literal query to scan. Neither ⇒ nothing to fetch.
@@ -804,6 +815,8 @@ export async function fetchKeyPaper(args: {
     // literal pre-change key (the array gained an element), but the cache is a process-local Map
     // that starts empty every deploy, so the miss costs one cold fetch and nothing else.
     glossTerms.length > 0 ? `g:${glossTerms}` : null,
+    // The pair reorders the result, so it buckets the cache too (trailing `null` when absent).
+    secondaryUis.length > 0 ? [...secondaryUis].sort() : null,
   ]);
 
   // The admitted SET is the bool `filter` (author + concept/free-text) — UNCHANGED
@@ -816,16 +829,23 @@ export async function fetchKeyPaper(args: {
       // #1366 — exclude the sibling-claimed pmids from the candidate pool itself, so
       // the panel under-fills from the remaining pool rather than resolving empty.
       ...(exclude.length > 0 ? { must_not: [{ terms: { pmid: exclude } }] } : {}),
-      ...(contentQuery.length > 0
+      ...(contentQuery.length > 0 || secondaryUis.length > 0
         ? {
             should: [
-              {
-                multi_match: {
-                  query: contentQuery,
-                  fields: ["title^2", "abstract"],
-                  operator: "or" as const,
-                },
-              },
+              ...(contentQuery.length > 0
+                ? [
+                    {
+                      multi_match: {
+                        query: contentQuery,
+                        fields: ["title^2", "abstract"],
+                        operator: "or" as const,
+                      },
+                    },
+                  ]
+                : []),
+              ...(secondaryUis.length > 0
+                ? [{ terms: { meshDescriptorUi: secondaryUis, boost: KEY_PAPER_SECONDARY_BOOST } }]
+                : []),
             ],
           }
         : {}),
