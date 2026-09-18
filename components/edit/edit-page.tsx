@@ -17,6 +17,7 @@ import { HonorsCard } from "@/components/edit/honors-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { MenteeSuggestionsCard } from "@/components/edit/mentee-suggestions-card";
+import { OrcidValue } from "@/components/edit/orcid-value";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -1053,7 +1054,7 @@ function renderPanel(
             { label: "Title", value: ctx.scholar.primaryTitle },
             { label: "Degrees", value: ctx.scholar.postnominal },
             { label: "Department", value: ctx.scholar.primaryDepartment },
-            { label: "ORCID", value: ctx.scholar.orcid },
+            { label: "ORCID", value: <OrcidValue orcid={ctx.scholar.orcid} cwid={cwid} /> },
           ]}
         />
       );
