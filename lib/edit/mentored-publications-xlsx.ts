@@ -1,10 +1,17 @@
 /**
  * The Mentored publications report as a three-sheet workbook — the exact
  * artifact the Medical Education office has been assembling by hand:
- *   - "Summary"            one row per learner (counts + mentors);
- *   - "Raw Data"           one row per (learner, mentor, publication);
- *   - "Query & Assumptions" what was asked for and the rules applied, so the
+ *   - "Summary"            one row per learner (counts + mentors + mentor CWIDs);
+ *   - "Raw Data"           one row per (learner, mentor, publication) — or, in
+ *                          the "all learner publications" mode, one row per
+ *                          (learner, publication) with the mentor(s) on it;
+ *   - "Query & Assumptions" what was asked for and the rules applied (which
+ *                          publication set, the mentored-subset rule), so the
  *                          sheet is self-describing a year later.
+ *
+ * The Summary and Raw Data headers differ by mode (`SUMMARY_HEADERS` /
+ * `SUMMARY_HEADERS_ALL`, `RAW_HEADERS` / `RAW_HEADERS_ALL`); the page's
+ * Publications view is NOT in the workbook.
  *
  * Presentation: header row bold + frozen, Arial 12 throughout, column width =
  * longest cell + 3 (capped at 60). Business-case headers ("Journal impact
@@ -18,6 +25,8 @@ import {
   HIGH_IMPACT_THRESHOLD,
   PROGRAM_LABEL,
   type MentoredPublicationsReport,
+  type MentoredPubsSet,
+  type MentorRef,
 } from "@/lib/edit/mentored-publications-report";
 
 export const SUMMARY_SHEET = "Summary";
@@ -32,10 +41,41 @@ export const SUMMARY_HEADERS = [
   "First name",
   "Last name",
   "Mentors",
+  "Mentor CWIDs",
   "Publications in program window",
   "Publications (all years)",
   `High-impact publications in window (JIF ≥ ${HIGH_IMPACT_THRESHOLD})`,
   "First-author publications in window",
+] as const;
+
+/** Summary headers in the "all learner publications" mode. */
+export const SUMMARY_HEADERS_ALL = [
+  "Graduation year",
+  "Entry year",
+  "Program",
+  "CWID",
+  "First name",
+  "Last name",
+  "Mentors",
+  "Mentor CWIDs",
+  "All publications in program window",
+  "Publications with a mentor in window",
+  "First-author publications in window",
+  `High-impact publications in window (JIF ≥ ${HIGH_IMPACT_THRESHOLD})`,
+  "Publications (all years)",
+] as const;
+
+const RAW_PUB_HEADERS = [
+  "PMID",
+  "Title",
+  "Journal",
+  "Journal impact factor",
+  "Publication year",
+  "Date added to PubMed",
+  "Citations (NIH iCite)",
+  "Learner author position",
+  "Author count",
+  "In program window",
 ] as const;
 
 export const RAW_HEADERS = [
@@ -47,16 +87,22 @@ export const RAW_HEADERS = [
   "Learner last name",
   "Mentor CWID",
   "Mentor",
-  "PMID",
-  "Title",
-  "Journal",
-  "Journal impact factor",
-  "Publication year",
-  "Date added to PubMed",
-  "Citations (NIH iCite)",
-  "Learner author position",
-  "Author count",
-  "In program window",
+  ...RAW_PUB_HEADERS,
+] as const;
+
+/** Raw Data headers in the "all learner publications" mode: one row per
+ *  (learner, publication); the mentor pair columns become the mentor(s) on
+ *  the paper (empty = none). */
+export const RAW_HEADERS_ALL = [
+  "Graduation year",
+  "Entry year",
+  "Program",
+  "Learner CWID",
+  "Learner first name",
+  "Learner last name",
+  "Mentor(s) on this paper",
+  "Mentor CWID(s) on this paper",
+  ...RAW_PUB_HEADERS,
 ] as const;
 
 const FONT: Partial<ExcelJS.Font> = { name: "Arial", size: 12 };
@@ -112,11 +158,26 @@ function scopeLabel(scopes: ReadonlyArray<string>): string {
   return scopes.map((s) => PROGRAM_LABEL[s] ?? s).join(", ");
 }
 
-/** `Mentored Publications <program or All> <years joined by -> - YYYY-MM-DD.xlsx` */
-export function downloadFilename(program: string | null, years: ReadonlyArray<number>, generatedAt: Date): string {
+/** `Mentored Publications <program or All> <years joined by -> [All Pubs] - YYYY-MM-DD.xlsx` */
+export function downloadFilename(
+  program: string | null,
+  years: ReadonlyArray<number>,
+  generatedAt: Date,
+  pubs: MentoredPubsSet = "mentored",
+): string {
   const programLabel = program ? (PROGRAM_LABEL[program] ?? program) : "All";
   const yearsLabel = years.length > 0 ? years.join("-") : "all-years";
-  return `Mentored Publications ${programLabel} ${yearsLabel} - ${isoDate(generatedAt)}.xlsx`;
+  const mode = pubs === "all" ? " All Pubs" : "";
+  return `Mentored Publications ${programLabel} ${yearsLabel}${mode} - ${isoDate(generatedAt)}.xlsx`;
+}
+
+/** `; `-joined, or null (a blank cell) when there are none. */
+function mentorNames(mentors: ReadonlyArray<MentorRef>): string | null {
+  return mentors.length > 0 ? mentors.map((m) => m.name).join("; ") : null;
+}
+
+function mentorCwids(mentors: ReadonlyArray<MentorRef>): string | null {
+  return mentors.length > 0 ? mentors.map((m) => m.cwid).join("; ") : null;
 }
 
 /** Build the workbook and return it as a `Buffer`. */
@@ -127,20 +188,36 @@ export async function buildMentoredPublicationsWorkbook(
   wb.creator = "Scholars Profile System";
   wb.created = report.generatedAt;
 
-  const summaryRows: CellValue[][] = report.summary.map((r) => [
-    r.gradYear,
-    r.entryYear,
-    r.program,
-    r.cwid,
-    r.firstName,
-    r.lastName,
-    r.mentors.join("; "),
-    r.pubsInWindow,
-    r.pubsAllTime,
-    r.highImpactInWindow,
-    r.firstAuthorInWindow,
-  ]);
-  fillSheet(wb.addWorksheet(SUMMARY_SHEET), SUMMARY_HEADERS, summaryRows);
+  const { filters } = report;
+  const allMode = filters.pubs === "all";
+
+  const summaryRows: CellValue[][] = report.summary.map((r) => {
+    const learner = [r.gradYear, r.entryYear, r.program, r.cwid, r.firstName, r.lastName];
+    const mentors = [mentorNames(r.mentors), mentorCwids(r.mentors)];
+    return allMode
+      ? [
+          ...learner,
+          ...mentors,
+          r.pubsInWindow,
+          r.withMentorInWindow,
+          r.firstAuthorInWindow,
+          r.highImpactInWindow,
+          r.pubsAllTime,
+        ]
+      : [
+          ...learner,
+          ...mentors,
+          r.pubsInWindow,
+          r.pubsAllTime,
+          r.highImpactInWindow,
+          r.firstAuthorInWindow,
+        ];
+  });
+  fillSheet(
+    wb.addWorksheet(SUMMARY_SHEET),
+    allMode ? SUMMARY_HEADERS_ALL : SUMMARY_HEADERS,
+    summaryRows,
+  );
 
   const rawRows: CellValue[][] = report.detail.map((r) => [
     r.gradYear,
@@ -149,8 +226,9 @@ export async function buildMentoredPublicationsWorkbook(
     r.learnerCwid,
     r.learnerFirstName,
     r.learnerLastName,
-    r.mentorCwid,
-    r.mentorName,
+    ...(allMode
+      ? [mentorNames(r.paperMentors), mentorCwids(r.paperMentors)]
+      : [r.mentorCwid, r.mentorName]),
     r.pmid,
     r.title,
     r.journal,
@@ -162,15 +240,20 @@ export async function buildMentoredPublicationsWorkbook(
     r.authorCount,
     yesNo(r.inWindow),
   ]);
-  fillSheet(wb.addWorksheet(RAW_SHEET), RAW_HEADERS, rawRows);
+  fillSheet(wb.addWorksheet(RAW_SHEET), allMode ? RAW_HEADERS_ALL : RAW_HEADERS, rawRows);
 
-  const { filters } = report;
   const years = filters.gradYears ? [...filters.gradYears].sort((a, b) => a - b).join(", ") : "All years";
   const fallbackCount = report.summary.filter((r) => r.entryYearSource === "fallback").length;
   const assumptions: CellValue[][] = [
     ["Generated", isoDate(report.generatedAt)],
     ["Graduation years", years],
     ["Programs", scopeLabel(filters.scopes)],
+    [
+      "Publication set",
+      allMode
+        ? "All learner publications: every PubMed publication on which the learner is a WCM-identified author (ReCiter author graph), whether or not a mentor is on it. Publications with a mentor = the subset also co-authored by one of the learner's AOC mentors (the mentored co-publication set)."
+        : "Mentored co-publications: every PubMed publication on which the learner and one of their AOC mentors are both WCM-identified authors.",
+    ],
     ["Learners", report.summary.length],
     ["Publication rows", report.detail.length],
     [
@@ -183,11 +266,19 @@ export async function buildMentoredPublicationsWorkbook(
     ],
     [
       "Counting rule",
-      "A publication co-authored with two of a learner's mentors appears once per mentor in Raw Data but counts once in the learner's Summary counts (distinct PMIDs).",
+      allMode
+        ? "Raw Data is one row per (learner, publication); the mentor columns list every one of the learner's mentors on that paper. Summary counts are distinct PMIDs per learner."
+        : "A publication co-authored with two of a learner's mentors appears once per mentor in Raw Data but counts once in the learner's Summary counts (distinct PMIDs).",
     ],
     [
       "Publication source",
-      "Every PubMed publication on which the learner and one of their AOC mentors are both WCM-identified authors (ReCiter author graph, via the mentoring co-publication bridge).",
+      allMode
+        ? "ReCiter author graph via the mentoring bridge (learner publication list + mentor co-publication list)."
+        : "Every PubMed publication on which the learner and one of their AOC mentors are both WCM-identified authors (ReCiter author graph, via the mentoring co-publication bridge).",
+    ],
+    [
+      "Mentor names",
+      "The mentor's name from their Scholars profile when they have one; otherwise the name on the Medical Education roster; otherwise the CWID alone.",
     ],
     [
       "Journal impact factor",

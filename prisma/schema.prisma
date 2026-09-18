@@ -493,23 +493,53 @@ model MenteeCopublication {
 /// per-pair key, so a surrogate `id` PK plus a full truncate-and-load import.
 /// No FK to Scholar — AOC students are frequently unlinked alumni (GH #181).
 model AocMentee {
-  id             Int      @id @default(autoincrement())
-  mentorCwid     String   @map("mentor_cwid") @db.VarChar(32)
-  menteeCwid     String   @map("mentee_cwid") @db.VarChar(32)
-  firstName      String?  @map("first_name") @db.VarChar(255)
-  lastName       String?  @map("last_name") @db.VarChar(255)
-  graduationYear Int?     @map("graduation_year")
+  id              Int      @id @default(autoincrement())
+  mentorCwid      String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid      String   @map("mentee_cwid") @db.VarChar(32)
+  firstName       String?  @map("first_name") @db.VarChar(255)
+  lastName        String?  @map("last_name") @db.VarChar(255)
+  graduationYear  Int?     @map("graduation_year")
   /// Year the learner ENTERED the program (`reporting_students_mentors.
   /// studentEntryYear`, nullable at the source). Read by the Mentored
   /// publications report (`lib/edit/mentored-publications-report.ts`) for its
   /// "in program window" rule; null falls back to `graduationYear - 4`.
-  entryYear      Int?     @map("entry_year")
-  programType    String?  @map("program_type") @db.VarChar(64)
-  refreshedAt    DateTime @default(now()) @map("refreshed_at")
+  entryYear       Int?     @map("entry_year")
+  programType     String?  @map("program_type") @db.VarChar(64)
+  /// The mentor's name as the Medical Education roster carries it
+  /// (`reporting_students_mentors.mentorFirstName` / `mentorLastName`). The
+  /// Mentored publications report displays a mentor who has no Scholar row
+  /// (an NYP affiliate, a departed faculty member) from these instead of the
+  /// bare CWID; a Scholar row's `preferredName` still wins when present.
+  mentorFirstName String?  @map("mentor_first_name") @db.VarChar(255)
+  mentorLastName  String?  @map("mentor_last_name") @db.VarChar(255)
+  refreshedAt     DateTime @default(now()) @map("refreshed_at")
 
   @@index([mentorCwid], map: "aoc_mentee_mentor_cwid_idx")
   @@index([mentorCwid, menteeCwid], map: "aoc_mentee_mentor_mentee_idx")
   @@map("aoc_mentee")
+}
+
+/// Mentored publications report (`/edit/reports/7`) — the learner's FULL
+/// publication list, not just the co-pubs with a mentor. MD-program learners
+/// are not Scholar rows in this app, so their ReCiter-attributed publications
+/// exist only in ReciterDB; this bridge mirrors them so the report's "All
+/// learner publications" mode can run in-VPC. One row per (learner, pmid);
+/// `pub` is the same `CoPublicationFull` JSON `mentee_copublication_pub`
+/// carries (the export reuses the same article/author-list builders), so the
+/// mentored set is a strict subset the report marks by pmid. Exported
+/// WCM-side (`etl:mentoring:export-copubs` → `mentoring/learner-pubs.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-learner-pubs`. No FK to
+/// Scholar/Publication (alumni learners, GH #181).
+model AocMenteePublication {
+  menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
+  pmid        Int
+  pubYear     Int?     @map("pub_year")
+  pub         Json
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@id([menteeCwid, pmid])
+  @@index([menteeCwid], map: "aoc_mentee_publication_mentee_cwid_idx")
+  @@map("aoc_mentee_publication")
 }
 
 /// Issue #928 — full mentor↔mentee co-publication list bridge. One row per

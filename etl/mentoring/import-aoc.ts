@@ -23,10 +23,12 @@
  * are frequently unlinked alumni, GH #181), so no per-env existence filtering.
  *
  * NDJSON contract: one object per RAW reporting_students_mentors row —
- *   { mentorCwid, menteeCwid, firstName, lastName, graduationYear, entryYear, programType }
- * (any of name/year/entryYear/programType may be null; duplicate pairs allowed;
- * an export predating `entryYear` simply reads it as null). Blank
- * lines are skipped; a line missing mentorCwid/menteeCwid is skipped + counted.
+ *   { mentorCwid, menteeCwid, firstName, lastName, graduationYear, entryYear,
+ *     programType, mentorFirstName, mentorLastName }
+ * (any of name/year/entryYear/programType/mentor name may be null; duplicate
+ * pairs allowed; an export predating `entryYear` or the mentor name fields
+ * simply reads them as null). Blank lines are skipped; a line missing
+ * mentorCwid/menteeCwid is skipped + counted.
  *
  * Env (AWS default credential chain — never hardcode keys):
  *   MENTORING_COPUBS_BUCKET  (default ARTIFACTS_BUCKET, else wcmc-reciterai-artifacts)
@@ -66,6 +68,8 @@ type Row = {
   graduationYear: number | null;
   entryYear: number | null;
   programType: string | null;
+  mentorFirstName: string | null;
+  mentorLastName: string | null;
 };
 
 function chunks<T>(arr: T[], size: number): T[][] {
@@ -98,6 +102,8 @@ function parseNdjson(text: string): { rows: Row[]; skipped: number } {
       const entryYear =
         typeof o.entryYear === "number" && Number.isFinite(o.entryYear) ? o.entryYear : null;
       const programType = typeof o.programType === "string" ? o.programType : null;
+      const mentorFirstName = typeof o.mentorFirstName === "string" ? o.mentorFirstName : null;
+      const mentorLastName = typeof o.mentorLastName === "string" ? o.mentorLastName : null;
       rows.push({
         mentorCwid,
         menteeCwid,
@@ -106,6 +112,8 @@ function parseNdjson(text: string): { rows: Row[]; skipped: number } {
         graduationYear,
         entryYear,
         programType,
+        mentorFirstName,
+        mentorLastName,
       });
     } catch {
       skipped++;
@@ -162,6 +170,8 @@ async function main() {
                 graduationYear: Number.isFinite(r.graduationYear) ? r.graduationYear : null,
                 entryYear: Number.isFinite(r.entryYear) ? r.entryYear : null,
                 programType: r.programType ?? null,
+                mentorFirstName: r.mentorFirstName ?? null,
+                mentorLastName: r.mentorLastName ?? null,
                 refreshedAt: importedAt,
               })),
             });

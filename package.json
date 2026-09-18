@@ -58,6 +58,7 @@
     "etl:mentoring:import-copubs": "tsx etl/mentoring/import-copubs.ts",
     "etl:mentoring:import-aoc": "tsx etl/mentoring/import-aoc.ts",
     "etl:mentoring:import-copub-list": "tsx etl/mentoring/import-copub-list.ts",
+    "etl:mentoring:import-learner-pubs": "tsx etl/mentoring/import-learner-pubs.ts",
     "etl:mentoring:export-citing": "tsx etl/mentoring/export-citing.ts",
     "etl:mentoring:import-citing": "tsx etl/mentoring/import-citing.ts",
     "etl:asms:probe": "tsx etl/asms/probe.ts",

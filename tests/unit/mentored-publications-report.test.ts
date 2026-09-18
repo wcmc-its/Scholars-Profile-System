@@ -7,12 +7,16 @@
  *   - `publication.findMany`             (dateAdded / journalAbbrev / iCite)
  *   - `journalImpactFactor.findMany`     (JIF by normalized abbreviation)
  *   - `scholar.findMany`                 (mentor display names)
+ *   - `aocMenteePublication.findMany/findFirst` (the learner's full list, "all" mode)
  *
  * Behaviors protected: the window rule incl. the `gradYear - 4` fallback and
  * the tail; a pub shared with two mentors counts ONCE in the learner's
  * summary; scope filtering by program bucket; the gradYears filter; the
  * learner's author position derived from the bridge's per-author CWIDs;
- * citations from iCite (`citedByCount`), never the Scopus count in the JSON.
+ * citations from iCite (`citedByCount`), never the Scopus count in the JSON;
+ * mentor name precedence scholar → roster → cwid; newest class first; the
+ * per-pmid Publications view deduped across learners; "all" mode's subset /
+ * `withMentor` flag and the empty-bridge signal.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +26,8 @@ const hoisted = vi.hoisted(() => ({
   mockPubFindMany: vi.fn(),
   mockJifFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
+  mockLearnerPubFindMany: vi.fn(),
+  mockLearnerPubFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -32,6 +38,10 @@ vi.mock("@/lib/db", () => ({
       publication: { findMany: hoisted.mockPubFindMany },
       journalImpactFactor: { findMany: hoisted.mockJifFindMany },
       scholar: { findMany: hoisted.mockScholarFindMany },
+      aocMenteePublication: {
+        findMany: hoisted.mockLearnerPubFindMany,
+        findFirst: hoisted.mockLearnerPubFindFirst,
+      },
     },
     write: {},
   },
@@ -54,6 +64,8 @@ type Aoc = {
   graduationYear: number | null;
   entryYear: number | null;
   programType: string | null;
+  mentorFirstName: string | null;
+  mentorLastName: string | null;
 };
 
 const aoc = (o: Partial<Aoc> & Pick<Aoc, "mentorCwid" | "menteeCwid">): Aoc => ({
@@ -62,8 +74,21 @@ const aoc = (o: Partial<Aoc> & Pick<Aoc, "mentorCwid" | "menteeCwid">): Aoc => (
   graduationYear: 2025,
   entryYear: null,
   programType: "AOC",
+  mentorFirstName: null,
+  mentorLastName: null,
   ...o,
 });
+
+/** An `aoc_mentee_publication` row (the learner's full list, "all" mode). */
+function learnerPub(
+  menteeCwid: string,
+  pmid: number,
+  year: number | null,
+  opts: { position?: number | null } = {},
+) {
+  const { pub } = copub("nobody", menteeCwid, pmid, year, opts);
+  return { menteeCwid, pmid, pub };
+}
 
 /** A bridge row whose `pub` JSON carries the learner at `position` on the byline. */
 function copub(
@@ -107,6 +132,8 @@ beforeEach(() => {
   hoisted.mockPubFindMany.mockResolvedValue([]);
   hoisted.mockJifFindMany.mockResolvedValue([]);
   hoisted.mockScholarFindMany.mockResolvedValue([]);
+  hoisted.mockLearnerPubFindMany.mockResolvedValue([]);
+  hoisted.mockLearnerPubFindFirst.mockResolvedValue(null);
 });
 
 describe("window rule", () => {
@@ -134,7 +161,10 @@ describe("loadMentoredPublicationsReport", () => {
     const report = await loadMentoredPublicationsReport({ scopes: ["md"] });
     expect(report.summary).toEqual([]);
     expect(report.detail).toEqual([]);
+    expect(report.publications).toEqual([]);
+    expect(report.allPubsLoaded).toBeNull();
     expect(hoisted.mockCopubFindMany).not.toHaveBeenCalled();
+    expect(hoisted.mockLearnerPubFindFirst).not.toHaveBeenCalled();
   });
 
   it("applies the gradYear - 4 fallback and the tail, listing out-of-window pubs but not counting them", async () => {
@@ -201,11 +231,15 @@ describe("loadMentoredPublicationsReport", () => {
     expect(report.summary).toHaveLength(1);
     expect(report.summary[0]).toMatchObject({
       pubsInWindow: 1,
+      withMentorInWindow: 1,
       pubsAllTime: 1,
       highImpactInWindow: 1,
       firstAuthorInWindow: 1,
-      // Resolved name for the scholar row; the bare cwid for the unresolved one; sorted.
-      mentors: ["men0002", "Zed Mentor"],
+      // Resolved name for the scholar row; the bare cwid for the unresolved one; sorted by name.
+      mentors: [
+        { cwid: "men0002", name: "men0002" },
+        { cwid: "men0001", name: "Zed Mentor" },
+      ],
     });
     expect(report.detail).toHaveLength(2);
     expect(report.detail.map((d) => d.mentorCwid)).toEqual(["men0001", "men0002"]);
@@ -216,9 +250,30 @@ describe("loadMentoredPublicationsReport", () => {
       learnerAuthorPosition: 1,
       authorCount: 3,
       mentorName: "Zed Mentor",
+      paperMentors: [
+        { cwid: "men0002", name: "men0002" },
+        { cwid: "men0001", name: "Zed Mentor" },
+      ],
+      withMentor: true,
       inWindow: true,
     });
     expect(report.detail[0].dateAdded?.toISOString().slice(0, 10)).toBe("2023-05-01");
+    // The Publications view: ONE row for the pmid, both mentors, the learner once.
+    expect(report.publications).toHaveLength(1);
+    expect(report.publications[0]).toMatchObject({
+      pmid: 7,
+      jif: 96.2,
+      citations: 12,
+      withMentor: true,
+      learners: [{ cwid: "stu0001", firstAuthor: true, inWindow: true }],
+      mentors: [
+        { cwid: "men0002", name: "men0002" },
+        { cwid: "men0001", name: "Zed Mentor" },
+      ],
+    });
+    expect(report.publications[0].citation).toBe(
+      "First, Second, Mentor. Paper 7. Journal of Tests. 2023.",
+    );
     // The JIF join was scoped to the abbreviations actually needed, normalized.
     expect(hoisted.mockJifFindMany).toHaveBeenCalledWith({
       where: { journalAbbrev: { in: ["N ENGL J MED"] } },
@@ -271,25 +326,205 @@ describe("loadMentoredPublicationsReport", () => {
     expect(hoisted.mockAocFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { graduationYear: { in: [2024, 2025] } } }),
     );
-    expect(report.filters).toEqual({ scopes: ["*"], gradYears: [2024, 2025], tail: 1 });
+    expect(report.filters).toEqual({
+      scopes: ["*"],
+      gradYears: [2024, 2025],
+      tail: 1,
+      pubs: "mentored",
+    });
 
     await loadMentoredPublicationsReport({ scopes: ["*"] });
     expect(hoisted.mockAocFindMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: undefined }));
   });
 
-  it("sorts summary by gradYear, lastName, firstName and detail the same then year desc", async () => {
+  it("sorts summary by gradYear DESC, then lastName, firstName; detail the same then year desc", async () => {
     hoisted.mockAocFindMany.mockResolvedValue([
       aoc({ mentorCwid: "men0001", menteeCwid: "stu0002", lastName: "Baker", firstName: "Bo", graduationYear: 2024 }),
       aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", lastName: "Baker", firstName: "Al", graduationYear: 2024 }),
       aoc({ mentorCwid: "men0001", menteeCwid: "stu0003", lastName: "Adams", firstName: "Cy", graduationYear: 2025 }),
+      aoc({
+        mentorCwid: "men0001",
+        menteeCwid: "stu0004",
+        lastName: "Zed",
+        firstName: "Zo",
+        graduationYear: null,
+      }),
     ]);
     hoisted.mockCopubFindMany.mockResolvedValue([
       copub("men0001", "stu0001", 1, 2021),
       copub("men0001", "stu0001", 2, 2023),
+      copub("men0001", "stu0003", 3, 2022),
     ]);
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.summary.map((s) => s.cwid)).toEqual(["stu0001", "stu0002", "stu0003"]);
-    expect(report.detail.map((d) => d.pmid)).toEqual([2, 1]);
+    // Newest graduating class first; unknown year last.
+    expect(report.summary.map((s) => s.cwid)).toEqual(["stu0003", "stu0001", "stu0002", "stu0004"]);
+    expect(report.detail.map((d) => [d.learnerCwid, d.pmid])).toEqual([
+      ["stu0003", 3],
+      ["stu0001", 2],
+      ["stu0001", 1],
+    ]);
+  });
+
+  it("mentor display name: Scholar.preferredName, else the roster's First Last, else the cwid — cwid always exposed", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({
+        mentorCwid: "men0001",
+        menteeCwid: "stu0001",
+        mentorFirstName: "Roster",
+        mentorLastName: "Name",
+      }),
+      aoc({
+        mentorCwid: "men0002",
+        menteeCwid: "stu0001",
+        mentorFirstName: "Only",
+        mentorLastName: "Roster",
+      }),
+      aoc({
+        mentorCwid: "men0003",
+        menteeCwid: "stu0001",
+        mentorFirstName: " ",
+        mentorLastName: null,
+      }),
+      // The same mentor again with no roster name: the first row that has one wins.
+      aoc({ mentorCwid: "men0002", menteeCwid: "stu0001", programType: "AOC-2025" }),
+    ]);
+    hoisted.mockScholarFindMany.mockResolvedValue([
+      { cwid: "men0001", preferredName: "Scholar Name" },
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([copub("men0003", "stu0001", 1, 2023)]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary[0].mentors).toEqual([
+      { cwid: "men0003", name: "men0003" },
+      { cwid: "men0002", name: "Only Roster" },
+      { cwid: "men0001", name: "Scholar Name" },
+    ]);
+    expect(report.detail[0]).toMatchObject({ mentorCwid: "men0003", mentorName: "men0003" });
+  });
+
+  it("Publications view: a pub co-authored by two learners is ONE row listing both, newest first then title", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({
+        mentorCwid: "men0001",
+        menteeCwid: "stu0001",
+        lastName: "Adams",
+        graduationYear: 2025,
+        entryYear: 2021,
+      }),
+      aoc({
+        mentorCwid: "men0002",
+        menteeCwid: "stu0002",
+        lastName: "Baker",
+        graduationYear: 2019,
+        entryYear: 2015,
+      }),
+    ]);
+    const shared1 = copub("men0001", "stu0001", 5, 2023, { position: 1 });
+    const shared2 = copub("men0002", "stu0002", 5, 2023, { position: null });
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      shared1,
+      shared2,
+      {
+        ...copub("men0001", "stu0001", 6, 2023),
+        pub: { ...copub("men0001", "stu0001", 6, 2023).pub, title: "Alpha" },
+      },
+      copub("men0002", "stu0002", 4, 2024),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.publications.map((p) => p.pmid)).toEqual([4, 6, 5]);
+    const shared = report.publications.find((p) => p.pmid === 5)!;
+    expect(shared.learners).toEqual([
+      { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, inWindow: true },
+      { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, inWindow: false },
+    ]);
+    expect(shared.mentors.map((m) => m.cwid)).toEqual(["men0001", "men0002"]);
+    // The detail sheet still has one row per (learner, mentor, pub).
+    expect(report.detail.filter((d) => d.pmid === 5)).toHaveLength(2);
+  });
+
+  describe("pubs: 'all'", () => {
+    it("reads the learner's full list, marks the mentored subset, and counts both", async () => {
+      hoisted.mockAocFindMany.mockResolvedValue([
+        aoc({
+          mentorCwid: "men0001",
+          menteeCwid: "stu0001",
+          graduationYear: 2025,
+          entryYear: 2021,
+        }),
+      ]);
+      hoisted.mockCopubFindMany.mockResolvedValue([
+        copub("men0001", "stu0001", 1, 2023, { position: 1 }),
+      ]);
+      hoisted.mockLearnerPubFindFirst.mockResolvedValue({ pmid: 1 });
+      hoisted.mockLearnerPubFindMany.mockResolvedValue([
+        learnerPub("stu0001", 1, 2023, { position: 1 }), // the mentored one
+        learnerPub("stu0001", 2, 2024, { position: 1 }), // solo, in window
+        learnerPub("stu0001", 3, 2015), // solo, before entry
+      ]);
+      hoisted.mockScholarFindMany.mockResolvedValue([
+        { cwid: "men0001", preferredName: "Zed Mentor" },
+      ]);
+
+      const report = await loadMentoredPublicationsReport({ scopes: ["*"], pubs: "all" });
+      expect(report.filters.pubs).toBe("all");
+      expect(report.allPubsLoaded).toBe(true);
+      expect(hoisted.mockLearnerPubFindMany).toHaveBeenCalledWith({
+        where: { menteeCwid: { in: ["stu0001"] } },
+        select: { menteeCwid: true, pmid: true, pub: true },
+      });
+      expect(report.summary[0]).toMatchObject({
+        pubsInWindow: 2,
+        withMentorInWindow: 1,
+        firstAuthorInWindow: 2,
+        pubsAllTime: 3,
+      });
+      // One row per (learner, pub): mentor pair columns null, paperMentors carries the mentor(s).
+      expect(
+        report.detail.map((d) => [
+          d.pmid,
+          d.mentorCwid,
+          d.withMentor,
+          d.paperMentors.map((m) => m.name),
+        ]),
+      ).toEqual([
+        [2, null, false, []],
+        [1, null, true, ["Zed Mentor"]],
+        [3, null, false, []],
+      ]);
+      expect(report.publications.map((p) => [p.pmid, p.withMentor])).toEqual([
+        [2, false],
+        [1, true],
+        [3, false],
+      ]);
+    });
+
+    it("a mentored mode report never touches the learner-pubs bridge", async () => {
+      hoisted.mockAocFindMany.mockResolvedValue([
+        aoc({ mentorCwid: "men0001", menteeCwid: "stu0001" }),
+      ]);
+      hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "stu0001", 1, 2023)]);
+      const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+      expect(report.allPubsLoaded).toBeNull();
+      expect(report.summary[0]).toMatchObject({ pubsInWindow: 1, withMentorInWindow: 1 });
+      expect(hoisted.mockLearnerPubFindMany).not.toHaveBeenCalled();
+      expect(hoisted.mockLearnerPubFindFirst).not.toHaveBeenCalled();
+    });
+
+    it("an EMPTY bridge table signals allPubsLoaded: false (the page's notice), with zero counts", async () => {
+      hoisted.mockAocFindMany.mockResolvedValue([
+        aoc({ mentorCwid: "men0001", menteeCwid: "stu0001" }),
+      ]);
+      hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "stu0001", 1, 2023)]);
+      hoisted.mockLearnerPubFindFirst.mockResolvedValue(null);
+      const report = await loadMentoredPublicationsReport({ scopes: ["*"], pubs: "all" });
+      expect(report.allPubsLoaded).toBe(false);
+      expect(report.summary[0]).toMatchObject({
+        pubsInWindow: 0,
+        withMentorInWindow: 0,
+        pubsAllTime: 0,
+      });
+      expect(report.detail).toEqual([]);
+      expect(report.publications).toEqual([]);
+    });
   });
 });
 

@@ -13,7 +13,7 @@
  * three surfaces; flip only AFTER the imports run — import-then-flip).
  *
  * ONE run, reusing the same ReciterDB connection + the already-loaded
- * mentor→mentee pairs, produces THREE NDJSON products:
+ * mentor→mentee pairs, produces FOUR NDJSON products:
  *
  *   1. copubs.ndjson  (#443, mentee_copublication) — per (mentor, mentee) co-pub
  *      COUNT + 3-pub preview, drives the chip badge + popover in
@@ -26,10 +26,13 @@
  *      `getMenteesForMentor` + the relationship check in `getMentorMenteePair`.
  *      One object per RAW row (duplicate pairs allowed — a student repeats across
  *      programs; NOT deduped):
- *        { mentorCwid, menteeCwid, firstName, lastName, graduationYear, entryYear, programType }
- *      (any of name / year / entryYear / programType may be null). `entryYear`
- *      is `studentEntryYear` — the program ENTRY year the Mentored publications
- *      report (`/edit/reports/7`) needs for its "in program window" rule.
+ *        { mentorCwid, menteeCwid, firstName, lastName, graduationYear, entryYear,
+ *          programType, mentorFirstName, mentorLastName }
+ *      (any of name / year / entryYear / programType / mentor name may be null).
+ *      `entryYear` is `studentEntryYear` — the program ENTRY year the Mentored
+ *      publications report (`/edit/reports/7`) needs for its "in program window"
+ *      rule. `mentorFirstName` / `mentorLastName` are the roster's own mentor
+ *      name, which the same report shows for a mentor with no Scholar row.
  *
  *   3. copub-list.ndjson  (#928, mentee_copublication_pub) — the FULL co-pub LIST
  *      per (mentor, mentee) pair, drives the dedicated co-pubs page
@@ -37,6 +40,16 @@
  *      `getCoPublications`. RAW (pre-suppression — the read layer applies
  *      suppression at request time). One object per (mentor, mentee) with ≥1 pub:
  *        { mentorCwid, menteeCwid, pubs: CoPublicationFull[] }
+ *
+ *   4. learner-pubs.ndjson  (aoc_mentee_publication) — EVERY ReCiter-attributed
+ *      publication of every distinct `reporting_students_mentors.studentCWID`
+ *      (all program types), mentor or no mentor on the byline, for the Mentored
+ *      publications report's "All learner publications" mode (MD learners are
+ *      not Scholar rows, so their full lists exist only here). Same
+ *      `CoPublicationFull` shape and the SAME article/author-list builder as
+ *      product 3 (`hydrateArticles`), so the co-pub set is a strict subset by
+ *      pmid. One object per learner with ≥1 pub:
+ *        { menteeCwid, pubs: CoPublicationFull[] }
  *
  * Mentor→mentee pairs come from THREE sources: `reporting_students_mentors`
  * (ReciterDB) + `phd_mentor_relationship` + `postdoc_mentor_relationship` (the
@@ -62,6 +75,7 @@
  *   MENTORING_COPUBS_KEY      (default mentoring/copubs.ndjson; or pass --key <key>)
  *   MENTORING_AOC_KEY         (default mentoring/aoc-mentees.ndjson)
  *   MENTORING_COPUB_LIST_KEY  (default mentoring/copub-list.ndjson)
+ *   MENTORING_LEARNER_PUBS_KEY (default mentoring/learner-pubs.ndjson)
  *   AWS_DEFAULT_REGION        (default us-east-1)
  *   SCHOLARS_RECITERDB_*      (ReciterDB connection — see lib/sources/reciterdb.ts)
  *
@@ -71,6 +85,7 @@
  *   npm run etl:mentoring:export-copubs -- --dry-run   # write /tmp files, skip S3
  */
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import type { PoolConnection } from "mariadb";
 import { writeFileSync } from "node:fs";
 import { db, disconnect } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
@@ -102,6 +117,13 @@ function resolveCopubListKey(): string {
   return process.env.MENTORING_COPUB_LIST_KEY ?? "mentoring/copub-list.ndjson";
 }
 
+function resolveLearnerPubsKey(): string {
+  return process.env.MENTORING_LEARNER_PUBS_KEY ?? "mentoring/learner-pubs.ndjson";
+}
+
+/** Learners per `analysis_summary_author` IN-list round-trip for product 4. */
+const LEARNER_BATCH = 200;
+
 type ExportRow = {
   mentorCwid: string;
   menteeCwid: string;
@@ -120,6 +142,17 @@ type AocMenteeRow = {
   /** `reporting_students_mentors.studentEntryYear` — nullable at the source. */
   entryYear: number | null;
   programType: string | null;
+  /** `reporting_students_mentors.mentorFirstName` / `mentorLastName` — the
+   *  roster's own mentor name, nullable at the source. */
+  mentorFirstName: string | null;
+  mentorLastName: string | null;
+};
+
+/** One line of learner-pubs.ndjson — every ReCiter-attributed publication of
+ *  one learner (product 4), only emitted when there is at least one. */
+type LearnerPubsRow = {
+  menteeCwid: string;
+  pubs: CoPublicationFull[];
 };
 
 /** One line of copub-list.ndjson — the full co-pub list for a (mentor, mentee)
@@ -231,7 +264,8 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
   const raw = (await withReciterConnection(async (conn) =>
     (await conn.query(
       `SELECT mentorCWID, studentCWID, studentFirstName, studentLastName,
-              studentGraduationYear, studentEntryYear, programType
+              studentGraduationYear, studentEntryYear, programType,
+              mentorFirstName, mentorLastName
          FROM reporting_students_mentors
         WHERE mentorCWID IS NOT NULL AND mentorCWID != ''
           AND studentCWID IS NOT NULL AND studentCWID != ''`,
@@ -243,6 +277,8 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
       studentGraduationYear: number | null;
       studentEntryYear: number | null;
       programType: string | null;
+        mentorFirstName: string | null;
+        mentorLastName: string | null;
     }[],
   ).catch((err) => {
     console.error(
@@ -259,7 +295,110 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
     graduationYear: r.studentGraduationYear ?? null,
     entryYear: r.studentEntryYear ?? null,
     programType: r.programType ?? null,
+    mentorFirstName: r.mentorFirstName?.trim() || null,
+    mentorLastName: r.mentorLastName?.trim() || null,
   }));
+}
+
+/** One rich article + abstract row as `ARTICLE_SELECT` returns it, keyed to
+ *  the learner it was fetched for (`mentee_cwid`) so a batched result fans
+ *  back out per learner. Shared by products 3 and 4. */
+type ArticleRow = {
+  mentee_cwid: string;
+  pmid: number | bigint;
+  title: string | null;
+  journal: string | null;
+  year: number | null;
+  doi: string | null;
+  pmcid: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  citationCount: number | null;
+  abstract: string | null;
+};
+
+/** The `CoPublicationFull` column list (same columns and aliases as
+ *  `getCoPublications`). `a2` is the alias of the `analysis_summary_author`
+ *  row that names the learner; the caller supplies the FROM/WHERE. */
+const ARTICLE_SELECT = `SELECT a2.personIdentifier AS mentee_cwid,
+              art.pmid          AS pmid,
+              art.articleTitle  AS title,
+              art.journalTitleVerbose AS journal,
+              art.articleYear   AS year,
+              art.doi           AS doi,
+              art.pmcid         AS pmcid,
+              art.volume        AS volume,
+              art.issue         AS issue,
+              art.pages         AS pages,
+              art.citationCountScopus AS citationCount,
+              ra.abstractVarchar AS abstract`;
+
+/** Query B — the full author list for every pmid in `articleRows` (ONE
+ *  round-trip), then assemble `CoPublicationFull` per row and group by
+ *  `mentee_cwid`. The one builder behind copub-list.ndjson AND
+ *  learner-pubs.ndjson, so the two products can't drift in shape. */
+async function hydrateArticles(
+  conn: PoolConnection,
+  articleRows: ArticleRow[],
+): Promise<Map<string, CoPublicationFull[]>> {
+  const out = new Map<string, CoPublicationFull[]>();
+  if (articleRows.length === 0) return out;
+
+  const pmidSet = new Set<number>();
+  for (const r of articleRows) {
+    pmidSet.add(typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid);
+  }
+  const pmids = [...pmidSet];
+
+  type AuthorRow = {
+    pmid: number | bigint;
+    rank: number;
+    authorLastName: string | null;
+    authorFirstName: string | null;
+    personIdentifier: string | null;
+  };
+  const authorRows = (await conn.query(
+    `SELECT pmid, rank, authorLastName, authorFirstName, personIdentifier
+       FROM analysis_summary_author_list
+      WHERE pmid IN (${pmids.map(() => "?").join(",")})
+      ORDER BY pmid, rank`,
+    pmids,
+  )) as AuthorRow[];
+
+  const authorsByPmid = new Map<number, CoPublicationAuthor[]>();
+  for (const r of authorRows) {
+    const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
+    const list = authorsByPmid.get(pmid) ?? [];
+    list.push({
+      rank: r.rank,
+      lastName: r.authorLastName ?? "",
+      firstName: r.authorFirstName,
+      personIdentifier: r.personIdentifier,
+    });
+    authorsByPmid.set(pmid, list);
+  }
+
+  for (const r of articleRows) {
+    const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
+    const list = out.get(r.mentee_cwid) ?? [];
+    list.push({
+      pmid,
+      title: r.title ?? "",
+      journal: r.journal,
+      year: r.year,
+      doi: r.doi,
+      pmcid: r.pmcid,
+      volume: r.volume,
+      issue: r.issue,
+      pages: r.pages,
+      citationCount: r.citationCount ?? 0,
+      abstract: r.abstract ?? null,
+      authors: authorsByPmid.get(pmid) ?? [],
+    });
+    out.set(r.mentee_cwid, list);
+  }
+  return out;
 }
 
 /** Issue #928 — the FULL co-pub list for one mentor, BATCHED across all his
@@ -272,40 +411,12 @@ async function fullCopubsForMentor(
   mentorCwid: string,
   menteeCwids: string[],
 ): Promise<Map<string, CoPublicationFull[]>> {
-  const out = new Map<string, CoPublicationFull[]>();
-  if (menteeCwids.length === 0) return out;
-
-  await withReciterConnection(async (conn) => {
-    // Query A — rich article + abstract rows per (mentee, pmid). Same columns
-    // and ORDER as getCoPublications, plus a2.personIdentifier so we can fan
-    // the batched result back out per mentee.
-    type ArticleRow = {
-      mentee_cwid: string;
-      pmid: number | bigint;
-      title: string | null;
-      journal: string | null;
-      year: number | null;
-      doi: string | null;
-      pmcid: string | null;
-      volume: string | null;
-      issue: string | null;
-      pages: string | null;
-      citationCount: number | null;
-      abstract: string | null;
-    };
+  if (menteeCwids.length === 0) return new Map();
+  return withReciterConnection(async (conn) => {
+    // Query A — rich article + abstract rows per (mentee, pmid), where the
+    // mentor (a1) and the mentee (a2) are both attributed authors.
     const articleRows = (await conn.query(
-      `SELECT a2.personIdentifier AS mentee_cwid,
-              art.pmid          AS pmid,
-              art.articleTitle  AS title,
-              art.journalTitleVerbose AS journal,
-              art.articleYear   AS year,
-              art.doi           AS doi,
-              art.pmcid         AS pmcid,
-              art.volume        AS volume,
-              art.issue         AS issue,
-              art.pages         AS pages,
-              art.citationCountScopus AS citationCount,
-              ra.abstractVarchar AS abstract
+      `${ARTICLE_SELECT}
          FROM analysis_summary_author a1
          JOIN analysis_summary_author a2
            ON a1.pmid = a2.pmid AND a2.personIdentifier != a1.personIdentifier
@@ -318,68 +429,34 @@ async function fullCopubsForMentor(
         ORDER BY a2.personIdentifier, art.articleYear DESC, art.pmid DESC`,
       [mentorCwid, ...menteeCwids],
     )) as ArticleRow[];
-
-    if (articleRows.length === 0) return;
-
-    // Distinct pmids across all the mentor's co-pubs for the single author-list
-    // round-trip (query B).
-    const pmidSet = new Set<number>();
-    for (const r of articleRows) {
-      pmidSet.add(typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid);
-    }
-    const pmids = [...pmidSet];
-
-    // Query B — full author list for every collected pmid (one round-trip).
-    type AuthorRow = {
-      pmid: number | bigint;
-      rank: number;
-      authorLastName: string | null;
-      authorFirstName: string | null;
-      personIdentifier: string | null;
-    };
-    const authorRows = (await conn.query(
-      `SELECT pmid, rank, authorLastName, authorFirstName, personIdentifier
-         FROM analysis_summary_author_list
-        WHERE pmid IN (${pmids.map(() => "?").join(",")})
-        ORDER BY pmid, rank`,
-      pmids,
-    )) as AuthorRow[];
-
-    const authorsByPmid = new Map<number, CoPublicationAuthor[]>();
-    for (const r of authorRows) {
-      const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
-      const list = authorsByPmid.get(pmid) ?? [];
-      list.push({
-        rank: r.rank,
-        lastName: r.authorLastName ?? "",
-        firstName: r.authorFirstName,
-        personIdentifier: r.personIdentifier,
-      });
-      authorsByPmid.set(pmid, list);
-    }
-
-    for (const r of articleRows) {
-      const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
-      const list = out.get(r.mentee_cwid) ?? [];
-      list.push({
-        pmid,
-        title: r.title ?? "",
-        journal: r.journal,
-        year: r.year,
-        doi: r.doi,
-        pmcid: r.pmcid,
-        volume: r.volume,
-        issue: r.issue,
-        pages: r.pages,
-        citationCount: r.citationCount ?? 0,
-        abstract: r.abstract ?? null,
-        authors: authorsByPmid.get(pmid) ?? [],
-      });
-      out.set(r.mentee_cwid, list);
-    }
+    return hydrateArticles(conn, articleRows);
   });
+}
 
-  return out;
+/** Product 4 — EVERY ReCiter-attributed publication of each learner in
+ *  `learnerCwids` (one batch; the caller chunks by `LEARNER_BATCH`), no
+ *  mentor condition. Same column list and author-list hydration as
+ *  `fullCopubsForMentor`, so a co-pub row and its learner-pubs row are
+ *  byte-identical for the same pmid. Returns menteeCwid → CoPublicationFull[];
+ *  only learners with ≥1 pub appear. */
+async function allPubsForLearners(
+  learnerCwids: string[],
+): Promise<Map<string, CoPublicationFull[]>> {
+  if (learnerCwids.length === 0) return new Map();
+  return withReciterConnection(async (conn) => {
+    const articleRows = (await conn.query(
+      `${ARTICLE_SELECT}
+         FROM analysis_summary_author a2
+         JOIN analysis_summary_article art
+           ON art.pmid = a2.pmid
+         LEFT JOIN reporting_abstracts ra
+           ON ra.pmid = art.pmid
+        WHERE a2.personIdentifier IN (${learnerCwids.map(() => "?").join(",")})
+        ORDER BY a2.personIdentifier, art.articleYear DESC, art.pmid DESC`,
+      learnerCwids,
+    )) as ArticleRow[];
+    return hydrateArticles(conn, articleRows);
+  });
 }
 
 async function main() {
@@ -422,25 +499,56 @@ async function main() {
   const aocRows = await loadAocMenteeRows();
   console.log(`Loaded ${aocRows.length} raw AOC mentee rows.`);
 
+  // Every learner's FULL publication list (learner-pubs.ndjson). The learner
+  // set is every distinct studentCWID the roster carries, all program types —
+  // NOT only the pairs that have a co-pub.
+  const learnerCwids = [...new Set(aocRows.map((r) => r.menteeCwid))];
+  console.log(`Loading all publications for ${learnerCwids.length} distinct learners...`);
+  const learnerPubsRows: LearnerPubsRow[] = [];
+  let learnerPubCount = 0;
+  for (let i = 0; i < learnerCwids.length; i += LEARNER_BATCH) {
+    const batch = learnerCwids.slice(i, i + LEARNER_BATCH);
+    const pubsByLearner = await allPubsForLearners(batch);
+    for (const [menteeCwid, pubs] of pubsByLearner) {
+      if (pubs.length === 0) continue;
+      learnerPubsRows.push({ menteeCwid, pubs });
+      learnerPubCount += pubs.length;
+    }
+    if ((i / LEARNER_BATCH + 1) % 5 === 0 || i + LEARNER_BATCH >= learnerCwids.length) {
+      console.log(
+        `  ...${Math.min(i + LEARNER_BATCH, learnerCwids.length)}/${learnerCwids.length} learners, ` +
+          `${learnerPubsRows.length} with ≥1 pub / ${learnerPubCount} pubs so far`,
+      );
+    }
+  }
+  console.log(
+    `Computed ${learnerPubsRows.length} learners with ≥1 publication (${learnerPubCount} publications).`,
+  );
+
   const copubsNdjson = exportRows.map((r) => JSON.stringify(r)).join("\n") + "\n";
   const aocNdjson = aocRows.map((r) => JSON.stringify(r)).join("\n") + "\n";
   const copubListNdjson = copubListRows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  const learnerPubsNdjson = learnerPubsRows.map((r) => JSON.stringify(r)).join("\n") + "\n";
 
   const key = resolveKey();
   const aocKey = resolveAocKey();
   const copubListKey = resolveCopubListKey();
+  const learnerPubsKey = resolveLearnerPubsKey();
 
   if (dryRun) {
     const copubsPath = "/tmp/mentee-copubs.ndjson";
     const aocPath = "/tmp/aoc-mentees.ndjson";
     const copubListPath = "/tmp/copub-list.ndjson";
+    const learnerPubsPath = "/tmp/learner-pubs.ndjson";
     writeFileSync(copubsPath, copubsNdjson, "utf-8");
     writeFileSync(aocPath, aocNdjson, "utf-8");
     writeFileSync(copubListPath, copubListNdjson, "utf-8");
+    writeFileSync(learnerPubsPath, learnerPubsNdjson, "utf-8");
     console.log(
       `DRY-RUN: wrote ${exportRows.length} co-pub rows to ${copubsPath}, ` +
         `${aocRows.length} AOC rows to ${aocPath}, ` +
-        `${copubListRows.length} full-list rows to ${copubListPath} (skipped S3 upload).`,
+        `${copubListRows.length} full-list rows to ${copubListPath}, ` +
+        `${learnerPubsRows.length} learner-pubs rows to ${learnerPubsPath} (skipped S3 upload).`,
     );
   } else {
     const s3 = new S3Client({ region: REGION });
@@ -471,10 +579,20 @@ async function main() {
         ContentType: "application/x-ndjson",
       }),
     );
+    console.log(`Uploading to s3://${BUCKET}/${learnerPubsKey} ...`);
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: learnerPubsKey,
+        Body: learnerPubsNdjson,
+        ContentType: "application/x-ndjson",
+      }),
+    );
     console.log(
       `Uploaded ${exportRows.length} co-pub rows to s3://${BUCKET}/${key}, ` +
         `${aocRows.length} AOC rows to s3://${BUCKET}/${aocKey}, ` +
-        `${copubListRows.length} full-list rows to s3://${BUCKET}/${copubListKey}.`,
+        `${copubListRows.length} full-list rows to s3://${BUCKET}/${copubListKey}, ` +
+        `${learnerPubsRows.length} learner-pubs rows to s3://${BUCKET}/${learnerPubsKey}.`,
     );
   }
 
@@ -495,6 +613,12 @@ async function main() {
   if (copubListRows.length === 0) {
     console.warn(
       "WARNING: 0 full co-pub-list pairs computed. Verify ReciterDB is reachable and " +
+        "analysis_summary_author/_article are populated before trusting a clean run.",
+    );
+  }
+  if (learnerPubsRows.length === 0) {
+    console.warn(
+      "WARNING: 0 learner-pubs rows computed. Verify ReciterDB is reachable and " +
         "analysis_summary_author/_article are populated before trusting a clean run.",
     );
   }
