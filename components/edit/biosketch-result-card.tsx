@@ -476,18 +476,45 @@ function suggestedPubMeta(p: SuggestedPub): string {
  * AI-drafted; the statement is the user's own words and every pmid is grounded in their record.
  */
 export function BiosketchSuggestedPubsCard({ pubs }: { pubs: SuggestedPub[] }) {
+  // The list exists to be carried into My Bibliography / SciENcv, so the PMIDs are the payload:
+  // one plain-text "Copy PMIDs" (comma-separated, the form a PubMed search accepts) plus a PMID
+  // link on every row. Session-local tick, same contract as the worksheet's Copy.
+  const [copied, setCopied] = React.useState(false);
+  const pmids = pubs.map((p) => p.pmid).filter(Boolean);
+  const copyPmids = () => {
+    navigator.clipboard
+      .writeText(pmids.join(", "))
+      .then(() => setCopied(true))
+      .catch(() => {
+        // Clipboard can reject (permissions / insecure context); no tick for a copy that didn't happen.
+      });
+  };
   return (
     <div
       className="border-apollo-border bg-apollo-surface flex flex-col gap-4 rounded-lg border p-4"
       data-slot="biosketch-suggested-pubs-card"
       data-testid="biosketch-suggested-pubs"
     >
-      <div className="flex flex-col gap-0.5">
-        <h2 className="text-foreground text-base font-semibold">Suggested publications</h2>
-        <p className="text-muted-foreground text-xs">
-          Your indexed publications ranked by overlap with your statement. Grounded from your
-          Scholars record — nothing here was AI-generated.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-foreground text-base font-semibold">Suggested publications</h2>
+          <p className="text-muted-foreground text-xs">
+            Your indexed publications ranked by overlap with your statement. Grounded from your
+            Scholars record — nothing here was AI-generated.
+          </p>
+        </div>
+        {pmids.length > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={copyPmids}
+            aria-live="polite"
+            data-testid="biosketch-suggested-pubs-copy-pmids"
+          >
+            {copied ? "Copied" : "Copy PMIDs"}
+          </Button>
+        )}
       </div>
       {pubs.length === 0 ? (
         <p className="text-muted-foreground text-sm" data-testid="biosketch-suggested-pubs-empty">
@@ -505,7 +532,18 @@ export function BiosketchSuggestedPubsCard({ pubs }: { pubs: SuggestedPub[] }) {
                 data-testid={`biosketch-suggested-pub-${p.pmid}`}
               >
                 <span className="text-foreground">{productLine(p)}</span>
-                {meta && <span className="text-muted-foreground block text-xs">{meta}</span>}
+                <span className="text-muted-foreground block text-xs">
+                  {meta && <>{meta} · </>}
+                  <a
+                    href={pubmedUrl(p.pmid)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-apollo-maroon hover:underline"
+                    data-testid={`biosketch-suggested-pub-pmid-${p.pmid}`}
+                  >
+                    PMID {p.pmid}
+                  </a>
+                </span>
               </li>
             );
           })}
