@@ -7,12 +7,13 @@
  * Native DOM assertions (no jest-dom in `tests/setup.ts`): textContent + toBeNull().
  */
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 import {
   BiosketchResultCard,
   type BiosketchGenerateResult,
 } from "@/components/edit/biosketch-result-card";
+import type { BiosketchProducts } from "@/lib/edit/biosketch-products";
 
 function result(over: Partial<BiosketchGenerateResult> = {}): BiosketchGenerateResult {
   return {
@@ -51,6 +52,51 @@ describe("BiosketchResultCard — v7 titles", () => {
     );
     // body "abc" = 3 chars against the 2,000 contribution cap (NOT title+body).
     expect(screen.getByTestId("biosketch-entry-count-0").textContent).toContain("3/2,000");
+  });
+});
+
+describe("BiosketchResultCard — #2653 v8 Personal Statement products", () => {
+  // Unmapped by design for a statement (contributionIndex null on every product).
+  const PRODUCTS: BiosketchProducts = {
+    related: [
+      {
+        pmid: "11",
+        title: "Alpha study",
+        venue: null,
+        year: 2019,
+        contributionIndex: null,
+        why: "",
+      },
+    ],
+    otherSignificant: [],
+    relatedFromAims: true,
+  };
+
+  it("renders the products with the statement caption and no contribution-mapping label", () => {
+    const { unmount } = render(
+      <BiosketchResultCard
+        result={result({
+          mode: "personal_statement",
+          entries: [{ title: "", body: "My statement (Smith 2019)." }],
+          products: PRODUCTS,
+        })}
+      />,
+    );
+    const card = within(screen.getByTestId("biosketch-result"));
+    const section = within(card.getByTestId("biosketch-products"));
+    expect(section.getByText(/A parenthetical reference in the statement/)).toBeTruthy();
+    expect(section.getByTestId("biosketch-product-11").textContent).toContain("Alpha study");
+    // showMapping=false: the "Not mapped to a contribution" group label is omitted.
+    expect(section.queryByText(/Not mapped to a contribution/)).toBeNull();
+    expect(section.queryByText(/mapped to your contributions/)).toBeNull();
+    unmount();
+
+    // Contrast: the same unmapped products in Contributions mode DO carry the mapping label,
+    // so the absence above is the statement's doing, not the fixture's.
+    render(<BiosketchResultCard result={result({ products: PRODUCTS })} />);
+    const contrib = within(screen.getByTestId("biosketch-products"));
+    expect(contrib.getByText(/Not mapped to a contribution/)).toBeTruthy();
+    expect(contrib.getByText(/mapped to your contributions/)).toBeTruthy();
   });
 });
 

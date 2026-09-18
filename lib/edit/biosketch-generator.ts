@@ -32,7 +32,9 @@ import {
   VERBATIM_STRINGS,
 } from "@/lib/edit/overview-prompt-fragments";
 import {
+  BIOSKETCH_APPLICATION_ROLE_LABELS,
   biosketchCharCap,
+  type BiosketchApplicationRole,
   type BiosketchEntry,
   type BiosketchMode,
   type BiosketchParams,
@@ -40,10 +42,20 @@ import {
 import {
   biosketchVersionEmitsTitle,
   biosketchVersionGroundsImpact,
+  biosketchVersionUsesApplicationRole,
+  biosketchVersionUsesProductReferences,
   defaultBiosketchPromptVersionId,
   isValidBiosketchPromptVersionId,
   type BiosketchPromptVersionId,
 } from "@/lib/edit/biosketch-prompt-versions";
+import {
+  buildProductReferencePrompt,
+  productReferenceList,
+  stripProductKeys,
+  validateProductReferences,
+  type BiosketchProductRef,
+  type BiosketchReferenceReport,
+} from "@/lib/edit/biosketch-references";
 import {
   applyProductMapping,
   buildProductMappingPrompt,
@@ -432,6 +444,129 @@ export const BIOSKETCH_SYSTEM_PROMPT_V7 = [
   ...BIOSKETCH_CLOSING,
 ].join("\n");
 
+// ---------------------------------------------------------------------------
+// v8 (#2653, Phase 2 spec F1 + F3). v7 plus two things that change the OUTPUT CONTRACT, so they
+// ship together: (1) the Personal Statement takes the scholar's ROLE ON THE APPLICATION (distinct
+// from element (iv), the author role within a contribution) and argues fitness for THAT role,
+// steered by one per-role fragment selected server-side into the user turn; (2) the narrative may
+// reference the ten listed products, by a payload KEY only, rendered post-parse into the NIH
+// lead-author-and-year form and validated (`biosketch-references.ts`). v7 stays byte-pinned: v8
+// reuses every v7 fragment and swaps the REFERENCES block for the keyed contract.
+// ---------------------------------------------------------------------------
+
+const BIOSKETCH_ROLE_V8: string[] = [
+  "ROLE ON THE APPLICATION (Personal Statement)",
+  "The user turn names the scholar's ROLE on this application (PD/PI, MPI, Co-Investigator, Mentor",
+  "or Sponsor, Collaborator or Consultant, Core or Resource Director, Other Significant",
+  "Contributor, or Candidate) and the ARGUMENT that role must make, with the evidence to favor.",
+  "The Personal Statement makes THAT argument and no other: its lead sentence states the role's",
+  "fitness for THIS project, and the records it draws on are the ones the role directive favors.",
+  "A PD/PI statement argues the ability to lead and deliver the aims; a Co-Investigator statement",
+  "argues a specific capability for specific aims; a Mentor statement argues a record of training",
+  "people; a Candidate statement argues a trajectory. Do not write a generic statement that would",
+  "read the same under a different role. This role is separate from element (iv): the author role",
+  "within each body of work still comes from `authorPosition` / `roleLabel` exactly as FACTS give it.",
+];
+
+const BIOSKETCH_REFERENCES_V8: string[] = [
+  "PRODUCT REFERENCES",
+  "The user turn may list up to ten PRODUCTS, each with a short KEY ([P1], [P2], ...). These are",
+  "the ONLY works you may reference in the narrative, and the key is the ONLY way to reference one:",
+  'place the key in square brackets right after the claim it supports, e.g. "... reduced 30-day',
+  'readmissions [P3]." Two or more keys share one bracket: "[P2, P5]". A key must follow a claim',
+  "that THAT product's own title or finding supports; never attach a key to a claim drawn from a",
+  "different paper. Do NOT write an author name, a year in parentheses, a journal, a PMID, a URL,",
+  "a DOI, a numbered marker, or any other citation form yourself: the key is rendered into the NIH",
+  "lead-author-and-year form after you write, and anything else is stripped. Use references",
+  "sparingly (a handful across the whole narrative), never inside a TITLE line, and never for a",
+  'product that is not in the list. You may still refer to your own work descriptively ("our 2023',
+  'study") without a key. When no PRODUCTS list is given, reference nothing.',
+];
+
+/** The composed biosketch **v8** system prompt — v7 + the role-on-the-application block and the
+ *  keyed product-reference contract (which replaces the v6 REFERENCES block). Every other v7
+ *  fragment is reused unchanged, so v7 stays byte-pinned. */
+export const BIOSKETCH_SYSTEM_PROMPT_V8 = [
+  ...BIOSKETCH_PREAMBLE_V6,
+  "",
+  ...BIOSKETCH_FACTS_NOTE,
+  "",
+  ...BIOSKETCH_THROUGHLINE,
+  "",
+  ...BIOSKETCH_ELEMENTS_V6,
+  "",
+  ...BIOSKETCH_ROLE_V8,
+  "",
+  ...BIOSKETCH_SIGNIFICANCE_V6,
+  "",
+  ...ENTITY_PROVENANCE_FLOOR,
+  "",
+  ...BIOSKETCH_METHODS_NOTE,
+  "",
+  ...BIOSKETCH_FACETS,
+  "",
+  ...BIOSKETCH_REFERENCES_V8,
+  "",
+  ...VERBATIM_STRINGS,
+  "",
+  ...BIOSKETCH_LENGTH_V6,
+  "",
+  ...BIOSKETCH_STYLE_V6,
+  "",
+  ...BIOSKETCH_TITLE_V7,
+  "",
+  ...BIOSKETCH_OUTPUT_V7,
+  "",
+  ...BIOSKETCH_CLOSING,
+].join("\n");
+
+/**
+ * #2653 v8 — one user-turn fragment per role on the application (Phase 2 spec F1 table): the
+ * argument the statement makes and the FACTS evidence to favor. Selected server-side from
+ * `params.applicationRole`; the system prompt only says a role directive will be given. Kept in
+ * the user turn (not the system prompt) so the static system prompt is identical across roles.
+ */
+export const BIOSKETCH_ROLE_FRAGMENTS: Record<BiosketchApplicationRole, string> = {
+  pd_pi:
+    "Argument: I can lead this work and deliver the aims. Favor grants whose roleLabel is " +
+    "Principal Investigator (or Multiple Principal Investigator), publications where " +
+    "authorPosition is last (senior author), and any leadership title in FACTS. Open with your " +
+    "standing to lead THIS project; name the team leadership the record shows.",
+  mpi:
+    "Argument: as one of the principal investigators I lead my share of this work and deliver " +
+    'the aims. State the standing as "Multiple Principal Investigator (MPI)" or "one of the ' +
+    'principal investigators", never "co-PI". Favor grants whose roleLabel carries principal-' +
+    "investigator standing, senior-author publications, and any leadership title in FACTS; " +
+    "name the leadership you bring to the shared aims.",
+  co_investigator:
+    "Argument: I bring a specific capability to specific aims. Favor the methods, tools, and " +
+    "publications that match the stated contribution, and tie each to the aim it serves. Do " +
+    "not argue that you can lead the whole project.",
+  mentor_sponsor:
+    "Argument: I train people well in this area. Favor training or career-development grants " +
+    "in FACTS (K, T, or F mechanisms), publications that show supervised work, and any " +
+    "leadership or program title in FACTS. Do NOT state a count of mentees or trainees " +
+    "(FACTS carry none); describe the mentoring record without numbers.",
+  collaborator_consultant:
+    "Argument: I supply narrow expertise on request. Favor the few publications and methods " +
+    "that establish exactly that expertise; keep the statement short and specific to what will " +
+    "be consulted on, and claim no role in the aims beyond it.",
+  core_director:
+    "Argument: the resource I direct can support the aims. Favor the methods and tools in " +
+    "FACTS, the capabilities the publications demonstrate, and any core or resource " +
+    "leadership title in FACTS. Frame the statement around the service the resource provides " +
+    "to THIS project.",
+  other_significant_contributor:
+    "Argument: I contribute in a defined way without measurable effort. Favor the publications " +
+    "and expertise most relevant to that contribution; be brief, and do not claim leadership " +
+    "of the project or of a specific aim.",
+  candidate:
+    "Argument: my trajectory fits this next step. Favor training history (education), " +
+    "first-author publications (authorPosition first), and career stage as FACTS give it; " +
+    "state how the proposed training and project build on that record. Do not name mentors " +
+    "or a mentoring team (FACTS carry none).",
+};
+
 /** The prompt content per biosketch version. `generateBiosketch` selects by resolved version.
  *  Biosketch uses character caps (not word `lengthBands`), so the impl carries only the
  *  system prompt. */
@@ -439,6 +574,7 @@ export const BIOSKETCH_PROMPT_IMPLS: Record<BiosketchPromptVersionId, { systemPr
   v5: { systemPrompt: BIOSKETCH_SYSTEM_PROMPT },
   v6: { systemPrompt: BIOSKETCH_SYSTEM_PROMPT_V6 },
   v7: { systemPrompt: BIOSKETCH_SYSTEM_PROMPT_V7 },
+  v8: { systemPrompt: BIOSKETCH_SYSTEM_PROMPT_V8 },
 };
 
 /** Resolve the composed prompt for a (possibly untrusted) version id, falling back to the
@@ -472,12 +608,29 @@ const BIOSKETCH_STATEMENT_LABEL = "3,500";
  * scholar typed none. {@link buildBiosketchUserPrompt} joins them back into the single
  * string every other consumer (debug payload, tests) reads.
  */
+/**
+ * #2653 v8 — the referenceable products for a generation: the deterministic Products
+ * selection (related first, then other significant) keyed `P1`.. with the NIH lead-author-year
+ * label. EMPTY for any version without `productReferences` (v5–v7), so nothing about those
+ * versions' prompts or results changes. Deterministic, so the user turn, the validator, the
+ * faithfulness pass, and the debug payload all compute the same list from the same inputs.
+ */
+export function biosketchProductRefs(
+  facts: OverviewFacts,
+  params: BiosketchParams,
+): BiosketchProductRef[] {
+  const { id } = resolveBiosketchPromptImpl(params.promptVersion);
+  if (!biosketchVersionUsesProductReferences(id)) return [];
+  return productReferenceList(selectBiosketchProducts(facts, params), facts.representativePublications);
+}
+
 export function buildBiosketchUserTurn(
   facts: OverviewFacts,
   params: BiosketchParams,
   opts?: { groundsImpact?: boolean },
 ): { payload: string; steering: string | null } {
   const lines: string[] = [];
+  const { id: versionId } = resolveBiosketchPromptImpl(params.promptVersion);
 
   if (params.mode === "personal_statement") {
     lines.push("Mode: Personal Statement.");
@@ -487,6 +640,20 @@ export function buildBiosketchUserTurn(
     lines.push(
       `Proposed project this statement supports: ${params.projectTitle} — ${params.aims}`,
     );
+    if (biosketchVersionUsesApplicationRole(versionId)) {
+      // #2653 v8 — the role on the application + its server-selected fragment. A null role
+      // (only reachable by a hand-built request; the route 400s the posted params) degrades to
+      // an unsteered statement rather than failing the generate.
+      const role = params.applicationRole;
+      lines.push(
+        role
+          ? `Your role on this application: ${BIOSKETCH_APPLICATION_ROLE_LABELS[role]}. ${BIOSKETCH_ROLE_FRAGMENTS[role]}`
+          : "Your role on this application: not specified.",
+      );
+      if (params.contributionLine.length > 0) {
+        lines.push(`What you will do on this project: ${params.contributionLine}`);
+      }
+    }
     lines.push(
       "Frame the scholar's throughline and grounded work toward fitness for this specific " +
         "project. Assert no qualification not grounded in FACTS.",
@@ -521,6 +688,14 @@ export function buildBiosketchUserTurn(
     JSON.stringify(opts?.groundsImpact ? toBiosketchModelFacts(facts) : toModelFacts(facts), null, 2),
   );
   lines.push("</FACTS>");
+
+  // #2653 v8 — the keyed product list the narrative may reference (empty for v5–v7). It is
+  // deterministic from facts + params, so it stays in the cached `payload`, ahead of the seam.
+  const refBlock = buildProductReferencePrompt(biosketchProductRefs(facts, params));
+  if (refBlock.length > 0) {
+    lines.push("");
+    lines.push(refBlock);
+  }
 
   const steering =
     params.instructions.length > 0
@@ -660,6 +835,9 @@ export type BiosketchResult = {
    *  verified against FACTS), for output traceability. `null` for Personal Statement / empty /
    *  when attribution failed. */
   sources: BiosketchContributionSources[] | null;
+  /** #2653 v8 — the product-reference validator's report (references rendered, spans stripped
+   *  or flagged), summed across entries. `null` for a version without product references. */
+  references: BiosketchReferenceReport | null;
 };
 
 /** A phase-boundary progress event (#917 follow-up A). Emitted as `generateBiosketch` advances so
@@ -708,6 +886,11 @@ export async function generateBiosketch(
   const groundsImpact = biosketchVersionGroundsImpact(versionId);
   // v7 emits a per-contribution TITLE line the parser lifts into `entry.title`; v5 / v6 do not.
   const extractTitle = biosketchVersionEmitsTitle(versionId);
+  // #2653 v8 — the keyed products the narrative may reference (empty for v5–v7): the same
+  // deterministic selection the user turn keys, reused by the validator and the faithfulness
+  // check below (the Contributions products phase reselects it; cheap, and byte-identical for v7).
+  const productRefs = biosketchProductRefs(facts, { ...params, promptVersion: versionId });
+  const usesRefs = biosketchVersionUsesProductReferences(versionId);
   const modelId =
     opts?.model ??
     process.env.BIOSKETCH_GENERATE_MODEL ??
@@ -741,6 +924,23 @@ export async function generateBiosketch(
   // for "up to N"; a model that over-produces is clamped, never padded).
   if (mode === "contributions") entries = entries.slice(0, params.maxContributions);
 
+  // #2653 v8 — render in-list keys to the NIH form and strip everything else reference-shaped
+  // BEFORE the faithfulness pass, so the verifier sees the final "(Smith 2019)" form it is told
+  // is grounded (and checks the claim under it against that product). A title never carries a
+  // reference: a stray key there is dropped, not rendered.
+  let references: BiosketchReferenceReport | null = null;
+  if (usesRefs) {
+    references = { kept: 0, issues: [] };
+    entries = entries
+      .map((e) => {
+        const v = validateProductReferences(e.body, productRefs);
+        references!.kept += v.report.kept;
+        references!.issues.push(...v.report.issues);
+        return { title: stripProductKeys(e.title), body: v.text };
+      })
+      .filter((e) => e.body.length > 0);
+  }
+
   const removed: UngroundedSpan[] = [];
   if (opts?.faithfulnessPass ?? isBiosketchFaithfulnessPassEnabled()) {
     // Per-entry verify→revise: each contribution is self-contained, so it is fact-checked
@@ -761,6 +961,9 @@ export async function generateBiosketch(
           permitSignificance: true,
           permitSynopsisFindings: true,
           permitBibliometrics: groundsImpact,
+          // #2653 v8 — the rendered references are grounded as written; the claim each sits
+          // on is checked against THAT product's record (`reference-mismatch`). Absent for v5–v7.
+          ...(usesRefs && productRefs.length > 0 ? { productRefs } : {}),
         }).then((g) => {
           groundedCount += 1;
           onProgress({ phase: "faithfulness", done: groundedCount, total: prior.length });
@@ -790,6 +993,12 @@ export async function generateBiosketch(
   // why. The pmids are grounded by construction; a mapping failure degrades to "listed,
   // unmapped" (never blocks the generate).
   let products: BiosketchProducts | null = null;
+  if (mode === "personal_statement" && usesRefs && productRefs.length > 0) {
+    // #2653 v8 — a Personal Statement returns the (unmapped) products its references point at,
+    // so the reader can see which record each "(Smith 2019)" names. No mapping call: the
+    // contribution mapping is a Contributions-mode concept.
+    products = selectBiosketchProducts(facts, params);
+  }
   if (mode === "contributions" && entries.length > 0) {
     onProgress({ phase: "products" });
     const selected = selectBiosketchProducts(facts, params);
@@ -838,7 +1047,7 @@ export async function generateBiosketch(
   }
 
   onProgress({ phase: "done" });
-  return { mode, entries, model: modelId, removed, overflow, products, sources };
+  return { mode, entries, model: modelId, removed, overflow, products, sources, references };
 }
 
 /**

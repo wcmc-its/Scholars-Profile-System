@@ -24,6 +24,7 @@ import { BEDROCK_CACHE_POINT, bedrockClient } from "@/lib/llm/client";
 import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
+import type { BiosketchProductRef } from "@/lib/edit/biosketch-references";
 import {
   OVERVIEW_ELEMENTS,
   OVERVIEW_MIN_PUBLICATIONS,
@@ -912,20 +913,44 @@ const VERIFY_BIBLIOMETRIC_EXCEPTION = [
   "  relaxation admits the NUMBER, never the boast.",
 ].join("\n");
 
+/**
+ * The clause appended to the verifier prompt for the NIH-biosketch v8 product references
+ * (#2653). A rendered reference ("(Smith 2019)") is grounded AS WRITTEN — its name and year are
+ * never a `named-entity` / `number` leak — but the claim it is attached to must be supported by
+ * THAT product's own record, listed under PRODUCT REFERENCES in the reference. This is the one
+ * faithfulness check F3 adds, folded into the existing verify call (no extra Bedrock call).
+ * Appended ONLY when `productRefs` is non-empty, so v5–v7 + the overview verifier stay
+ * byte-identical.
+ */
+const VERIFY_PRODUCT_REFERENCE_CHECK = [
+  "",
+  "CHECK — product references (this generation PERMITS them): a parenthetical reference that",
+  'appears EXACTLY as listed under PRODUCT REFERENCES (e.g. "(Smith 2019)", "(PMID 123)") is',
+  "GROUNDED as written — never flag the name or the year inside it. But the claim it is attached",
+  "to (the clause or sentence that ends in that reference) must be supported by THAT product's own",
+  "TITLE or finding lines — the product the reference names, not a different listed paper. When",
+  "the claim is not supported by that product's record, output the REFERENCE ITSELF as the span",
+  '(e.g. "(Smith 2019)", verbatim) with category `reference-mismatch`, so the reference is removed',
+  "and the claim is judged on its own under the other categories. A parenthetical reference NOT",
+  "listed under PRODUCT REFERENCES is `reference-mismatch` too.",
+].join("\n");
+
 /** The verifier system prompt for a version: the base contract, plus the synopsis-number
  *  exception when the version permits synopsis findings, plus the significance exception for
- *  the NIH-biosketch purpose (#917 v5), plus the grounded-bibliometric exception (#917 v6).
- *  Each is additive and order-stable, so the overview callers (which set none of them, or only
- *  `permitSynopsisFindings`) stay byte-identical. */
+ *  the NIH-biosketch purpose (#917 v5), plus the grounded-bibliometric exception (#917 v6), plus
+ *  the product-reference check (#2653 v8). Each is additive and order-stable, so the overview
+ *  callers (which set none of them, or only `permitSynopsisFindings`) stay byte-identical. */
 export function overviewVerifySystemPrompt(opts?: {
   permitSynopsisFindings?: boolean;
   permitSignificance?: boolean;
   permitBibliometrics?: boolean;
+  productRefs?: readonly BiosketchProductRef[];
 }): string {
   let prompt = OVERVIEW_VERIFY_SYSTEM_PROMPT;
   if (opts?.permitSynopsisFindings) prompt += `\n${VERIFY_SYNOPSIS_NUMBER_EXCEPTION}`;
   if (opts?.permitSignificance) prompt += `\n${VERIFY_SIGNIFICANCE_EXCEPTION}`;
   if (opts?.permitBibliometrics) prompt += `\n${VERIFY_BIBLIOMETRIC_EXCEPTION}`;
+  if (opts?.productRefs && opts.productRefs.length > 0) prompt += `\n${VERIFY_PRODUCT_REFERENCE_CHECK}`;
   return prompt;
 }
 
@@ -939,7 +964,14 @@ export function overviewVerifySystemPrompt(opts?: {
  */
 export function buildGroundingReference(
   facts: OverviewFacts,
-  opts?: { permitSynopsisFindings?: boolean; permitSignificance?: boolean; permitBibliometrics?: boolean },
+  opts?: {
+    permitSynopsisFindings?: boolean;
+    permitSignificance?: boolean;
+    permitBibliometrics?: boolean;
+    /** #2653 v8 — the rendered product references the draft may carry (each grounded as
+     *  written; the claim under each is checked against that product's record). */
+    productRefs?: readonly BiosketchProductRef[];
+  },
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -1013,6 +1045,18 @@ export function buildGroundingReference(
           "REFRAMES — stated in the same sentence as that finding — is GROUNDED. A significance " +
           "claim with NO finding above to attach to is NOT grounded.",
       );
+    }
+    if (opts?.productRefs && opts.productRefs.length > 0) {
+      // #2653 v8 — the ONLY parenthetical references permitted, each mapped to the product it
+      // names so the verifier can check the claim under it against THAT record.
+      lines.push(
+        "PRODUCT REFERENCES (the ONLY parenthetical references permitted; each is GROUNDED exactly " +
+          "as written — never flag its name or year; the claim it is attached to must be supported " +
+          "by THAT product's TITLE / finding lines above):",
+      );
+      for (const r of opts.productRefs) {
+        lines.push(`- (${r.label}) = TITLE: ${r.title.replace(/<[^>]+>/g, "")}${r.year ? ` (${r.year})` : ""}`);
+      }
     }
   } else {
     lines.push(
@@ -1195,6 +1239,7 @@ export async function verifyDraftGrounding(
     permitSynopsisFindings?: boolean;
     permitSignificance?: boolean;
     permitBibliometrics?: boolean;
+    productRefs?: readonly BiosketchProductRef[];
   },
 ): Promise<UngroundedSpan[]> {
   const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_GENERATE_MODEL;
@@ -1208,11 +1253,12 @@ export async function verifyDraftGrounding(
   // them), so the model still sees a single turn — same words, same order. The only byte the
   // model MAY see differently is the seam: the original string had one blank line there and
   // the API supplies whatever it puts between adjacent text blocks.
+  const productRefs = opts?.productRefs;
   const reference = [
     "Here is the REFERENCE of ALLOWED FACTS. It is the only permitted source.",
     "",
     "<ALLOWED_FACTS>",
-    buildGroundingReference(facts, { permitSynopsisFindings, permitSignificance, permitBibliometrics }),
+    buildGroundingReference(facts, { permitSynopsisFindings, permitSignificance, permitBibliometrics, productRefs }),
     "</ALLOWED_FACTS>",
   ].join("\n");
   const draft = ["Here is the DRAFT to fact-check:", "", "<DRAFT>", prose, "</DRAFT>"].join("\n");
@@ -1229,6 +1275,7 @@ export async function verifyDraftGrounding(
         permitSynopsisFindings,
         permitSignificance,
         permitBibliometrics,
+        productRefs,
       }),
       providerOptions: BEDROCK_CACHE_POINT,
     },
@@ -1295,6 +1342,9 @@ export async function groundOverviewDraft(
     /** #917 v6 — biosketch impact grounding: allow a citation count / RCR / NIH percentile
      *  that IS present in FACTS, so the pass does not strip a grounded bibliometric. */
     permitBibliometrics?: boolean;
+    /** #2653 v8 — the rendered product references the draft may carry: grounded as written,
+     *  and the claim under each is checked against that product's record. */
+    productRefs?: readonly BiosketchProductRef[];
   },
 ): Promise<{ prose: string; removed: UngroundedSpan[] }> {
   const maxRevisions = opts?.maxRevisions ?? 2;
