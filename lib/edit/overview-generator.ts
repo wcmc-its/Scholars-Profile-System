@@ -526,7 +526,7 @@ export function toBiosketchModelFacts(facts: OverviewFacts) {
  * same-params regenerate re-sends byte-for-byte (directives + FACTS) and is the cached
  * prefix; `steering` is the optional ADDITIONAL_INSTRUCTIONS block, or null when the
  * scholar typed none. {@link buildOverviewUserPrompt} joins them back into the single
- * string every other consumer (cv route, debug payload, validation script, tests) reads.
+ * string every other consumer (debug payload, validation script, tests) reads.
  */
 export function buildOverviewUserTurn(
   facts: OverviewFacts,

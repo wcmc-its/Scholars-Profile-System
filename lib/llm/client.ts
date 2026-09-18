@@ -30,5 +30,13 @@ export function bedrockClient() {
  * source-attribution system prompts are ~200-350 tokens and deliberately carry none,
  * while the verify system prompt keeps its mark for the biosketch permits path
  * (~1.6k tokens) even though the overview's default verifier (~0.8k) falls under.
+ *
+ * Reading the result: `usage.inputTokens` is the UNCACHED count — Bedrock, like the
+ * Anthropic API, reports cache traffic beside it, not inside it (the #2655 measurement
+ * run is where that reading gets confirmed). On the installed `ai` 6 /
+ * `@ai-sdk/amazon-bedrock` 3 pair the read count is
+ * `usage.inputTokenDetails.cacheReadTokens` and the write count survives only as
+ * `providerMetadata.bedrock.usage.cacheWriteInputTokens` (the v2→v3 usage adapter drops
+ * it). Nothing reads these yet; the pricing wiring lands with the measurement harness.
  */
 export const BEDROCK_CACHE_POINT = { bedrock: { cachePoint: { type: "default" } } };

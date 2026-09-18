@@ -24,16 +24,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { generateText } from "ai";
 
-import { bedrockClient } from "@/lib/llm/client";
+import { BEDROCK_CACHE_POINT, bedrockClient } from "@/lib/llm/client";
 import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, type OverviewFacts } from "@/lib/edit/overview-facts";
-import {
-  overviewSystemPromptFor,
-  buildOverviewUserPrompt,
-} from "@/lib/edit/overview-generator";
+import { overviewSystemPromptFor, buildOverviewUserTurn } from "@/lib/edit/overview-generator";
 import {
   DEFAULT_OVERVIEW_PARAMS,
   normalizeOverviewSelection,
@@ -76,10 +73,23 @@ const PATH = "/api/edit/cv";
 async function generateResearchSummary(facts: OverviewFacts): Promise<string> {
   const params: OverviewParams = { ...DEFAULT_OVERVIEW_PARAMS, voice: "third", length: "extended" };
   const modelId = process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_GENERATE_MODEL;
+  // #2655 — the same [system]<cp>[directives + FACTS]<cp>[steering?] shape as
+  // `generateOverviewDraft`, same words in the same order. The system mark shares its
+  // prefix with overview drafts on the same model + prompt version within the TTL; the
+  // payload mark pays on a repeat export of the same scholar. `steering` is always null
+  // here (DEFAULT_OVERVIEW_PARAMS carries no instructions), so the payload is the whole turn.
+  const { payload, steering } = buildOverviewUserTurn(facts, params);
   const { text } = await generateText({
     model: bedrockClient()(modelId),
-    system: overviewSystemPromptFor(params.promptVersion),
-    prompt: buildOverviewUserPrompt(facts, params),
+    system: {
+      role: "system",
+      content: overviewSystemPromptFor(params.promptVersion),
+      providerOptions: BEDROCK_CACHE_POINT,
+    },
+    messages: [
+      { role: "user", content: payload, providerOptions: BEDROCK_CACHE_POINT },
+      ...(steering === null ? [] : [{ role: "user" as const, content: steering }]),
+    ],
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0.4 } : {}),
   });
   return text;
