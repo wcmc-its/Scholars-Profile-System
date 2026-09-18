@@ -1341,6 +1341,11 @@ model PublicationAuthor {
   isPenultimate   Boolean     @default(false) @map("is_penultimate")
   isConfirmed     Boolean     @default(true) @map("is_confirmed") // ReCiter authorship-confirmation (spec line 118)
   lastRefreshedAt DateTime    @default(now()) @map("last_refreshed_at")
+  /// #2668 -- when Scholars first linked this authorship. Set by the default on create and
+  /// never bumped (the reconcile's UPDATE path leaves it alone), unlike `lastRefreshedAt`,
+  /// the coi-gap watermark that moves on any content delta. The biosketch staleness nudge
+  /// reads this one. Pre-column rows were backfilled to their `last_refreshed_at`.
+  createdAt       DateTime    @default(now()) @map("created_at")
 
   @@index([cwid])
   @@index([pmid])
