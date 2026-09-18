@@ -294,9 +294,14 @@ describe("reviseDraftForGrounding — no cache point (system prompt is under the
 });
 
 describe("generateBiosketch — cache points on the draft + verify; none on the aux calls", () => {
-  // A v7 draft with two titled contributions, so the faithfulness pass verifies twice.
+  // A v7 draft with two titled contributions, so the faithfulness pass verifies twice. Pinned
+  // to v7: under the v8 default the payload ends with the product-reference block, not </FACTS>.
   const DRAFT = "1. TITLE: Alpha\n\nBody alpha.\n\n2. TITLE: Beta\n\nBody beta.";
-  const PARAMS = normalizeBiosketchParams({ mode: "contributions", maxContributions: 5 });
+  const PARAMS = normalizeBiosketchParams({
+    mode: "contributions",
+    maxContributions: 5,
+    promptVersion: "v7",
+  });
 
   /** A verify call is the one whose LAST user message carries the DRAFT block. */
   const isVerify = (c: Call) => Boolean(c.messages?.at(-1)?.content.includes("<DRAFT>"));
@@ -362,6 +367,7 @@ describe("generateBiosketch — cache points on the draft + verify; none on the 
     const params = normalizeBiosketchParams({
       mode: "contributions",
       maxContributions: 5,
+      promptVersion: "v7",
       instructions: "Lead with the vector-safety work.",
     });
     await generateBiosketch(FACTS, params, { faithfulnessPass: false });
