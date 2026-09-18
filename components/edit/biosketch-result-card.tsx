@@ -18,7 +18,8 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy, Download, TriangleAlert } from "lucide-react";
+import Link from "next/link";
+import { Check, ClipboardList, Copy, Download, TriangleAlert } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -149,18 +150,33 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
             Copy these into your grant application. Nothing here is saved to your profile.
           </p>
         </div>
-        {result.entries.length > 0 && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={downloadAll}
-            data-testid="biosketch-download-all"
-          >
-            <Download className="size-4" />
-            Download all (.txt)
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {/* #2652 — the SciENcv worksheet is per SAVED generation, so the link needs the id;
+              a run that failed to persist (generationId null) has no worksheet. */}
+          {result.generationId && (
+            <Button asChild variant="outline" size="sm">
+              <Link
+                href={`/edit/biosketch/worksheet?id=${encodeURIComponent(result.generationId)}`}
+                data-testid="biosketch-open-worksheet"
+              >
+                <ClipboardList className="size-4" />
+                Open SciENcv worksheet
+              </Link>
+            </Button>
+          )}
+          {result.entries.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={downloadAll}
+              data-testid="biosketch-download-all"
+            >
+              <Download className="size-4" />
+              Download all (.txt)
+            </Button>
+          )}
+        </div>
       </div>
 
       {result.removedCount > 0 && (
