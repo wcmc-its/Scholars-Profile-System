@@ -5,9 +5,10 @@
  * missing / oversized `?id` → 404; signed-out → SAML redirect carrying the full worksheet URL;
  * unknown generation → 404 (before authz — the row's `cwid` IS the authz key); authz deny →
  * the reduced-chrome `ForbiddenEditPage` shell + a logged denial, with NO edit-context or honors
- * read and NO cwid echoed to the 403; authz allow → the edit context + published honors load
- * and the worksheet renders keyed on the ROW's cwid (never the caller's); #536 hidden class +
- * non-superuser → 404 (superuser bypasses), as on the scholar editor. Follows the #955
+ * read and NO cwid echoed to the 403; authz allow → the edit context, published honors, the
+ * WHOLE appointment history (not the edit context's active-only set) and the newest other-mode
+ * draft load, and the worksheet renders keyed on the ROW's cwid (never the caller's); #536
+ * hidden class + non-superuser → 404 (superuser bypasses), as on the scholar editor. Follows the #955
  * finding #11 page-test pattern (`tests/unit/scholar-history-page.test.tsx`): the view + the
  * forbidden component are mocked (module-hoisted), so we assert on the returned element type
  * and props, not a render.
@@ -22,6 +23,9 @@ const {
   mockLogDenial,
   mockLoadEditContext,
   mockHonorFindMany,
+  mockAppointmentFindMany,
+  mockSuppressionFindMany,
+  mockGenerationFindFirst,
   mockIsPubliclyDisplayed,
   mockForbidden,
   mockWorksheet,
@@ -35,6 +39,9 @@ const {
   mockLogDenial: vi.fn(),
   mockLoadEditContext: vi.fn(),
   mockHonorFindMany: vi.fn(),
+  mockAppointmentFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
+  mockGenerationFindFirst: vi.fn(),
   mockIsPubliclyDisplayed: vi.fn(),
   mockForbidden: vi.fn(() => null),
   mockWorksheet: vi.fn(() => null),
@@ -49,13 +56,25 @@ const {
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
 vi.mock("@/lib/edit/biosketch-generator", () => ({ isBiosketchGenerateEnabled: mockEnabled }));
 vi.mock("@/lib/edit/request", () => ({ resolveEditIdentity: mockResolveIdentity }));
-vi.mock("@/lib/edit/biosketch-provenance", () => ({ getBiosketchGeneration: mockGetGeneration }));
+// `coerceEntries` stays real: the other-mode draft's stored JSON goes through it on the page.
+vi.mock("@/lib/edit/biosketch-provenance", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/edit/biosketch-provenance")>()),
+  getBiosketchGeneration: mockGetGeneration,
+}));
 vi.mock("@/lib/edit/overview-authz", () => ({ authorizeOverviewWrite: mockAuthorize }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogDenial }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
 vi.mock("@/lib/eligibility", () => ({ isPubliclyDisplayed: mockIsPubliclyDisplayed }));
 vi.mock("@/lib/db", () => ({
-  db: { read: { honor: { findMany: mockHonorFindMany } }, write: {} },
+  db: {
+    read: {
+      honor: { findMany: mockHonorFindMany },
+      appointment: { findMany: mockAppointmentFindMany },
+      suppression: { findMany: mockSuppressionFindMany },
+      biosketchGeneration: { findFirst: mockGenerationFindFirst },
+    },
+    write: {},
+  },
 }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
 vi.mock("@/components/edit/sciencv-worksheet", () => ({ SciencvWorksheet: mockWorksheet }));
@@ -90,38 +109,72 @@ const CTX = {
     { degree: "PhD", institution: "Example U", field: "Biostatistics", year: 2010, state: "shown" },
     { degree: "MS", institution: "Hidden U", field: "Stats", year: 2006, state: "hidden_by_self" },
   ],
+  // The edit context's appointment set is ACTIVE rows only, so the page must NOT read it for
+  // SciENcv's whole-career block. A decoy title pins that: it appears nowhere in the table
+  // rows below, so it can only reach the worksheet through `ctx.appointments`.
   appointments: [
     {
-      title: "Assistant Professor",
-      organization: "Example Dept",
-      startDate: "2015-07-01",
-      endDate: "2020-06-30",
-      state: "shown",
-    },
-    {
-      title: "Chair",
+      title: "Decoy (edit context)",
       organization: "Example Dept",
       startDate: "2022-01-01",
-      endDate: null,
-      state: "locked",
-    },
-    {
-      title: "Adjunct",
-      organization: "Elsewhere",
-      startDate: "2018-01-01",
-      endDate: null,
-      state: "removed_by_admin",
-    },
-    {
-      title: "Associate Professor",
-      organization: "Example Dept",
-      startDate: "2020-07-01",
       endDate: null,
       state: "shown",
     },
   ],
 };
 const HONORS = [{ name: "Best Paper", organization: "Society", year: 2024 }];
+/** The table rows for the owner, as Prisma returns them (Date columns), in no useful order. */
+const APPOINTMENT_ROWS = [
+  {
+    externalId: "appt-assistant",
+    title: "Assistant Professor",
+    organization: "Example Dept",
+    startDate: new Date("2015-07-01T00:00:00.000Z"),
+    endDate: new Date("2020-06-30T00:00:00.000Z"),
+  },
+  {
+    externalId: "appt-chair",
+    title: "Chair",
+    organization: "Example Dept",
+    startDate: new Date("2022-01-01T00:00:00.000Z"),
+    endDate: null,
+  },
+  {
+    externalId: "appt-suppressed",
+    title: "Adjunct",
+    organization: "Elsewhere",
+    startDate: new Date("2018-01-01T00:00:00.000Z"),
+    endDate: null,
+  },
+  {
+    // A 3-day WOOFA effective-dating artifact (`looksLikeArtifactAppointment`), not a job.
+    externalId: "appt-artifact",
+    title: "Assistant Professor (Interim)",
+    organization: "Example Dept",
+    startDate: new Date("2015-06-28T00:00:00.000Z"),
+    endDate: new Date("2015-07-01T00:00:00.000Z"),
+  },
+  {
+    externalId: "appt-associate",
+    title: "Associate Professor",
+    organization: "Example Dept",
+    startDate: new Date("2020-07-01T00:00:00.000Z"),
+    endDate: null,
+  },
+  {
+    // Historical (expired years ago) — exactly the row the edit context never carries.
+    externalId: "appt-fellow",
+    title: "Research Fellow",
+    organization: "Elsewhere U",
+    startDate: new Date("2010-09-01T00:00:00.000Z"),
+    endDate: new Date("2013-08-31T00:00:00.000Z"),
+  },
+];
+const OTHER_DRAFT_ROW = {
+  // Pre-v7 rows stored a plain `string[]`; `coerceEntries` lifts it to `{ title, body }`.
+  entries: ["My statement, from an older draft."],
+  createdAt: new Date("2026-08-15T09:30:00.000Z"),
+};
 
 /** Wire a non-impersonating signed-in actor. */
 function signedInAs(cwid: string, opts: { isSuperuser?: boolean } = {}) {
@@ -139,6 +192,9 @@ beforeEach(() => {
   mockAuthorize.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
   mockLoadEditContext.mockResolvedValue(CTX);
   mockHonorFindMany.mockResolvedValue(HONORS);
+  mockAppointmentFindMany.mockResolvedValue(APPOINTMENT_ROWS);
+  mockSuppressionFindMany.mockResolvedValue([{ entityId: "appt-suppressed" }]);
+  mockGenerationFindFirst.mockResolvedValue(null);
   mockIsPubliclyDisplayed.mockReturnValue(true);
 });
 
@@ -231,6 +287,8 @@ describe("/edit/biosketch/worksheet — authorization", () => {
     });
     expect(mockLoadEditContext).not.toHaveBeenCalled();
     expect(mockHonorFindMany).not.toHaveBeenCalled();
+    expect(mockAppointmentFindMany).not.toHaveBeenCalled();
+    expect(mockGenerationFindFirst).not.toHaveBeenCalled();
     expect(mockWorksheet).not.toHaveBeenCalled();
   });
 
@@ -330,8 +388,29 @@ describe("/edit/biosketch/worksheet — what reaches the worksheet", () => {
     ]);
   });
 
-  it("appointments: shown + locked only, reverse chronological by start date", async () => {
+  it("appointments: the WHOLE history from the table, not the edit context's active-only set", async () => {
     const p = await worksheetProps();
+    // Every row, no active-only predicate — the expired rows are the point.
+    expect(mockAppointmentFindMany).toHaveBeenCalledOnce();
+    expect(mockAppointmentFindMany.mock.calls[0]![0].where).toEqual({ cwid: OWNER });
+    const titles = (p.appointments as Array<{ title: string }>).map((a) => a.title);
+    expect(titles).toContain("Research Fellow");
+    expect(titles).not.toContain("Decoy (edit context)");
+  });
+
+  it("appointments: the profile's #160 suppression exclusion + artifact drop, in SciENcv order", async () => {
+    const p = await worksheetProps();
+    expect(mockSuppressionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          entityType: "appointment",
+          entityId: { in: APPOINTMENT_ROWS.map((a) => a.externalId) },
+          revokedAt: null,
+        }),
+      }),
+    );
+    // Current (no end date) first, newest start first; then ended, most recently ended first.
+    // The suppressed Adjunct and the 3-day (Interim) artifact are gone; dates are ISO days.
     expect(p.appointments).toEqual([
       { title: "Chair", organization: "Example Dept", startDate: "2022-01-01", endDate: null },
       {
@@ -346,6 +425,61 @@ describe("/edit/biosketch/worksheet — what reaches the worksheet", () => {
         startDate: "2015-07-01",
         endDate: "2020-06-30",
       },
+      {
+        title: "Research Fellow",
+        organization: "Elsewhere U",
+        startDate: "2010-09-01",
+        endDate: "2013-08-31",
+      },
     ]);
+  });
+
+  it("appointments: no rows → no suppression query, empty list", async () => {
+    mockAppointmentFindMany.mockResolvedValue([]);
+    const p = await worksheetProps();
+    expect(mockSuppressionFindMany).not.toHaveBeenCalled();
+    expect(p.appointments).toEqual([]);
+  });
+
+  it("other-mode draft: a Contributions worksheet reads the newest Personal Statement and passes it, dated", async () => {
+    mockGenerationFindFirst.mockResolvedValue(OTHER_DRAFT_ROW);
+    const p = await worksheetProps();
+    expect(mockGenerationFindFirst).toHaveBeenCalledOnce();
+    expect(mockGenerationFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { cwid: OWNER, mode: "personal_statement" },
+        orderBy: { createdAt: "desc" },
+      }),
+    );
+    expect(p.otherDraft).toEqual({
+      entries: [{ title: "", body: "My statement, from an older draft." }],
+      createdAt: "2026-08-15T09:30:00.000Z",
+    });
+  });
+
+  it("other-mode draft: a Personal Statement worksheet reads the newest Contributions draft", async () => {
+    mockGetGeneration.mockResolvedValue({
+      ...GENERATION,
+      mode: "personal_statement",
+      entries: [{ title: "", body: "The statement." }],
+    });
+    mockGenerationFindFirst.mockResolvedValue({
+      entries: [{ title: "Heading", body: "Body." }],
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+    });
+    const p = await worksheetProps();
+    expect(mockGenerationFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: OWNER, mode: "contributions" } }),
+    );
+    expect(p.otherDraft).toEqual({
+      entries: [{ title: "Heading", body: "Body." }],
+      createdAt: "2026-07-01T00:00:00.000Z",
+    });
+  });
+
+  it("other-mode draft: none on file → null (the block keeps its note)", async () => {
+    const p = await worksheetProps();
+    expect(mockGenerationFindFirst).toHaveBeenCalledOnce();
+    expect(p.otherDraft).toBeNull();
   });
 });

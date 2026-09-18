@@ -78,6 +78,10 @@ export type SciencvWorksheetProps = {
     /** ISO timestamp. */
     createdAt: string;
   };
+  /** The scholar's newest draft of the OTHER mode, when one exists: it fills the narrative block
+   *  this generation can't, so one worksheet carries both narratives. `createdAt` is an ISO
+   *  timestamp; the block is labelled with its date so the reader knows which draft it is. */
+  otherDraft?: { entries: BiosketchEntry[]; createdAt: string } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -388,6 +392,7 @@ export function SciencvWorksheet({
   appointments,
   honors,
   generation,
+  otherDraft = null,
 }: SciencvWorksheetProps) {
   const [copied, setCopied] = React.useState<Set<string>>(() => new Set());
   const copy = React.useCallback(
@@ -408,8 +413,12 @@ export function SciencvWorksheet({
   const ctx = React.useMemo<CopyCtx>(() => ({ copied, copy }), [copied, copy]);
 
   const isStatement = generation.mode === "personal_statement";
-  const statement = isStatement ? (generation.entries[0]?.body ?? "") : null;
-  const contributions = isStatement ? [] : generation.entries;
+  // The other narrative block is filled from `otherDraft` when there is one; a block with no
+  // draft behind it keeps its "generate one" note.
+  const statement = isStatement
+    ? (generation.entries[0]?.body ?? "")
+    : (otherDraft?.entries[0]?.body ?? null);
+  const contributions = isStatement ? (otherDraft?.entries ?? []) : generation.entries;
   const products = isStatement ? null : generation.products;
   // Combined handoff: every PMID across both lists, de-duplicated, blanks dropped.
   const allPmids = products
@@ -419,11 +428,13 @@ export function SciencvWorksheet({
         ),
       )
     : [];
-  const generatedOn = new Date(generation.createdAt).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  const generatedOn = fmtDate(generation.createdAt);
+  // Labelled only when it actually fills the block (a stored draft is never empty, but the
+  // note and the label must not both show).
+  const otherDraftOn =
+    otherDraft && otherDraft.entries.length > 0 ? fmtDate(otherDraft.createdAt) : null;
 
   return (
     <CopyContext.Provider value={ctx}>
@@ -574,7 +585,15 @@ export function SciencvWorksheet({
           )}
         </Block>
 
-        <Block id="statement" title="Personal Statement">
+        <Block
+          id="statement"
+          title="Personal Statement"
+          hint={
+            !isStatement && otherDraftOn
+              ? `From your Personal Statement draft of ${otherDraftOn}.`
+              : undefined
+          }
+        >
           <BiosketchAiWarning />
           {statement != null ? (
             <Narrative id="statement" initial={statement} cap={BIOSKETCH_STATEMENT_MAX_CHARS} />
@@ -589,7 +608,15 @@ export function SciencvWorksheet({
           )}
         </Block>
 
-        <Block id="contributions" title="Contributions to Science">
+        <Block
+          id="contributions"
+          title="Contributions to Science"
+          hint={
+            isStatement && otherDraftOn
+              ? `From your Contributions draft of ${otherDraftOn}.`
+              : undefined
+          }
+        >
           <BiosketchAiWarning />
           {contributions.length === 0 ? (
             <Empty>

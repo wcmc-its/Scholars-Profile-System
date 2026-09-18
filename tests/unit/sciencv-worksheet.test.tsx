@@ -187,6 +187,65 @@ describe("SciencvWorksheet — layout", () => {
     );
     expect(root.querySelector('[data-testid="ws-narrative-contribution.1"]')).toBeNull();
     expect(root.querySelector('[data-testid="ws-products-related"]')).toBeNull();
+    // No other-mode draft: the note stays, and no label claims one.
+    const block = root.querySelector('[data-testid="ws-block-contributions"]')!;
+    expect(block.textContent).toContain("generate a Contributions draft for this block");
+    expect(block.textContent).not.toContain("From your Contributions draft");
+  });
+
+  it("a Contributions draft fills the statement block from the other-mode draft, labelled with its date", () => {
+    stubNavigator();
+    const { container } = render(
+      <SciencvWorksheet
+        {...props({
+          otherDraft: {
+            entries: [{ title: "", body: "An older statement." }],
+            createdAt: "2026-08-15T12:00:00.000Z",
+          },
+        })}
+      />,
+    );
+    const root = container.querySelector('[data-testid="sciencv-worksheet"]')!;
+    const block = root.querySelector('[data-testid="ws-block-statement"]')!;
+    expect(
+      block.querySelector<HTMLTextAreaElement>('[data-testid="ws-text-statement"]')!.value,
+    ).toBe("An older statement.");
+    expect(block.textContent).toContain("From your Personal Statement draft of Aug 15, 2026.");
+    // This generation's own block carries no such label.
+    expect(root.querySelector('[data-testid="ws-block-contributions"]')!.textContent).not.toContain(
+      "From your Contributions draft",
+    );
+  });
+
+  it("a Personal Statement draft fills the contributions block from the other-mode draft", () => {
+    stubNavigator();
+    const { container } = render(
+      <SciencvWorksheet
+        {...props({
+          generation: {
+            id: "gen-2",
+            mode: "personal_statement",
+            entries: [{ title: "", body: "My statement." }],
+            products: null,
+            createdAt: "2026-09-01T12:00:00.000Z",
+          },
+          otherDraft: {
+            entries: [{ title: "Heading", body: "Body." }],
+            createdAt: "2026-07-04T12:00:00.000Z",
+          },
+        })}
+      />,
+    );
+    const root = container.querySelector('[data-testid="sciencv-worksheet"]')!;
+    const block = root.querySelector('[data-testid="ws-block-contributions"]')!;
+    expect(
+      block.querySelector<HTMLTextAreaElement>('[data-testid="ws-text-contribution.1"]')!.value,
+    ).toBe("Heading\n\nBody.");
+    expect(block.textContent).toContain("From your Contributions draft of Jul 4, 2026.");
+    // The statement is still this generation's own.
+    expect(
+      root.querySelector<HTMLTextAreaElement>('[data-testid="ws-text-statement"]')!.value,
+    ).toBe("My statement.");
   });
 });
 
