@@ -3,8 +3,10 @@
  * the credential chain are mocked — NEVER invokes Bedrock or AWS. Per call site, asserts that
  * the cache point (`providerOptions.bedrock.cachePoint`) rides on the intended message(s) and
  * that the per-call variable part is LAST:
- *  - overview draft + biosketch draft: cache point on `system`; the user turn stays ONE plain
- *    string (its FACTS sit behind the per-call directives, so nothing after `system` is marked).
+ *  - overview draft + biosketch draft: cache point on `system` AND on the directives + FACTS
+ *    user message (the payload a same-params regenerate re-sends); the optional
+ *    ADDITIONAL_INSTRUCTIONS block is a second, unmarked user message and is absent when the
+ *    scholar typed none; the parts joined at their seam are the single-string user turn.
  *  - verify: cache point on `system` AND on the ALLOWED_FACTS user message; the DRAFT user
  *    message is last and unmarked; the two joined at their seam are the pre-split user turn.
  *  - the aux biosketch calls (product mapping, source attribution) and revise carry NO cache
@@ -24,10 +26,11 @@ vi.mock("@/lib/llm/models", () => ({
 }));
 
 import { BEDROCK_CACHE_POINT } from "@/lib/llm/client";
-import { generateBiosketch } from "@/lib/edit/biosketch-generator";
+import { buildBiosketchUserPrompt, generateBiosketch } from "@/lib/edit/biosketch-generator";
 import { normalizeBiosketchParams } from "@/lib/edit/biosketch-params";
 import {
   buildGroundingReference,
+  buildOverviewUserPrompt,
   generateOverviewDraft,
   reviseDraftForGrounding,
   verifyDraftGrounding,
@@ -87,8 +90,8 @@ describe("BEDROCK_CACHE_POINT", () => {
   });
 });
 
-describe("generateOverviewDraft — cache point on the system prompt only", () => {
-  it("marks `system`; the user turn is one unmarked string; output is unchanged", async () => {
+describe("generateOverviewDraft — cache points on the system prompt AND the FACTS payload", () => {
+  it("marks `system` + the payload; no steering → one user message; output is unchanged", async () => {
     mockGenerateText.mockResolvedValue({ text: PROSE });
     const out = await generateOverviewDraft(FACTS, DEFAULT_OVERVIEW_PARAMS);
     expect(out.draft).toContain(PROSE);
@@ -96,9 +99,49 @@ describe("generateOverviewDraft — cache point on the system prompt only", () =
     const [call] = calls();
     expect(calls()).toHaveLength(1);
     expect(call.system).toEqual(CACHED_SYSTEM);
-    expect(typeof call.prompt).toBe("string");
-    expect(call.prompt).toContain("<FACTS>");
-    expect(call.messages).toBeUndefined();
+    expect(call.prompt).toBeUndefined();
+    expect(call.messages).toEqual([
+      {
+        role: "user",
+        content: expect.stringMatching(/<FACTS>[\s\S]*<\/FACTS>$/),
+        providerOptions: BEDROCK_CACHE_POINT,
+      },
+    ]);
+    // With no steering note the marked payload IS the whole single-string user turn.
+    expect(call.messages![0].content).toBe(buildOverviewUserPrompt(FACTS, DEFAULT_OVERVIEW_PARAMS));
+  });
+
+  it("steering note → a second, unmarked user message; joined at the seam = the string turn", async () => {
+    mockGenerateText.mockResolvedValue({ text: PROSE });
+    const params = { ...DEFAULT_OVERVIEW_PARAMS, instructions: "Mention the AAV work first." };
+    await generateOverviewDraft(FACTS, params);
+
+    const [call] = calls();
+    const messages = call.messages!;
+    expect(messages).toHaveLength(2);
+    expect(messages[0].providerOptions).toBe(BEDROCK_CACHE_POINT);
+    expect(messages[0].content).not.toContain("<ADDITIONAL_INSTRUCTIONS>");
+    expect(messages[1]).toEqual({
+      role: "user",
+      content: expect.stringContaining("<ADDITIONAL_INSTRUCTIONS>\nMention the AAV work first.\n"),
+    });
+    expect(messages[1]).not.toHaveProperty("providerOptions");
+    expect(`${messages[0].content}\n\n${messages[1].content}`).toBe(
+      buildOverviewUserPrompt(FACTS, params),
+    );
+  });
+
+  it("the payload is byte-identical across a same-params regenerate; only steering moves", async () => {
+    mockGenerateText.mockResolvedValue({ text: PROSE });
+    await generateOverviewDraft(FACTS, DEFAULT_OVERVIEW_PARAMS);
+    await generateOverviewDraft(FACTS, DEFAULT_OVERVIEW_PARAMS);
+    await generateOverviewDraft(FACTS, { ...DEFAULT_OVERVIEW_PARAMS, instructions: "Shorter." });
+    const [a, b, c] = calls();
+    expect(a.system).toEqual(b.system);
+    expect(a.messages![0]).toEqual(b.messages![0]);
+    // A steering note changes NOTHING before the second cache point.
+    expect(c.messages![0]).toEqual(a.messages![0]);
+    expect(c.messages).toHaveLength(2);
   });
 });
 
@@ -171,11 +214,14 @@ describe("generateBiosketch — cache points on the draft + verify; none on the 
   const DRAFT = "1. TITLE: Alpha\n\nBody alpha.\n\n2. TITLE: Beta\n\nBody beta.";
   const PARAMS = normalizeBiosketchParams({ mode: "contributions", maxContributions: 5 });
 
-  it("draft: marked system, string user turn; verify: both marks; product/source: unmarked", async () => {
-    // The verify calls are the ones that send `messages`; everything else gets the draft text
+  /** A verify call is the one whose LAST user message carries the DRAFT block. */
+  const isVerify = (c: Call) => Boolean(c.messages?.at(-1)?.content.includes("<DRAFT>"));
+
+  it("draft: system + payload marks; verify: both marks; product/source: unmarked", async () => {
+    // The verify calls answer with the grounding verdict; everything else gets the draft text
     // (the aux calls parse it leniently and degrade, exactly as they would pre-#2655).
     mockGenerateText.mockImplementation(async (args: Call) => ({
-      text: Array.isArray(args.messages) ? NO_UNGROUNDED : DRAFT,
+      text: isVerify(args) ? NO_UNGROUNDED : DRAFT,
     }));
     const out = await generateBiosketch(FACTS, PARAMS, { faithfulnessPass: true });
     // Byte-identical parse of the mock draft — the change is call shape only.
@@ -191,11 +237,20 @@ describe("generateBiosketch — cache points on the draft + verify; none on the 
 
     const [draft] = shapes;
     expect(draft.system).toEqual(CACHED_SYSTEM);
-    expect(typeof draft.prompt).toBe("string");
-    expect(draft.prompt).toContain("<FACTS>");
-    expect(draft.messages).toBeUndefined();
+    expect(draft.prompt).toBeUndefined();
+    // No steering note → the marked directives + FACTS payload is the whole user turn.
+    expect(draft.messages).toEqual([
+      {
+        role: "user",
+        content: buildBiosketchUserPrompt(FACTS, PARAMS, { groundsImpact: true }),
+        providerOptions: BEDROCK_CACHE_POINT,
+      },
+    ]);
+    expect(draft.messages![0].content).toMatch(
+      /^Mode: Contributions to Science\.\n[\s\S]*<\/FACTS>$/,
+    );
 
-    const verifies = shapes.filter((c) => Array.isArray(c.messages));
+    const verifies = shapes.filter(isVerify);
     expect(verifies).toHaveLength(2);
     for (const v of verifies) {
       expect(v.system).toEqual(CACHED_SYSTEM);
@@ -207,11 +262,39 @@ describe("generateBiosketch — cache points on the draft + verify; none on the 
     // trailing DRAFT block differs.
     expect(verifies[0].messages![0]).toEqual(verifies[1].messages![0]);
 
-    const aux = shapes.slice(1).filter((c) => !Array.isArray(c.messages));
+    const aux = shapes.slice(1).filter((c) => !isVerify(c));
     expect(aux).toHaveLength(2);
     for (const a of aux) {
       expect(typeof a.system).toBe("string");
       expect(typeof a.prompt).toBe("string");
     }
+  });
+
+  it("steering note → second unmarked user message after the payload mark; seam-joined = string turn", async () => {
+    mockGenerateText.mockImplementation(async (args: Call) => ({
+      text: isVerify(args) ? NO_UNGROUNDED : DRAFT,
+    }));
+    const params = normalizeBiosketchParams({
+      mode: "contributions",
+      maxContributions: 5,
+      instructions: "Lead with the vector-safety work.",
+    });
+    await generateBiosketch(FACTS, params, { faithfulnessPass: false });
+
+    const [draft] = calls();
+    const messages = draft.messages!;
+    expect(messages).toHaveLength(2);
+    expect(messages[0].providerOptions).toBe(BEDROCK_CACHE_POINT);
+    expect(messages[0].content).toMatch(/<\/FACTS>$/);
+    expect(messages[1]).toEqual({
+      role: "user",
+      content: expect.stringContaining(
+        "<ADDITIONAL_INSTRUCTIONS>\nLead with the vector-safety work.\n",
+      ),
+    });
+    expect(messages[1]).not.toHaveProperty("providerOptions");
+    expect(`${messages[0].content}\n\n${messages[1].content}`).toBe(
+      buildBiosketchUserPrompt(FACTS, params, { groundsImpact: true }),
+    );
   });
 });
