@@ -36,7 +36,7 @@ export interface BiosketchGenerationSummary {
   /** The authoritative, queryable prompt-version column ("v5" / "v6" / "v7"). */
   promptVersion: string | null;
   /** Re-normalized steering params (the trust boundary, applied on read) — carries the
-   *  `promptVersion` for "Use these settings" restore. */
+   *  `promptVersion` for Clone (#2654) to restore. */
   params: BiosketchParams;
   /** The Products list (Contributions mode), or null. */
   products: BiosketchProducts | null;
@@ -46,6 +46,14 @@ export interface BiosketchGenerationSummary {
   createdByCwid: string;
   /** The "View as" overlay target when generated through impersonation, else null. */
   impersonatedCwid: string | null;
+  /** #2654 — the scholar-typed label (application name), or null when unlabeled. */
+  label: string | null;
+  /** #2654 — how many CONFIRMED authorships of the scholar's appeared (or were re-confirmed)
+   *  after this draft was generated: the staleness nudge. Keyed on
+   *  `publication_author.last_refreshed_at`, which the reciter ETL stamps on create and bumps
+   *  only on a real content delta (never on a steady-state night), so it is the same "new /
+   *  re-confirmed author link since a watermark" signal `etl/coi-gap` already reads. */
+  pubsAddedSince: number;
   createdAt: Date;
 }
 
@@ -111,6 +119,7 @@ const GENERATION_SELECT = {
   sources: true,
   createdByCwid: true,
   impersonatedCwid: true,
+  label: true,
   createdAt: true,
 } as const;
 
@@ -127,10 +136,13 @@ type GenerationRow = {
   sources: unknown;
   createdByCwid: string;
   impersonatedCwid: string | null;
+  label: string | null;
   createdAt: Date;
 };
 
-function toSummary(row: GenerationRow): BiosketchGenerationSummary {
+/** `pubsAddedSince` is a per-LIST computation (one authorship read spanning every listed draft),
+ *  so the single-row reader passes 0 — the worksheet has no nudge. */
+function toSummary(row: GenerationRow, pubsAddedSince: number): BiosketchGenerationSummary {
   // The stored params Json predates a `projectTitle`/`aims` field, so re-seed them from the
   // first-class columns before normalizing — so a restore recovers the project framing.
   const rawParams = (row.params && typeof row.params === "object" ? row.params : {}) as Record<
@@ -155,6 +167,8 @@ function toSummary(row: GenerationRow): BiosketchGenerationSummary {
     sources: coerceSources(row.sources),
     createdByCwid: row.createdByCwid,
     impersonatedCwid: row.impersonatedCwid,
+    label: row.label,
+    pubsAddedSince,
     createdAt: row.createdAt,
   };
 }
@@ -173,7 +187,22 @@ export async function listBiosketchGenerations(
     take: BIOSKETCH_HISTORY_LIMIT,
     select: GENERATION_SELECT,
   });
-  return rows.map(toSummary);
+  // #2654 — ONE read for the staleness nudge: every confirmed authorship stamped after the OLDEST
+  // listed draft (rows are newest-first, so that is the last one), then counted per draft in
+  // memory. Bounded by what the nightly added since the scholar's oldest kept draft, not by the
+  // corpus.
+  const oldest = rows.at(-1)?.createdAt;
+  const addedAt = oldest
+    ? (
+        await db.read.publicationAuthor.findMany({
+          where: { cwid, isConfirmed: true, lastRefreshedAt: { gt: oldest } },
+          select: { lastRefreshedAt: true },
+        })
+      ).map((a) => a.lastRefreshedAt.getTime())
+    : [];
+  return rows.map((row) =>
+    toSummary(row, addedAt.filter((t) => t > row.createdAt.getTime()).length),
+  );
 }
 
 /**
@@ -188,5 +217,5 @@ export async function getBiosketchGeneration(
     where: { id },
     select: { ...GENERATION_SELECT, cwid: true },
   });
-  return row ? { ...toSummary(row), cwid: row.cwid } : null;
+  return row ? { ...toSummary(row, 0), cwid: row.cwid } : null;
 }
