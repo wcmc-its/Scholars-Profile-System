@@ -1910,14 +1910,14 @@ describe("AppStack", () => {
         expect(env.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
       });
 
-      it("activates the #917 biosketch generator in prod (EDIT_BIOSKETCH_GENERATE=on, launch batch 2; faithfulness pass ON; default version v7)", () => {
+      it("activates the #917 biosketch generator in prod (EDIT_BIOSKETCH_GENERATE=on, launch batch 2; faithfulness pass ON; default version v8)", () => {
         // Prod flipped 2026-07-05 (#506): staging soak complete. The #917
         // faithfulness pass stays ON in both envs (grant document); the default
         // prompt version is v7 in both envs.
         const env = appContainerEnv();
         expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
         expect(env.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
-        expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v7");
+        expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v8");
       });
 
       it("sources the superuser tier from the ED group with the allowlist emptied", () => {
@@ -2402,7 +2402,7 @@ describe("AppStack", () => {
       expect(envByName.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
     });
 
-    it("enables the #917 v6 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass on; default version v6)", () => {
+    it("enables the #917 v6 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass on; default version v8)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appContainer = (
         Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
@@ -2416,7 +2416,7 @@ describe("AppStack", () => {
       expect(envByName.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
       // #917 v7 — faithfulness pass ON in both envs (grant document); default prompt version v7.
       expect(envByName.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
-      expect(envByName.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v7");
+      expect(envByName.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v8");
     });
 
     it("ships the ReCiter pending-suggestions nudge ON in staging (SELF_EDIT_RECITER_PENDING_HINT — live DynamoDB read for the soak)", () => {

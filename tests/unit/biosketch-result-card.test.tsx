@@ -6,14 +6,15 @@
  *
  * Native DOM assertions (no jest-dom in `tests/setup.ts`): textContent + toBeNull().
  */
-import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import {
   BiosketchResultCard,
+  BiosketchSuggestedPubsCard,
   type BiosketchGenerateResult,
 } from "@/components/edit/biosketch-result-card";
-import type { BiosketchProducts } from "@/lib/edit/biosketch-products";
+import type { BiosketchProducts, SuggestedPub } from "@/lib/edit/biosketch-products";
 
 function result(over: Partial<BiosketchGenerateResult> = {}): BiosketchGenerateResult {
   return {
@@ -114,5 +115,54 @@ describe("BiosketchResultCard — SciENcv worksheet link (#2652)", () => {
   it("renders no link when the run did not persist (generationId null)", () => {
     const { container } = render(<BiosketchResultCard result={result()} />);
     expect(container.querySelector('[data-testid="biosketch-open-worksheet"]')).toBeNull();
+  });
+});
+
+describe("BiosketchSuggestedPubsCard — copyable PMIDs", () => {
+  const PUBS: SuggestedPub[] = [
+    {
+      pmid: "111",
+      title: "EHR paper",
+      venue: "J Med Inform",
+      year: 2021,
+      impact: 57,
+      overlap: 3,
+      matchedTerms: ["electronic", "health"],
+    },
+    {
+      pmid: "222",
+      title: "RWD paper",
+      venue: null,
+      year: 2026,
+      impact: null,
+      overlap: 2,
+      matchedTerms: [],
+    },
+  ];
+
+  it("links each row to PubMed and copies every PMID comma-separated", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const { container } = render(<BiosketchSuggestedPubsCard pubs={PUBS} />);
+    const card = within(
+      container.querySelector('[data-testid="biosketch-suggested-pubs"]') as HTMLElement,
+    );
+    expect(card.getByTestId("biosketch-suggested-pub-pmid-111").getAttribute("href")).toContain(
+      "111",
+    );
+    // A pub with no meta still gets its PMID line.
+    expect(card.getByTestId("biosketch-suggested-pub-pmid-222").textContent).toBe("PMID 222");
+    const btn = card.getByTestId("biosketch-suggested-pubs-copy-pmids");
+    expect(btn.textContent).toBe("Copy PMIDs");
+    fireEvent.click(btn);
+    expect(writeText).toHaveBeenCalledWith("111, 222");
+    await waitFor(() => expect(btn.textContent).toBe("Copied"));
+  });
+
+  it("renders no copy button for an empty result", () => {
+    const { container } = render(<BiosketchSuggestedPubsCard pubs={[]} />);
+    expect(
+      container.querySelector('[data-testid="biosketch-suggested-pubs-copy-pmids"]'),
+    ).toBeNull();
   });
 });
