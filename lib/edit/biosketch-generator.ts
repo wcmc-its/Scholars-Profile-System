@@ -18,7 +18,7 @@
  */
 import { generateText } from "ai";
 
-import { bedrockClient } from "@/lib/llm/client";
+import { BEDROCK_CACHE_POINT, bedrockClient } from "@/lib/llm/client";
 import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import {
@@ -703,7 +703,11 @@ export async function generateBiosketch(
   onProgress({ phase: "drafting" });
   const result = await generateText({
     model: bedrockClient()(modelId),
-    system: systemPrompt,
+    // #2655 — the ~3k-token static system prompt is the cached prefix (a regenerate, or any
+    // other scholar's draft within 5 min, reads it at ~0.1×). The user turn stays a single
+    // string: its FACTS sit BEHIND the per-call mode directives, so a payload checkpoint would
+    // need the prompt reordered (v8 territory) — nothing after `system` is marked.
+    system: { role: "system", content: systemPrompt, providerOptions: BEDROCK_CACHE_POINT },
     prompt: buildBiosketchUserPrompt(facts, params, { groundsImpact }),
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
   });

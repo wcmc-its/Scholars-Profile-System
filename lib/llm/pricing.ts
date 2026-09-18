@@ -17,20 +17,42 @@ const MODEL_PRICE_PER_MTOK: { test: RegExp; input: number; output: number }[] = 
 const OVERVIEW_DRAFT_INPUT_TOKENS = 5000;
 const OVERVIEW_DRAFT_OUTPUT_TOKENS = 300;
 
+/** Bedrock prompt-cache multipliers on the INPUT price (#2655): a read is ~0.1×,
+ *  a 5-minute-TTL write is 1.25×. Same ratio for every Claude family, so they
+ *  are not per-row in the table above. */
+const CACHE_READ_MULTIPLIER = 0.1;
+const CACHE_WRITE_MULTIPLIER = 1.25;
+
 /**
  * Generic best-effort USD estimate for one Bedrock call on `modelId` given an
  * input/output token shape; null when the model family is unrecognized. The
  * price lookup + arithmetic both `estimateDraftCostUsd` and
  * {@link estimateBiosketchCostUsd} share.
+ *
+ * `inputTokens` is the UNCACHED count — Bedrock, like the Anthropic API, reports
+ * cache traffic beside it, not inside it (the #2655 measurement run is where that
+ * reading gets confirmed) — so a caller pricing a live `generateText` result passes
+ * `usage.inputTokens` plus, from the installed `ai` 6 / `@ai-sdk/amazon-bedrock` 3
+ * pair, `cacheReadTokens = usage.inputTokenDetails.cacheReadTokens` and
+ * `cacheWriteTokens = providerMetadata.bedrock.usage.cacheWriteInputTokens` (the
+ * v2→v3 usage adapter drops the write count, so it only survives in provider
+ * metadata). Both default to 0, so the static console estimates are unchanged.
  */
 export function estimateCostUsd(
   modelId: string,
-  opts: { inputTokens: number; outputTokens: number },
+  opts: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  },
 ): number | null {
   const p = MODEL_PRICE_PER_MTOK.find((x) => x.test.test(modelId));
   if (!p) return null;
   return (
     (opts.inputTokens / 1_000_000) * p.input +
+    ((opts.cacheReadTokens ?? 0) / 1_000_000) * p.input * CACHE_READ_MULTIPLIER +
+    ((opts.cacheWriteTokens ?? 0) / 1_000_000) * p.input * CACHE_WRITE_MULTIPLIER +
     (opts.outputTokens / 1_000_000) * p.output
   );
 }

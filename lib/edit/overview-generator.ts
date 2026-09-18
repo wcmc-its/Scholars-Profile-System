@@ -20,7 +20,7 @@
  */
 import { generateText } from "ai";
 
-import { bedrockClient } from "@/lib/llm/client";
+import { BEDROCK_CACHE_POINT, bedrockClient } from "@/lib/llm/client";
 import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
@@ -719,7 +719,9 @@ export async function generateOverviewDraft(
   emit({ phase: "drafting" });
   const result = await generateText({
     model: bedrockClient()(modelId),
-    system: impl.systemPrompt,
+    // #2655 — the ~1.4k-token static system prompt is the cached prefix. The user turn stays
+    // one string: FACTS sit behind the per-call directives, so no payload checkpoint here.
+    system: { role: "system", content: impl.systemPrompt, providerOptions: BEDROCK_CACHE_POINT },
     prompt: buildOverviewUserPrompt(facts, { ...params, promptVersion: versionId }),
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
   });
@@ -1172,19 +1174,21 @@ export async function verifyDraftGrounding(
   const permitSynopsisFindings = opts?.permitSynopsisFindings ?? false;
   const permitSignificance = opts?.permitSignificance ?? false;
   const permitBibliometrics = opts?.permitBibliometrics ?? false;
-  const userTurn = [
+  // #2655 — the user turn is split at the reference/draft seam so a cache point can sit
+  // between them: the same per-scholar REFERENCE is re-sent by every contribution's verify
+  // (the biosketch fan-out) and by the re-verify after a revise, and only the DRAFT varies.
+  // Two consecutive user messages collapse into ONE Bedrock user turn (the provider groups
+  // them), so the model still sees a single turn — same words, same order. The only byte the
+  // model MAY see differently is the seam: the original string had one blank line there and
+  // the API supplies whatever it puts between adjacent text blocks.
+  const reference = [
     "Here is the REFERENCE of ALLOWED FACTS. It is the only permitted source.",
     "",
     "<ALLOWED_FACTS>",
     buildGroundingReference(facts, { permitSynopsisFindings, permitSignificance, permitBibliometrics }),
     "</ALLOWED_FACTS>",
-    "",
-    "Here is the DRAFT to fact-check:",
-    "",
-    "<DRAFT>",
-    prose,
-    "</DRAFT>",
   ].join("\n");
+  const draft = ["Here is the DRAFT to fact-check:", "", "<DRAFT>", prose, "</DRAFT>"].join("\n");
   const result = await generateText({
     model: bedrockClient()(modelId),
     // The verifier prompt + the reference both honor the version's synopsis-number
@@ -1192,8 +1196,21 @@ export async function verifyDraftGrounding(
     // biosketch significance permission (#917 v5) so it does not strip an anchored
     // implication, and the biosketch v6 bibliometric permission so it does not strip a
     // citation/RCR figure that IS present in FACTS.
-    system: overviewVerifySystemPrompt({ permitSynopsisFindings, permitSignificance, permitBibliometrics }),
-    prompt: userTurn,
+    system: {
+      role: "system",
+      content: overviewVerifySystemPrompt({
+        permitSynopsisFindings,
+        permitSignificance,
+        permitBibliometrics,
+      }),
+      providerOptions: BEDROCK_CACHE_POINT,
+    },
+    // [system]<cp>[reference]<cp>[draft] — the variable part is last. Bedrock caps a request
+    // at 4 checkpoints; this uses 2.
+    messages: [
+      { role: "user", content: reference, providerOptions: BEDROCK_CACHE_POINT },
+      { role: "user", content: draft },
+    ],
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
   });
   return parseUngrounded(result.text);
