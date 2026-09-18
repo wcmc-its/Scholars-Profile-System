@@ -48,6 +48,16 @@ describe("parseMentoredPubsParams", () => {
     expect(parseMentoredPubsParams({ years: ["2024", "all"] })).toMatchObject({ ok: true, value: { years: [] } });
   });
 
+  it("years: 'unknown' = null, always last; 'all' still wins", () => {
+    expect(parseMentoredPubsParams({ years: "2025,unknown" })).toMatchObject({ ok: true, value: { years: [2025, null] } });
+    expect(parseMentoredPubsParams({ years: ["unknown", "2025"] })).toMatchObject({
+      ok: true,
+      value: { years: [2025, null] },
+    });
+    expect(parseMentoredPubsParams({ years: "Unknown" })).toMatchObject({ ok: true, value: { years: [null] } });
+    expect(parseMentoredPubsParams({ years: "all,unknown" })).toMatchObject({ ok: true, value: { years: [] } });
+  });
+
   it("years: a malformed token is an error, not a silent drop", () => {
     expect(parseMentoredPubsParams({ years: "2024,abc" })).toEqual({ ok: false, error: "invalid_years" });
     expect(parseMentoredPubsParams({ years: "24" })).toEqual({ ok: false, error: "invalid_years" });
@@ -77,6 +87,7 @@ describe("mentoredPubsQueryString", () => {
       { years: [2024, 2025], program: "md" as const, tail: 2, pubs: "mentored" as const, view: "summary" as const },
       { years: [], program: null, tail: 0, pubs: "all" as const, view: "publications" as const },
       { years: null, program: "ecr" as const, tail: 1, pubs: "all" as const, view: "summary" as const },
+      { years: [2025, null], program: null, tail: 1, pubs: "mentored" as const, view: "summary" as const },
     ];
     for (const value of cases) {
       const qs = mentoredPubsQueryString(value);
@@ -87,6 +98,9 @@ describe("mentoredPubsQueryString", () => {
       "years=2024%2C2025&program=all&tail=1&pubs=mentored",
     );
     expect(mentoredPubsQueryString({ ...DEFAULTS, years: [] })).toBe("years=all&program=all&tail=1&pubs=mentored");
+    expect(mentoredPubsQueryString({ ...DEFAULTS, years: [2025, null] })).toBe(
+      "years=2025%2Cunknown&program=all&tail=1&pubs=mentored",
+    );
     expect(mentoredPubsQueryString({ ...DEFAULTS, years: [], pubs: "all", view: "publications" })).toBe(
       "years=all&program=all&tail=1&pubs=all&view=publications",
     );

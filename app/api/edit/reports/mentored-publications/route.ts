@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { parseMentoredPubsParams } from "@/lib/edit/mentored-publications-params";
 import {
+  defaultMentoredPubsYears,
   loadMentoredGradYears,
   loadMentoredPublicationsReport,
 } from "@/lib/edit/mentored-publications-report";
@@ -51,8 +52,9 @@ export async function GET(request: Request) {
   }
   const loaderScopes = program !== null ? [program] : [...scopes];
 
-  // Same default as the page: the two most recent graduation years in scope.
-  const years = parsed.value.years ?? (await loadMentoredGradYears(loaderScopes)).slice(0, 2);
+  // Same default as the page: the two most recent graduation years in scope,
+  // plus "unknown" when the scope has learners with no graduation year.
+  const years = parsed.value.years ?? defaultMentoredPubsYears(await loadMentoredGradYears(loaderScopes));
   const report = await loadMentoredPublicationsReport({
     scopes: loaderScopes,
     gradYears: years.length > 0 ? years : null,

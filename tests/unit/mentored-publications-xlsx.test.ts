@@ -170,9 +170,39 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(String(items.get("Journal impact factor"))).toContain("Journal Citation Reports");
   });
 
+  it("an unknowable window: null counts and a null flag are blank cells; 'Unknown' in the years line", async () => {
+    const wb = await load(
+      await buildMentoredPublicationsWorkbook({
+        ...REPORT,
+        filters: { ...REPORT.filters, gradYears: [2025, null] },
+        summary: [
+          {
+            ...REPORT.summary[0],
+            gradYear: null,
+            entryYear: null,
+            entryYearSource: null,
+            pubsInWindow: null,
+            withMentorInWindow: null,
+            highImpactInWindow: null,
+            firstAuthorInWindow: null,
+          },
+        ],
+        detail: [{ ...REPORT.detail[0], gradYear: null, entryYear: null, inWindow: null }],
+      }),
+    );
+    const summary = wb.getWorksheet(SUMMARY_SHEET)!;
+    expect(summary.getCell("I2").value).toBeNull();
+    expect(summary.getCell("J2").value).toBe(2);
+    expect(summary.getCell("K2").value).toBeNull();
+    expect(summary.getCell("L2").value).toBeNull();
+    expect(wb.getWorksheet(RAW_SHEET)!.getCell("R2").value).toBeNull();
+    expect(wb.getWorksheet(ASSUMPTIONS_SHEET)!.getRow(3).getCell(2).value).toBe("2025, Unknown");
+  });
+
   it("downloadFilename: program or All, years joined by -, ' All Pubs' in all mode, ISO day", () => {
     const d = new Date("2026-09-18T23:59:59Z");
     expect(downloadFilename("md", [2024, 2025], d)).toBe("Mentored Publications MD 2024-2025 - 2026-09-18.xlsx");
+    expect(downloadFilename("md", [2026, null], d)).toBe("Mentored Publications MD 2026-unknown - 2026-09-18.xlsx");
     expect(downloadFilename(null, [2025], d)).toBe("Mentored Publications All 2025 - 2026-09-18.xlsx");
     expect(downloadFilename("mdphd", [], d)).toBe("Mentored Publications MD-PhD all-years - 2026-09-18.xlsx");
     expect(downloadFilename("md", [2025], d, "all")).toBe("Mentored Publications MD 2025 All Pubs - 2026-09-18.xlsx");

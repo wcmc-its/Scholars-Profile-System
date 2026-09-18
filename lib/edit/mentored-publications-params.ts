@@ -5,8 +5,10 @@
  * never disagree:
  *   - `years`   graduation years, comma-separated and/or repeated
  *               (`years=2024,2025` from a link, `years=2024&years=2025` from
- *               the page's checkbox group); `years=all` = every year; absent
- *               → the caller's default: the two most recent years in scope;
+ *               the page's checkbox group); the token `unknown` = learners
+ *               with no graduation year (`null` in the parsed list);
+ *               `years=all` = every year; absent → the caller's default
+ *               (`defaultMentoredPubsYears`);
  *   - `program` one of `MENTORED_PUBS_SCOPES`, or `all` / absent;
  *   - `tail`    integer 0..MAX_TAIL, default DEFAULT_TAIL;
  *   - `pubs`    which publication set: `mentored` (co-pubs with an AOC mentor,
@@ -28,9 +30,10 @@ export const MENTORED_PUBS_VIEWS = ["summary", "publications"] as const;
 export type MentoredPubsView = (typeof MENTORED_PUBS_VIEWS)[number];
 
 export type MentoredPubsParams = {
-  /** Explicit graduation years; `[]` = every year (`years=all`); null =
-   *  not given, the caller applies its default. */
-  years: number[] | null;
+  /** Explicit graduation years, `null` in the list = "unknown grad year";
+   *  `[]` = every year (`years=all`); null = not given, the caller applies
+   *  its default. */
+  years: Array<number | null> | null;
   /** A single program bucket, or null for "every scope the caller holds". */
   program: MentoredPubsScope | null;
   tail: number;
@@ -65,7 +68,7 @@ export function parseMentoredPubsParams(
     raw instanceof URLSearchParams ? (raw.get(k) ?? undefined) : first(raw[k]);
   const getAll = (k: string) => (raw instanceof URLSearchParams ? raw.getAll(k) : all(raw[k]));
 
-  let years: number[] | null = null;
+  let years: Array<number | null> | null = null;
   const yearTokens = getAll("years")
     .flatMap((v) => v.split(","))
     .map((t) => t.trim())
@@ -74,13 +77,19 @@ export function parseMentoredPubsParams(
     years = [];
   } else if (yearTokens.length > 0) {
     const out = new Set<number>();
+    let unknown = false;
     for (const t of yearTokens) {
+      if (t.toLowerCase() === "unknown") {
+        unknown = true;
+        continue;
+      }
       if (!/^\d{4}$/.test(t)) return { ok: false, error: "invalid_years" };
       const n = Number(t);
       if (n < YEAR_MIN || n > YEAR_MAX) return { ok: false, error: "invalid_years" };
       out.add(n);
     }
     years = [...out].sort((a, b) => a - b);
+    if (unknown) years.push(null);
   }
 
   let program: MentoredPubsScope | null = null;
@@ -127,7 +136,9 @@ export function parseMentoredPubsParams(
  *  when it is not the default, so the download link stays view-free. */
 export function mentoredPubsQueryString(p: MentoredPubsParams): string {
   const sp = new URLSearchParams();
-  if (p.years !== null) sp.set("years", p.years.length > 0 ? p.years.join(",") : "all");
+  if (p.years !== null) {
+    sp.set("years", p.years.length > 0 ? p.years.map((y) => y ?? "unknown").join(",") : "all");
+  }
   sp.set("program", p.program ?? "all");
   sp.set("tail", String(p.tail));
   sp.set("pubs", p.pubs);

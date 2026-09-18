@@ -50,6 +50,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/edit/cancer-center-publications-report", () => ({ HIGH_IMPACT_THRESHOLD: 10 }));
 
 import {
+  defaultMentoredPubsYears,
   effectiveEntryYear,
   inProgramWindow,
   loadMentoredGradYears,
@@ -137,15 +138,16 @@ beforeEach(() => {
 });
 
 describe("window rule", () => {
-  it("entryYear <= year <= gradYear + tail; unknowns never count", () => {
+  it("entryYear <= year <= gradYear + tail; unknown pub year never counts; unknown window is null", () => {
     expect(inProgramWindow(2022, 2021, 2025, 1)).toBe(true);
     expect(inProgramWindow(2026, 2021, 2025, 1)).toBe(true);
     expect(inProgramWindow(2027, 2021, 2025, 1)).toBe(false);
     expect(inProgramWindow(2027, 2021, 2025, 2)).toBe(true);
     expect(inProgramWindow(2020, 2021, 2025, 1)).toBe(false);
     expect(inProgramWindow(null, 2021, 2025, 1)).toBe(false);
-    expect(inProgramWindow(2022, null, 2025, 1)).toBe(false);
-    expect(inProgramWindow(2022, 2021, null, 1)).toBe(false);
+    expect(inProgramWindow(2022, null, 2025, 1)).toBeNull();
+    expect(inProgramWindow(2022, 2021, null, 1)).toBeNull();
+    expect(inProgramWindow(null, null, null, 1)).toBeNull();
   });
 
   it("effectiveEntryYear: bridge value wins, else gradYear - 4, else null", () => {
@@ -335,6 +337,37 @@ describe("loadMentoredPublicationsReport", () => {
 
     await loadMentoredPublicationsReport({ scopes: ["*"] });
     expect(hoisted.mockAocFindMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: undefined }));
+
+    // A null in the list admits the rows with no graduation year.
+    await loadMentoredPublicationsReport({ scopes: ["*"], gradYears: [2025, null] });
+    expect(hoisted.mockAocFindMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { OR: [{ graduationYear: { in: [2025] } }, { graduationYear: null }] },
+      }),
+    );
+  });
+
+  it("a learner with no grad year and no entry year has NO window: in-window counts null, all-time still counted", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", graduationYear: null, entryYear: null, programType: "MDPHD" }),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0001", "stu0001", 1, 2023, { position: 1 }),
+      copub("men0001", "stu0001", 2, 2024),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"], gradYears: [null] });
+    expect(report.summary[0]).toMatchObject({
+      gradYear: null,
+      entryYear: null,
+      entryYearSource: null,
+      pubsInWindow: null,
+      withMentorInWindow: null,
+      highImpactInWindow: null,
+      firstAuthorInWindow: null,
+      pubsAllTime: 2,
+    });
+    expect(report.detail.map((d) => d.inWindow)).toEqual([null, null]);
+    expect(report.publications[0].learners[0].inWindow).toBeNull();
   });
 
   it("sorts summary by gradYear DESC, then lastName, firstName; detail the same then year desc", async () => {
@@ -529,7 +562,7 @@ describe("loadMentoredPublicationsReport", () => {
 });
 
 describe("loadMentoredGradYears", () => {
-  it("distinct years within scope, newest first", async () => {
+  it("distinct years within scope, newest first, then null when a row in scope has no year", async () => {
     hoisted.mockAocFindMany.mockResolvedValue([
       { graduationYear: 2023, programType: "AOC" },
       { graduationYear: 2025, programType: "AOC" },
@@ -537,8 +570,15 @@ describe("loadMentoredGradYears", () => {
       { graduationYear: 2024, programType: "ECR" },
       { graduationYear: null, programType: "AOC" },
     ]);
-    expect(await loadMentoredGradYears(["*"])).toEqual([2025, 2024, 2023]);
-    expect(await loadMentoredGradYears(["md"])).toEqual([2025, 2023]);
+    expect(await loadMentoredGradYears(["*"])).toEqual([2025, 2024, 2023, null]);
+    expect(await loadMentoredGradYears(["md"])).toEqual([2025, 2023, null]);
     expect(await loadMentoredGradYears(["ecr"])).toEqual([2024]);
+  });
+
+  it("defaultMentoredPubsYears: the two most recent known years, plus null when offered", () => {
+    expect(defaultMentoredPubsYears([2025, 2024, 2023, null])).toEqual([2025, 2024, null]);
+    expect(defaultMentoredPubsYears([2024])).toEqual([2024]);
+    expect(defaultMentoredPubsYears([null])).toEqual([null]);
+    expect(defaultMentoredPubsYears([])).toEqual([]);
   });
 });

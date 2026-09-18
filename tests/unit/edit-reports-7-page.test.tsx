@@ -4,12 +4,15 @@
  * page's collaborators are mocked at the module boundary and the returned
  * element tree is walked (no render). Protects: no session → SSO redirect;
  * an EMPTY scope set → `notFound()` (fail closed); a holder's scopes reach
- * the loader and default to the two most recent years; the "Viewers" panel
- * is rendered ONLY for superuser / comms_steward; a `program` outside the
- * caller's scopes silently falls back to their own "all"; the view tabs and
- * the publication-set toggle carry every param; `pubs` reaches the loader and
- * the download link (never `view`); the filter form is the auto-submit
- * island; an unloaded all-pubs bridge renders the notice, not a table.
+ * the loader and default to the two most recent years (plus "unknown" when
+ * the program has year-less learners), the choices being the SELECTED
+ * program's; requested years the program has no class in are dropped; the
+ * "Viewers" panel is rendered ONLY for superuser / comms_steward; a `program`
+ * outside the caller's scopes silently falls back to their own "all"; the
+ * view tabs carry every param; `pubs` is a select in the filter form and
+ * reaches the loader and the download link (never `view`); the filter form
+ * is the auto-submit island; an unloaded all-pubs bridge renders the notice,
+ * not a table.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -186,7 +189,48 @@ describe("/edit/reports/7 — wiring", () => {
     });
   });
 
-  it("the filter form is the auto-submit island, carrying the current view/set as hidden fields", async () => {
+  it("year-less learners in scope: the default adds 'unknown' and the form offers the checkbox, checked", async () => {
+    h.mockLoadGradYears.mockResolvedValue([2026, 2025, 2024, null]);
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["md"],
+      gradYears: [2026, 2025, null],
+      tail: 1,
+      ...MENTORED,
+    });
+    const boxes: Array<[string, boolean]> = [];
+    const walk = (node: unknown) => {
+      if (node === null || node === undefined || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk); // the mapped checkbox list
+      const el = asEl(node);
+      if (el.type === "input" && el.props.type === "checkbox") boxes.push([String(el.props.value), !!el.props.defaultChecked]);
+      for (const c of childrenOf(el)) walk(c);
+    };
+    walk(findByType(result, h.mockAutoSubmitForm));
+    expect(boxes).toEqual([
+      ["2026", true],
+      ["2025", true],
+      ["2024", false],
+      ["unknown", true],
+      ["all", false],
+    ]);
+    expect(textOf(findByType(result, h.mockAutoSubmitForm))).toContain("Unknown grad year");
+    expect(findByTestId(result, "mentored-pubs-download")?.props.href).toBe(
+      "/api/edit/reports/mentored-publications?years=2026%2C2025%2Cunknown&program=all&tail=1&pubs=mentored",
+    );
+  });
+
+  it("requested years the program has no class in are dropped; nothing left → the default", async () => {
+    await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "2018" }) });
+    expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["md"], gradYears: [2026, 2025], tail: 1, ...MENTORED });
+    await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "2024,2018" }) });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith({ scopes: ["md"], gradYears: [2024], tail: 1, ...MENTORED });
+    // years=all is never "empty".
+    await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "all" }) });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith({ scopes: ["md"], gradYears: null, tail: 1, ...MENTORED });
+  });
+
+  it("the filter form is the auto-submit island, carrying the view as a hidden field and the set as a select", async () => {
     const result = await EditReportsMentoredPublicationsPage({
       searchParams: sp({ years: "2025", pubs: "all", view: "publications" }),
     });
@@ -195,20 +239,21 @@ describe("/edit/reports/7 — wiring", () => {
     expect(form!.props["data-testid"]).toBe("mentored-pubs-filters");
     expect(form!.props.action).toBe("/edit/reports/7");
     const hidden: Array<[string, string]> = [];
+    const selects: Array<[string, string]> = [];
     const walk = (node: unknown) => {
       if (node === null || node === undefined || typeof node !== "object") return;
       const el = asEl(node);
       if (el.type === "input" && el.props.type === "hidden") hidden.push([String(el.props.name), String(el.props.value)]);
+      if (el.type === "select") selects.push([String(el.props.name), String(el.props.defaultValue)]);
       for (const c of childrenOf(el)) walk(c);
     };
     walk(form);
-    expect(hidden).toEqual([
-      ["view", "publications"],
-      ["pubs", "all"],
-    ]);
+    expect(hidden).toEqual([["view", "publications"]]);
+    expect(selects).toContainEqual(["pubs", "all"]);
+    expect(findByTestId(form, "mentored-pubs-set")?.props.name).toBe("pubs");
   });
 
-  it("view tabs and the set toggle keep every param; the download carries pubs but never view", async () => {
+  it("view tabs keep every param; the download carries pubs but never view", async () => {
     const result = await EditReportsMentoredPublicationsPage({
       searchParams: sp({ years: "2025", tail: "2", pubs: "all", view: "publications" }),
     });
@@ -219,13 +264,7 @@ describe("/edit/reports/7 — wiring", () => {
       `/edit/reports/7?${base}&pubs=all&view=publications`,
     );
     expect(findByTestId(result, "mentored-pubs-view-publications")?.props["aria-current"]).toBe("page");
-    expect(findByTestId(result, "mentored-pubs-set-mentored")?.props.href).toBe(
-      `/edit/reports/7?${base}&pubs=mentored&view=publications`,
-    );
-    expect(findByTestId(result, "mentored-pubs-set-all")?.props.href).toBe(
-      `/edit/reports/7?${base}&pubs=all&view=publications`,
-    );
-    expect(findByTestId(result, "mentored-pubs-set-all")?.props["aria-pressed"]).toBe(true);
+    expect(findByTestId(result, "mentored-pubs-set-all")).toBeNull();
     expect(findByTestId(result, "mentored-pubs-download")?.props.href).toBe(
       `/api/edit/reports/mentored-publications?${base}&pubs=all`,
     );
@@ -301,7 +340,7 @@ describe("/edit/reports/7 — wiring", () => {
     expect(findByTestId(result, "mentored-pubs-learner-stu0001")).toBeNull();
   });
 
-  it("a superuser: '*' reaches the loader, and the Viewers panel renders with the current rows", async () => {
+  it("a superuser: the chosen program's scope reaches BOTH loaders, and the Viewers panel renders with the current rows", async () => {
     h.mockGetEditSession.mockResolvedValue(SUPERUSER);
     h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     h.mockListReportAccess.mockResolvedValue([
@@ -314,6 +353,8 @@ describe("/edit/reports/7 — wiring", () => {
       },
     ]);
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ program: "ecr" }) });
+    // Year choices come from ECR's classes, not every held scope.
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["ecr"]);
     expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["ecr"], gradYears: [2026, 2025], tail: 1, ...MENTORED });
     const panel = findByType(result, h.mockPanel);
     expect(panel).not.toBeNull();

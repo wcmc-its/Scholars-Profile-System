@@ -149,8 +149,9 @@ function fillSheet(ws: ExcelJS.Worksheet, headers: ReadonlyArray<string>, rows: 
   });
 }
 
-function yesNo(b: boolean): string {
-  return b ? "Yes" : "No";
+/** Null (an unknowable window) is a blank cell. */
+function yesNo(b: boolean | null): string | null {
+  return b === null ? null : b ? "Yes" : "No";
 }
 
 function scopeLabel(scopes: ReadonlyArray<string>): string {
@@ -158,15 +159,16 @@ function scopeLabel(scopes: ReadonlyArray<string>): string {
   return scopes.map((s) => PROGRAM_LABEL[s] ?? s).join(", ");
 }
 
-/** `Mentored Publications <program or All> <years joined by -> [All Pubs] - YYYY-MM-DD.xlsx` */
+/** `Mentored Publications <program or All> <years joined by -> [All Pubs] - YYYY-MM-DD.xlsx`
+ *  (a `null` year reads `unknown`). */
 export function downloadFilename(
   program: string | null,
-  years: ReadonlyArray<number>,
+  years: ReadonlyArray<number | null>,
   generatedAt: Date,
   pubs: MentoredPubsSet = "mentored",
 ): string {
   const programLabel = program ? (PROGRAM_LABEL[program] ?? program) : "All";
-  const yearsLabel = years.length > 0 ? years.join("-") : "all-years";
+  const yearsLabel = years.length > 0 ? years.map((y) => y ?? "unknown").join("-") : "all-years";
   const mode = pubs === "all" ? " All Pubs" : "";
   return `Mentored Publications ${programLabel} ${yearsLabel}${mode} - ${isoDate(generatedAt)}.xlsx`;
 }
@@ -242,7 +244,12 @@ export async function buildMentoredPublicationsWorkbook(
   ]);
   fillSheet(wb.addWorksheet(RAW_SHEET), allMode ? RAW_HEADERS_ALL : RAW_HEADERS, rawRows);
 
-  const years = filters.gradYears ? [...filters.gradYears].sort((a, b) => a - b).join(", ") : "All years";
+  const years = filters.gradYears
+    ? [
+        ...filters.gradYears.filter((y): y is number => y !== null).sort((a, b) => a - b),
+        ...(filters.gradYears.includes(null) ? ["Unknown"] : []),
+      ].join(", ")
+    : "All years";
   const fallbackCount = report.summary.filter((r) => r.entryYearSource === "fallback").length;
   const assumptions: CellValue[][] = [
     ["Generated", isoDate(report.generatedAt)],
