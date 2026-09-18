@@ -452,6 +452,23 @@ export function SciencvWorksheet({
             Blocks follow SciENcv&rsquo;s field order; each Copy puts plain text on the clipboard,
             and the character counts match what you paste. Nothing on this page is saved.
           </p>
+          {/* Why block-by-block at all — closed by default so it costs a repeat user nothing.
+              Native <details>: works on touch, needs no script, and reads in order for a
+              screen reader (a hover card would not). */}
+          <details className="mt-3" data-testid="ws-why">
+            <summary className="text-apollo-slate w-fit cursor-pointer text-sm font-medium select-none">
+              Why copy block by block?
+            </summary>
+            <p className="text-muted-foreground mt-2 max-w-prose text-sm">
+              Since May 2026, NIH accepts only a biosketch assembled and certified in SciENcv, and
+              SciENcv has no import for the Biographical Sketch. Each block below is one SciENcv
+              field or entry &mdash; one box for the Personal Statement, one entry per Contribution,
+              Education and Appointments as rows, Products pulled from your My Bibliography by PMID
+              &mdash; so this page follows SciENcv&rsquo;s order with a Copy button and a character
+              count per block. The count includes markdown characters, the way SciENcv counts, so
+              what fits here fits there.
+            </p>
+          </details>
         </div>
 
         <Block id="identity" title="Name, ORCID iD and position title">
