@@ -8,12 +8,24 @@
  *               the page's checkbox group); `years=all` = every year; absent
  *               → the caller's default: the two most recent years in scope;
  *   - `program` one of `MENTORED_PUBS_SCOPES`, or `all` / absent;
- *   - `tail`    integer 0..MAX_TAIL, default DEFAULT_TAIL.
+ *   - `tail`    integer 0..MAX_TAIL, default DEFAULT_TAIL;
+ *   - `pubs`    which publication set: `mentored` (co-pubs with an AOC mentor,
+ *               the default) or `all` (every publication of the learner, from
+ *               the `aoc_mentee_publication` bridge); the route honours it too;
+ *   - `view`    which in-page view: `summary` (default) or `publications`
+ *               (one row per publication, most recent first). Page-only — the
+ *               route accepts and ignores it so one link shape serves both.
  * Malformed input is an error (the route 400s; the page falls back to its
  * defaults) rather than a silent coercion. Pure — no DB, safe anywhere.
  */
 import { DEFAULT_TAIL, MAX_TAIL } from "@/lib/edit/mentored-publications-report";
 import { MENTORED_PUBS_SCOPES, type MentoredPubsScope } from "@/lib/edit/report-access";
+
+export const MENTORED_PUBS_MODES = ["mentored", "all"] as const;
+export type MentoredPubsMode = (typeof MENTORED_PUBS_MODES)[number];
+
+export const MENTORED_PUBS_VIEWS = ["summary", "publications"] as const;
+export type MentoredPubsView = (typeof MENTORED_PUBS_VIEWS)[number];
 
 export type MentoredPubsParams = {
   /** Explicit graduation years; `[]` = every year (`years=all`); null =
@@ -22,11 +34,16 @@ export type MentoredPubsParams = {
   /** A single program bucket, or null for "every scope the caller holds". */
   program: MentoredPubsScope | null;
   tail: number;
+  pubs: MentoredPubsMode;
+  view: MentoredPubsView;
 };
 
 export type ParsedMentoredPubsParams =
   | { ok: true; value: MentoredPubsParams }
-  | { ok: false; error: "invalid_years" | "invalid_program" | "invalid_tail" };
+  | {
+      ok: false;
+      error: "invalid_years" | "invalid_program" | "invalid_tail" | "invalid_pubs" | "invalid_view";
+    };
 
 const YEAR_MIN = 1900;
 const YEAR_MAX = 2100;
@@ -83,15 +100,37 @@ export function parseMentoredPubsParams(
     if (tail > MAX_TAIL) return { ok: false, error: "invalid_tail" };
   }
 
-  return { ok: true, value: { years, program, tail } };
+  let pubs: MentoredPubsMode = "mentored";
+  const rawPubs = get("pubs")?.trim().toLowerCase();
+  if (rawPubs !== undefined && rawPubs !== "") {
+    if (!(MENTORED_PUBS_MODES as readonly string[]).includes(rawPubs)) {
+      return { ok: false, error: "invalid_pubs" };
+    }
+    pubs = rawPubs as MentoredPubsMode;
+  }
+
+  let view: MentoredPubsView = "summary";
+  const rawView = get("view")?.trim().toLowerCase();
+  if (rawView !== undefined && rawView !== "") {
+    if (!(MENTORED_PUBS_VIEWS as readonly string[]).includes(rawView)) {
+      return { ok: false, error: "invalid_view" };
+    }
+    view = rawView as MentoredPubsView;
+  }
+
+  return { ok: true, value: { years, program, tail, pubs, view } };
 }
 
 /** The query string the page's links and the download button carry — the
- *  inverse of `parseMentoredPubsParams`, so a round-trip is lossless. */
+ *  inverse of `parseMentoredPubsParams`, so a round-trip is lossless. `pubs`
+ *  is always written (the download link must carry the mode); `view` only
+ *  when it is not the default, so the download link stays view-free. */
 export function mentoredPubsQueryString(p: MentoredPubsParams): string {
   const sp = new URLSearchParams();
   if (p.years !== null) sp.set("years", p.years.length > 0 ? p.years.join(",") : "all");
   sp.set("program", p.program ?? "all");
   sp.set("tail", String(p.tail));
+  sp.set("pubs", p.pubs);
+  if (p.view !== "summary") sp.set("view", p.view);
   return sp.toString();
 }

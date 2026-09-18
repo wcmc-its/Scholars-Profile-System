@@ -1,8 +1,11 @@
 /**
  * GET /api/edit/reports/mentored-publications — the Mentored publications
  * report (`/edit/reports/7`) as a three-sheet `.xlsx` attachment. Same query
- * string the page renders (`years`, `program`, `tail` — see
- * `parseMentoredPubsParams`), same scope gate (`getReportScopes`).
+ * string the page renders (`years`, `program`, `tail`, `pubs` — see
+ * `parseMentoredPubsParams`; `view` is accepted and ignored, it is page-only),
+ * same scope gate (`getReportScopes`). `pubs=all` builds the "all learner
+ * publications" workbook (different Summary / Raw Data columns, " All Pubs"
+ * in the filename).
  *
  * Gate order: no session → 401 · no report scope at all → 403 · malformed
  * params → 400 · `program` outside the caller's scopes → 403 · else the
@@ -42,7 +45,7 @@ export async function GET(request: Request) {
   if (!parsed.ok) {
     return new NextResponse(parsed.error, { status: 400 });
   }
-  const { program, tail } = parsed.value;
+  const { program, tail, pubs } = parsed.value;
   if (program !== null && !scopeAdmits(scopes, program)) {
     return new NextResponse("Forbidden", { status: 403 });
   }
@@ -54,9 +57,10 @@ export async function GET(request: Request) {
     scopes: loaderScopes,
     gradYears: years.length > 0 ? years : null,
     tail,
+    pubs,
   });
   const buffer = await buildMentoredPublicationsWorkbook(report);
-  const filename = downloadFilename(program, years, report.generatedAt);
+  const filename = downloadFilename(program, years, report.generatedAt, pubs);
 
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,

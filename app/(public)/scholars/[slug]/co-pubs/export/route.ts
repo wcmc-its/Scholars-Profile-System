@@ -33,11 +33,10 @@ import {
   copubId,
   menteeProgramLabel,
   getAllMentorCoPublications,
-  type CoPublicationAuthor,
   type CoPublicationFull,
   type MenteeCoPubGroup,
 } from "@/lib/api/mentoring";
-import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
+import { citationIdentifier, formatVolIssuePages, vancouverAuthorToken } from "@/lib/citation";
 import { toCsv } from "@/lib/csv";
 import { htmlToPlainText } from "@/lib/utils";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
@@ -131,7 +130,7 @@ function renderCsv(groups: MenteeCoPubGroup[]): string {
         // PubMed titles carry inline HTML (`<i>`, `<sup>`); strip for CSV
         // so spreadsheets don't show literal `<sup>+</sup>` (#331).
         htmlToPlainText(e.publication.title, Number.POSITIVE_INFINITY),
-        e.publication.authors.map(authorToVancouverToken).join("; "),
+        e.publication.authors.map(vancouverAuthorToken).join("; "),
         e.mentee.fullName,
         g.programLabel,
         copubId(e.publication),
@@ -139,18 +138,6 @@ function renderCsv(groups: MenteeCoPubGroup[]): string {
     }
   }
   return toCsv([...CSV_HEADERS], rows);
-}
-
-/** Vancouver token: "Lastname Initials" (e.g. "Smith JA"). Initials are
- *  the first letter of each whitespace-separated first/middle name with
- *  no periods. */
-function authorToVancouverToken(a: CoPublicationAuthor): string {
-  const initials = (a.firstName ?? "")
-    .split(/\s+/)
-    .map((p) => p.charAt(0).toUpperCase())
-    .filter(Boolean)
-    .join("");
-  return initials ? `${a.lastName} ${initials}` : a.lastName;
 }
 
 const HANGING_INDENT_TWIPS = 360;
@@ -274,7 +261,7 @@ function buildCitationParagraph(
   const authorRuns: TextRun[] = [];
   pub.authors.forEach((a, i) => {
     if (i > 0) authorRuns.push(new TextRun({ text: ", " }));
-    const token = authorToVancouverToken(a);
+    const token = vancouverAuthorToken(a);
     const bold = a.personIdentifier !== null && boldCwids.has(a.personIdentifier);
     authorRuns.push(new TextRun({ text: token, bold }));
   });

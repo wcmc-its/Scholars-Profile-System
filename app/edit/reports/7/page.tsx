@@ -7,6 +7,15 @@
  * three-sheet workbook behind "Download .xlsx"
  * (`/api/edit/reports/mentored-publications`, same query string).
  *
+ * Two in-page views (`view=summary|publications`, a tab pair above the table):
+ * the per-learner Summary, and Publications — one row per distinct paper,
+ * most recent first, as a Vancouver citation with its PMID link, JIF, iCite
+ * count, the learner(s) and mentor(s) on it. Two publication sets
+ * (`pubs=mentored|all`, a toggle): the co-pubs with an AOC mentor (default),
+ * or every publication of the learner from the `aoc_mentee_publication`
+ * bridge, each flagged for a mentor co-author. Both params ride every tab /
+ * toggle link and the download link; `view` is page-only.
+ *
  * NOT unit-scoped like reports 1–6: access is a `report_access` row
  * (`lib/edit/report-access.ts`) — superuser / comms_steward always pass;
  * anyone else needs a row, and their rows' scope keys are the programs they
@@ -14,16 +23,20 @@
  * SSO login; an empty scope set → `notFound()` (the route reads as unbuilt
  * to someone it was never granted to). Filters are plain GET params
  * (`parseMentoredPubsParams`) — a server re-render per change, no client
- * state, like `/edit/data-sharing`'s filter bar. The "Viewers" panel
- * (`ReportAccessPanel`) is the one client island, rendered only for
+ * state, like `/edit/data-sharing`'s filter bar; the form is the
+ * `AutoSubmitForm` island so a change submits without an Apply click (the
+ * button stays as the no-JS fallback). The "Viewers" panel
+ * (`ReportAccessPanel`) is the other client island, rendered only for
  * `canManageReportAccess`.
  */
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ReportAccessPanel, type ReportAccessPanelRow } from "@/components/edit/report-access-panel";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { citationIdentifier } from "@/lib/citation";
 import { db } from "@/lib/db";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
@@ -39,6 +52,7 @@ import {
   MAX_TAIL,
   PROGRAM_LABEL,
   type MentoredPublicationsReport,
+  type MentorRef,
 } from "@/lib/edit/mentored-publications-report";
 import {
   ALL_SCOPES,
@@ -60,6 +74,29 @@ export const metadata = {
 
 const TH_CLASS = "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
 const TD_CLASS = "border-apollo-border border-t px-3 py-2 align-top";
+const CWID_CLASS = "text-muted-foreground ml-2 font-mono text-xs";
+const TAB_BASE = "inline-flex h-8 items-center rounded-md px-3 text-sm font-medium";
+const TAB_ACTIVE = `${TAB_BASE} bg-apollo-surface-2 text-foreground`;
+const TAB_IDLE = `${TAB_BASE} text-muted-foreground hover:bg-apollo-surface-2`;
+
+function pageHref(params: MentoredPubsParams): string {
+  return `/edit/reports/7?${mentoredPubsQueryString(params)}`;
+}
+
+/** "Name  cwid" — the same treatment the learner column gives its cwid. */
+function MentorCell({ mentors }: { mentors: ReadonlyArray<MentorRef> }) {
+  if (mentors.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <ul className="m-0 list-none p-0">
+      {mentors.map((m) => (
+        <li key={m.cwid}>
+          {m.name}
+          <span className={CWID_CLASS}>{m.cwid}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function FilterForm({
   params,
@@ -73,11 +110,14 @@ function FilterForm({
   const selected = new Set(params.years ?? []);
   const allYears = params.years !== null && params.years.length === 0;
   return (
-    <form
-      method="get"
-      className="border-apollo-border bg-apollo-surface mt-4 flex flex-wrap items-end gap-4 rounded-md border p-3 text-xs"
+    <AutoSubmitForm
+      action="/edit/reports/7"
+      className="group border-apollo-border bg-apollo-surface mt-4 flex flex-wrap items-end gap-4 rounded-md border p-3 text-xs"
       data-testid="mentored-pubs-filters"
     >
+      {/* The view / set ride along so a filter change keeps them. */}
+      {params.view !== "summary" && <input type="hidden" name="view" value={params.view} />}
+      <input type="hidden" name="pubs" value={params.pubs} />
       <fieldset className="flex flex-col gap-1">
         <legend className="text-muted-foreground">Graduation year</legend>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -120,14 +160,63 @@ function FilterForm({
           ))}
         </select>
       </label>
-      <button type="submit" className="border-apollo-border rounded border px-3 py-1.5 hover:bg-apollo-surface-2">
+      {/* No-JS fallback; the island hides it once hydrated. */}
+      <button
+        type="submit"
+        className="border-apollo-border hover:bg-apollo-surface-2 rounded border px-3 py-1.5 group-data-[hydrated=true]:hidden"
+      >
         Apply
       </button>
-    </form>
+    </AutoSubmitForm>
+  );
+}
+
+/** The Summary | Publications view tabs and the Mentored | All set toggle —
+ *  plain links that keep every other param. */
+function ViewControls({ params }: { params: MentoredPubsParams }) {
+  const tab = (view: MentoredPubsParams["view"], label: string) => (
+    <Link
+      href={pageHref({ ...params, view })}
+      className={params.view === view ? TAB_ACTIVE : TAB_IDLE}
+      aria-current={params.view === view ? "page" : undefined}
+      data-testid={`mentored-pubs-view-${view}`}
+    >
+      {label}
+    </Link>
+  );
+  const toggle = (pubs: MentoredPubsParams["pubs"], label: string) => (
+    <Link
+      href={pageHref({ ...params, pubs })}
+      className={params.pubs === pubs ? TAB_ACTIVE : TAB_IDLE}
+      aria-pressed={params.pubs === pubs}
+      data-testid={`mentored-pubs-set-${pubs}`}
+    >
+      {label}
+    </Link>
+  );
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <nav
+        className="border-apollo-border inline-flex gap-1 rounded-md border p-0.5"
+        aria-label="View"
+      >
+        {tab("summary", "Summary")}
+        {tab("publications", "Publications")}
+      </nav>
+      <div
+        className="border-apollo-border inline-flex gap-1 rounded-md border p-0.5"
+        role="group"
+        aria-label="Publication set"
+      >
+        {toggle("mentored", "Mentored co-publications")}
+        {toggle("all", "All learner publications")}
+      </div>
+    </div>
   );
 }
 
 function SummaryTable({ report }: { report: MentoredPublicationsReport }) {
+  const allMode = report.filters.pubs === "all";
   if (report.summary.length === 0) {
     return (
       <p className="text-muted-foreground mt-6" data-testid="mentored-pubs-empty">
@@ -144,10 +233,24 @@ function SummaryTable({ report }: { report: MentoredPublicationsReport }) {
             <th className={TH_CLASS}>Learner</th>
             <th className={TH_CLASS}>Program</th>
             <th className={TH_CLASS}>Mentors</th>
-            <th className={`${TH_CLASS} text-right`}>In window</th>
-            <th className={`${TH_CLASS} text-right`}>All years</th>
-            <th className={`${TH_CLASS} text-right`}>JIF &ge; {HIGH_IMPACT_THRESHOLD}</th>
-            <th className={`${TH_CLASS} text-right`}>First author</th>
+            {allMode ? (
+              <>
+                <th className={`${TH_CLASS} text-right`}>All pubs (in window)</th>
+                <th className={`${TH_CLASS} text-right`}>With a mentor (in window)</th>
+                <th className={`${TH_CLASS} text-right`}>First author (in window)</th>
+                <th className={`${TH_CLASS} text-right`}>
+                  JIF &ge; {HIGH_IMPACT_THRESHOLD} (in window)
+                </th>
+                <th className={`${TH_CLASS} text-right`}>All-time total</th>
+              </>
+            ) : (
+              <>
+                <th className={`${TH_CLASS} text-right`}>In window</th>
+                <th className={`${TH_CLASS} text-right`}>All years</th>
+                <th className={`${TH_CLASS} text-right`}>JIF &ge; {HIGH_IMPACT_THRESHOLD}</th>
+                <th className={`${TH_CLASS} text-right`}>First author</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -158,7 +261,7 @@ function SummaryTable({ report }: { report: MentoredPublicationsReport }) {
                 {r.lastName ?? ""}
                 {r.lastName && r.firstName ? ", " : ""}
                 {r.firstName ?? ""}
-                <span className="text-muted-foreground ml-2 font-mono text-xs">{r.cwid}</span>
+                <span className={CWID_CLASS}>{r.cwid}</span>
                 {r.entryYearSource === "fallback" && (
                   <span
                     className="text-muted-foreground ml-2 text-xs"
@@ -169,13 +272,119 @@ function SummaryTable({ report }: { report: MentoredPublicationsReport }) {
                 )}
               </td>
               <td className={TD_CLASS}>{r.program}</td>
-              <td className={TD_CLASS}>{r.mentors.join("; ")}</td>
-              <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsInWindow}</td>
-              <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsAllTime}</td>
-              <td className={`${TD_CLASS} text-right tabular-nums`}>{r.highImpactInWindow}</td>
-              <td className={`${TD_CLASS} text-right tabular-nums`}>{r.firstAuthorInWindow}</td>
+              <td className={TD_CLASS}>
+                <MentorCell mentors={r.mentors} />
+              </td>
+              {allMode ? (
+                <>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.withMentorInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.firstAuthorInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.highImpactInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsAllTime}</td>
+                </>
+              ) : (
+                <>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsAllTime}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.highImpactInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.firstAuthorInWindow}</td>
+                </>
+              )}
             </tr>
           ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** One row per distinct publication, most recent first. */
+function PublicationsTable({ report }: { report: MentoredPublicationsReport }) {
+  const allMode = report.filters.pubs === "all";
+  if (report.publications.length === 0) {
+    return (
+      <p className="text-muted-foreground mt-6" data-testid="mentored-pubs-empty">
+        No publications match these filters.
+      </p>
+    );
+  }
+  return (
+    <div className="border-apollo-border bg-apollo-surface mt-4 overflow-x-auto rounded-md border">
+      <table
+        className="w-full border-collapse text-left text-sm"
+        data-testid="mentored-pubs-publications"
+      >
+        <thead>
+          <tr>
+            <th className={TH_CLASS}>Citation</th>
+            <th className={`${TH_CLASS} text-right`}>JIF</th>
+            <th className={`${TH_CLASS} text-right`}>Citations</th>
+            <th className={TH_CLASS}>Learner(s)</th>
+            <th className={TH_CLASS}>Mentor(s)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {report.publications.map((p) => {
+            const id = citationIdentifier(p.pmid);
+            return (
+              <tr key={p.pmid} data-testid={`mentored-pubs-pub-${p.pmid}`}>
+                <td className={TD_CLASS}>
+                  {p.citation}{" "}
+                  <span className="whitespace-nowrap">
+                    {id.label}:{" "}
+                    {id.href ? (
+                      <a
+                        href={id.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-apollo-slate hover:underline"
+                      >
+                        {id.value}
+                      </a>
+                    ) : (
+                      id.value
+                    )}
+                  </span>
+                </td>
+                <td className={`${TD_CLASS} text-right tabular-nums`}>{p.jif ?? "—"}</td>
+                <td className={`${TD_CLASS} text-right tabular-nums`}>{p.citations ?? "—"}</td>
+                <td className={TD_CLASS}>
+                  <ul className="m-0 list-none p-0">
+                    {p.learners.map((l) => (
+                      <li key={l.cwid} className="whitespace-nowrap">
+                        {l.lastName ?? ""}
+                        {l.lastName && l.firstName ? ", " : ""}
+                        {l.firstName ?? ""}
+                        <span className={CWID_CLASS}>{l.cwid}</span>
+                        {l.firstAuthor && (
+                          <span
+                            className="text-muted-foreground ml-2 text-xs"
+                            title="Learner is first author"
+                          >
+                            1st author
+                          </span>
+                        )}
+                        <span
+                          className="text-muted-foreground ml-2 text-xs"
+                          title="Publication year inside this learner's program window"
+                        >
+                          {l.inWindow ? "In window: Yes" : "In window: No"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </td>
+                <td className={TD_CLASS}>
+                  {allMode && !p.withMentor ? (
+                    <span className="text-muted-foreground">No mentor co-author</span>
+                  ) : (
+                    <MentorCell mentors={p.mentors} />
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -204,7 +413,7 @@ export default async function EditReportsMentoredPublicationsPage({
   const parsed = parseMentoredPubsParams((await searchParams) ?? {});
   const requested: MentoredPubsParams = parsed.ok
     ? parsed.value
-    : { years: null, program: null, tail: DEFAULT_TAIL };
+    : { years: null, program: null, tail: DEFAULT_TAIL, pubs: "mentored", view: "summary" };
   // A `program` outside the caller's scopes is silently the "all" view of
   // what they DO hold — never a wider set.
   const program = requested.program !== null && scopeAdmits(scopes, requested.program) ? requested.program : null;
@@ -212,7 +421,13 @@ export default async function EditReportsMentoredPublicationsPage({
 
   const yearChoices = await loadMentoredGradYears([...scopes]);
   const years = requested.years ?? yearChoices.slice(0, 2);
-  const params: MentoredPubsParams = { years, program, tail: requested.tail };
+  const params: MentoredPubsParams = {
+    years,
+    program,
+    tail: requested.tail,
+    pubs: requested.pubs,
+    view: requested.view,
+  };
 
   const canManage = canManageReportAccess(session);
   const [report, pendingSlugRequests, pendingHonors, accessRows] = await Promise.all([
@@ -220,6 +435,7 @@ export default async function EditReportsMentoredPublicationsPage({
       scopes: loaderScopes,
       gradYears: years.length > 0 ? years : null,
       tail: params.tail,
+      pubs: params.pubs,
     }),
     session.isSuperuser && isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
@@ -240,7 +456,10 @@ export default async function EditReportsMentoredPublicationsPage({
 
   const totalInWindow = report.summary.reduce((n, r) => n + r.pubsInWindow, 0);
   const totalAllTime = report.summary.reduce((n, r) => n + r.pubsAllTime, 0);
-  const qs = mentoredPubsQueryString(params);
+  const allMode = params.pubs === "all";
+  const allPubsMissing = allMode && report.allPubsLoaded === false;
+  // The download never carries `view` (the workbook has no Publications view).
+  const qs = mentoredPubsQueryString({ ...params, view: "summary" });
 
   return (
     <ConsoleShell
@@ -255,18 +474,35 @@ export default async function EditReportsMentoredPublicationsPage({
       </Link>
       <h1 className="mb-1 text-xl font-bold">Mentored publications</h1>
       <p className="text-muted-foreground text-sm">
-        Every publication a learner co-authored with one of their AOC mentors, with Journal Impact
-        Factor and NIH iCite citations. &ldquo;In window&rdquo; means entry year &le; publication year
-        &le; graduation year + {params.tail}; a learner with no entry year on the roster is assumed to
-        have entered four years before graduating.
+        {allMode
+          ? "Every publication of each learner, with the ones co-authored with one of their AOC mentors flagged, "
+          : "Every publication a learner co-authored with one of their AOC mentors, "}
+        with Journal Impact Factor and NIH iCite citations. &ldquo;In window&rdquo; means entry year
+        &le; publication year &le; graduation year + {params.tail}; a learner with no entry year on
+        the roster is assumed to have entered four years before graduating.
       </p>
       <FilterForm params={params} yearChoices={yearChoices} programChoices={programChoices} />
+      <ViewControls params={params} />
+      {allPubsMissing && (
+        <p
+          className="border-apollo-border bg-apollo-surface-2 mt-4 rounded-md border px-3 py-2 text-sm"
+          role="status"
+          data-testid="mentored-pubs-all-missing"
+        >
+          All-publication data has not been loaded yet. The learner publication bridge (
+          <code>etl:mentoring:import-learner-pubs</code>) has not run in this environment, so every
+          count below would be zero. Switch back to &ldquo;Mentored co-publications&rdquo; or run
+          the import.
+        </p>
+      )}
       <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
         <p data-testid="mentored-pubs-total">
           <strong>{report.summary.length.toLocaleString()}</strong>{" "}
           {report.summary.length === 1 ? "learner" : "learners"} ·{" "}
           <strong>{totalInWindow.toLocaleString()}</strong> publications in window ·{" "}
-          <strong>{totalAllTime.toLocaleString()}</strong> all years
+          <strong>{totalAllTime.toLocaleString()}</strong> all years ·{" "}
+          <strong>{report.publications.length.toLocaleString()}</strong> distinct{" "}
+          {report.publications.length === 1 ? "publication" : "publications"}
         </p>
         <a
           href={`/api/edit/reports/mentored-publications?${qs}`}
@@ -276,7 +512,11 @@ export default async function EditReportsMentoredPublicationsPage({
           Download .xlsx
         </a>
       </div>
-      <SummaryTable report={report} />
+      {allPubsMissing ? null : params.view === "publications" ? (
+        <PublicationsTable report={report} />
+      ) : (
+        <SummaryTable report={report} />
+      )}
       {canManage && (
         <ReportAccessPanel reportKey={MENTORED_PUBS_REPORT} initialRows={panelRows} scopeOptions={scopeOptions} />
       )}

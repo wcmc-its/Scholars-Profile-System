@@ -113,3 +113,35 @@ export function citationIdentifier(pmid: string | number): CitationIdentifier {
   }
   return { label: "Source", value: sourceLabel ?? "External", href: null };
 }
+
+/**
+ * Vancouver author token: `Lastname Initials` (e.g. `Smith JA`). Initials are
+ * the first letter of each whitespace-separated first/middle name, upper-cased,
+ * no periods; an empty first name yields the last name alone. One copy for the
+ * two `/scholars/<slug>/co-pubs` exports and the Mentored publications report,
+ * which each used to carry their own.
+ */
+export function vancouverAuthorToken(a: { lastName: string; firstName: string | null }): string {
+  const initials = (a.firstName ?? "")
+    .split(/\s+/)
+    .map((p) => p.charAt(0).toUpperCase())
+    .filter(Boolean)
+    .join("");
+  return initials ? `${a.lastName} ${initials}` : a.lastName;
+}
+
+/** Authors beyond this many collapse to `et al.` (NLM / Vancouver practice). */
+export const VANCOUVER_MAX_AUTHORS = 6;
+
+/**
+ * The author block of a Vancouver citation: up to {@link VANCOUVER_MAX_AUTHORS}
+ * tokens joined by `, `, then `, et al` when more follow. `""` for no authors.
+ */
+export function vancouverAuthorList(
+  authors: ReadonlyArray<{ lastName: string; firstName: string | null }>,
+  max = VANCOUVER_MAX_AUTHORS,
+): string {
+  const tokens = authors.slice(0, max).map(vancouverAuthorToken);
+  if (authors.length > max) tokens.push("et al");
+  return tokens.join(", ");
+}

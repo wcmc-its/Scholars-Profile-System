@@ -1,7 +1,9 @@
 /**
  * `lib/edit/mentored-publications-xlsx.ts` — builds the three-sheet workbook
  * and reads it back with exceljs: sheet names, header rows, a data row per
- * sheet, the frozen + bold header, Arial 12, and the Yes/No window column.
+ * sheet, the frozen + bold header, Arial 12, the Yes/No window column, the
+ * Mentor CWIDs column, and the "all learner publications" mode's headers /
+ * mentor-on-paper columns / filename suffix / assumptions.
  * `@/lib/db` is stubbed only because the report module (imported for its
  * types/constants) pulls it in at module scope; nothing here reads it.
  */
@@ -16,14 +18,21 @@ import {
   buildMentoredPublicationsWorkbook,
   downloadFilename,
   RAW_HEADERS,
+  RAW_HEADERS_ALL,
   RAW_SHEET,
   SUMMARY_HEADERS,
+  SUMMARY_HEADERS_ALL,
   SUMMARY_SHEET,
 } from "@/lib/edit/mentored-publications-xlsx";
 
+const ZED = { cwid: "men0001", name: "Zed Mentor" };
+const YAN = { cwid: "men0002", name: "Yan Other" };
+
 const REPORT: MentoredPublicationsReport = {
   generatedAt: new Date("2026-09-18T15:04:05Z"),
-  filters: { scopes: ["md"], gradYears: [2025, 2024], tail: 1 },
+  filters: { scopes: ["md"], gradYears: [2025, 2024], tail: 1, pubs: "mentored" },
+  allPubsLoaded: null,
+  publications: [],
   summary: [
     {
       gradYear: 2025,
@@ -33,8 +42,9 @@ const REPORT: MentoredPublicationsReport = {
       firstName: "Ada",
       lastName: "Learner",
       program: "MD",
-      mentors: ["Zed Mentor"],
+      mentors: [YAN, ZED],
       pubsInWindow: 1,
+      withMentorInWindow: 1,
       pubsAllTime: 2,
       highImpactInWindow: 1,
       firstAuthorInWindow: 0,
@@ -50,6 +60,8 @@ const REPORT: MentoredPublicationsReport = {
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
+      paperMentors: [ZED],
+      withMentor: true,
       pmid: 7,
       title: "A very long title ".repeat(10),
       journal: "N Engl J Med",
@@ -70,6 +82,8 @@ const REPORT: MentoredPublicationsReport = {
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
+      paperMentors: [ZED],
+      withMentor: true,
       pmid: 8,
       title: "Older",
       journal: null,
@@ -107,7 +121,9 @@ describe("buildMentoredPublicationsWorkbook", () => {
     const wb = await load(await buildMentoredPublicationsWorkbook(REPORT));
     const ws = wb.getWorksheet(SUMMARY_SHEET)!;
     expect(rowValues(ws, 1)).toEqual([...SUMMARY_HEADERS]);
-    expect(rowValues(ws, 2)).toEqual([2025, 2021, "MD", "stu0001", "Ada", "Learner", "Zed Mentor", 1, 2, 1, 0]);
+    expect(rowValues(ws, 2)).toEqual([
+      2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001", 1, 2, 1, 0,
+    ]);
     expect(ws.rowCount).toBe(2);
     expect(ws.views[0]).toMatchObject({ state: "frozen", ySplit: 1 });
     expect(ws.getCell("A1").font).toMatchObject({ name: "Arial", size: 12, bold: true });
@@ -154,10 +170,69 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(String(items.get("Journal impact factor"))).toContain("Journal Citation Reports");
   });
 
-  it("downloadFilename: program or All, years joined by -, ISO day", () => {
+  it("downloadFilename: program or All, years joined by -, ' All Pubs' in all mode, ISO day", () => {
     const d = new Date("2026-09-18T23:59:59Z");
     expect(downloadFilename("md", [2024, 2025], d)).toBe("Mentored Publications MD 2024-2025 - 2026-09-18.xlsx");
     expect(downloadFilename(null, [2025], d)).toBe("Mentored Publications All 2025 - 2026-09-18.xlsx");
     expect(downloadFilename("mdphd", [], d)).toBe("Mentored Publications MD-PhD all-years - 2026-09-18.xlsx");
+    expect(downloadFilename("md", [2025], d, "all")).toBe("Mentored Publications MD 2025 All Pubs - 2026-09-18.xlsx");
+    expect(downloadFilename("md", [2025], d, "mentored")).toBe("Mentored Publications MD 2025 - 2026-09-18.xlsx");
+  });
+
+  describe("pubs: 'all' mode", () => {
+    const ALL: MentoredPublicationsReport = {
+      ...REPORT,
+      filters: { ...REPORT.filters, pubs: "all" },
+      allPubsLoaded: true,
+      summary: [{ ...REPORT.summary[0], pubsInWindow: 3, withMentorInWindow: 1, firstAuthorInWindow: 2, pubsAllTime: 5 }],
+      detail: [
+        { ...REPORT.detail[0], mentorCwid: null, mentorName: null, paperMentors: [YAN, ZED], withMentor: true },
+        { ...REPORT.detail[1], mentorCwid: null, mentorName: null, paperMentors: [], withMentor: false },
+      ],
+    };
+
+    it("Summary: the all-mode headers and column order", async () => {
+      const wb = await load(await buildMentoredPublicationsWorkbook(ALL));
+      const ws = wb.getWorksheet(SUMMARY_SHEET)!;
+      expect(rowValues(ws, 1)).toEqual([...SUMMARY_HEADERS_ALL]);
+      expect(SUMMARY_HEADERS_ALL.slice(8)).toEqual([
+        "All publications in program window",
+        "Publications with a mentor in window",
+        "First-author publications in window",
+        "High-impact publications in window (JIF ≥ 10)",
+        "Publications (all years)",
+      ]);
+      expect(rowValues(ws, 2)).toEqual([
+        2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001", 3, 1, 2, 1, 5,
+      ]);
+    });
+
+    it("Raw Data: one row per (learner, pub) with the mentor(s) on the paper, blank when none", async () => {
+      const wb = await load(await buildMentoredPublicationsWorkbook(ALL));
+      const ws = wb.getWorksheet(RAW_SHEET)!;
+      expect(rowValues(ws, 1)).toEqual([...RAW_HEADERS_ALL]);
+      expect(RAW_HEADERS_ALL[6]).toBe("Mentor(s) on this paper");
+      expect(rowValues(ws, 2).slice(6, 9)).toEqual(["Yan Other; Zed Mentor", "men0002; men0001", 7]);
+      expect(ws.getCell("G3").value).toBeNull();
+      expect(ws.getCell("H3").value).toBeNull();
+      expect(rowValues(ws, 3)[8]).toBe(8);
+    });
+
+    it("Query & Assumptions names the mode and the mentored-subset rule", async () => {
+      const wb = await load(await buildMentoredPublicationsWorkbook(ALL));
+      const ws = wb.getWorksheet(ASSUMPTIONS_SHEET)!;
+      const items = new Map<string, unknown>();
+      ws.eachRow((row, n) => {
+        if (n > 1) items.set(String(row.getCell(1).value), row.getCell(2).value);
+      });
+      expect(String(items.get("Publication set"))).toMatch(/^All learner publications/);
+      expect(String(items.get("Publication set"))).toContain("subset");
+      expect(String(items.get("Mentor names"))).toContain("Scholars profile");
+      const mentored = await load(await buildMentoredPublicationsWorkbook(REPORT));
+      const row = [...Array(20).keys()]
+        .map((i) => mentored.getWorksheet(ASSUMPTIONS_SHEET)!.getRow(i + 1))
+        .find((r) => String(r.getCell(1).value) === "Publication set");
+      expect(String(row?.getCell(2).value)).toMatch(/^Mentored co-publications/);
+    });
   });
 });

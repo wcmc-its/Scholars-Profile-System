@@ -18,11 +18,33 @@
  *     `loadUnitPublicationsReport` (`cancer-center-publications-report.ts`)
  *     does; an unmatched journal reads a null JIF, never a zero.
  *
+ *   - `aoc_mentee_publication` — the learner's FULL ReCiter-attributed
+ *     publication list (same `CoPublicationFull` JSON, same export code), read
+ *     only in `pubs: "all"` mode; the mentored set is a strict subset by pmid.
+ *
  * Program window: `entryYear <= pubYear <= gradYear + tail`. A pub outside the
  * window is still LISTED (the office wants the all-time list too) but flagged
  * `inWindow: false`, and the summary carries both counts. A pub shared with two
  * of a learner's mentors is one detail row per mentor but counts ONCE in that
  * learner's summary (distinct pmids).
+ *
+ * Two publication sets (`pubs`): `"mentored"` (default) is every co-pub with
+ * one of the learner's AOC mentors; `"all"` is every publication of the
+ * learner from the `aoc_mentee_publication` bridge, each marked `withMentor`
+ * when it also appears in `mentee_copublication_pub` for one of the learner's
+ * mentors. In `"all"` mode the detail rows are per (learner, pub) — the
+ * mentor columns are null and `paperMentors` lists the mentors on the byline.
+ * `allPubsLoaded` reports whether that bridge has ever been loaded (the table
+ * is non-empty); the page shows a notice rather than zeros when it hasn't.
+ *
+ * Three shapes come back: `summary` (one row per learner), `detail` (the Raw
+ * Data sheet's rows) and `publications` (one row per DISTINCT pmid across
+ * every learner and mentor in scope, most recent first, with the learners and
+ * mentors on it — the page's Publications view; not in the workbook).
+ *
+ * Mentor display name: the mentor's Scholar row (`preferredName`, canonical)
+ * when there is one, else the roster's own `mentorFirstName mentorLastName`
+ * from the bridge, else the bare CWID. The CWID is always carried alongside.
  *
  * Citations are the NIH iCite count (`Publication.citedByCount`), NOT the
  * Scopus count the bridge JSON carries (`CoPublicationFull.citationCount` is
@@ -38,14 +60,18 @@
  * Server-only (reads `@/lib/db`); imported by the page and the download
  * route, never from a `"use client"` component.
  */
-import type { CoPublicationFull } from "@/lib/api/mentoring";
+import type { CoPublicationAuthor, CoPublicationFull } from "@/lib/api/mentoring";
 import { bucketProgramType, type MentoringProgramKey } from "@/lib/api/mentoring-pmids";
 import { db } from "@/lib/db";
 import { HIGH_IMPACT_THRESHOLD } from "@/lib/edit/cancer-center-publications-report";
+import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { scopeAdmits } from "@/lib/edit/report-access";
 import { normalizeJournalAbbrev } from "@/lib/journal-abbrev";
 
 export { HIGH_IMPACT_THRESHOLD };
+
+/** Which publication set the report describes — see the module doc. */
+export type MentoredPubsSet = "mentored" | "all";
 
 /** Years past graduation a publication may still count as "in program". */
 export const DEFAULT_TAIL = 1;
@@ -67,7 +93,11 @@ export type MentoredPublicationsFilters = {
   /** Graduation years kept; `null` = every year. */
   gradYears: ReadonlyArray<number> | null;
   tail: number;
+  pubs: MentoredPubsSet;
 };
+
+/** A mentor as the report shows them: resolved display name + CWID. */
+export type MentorRef = { cwid: string; name: string };
 
 export type MentoredPubsSummaryRow = {
   gradYear: number | null;
@@ -82,10 +112,13 @@ export type MentoredPubsSummaryRow = {
   /** "MD", "MD-PhD", "ECR" — joined with " / " when the learner's rows span
    *  more than one bucket. */
   program: string;
-  /** Mentor display names, sorted. */
-  mentors: string[];
-  /** Distinct pmids inside the program window. */
+  /** The learner's mentors (every `aoc_mentee` row), sorted by display name. */
+  mentors: MentorRef[];
+  /** Distinct pmids inside the program window (of the selected set). */
   pubsInWindow: number;
+  /** Distinct in-window pmids with one of the learner's mentors on the
+   *  byline. Equals `pubsInWindow` in `"mentored"` mode. */
+  withMentorInWindow: number;
   /** Distinct pmids across every year. */
   pubsAllTime: number;
   /** Distinct in-window pmids in a journal with JIF >= HIGH_IMPACT_THRESHOLD. */
@@ -102,8 +135,14 @@ export type MentoredPubsDetailRow = {
   learnerCwid: string;
   learnerFirstName: string | null;
   learnerLastName: string | null;
-  mentorCwid: string;
-  mentorName: string;
+  /** `"mentored"` mode: the (learner, mentor) pair's mentor — one row per
+   *  pair per pub. `"all"` mode: null — rows are per (learner, pub). */
+  mentorCwid: string | null;
+  mentorName: string | null;
+  /** Every one of the learner's mentors who is a WCM-identified co-author on
+   *  this paper (via the co-pub bridge). Empty only in `"all"` mode. */
+  paperMentors: MentorRef[];
+  withMentor: boolean;
   pmid: number;
   title: string;
   journal: string | null;
@@ -121,11 +160,47 @@ export type MentoredPubsDetailRow = {
   inWindow: boolean;
 };
 
+/** A learner's presence on one publication (the Publications view). */
+export type MentoredPubsLearnerOnPub = {
+  cwid: string;
+  firstName: string | null;
+  lastName: string | null;
+  firstAuthor: boolean;
+  inWindow: boolean;
+};
+
+/** One row per DISTINCT pmid across every learner in scope — the page's
+ *  Publications view. A pub co-authored by two learners appears once,
+ *  listing both. Not part of the workbook. */
+export type MentoredPubsPublicationRow = {
+  pmid: number;
+  title: string;
+  journal: string | null;
+  year: number | null;
+  /** `mentoredPubCitation` of the bridge JSON (authors, title, journal,
+   *  year;vol(issue):pages) — the identifier is rendered by the caller. */
+  citation: string;
+  jif: number | null;
+  citations: number | null;
+  dateAdded: Date | null;
+  authorCount: number;
+  /** Learners on this paper, in summary order. */
+  learners: MentoredPubsLearnerOnPub[];
+  /** Mentors (of those learners) on this paper, sorted by display name. */
+  mentors: MentorRef[];
+  withMentor: boolean;
+};
+
 export type MentoredPublicationsReport = {
   summary: MentoredPubsSummaryRow[];
   detail: MentoredPubsDetailRow[];
+  publications: MentoredPubsPublicationRow[];
   generatedAt: Date;
   filters: MentoredPublicationsFilters;
+  /** `"all"` mode: whether `aoc_mentee_publication` has ever been loaded
+   *  (any row at all). `false` = the bridge has not run in this env, so every
+   *  count is a vacuous zero — the page says so. `null` in `"mentored"` mode. */
+  allPubsLoaded: boolean | null;
 };
 
 /** Whether `year` falls in the learner's program window. Unknown year, grad
@@ -158,13 +233,6 @@ function chunks<T>(arr: readonly T[], size: number): T[][] {
   return out;
 }
 
-function compareNullsLast(a: number | null, b: number | null): number {
-  if (a === b) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return a - b;
-}
-
 function compareDescNullsLast(a: number | null, b: number | null): number {
   if (a === b) return 0;
   if (a === null) return 1;
@@ -184,6 +252,8 @@ type AocRow = {
   graduationYear: number | null;
   entryYear: number | null;
   programType: string | null;
+  mentorFirstName: string | null;
+  mentorLastName: string | null;
 };
 
 /** One learner, collapsed across their `aoc_mentee` rows (a learner repeats
@@ -249,6 +319,25 @@ function collapseLearners(rows: ReadonlyArray<AocRow & { bucket: MentoringProgra
   return learners;
 }
 
+/** The roster's own mentor name per mentor CWID — the first row that carries
+ *  one wins (the roster repeats a mentor per learner and per program). */
+function bridgeMentorNames(rows: ReadonlyArray<AocRow>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    if (out.has(r.mentorCwid)) continue;
+    const name = [r.mentorFirstName, r.mentorLastName]
+      .map((v) => (v ?? "").trim())
+      .filter((v) => v.length > 0)
+      .join(" ");
+    if (name) out.set(r.mentorCwid, name);
+  }
+  return out;
+}
+
+function compareMentor(a: MentorRef, b: MentorRef): number {
+  return compareName(a.name, b.name) || a.cwid.localeCompare(b.cwid);
+}
+
 function programLabel(buckets: ReadonlySet<MentoringProgramKey>): string {
   return [...buckets]
     .map((b) => PROGRAM_LABEL[b] ?? b)
@@ -286,21 +375,33 @@ function authorPosition(pub: CoPublicationFull, cwid: string): number | null {
  * Build the report. `scopes` is the caller's resolved scope set (never
  * empty — the page/route refuse before calling this); `gradYears` narrows
  * learners by graduation year (null = all); `tail` widens the window past
- * graduation. Four batched reads after the `aoc_mentee` scan: co-pubs per
- * (mentor, learner) pair, `publication` per pmid, `journal_impact_factor` per
- * abbreviation, `scholar` per mentor cwid.
+ * graduation; `pubs` picks the publication set (see the module doc). Batched
+ * reads after the `aoc_mentee` scan: co-pubs per (mentor, learner) pair,
+ * `aoc_mentee_publication` per learner (`"all"` only), `publication` per
+ * pmid, `journal_impact_factor` per abbreviation, `scholar` per mentor cwid.
  */
 export async function loadMentoredPublicationsReport({
   scopes,
   gradYears = null,
   tail = DEFAULT_TAIL,
+  pubs = "mentored",
 }: {
   scopes: ReadonlyArray<string>;
   gradYears?: ReadonlyArray<number> | null;
   tail?: number;
+  pubs?: MentoredPubsSet;
 }): Promise<MentoredPublicationsReport> {
   const generatedAt = new Date();
-  const filters: MentoredPublicationsFilters = { scopes: [...scopes], gradYears, tail };
+  const filters: MentoredPublicationsFilters = { scopes: [...scopes], gradYears, tail, pubs };
+  const allMode = pubs === "all";
+  const empty = (allPubsLoaded: boolean | null): MentoredPublicationsReport => ({
+    summary: [],
+    detail: [],
+    publications: [],
+    generatedAt,
+    filters,
+    allPubsLoaded,
+  });
 
   const aocRows = (await db.read.aocMentee.findMany({
     where: gradYears ? { graduationYear: { in: [...gradYears] } } : undefined,
@@ -312,11 +413,19 @@ export async function loadMentoredPublicationsReport({
       graduationYear: true,
       entryYear: true,
       programType: true,
+      mentorFirstName: true,
+      mentorLastName: true,
     },
   })) as AocRow[];
   const rows = admittedRows(aocRows, scopes);
   const learners = collapseLearners(rows);
-  if (learners.size === 0) return { summary: [], detail: [], generatedAt, filters };
+
+  // "All" mode: has the learner-pubs bridge EVER been loaded here? An empty
+  // table means every count below would be a vacuous zero.
+  const allPubsLoaded = allMode
+    ? (await db.read.aocMenteePublication.findFirst({ select: { pmid: true } })) !== null
+    : null;
+  if (learners.size === 0) return empty(allPubsLoaded);
 
   // Every admitted (mentor, learner) pair — the co-pub bridge's key.
   const pairs: Array<{ mentorCwid: string; menteeCwid: string }> = [];
@@ -339,9 +448,50 @@ export async function loadMentoredPublicationsReport({
     });
     copubs.push(...found);
   }
+  // learner → pmid → the mentors on that paper (the co-pub bridge's fact).
+  const mentorsOnPaper = new Map<string, Map<number, Set<string>>>();
+  for (const c of copubs) {
+    let byPmid = mentorsOnPaper.get(c.menteeCwid);
+    if (!byPmid) {
+      byPmid = new Map();
+      mentorsOnPaper.set(c.menteeCwid, byPmid);
+    }
+    let set = byPmid.get(c.pmid);
+    if (!set) {
+      set = new Set();
+      byPmid.set(c.pmid, set);
+    }
+    set.add(c.mentorCwid);
+  }
+
+  // The publication set per learner: the co-pub rows' distinct pmids, or in
+  // "all" mode every `aoc_mentee_publication` row for the learner.
+  const pubsByLearner = new Map<string, Map<number, CoPublicationFull>>();
+  const addPub = (cwid: string, pmid: number, pub: unknown) => {
+    let m = pubsByLearner.get(cwid);
+    if (!m) {
+      m = new Map();
+      pubsByLearner.set(cwid, m);
+    }
+    if (!m.has(pmid)) m.set(pmid, pub as CoPublicationFull);
+  };
+  if (allMode) {
+    const learnerCwids = [...learners.keys()];
+    for (const batch of chunks(learnerCwids, PAIR_BATCH)) {
+      const found = await db.read.aocMenteePublication.findMany({
+        where: { menteeCwid: { in: batch } },
+        select: { menteeCwid: true, pmid: true, pub: true },
+      });
+      for (const r of found) addPub(r.menteeCwid, r.pmid, r.pub);
+    }
+  } else {
+    for (const c of copubs) addPub(c.menteeCwid, c.pmid, c.pub);
+  }
 
   // Enrich from the local corpus (date added, JIF join key, iCite citations).
-  const pmids = [...new Set(copubs.map((c) => String(c.pmid)))];
+  const pmidSet = new Set<number>();
+  for (const m of pubsByLearner.values()) for (const pmid of m.keys()) pmidSet.add(pmid);
+  const pmids = [...pmidSet].map(String);
   type PubRow = {
     pmid: string;
     journalAbbrev: string | null;
@@ -375,66 +525,125 @@ export async function loadMentoredPublicationsReport({
     }
   }
 
+  // Mentor display names: Scholar.preferredName → roster name → cwid.
   const mentorCwids = [...new Set(pairs.map((p) => p.mentorCwid))];
-  const mentorName = new Map<string, string>();
+  const scholarName = new Map<string, string>();
   for (const batch of chunks(mentorCwids, PMID_BATCH)) {
     const found = await db.read.scholar.findMany({
       where: { cwid: { in: batch } },
       select: { cwid: true, preferredName: true },
     });
-    for (const s of found) mentorName.set(s.cwid, s.preferredName);
+    for (const s of found) scholarName.set(s.cwid, s.preferredName);
   }
-  const nameFor = (cwid: string) => mentorName.get(cwid) ?? cwid;
+  const rosterName = bridgeMentorNames(rows);
+  const mentorRef = (cwid: string): MentorRef => ({
+    cwid,
+    name: scholarName.get(cwid) ?? rosterName.get(cwid) ?? cwid,
+  });
+  const paperMentorsFor = (learnerCwid: string, pmid: number): MentorRef[] =>
+    [...(mentorsOnPaper.get(learnerCwid)?.get(pmid) ?? [])].map(mentorRef).sort(compareMentor);
 
-  // Per-learner distinct-pmid accumulators (a pub shared with two mentors
-  // counts once) and the per-(learner, mentor, pub) detail rows.
-  type Acc = { all: Set<number>; inWindow: Set<number>; highImpact: Set<number>; firstAuthor: Set<number> };
-  const acc = new Map<string, Acc>();
-  const detail: MentoredPubsDetailRow[] = [];
-  for (const c of copubs) {
-    const l = learners.get(c.menteeCwid);
-    if (!l) continue;
-    const pub = c.pub as CoPublicationFull;
-    const { entryYear } = effectiveEntryYear(l.entryYear, l.gradYear);
-    const year = pub.year ?? null;
-    const local = pubByPmid.get(String(c.pmid));
+  const enrich = (pmid: number) => {
+    const local = pubByPmid.get(String(pmid));
     const abbrev = local?.journalAbbrev ? normalizeJournalAbbrev(local.journalAbbrev) : null;
     const jif = abbrev ? (jifByAbbrev.get(abbrev) ?? null) : null;
-    const position = authorPosition(pub, l.cwid);
-    const inWindow = inProgramWindow(year, entryYear, l.gradYear, tail);
-
-    let a = acc.get(l.cwid);
-    if (!a) {
-      a = { all: new Set(), inWindow: new Set(), highImpact: new Set(), firstAuthor: new Set() };
-      acc.set(l.cwid, a);
-    }
-    a.all.add(c.pmid);
-    if (inWindow) {
-      a.inWindow.add(c.pmid);
-      if (jif !== null && jif >= HIGH_IMPACT_THRESHOLD) a.highImpact.add(c.pmid);
-      if (position === 1) a.firstAuthor.add(c.pmid);
-    }
-
-    detail.push({
-      gradYear: l.gradYear,
-      entryYear,
-      program: programLabel(l.buckets),
-      learnerCwid: l.cwid,
-      learnerFirstName: l.firstName,
-      learnerLastName: l.lastName,
-      mentorCwid: c.mentorCwid,
-      mentorName: nameFor(c.mentorCwid),
-      pmid: c.pmid,
-      title: pub.title ?? "",
-      journal: pub.journal ?? null,
+    return {
       jif,
-      year,
       dateAdded: local?.dateAddedToEntrez ?? null,
       citations: local?.citedByCount ?? null,
-      learnerAuthorPosition: position,
-      authorCount: pub.authors?.length ?? 0,
-      inWindow,
-    });
+    };
+  };
+
+  // Per-learner distinct-pmid accumulators (a pub shared with two mentors
+  // counts once), the detail rows, and the per-pmid publication rows.
+  type Acc = {
+    all: Set<number>;
+    inWindow: Set<number>;
+    withMentorInWindow: Set<number>;
+    highImpact: Set<number>;
+    firstAuthor: Set<number>;
+  };
+  const acc = new Map<string, Acc>();
+  const detail: MentoredPubsDetailRow[] = [];
+  type PubAgg = {
+    pub: CoPublicationFull;
+    learners: Map<string, MentoredPubsLearnerOnPub>;
+    mentors: Map<string, MentorRef>;
+  };
+  const pubAgg = new Map<number, PubAgg>();
+
+  for (const l of learners.values()) {
+    const learnerPubs = pubsByLearner.get(l.cwid);
+    if (!learnerPubs) continue;
+    const { entryYear } = effectiveEntryYear(l.entryYear, l.gradYear);
+    const program = programLabel(l.buckets);
+    const a: Acc = {
+      all: new Set(),
+      inWindow: new Set(),
+      withMentorInWindow: new Set(),
+      highImpact: new Set(),
+      firstAuthor: new Set(),
+    };
+    acc.set(l.cwid, a);
+
+    for (const [pmid, pub] of learnerPubs) {
+      const year = pub.year ?? null;
+      const { jif, dateAdded, citations } = enrich(pmid);
+      const position = authorPosition(pub, l.cwid);
+      const inWindow = inProgramWindow(year, entryYear, l.gradYear, tail);
+      const paperMentors = paperMentorsFor(l.cwid, pmid);
+      const withMentor = paperMentors.length > 0;
+
+      a.all.add(pmid);
+      if (inWindow) {
+        a.inWindow.add(pmid);
+        if (withMentor) a.withMentorInWindow.add(pmid);
+        if (jif !== null && jif >= HIGH_IMPACT_THRESHOLD) a.highImpact.add(pmid);
+        if (position === 1) a.firstAuthor.add(pmid);
+      }
+
+      const base = {
+        gradYear: l.gradYear,
+        entryYear,
+        program,
+        learnerCwid: l.cwid,
+        learnerFirstName: l.firstName,
+        learnerLastName: l.lastName,
+        paperMentors,
+        withMentor,
+        pmid,
+        title: pub.title ?? "",
+        journal: pub.journal ?? null,
+        jif,
+        year,
+        dateAdded,
+        citations,
+        learnerAuthorPosition: position,
+        authorCount: pub.authors?.length ?? 0,
+        inWindow,
+      };
+      if (allMode) {
+        detail.push({ ...base, mentorCwid: null, mentorName: null });
+      } else {
+        // One row per (learner, mentor, pub) — the pair is the bridge's key.
+        for (const m of paperMentors)
+          detail.push({ ...base, mentorCwid: m.cwid, mentorName: m.name });
+      }
+
+      let agg = pubAgg.get(pmid);
+      if (!agg) {
+        agg = { pub, learners: new Map(), mentors: new Map() };
+        pubAgg.set(pmid, agg);
+      }
+      agg.learners.set(l.cwid, {
+        cwid: l.cwid,
+        firstName: l.firstName,
+        lastName: l.lastName,
+        firstAuthor: position === 1,
+        inWindow,
+      });
+      for (const m of paperMentors) agg.mentors.set(m.cwid, m);
+    }
   }
 
   const summary: MentoredPubsSummaryRow[] = [...learners.values()].map((l) => {
@@ -448,19 +657,21 @@ export async function loadMentoredPublicationsReport({
       firstName: l.firstName,
       lastName: l.lastName,
       program: programLabel(l.buckets),
-      mentors: [...l.mentorCwids].map(nameFor).sort(compareName),
+      mentors: [...l.mentorCwids].map(mentorRef).sort(compareMentor),
       pubsInWindow: a?.inWindow.size ?? 0,
+      withMentorInWindow: a?.withMentorInWindow.size ?? 0,
       pubsAllTime: a?.all.size ?? 0,
       highImpactInWindow: a?.highImpact.size ?? 0,
       firstAuthorInWindow: a?.firstAuthor.size ?? 0,
     };
   });
 
+  // Newest graduating class first, then by learner name.
   const byLearner = (
     a: { gradYear: number | null; lastName: string | null; firstName: string | null },
     b: { gradYear: number | null; lastName: string | null; firstName: string | null },
   ) =>
-    compareNullsLast(a.gradYear, b.gradYear) ||
+    compareDescNullsLast(a.gradYear, b.gradYear) ||
     compareName(a.lastName, b.lastName) ||
     compareName(a.firstName, b.firstName);
   summary.sort((a, b) => byLearner(a, b) || a.cwid.localeCompare(b.cwid));
@@ -473,8 +684,43 @@ export async function loadMentoredPublicationsReport({
       a.learnerCwid.localeCompare(b.learnerCwid) ||
       compareDescNullsLast(a.year, b.year) ||
       b.pmid - a.pmid ||
-      a.mentorCwid.localeCompare(b.mentorCwid),
+      (a.mentorCwid ?? "").localeCompare(b.mentorCwid ?? ""),
   );
 
-  return { summary, detail, generatedAt, filters };
+  const summaryRank = new Map(summary.map((r, i) => [r.cwid, i]));
+  const publications: MentoredPubsPublicationRow[] = [...pubAgg.entries()].map(([pmid, agg]) => {
+    const { jif, dateAdded, citations } = enrich(pmid);
+    const mentors = [...agg.mentors.values()].sort(compareMentor);
+    return {
+      pmid,
+      title: agg.pub.title ?? "",
+      journal: agg.pub.journal ?? null,
+      year: agg.pub.year ?? null,
+      citation: mentoredPubCitation({
+        title: agg.pub.title ?? "",
+        journal: agg.pub.journal ?? null,
+        year: agg.pub.year ?? null,
+        volume: agg.pub.volume ?? null,
+        issue: agg.pub.issue ?? null,
+        pages: agg.pub.pages ?? null,
+        authors: (agg.pub.authors ?? []) as CoPublicationAuthor[],
+      }),
+      jif,
+      citations,
+      dateAdded,
+      authorCount: agg.pub.authors?.length ?? 0,
+      learners: [...agg.learners.values()].sort(
+        (a, b) => (summaryRank.get(a.cwid) ?? 0) - (summaryRank.get(b.cwid) ?? 0),
+      ),
+      mentors,
+      withMentor: mentors.length > 0,
+    };
+  });
+  // Most recent first, then title, then pmid desc — the Publications view.
+  publications.sort(
+    (a, b) =>
+      compareDescNullsLast(a.year, b.year) || compareName(a.title, b.title) || b.pmid - a.pmid,
+  );
+
+  return { summary, detail, publications, generatedAt, filters, allPubsLoaded };
 }
