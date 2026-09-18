@@ -195,10 +195,42 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     expect((q(container, "biosketch-label") as HTMLInputElement).value).toBe(
       "R01 resubmission (copy)",
     );
-    expect(q(container, "biosketch-cloned-from")?.textContent).toContain(
+    const notice = q(container, "biosketch-cloned-from")?.textContent ?? "";
+    expect(notice).toContain(
       "Cloned from the personal statement generated Jul 20, 2026 (R01 resubmission)",
     );
+    expect(notice).toContain("the statement and related products are drafted fresh.");
     expect(sent).toHaveLength(0);
+  });
+
+  it("a contributions Clone says the contributions and products are drafted fresh", async () => {
+    const { container } = renderTool();
+    fireEvent.click(await findQ(container, "biosketch-version-clone-gen-c"));
+    const notice = (await findQ(container, "biosketch-cloned-from")).textContent ?? "";
+    expect(notice).toContain("Cloned from the contributions draft generated Jul 18, 2026.");
+    expect(notice).toContain(
+      "the contributions and products are drafted fresh from these settings.",
+    );
+    expect(notice).not.toContain("the statement and related products");
+    // Unlabeled source → no "(copy)" label is minted.
+    expect((q(container, "biosketch-label") as HTMLInputElement).value).toBe("");
+  });
+
+  it("View draft clears the clone notice — it names the form's source, not the draft on screen", async () => {
+    const { container } = renderTool();
+    fireEvent.click(await findQ(container, "biosketch-version-clone-gen-ps"));
+    await findQ(container, "biosketch-cloned-from");
+    fireEvent.click(q(container, "biosketch-version-view-gen-c") as HTMLElement);
+
+    await waitFor(() => expect(q(container, "biosketch-cloned-from")).toBeNull());
+    // The unrelated draft is what's on screen now.
+    expect(q(container, "biosketch-entry-text-0")?.textContent).toContain(
+      "We ran the first-in-human study.",
+    );
+    // The cloned form itself is untouched — only the notice went.
+    expect((q(container, "biosketch-project-title") as HTMLInputElement).value).toBe(
+      "Targeting CAR-T resistance",
+    );
   });
 
   it("the generate POST carries the (edited) label and the cloned params", async () => {

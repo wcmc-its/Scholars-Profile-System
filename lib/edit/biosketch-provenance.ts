@@ -36,7 +36,7 @@ export interface BiosketchGenerationSummary {
   /** The authoritative, queryable prompt-version column ("v5" / "v6" / "v7"). */
   promptVersion: string | null;
   /** Re-normalized steering params (the trust boundary, applied on read) — carries the
-   *  `promptVersion` for "Use these settings" restore. */
+   *  `promptVersion` for Clone (#2654) to restore. */
   params: BiosketchParams;
   /** The Products list (Contributions mode), or null. */
   products: BiosketchProducts | null;

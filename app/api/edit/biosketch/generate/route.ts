@@ -175,14 +175,14 @@ export async function POST(request: NextRequest): Promise<Response> {
             entries: result.entries,
             // Project title/aims: required for Personal Statement; optional steer for
             // Contributions (#917 v6 — drives the "related" products bucket). Persisted
-            // whenever present so a "Use these settings" restore can recover them.
+            // whenever present so Clone (#2654) can re-seed them into the form.
             projectTitle:
               effectiveParams.projectTitle.length > 0 ? effectiveParams.projectTitle : null,
             projectAims: effectiveParams.aims.length > 0 ? effectiveParams.aims : null,
             model: result.model,
             // The RESOLVED (post-downgrade) version actually generated with.
             promptVersion: effectiveParams.promptVersion,
-            // Persist the steering controls so "Use these settings" can restore them (incl. the
+            // Persist the steering controls so Clone (#2654) can restore them (incl. the
             // resolved prompt version, mirroring the overview history row).
             params: {
               mode: effectiveParams.mode,

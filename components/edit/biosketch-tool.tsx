@@ -425,9 +425,12 @@ export function BiosketchTool({
     }
   }
 
-  /** Show a history row's entries + products as the current result (read-only view). */
+  /** Show a history row's entries + products as the current result (read-only view). The clone
+   *  notice names the row the FORM came from, not the one on screen, so it is cleared here —
+   *  otherwise "Cloned from X" would sit above a view of an unrelated draft. */
   function viewDraft(gen: BiosketchGenerationItem) {
     if (isGenerating) return;
+    setClonedFrom(null);
     setResult({
       mode: gen.mode,
       entries: gen.entries,
@@ -719,8 +722,10 @@ export function BiosketchTool({
               <AlertDescription>
                 Cloned from the {describeGen(clonedFrom)}
                 {clonedFrom.label ? ` (${clonedFrom.label})` : ""}. Update the project title and
-                aims for the new application, then generate — the statement and related products are
-                drafted fresh.
+                aims for the new application, then generate —{" "}
+                {clonedFrom.mode === "personal_statement"
+                  ? "the statement and related products are drafted fresh."
+                  : "the contributions and products are drafted fresh from these settings."}
               </AlertDescription>
             </Alert>
           )}
