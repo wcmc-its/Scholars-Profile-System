@@ -29,6 +29,7 @@ const {
   mockRedirect,
   mockEditPage,
   mockScholarsServedByProxy,
+  mockLoadReportScopesForCwid,
   mockLoadManageableUnits,
   mockListUnitAdminEditors,
   mockCountPendingSlugRequests,
@@ -51,6 +52,7 @@ const {
   // checking the spy's invocation; the return value is irrelevant here.
   mockEditPage: vi.fn(() => null),
   mockScholarsServedByProxy: vi.fn(),
+  mockLoadReportScopesForCwid: vi.fn(),
   mockLoadManageableUnits: vi.fn(),
   mockListUnitAdminEditors: vi.fn(),
   mockCountPendingSlugRequests: vi.fn(),
@@ -97,6 +99,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/edit/proxy-authz", () => ({ scholarsServedByProxy: mockScholarsServedByProxy }));
+// Mentored publications report access (`/edit/reports/7`) — the last
+// profile-less branch before notFound(); default: no row held.
+vi.mock("@/lib/edit/report-access", () => ({
+  loadReportScopesForCwid: mockLoadReportScopesForCwid,
+  MENTORED_PUBS_REPORT: "mentored-publications",
+}));
 vi.mock("@/lib/edit/unit-scholar-authz", () => ({
   listUnitAdminEditorsForScholar: mockListUnitAdminEditors,
 }));
@@ -189,6 +197,7 @@ beforeEach(() => {
   mockIsDeveloper.mockResolvedValue(false);
   mockResolveGlobalRole.mockResolvedValue(null);
   mockIsCommsSteward.mockResolvedValue(false);
+  mockLoadReportScopesForCwid.mockResolvedValue(new Set());
 });
 
 describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () => {
@@ -209,6 +218,16 @@ describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () 
   it("no global role, no self-profile, no proxy grants → notFound() (unchanged)", async () => {
     mockLoadEditContext.mockResolvedValue(null);
     await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow("__NOT_FOUND__");
+    expect(mockLoadReportScopesForCwid).toHaveBeenCalledWith("self01", "mentored-publications");
+  });
+
+  it("no self-profile + a report_access row → redirect to /edit/reports/7 instead of 404", async () => {
+    mockLoadEditContext.mockResolvedValue(null);
+    mockLoadReportScopesForCwid.mockResolvedValue(new Set(["md"]));
+    await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow(
+      "__REDIRECT__:/edit/reports/7",
+    );
+    expect(mockNotFound).not.toHaveBeenCalled();
   });
 });
 

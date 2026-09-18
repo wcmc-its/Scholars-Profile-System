@@ -499,6 +499,11 @@ model AocMentee {
   firstName      String?  @map("first_name") @db.VarChar(255)
   lastName       String?  @map("last_name") @db.VarChar(255)
   graduationYear Int?     @map("graduation_year")
+  /// Year the learner ENTERED the program (`reporting_students_mentors.
+  /// studentEntryYear`, nullable at the source). Read by the Mentored
+  /// publications report (`lib/edit/mentored-publications-report.ts`) for its
+  /// "in program window" rule; null falls back to `graduationYear - 4`.
+  entryYear      Int?     @map("entry_year")
   programType    String?  @map("program_type") @db.VarChar(64)
   refreshedAt    DateTime @default(now()) @map("refreshed_at")
 
@@ -2335,6 +2340,26 @@ model UnitAdmin {
   @@index([cwid])
   @@index([source]) // #728 — per-source reconcile + Administrators-tab provenance filter
   @@map("unit_admin")
+}
+
+/// Data-driven per-report access grant (Mentored publications report,
+/// `/edit/reports/7`). One row = (report, scope, cwid): the holder may open
+/// `reportKey` and sees the rows whose program bucket is `scopeKey` (`"*"` =
+/// every scope). No org unit, no ED group — superuser / comms_steward always
+/// pass and manage these rows from the report's own "Viewers" panel
+/// (`lib/edit/report-access.ts`, `app/api/edit/report-access`). An EMPTY table
+/// means nobody but superuser/comms_steward can open the report (fail closed;
+/// there is no env flag).
+model ReportAccess {
+  reportKey String   @map("report_key") @db.VarChar(64)
+  scopeKey  String   @map("scope_key") @db.VarChar(64)
+  cwid      String   @db.VarChar(32)
+  grantedBy String   @map("granted_by") @db.VarChar(32)
+  grantedAt DateTime @default(now()) @map("granted_at")
+
+  @@id([reportKey, scopeKey, cwid])
+  @@index([cwid])
+  @@map("report_access")
 }
 
 /// Scholar-assigned proxy editor grant (scholar-proxy-spec.md / #779, ADR-005

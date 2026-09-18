@@ -231,7 +231,17 @@ export type AuditAction =
    *  label/roleGroup/scope plus the count of `OrgUnitRoleScope` allowlist
    *  rows removed with it; `afterValues` is `null`. Requires the
    *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
-  | "role_vocabulary_delete";
+  | "role_vocabulary_delete"
+  /** a superuser/comms-steward granted a named CWID access to a program
+   *  report (`report_access` row created — Mentored publications,
+   *  `/edit/reports/7`); `targetEntityType='report_access'`, `targetEntityId`
+   *  is the `"{reportKey}:{scopeKey}:{cwid}"` triple; `afterValues` carries
+   *  the row. Requires the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "report_access_grant"
+  /** the matching revoke (`report_access` row deleted); same target shape,
+   *  `beforeValues` carries the deleted row. */
+  | "report_access_revoke";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -310,7 +320,12 @@ export type AuditEntityType =
   /** #2634 — a `mentee_suggestion` queue row; `targetEntityId` is the
    *  `"{mentorCwid}:{menteeCwid}"` pair. Requires the `scholars_audit`
    *  target_entity_type ENUM be extended, see `scripts/sql/audit-log.sql`. */
-  | "mentee_suggestion";
+  | "mentee_suggestion"
+  /** a per-report access grant row (`report_access`, Mentored publications
+   *  report); `targetEntityId` is the `"{reportKey}:{scopeKey}:{cwid}"`
+   *  triple. Requires the `scholars_audit` target_entity_type ENUM be
+   *  extended, see `scripts/sql/audit-log.sql`. */
+  | "report_access";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

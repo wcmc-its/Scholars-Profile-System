@@ -48,6 +48,12 @@ vi.mock("@/lib/edit/slug-request", () => ({
   countPendingSlugRequests: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/edit/manageable-units", () => ({ unitEditHref: () => "/edit/center/x" }));
+// Program reports (report 7) ride a `report_access` row — none held here; the
+// mode choice under test is the unit-scoped rendering, which it never touches.
+vi.mock("@/lib/edit/report-access", () => ({
+  getReportScopes: vi.fn().mockResolvedValue(new Set()),
+  MENTORED_PUBS_REPORT: "mentored-publications",
+}));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 
 import EditReportsIndexPage from "@/app/edit/reports/page";

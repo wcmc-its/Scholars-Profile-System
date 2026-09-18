@@ -1,0 +1,88 @@
+/**
+ * POST /api/edit/report-access — grant / revoke a per-report access row
+ * (`report_access`, `lib/edit/report-access.ts`) from the "Viewers" panel on
+ * `/edit/reports/7`.
+ *
+ * Body: `{ op: "grant" | "revoke", reportKey, scopeKey, cwid }`.
+ *   - `reportKey` must be `MENTORED_PUBS_REPORT` (the one report this table
+ *     gates today);
+ *   - `scopeKey` one of `MENTORED_PUBS_SCOPES` or `"*"`;
+ *   - `cwid` lowercased, then `/^[a-z][a-z0-9]{1,11}$/`.
+ *
+ * Gate order (mirrors `/api/edit/roles`): shared preamble (`readEditRequest`
+ * — origin / content-type / session / body) → not superuser or comms_steward
+ * ⇒ 403 `not_comms_steward` BEFORE any field of the body is read → field
+ * validation ⇒ 400 → the write, one transaction with its
+ * `report_access_grant` / `report_access_revoke` audit row (`actorCwid` is
+ * always `realCwid`, never the "View as" target). Responds with the updated
+ * list for the report so the panel re-renders from the server's truth — the
+ * list the write itself returned, read inside its transaction on the WRITER.
+ * It is never re-fetched here through `listReportAccess`'s reader default:
+ * `db.read` is the Aurora reader replica in prod, and a post-write read there
+ * can miss the row just written (the `core-client` route's rule, PR #2620).
+ */
+import { type NextRequest, type NextResponse } from "next/server";
+
+import { logEditDenial } from "@/lib/edit/authz";
+import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import {
+  canManageReportAccess,
+  grantReportAccess,
+  isMentoredPubsScopeKey,
+  MENTORED_PUBS_REPORT,
+  revokeReportAccess,
+  type ReportAccessWriteResult,
+} from "@/lib/edit/report-access";
+
+const PATH = "/api/edit/report-access";
+
+/** The grantee shape this route accepts — lowercased first. Stricter than the
+ *  house `CWID_PATTERN` on length by design (2–12 chars covers every real
+ *  staff CWID this panel is for). */
+const GRANTEE_PATTERN = /^[a-z][a-z0-9]{1,11}$/;
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const req = await readEditRequest(request);
+  if (!req.ok) return req.response;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
+
+  if (!canManageReportAccess(session)) {
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: session.cwid,
+      path: PATH,
+      reason: "not_comms_steward",
+    });
+    return editError(403, "not_comms_steward");
+  }
+
+  const { op, reportKey, scopeKey } = body;
+  if (op !== "grant" && op !== "revoke") {
+    return editError(400, "invalid_op", "op");
+  }
+  if (reportKey !== MENTORED_PUBS_REPORT) {
+    return editError(400, "invalid_report_key", "reportKey");
+  }
+  if (!isMentoredPubsScopeKey(scopeKey)) {
+    return editError(400, "invalid_scope_key", "scopeKey");
+  }
+  const cwid = typeof body.cwid === "string" ? body.cwid.trim().toLowerCase() : "";
+  if (!GRANTEE_PATTERN.test(cwid)) {
+    return editError(400, "invalid_cwid", "cwid");
+  }
+
+  const args = { reportKey, scopeKey, cwid, actorCwid: realCwid, impersonatedCwid, requestId };
+  let result: ReportAccessWriteResult;
+  try {
+    result = op === "grant" ? await grantReportAccess(args) : await revokeReportAccess(args);
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "write_failed");
+  }
+
+  return editOk({
+    op,
+    changed: result.changed,
+    rows: result.rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
+  });
+}

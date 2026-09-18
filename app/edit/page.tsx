@@ -40,6 +40,7 @@ import {
   loadLatestSlugRequest,
 } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
+import { loadReportScopesForCwid, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
@@ -156,6 +157,15 @@ export default async function EditSelfPage({
       if (scholars.length > 1) {
         return <ProxyLanding scholars={scholars} />;
       }
+    }
+    // A `report_access` holder (Mentored publications, `/edit/reports/7`) —
+    // Medical Education staff with no Scholar row, no ED-group role and no
+    // proxy grant. Their one console entry point is the report itself; send
+    // them there rather than 404ing (`lib/edit/report-access.ts`). A row-
+    // based grant, so this is a cheap indexed read, not a directory call.
+    const reportScopes = await loadReportScopesForCwid(editCwid, MENTORED_PUBS_REPORT);
+    if (reportScopes.size > 0) {
+      redirect("/edit/reports/7");
     }
     notFound();
   }

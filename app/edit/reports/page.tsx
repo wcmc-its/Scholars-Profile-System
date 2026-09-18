@@ -40,7 +40,15 @@
  * grants) — a table with a filter rail for a superuser/comms_steward (`2a`,
  * no unit-count minimum, #2455), otherwise every unit banded inline on one
  * page (`1a`).
+ *
+ * Program reports (`/edit/reports/7`, Mentored publications) are NOT
+ * unit-scoped — their gate is a `report_access` row (`getReportScopes`,
+ * `lib/edit/report-access.ts`). A holder gets one extra "Program reports"
+ * card under whichever unit view above they'd otherwise see (superuser /
+ * comms_steward always; a plain holder with zero reportable units gets the
+ * card alone instead of the 404). The unit-scoped rendering is untouched.
  */
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
@@ -66,6 +74,7 @@ import {
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
+import { getReportScopes, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -155,6 +164,10 @@ export default async function EditReportsIndexPage({
     ? await countPendingHonors(db.read)
     : null;
   const shell = { session, pendingSlugRequests, pendingHonors } as const;
+  // Program reports (report 7) ride a `report_access` row, not a unit grant —
+  // one card, shown wherever the holder lands below.
+  const programScopes = await getReportScopes(session, MENTORED_PUBS_REPORT);
+  const programReports = programScopes.size > 0 ? <ProgramReportsCard /> : null;
 
   const { center, kind: kindParam } = (await searchParams) ?? {};
   const kind = parseKind(kindParam);
@@ -177,6 +190,7 @@ export default async function EditReportsIndexPage({
         code={code}
         kind={kind}
         perReport={await loadSingleUnitPerReport(code, kind)}
+        programReports={programReports}
         {...shell}
       />
     );
@@ -188,7 +202,20 @@ export default async function EditReportsIndexPage({
   // exist" the way it is for a scoped Owner/Curator/comms_steward with no
   // grants at all — it's an empty roster. Fall through to the bands view below,
   // which renders gracefully on an empty `units` array; everyone else still 404s.
-  if (reportableUnits.length === 0 && !session.isSuperuser) notFound();
+  if (reportableUnits.length === 0 && !session.isSuperuser) {
+    // A `report_access` holder with no unit grant at all still has somewhere
+    // to go: the Program reports card alone, not the 404.
+    if (programReports === null) notFound();
+    return (
+      <ConsoleShell active="reports" reportsTab {...shell}>
+        <h1 className="mb-1 text-xl font-bold">Reports</h1>
+        <p className="text-muted-foreground text-sm">
+          Advisory only: every report reads precomputed data; nothing here writes to the roster.
+        </p>
+        {programReports}
+      </ConsoleShell>
+    );
+  }
 
   if (reportableUnits.length === 1) {
     const unit = reportableUnits[0];
@@ -205,6 +232,7 @@ export default async function EditReportsIndexPage({
         code={unit.code}
         kind={unit.kind}
         perReport={await loadSingleUnitPerReport(unit.code, unit.kind)}
+        programReports={programReports}
         {...shell}
       />
     );
@@ -246,7 +274,32 @@ export default async function EditReportsIndexPage({
       <div className="apollo-card mt-5">
         <ReportsIndex units={units} mode={mode} />
       </div>
+      {programReports}
     </ConsoleShell>
+  );
+}
+
+/** The one non-unit report card (`/edit/reports/7`). Rendered only when the
+ *  viewer's `getReportScopes` is non-empty — see the module doc comment. */
+function ProgramReportsCard() {
+  return (
+    <div className="apollo-card mt-5" data-testid="program-reports-card">
+      <h2 className="text-base font-semibold">Program reports</h2>
+      <p className="text-muted-foreground mt-1 text-sm">
+        Not tied to an org unit — access is granted per person by a superuser or comms steward.
+      </p>
+      <ul className="mt-3">
+        <li>
+          <Link href="/edit/reports/7" className="text-apollo-slate font-medium hover:underline">
+            7. Mentored publications
+          </Link>
+          <p className="text-muted-foreground text-xs">
+            Every publication an MD-program learner co-authored with an AOC mentor, with impact factor
+            and citations — the Medical Education office&rsquo;s annual spreadsheet, on demand.
+          </p>
+        </li>
+      </ul>
+    </div>
   );
 }
 
@@ -291,6 +344,7 @@ function SingleUnitReports({
   code,
   kind,
   perReport,
+  programReports,
   session,
   pendingSlugRequests,
   pendingHonors,
@@ -299,6 +353,8 @@ function SingleUnitReports({
   code: string;
   kind: ReportableUnitKind;
   perReport: SerializedPerReport;
+  /** The Program reports card, or null when the viewer holds no report grant. */
+  programReports: React.ReactNode;
   session: EditSession;
   pendingSlugRequests: number | null;
   pendingHonors: number | null;
@@ -326,6 +382,7 @@ function SingleUnitReports({
           reports={REPORTS_BY_KIND[kind]}
         />
       </div>
+      {programReports}
     </ConsoleShell>
   );
 }
