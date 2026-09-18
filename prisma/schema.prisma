@@ -3138,6 +3138,9 @@ model BiosketchGeneration {
   // for a direct generation. Mirrors `manual_edit_audit.impersonated_cwid` so the history panel
   // can attribute a delegated draft to the human who actually ran it.
   impersonatedCwid String?  @map("impersonated_cwid") @db.VarChar(32)
+  // #2654 -- optional scholar-typed label (the application name) so drafts are tellable apart
+  // in the saved-drafts list. NULL for an unlabeled run; editable from the list.
+  label            String?  @db.VarChar(120)
   createdAt        DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)

@@ -1,8 +1,8 @@
 /**
- * GET / DELETE /api/edit/biosketch/generations (#917 v6, handoff §6; #1992).
+ * GET / PATCH / DELETE /api/edit/biosketch/generations (#917 v6, handoff §6; #1992; #2654).
  *
- * Returns — and prunes — a scholar's biosketch generation history for the `/edit` "Earlier
- * biosketches" panel. Unlike the overview, the biosketch has no save-to-profile flow, so there
+ * Returns, relabels, and prunes a scholar's biosketch generation history for the `/edit` saved
+ * drafts list. Unlike the overview, the biosketch has no save-to-profile flow, so there
  * is NO provenance half — just the list of prior generations (newest first, capped).
  *
  * Target: the `?cwid=` query param (the scholar being edited), defaulting to the effective
@@ -74,6 +74,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         // Audit "who ran it": the accountable human, plus the impersonation overlay (if any).
         createdByCwid: g.createdByCwid,
         impersonatedCwid: g.impersonatedCwid,
+        // #2654 — the drafts-list affordances: the application-name label, and the staleness
+        // nudge's count of confirmed publications added since the draft.
+        label: g.label,
+        pubsAddedSince: g.pubsAddedSince,
         createdAt: g.createdAt.toISOString(),
       })),
     });
@@ -81,6 +85,81 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     logEditFailure(PATH, err);
     return editError(500, "read_failed");
   }
+}
+
+/** The `label` column's width (`biosketch_generation.label VARCHAR(120)`). */
+const LABEL_MAX = 120;
+
+/**
+ * PATCH `{ generationId, label }` — set or clear a draft's label (#2654), the application name
+ * that makes rows in the saved-drafts list tellable apart. `label` is trimmed and clamped to the
+ * column width; an empty string clears it (NULL). Authorization is keyed on the ROW'S OWN `cwid`
+ * exactly as DELETE is — the body names no scholar. The found-vs-gone verdict is the writer's
+ * (`updateMany` count), so a retry inside the replication window still answers 404, not 200.
+ *
+ * ponytail: NOT audited. A label is a display nickname on a copy/export artifact — it carries
+ * none of the drafted prose and changes nothing the audit log is for (who drafted what, on whose
+ * behalf, and who erased it). Adding `biosketch_generation_relabel` would mean the audit union +
+ * all four ENUM sites for a rename; revisit if a curator ever needs to see who renamed a draft.
+ */
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  if (!isBiosketchGenerateEnabled()) return editError(404, "not_found");
+
+  const req = await readEditRequest(request);
+  if (!req.ok) return req.response;
+  const { session, realCwid, impersonatedCwid, body } = req.ctx;
+
+  const { generationId } = body;
+  if (typeof generationId !== "string" || generationId.length === 0 || generationId.length > 64) {
+    return editError(400, "invalid_generation_id", "generationId");
+  }
+  if (body.label !== null && body.label !== undefined && typeof body.label !== "string") {
+    return editError(400, "invalid_label", "label");
+  }
+  const trimmed = typeof body.label === "string" ? body.label.trim().slice(0, LABEL_MAX) : "";
+  const label = trimmed.length > 0 ? trimmed : null;
+
+  let row: { cwid: string } | null;
+  try {
+    row = await db.read.biosketchGeneration.findUnique({
+      where: { id: generationId },
+      select: { cwid: true },
+    });
+  } catch (err) {
+    logEditFailure(`${PATH}#patch`, err);
+    return editError(500, "read_failed");
+  }
+  if (!row) return editError(404, "not_found");
+
+  const authz = await authorizeOverviewWrite({
+    session,
+    realCwid,
+    impersonatedCwid,
+    entityId: row.cwid,
+    proxyDb: db.read as unknown as ProxyLookup,
+    unitDb: db.read as unknown as UnitScholarLookup,
+  });
+  if (!authz.ok) {
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: row.cwid,
+      path: PATH,
+      reason: authz.reason,
+    });
+    return editError(403, authz.reason);
+  }
+
+  try {
+    const { count } = await db.write.biosketchGeneration.updateMany({
+      where: { id: generationId },
+      data: { label },
+    });
+    if (count === 0) return editError(404, "not_found");
+  } catch (err) {
+    logEditFailure(`${PATH}#patch`, err);
+    return editError(500, "write_failed");
+  }
+  return editOk({ id: generationId, label });
 }
 
 /**

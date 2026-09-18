@@ -1,6 +1,6 @@
 /**
- * Route tests for `DELETE /api/edit/biosketch/generations` (#1992) — pruning one biosketch
- * generation run out of the /edit history. The policy behind the hard delete is documented in
+ * Route tests for `DELETE` (#1992) and `PATCH` (#2654) `/api/edit/biosketch/generations` — pruning
+ * one biosketch generation run out of the /edit history, and relabeling one. The policy behind the hard delete is documented in
  * the route; these pin the three things that make it safe: the authorization key is the ROW'S OWN
  * `cwid` (nothing in the request body names a scholar), the found-vs-gone verdict is the WRITER'S,
  * and the delete + the B03 audit row land in ONE transaction with `beforeValues` carrying the
@@ -21,6 +21,7 @@ const {
   mockTransaction,
   mockTxGenerationDeleteMany,
   mockTxExecuteRaw,
+  mockGenerationUpdateMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockEnabled: vi.fn(),
@@ -29,6 +30,7 @@ const {
   mockTransaction: vi.fn(),
   mockTxGenerationDeleteMany: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
+  mockGenerationUpdateMany: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -51,11 +53,14 @@ vi.mock("@/lib/edit/overview-authz", () => ({
 vi.mock("@/lib/db", () => ({
   db: {
     read: { biosketchGeneration: { findUnique: mockGenerationFindUnique } },
-    write: { $transaction: mockTransaction },
+    write: {
+      $transaction: mockTransaction,
+      biosketchGeneration: { updateMany: mockGenerationUpdateMany },
+    },
   },
 }));
 
-import { DELETE } from "@/app/api/edit/biosketch/generations/route";
+import { DELETE, PATCH } from "@/app/api/edit/biosketch/generations/route";
 
 const SELF = { cwid: "abc1001", isSuperuser: false, isCommsSteward: false };
 
@@ -91,6 +96,14 @@ function del(body: unknown): NextRequest {
   });
 }
 
+function patch(body: unknown): NextRequest {
+  return new NextRequest("http://localhost/api/edit/biosketch/generations", {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+    body: JSON.stringify(body),
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -102,6 +115,74 @@ beforeEach(() => {
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockTxGenerationDeleteMany.mockResolvedValue({ count: 1 });
   mockTxExecuteRaw.mockResolvedValue(1);
+  mockGenerationUpdateMany.mockResolvedValue({ count: 1 });
+});
+
+describe("PATCH /api/edit/biosketch/generations (#2654 label)", () => {
+  it("404s while the flag is off, before any session or DB work", async () => {
+    mockEnabled.mockReturnValue(false);
+    const res = await PATCH(patch({ generationId: "gen-1", label: "x" }));
+    expect(res.status).toBe(404);
+    expect(mockGetEditSession).not.toHaveBeenCalled();
+    expect(mockGenerationFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("400s on a missing generationId or a non-string label, before reading anything", async () => {
+    expect((await PATCH(patch({ label: "x" }))).status).toBe(400);
+    const res = await PATCH(patch({ generationId: "gen-1", label: 7 }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_label", field: "label" });
+    expect(mockGenerationFindUnique).not.toHaveBeenCalled();
+    expect(mockGenerationUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("authorizes against the ROW'S OWN cwid, never anything in the body", async () => {
+    mockGenerationFindUnique.mockResolvedValue(run("xyz9001"));
+    mockAuthorizeOverviewWrite.mockResolvedValue({ ok: false, reason: "not_self" });
+    const res = await PATCH(patch({ generationId: "gen-1", label: "x", cwid: "abc1001" }));
+    expect(res.status).toBe(403);
+    expect(mockAuthorizeOverviewWrite.mock.calls[0][0]).toMatchObject({ entityId: "xyz9001" });
+    expect(mockGenerationUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("sets a trimmed, width-clamped label on the owner's own run — no audit row", async () => {
+    const res = await PATCH(patch({ generationId: "gen-1", label: `  ${"R".repeat(130)}  ` }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, id: "gen-1", label: "R".repeat(120) });
+    expect(mockGenerationUpdateMany).toHaveBeenCalledWith({
+      where: { id: "gen-1" },
+      data: { label: "R".repeat(120) },
+    });
+    // A label is a display nickname, not an accountable act (see the route's ponytail note).
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockTxExecuteRaw).not.toHaveBeenCalled();
+  });
+
+  it("an empty / whitespace / null label CLEARS it (NULL)", async () => {
+    for (const label of ["", "   ", null, undefined]) {
+      mockGenerationUpdateMany.mockClear();
+      const res = await PATCH(patch({ generationId: "gen-1", label }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ label: null });
+      expect(mockGenerationUpdateMany.mock.calls[0][0]).toMatchObject({ data: { label: null } });
+    }
+  });
+
+  it("404s when the reader sees the row but the WRITER updates nothing", async () => {
+    mockGenerationUpdateMany.mockResolvedValue({ count: 0 });
+    const res = await PATCH(patch({ generationId: "gen-1", label: "x" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("404s when the run is already gone; 500s write_failed when the update throws", async () => {
+    mockGenerationFindUnique.mockResolvedValue(null);
+    expect((await PATCH(patch({ generationId: "gen-1", label: "x" }))).status).toBe(404);
+    mockGenerationFindUnique.mockResolvedValue(run("abc1001"));
+    mockGenerationUpdateMany.mockRejectedValue(new Error("deadlock"));
+    const res = await PATCH(patch({ generationId: "gen-1", label: "x" }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "write_failed" });
+  });
 });
 
 describe("DELETE /api/edit/biosketch/generations", () => {
