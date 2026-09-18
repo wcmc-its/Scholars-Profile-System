@@ -186,6 +186,10 @@ export async function POST(request: NextRequest): Promise<Response> {
               emphasis: effectiveParams.emphasis,
               instructions: effectiveParams.instructions,
               promptVersion: effectiveParams.promptVersion,
+              // #2653 v8 — the role on the application + contribution line (null / "" for
+              // Contributions and for v5–v7), so a restore recovers the role the draft argued.
+              applicationRole: effectiveParams.applicationRole,
+              contributionLine: effectiveParams.contributionLine,
             },
             products: result.products ?? undefined,
             sources: result.sources ?? undefined,

@@ -328,6 +328,9 @@ describe("POST /api/edit/biosketch/generate", () => {
             emphasis: "",
             instructions: "",
             promptVersion: "v7",
+            // #2653 v8 — persisted so a restore recovers them; unset here (Contributions, v7).
+            applicationRole: null,
+            contributionLine: "",
           },
           // Audit: the accountable human (self here), no impersonation overlay.
           createdByCwid: "self01",

@@ -10,7 +10,9 @@
  *   - Contributions — a `maxContributions` 1..5 segmented stepper (default 5).
  *   - Personal Statement — a REQUIRED `projectTitle` input + a REQUIRED `aims`
  *     textarea (the model needs them to write the "directly relevant experience"
- *     framing; the route 400s without them).
+ *     framing; the route 400s without them). Under a v8 prompt (#2653) a REQUIRED
+ *     "Your role on this application" select sits above the title, plus an optional
+ *     200-char "What you will do on this project" line; v5–v7 hide both.
  *
  * Both modes share an optional `emphasis` input and an optional `instructions`
  * note. Untrusted free text is clamped client-side at the same ceilings the
@@ -29,14 +31,19 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   BIOSKETCH_AIMS_MAX,
+  BIOSKETCH_APPLICATION_ROLE_LABELS,
+  BIOSKETCH_APPLICATION_ROLES,
+  BIOSKETCH_CONTRIBUTION_LINE_MAX,
   BIOSKETCH_EMPHASIS_MAX,
   BIOSKETCH_INSTRUCTIONS_MAX,
   BIOSKETCH_MAX_CONTRIBUTIONS,
   BIOSKETCH_PROJECT_TITLE_MAX,
+  isBiosketchApplicationRole,
   type BiosketchMode,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
 import {
+  biosketchVersionUsesApplicationRole,
   type BiosketchPromptVersionId,
   type BiosketchPromptVersionMeta,
 } from "@/lib/edit/biosketch-prompt-versions";
@@ -81,6 +88,8 @@ export function BiosketchGenerateControls({
   canSelectVersion = false,
 }: BiosketchGenerateControlsProps) {
   const isStatement = value.mode === "personal_statement";
+  // #2653 v8 — the role on the application is a v8 input; v5–v7 ignore it, so the control hides.
+  const asksRole = isStatement && biosketchVersionUsesApplicationRole(value.promptVersion);
   const cost = canSeeCost ? estimateBiosketchCostUsd(model, value.mode) : null;
   const showVersionSelector = canSelectVersion && versions.length > 0;
   const selectedVersion = versions.find((v) => v.id === value.promptVersion);
@@ -175,6 +184,68 @@ export function BiosketchGenerateControls({
         </details>
       )}
 
+      {asksRole && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="biosketch-application-role"
+              className="text-foreground text-sm font-medium"
+            >
+              Your role on this application{" "}
+              <span className="text-destructive" aria-hidden="true">
+                *
+              </span>
+            </label>
+            <select
+              id="biosketch-application-role"
+              value={value.applicationRole ?? ""}
+              disabled={disabled}
+              required
+              aria-required="true"
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  applicationRole: isBiosketchApplicationRole(e.target.value)
+                    ? e.target.value
+                    : null,
+                })
+              }
+              className={cn(
+                "border-apollo-border-strong bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
+                disabled && "cursor-not-allowed opacity-60",
+              )}
+              data-testid="biosketch-application-role"
+            >
+              <option value="">Select a role</option>
+              {BIOSKETCH_APPLICATION_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {BIOSKETCH_APPLICATION_ROLE_LABELS[r]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="biosketch-contribution-line"
+              className="text-foreground text-sm font-medium"
+            >
+              What you will do on this project{" "}
+              <span className="text-muted-foreground text-xs font-normal">(optional)</span>
+            </label>
+            <Input
+              id="biosketch-contribution-line"
+              value={value.contributionLine}
+              maxLength={BIOSKETCH_CONTRIBUTION_LINE_MAX}
+              disabled={disabled}
+              placeholder="e.g. lead the single-cell analyses for Aims 1 and 2"
+              onChange={(e) => onChange({ ...value, contributionLine: e.target.value })}
+              data-testid="biosketch-contribution-line"
+            />
+          </div>
+        </>
+      )}
+
       {isStatement && (
         <>
           <div className="flex flex-col gap-1.5">
@@ -221,8 +292,9 @@ export function BiosketchGenerateControls({
           </div>
 
           <p className="text-muted-foreground -mt-1 text-xs" data-testid="biosketch-statement-hint">
-            A title and aims are required — the statement is tailored to fitness for this specific
-            project.
+            {asksRole ? "Your role, a title, and aims" : "A title and aims"} are required — the
+            statement is tailored to fitness for this specific project
+            {asksRole ? " in that role" : ""}.
           </p>
         </>
       )}

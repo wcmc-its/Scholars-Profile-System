@@ -35,6 +35,7 @@ import {
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
+import { leadAuthorSurname } from "@/lib/edit/biosketch-references";
 import { scoreFundingImportance } from "@/lib/edit/funding-importance";
 import { isChairTitleFor } from "@/lib/leadership";
 import {
@@ -107,6 +108,10 @@ export type OverviewFacts = {
     nihPercentile?: number | null;
     /** NIH iCite cumulative citation count. #917 v6 — biosketch-only. */
     citedByCount?: number | null;
+    /** Lead (first-listed) author's surname from `Publication.authorsString`. #2653 v8 —
+     *  the NIH lead-author-and-year reference form; biosketch v8 only (neither model
+     *  projection carries it; the reference list reads it). Optional for older fixtures. */
+    leadAuthor?: string | null;
   }[];
   /** Distinct confirmed-authorship pmid count (the whole corpus, not just scored). */
   publicationCount: number;
@@ -367,6 +372,7 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
     relativeCitationRatio: number | null;
     nihPercentile: number | null;
     citedByCount: number | null;
+    leadAuthor: string | null;
     authorPosition: OverviewAuthorPosition | null;
     isFirstOrLast: boolean;
   }[]
@@ -402,6 +408,8 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
       relativeCitationRatio: true,
       nihPercentile: true,
       citedByCount: true,
+      // #2653 v8 -- the lead author for the NIH reference form; biosketch v8 only.
+      authorsString: true,
     },
   });
 
@@ -419,6 +427,7 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
       relativeCitationRatio: decimalToNumber(r.relativeCitationRatio),
       nihPercentile: decimalToNumber(r.nihPercentile),
       citedByCount: r.citedByCount ?? null,
+      leadAuthor: leadAuthorSurname(r.authorsString),
       authorPosition: position,
       isFirstOrLast: position === "first" || position === "last",
     };
@@ -772,6 +781,7 @@ export async function assembleOverviewFacts(
       relativeCitationRatio: p.relativeCitationRatio,
       nihPercentile: p.nihPercentile,
       citedByCount: p.citedByCount,
+      leadAuthor: p.leadAuthor,
     }));
 
   const activeGrants = funding

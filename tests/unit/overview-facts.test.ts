@@ -349,9 +349,20 @@ describe("assembleOverviewFacts — representative publications (distilled, sele
       relativeCitationRatio: null,
       nihPercentile: null,
       citedByCount: null,
+      // #2653 v8 — no authorsString on the row → no lead author.
+      leadAuthor: null,
     });
     // The raw abstract is gone (decision 4).
     expect(pub).not.toHaveProperty("abstractExcerpt");
+  });
+
+  it("derives leadAuthor from the row's authorsString, unwrapping the WCM ((…)) marker (#2653)", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1", isFirst: true, isLast: false }]);
+    mockPublicationFindMany.mockResolvedValue([
+      { ...pubRow("1"), authorsString: "((Doe JA)), Roe B, Poe C" },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts!.representativePublications[0]!.leadAuthor).toBe("Doe");
   });
 
   it("does NOT default-select a middle-author scored pub", async () => {
