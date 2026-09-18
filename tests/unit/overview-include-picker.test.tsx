@@ -46,6 +46,10 @@ describe("OverviewIncludePicker — tiers", () => {
     render(<OverviewIncludePicker options={options()} deltas={deltas()} onChange={() => {}} />);
     expect(screen.getByTestId("overview-source-row-publication-11")).toBeTruthy();
     expect(screen.getByTestId("overview-source-row-publication-22")).toBeTruthy();
+    // Every citation carries its PMID in the meta line.
+    expect(screen.getByTestId("overview-source-row-publication-11").textContent).toContain(
+      "PMID 11",
+    );
     // "more" and "mid" buckets are hidden until revealed.
     expect(screen.queryByTestId("overview-source-row-publication-33")).toBeNull();
     expect(screen.queryByTestId("overview-source-row-publication-44")).toBeNull();

@@ -101,6 +101,44 @@ describe("BiosketchResultCard — #2653 v8 Personal Statement products", () => {
   });
 });
 
+describe("BiosketchResultCard — every product row carries its PMID", () => {
+  const PRODUCTS: BiosketchProducts = {
+    related: [
+      {
+        pmid: "11",
+        title: "Alpha study",
+        venue: "J Alpha",
+        year: 2019,
+        contributionIndex: 1,
+        why: "",
+      },
+    ],
+    otherSignificant: [
+      {
+        pmid: "22",
+        title: "Beta study",
+        venue: null,
+        year: null,
+        contributionIndex: null,
+        why: "Cited widely.",
+      },
+    ],
+    relatedFromAims: false,
+  };
+
+  it("links PMID n on each row (after the why-line when there is one)", () => {
+    const { container } = render(<BiosketchResultCard result={result({ products: PRODUCTS })} />);
+    const card = within(container.querySelector('[data-testid="biosketch-result"]') as HTMLElement);
+    const a11 = card.getByTestId("biosketch-product-pmid-11");
+    expect(a11.getAttribute("href")).toContain("11");
+    expect(a11.textContent).toBe("PMID 11");
+    // With a why-line, the PMID follows it on the same muted line.
+    expect(card.getByTestId("biosketch-product-22").textContent).toContain(
+      "Cited widely. · PMID 22",
+    );
+  });
+});
+
 describe("BiosketchResultCard — SciENcv worksheet link (#2652)", () => {
   it("links to the worksheet for a persisted generation", () => {
     const { container } = render(

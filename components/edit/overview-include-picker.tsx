@@ -160,9 +160,14 @@ function buildPublications(options: OverviewSourceOptions): RecordView[] {
     return {
       id: p.pmid,
       title: <PubTitle as="span" value={p.title} />,
-      meta: [p.venue ?? null, pubRole(p), p.year != null ? String(p.year) : null].filter(
-        (x): x is string => Boolean(x),
-      ),
+      // Every citation carries its PMID (the row already links to PubMed; the number is what
+      // a reader can search or paste).
+      meta: [
+        p.venue ?? null,
+        pubRole(p),
+        p.year != null ? String(p.year) : null,
+        `PMID ${p.pmid}`,
+      ].filter((x): x is string => Boolean(x)),
       reason: p.reason,
       bucket,
       externalHref: `https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`,

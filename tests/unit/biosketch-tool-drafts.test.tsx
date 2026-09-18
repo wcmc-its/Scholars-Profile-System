@@ -234,6 +234,23 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     );
   });
 
+  it("View draft says WHICH draft is on screen and moves focus to the result heading", async () => {
+    const { container } = renderTool();
+    fireEvent.click(await findQ(container, "biosketch-version-view-gen-ps"));
+    const ctx = await findQ(container, "biosketch-result-context");
+    // The card mounts below the form; the header names the saved draft (label + date) so the
+    // reader isn't left guessing whether this is a fresh run or the row they clicked.
+    expect(ctx.textContent).toContain("Saved draft “R01 resubmission”, generated Jul 20, 2026.");
+    await waitFor(() => expect(document.activeElement?.id).toBe("biosketch-result-heading"));
+    // An unlabeled draft still gets the date.
+    fireEvent.click(q(container, "biosketch-version-view-gen-c") as HTMLElement);
+    await waitFor(() =>
+      expect(q(container, "biosketch-result-context")?.textContent).toContain(
+        "Saved draft, generated Jul 18, 2026.",
+      ),
+    );
+  });
+
   it("the generate POST carries the (edited) label and the cloned params", async () => {
     const { container } = renderTool();
     fireEvent.click(await findQ(container, "biosketch-version-clone-gen-ps"));
