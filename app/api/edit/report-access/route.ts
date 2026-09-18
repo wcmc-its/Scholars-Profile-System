@@ -15,7 +15,11 @@
  * validation ⇒ 400 → the write, one transaction with its
  * `report_access_grant` / `report_access_revoke` audit row (`actorCwid` is
  * always `realCwid`, never the "View as" target). Responds with the updated
- * list for the report so the panel re-renders from the server's truth.
+ * list for the report so the panel re-renders from the server's truth — the
+ * list the write itself returned, read inside its transaction on the WRITER.
+ * It is never re-fetched here through `listReportAccess`'s reader default:
+ * `db.read` is the Aurora reader replica in prod, and a post-write read there
+ * can miss the row just written (the `core-client` route's rule, PR #2620).
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
@@ -25,9 +29,9 @@ import {
   canManageReportAccess,
   grantReportAccess,
   isMentoredPubsScopeKey,
-  listReportAccess,
   MENTORED_PUBS_REPORT,
   revokeReportAccess,
+  type ReportAccessWriteResult,
 } from "@/lib/edit/report-access";
 
 const PATH = "/api/edit/report-access";
@@ -68,18 +72,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const args = { reportKey, scopeKey, cwid, actorCwid: realCwid, impersonatedCwid, requestId };
-  let changed: boolean;
+  let result: ReportAccessWriteResult;
   try {
-    ({ changed } = op === "grant" ? await grantReportAccess(args) : await revokeReportAccess(args));
+    result = op === "grant" ? await grantReportAccess(args) : await revokeReportAccess(args);
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
 
-  const rows = await listReportAccess(reportKey);
   return editOk({
     op,
-    changed,
-    rows: rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
+    changed: result.changed,
+    rows: result.rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
   });
 }

@@ -4,7 +4,11 @@
  * `readEditRequest` preamble runs (origin check stubbed ok), the session
  * seams are mocked, and `lib/edit/report-access` is mocked at the module
  * boundary so this suite asserts what the route wires where, not the
- * grant functions' own logic (covered in `report-access.test.ts`).
+ * grant functions' own logic (covered in `report-access.test.ts`). One
+ * wiring fact is load-bearing: the rows the route answers with are the ones
+ * the WRITE returned (read on the writer, inside its transaction) — the route
+ * must never re-fetch them through `listReportAccess`, whose default client
+ * is the reader replica (the read-your-writes race, `core-client` PR #2620).
  */
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,22 +69,28 @@ function asGenuine(cwid: string, roles: { isSuperuser?: boolean; isCommsSteward?
 
 const VALID = { op: "grant", reportKey: "mentored-publications", scopeKey: "md", cwid: "Abc1234" };
 
+/** The list as the write hands it back (writer-side, in-transaction). */
+const WRITTEN_ROWS = [
+  {
+    reportKey: "mentored-publications",
+    scopeKey: "md",
+    cwid: "abc1234",
+    grantedBy: ADMIN,
+    grantedAt: new Date("2026-09-18T12:00:00Z"),
+  },
+];
+/** What a reader-side `listReportAccess` would answer — deliberately
+ *  different, so a route that re-fetched would be caught by the body. */
+const READER_ROWS = [{ ...WRITTEN_ROWS[0], cwid: "rdr0001", scopeKey: "ecr" }];
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   asGenuine(ADMIN, { isSuperuser: true });
-  h.mockGrant.mockResolvedValue({ changed: true });
-  h.mockRevoke.mockResolvedValue({ changed: true });
-  h.mockList.mockResolvedValue([
-    {
-      reportKey: "mentored-publications",
-      scopeKey: "md",
-      cwid: "abc1234",
-      grantedBy: ADMIN,
-      grantedAt: new Date("2026-09-18T12:00:00Z"),
-    },
-  ]);
+  h.mockGrant.mockResolvedValue({ changed: true, rows: WRITTEN_ROWS });
+  h.mockRevoke.mockResolvedValue({ changed: true, rows: WRITTEN_ROWS });
+  h.mockList.mockResolvedValue(READER_ROWS);
 });
 
 describe("POST /api/edit/report-access — gating", () => {
@@ -148,13 +158,21 @@ describe("POST /api/edit/report-access — writes", () => {
     expect(h.mockRevoke).not.toHaveBeenCalled();
   });
 
-  it("revoke: dispatches to revokeReportAccess and accepts the wildcard scope", async () => {
-    h.mockRevoke.mockResolvedValue({ changed: false });
+  it("answers with the rows the WRITE returned, never a reader-side re-fetch", async () => {
+    const res = await POST(post(VALID));
+    const body = await res.json();
+    expect(body.rows.map((r: { cwid: string }) => r.cwid)).toEqual(["abc1234"]);
+    expect(h.mockList).not.toHaveBeenCalled();
+  });
+
+  it("revoke: dispatches to revokeReportAccess, accepts the wildcard scope, returns the write's rows", async () => {
+    h.mockRevoke.mockResolvedValue({ changed: false, rows: [] });
     const res = await POST(post({ ...VALID, op: "revoke", scopeKey: "*" }));
     expect(res.status).toBe(200);
     expect(h.mockRevoke).toHaveBeenCalledWith(expect.objectContaining({ scopeKey: "*", cwid: "abc1234" }));
-    expect(await res.json()).toMatchObject({ ok: true, op: "revoke", changed: false });
+    expect(await res.json()).toMatchObject({ ok: true, op: "revoke", changed: false, rows: [] });
     expect(h.mockGrant).not.toHaveBeenCalled();
+    expect(h.mockList).not.toHaveBeenCalled();
   });
 
   it("500 write_failed when the grant throws", async () => {
