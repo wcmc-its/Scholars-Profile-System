@@ -6,7 +6,8 @@
  * scholar's edit context for the identity, education and appointment blocks plus the published,
  * profile-visible honors, and hands everything to the client worksheet.
  *
- * Flag-gated like the generations GET (`EDIT_BIOSKETCH_GENERATE` off ⇒ 404). Reads only —
+ * Flag-gated like the generations GET (`EDIT_BIOSKETCH_GENERATE` off ⇒ 404), and the #536
+ * hidden-class guard runs after the context loads, as on the scholar editor. Reads only —
  * nothing on the page writes. `force-dynamic` + `noindex`, mirroring the rest of `/edit/*`.
  */
 import { notFound, redirect } from "next/navigation";
@@ -23,6 +24,7 @@ import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { resolveEditIdentity } from "@/lib/edit/request";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 
 export const dynamic = "force-dynamic";
 
@@ -71,10 +73,13 @@ export default async function BiosketchWorksheetPage({
       path: PATH,
       reason: authz.reason,
     });
+    // No `targetCwid` on the 403: unlike the scholar pages, the cwid is NOT in the URL the
+    // caller typed — it came off the row — so echoing it (even as a data-attribute) would tell
+    // a caller holding only the opaque id whose generation it is. The denial log above keeps it.
     return (
       <div className="bg-apollo-page min-h-screen">
         <ConsoleTopBar variant="console" />
-        <ForbiddenEditPage targetCwid={generation.cwid} />
+        <ForbiddenEditPage />
       </div>
     );
   }
@@ -92,6 +97,11 @@ export default async function BiosketchWorksheetPage({
     }),
   ]);
   if (!ctx) notFound();
+
+  // #536 — a hidden identity class (doctoral student) has no public profile, so only a
+  // superuser reaches any of its /edit surfaces; mirrors `/edit/scholar/[cwid]`. A
+  // non-superuser — including the scholar themselves — 404s.
+  if (!session.isSuperuser && !isPubliclyDisplayed(ctx.scholar.roleCategory)) notFound();
 
   const isSelf = session.cwid === generation.cwid;
   const backHref = isSelf

@@ -31,7 +31,12 @@ import {
 import type { BiosketchProduct, BiosketchProducts } from "@/lib/edit/biosketch-products";
 import { cn } from "@/lib/utils";
 
-/** SciENcv accepts at most this many honors; the picker enforces it when the profile holds more. */
+/**
+ * SciENcv accepts at most this many honors; the picker enforces it when the profile holds more.
+ * Source: the NIH Supplement limits table in the Galter SciENcv guide, updated 2026-05-28 — the
+ * same source as the 3,500 / 2,000 character caps. Not yet confirmed against the SciENcv form
+ * itself; when it is, record the date here (the Phase 2 spec's `verifiedOn` for this limit).
+ */
 export const SCIENCV_HONORS_MAX = 15;
 
 export type WorksheetEducation = {
