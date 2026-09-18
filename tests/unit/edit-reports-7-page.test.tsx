@@ -88,6 +88,27 @@ function findByType(node: unknown, type: unknown): El | null {
   return null;
 }
 
+
+/** Every string/number leaf under `node`, joined — what a user would read. */
+function textOf(node: unknown): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (typeof node !== "object") return "";
+  return childrenOf(asEl(node)).map(textOf).join("");
+}
+
+function findByHref(node: unknown, pattern: RegExp): El | null {
+  if (node === null || node === undefined || typeof node !== "object") return null;
+  const el = asEl(node);
+  if (typeof el.props?.href === "string" && pattern.test(el.props.href)) return el;
+  for (const c of childrenOf(el)) {
+    const found = findByHref(c, pattern);
+    if (found) return found;
+  }
+  return null;
+}
+
 function findByTestId(node: unknown, testId: string): El | null {
   if (node === null || node === undefined || typeof node !== "object") return null;
   const el = asEl(node);
@@ -211,6 +232,42 @@ describe("/edit/reports/7 — wiring", () => {
     // Publications view renders its table (empty state here), not the summary.
     expect(findByTestId(result, "mentored-pubs-summary")).toBeNull();
     expect(findByTestId(result, "mentored-pubs-all-missing")).toBeNull();
+  });
+
+
+  it("with data: the learner row shows each mentor's name AND cwid; a publication row links its PMID to PubMed", async () => {
+    const summaryRow = {
+      gradYear: 2025, entryYear: 2021, entryYearSource: "bridge", cwid: "stu0001",
+      firstName: "Ada", lastName: "Learner", program: "MD",
+      mentors: [{ cwid: "men0001", name: "Grace Mentor" }],
+      pubsInWindow: 1, withMentorInWindow: 1, pubsAllTime: 1, highImpactInWindow: 0, firstAuthorInWindow: 1,
+    };
+    const pub = {
+      pmid: 12345678, title: "A paper", journal: "J Test", year: 2024, citation: "Learner A, Mentor G. A paper. J Test. 2024.",
+      jif: 3.2, citations: 4, dateAdded: null, authorCount: 2,
+      learners: [{ cwid: "stu0001", firstName: "Ada", lastName: "Learner", firstAuthor: true, inWindow: true }],
+      mentors: [{ cwid: "men0001", name: "Grace Mentor" }], withMentor: true,
+    };
+    h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
+      summary: [summaryRow], detail: [], publications: [pub],
+      generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
+    }));
+
+    const summary = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
+    const learnerRow = findByTestId(summary, "mentored-pubs-learner-stu0001");
+    expect(learnerRow).not.toBeNull();
+    const rowText = textOf(learnerRow);
+    expect(rowText).toContain("Grace Mentor");
+    expect(rowText).toContain("men0001");
+
+    const pubs = await EditReportsMentoredPublicationsPage({ searchParams: sp({ view: "publications" }) });
+    const pubRow = findByTestId(pubs, "mentored-pubs-pub-12345678");
+    expect(pubRow).not.toBeNull();
+    expect(findByHref(pubRow, /pubmed\.ncbi\.nlm\.nih\.gov\/12345678/)).not.toBeNull();
+    const pubText = textOf(pubRow);
+    expect(pubText).toContain("A paper");
+    expect(pubText).toContain("men0001");
+    expect(pubText).toContain("stu0001");
   });
 
   it("all mode with an unloaded bridge renders the notice and no table", async () => {
