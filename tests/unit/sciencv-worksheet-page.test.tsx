@@ -169,6 +169,14 @@ const APPOINTMENT_ROWS = [
     startDate: new Date("2010-09-01T00:00:00.000Z"),
     endDate: new Date("2013-08-31T00:00:00.000Z"),
   },
+  {
+    // Onboarding placeholder (`shouldSuppressPreStart`): dropped whenever a real row exists.
+    externalId: "appt-prestart",
+    title: "Pre-Start Academic",
+    organization: "Example Dept",
+    startDate: new Date("2015-06-01T00:00:00.000Z"),
+    endDate: new Date("2015-06-30T00:00:00.000Z"),
+  },
 ];
 const OTHER_DRAFT_ROW = {
   // Pre-v7 rows stored a plain `string[]`; `coerceEntries` lifts it to `{ title, body }`.
@@ -398,7 +406,7 @@ describe("/edit/biosketch/worksheet — what reaches the worksheet", () => {
     expect(titles).not.toContain("Decoy (edit context)");
   });
 
-  it("appointments: the profile's #160 suppression exclusion + artifact drop, in SciENcv order", async () => {
+  it("appointments: the profile's #160 suppression exclusion + artifact + pre-start drops, in SciENcv order", async () => {
     const p = await worksheetProps();
     expect(mockSuppressionFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -410,7 +418,8 @@ describe("/edit/biosketch/worksheet — what reaches the worksheet", () => {
       }),
     );
     // Current (no end date) first, newest start first; then ended, most recently ended first.
-    // The suppressed Adjunct and the 3-day (Interim) artifact are gone; dates are ISO days.
+    // The suppressed Adjunct, the 3-day (Interim) artifact and the Pre-Start placeholder are
+    // gone; dates are ISO days.
     expect(p.appointments).toEqual([
       { title: "Chair", organization: "Example Dept", startDate: "2022-01-01", endDate: null },
       {

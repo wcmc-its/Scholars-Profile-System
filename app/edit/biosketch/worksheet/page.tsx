@@ -18,7 +18,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { SciencvWorksheet } from "@/components/edit/sciencv-worksheet";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
-import { looksLikeArtifactAppointment } from "@/lib/appointment-artifacts";
+import { looksLikeArtifactAppointment, shouldSuppressPreStart } from "@/lib/appointment-artifacts";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
@@ -142,7 +142,10 @@ export default async function BiosketchWorksheetPage({
     .filter(
       (a) =>
         !suppressedAppointmentIds.has(a.externalId) &&
-        !looksLikeArtifactAppointment(a.startDate, a.endDate),
+        !looksLikeArtifactAppointment(a.startDate, a.endDate) &&
+        // Same placeholder drop the profile's past list applies — a "Pre-Start Academic"
+        // row is an onboarding artifact, not a position anyone would paste into SciENcv.
+        !shouldSuppressPreStart(a.title, appointmentRows.length),
     )
     // SciENcv's reverse-chronological order: current (no end date) first, then most recently
     // ended, then most recently started; an undated start sorts last within its group.
