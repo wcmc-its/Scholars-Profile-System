@@ -55,6 +55,9 @@ export type BiosketchGenerateResult = {
   /** #917 v6 follow-up — per-contribution source PMIDs, or null. */
   sources: BiosketchContributionSources[] | null;
   generationId: string | null;
+  /** Set when the card shows a SAVED draft opened from the drafts list (not a fresh run):
+   *  the label (or null) and the formatted generation date, so the header says which one. */
+  viewing?: { label: string | null; generatedOn: string };
 };
 
 /** Format a product / suggested pub as a single export/display line: "title · venue · year".
@@ -143,10 +146,20 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-0.5">
-          <h2 className="text-foreground text-base font-semibold">
+          {/* The heading is the focus target when a saved draft is opened from the list above
+              (`View draft` in the tool): the card mounts below the form, out of view, so the
+              tool focuses this — which scrolls it in — instead of leaving the reader to hunt. */}
+          <h2
+            id="biosketch-result-heading"
+            tabIndex={-1}
+            className="text-foreground scroll-mt-20 text-base font-semibold outline-none"
+          >
             {isContributions ? "Contributions to Science" : "Personal Statement"}
           </h2>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-xs" data-testid="biosketch-result-context">
+            {result.viewing
+              ? `Saved draft${result.viewing.label ? ` “${result.viewing.label}”` : ""}, generated ${result.viewing.generatedOn}. `
+              : ""}
             Copy these into your grant application. Nothing here is saved to your profile.
           </p>
         </div>
@@ -249,7 +262,7 @@ function productsToText(products: BiosketchProducts): string {
           : "  Not mapped to a contribution:";
       lines.push(head);
       for (const p of g.items) {
-        lines.push(`    - ${productLine(p)}`);
+        lines.push(`    - ${productLine(p)} · PMID ${p.pmid}`);
         if (p.why) lines.push(`        ${p.why}`);
       }
     }
@@ -293,7 +306,20 @@ function ProductBucket({
             {g.items.map((p) => (
               <li key={p.pmid} className="text-sm" data-testid={`biosketch-product-${p.pmid}`}>
                 <span className="text-foreground">{productLine(p)}</span>
-                {p.why && <span className="text-muted-foreground block text-xs">{p.why}</span>}
+                {/* Every citation carries its PMID — the identifier is what travels into My
+                    Bibliography / SciENcv; a title alone can't be pasted anywhere. */}
+                <span className="text-muted-foreground block text-xs">
+                  {p.why && <>{p.why} · </>}
+                  <a
+                    href={pubmedUrl(p.pmid)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-apollo-maroon hover:underline"
+                    data-testid={`biosketch-product-pmid-${p.pmid}`}
+                  >
+                    PMID {p.pmid}
+                  </a>
+                </span>
               </li>
             ))}
           </ul>

@@ -482,7 +482,13 @@ export function BiosketchTool({
       products: gen.products,
       sources: gen.sources,
       generationId: gen.id,
+      viewing: { label: gen.label ?? null, generatedOn: formatGenDate(gen.createdAt) },
     });
+    // The result card mounts BELOW the form; the row the reader clicked is above it. Focus the
+    // card's heading (which scrolls it into view) so "View draft" visibly does something.
+    window.requestAnimationFrame(() =>
+      document.getElementById("biosketch-result-heading")?.focus(),
+    );
   }
 
   /**
