@@ -90,8 +90,9 @@ const PMID_BATCH = 1000;
 export type MentoredPublicationsFilters = {
   /** The scope keys the caller may see (`"*"` = every bucket). */
   scopes: ReadonlyArray<string>;
-  /** Graduation years kept; `null` = every year. */
-  gradYears: ReadonlyArray<number> | null;
+  /** Graduation years kept (`null` in the list = learners with no graduation
+   *  year); `null` = every year. */
+  gradYears: ReadonlyArray<number | null> | null;
   tail: number;
   pubs: MentoredPubsSet;
 };
@@ -114,18 +115,20 @@ export type MentoredPubsSummaryRow = {
   program: string;
   /** The learner's mentors (every `aoc_mentee` row), sorted by display name. */
   mentors: MentorRef[];
-  /** Distinct pmids inside the program window (of the selected set). */
-  pubsInWindow: number;
+  /** Distinct pmids inside the program window (of the selected set). The
+   *  four in-window counts are `null` (never 0) when the learner's window is
+   *  unknowable — no effective entry year or no graduation year. */
+  pubsInWindow: number | null;
   /** Distinct in-window pmids with one of the learner's mentors on the
    *  byline. Equals `pubsInWindow` in `"mentored"` mode. */
-  withMentorInWindow: number;
+  withMentorInWindow: number | null;
   /** Distinct pmids across every year. */
   pubsAllTime: number;
   /** Distinct in-window pmids in a journal with JIF >= HIGH_IMPACT_THRESHOLD. */
-  highImpactInWindow: number;
+  highImpactInWindow: number | null;
   /** Distinct in-window pmids where the learner is author #1 (from the
    *  bridge's per-author CWIDs). */
-  firstAuthorInWindow: number;
+  firstAuthorInWindow: number | null;
 };
 
 export type MentoredPubsDetailRow = {
@@ -157,7 +160,8 @@ export type MentoredPubsDetailRow = {
    *  list does not carry their CWID. */
   learnerAuthorPosition: number | null;
   authorCount: number;
-  inWindow: boolean;
+  /** `null` = the learner's window is unknowable (see `inProgramWindow`). */
+  inWindow: boolean | null;
 };
 
 /** A learner's presence on one publication (the Publications view). */
@@ -166,7 +170,7 @@ export type MentoredPubsLearnerOnPub = {
   firstName: string | null;
   lastName: string | null;
   firstAuthor: boolean;
-  inWindow: boolean;
+  inWindow: boolean | null;
 };
 
 /** One row per DISTINCT pmid across every learner in scope — the page's
@@ -203,15 +207,17 @@ export type MentoredPublicationsReport = {
   allPubsLoaded: boolean | null;
 };
 
-/** Whether `year` falls in the learner's program window. Unknown year, grad
- *  year or entry year → false (never a guess). */
+/** Whether `year` falls in the learner's program window. Unknown grad year
+ *  or entry year → null (the window itself is unknowable); unknown pub year
+ *  → false (never a guess). */
 export function inProgramWindow(
   year: number | null,
   entryYear: number | null,
   gradYear: number | null,
   tail: number,
-): boolean {
-  if (year === null || entryYear === null || gradYear === null) return false;
+): boolean | null {
+  if (entryYear === null || gradYear === null) return null;
+  if (year === null) return false;
   return entryYear <= year && year <= gradYear + tail;
 }
 
@@ -346,20 +352,34 @@ function programLabel(buckets: ReadonlySet<MentoringProgramKey>): string {
 }
 
 /** Distinct graduation years present in `aoc_mentee` within `scopes`, newest
- *  first — the page's year-picker choices (default = the two most recent). */
-export async function loadMentoredGradYears(scopes: ReadonlyArray<string>): Promise<number[]> {
+ *  first, then a trailing `null` when any admitted row has no graduation
+ *  year — the page's year-picker choices. */
+export async function loadMentoredGradYears(scopes: ReadonlyArray<string>): Promise<Array<number | null>> {
   const rows = await db.read.aocMentee.findMany({
     select: { graduationYear: true, programType: true },
   });
   const scopeSet = new Set(scopes);
   const years = new Set<number>();
+  let unknown = false;
   for (const r of rows) {
-    if (r.graduationYear === null) continue;
     const bucket = bucketProgramType(r.programType);
     if (!bucket || !scopeAdmits(scopeSet, bucket)) continue;
-    years.add(r.graduationYear);
+    if (r.graduationYear === null) unknown = true;
+    else years.add(r.graduationYear);
   }
-  return [...years].sort((a, b) => b - a);
+  const out: Array<number | null> = [...years].sort((a, b) => b - a);
+  if (unknown) out.push(null);
+  return out;
+}
+
+/** The page's / route's default selection: the two most recent known
+ *  years, plus "unknown" when the scope has learners with no
+ *  graduation year (else they would silently vanish — MD-PhD's roster
+ *  carries no years at all). */
+export function defaultMentoredPubsYears(choices: ReadonlyArray<number | null>): Array<number | null> {
+  const out: Array<number | null> = choices.filter((y) => y !== null).slice(0, 2);
+  if (choices.includes(null)) out.push(null);
+  return out;
 }
 
 /** 1-based byline rank of the author whose `personIdentifier` is `cwid`, or
@@ -387,7 +407,7 @@ export async function loadMentoredPublicationsReport({
   pubs = "mentored",
 }: {
   scopes: ReadonlyArray<string>;
-  gradYears?: ReadonlyArray<number> | null;
+  gradYears?: ReadonlyArray<number | null> | null;
   tail?: number;
   pubs?: MentoredPubsSet;
 }): Promise<MentoredPublicationsReport> {
@@ -403,8 +423,14 @@ export async function loadMentoredPublicationsReport({
     allPubsLoaded,
   });
 
+  // A `null` in `gradYears` admits the rows with no graduation year.
+  const knownYears = gradYears?.filter((y): y is number => y !== null) ?? [];
   const aocRows = (await db.read.aocMentee.findMany({
-    where: gradYears ? { graduationYear: { in: [...gradYears] } } : undefined,
+    where: !gradYears
+      ? undefined
+      : gradYears.includes(null)
+        ? { OR: [{ graduationYear: { in: knownYears } }, { graduationYear: null }] }
+        : { graduationYear: { in: knownYears } },
     select: {
       mentorCwid: true,
       menteeCwid: true,
@@ -649,6 +675,8 @@ export async function loadMentoredPublicationsReport({
   const summary: MentoredPubsSummaryRow[] = [...learners.values()].map((l) => {
     const { entryYear, source } = effectiveEntryYear(l.entryYear, l.gradYear);
     const a = acc.get(l.cwid);
+    // No window to count against → null, not a misleading 0.
+    const windowed = (n: number) => (entryYear === null || l.gradYear === null ? null : n);
     return {
       gradYear: l.gradYear,
       entryYear,
@@ -658,11 +686,11 @@ export async function loadMentoredPublicationsReport({
       lastName: l.lastName,
       program: programLabel(l.buckets),
       mentors: [...l.mentorCwids].map(mentorRef).sort(compareMentor),
-      pubsInWindow: a?.inWindow.size ?? 0,
-      withMentorInWindow: a?.withMentorInWindow.size ?? 0,
+      pubsInWindow: windowed(a?.inWindow.size ?? 0),
+      withMentorInWindow: windowed(a?.withMentorInWindow.size ?? 0),
       pubsAllTime: a?.all.size ?? 0,
-      highImpactInWindow: a?.highImpact.size ?? 0,
-      firstAuthorInWindow: a?.firstAuthor.size ?? 0,
+      highImpactInWindow: windowed(a?.highImpact.size ?? 0),
+      firstAuthorInWindow: windowed(a?.firstAuthor.size ?? 0),
     };
   });
 

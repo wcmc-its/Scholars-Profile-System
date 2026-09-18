@@ -7,14 +7,14 @@
  * three-sheet workbook behind "Download .xlsx"
  * (`/api/edit/reports/mentored-publications`, same query string).
  *
- * Two in-page views (`view=summary|publications`, a tab pair above the table):
- * the per-learner Summary, and Publications — one row per distinct paper,
- * most recent first, as a Vancouver citation with its PMID link, JIF, iCite
- * count, the learner(s) and mentor(s) on it. Two publication sets
- * (`pubs=mentored|all`, a toggle): the co-pubs with an AOC mentor (default),
- * or every publication of the learner from the `aoc_mentee_publication`
- * bridge, each flagged for a mentor co-author. Both params ride every tab /
- * toggle link and the download link; `view` is page-only.
+ * Two in-page views (`view=summary|publications`, underline tabs above the
+ * table): Learners — the per-learner summary — and Publications — one row per
+ * distinct paper, most recent first, as a Vancouver citation with its PMID
+ * link, JIF, iCite count, the learner(s) and mentor(s) on it. Two publication
+ * sets (`pubs=mentored|all`, a select in the filter form): the co-pubs with
+ * an AOC mentor (default), or every publication of the learner from the
+ * `aoc_mentee_publication` bridge, each flagged for a mentor co-author. Both
+ * params ride every tab link and the download link; `view` is page-only.
  *
  * NOT unit-scoped like reports 1–6: access is a `report_access` row
  * (`lib/edit/report-access.ts`) — superuser / comms_steward always pass;
@@ -46,6 +46,7 @@ import {
 } from "@/lib/edit/mentored-publications-params";
 import {
   DEFAULT_TAIL,
+  defaultMentoredPubsYears,
   HIGH_IMPACT_THRESHOLD,
   loadMentoredGradYears,
   loadMentoredPublicationsReport,
@@ -75,9 +76,9 @@ export const metadata = {
 const TH_CLASS = "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
 const TD_CLASS = "border-apollo-border border-t px-3 py-2 align-top";
 const CWID_CLASS = "text-muted-foreground ml-2 font-mono text-xs";
-const TAB_BASE = "inline-flex h-8 items-center rounded-md px-3 text-sm font-medium";
-const TAB_ACTIVE = `${TAB_BASE} bg-apollo-surface-2 text-foreground`;
-const TAB_IDLE = `${TAB_BASE} text-muted-foreground hover:bg-apollo-surface-2`;
+// Underline tabs, as `components/edit/matcha-tab.tsx` draws them.
+const TAB_ACTIVE = "border-apollo-maroon inline-block border-b-2 py-2 text-sm font-medium";
+const TAB_IDLE = "text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-2 text-sm";
 
 function pageHref(params: MentoredPubsParams): string {
   return `/edit/reports/7?${mentoredPubsQueryString(params)}`;
@@ -104,7 +105,7 @@ function FilterForm({
   programChoices,
 }: {
   params: MentoredPubsParams;
-  yearChoices: ReadonlyArray<number>;
+  yearChoices: ReadonlyArray<number | null>;
   programChoices: ReadonlyArray<readonly [string, string]>;
 }) {
   const selected = new Set(params.years ?? []);
@@ -115,16 +116,15 @@ function FilterForm({
       className="group border-apollo-border bg-apollo-surface mt-4 flex flex-wrap items-end gap-4 rounded-md border p-3 text-xs"
       data-testid="mentored-pubs-filters"
     >
-      {/* The view / set ride along so a filter change keeps them. */}
+      {/* The view rides along so a filter change keeps it. */}
       {params.view !== "summary" && <input type="hidden" name="view" value={params.view} />}
-      <input type="hidden" name="pubs" value={params.pubs} />
       <fieldset className="flex flex-col gap-1">
         <legend className="text-muted-foreground">Graduation year</legend>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {yearChoices.map((y) => (
-            <label key={y} className="inline-flex items-center gap-1">
-              <input type="checkbox" name="years" value={y} defaultChecked={selected.has(y)} />
-              {y}
+            <label key={y ?? "unknown"} className="inline-flex items-center gap-1">
+              <input type="checkbox" name="years" value={y ?? "unknown"} defaultChecked={selected.has(y)} />
+              {y ?? "Unknown grad year"}
             </label>
           ))}
           <label className="inline-flex items-center gap-1">
@@ -151,6 +151,18 @@ function FilterForm({
         </label>
       )}
       <label className="flex flex-col gap-1">
+        <span className="text-muted-foreground">Publications</span>
+        <select
+          name="pubs"
+          defaultValue={params.pubs}
+          className="border-apollo-border rounded border px-2 py-1"
+          data-testid="mentored-pubs-set"
+        >
+          <option value="mentored">Co-authored with a mentor</option>
+          <option value="all">All learner publications</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
         <span className="text-muted-foreground">Years after graduation still counted</span>
         <select name="tail" defaultValue={String(params.tail)} className="border-apollo-border rounded border px-2 py-1">
           {Array.from({ length: MAX_TAIL + 1 }, (_, i) => (
@@ -171,8 +183,8 @@ function FilterForm({
   );
 }
 
-/** The Summary | Publications view tabs and the Mentored | All set toggle —
- *  plain links that keep every other param. */
+/** The Learners | Publications view tabs — plain links that keep every other
+ *  param. */
 function ViewControls({ params }: { params: MentoredPubsParams }) {
   const tab = (view: MentoredPubsParams["view"], label: string) => (
     <Link
@@ -184,34 +196,11 @@ function ViewControls({ params }: { params: MentoredPubsParams }) {
       {label}
     </Link>
   );
-  const toggle = (pubs: MentoredPubsParams["pubs"], label: string) => (
-    <Link
-      href={pageHref({ ...params, pubs })}
-      className={params.pubs === pubs ? TAB_ACTIVE : TAB_IDLE}
-      aria-pressed={params.pubs === pubs}
-      data-testid={`mentored-pubs-set-${pubs}`}
-    >
-      {label}
-    </Link>
-  );
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-      <nav
-        className="border-apollo-border inline-flex gap-1 rounded-md border p-0.5"
-        aria-label="View"
-      >
-        {tab("summary", "Summary")}
-        {tab("publications", "Publications")}
-      </nav>
-      <div
-        className="border-apollo-border inline-flex gap-1 rounded-md border p-0.5"
-        role="group"
-        aria-label="Publication set"
-      >
-        {toggle("mentored", "Mentored co-publications")}
-        {toggle("all", "All learner publications")}
-      </div>
-    </div>
+    <nav className="border-apollo-border mt-4 flex gap-4 border-b" aria-label="View">
+      {tab("summary", "Learners")}
+      {tab("publications", "Publications")}
+    </nav>
   );
 }
 
@@ -275,20 +264,21 @@ function SummaryTable({ report }: { report: MentoredPublicationsReport }) {
               <td className={TD_CLASS}>
                 <MentorCell mentors={r.mentors} />
               </td>
+              {/* "—" = no window to count against (no grad or entry year). */}
               {allMode ? (
                 <>
-                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsInWindow}</td>
-                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.withMentorInWindow}</td>
-                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.firstAuthorInWindow}</td>
-                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.highImpactInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsInWindow ?? "—"}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.withMentorInWindow ?? "—"}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.firstAuthorInWindow ?? "—"}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.highImpactInWindow ?? "—"}</td>
                   <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsAllTime}</td>
                 </>
               ) : (
                 <>
-                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsInWindow ?? "—"}</td>
                   <td className={`${TD_CLASS} text-right tabular-nums`}>{r.pubsAllTime}</td>
-                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.highImpactInWindow}</td>
-                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.firstAuthorInWindow}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.highImpactInWindow ?? "—"}</td>
+                  <td className={`${TD_CLASS} text-right tabular-nums`}>{r.firstAuthorInWindow ?? "—"}</td>
                 </>
               )}
             </tr>
@@ -367,9 +357,17 @@ function PublicationsTable({ report }: { report: MentoredPublicationsReport }) {
                         )}
                         <span
                           className="text-muted-foreground ml-2 text-xs"
-                          title="Publication year inside this learner's program window"
+                          title={
+                            l.inWindow === null
+                              ? "Program window unknown (no graduation or entry year on the roster)"
+                              : "Publication year inside this learner's program window"
+                          }
                         >
-                          {l.inWindow ? "In window: Yes" : "In window: No"}
+                          {l.inWindow === null
+                            ? "In window: —"
+                            : l.inWindow
+                              ? "In window: Yes"
+                              : "In window: No"}
                         </span>
                       </li>
                     ))}
@@ -419,8 +417,16 @@ export default async function EditReportsMentoredPublicationsPage({
   const program = requested.program !== null && scopeAdmits(scopes, requested.program) ? requested.program : null;
   const loaderScopes = program !== null ? [program] : [...scopes];
 
-  const yearChoices = await loadMentoredGradYears([...scopes]);
-  const years = requested.years ?? yearChoices.slice(0, 2);
+  const yearChoices = await loadMentoredGradYears(loaderScopes);
+  // Years the chosen program has no class in are dropped (the Program
+  // select auto-submits with the previous program's years); nothing left
+  // → this program's default.
+  const choiceSet = new Set(yearChoices);
+  const kept = (requested.years ?? []).filter((y) => choiceSet.has(y));
+  const years =
+    requested.years === null || (requested.years.length > 0 && kept.length === 0)
+      ? defaultMentoredPubsYears(yearChoices)
+      : kept;
   const params: MentoredPubsParams = {
     years,
     program,
@@ -454,7 +460,7 @@ export default async function EditReportsMentoredPublicationsPage({
     grantedAt: r.grantedAt.toISOString(),
   }));
 
-  const totalInWindow = report.summary.reduce((n, r) => n + r.pubsInWindow, 0);
+  const totalInWindow = report.summary.reduce((n, r) => n + (r.pubsInWindow ?? 0), 0);
   const totalAllTime = report.summary.reduce((n, r) => n + r.pubsAllTime, 0);
   const allMode = params.pubs === "all";
   const allPubsMissing = allMode && report.allPubsLoaded === false;
@@ -491,8 +497,8 @@ export default async function EditReportsMentoredPublicationsPage({
         >
           All-publication data has not been loaded yet. The learner publication bridge (
           <code>etl:mentoring:import-learner-pubs</code>) has not run in this environment, so every
-          count below would be zero. Switch back to &ldquo;Mentored co-publications&rdquo; or run
-          the import.
+          count below would be zero. Switch &ldquo;Publications&rdquo; back to &ldquo;Co-authored
+          with a mentor&rdquo; or run the import.
         </p>
       )}
       <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">

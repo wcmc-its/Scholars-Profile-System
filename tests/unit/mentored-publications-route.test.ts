@@ -111,6 +111,18 @@ describe("response", () => {
     expect(Buffer.from(await res.arrayBuffer()).toString()).toBe("xlsx-bytes");
   });
 
+  it("year-less learners in scope: the default adds 'unknown' and the filename says so", async () => {
+    h.mockLoadGradYears.mockResolvedValue([2026, 2025, 2024, null]);
+    const res = await GET(req());
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["md", "ecr"],
+      gradYears: [2026, 2025, null],
+      tail: 1,
+      ...MENTORED,
+    });
+    expect(res.headers.get("content-disposition")).toContain("2026-2025-unknown");
+  });
+
   it("an explicit program narrows the loader to that one scope and names the file for it", async () => {
     const res = await GET(req("?program=md&years=2024,2025&tail=2"));
     expect(res.status).toBe(200);
