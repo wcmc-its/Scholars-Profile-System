@@ -145,7 +145,7 @@ describe("buildBiosketchUserPrompt — v8 vs v7 for the same inputs", () => {
 });
 
 describe("generateBiosketch — v8 end to end (mocked gateway)", () => {
-  it("renders keys, strips out-of-list references + URLs, reports, grounds with productRefs, returns products", async () => {
+  it("renders keys, strips out-of-list keys + URLs, flags a stray author-year in place, grounds with productRefs, returns products", async () => {
     mockGenerateText.mockResolvedValue({
       text: "I direct vector work [P1]. A dosing result [P2, P9]. See (Roe 2020) and https://x.org/y. Done.",
     });
@@ -157,14 +157,14 @@ describe("generateBiosketch — v8 end to end (mocked gateway)", () => {
     expect(result.entries).toEqual([
       {
         title: "",
-        body: "I direct vector work (Doe 2019). A dosing result (PMID 22). See and. Done.",
+        body: "I direct vector work (Doe 2019). A dosing result (PMID 22). See (Roe 2020) and. Done.",
       },
     ]);
     expect(result.references).toEqual({
       kept: 2,
       issues: [
         { span: "[P2, P9]", kind: "out_of_list", action: "stripped" },
-        { span: "(Roe 2020)", kind: "out_of_list", action: "stripped" },
+        { span: "(Roe 2020)", kind: "out_of_list", action: "flagged" },
         { span: "https://x.org/y", kind: "url", action: "stripped" },
       ],
     });

@@ -11,9 +11,11 @@
  *      its key, in square brackets, right after the claim it supports.
  *   2. After parse, {@link validateProductReferences} renders every in-list key to the NIH
  *      lead-author-and-year form (`(Smith 2019)`; `(PMID 123)` when no lead author is known),
- *      STRIPS anything else that looks like a reference (an out-of-list key, an author-year or
- *      PMID parenthetical the model wrote itself that matches no product, a URL / DOI), and
- *      FLAGS a full-citation tell without touching the prose.
+ *      STRIPS an out-of-list key, an out-of-list PMID parenthetical, and any URL / DOI, and
+ *      FLAGS without touching the prose (a) an author-year parenthetical that names no listed
+ *      product and (b) a full-citation tell. Author-year is flag-only because the shape is
+ *      indistinguishable from ordinary prose ("(March 2020)", "(Phase 2019)"); stripping it
+ *      silently mangled grounded text.
  *   3. The faithfulness pass (`buildGroundingReference` / `overviewVerifySystemPrompt`) gets the
  *      rendered list so a reference is never flagged as an ungrounded name/year, and so the
  *      claim it sits on is checked against THAT product's record.
@@ -114,6 +116,7 @@ export function buildProductReferencePrompt(refs: readonly BiosketchProductRef[]
 // phase parenthetical like "(P53)" is never mistaken for a key.
 const KEY_GROUP_RE = /\[\s*P\d{1,2}(?:\s*[,;]\s*P\d{1,2})*\s*\]/g;
 // An author-year parenthetical the model wrote itself: "(Smith 2019)", "(Smith et al., 2019)".
+// Also matches plain prose ("(March 2020)"), so an out-of-list hit is FLAGGED, never stripped.
 const AUTHOR_YEAR_RE = /\(\s*([A-Z][\p{L}'-]+)(?:\s+et\s+al\.?)?,?\s+((?:19|20)\d{2})\s*\)/gu;
 // A PMID / PMCID parenthetical: "(PMID 123)", "(PMID: 123)", "(PMCID: PMC123)".
 const PMID_RE = /\(\s*PM(?:C)?ID:?\s*(?:PMC)?(\d+)\s*\)/gi;
@@ -144,7 +147,7 @@ export function scanReferenceIssues(
   }
   for (const m of text.matchAll(AUTHOR_YEAR_RE)) {
     if (!byLabel.has(`${m[1]} ${m[2]}`.toLowerCase())) {
-      issues.push({ span: m[0], kind: "out_of_list", action: "stripped" });
+      issues.push({ span: m[0], kind: "out_of_list", action: "flagged" });
     }
   }
   for (const m of text.matchAll(PMID_RE)) {
@@ -178,11 +181,13 @@ function tidy(s: string): string {
 }
 
 /**
- * Render in-list references and remove everything else reference-shaped. The `[P3]` key form
+ * Render in-list references and remove the unambiguous out-of-list ones. The `[P3]` key form
  * becomes `(Smith 2019)`; a group with some out-of-list keys keeps its in-list members; an
- * author-year or PMID parenthetical the model wrote itself is kept ONLY when it names a listed
- * product (normalized to that product's label). URLs / DOIs are removed. A full-citation tell
- * is reported, not edited. Never throws; empty `refs` still strips URLs and stray keys.
+ * author-year parenthetical the model wrote itself is normalized to the product's label when it
+ * names a listed product and otherwise left in place and reported (it may be prose); a PMID
+ * parenthetical is kept ONLY when it names a listed product. URLs / DOIs are removed. A
+ * full-citation tell is reported, not edited. Never throws; empty `refs` still strips URLs and
+ * stray keys.
  */
 export function validateProductReferences(
   text: string,
@@ -198,7 +203,7 @@ export function validateProductReferences(
   // form the author-year pass matches, and rendering it first would count it twice.
   let out = text.replace(AUTHOR_YEAR_RE, (whole, surname: string, year: string) => {
     const ref = byLabel.get(`${surname} ${year}`.toLowerCase());
-    if (!ref) return "";
+    if (!ref) return whole;
     kept += 1;
     return `(${ref.label})`;
   });

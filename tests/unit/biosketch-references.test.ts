@@ -1,7 +1,8 @@
 /**
  * #2653 v8 — product references (`lib/edit/biosketch-references.ts`): lead-author derivation,
  * the keyed list, the prompt block, and the post-parse validator (render in-list keys, strip
- * out-of-list references / URLs, flag full-citation tells, tidy what a strip leaves behind).
+ * out-of-list keys / PMIDs / URLs, flag out-of-list author-year parentheticals and full-citation
+ * tells without editing them, tidy what a strip leaves behind).
  * Pure module; no mocks.
  */
 import { describe, expect, it } from "vitest";
@@ -110,17 +111,33 @@ describe("validateProductReferences", () => {
     ]);
   });
 
-  it("keeps an author-year or PMID parenthetical only when it names a listed product", () => {
+  it("normalizes an in-list author-year, flags an out-of-list one in place, strips an out-of-list PMID", () => {
     const { text, report } = validateProductReferences(
       "Known (SMITH 2019) and (Smith et al., 2019); unknown (Jones 2020) and (PMID: 999); listed (PMID 33).",
       refs,
     );
-    expect(text).toBe("Known (Smith 2019) and (Smith 2019); unknown and; listed (PMID 33).");
+    expect(text).toBe(
+      "Known (Smith 2019) and (Smith 2019); unknown (Jones 2020) and; listed (PMID 33).",
+    );
     expect(report.kept).toBe(3);
-    expect(report.issues.map((i) => [i.span, i.kind])).toEqual([
-      ["(Jones 2020)", "out_of_list"],
-      ["(PMID: 999)", "out_of_list"],
+    expect(report.issues).toEqual([
+      { span: "(Jones 2020)", kind: "out_of_list", action: "flagged" },
+      { span: "(PMID: 999)", kind: "out_of_list", action: "stripped" },
     ]);
+  });
+
+  it("never strips a prose parenthetical shaped like author-year; an in-list one is not flagged", () => {
+    const input = "Enrollment began (March 2020) after the pilot (Smith 2019) and [P1].";
+    const { text, report } = validateProductReferences(input, refs);
+    // "(March 2020)" survives verbatim; the in-list forms render and raise no issue.
+    expect(text).toBe(
+      "Enrollment began (March 2020) after the pilot (Smith 2019) and (Smith 2019).",
+    );
+    expect(report.kept).toBe(2);
+    expect(report.issues).toEqual([
+      { span: "(March 2020)", kind: "out_of_list", action: "flagged" },
+    ]);
+    expect(scanReferenceIssues(input, refs)).toEqual(report.issues);
   });
 
   it("strips URLs and DOIs, and flags (but does not edit) a full-citation tell", () => {

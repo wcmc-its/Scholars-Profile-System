@@ -64,15 +64,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   // count clamped to 1..5, free text trimmed/clamped). A garbage value yields a usable shape.
   const params = normalizeBiosketchParams(req.ctx.body.params);
 
-  // The Personal Statement sub-mode REQUIRES a project title + aims — without them the model
-  // cannot honestly write the "directly relevant experience" framing (spec §USER-TURN). This
-  // is the one explicit 400-on-bad-params: the inputs are not in the FACTS, so we cannot
-  // default them. Contributions mode needs neither and never trips this.
-  const missing = missingPersonalStatementInputs(params);
-  if (missing.length > 0) {
-    return editError(400, "missing_project_inputs", missing.join(","));
-  }
-
   // --- authorization: the SHARED bio-write predicate (self OR superuser OR granted proxy OR
   //     org-unit owner/curator). Keyed on `realCwid`, gated to non-impersonating for the
   //     delegated legs. Only the allow/deny verdict is needed (no audit row is written). ---
@@ -103,6 +94,17 @@ export async function POST(request: NextRequest): Promise<Response> {
     canSelectBiosketchPromptVersion || params.promptVersion === defaultBiosketchPromptVersionId()
       ? params
       : { ...params, promptVersion: defaultBiosketchPromptVersionId() };
+
+  // The Personal Statement sub-mode REQUIRES a project title + aims — without them the model
+  // cannot honestly write the "directly relevant experience" framing (spec §USER-TURN) — and,
+  // under v8, the role on the application (#2653). This is the one explicit 400-on-bad-params:
+  // the inputs are not in the FACTS, so we cannot default them. Contributions mode needs none
+  // and never trips this. Checked on the EFFECTIVE version, after the downgrade, so an
+  // unprivileged client posting v8 is not held to a role requirement v7 will never read.
+  const missing = missingPersonalStatementInputs(effectiveParams);
+  if (missing.length > 0) {
+    return editError(400, "missing_project_inputs", missing.join(","));
+  }
 
   // --- per-scholar rate limit (DB write) + facts assembly (DB read). The rate limit runs
   //     first (before the gateway call) so a burst can't run up cost; its bucket is keyed on
