@@ -15,13 +15,24 @@
 import * as React from "react";
 
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+/**
+ * The shared pill look for a segmented control: one source of truth for the
+ * non-compact segment, so the tool-mode tablist ({@link SegmentedTabs}) and the
+ * form-value radio groups here render identically while keeping the semantics
+ * each one needs. `selected` paints the maroon fill; `disabled` dims it.
+ */
+export function segmentPillClass(selected: boolean, disabled: boolean): string {
+  return cn(
+    "inline-flex cursor-pointer items-center rounded-md border px-3 py-1 text-sm transition-colors select-none",
+    selected
+      ? "border-apollo-maroon bg-apollo-maroon text-apollo-maroon-foreground"
+      : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
+    disabled && "cursor-not-allowed opacity-60",
+  );
+}
 
 export function SegmentedField({
   legend,
@@ -73,20 +84,18 @@ export function SegmentedField({
           <label
             key={opt.value}
             htmlFor={id}
-            className={cn(
-              "cursor-pointer items-center transition-colors select-none",
+            className={
               compact
-                ? "border-apollo-border-strong flex min-w-0 flex-1 justify-center truncate border-l px-2 py-1 text-center text-[12.5px] first:border-l-0"
-                : "inline-flex rounded-md border px-3 py-1 text-sm",
-              selected
-                ? compact
-                  ? "bg-apollo-maroon text-apollo-maroon-foreground font-medium"
-                  : "border-apollo-maroon bg-apollo-maroon text-apollo-maroon-foreground"
-                : compact
-                  ? "bg-apollo-surface text-foreground hover:bg-apollo-surface-2"
-                  : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
-              disabled && "cursor-not-allowed opacity-60",
-            )}
+                ? cn(
+                    "cursor-pointer items-center transition-colors select-none",
+                    "border-apollo-border-strong flex min-w-0 flex-1 justify-center truncate border-l px-2 py-1 text-center text-[12.5px] first:border-l-0",
+                    selected
+                      ? "bg-apollo-maroon text-apollo-maroon-foreground font-medium"
+                      : "bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
+                    disabled && "cursor-not-allowed opacity-60",
+                  )
+                : segmentPillClass(selected, disabled)
+            }
           >
             <RadioGroupItem
               id={id}
