@@ -105,6 +105,74 @@ function coerceSources(value: unknown): BiosketchContributionSources[] | null {
   return out.length > 0 ? out : null;
 }
 
+/** The column set both readers select — one shape, so `toSummary` fits both. */
+const GENERATION_SELECT = {
+  id: true,
+  mode: true,
+  entries: true,
+  projectTitle: true,
+  projectAims: true,
+  model: true,
+  promptVersion: true,
+  params: true,
+  products: true,
+  sources: true,
+  createdByCwid: true,
+  impersonatedCwid: true,
+  label: true,
+  createdAt: true,
+} as const;
+
+type GenerationRow = {
+  id: string;
+  mode: string;
+  entries: unknown;
+  projectTitle: string | null;
+  projectAims: string | null;
+  model: string;
+  promptVersion: string | null;
+  params: unknown;
+  products: unknown;
+  sources: unknown;
+  createdByCwid: string;
+  impersonatedCwid: string | null;
+  label: string | null;
+  createdAt: Date;
+};
+
+/** `pubsAddedSince` is a per-LIST computation (one authorship read spanning every listed draft),
+ *  so the single-row reader passes 0 — the worksheet has no nudge. */
+function toSummary(row: GenerationRow, pubsAddedSince: number): BiosketchGenerationSummary {
+  // The stored params Json predates a `projectTitle`/`aims` field, so re-seed them from the
+  // first-class columns before normalizing — so a restore recovers the project framing.
+  const rawParams = (row.params && typeof row.params === "object" ? row.params : {}) as Record<
+    string,
+    unknown
+  >;
+  const params = normalizeBiosketchParams({
+    ...rawParams,
+    projectTitle: row.projectTitle ?? rawParams.projectTitle ?? "",
+    aims: row.projectAims ?? rawParams.aims ?? "",
+  });
+  return {
+    id: row.id,
+    mode: row.mode,
+    entries: coerceEntries(row.entries),
+    projectTitle: row.projectTitle,
+    projectAims: row.projectAims,
+    model: row.model,
+    promptVersion: row.promptVersion,
+    params,
+    products: coerceProducts(row.products),
+    sources: coerceSources(row.sources),
+    createdByCwid: row.createdByCwid,
+    impersonatedCwid: row.impersonatedCwid,
+    label: row.label,
+    pubsAddedSince,
+    createdAt: row.createdAt,
+  };
+}
+
 /**
  * The scholar's recent biosketch generations, newest first, capped at
  * {@link BIOSKETCH_HISTORY_LIMIT}. `params` is re-normalized on read so a row written under an
@@ -117,22 +185,7 @@ export async function listBiosketchGenerations(
     where: { cwid },
     orderBy: { createdAt: "desc" },
     take: BIOSKETCH_HISTORY_LIMIT,
-    select: {
-      id: true,
-      mode: true,
-      entries: true,
-      projectTitle: true,
-      projectAims: true,
-      model: true,
-      promptVersion: true,
-      params: true,
-      products: true,
-      sources: true,
-      createdByCwid: true,
-      impersonatedCwid: true,
-      label: true,
-      createdAt: true,
-    },
+    select: GENERATION_SELECT,
   });
   // #2654 — ONE read for the staleness nudge: every confirmed authorship stamped after the OLDEST
   // listed draft (rows are newest-first, so that is the last one), then counted per draft in
@@ -147,34 +200,22 @@ export async function listBiosketchGenerations(
         })
       ).map((a) => a.lastRefreshedAt.getTime())
     : [];
-  return rows.map((row) => {
-    // The stored params Json predates a `projectTitle`/`aims` field, so re-seed them from the
-    // first-class columns before normalizing — so a restore recovers the project framing.
-    const rawParams = (row.params && typeof row.params === "object" ? row.params : {}) as Record<
-      string,
-      unknown
-    >;
-    const params = normalizeBiosketchParams({
-      ...rawParams,
-      projectTitle: row.projectTitle ?? rawParams.projectTitle ?? "",
-      aims: row.projectAims ?? rawParams.aims ?? "",
-    });
-    return {
-      id: row.id,
-      mode: row.mode,
-      entries: coerceEntries(row.entries),
-      projectTitle: row.projectTitle,
-      projectAims: row.projectAims,
-      model: row.model,
-      promptVersion: row.promptVersion,
-      params,
-      products: coerceProducts(row.products),
-      sources: coerceSources(row.sources),
-      createdByCwid: row.createdByCwid,
-      impersonatedCwid: row.impersonatedCwid,
-      label: row.label,
-      pubsAddedSince: addedAt.filter((t) => t > row.createdAt.getTime()).length,
-      createdAt: row.createdAt,
-    };
+  return rows.map((row) =>
+    toSummary(row, addedAt.filter((t) => t > row.createdAt.getTime()).length),
+  );
+}
+
+/**
+ * One generation by id, or null (#2652 — the SciENcv worksheet is per saved generation and is
+ * keyed on the row, not the history window, so a run older than the 20-row list still opens).
+ * The caller authorizes on the returned `cwid` — this read is NOT an authorization gate.
+ */
+export async function getBiosketchGeneration(
+  id: string,
+): Promise<(BiosketchGenerationSummary & { cwid: string }) | null> {
+  const row = await db.read.biosketchGeneration.findUnique({
+    where: { id },
+    select: { ...GENERATION_SELECT, cwid: true },
   });
+  return row ? { ...toSummary(row, 0), cwid: row.cwid } : null;
 }

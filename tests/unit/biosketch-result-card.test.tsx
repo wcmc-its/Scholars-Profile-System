@@ -53,3 +53,20 @@ describe("BiosketchResultCard — v7 titles", () => {
     expect(screen.getByTestId("biosketch-entry-count-0").textContent).toContain("3/2,000");
   });
 });
+
+describe("BiosketchResultCard — SciENcv worksheet link (#2652)", () => {
+  it("links to the worksheet for a persisted generation", () => {
+    const { container } = render(
+      <BiosketchResultCard result={result({ generationId: "gen-42" })} />,
+    );
+    const link = container.querySelector<HTMLAnchorElement>(
+      '[data-testid="biosketch-open-worksheet"]',
+    );
+    expect(link?.getAttribute("href")).toBe("/edit/biosketch/worksheet?id=gen-42");
+  });
+
+  it("renders no link when the run did not persist (generationId null)", () => {
+    const { container } = render(<BiosketchResultCard result={result()} />);
+    expect(container.querySelector('[data-testid="biosketch-open-worksheet"]')).toBeNull();
+  });
+});

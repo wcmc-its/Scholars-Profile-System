@@ -24,8 +24,9 @@ export type ReadonlyAttributePanelProps = {
   heading: string;
   /** The explanatory line under the heading. */
   description: string;
-  /** Optional read-only values to echo (e.g. the current name). */
-  fields?: ReadonlyArray<{ label: string; value: string | null }>;
+  /** Optional read-only values to echo (e.g. the current name). `null` renders as "—";
+   *  a node lets one row carry a link or a fix-it line (ORCID, #2650). */
+  fields?: ReadonlyArray<{ label: string; value: ReactNode }>;
   /** Optional media rendered above the values (e.g. the Photo panel's headshot). */
   media?: ReactNode;
 };
