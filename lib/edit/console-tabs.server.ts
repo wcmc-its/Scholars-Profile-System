@@ -43,6 +43,7 @@ import {
 import { isNewsQueueTabVisible } from "@/lib/edit/news-queue";
 import { isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashboard";
+import { MENTORED_PUBS_REPORT, loadReportScopesForCwid } from "@/lib/edit/report-access";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
@@ -105,6 +106,11 @@ export interface ConsoleGrants {
   /** `canViewUsage(...)` — any `UnitAdmin` grant holder, either role. Already
    *  ORs in `isSuperuser`. Feeds `usage`. */
   viewerCanViewUsage: boolean;
+  /** `report_access` scopes for this cwid on the mentored-publications
+   *  report — the non-unit report grants behind `/edit/reports/7`. A holder with a Scholar
+   *  row lands on their own profile editor, so without this the Reports tab
+   *  is their only way in. Feeds `reports`. */
+  reportAccessCount: number;
 }
 
 export type TabPredicate = (session: EditSession, grants: ConsoleGrants) => boolean;
@@ -150,7 +156,8 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
 
   // Gap 4 (reports half): a reportable unit surfaces the tab everywhere,
   // including `/edit/units` and `/edit/administrators`.
-  reports: (s, g) => s.isSuperuser || s.isCommsSteward || g.reportableUnitCount > 0,
+  reports: (s, g) =>
+    s.isSuperuser || s.isCommsSteward || g.reportableUnitCount > 0 || g.reportAccessCount > 0,
 
   // COI review — superuser-only, no comms_steward/unit-admin escape hatch at
   // all (unlike `profiles`/`units`/`reports`). Split out of the merged
@@ -203,17 +210,19 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
  */
 export const loadConsoleGrants = cache(
   async (session: EditSession, db: PrismaClient): Promise<ConsoleGrants> => {
-    const [ownerScope, units, reportable, usage] = await Promise.all([
+    const [ownerScope, units, reportable, usage, reportAccess] = await Promise.all([
       session.isSuperuser ? Promise.resolve([]) : loadOwnerManagedUnitScope(session, db),
       loadManageableUnits(session.cwid, db),
       loadReportableUnitsForActor(session, db, REPORTABLE_KINDS),
       canViewUsage(session, db),
+      loadReportScopesForCwid(session.cwid, MENTORED_PUBS_REPORT),
     ]);
     return {
       ownerUnitCount: ownerScope.length,
       manageableUnitCount: units.total,
       reportableUnitCount: reportable.length,
       viewerCanViewUsage: usage,
+      reportAccessCount: reportAccess.size,
     };
   },
 );

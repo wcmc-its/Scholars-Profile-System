@@ -83,6 +83,8 @@ vi.mock("@/lib/db", () => ({
       division: { findMany: mockDivisionFindMany, findUnique: mockDivisionFindUnique },
       unitAdmin: { findMany: mockUnitAdminFindMany },
       department: { findUnique: mockDepartmentFindUnique },
+      // Console Reports-tab gate reads report_access; no grants here.
+      reportAccess: { findMany: async () => [] },
     },
     write: {},
   },

@@ -28,6 +28,7 @@ export const grants = (over: Partial<ConsoleGrants> = {}): ConsoleGrants => ({
   manageableUnitCount: 0,
   reportableUnitCount: 0,
   viewerCanViewUsage: false,
+  reportAccessCount: 0,
   ...over,
 });
 
@@ -173,6 +174,13 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "roleVocabulary",
     ],
     pins: "Gap 4b — a comms_steward loses Units on /edit/administrators (unitsTab={session.isSuperuser})",
+  },
+  {
+    name: "pure report_access holder (a program office's mentored-pubs report)",
+    session: sess(),
+    grants: grants({ reportAccessCount: 1 }),
+    expect: ["reports"],
+    pins: "2026-09-18 — a report_access row unlocks ONLY the Reports tab; the page itself re-checks scope",
   },
   {
     name: "no roles, no grants",

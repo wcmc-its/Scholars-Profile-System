@@ -82,6 +82,7 @@ function mergeGrants(a: ConsoleGrants, b: ConsoleGrants): ConsoleGrants {
     manageableUnitCount: a.manageableUnitCount + b.manageableUnitCount,
     reportableUnitCount: a.reportableUnitCount + b.reportableUnitCount,
     viewerCanViewUsage: a.viewerCanViewUsage || b.viewerCanViewUsage,
+    reportAccessCount: a.reportAccessCount + b.reportAccessCount,
   };
 }
 
