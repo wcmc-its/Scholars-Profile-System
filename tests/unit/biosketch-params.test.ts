@@ -91,9 +91,12 @@ describe("missingPersonalStatementInputs — required-input enforcement", () => 
     );
   });
 
+  // Pinned to v7: under the v8 default the role is required too (covered in the v8 block).
   it("personal statement without title/aims reports both missing", () => {
     expect(
-      missingPersonalStatementInputs(normalizeBiosketchParams({ mode: "personal_statement" })),
+      missingPersonalStatementInputs(
+        normalizeBiosketchParams({ mode: "personal_statement", promptVersion: "v7" }),
+      ),
     ).toEqual(["projectTitle", "aims"]);
   });
 
@@ -102,6 +105,7 @@ describe("missingPersonalStatementInputs — required-input enforcement", () => 
       missingPersonalStatementInputs(
         normalizeBiosketchParams({
           mode: "personal_statement",
+          promptVersion: "v7",
           projectTitle: "CNS gene therapy",
           aims: "Aim 1: dose-finding. Aim 2: safety.",
         }),

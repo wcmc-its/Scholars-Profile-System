@@ -24,9 +24,10 @@ import {
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 describe("biosketch prompt-version registry (#917 v6)", () => {
-  it("default is v7, and the ids list it first (selector order)", () => {
-    expect(BIOSKETCH_DEFAULT_PROMPT_VERSION).toBe("v7");
-    expect(BIOSKETCH_PROMPT_VERSION_IDS[0]).toBe("v7");
+  it("default is v8, and the ids list it first (selector order)", () => {
+    expect(BIOSKETCH_DEFAULT_PROMPT_VERSION).toBe("v8");
+    expect(BIOSKETCH_PROMPT_VERSION_IDS[0]).toBe("v8");
+    expect(BIOSKETCH_PROMPT_VERSION_IDS).toContain("v7");
     expect(BIOSKETCH_PROMPT_VERSION_IDS).toContain("v6");
     expect(BIOSKETCH_PROMPT_VERSION_IDS).toContain("v5");
   });
@@ -42,8 +43,8 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
 
   it("listSelectable returns the metas in insertion order (default first)", () => {
     const metas = listSelectableBiosketchPromptVersions();
-    // #2653 — v8 sits behind the v7 default as the experimental candidate; v7 is the rollback.
-    expect(metas.map((m) => m.id)).toEqual(["v7", "v8", "v6", "v5"]);
+    // v8 is the default (2026-09-18); v7 sits behind it as the one-step-back rollback.
+    expect(metas.map((m) => m.id)).toEqual(["v8", "v7", "v6", "v5"]);
     expect(metas[0].status).toBe("default");
     expect(metas[1].status).toBe("experimental");
   });
@@ -69,8 +70,8 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
       expect(biosketchVersionUsesProductReferences(id)).toBe(false);
     }
     expect(isValidBiosketchPromptVersionId("v8")).toBe(true);
-    // v8 is selectable + a valid env-lever target, but NOT the compiled default (gate first).
-    expect(BIOSKETCH_DEFAULT_PROMPT_VERSION).toBe("v7");
+    // v8 is the compiled default; v7 stays selectable + a valid env-lever rollback target.
+    expect(BIOSKETCH_DEFAULT_PROMPT_VERSION).toBe("v8");
     expect(resolveBiosketchPromptImpl("v8").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT_V8);
   });
 
@@ -88,9 +89,9 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
 
     it("falls back to the compiled default on an invalid/unset value", () => {
       process.env.BIOSKETCH_PROMPT_VERSION_DEFAULT = "nonsense";
-      expect(defaultBiosketchPromptVersionId()).toBe("v7");
+      expect(defaultBiosketchPromptVersionId()).toBe("v8");
       delete process.env.BIOSKETCH_PROMPT_VERSION_DEFAULT;
-      expect(defaultBiosketchPromptVersionId()).toBe("v7");
+      expect(defaultBiosketchPromptVersionId()).toBe("v8");
     });
 
     it("v6 stays a valid rollback target for the env lever", () => {
@@ -104,8 +105,8 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
     expect(resolveBiosketchPromptImpl("v5").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT);
     expect(resolveBiosketchPromptImpl("v6").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT_V6);
     expect(resolveBiosketchPromptImpl("v7").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT_V7);
-    // invalid → live default (v7 unless the env lever says otherwise)
-    expect(resolveBiosketchPromptImpl("bogus").id).toBe("v7");
+    // invalid → live default (v8 unless the env lever says otherwise)
+    expect(resolveBiosketchPromptImpl("bogus").id).toBe("v8");
   });
 
   it("the impl map exposes exactly the four versions", () => {

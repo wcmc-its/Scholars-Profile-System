@@ -169,17 +169,26 @@ describe("POST /api/edit/biosketch/generate", () => {
     expect(mockGenerateBiosketch).not.toHaveBeenCalled();
   });
 
-  it("#2653 — the v8 role requirement is checked on the EFFECTIVE version: an unprivileged v8 post without a role is downgraded to v7 and NOT rejected; a privileged one is", async () => {
+  it("#2653 — the v8 role requirement is checked on the EFFECTIVE version: an unprivileged v7 post is forced to the v8 default, so a missing role IS a 400; a privileged v7 post is not", async () => {
     const body = {
       entityId: "self01",
       params: {
         mode: "personal_statement",
-        promptVersion: "v8",
+        promptVersion: "v7",
         projectTitle: "CNS gene therapy",
         aims: "Aim 1.",
       },
     };
-    // Unprivileged self: v8 is downgraded to the default (v7), which has no role, so no 400.
+    // Unprivileged self: the posted v7 is replaced by the default (v8), which requires a role.
+    const denied = await POST(post(body));
+    expect(denied.status).toBe(400);
+    expect(await denied.json()).toMatchObject({
+      error: "missing_project_inputs",
+      field: "applicationRole",
+    });
+    expect(mockGenerateBiosketch).not.toHaveBeenCalled();
+    // Privileged (superuser) actor: v7 sticks, and v7 has no role, so no 400.
+    mockGetEditSession.mockResolvedValue(ADMIN);
     const res = await POST(post(body));
     expect(res.status).toBe(200);
     await drainResult(res);
@@ -188,14 +197,6 @@ describe("POST /api/edit/biosketch/generate", () => {
       expect.objectContaining({ promptVersion: "v7", applicationRole: null }),
       expect.anything(),
     );
-    // Privileged (superuser) actor: v8 sticks, so the missing role IS a 400 naming the field.
-    mockGetEditSession.mockResolvedValue(ADMIN);
-    const denied = await POST(post(body));
-    expect(denied.status).toBe(400);
-    expect(await denied.json()).toMatchObject({
-      error: "missing_project_inputs",
-      field: "applicationRole",
-    });
   });
 
   it("200 for a personal statement WITH project title + aims (passes the required-input gate)", async () => {
@@ -207,7 +208,12 @@ describe("POST /api/edit/biosketch/generate", () => {
     const res = await POST(
       post({
         entityId: "self01",
-        params: { mode: "personal_statement", projectTitle: "CNS gene therapy", aims: "Aim 1." },
+        params: {
+          mode: "personal_statement",
+          projectTitle: "CNS gene therapy",
+          aims: "Aim 1.",
+          applicationRole: "pd_pi", // required under the v8 default
+        },
       }),
     );
     expect(res.status).toBe(200);
@@ -365,15 +371,15 @@ describe("POST /api/edit/biosketch/generate", () => {
           projectTitle: null,
           projectAims: null,
           model: "us.anthropic.claude-opus-4-8",
-          // #917 v7 — the RESOLVED default version (no env override in test → v7).
-          promptVersion: "v7",
+          // The RESOLVED default version (no env override in test → v8 since 2026-09-18).
+          promptVersion: "v8",
           params: {
             mode: "contributions",
             maxContributions: 3,
             emphasis: "",
             instructions: "",
-            promptVersion: "v7",
-            // #2653 v8 — persisted so a restore recovers them; unset here (Contributions, v7).
+            promptVersion: "v8",
+            // #2653 v8 — persisted so a restore recovers them; unset here (Contributions).
             applicationRole: null,
             contributionLine: "",
           },
