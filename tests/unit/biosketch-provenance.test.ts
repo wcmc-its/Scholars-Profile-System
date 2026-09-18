@@ -75,15 +75,22 @@ describe("listBiosketchGenerations — staleness nudge (#2654)", () => {
     vi.clearAllMocks();
   });
 
-  it("counts CONFIRMED authorships stamped after each draft, from ONE read keyed on the oldest", async () => {
+  it("counts CONFIRMED authorships LINKED after each draft (createdAt, never lastRefreshedAt), from ONE read keyed on the oldest", async () => {
     mockGenerationFindMany.mockResolvedValue([
       row("newer", "2026-07-20T00:00:00.000Z"),
       row("older", "2026-07-10T00:00:00.000Z"),
     ]);
     mockAuthorFindMany.mockResolvedValue([
-      { lastRefreshedAt: new Date("2026-07-12T00:00:00.000Z") }, // after older only
-      { lastRefreshedAt: new Date("2026-07-25T00:00:00.000Z") }, // after both
-      { lastRefreshedAt: new Date("2026-07-20T00:00:00.000Z") }, // == newer: not "after"
+      { createdAt: new Date("2026-07-12T00:00:00.000Z") }, // after older only
+      { createdAt: new Date("2026-07-25T00:00:00.000Z") }, // after both
+      { createdAt: new Date("2026-07-20T00:00:00.000Z") }, // == newer: not "after"
+      // #2668 — the row that motivated the column: linked BEFORE both drafts, metadata bumped
+      // after them. Counted by nothing (the read is keyed on createdAt, and so is the per-draft
+      // filter; `lastRefreshedAt` is not even selected).
+      {
+        createdAt: new Date("2026-07-01T00:00:00.000Z"),
+        lastRefreshedAt: new Date("2026-07-30T00:00:00.000Z"),
+      },
     ]);
     const out = await listBiosketchGenerations("abc1001");
 
@@ -96,9 +103,9 @@ describe("listBiosketchGenerations — staleness nudge (#2654)", () => {
       where: {
         cwid: "abc1001",
         isConfirmed: true,
-        lastRefreshedAt: { gt: new Date("2026-07-10T00:00:00.000Z") },
+        createdAt: { gt: new Date("2026-07-10T00:00:00.000Z") },
       },
-      select: { lastRefreshedAt: true },
+      select: { createdAt: true },
     });
   });
 

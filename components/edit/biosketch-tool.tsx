@@ -134,9 +134,8 @@ type BiosketchGenerationItem = {
   impersonatedCwid: string | null;
   /** #2654 — the application-name label, or null when unlabeled. */
   label?: string | null;
-  /** #2654 — confirmed authorships whose `lastRefreshedAt` is newer than this draft (the
-   *  staleness nudge). That column moves on an authorship UPDATE as well as a create, so
-   *  this is "added or updated since", which is what the row says. */
+  /** #2654 / #2668 — confirmed authorships LINKED to the profile after this draft (the
+   *  staleness nudge), keyed on `publication_author.created_at`, which is set once. */
   pubsAddedSince?: number;
   createdAt: string;
 };
@@ -644,23 +643,16 @@ export function BiosketchTool({
             </Button>
           </div>
         </div>
-        {/* #2654 — staleness nudge: confirmed publications added since this draft, with a
-            one-click that re-runs product suggestion only (no regeneration). */}
+        {/* #2654 — staleness nudge: confirmed publications LINKED to the profile since this draft
+                (#2668: `publication_author.created_at`, set once on create), with a one-click
+                re-run of the product ranker. */}
         {added > 0 && (
           <div
             className="flex flex-wrap items-center gap-2 text-xs"
             data-testid={`biosketch-version-stale-${gen.id}`}
           >
-            {/* "added or updated", not "added": `pubsAddedSince` counts confirmed authorships
-                whose `lastRefreshedAt` is newer than the draft, and the nightly ReCiter
-                reconcile bumps that column on any authorship UPDATE (position, totalAuthors,
-                isConfirmed), not only on create. A metadata sweep therefore makes long-standing
-                publications count as new, which is why two drafts five weeks apart can show the
-                same number. A true count needs a created-at column on `publication_author`;
-                until then the sentence says what the number actually is. */}
             <span className="text-foreground">
-              {added} {added === 1 ? "publication" : "publications"} added or updated since this
-              draft
+              {added} {added === 1 ? "publication" : "publications"} added since this draft
             </span>
             <Button
               type="button"

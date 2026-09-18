@@ -48,11 +48,11 @@ export interface BiosketchGenerationSummary {
   impersonatedCwid: string | null;
   /** #2654 — the scholar-typed label (application name), or null when unlabeled. */
   label: string | null;
-  /** #2654 — how many CONFIRMED authorships of the scholar's appeared (or were re-confirmed)
-   *  after this draft was generated: the staleness nudge. Keyed on
-   *  `publication_author.last_refreshed_at`, which the reciter ETL stamps on create and bumps
-   *  only on a real content delta (never on a steady-state night), so it is the same "new /
-   *  re-confirmed author link since a watermark" signal `etl/coi-gap` already reads. */
+  /** #2654 / #2668 — how many CONFIRMED authorships of the scholar's were LINKED after this
+   *  draft was generated: the staleness nudge. Keyed on `publication_author.created_at`,
+   *  which is set once on create and never bumped — NOT on `last_refreshed_at`, the coi-gap
+   *  watermark that also moves on an authorship UPDATE (position / totalAuthors /
+   *  isConfirmed), which made a metadata sweep read as "publications added". */
   pubsAddedSince: number;
   createdAt: Date;
 }
@@ -187,18 +187,18 @@ export async function listBiosketchGenerations(
     take: BIOSKETCH_HISTORY_LIMIT,
     select: GENERATION_SELECT,
   });
-  // #2654 — ONE read for the staleness nudge: every confirmed authorship stamped after the OLDEST
+  // #2654 — ONE read for the staleness nudge: every confirmed authorship LINKED after the OLDEST
   // listed draft (rows are newest-first, so that is the last one), then counted per draft in
   // memory. Bounded by what the nightly added since the scholar's oldest kept draft, not by the
-  // corpus.
+  // corpus. #2668: keyed on `createdAt` (set once), not `lastRefreshedAt` (bumped on update).
   const oldest = rows.at(-1)?.createdAt;
   const addedAt = oldest
     ? (
         await db.read.publicationAuthor.findMany({
-          where: { cwid, isConfirmed: true, lastRefreshedAt: { gt: oldest } },
-          select: { lastRefreshedAt: true },
+          where: { cwid, isConfirmed: true, createdAt: { gt: oldest } },
+          select: { createdAt: true },
         })
-      ).map((a) => a.lastRefreshedAt.getTime())
+      ).map((a) => a.createdAt.getTime())
     : [];
   return rows.map((row) =>
     toSummary(row, addedAt.filter((t) => t > row.createdAt.getTime()).length),

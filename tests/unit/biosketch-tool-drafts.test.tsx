@@ -304,9 +304,8 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
   it("nudge renders only where publications were added, and its click re-runs suggestion only", async () => {
     const { container } = renderTool();
     const stale = await findQ(container, "biosketch-version-stale-gen-ps");
-    // "added or updated": the count keys on `lastRefreshedAt`, which the nightly reconcile
-    // bumps on an authorship UPDATE too, so the sentence cannot promise "added".
-    expect(stale.textContent).toContain("2 publications added or updated since this draft");
+    // "added": the count keys on `publication_author.created_at` (#2668), set once on create.
+    expect(stale.textContent).toContain("2 publications added since this draft");
     expect(q(container, "biosketch-version-stale-gen-c")).toBeNull();
 
     fireEvent.click(q(container, "biosketch-version-suggest-gen-ps") as HTMLElement);
