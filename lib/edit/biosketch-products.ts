@@ -167,7 +167,9 @@ export function selectBiosketchProducts(
     ...tokenize(params.projectTitle),
     ...tokenize(params.aims),
   ]);
-  const hasAims = aimsTokens.size > 0 && params.mode === "contributions";
+  // #2653 v8 — a Personal Statement's (required) aims rank the related bucket too, so the
+  // referenceable products are the ones closest to the project the statement argues for.
+  const hasAims = aimsTokens.size > 0;
 
   const bySignificance = [...pubs].sort((a, b) => blendedImpactScore(b) - blendedImpactScore(a));
 

@@ -204,8 +204,10 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
         })}
       </ol>
 
-      {isContributions && result.products && (
-        <BiosketchProductsSection products={result.products} />
+      {result.products && (
+        // #2653 v8 — a Personal Statement carries (unmapped) products too: the ones its
+        // parenthetical references point at. v5–v7 statements have `products: null`.
+        <BiosketchProductsSection products={result.products} isContributions={isContributions} />
       )}
     </div>
   );
@@ -263,18 +265,30 @@ function productsToText(products: BiosketchProducts): string {
   return lines.join("\n").trimEnd();
 }
 
-function ProductBucket({ title, items }: { title: string; items: BiosketchProduct[] }) {
+function ProductBucket({
+  title,
+  items,
+  showMapping,
+}: {
+  title: string;
+  items: BiosketchProduct[];
+  /** Contributions mode: label each group by the contribution it maps to. A Personal
+   *  Statement's products are unmapped by design, so the label is omitted. */
+  showMapping: boolean;
+}) {
   if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-2" data-testid="biosketch-product-bucket">
       <h4 className="text-foreground text-sm font-semibold">{title}</h4>
       {groupByContribution(items).map((g) => (
         <div key={g.contributionIndex ?? "none"} className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs font-medium">
-            {g.contributionIndex != null
-              ? `Contribution ${g.contributionIndex}`
-              : "Not mapped to a contribution"}
-          </span>
+          {showMapping && (
+            <span className="text-muted-foreground text-xs font-medium">
+              {g.contributionIndex != null
+                ? `Contribution ${g.contributionIndex}`
+                : "Not mapped to a contribution"}
+            </span>
+          )}
           <ul className="flex flex-col gap-1.5">
             {g.items.map((p) => (
               <li key={p.pmid} className="text-sm" data-testid={`biosketch-product-${p.pmid}`}>
@@ -292,7 +306,13 @@ function ProductBucket({ title, items }: { title: string; items: BiosketchProduc
 /** #917 v6 — the Products list: up to 5 related + 5 other significant publications, grouped
  *  by the contribution each was mapped to. A copy/export aid for the Common Form Products
  *  section; the pmids are grounded (deterministically selected), the mapping is the model's. */
-function BiosketchProductsSection({ products }: { products: BiosketchProducts }) {
+function BiosketchProductsSection({
+  products,
+  isContributions,
+}: {
+  products: BiosketchProducts;
+  isContributions: boolean;
+}) {
   const hasAny = products.related.length > 0 || products.otherSignificant.length > 0;
   if (!hasAny) return null;
   return (
@@ -304,8 +324,9 @@ function BiosketchProductsSection({ products }: { products: BiosketchProducts })
       <div className="flex flex-col gap-0.5">
         <h3 className="text-foreground text-sm font-semibold">Products</h3>
         <p className="text-muted-foreground text-xs">
-          Suggested products for the Common Form, mapped to your contributions. Review and place
-          them yourself; up to four peer-reviewed products per contribution is the NIH norm.
+          {isContributions
+            ? "Suggested products for the Common Form, mapped to your contributions. Review and place them yourself; up to four peer-reviewed products per contribution is the NIH norm."
+            : "Suggested products for the Common Form. A parenthetical reference in the statement (lead author and year, or PMID) points at one of these; NIH allows references to the listed products only."}
         </p>
       </div>
       <ProductBucket
@@ -315,8 +336,13 @@ function BiosketchProductsSection({ products }: { products: BiosketchProducts })
             : "Most significant"
         }
         items={products.related}
+        showMapping={isContributions}
       />
-      <ProductBucket title="Other significant products" items={products.otherSignificant} />
+      <ProductBucket
+        title="Other significant products"
+        items={products.otherSignificant}
+        showMapping={isContributions}
+      />
     </div>
   );
 }
