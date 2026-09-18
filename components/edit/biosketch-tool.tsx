@@ -15,11 +15,16 @@
  * Statement sub-mode is missing its required project title / aims (reusing
  * `missingPersonalStatementInputs`, the same predicate the route enforces), so a
  * request that the route would 400 never leaves the client.
+ *
+ * #2654 — the tab opens on the scholar's SAVED DRAFTS (the `biosketch_generation` rows, newest
+ * first) with New / Clone / label / Delete per row, and a staleness nudge ("N publications added
+ * since this draft") whose one click re-runs product suggestion only. The generation row IS the
+ * draft — there is no separate draft table or endpoint.
  */
 "use client";
 
 import * as React from "react";
-import { Braces, Search, Sparkles } from "lucide-react";
+import { Braces, Copy, Search, Sparkles } from "lucide-react";
 
 import {
   BiosketchGenerateControls,
@@ -34,6 +39,7 @@ import { BiosketchProgress } from "@/components/edit/biosketch-progress";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   readBiosketchStream,
@@ -62,6 +68,9 @@ const FAILED = "We couldn't generate a biosketch just now. Please try again.";
 const DEBUG_FAILED = "We couldn't assemble the prompt payload just now. Please try again.";
 const SUGGEST_FAILED = "We couldn't find matching publications just now. Please try again.";
 const DELETE_FAILED = "We couldn't delete that draft just now. Please try again.";
+const LABEL_FAILED = "We couldn't save that label just now. Please try again.";
+/** `biosketch_generation.label VARCHAR(120)` — the input's maxLength. */
+const LABEL_MAX = 120;
 
 export type BiosketchToolProps = {
   /** The scholar the biosketch is generated for (self cwid or the delegated `[cwid]`). */
@@ -95,6 +104,10 @@ type BiosketchGenerationItem = {
   /** Audit "who ran it": the accountable human, plus the impersonation overlay (if any). */
   createdByCwid: string;
   impersonatedCwid: string | null;
+  /** #2654 — the application-name label, or null when unlabeled. */
+  label?: string | null;
+  /** #2654 — confirmed publications added since this draft (the staleness nudge). */
+  pubsAddedSince?: number;
   createdAt: string;
 };
 
@@ -121,6 +134,17 @@ export function BiosketchTool({
   // Cancel — not the destructive button — is the focused default.
   const [pendingDelete, setPendingDelete] = React.useState<BiosketchGenerationItem | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  // #2654 — the application-name label the NEXT generation is saved under, and the draft the
+  // current form was cloned from (a one-line notice asking for the new title / aims).
+  const [label, setLabel] = React.useState("");
+  const [clonedFrom, setClonedFrom] = React.useState<BiosketchGenerationItem | null>(null);
+  // #2654 — inline label edit on one drafts-list row: which row, and the text being typed.
+  const [editingLabelId, setEditingLabelId] = React.useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = React.useState("");
+  const [isSavingLabel, setIsSavingLabel] = React.useState(false);
+  // #2654 — the staleness nudge's one-click: which row's product suggestion is running / shown.
+  const [nudgingId, setNudgingId] = React.useState<string | null>(null);
+  const [nudge, setNudge] = React.useState<{ id: string; pubs: SuggestedPub[] } | null>(null);
 
   // #1569 — the two tool modes: the AI generator (default) and the DETERMINISTIC
   // "write your own statement → suggested publications" mode (no model call).
@@ -178,7 +202,7 @@ export function BiosketchTool({
       const res = await fetch("/api/edit/biosketch/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entityId, params }),
+        body: JSON.stringify({ entityId, params, label }),
       });
       // A pre-stream rejection (4xx/5xx) is a BUFFERED JSON `editError`, not the NDJSON stream.
       if (!res.ok) {
@@ -207,6 +231,7 @@ export function BiosketchTool({
         sources: data.sources ?? null,
         generationId: data.generationId ?? null,
       });
+      setClonedFrom(null);
       void refreshGenerations();
     } catch {
       setError(FAILED);
@@ -295,10 +320,109 @@ export function BiosketchTool({
     }
   }
 
-  /** Restore a history row's steering params (incl. prompt version) into the controls. */
-  function restoreSettings(gen: BiosketchGenerationItem) {
+  /**
+   * #2654 Clone — prefill the generate form from a saved draft: its steering params (mode, count,
+   * emphasis, instructions, prompt version) AND the project title / aims the GET re-seeds into
+   * `params` from the row's columns, plus a "(copy)" label. Nothing is sent: the user edits the
+   * title and aims for the new application, then generates. Contributions carry over through
+   * the params; the Personal Statement and Related products are regenerated by that run. The
+   * title field is focused (and its optional-project disclosure opened) so the ask is visible.
+   */
+  function cloneDraft(gen: BiosketchGenerationItem) {
     if (isGenerating) return;
     setParams(normalizeBiosketchParams(gen.params));
+    setLabel(gen.label ? `${gen.label} (copy)` : "");
+    setClonedFrom(gen);
+    setResult(null);
+    setNudge(null);
+    window.requestAnimationFrame(() => {
+      const title = document.getElementById(
+        gen.mode === "personal_statement" ? "biosketch-project-title" : "biosketch-related-title",
+      );
+      const details = title?.closest("details");
+      if (details) details.open = true;
+      title?.focus();
+    });
+  }
+
+  /** #2654 New — a blank form: default params, no label, no clone notice, no result. */
+  function newDraft() {
+    if (isGenerating) return;
+    setParams({ ...DEFAULT_BIOSKETCH_PARAMS });
+    setLabel("");
+    setClonedFrom(null);
+    setResult(null);
+    setNudge(null);
+  }
+
+  /** #2654 — PATCH a row's label (empty clears it). The row updates in place on success. */
+  async function saveLabel(gen: BiosketchGenerationItem) {
+    if (isSavingLabel) return;
+    setIsSavingLabel(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/edit/biosketch/generations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ generationId: gen.id, label: labelDraft }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok: true; label: string | null }
+        | { ok: false }
+        | null;
+      if (!res.ok || !data || data.ok !== true) {
+        setError(LABEL_FAILED);
+        return;
+      }
+      const saved = data.label;
+      setGenerations((prev) => prev.map((g) => (g.id === gen.id ? { ...g, label: saved } : g)));
+      setEditingLabelId(null);
+    } catch {
+      setError(LABEL_FAILED);
+    } finally {
+      setIsSavingLabel(false);
+    }
+  }
+
+  /**
+   * #2654 staleness nudge — re-run PRODUCT SUGGESTION ONLY for a draft: POST the draft's own text
+   * (title, aims, entries) to the deterministic `/suggest-pubs` ranker, which now sees the
+   * publications added since the draft. No model call, nothing regenerated or written; the
+   * ranked list renders under the row so the scholar can pick new products for the worksheet.
+   */
+  async function suggestForDraft(gen: BiosketchGenerationItem) {
+    if (nudgingId) return;
+    setNudgingId(gen.id);
+    setNudge(null);
+    setError(null);
+    const statement = [
+      gen.params.projectTitle,
+      gen.params.aims,
+      ...gen.entries.map((e) => `${e.title} ${e.body}`),
+    ]
+      .filter((t) => t && t.trim().length > 0)
+      .join("\n");
+    try {
+      const res = await fetch("/api/edit/biosketch/suggest-pubs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityId, statement }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok: true; pubs: SuggestedPub[] }
+        | { ok: false }
+        | null;
+      if (!res.ok || !data || data.ok !== true || !Array.isArray(data.pubs)) {
+        setError(SUGGEST_FAILED);
+        return;
+      }
+      setNudge({ id: gen.id, pubs: data.pubs });
+    } catch {
+      setError(SUGGEST_FAILED);
+    } finally {
+      setNudgingId(null);
+    }
   }
 
   /** Show a history row's entries + products as the current result (read-only view). */
@@ -353,79 +477,166 @@ export function BiosketchTool({
     }
   }
 
-  /** One history row. Shared by both mode sections; the section heading carries the
+  /** One saved-draft row. Shared by both mode sections; the section heading carries the
    *  mode, so only Contributions repeats its entry count here. */
   function renderGenRow(gen: BiosketchGenerationItem) {
+    const added = gen.pubsAddedSince ?? 0;
     return (
-      <li
-        key={gen.id}
-        className="flex flex-wrap items-start justify-between gap-3"
-        data-testid={`biosketch-version-${gen.id}`}
-      >
-        <span className="text-muted-foreground flex min-w-0 flex-col">
-          <span className="text-foreground text-xs">
-            {(gen.promptVersion ?? gen.params.promptVersion) ?? ""}
-            {(gen.promptVersion ?? gen.params.promptVersion) ? " · " : ""}
-            {humanizeModelId(gen.model)}
-          </span>
-          {gen.mode === "contributions" && (
+      <li key={gen.id} className="flex flex-col gap-2" data-testid={`biosketch-version-${gen.id}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <span className="text-muted-foreground flex min-w-0 flex-col">
+            {/* #2654 — the application-name label is the row's headline; inline-editable. */}
+            {editingLabelId === gen.id ? (
+              <form
+                className="flex flex-wrap items-center gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void saveLabel(gen);
+                }}
+              >
+                <Input
+                  value={labelDraft}
+                  maxLength={LABEL_MAX}
+                  disabled={isSavingLabel}
+                  placeholder="Application name (e.g. R01 resubmission)"
+                  aria-label="Draft label"
+                  className="h-8 w-64 max-w-full text-sm"
+                  onChange={(e) => setLabelDraft(e.target.value)}
+                  data-testid={`biosketch-version-label-input-${gen.id}`}
+                />
+                <Button
+                  type="submit"
+                  variant="apollo"
+                  size="sm"
+                  disabled={isSavingLabel}
+                  data-testid={`biosketch-version-label-save-${gen.id}`}
+                >
+                  Save
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isSavingLabel}
+                  onClick={() => setEditingLabelId(null)}
+                >
+                  Cancel
+                </Button>
+              </form>
+            ) : (
+              <span className="flex flex-wrap items-center gap-2">
+                <span
+                  className="text-foreground text-sm font-medium"
+                  data-testid={`biosketch-version-label-${gen.id}`}
+                >
+                  {gen.label ?? describeGen(gen)}
+                </span>
+                <button
+                  type="button"
+                  className="text-apollo-maroon text-xs underline-offset-2 hover:underline"
+                  disabled={isSavingLabel}
+                  onClick={() => {
+                    setLabelDraft(gen.label ?? "");
+                    setEditingLabelId(gen.id);
+                  }}
+                  aria-label={`${gen.label ? "Rename" : "Label"} the ${describeGen(gen)}`}
+                  data-testid={`biosketch-version-label-edit-${gen.id}`}
+                >
+                  {gen.label ? "Rename" : "Add label"}
+                </button>
+              </span>
+            )}
             <span className="text-xs">
-              {gen.entries.length} {gen.entries.length === 1 ? "contribution" : "contributions"}
+              {gen.promptVersion ?? gen.params.promptVersion ?? ""}
+              {(gen.promptVersion ?? gen.params.promptVersion) ? " · " : ""}
+              {humanizeModelId(gen.model)}
             </span>
-          )}
-          {/* Audit "who ran it" — the accountable human, and the "View as" overlay
+            {gen.mode === "contributions" && (
+              <span className="text-xs">
+                {gen.entries.length} {gen.entries.length === 1 ? "contribution" : "contributions"}
+              </span>
+            )}
+            {/* Audit "who ran it" — the accountable human, and the "View as" overlay
               target when a delegate/superuser generated on the scholar's behalf. */}
-          <span className="text-xs" data-testid={`biosketch-version-actor-${gen.id}`}>
-            Generated by {gen.createdByCwid}
-            {gen.impersonatedCwid ? ` (as ${gen.impersonatedCwid})` : ""} · {formatGenDate(gen.createdAt)}
+            <span className="text-xs" data-testid={`biosketch-version-actor-${gen.id}`}>
+              Generated by {gen.createdByCwid}
+              {gen.impersonatedCwid ? ` (as ${gen.impersonatedCwid})` : ""} ·{" "}
+              {formatGenDate(gen.createdAt)}
+            </span>
           </span>
-        </span>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => viewDraft(gen)}
-            disabled={isGenerating}
-            data-testid={`biosketch-version-view-${gen.id}`}
-          >
-            View draft
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => restoreSettings(gen)}
-            disabled={isGenerating}
-            data-testid={`biosketch-version-use-settings-${gen.id}`}
-          >
-            Use these settings
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPendingDelete(gen)}
-            disabled={isGenerating || isDeleting}
-            // The row's visible text is a version/model line plus a date — nothing that names
-            // the artifact — so the button says what it destroys in its accessible name.
-            aria-label={`Delete the ${describeGen(gen)}`}
-            data-testid={`biosketch-version-delete-${gen.id}`}
-          >
-            Delete
-          </Button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => viewDraft(gen)}
+              disabled={isGenerating}
+              data-testid={`biosketch-version-view-${gen.id}`}
+            >
+              View draft
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => cloneDraft(gen)}
+              disabled={isGenerating}
+              aria-label={`Clone the ${describeGen(gen)}`}
+              data-testid={`biosketch-version-clone-${gen.id}`}
+            >
+              <Copy className="size-4" />
+              Clone
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingDelete(gen)}
+              disabled={isGenerating || isDeleting}
+              // The row's visible text is a version/model line plus a date — nothing that names
+              // the artifact — so the button says what it destroys in its accessible name.
+              aria-label={`Delete the ${describeGen(gen)}`}
+              data-testid={`biosketch-version-delete-${gen.id}`}
+            >
+              Delete
+            </Button>
+          </div>
         </div>
+        {/* #2654 — staleness nudge: confirmed publications added since this draft, with a
+            one-click that re-runs product suggestion only (no regeneration). */}
+        {added > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-2 text-xs"
+            data-testid={`biosketch-version-stale-${gen.id}`}
+          >
+            <span className="text-foreground">
+              {added} {added === 1 ? "publication" : "publications"} added since this draft
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => suggestForDraft(gen)}
+              disabled={nudgingId !== null}
+              data-testid={`biosketch-version-suggest-${gen.id}`}
+            >
+              <Search className="size-4" />
+              {nudgingId === gen.id ? "Finding…" : "Find new products"}
+            </Button>
+          </div>
+        )}
+        {nudge?.id === gen.id && <BiosketchSuggestedPubsCard pubs={nudge.pubs} />}
       </li>
     );
   }
 
-  /** A collapsible mode section ("Personal Statements" / "Contributions to Science").
-   *  Rendered only when that mode has history, so an actor who has used just one mode
-   *  never sees an empty section for the other. */
+  /** A collapsible mode section ("Personal Statements" / "Contributions to Science"), open
+   *  by default (#2654 — the tab opens on the saved drafts). Rendered only when that mode has
+   *  drafts, so an actor who has used just one mode never sees an empty section for the other. */
   function renderGenSection(title: string, items: BiosketchGenerationItem[], testId: string) {
     if (items.length === 0) return null;
     return (
-      <details className="group" data-testid={testId}>
+      <details className="group" open data-testid={testId}>
         <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
           {title} ({items.length})
         </summary>
@@ -472,6 +683,66 @@ export function BiosketchTool({
 
       {toolMode === "generate" && (
         <>
+          {/* #2654 — the saved-drafts list leads the tab: newest first, New / Clone / label /
+              Delete per row, staleness nudge where the nightly added publications since. */}
+          {generations.length > 0 && (
+            <div className="flex flex-col gap-3" data-testid="biosketch-versions-panel">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-foreground text-sm font-semibold">Saved drafts</h3>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={newDraft}
+                  disabled={isGenerating}
+                  data-testid="biosketch-new-draft"
+                >
+                  <Sparkles className="size-4" />
+                  New draft
+                </Button>
+              </div>
+              {renderGenSection(
+                "Personal statements",
+                personalStatements,
+                "biosketch-versions-personal-statement",
+              )}
+              {renderGenSection(
+                "Contributions to science",
+                contributions,
+                "biosketch-versions-contributions",
+              )}
+            </div>
+          )}
+
+          {clonedFrom && (
+            <Alert data-testid="biosketch-cloned-from">
+              <AlertDescription>
+                Cloned from the {describeGen(clonedFrom)}
+                {clonedFrom.label ? ` (${clonedFrom.label})` : ""}. Update the project title and
+                aims for the new application, then generate — the statement and related products are
+                drafted fresh.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="biosketch-label" className="text-foreground text-sm font-medium">
+              Label{" "}
+              <span className="text-muted-foreground text-xs font-normal">
+                (optional — the application this draft is for)
+              </span>
+            </label>
+            <Input
+              id="biosketch-label"
+              value={label}
+              maxLength={LABEL_MAX}
+              disabled={isGenerating}
+              placeholder="e.g. R01 resubmission, Oct 2026"
+              onChange={(e) => setLabel(e.target.value)}
+              data-testid="biosketch-label"
+            />
+          </div>
+
           <BiosketchGenerateControls
             value={params}
             onChange={setParams}
@@ -537,21 +808,6 @@ export function BiosketchTool({
           )}
 
           {result && <BiosketchResultCard result={result} />}
-
-          {generations.length > 0 && (
-            <div className="flex flex-col gap-3" data-testid="biosketch-versions-panel">
-              {renderGenSection(
-                "Earlier personal statements",
-                personalStatements,
-                "biosketch-versions-personal-statement",
-              )}
-              {renderGenSection(
-                "Earlier contributions to science",
-                contributions,
-                "biosketch-versions-contributions",
-              )}
-            </div>
-          )}
         </>
       )}
 

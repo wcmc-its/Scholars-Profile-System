@@ -63,6 +63,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Steering params are NEVER trusted — normalize defensively (unknown mode → contributions,
   // count clamped to 1..5, free text trimmed/clamped). A garbage value yields a usable shape.
   const params = normalizeBiosketchParams(req.ctx.body.params);
+  // #2654 — optional application-name label for the saved-drafts list. Untrusted free text:
+  // trimmed, clamped to the column width, empty ⇒ NULL. Never reaches the prompt.
+  const label =
+    typeof req.ctx.body.label === "string" ? req.ctx.body.label.trim().slice(0, 120) : "";
 
   // The Personal Statement sub-mode REQUIRES a project title + aims — without them the model
   // cannot honestly write the "directly relevant experience" framing (spec §USER-TURN). This
@@ -196,6 +200,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             // the history panel can answer "who ran this" even for a delegated draft.
             createdByCwid: realCwid,
             impersonatedCwid,
+            label: label.length > 0 ? label : null,
           },
           select: { id: true },
         });

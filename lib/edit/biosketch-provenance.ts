@@ -46,6 +46,14 @@ export interface BiosketchGenerationSummary {
   createdByCwid: string;
   /** The "View as" overlay target when generated through impersonation, else null. */
   impersonatedCwid: string | null;
+  /** #2654 — the scholar-typed label (application name), or null when unlabeled. */
+  label: string | null;
+  /** #2654 — how many CONFIRMED authorships of the scholar's appeared (or were re-confirmed)
+   *  after this draft was generated: the staleness nudge. Keyed on
+   *  `publication_author.last_refreshed_at`, which the reciter ETL stamps on create and bumps
+   *  only on a real content delta (never on a steady-state night), so it is the same "new /
+   *  re-confirmed author link since a watermark" signal `etl/coi-gap` already reads. */
+  pubsAddedSince: number;
   createdAt: Date;
 }
 
@@ -122,9 +130,23 @@ export async function listBiosketchGenerations(
       sources: true,
       createdByCwid: true,
       impersonatedCwid: true,
+      label: true,
       createdAt: true,
     },
   });
+  // #2654 — ONE read for the staleness nudge: every confirmed authorship stamped after the OLDEST
+  // listed draft (rows are newest-first, so that is the last one), then counted per draft in
+  // memory. Bounded by what the nightly added since the scholar's oldest kept draft, not by the
+  // corpus.
+  const oldest = rows.at(-1)?.createdAt;
+  const addedAt = oldest
+    ? (
+        await db.read.publicationAuthor.findMany({
+          where: { cwid, isConfirmed: true, lastRefreshedAt: { gt: oldest } },
+          select: { lastRefreshedAt: true },
+        })
+      ).map((a) => a.lastRefreshedAt.getTime())
+    : [];
   return rows.map((row) => {
     // The stored params Json predates a `projectTitle`/`aims` field, so re-seed them from the
     // first-class columns before normalizing — so a restore recovers the project framing.
@@ -150,6 +172,8 @@ export async function listBiosketchGenerations(
       sources: coerceSources(row.sources),
       createdByCwid: row.createdByCwid,
       impersonatedCwid: row.impersonatedCwid,
+      label: row.label,
+      pubsAddedSince: addedAt.filter((t) => t > row.createdAt.getTime()).length,
       createdAt: row.createdAt,
     };
   });

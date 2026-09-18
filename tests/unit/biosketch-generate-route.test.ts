@@ -195,6 +195,21 @@ describe("POST /api/edit/biosketch/generate", () => {
     );
   });
 
+  it("persists a trimmed, width-clamped label; absent / blank ⇒ NULL (#2654)", async () => {
+    let res = await POST(post({ entityId: "self01", label: `  ${"L".repeat(125)}  ` }));
+    expect(res.status).toBe(200);
+    await drainResult(res);
+    expect(mockGenerationCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ label: "L".repeat(120) }) }),
+    );
+    mockGenerationCreate.mockClear();
+    res = await POST(post({ entityId: "self01", label: "   " }));
+    await drainResult(res);
+    expect(mockGenerationCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ label: null }) }),
+    );
+  });
+
   it("403 when the shared overview-write predicate denies", async () => {
     mockAuthorizeOverviewWrite.mockResolvedValue({ ok: false, reason: "not_self" });
     const res = await POST(post({ entityId: "other9" }));
