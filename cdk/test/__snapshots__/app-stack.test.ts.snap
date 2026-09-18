@@ -611,7 +611,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "BIOSKETCH_PROMPT_VERSION_DEFAULT",
-                "Value": "v7",
+                "Value": "v8",
               },
               {
                 "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
@@ -5078,7 +5078,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "BIOSKETCH_PROMPT_VERSION_DEFAULT",
-                "Value": "v7",
+                "Value": "v8",
               },
               {
                 "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",

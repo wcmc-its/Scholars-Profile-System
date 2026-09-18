@@ -1825,15 +1825,17 @@ export class AppStack extends Stack {
         // `cdk deploy --exclusively Sps-App-<env>`.
         BIOSKETCH_FAITHFULNESS_PASS: "on",
         // #917 v7 -- the LIVE default biosketch prompt VERSION (its own namespace,
-        // NOT the overview v2/v3/v4). "v7" is v6 + a short subject heading on each
-        // contribution (the NIH "Contributions to Science" heading format) and the new
-        // default in both envs. No-image-roll ROLLBACK lever: set "v6" + a manual
-        // `cdk deploy --exclusively Sps-App-<env>` to revert to the (byte-pinned)
-        // title-less prompt. An invalid / unset value falls back to the registry default
-        // (v7), so a typo never breaks the generator (defaultBiosketchPromptVersionId,
+        // NOT the overview v2/v3/v4). "v8" (#2653) is v7 + the role-on-the-application
+        // selector for the Personal Statement and keyed product references, the default in
+        // both envs since 2026-09-18. No-image-roll ROLLBACK lever: set "v7" + a manual
+        // `cdk deploy --exclusively Sps-App-<env>` to revert to the (sha-pinned) v7 prompt.
+        // An invalid / unset value falls back to the registry default (v8), so a typo never
+        // breaks the generator (defaultBiosketchPromptVersionId,
         // lib/edit/biosketch-prompt-versions.ts). Superuser / curator can still pick any
-        // version per-generate regardless of this default.
-        BIOSKETCH_PROMPT_VERSION_DEFAULT: "v7",
+        // version per-generate regardless of this default. Keep this and the compiled
+        // default in step: the client bundle reads the compiled one to decide whether to
+        // show the role selector, the route reads this one.
+        BIOSKETCH_PROMPT_VERSION_DEFAULT: "v8",
         // #742 -- the LIVE default prompt VERSION (overview-prompt-versioning-spec.md).
         // "v3" is the keyword-rich narrative prompt and the new default for all
         // generations in both envs. This env is the no-image-roll ROLLBACK lever:
