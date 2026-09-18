@@ -17,7 +17,14 @@ function renderControls(over: Record<string, unknown>) {
   const onChange = vi.fn();
   const value = normalizeBiosketchParams(over);
   const { container } = render(
-    <BiosketchGenerateControls value={value} onChange={onChange} model="test-model" />,
+    <BiosketchGenerateControls
+      value={value}
+      onChange={onChange}
+      model="test-model"
+      label=""
+      onLabelChange={vi.fn()}
+      labelMax={120}
+    />,
   );
   const root = container.querySelector('[data-slot="biosketch-generate-controls"]')!;
   return { root, onChange, value };

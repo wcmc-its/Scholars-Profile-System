@@ -26,9 +26,7 @@
 import * as React from "react";
 import { Braces, Copy, Search, Sparkles } from "lucide-react";
 
-import {
-  BiosketchGenerateControls,
-} from "@/components/edit/biosketch-generate-controls";
+import { BiosketchGenerateControls } from "@/components/edit/biosketch-generate-controls";
 import {
   BiosketchAiWarning,
   BiosketchResultCard,
@@ -37,14 +35,17 @@ import {
 } from "@/components/edit/biosketch-result-card";
 import { BiosketchProgress } from "@/components/edit/biosketch-progress";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { EditPanel } from "@/components/edit/edit-panel";
+import {
+  SegmentedTabs,
+  tabPanelProps,
+  type SegmentedTabOption,
+} from "@/components/edit/segmented-tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  readBiosketchStream,
-  type BiosketchProgressState,
-} from "@/lib/edit/biosketch-stream";
+import { readBiosketchStream, type BiosketchProgressState } from "@/lib/edit/biosketch-stream";
 import {
   DEFAULT_BIOSKETCH_PARAMS,
   normalizeBiosketchParams,
@@ -71,6 +72,33 @@ const DELETE_FAILED = "We couldn't delete that draft just now. Please try again.
 const LABEL_FAILED = "We couldn't save that label just now. Please try again.";
 /** `biosketch_generation.label VARCHAR(120)` — the input's maxLength. */
 const LABEL_MAX = 120;
+
+/**
+ * `missingPersonalStatementInputs` key → the DOM id of the control that satisfies it, so a
+ * blocked Generate can put focus on the first thing the user has to fill in.
+ */
+const REQUIRED_FIELD_IDS: Record<string, string> = {
+  applicationRole: "biosketch-application-role",
+  projectTitle: "biosketch-project-title",
+  aims: "biosketch-aims",
+};
+
+/** The tablist's name — ids for the two tabs and their panels derive from it. */
+const TOOL_MODE_TABS = "biosketch-mode";
+const TOOL_MODE_OPTIONS: ReadonlyArray<SegmentedTabOption<"generate" | "suggest">> = [
+  {
+    value: "generate",
+    label: "Generate a draft",
+    icon: <Sparkles className="size-4" aria-hidden="true" />,
+    testId: "biosketch-mode-generate",
+  },
+  {
+    value: "suggest",
+    label: "Suggest publications from your statement",
+    icon: <Search className="size-4" aria-hidden="true" />,
+    testId: "biosketch-mode-suggest",
+  },
+];
 
 export type BiosketchToolProps = {
   /** The scholar the biosketch is generated for (self cwid or the delegated `[cwid]`). */
@@ -106,7 +134,9 @@ type BiosketchGenerationItem = {
   impersonatedCwid: string | null;
   /** #2654 — the application-name label, or null when unlabeled. */
   label?: string | null;
-  /** #2654 — confirmed publications added since this draft (the staleness nudge). */
+  /** #2654 — confirmed authorships whose `lastRefreshedAt` is newer than this draft (the
+   *  staleness nudge). That column moves on an authorship UPDATE as well as a create, so
+   *  this is "added or updated since", which is what the row says. */
   pubsAddedSince?: number;
   createdAt: string;
 };
@@ -154,9 +184,13 @@ export function BiosketchTool({
   const [suggestError, setSuggestError] = React.useState<string | null>(null);
   const [suggestions, setSuggestions] = React.useState<SuggestedPub[] | null>(null);
 
-  // Mirror the route's required-input gate so a request it would 400 never fires.
+  // Mirror the route's required-input gate so a request it would 400 never fires. The gate is
+  // enforced on CLICK, not by disabling the button: a primary action that is dead on arrival
+  // with no message next to it leaves the user hunting for what is wrong (and a disabled
+  // button is not reliably announced). Generate stays pressable, and pressing it with fields
+  // missing shows a message on each one and moves focus to the first.
   const missing = missingPersonalStatementInputs(params);
-  const disabled = isGenerating || missing.length > 0;
+  const [showValidation, setShowValidation] = React.useState(false);
 
   // Tick an elapsed counter while a generation runs (the liveness within a static phase). Reset on
   // each run; cleared when generation ends.
@@ -190,7 +224,16 @@ export function BiosketchTool({
   }, [refreshGenerations]);
 
   async function generate() {
-    if (isGenerating || missing.length > 0) return;
+    if (isGenerating) return;
+    if (missing.length > 0) {
+      setShowValidation(true);
+      // Focus the first field the route would reject on, so the message is where the caret is.
+      const first = missing[0];
+      const id = first ? REQUIRED_FIELD_IDS[first] : undefined;
+      if (id) window.requestAnimationFrame(() => document.getElementById(id)?.focus());
+      return;
+    }
+    setShowValidation(false);
     setIsGenerating(true);
     setError(null);
     setResult(null);
@@ -532,7 +575,7 @@ export function BiosketchTool({
                   className="text-foreground text-sm font-medium"
                   data-testid={`biosketch-version-label-${gen.id}`}
                 >
-                  {gen.label ?? describeGen(gen)}
+                  {gen.label ?? genHeadline(gen)}
                 </span>
                 <button
                   type="button"
@@ -549,22 +592,14 @@ export function BiosketchTool({
                 </button>
               </span>
             )}
-            <span className="text-xs">
-              {gen.promptVersion ?? gen.params.promptVersion ?? ""}
-              {(gen.promptVersion ?? gen.params.promptVersion) ? " · " : ""}
-              {humanizeModelId(gen.model)}
-            </span>
-            {gen.mode === "contributions" && (
-              <span className="text-xs">
-                {gen.entries.length} {gen.entries.length === 1 ? "contribution" : "contributions"}
-              </span>
-            )}
-            {/* Audit "who ran it" — the accountable human, and the "View as" overlay
-              target when a delegate/superuser generated on the scholar's behalf. */}
+            {/* ONE wrapped meta line: prompt version, model, entry count, and the audit
+              "who ran it" — the accountable human plus the "View as" overlay target when a
+              delegate/superuser generated on the scholar's behalf — ending in the date.
+              These were four stacked lines, and the date appeared twice, because the
+              unlabeled headline was "<noun> generated <date>" and the actor line repeated
+              it. The headline is now the noun alone and the date is stated once, here. */}
             <span className="text-xs" data-testid={`biosketch-version-actor-${gen.id}`}>
-              Generated by {gen.createdByCwid}
-              {gen.impersonatedCwid ? ` (as ${gen.impersonatedCwid})` : ""} ·{" "}
-              {formatGenDate(gen.createdAt)}
+              {genMetaLine(gen)}
             </span>
           </span>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -590,10 +625,14 @@ export function BiosketchTool({
               <Copy className="size-4" />
               Clone
             </Button>
+            {/* Demoted: View and Clone are the everyday actions, and Delete was sitting
+                beside them at identical weight — an unrecoverable action one slip away from
+                the two you reach for. It still opens the confirm dialog. */}
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
+              className="text-destructive hover:text-destructive"
               onClick={() => setPendingDelete(gen)}
               disabled={isGenerating || isDeleting}
               // The row's visible text is a version/model line plus a date — nothing that names
@@ -612,8 +651,16 @@ export function BiosketchTool({
             className="flex flex-wrap items-center gap-2 text-xs"
             data-testid={`biosketch-version-stale-${gen.id}`}
           >
+            {/* "added or updated", not "added": `pubsAddedSince` counts confirmed authorships
+                whose `lastRefreshedAt` is newer than the draft, and the nightly ReCiter
+                reconcile bumps that column on any authorship UPDATE (position, totalAuthors,
+                isConfirmed), not only on create. A metadata sweep therefore makes long-standing
+                publications count as new, which is why two drafts five weeks apart can show the
+                same number. A true count needs a created-at column on `publication_author`;
+                until then the sentence says what the number actually is. */}
             <span className="text-foreground">
-              {added} {added === 1 ? "publication" : "publications"} added since this draft
+              {added} {added === 1 ? "publication" : "publications"} added or updated since this
+              draft
             </span>
             <Button
               type="button"
@@ -624,7 +671,10 @@ export function BiosketchTool({
               data-testid={`biosketch-version-suggest-${gen.id}`}
             >
               <Search className="size-4" />
-              {nudgingId === gen.id ? "Finding…" : "Find new products"}
+              {/* "products" is NIH's word and the API's; the sentence beside this button,
+                  the card it opens, and the rest of the tool all say publications. One
+                  vocabulary per surface. */}
+              {nudgingId === gen.id ? "Finding…" : "Find matching publications"}
             </Button>
           </div>
         )}
@@ -655,37 +705,27 @@ export function BiosketchTool({
   const contributions = generations.filter((g) => g.mode === "contributions");
 
   return (
-    <div className="flex flex-col gap-4" data-slot="biosketch-tool">
+    <EditPanel
+      slot="biosketch-tool"
+      heading="NIH biosketch"
+      description="Draft the narrative sections of an NIH biosketch from your Scholars record — Contributions to Science, or a Personal Statement tailored to one application. Every draft is a starting point you rewrite in your own voice."
+    >
       {/* #1569 — switch between the AI generator and the deterministic "suggest pubs from your
-          own statement" mode. Two toggle buttons rather than a heavier tab primitive, matching
-          the button-driven controls the tool already uses. */}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant={toolMode === "generate" ? "apollo" : "outline"}
-          size="sm"
-          onClick={() => setToolMode("generate")}
-          aria-pressed={toolMode === "generate"}
-          data-testid="biosketch-mode-generate"
-        >
-          <Sparkles className="size-4" />
-          Generate a draft
-        </Button>
-        <Button
-          type="button"
-          variant={toolMode === "suggest" ? "apollo" : "outline"}
-          size="sm"
-          onClick={() => setToolMode("suggest")}
-          aria-pressed={toolMode === "suggest"}
-          data-testid="biosketch-mode-suggest"
-        >
-          <Search className="size-4" />
-          Suggest pubs from your statement
-        </Button>
-      </div>
+          own statement" mode. A real tablist: these swap which PANEL is on screen, so they are
+          tabs, not the `aria-pressed` toggle buttons they used to be (which read as actions that
+          would generate something on click). The pill look is shared with the SegmentedField
+          radio groups below, so the page has one segmented idiom with the right semantics under
+          each instance. */}
+      <SegmentedTabs
+        label="Biosketch tool mode"
+        name={TOOL_MODE_TABS}
+        options={TOOL_MODE_OPTIONS}
+        value={toolMode}
+        onValueChange={setToolMode}
+      />
 
       {toolMode === "generate" && (
-        <>
+        <div className="flex flex-col gap-4" {...tabPanelProps(TOOL_MODE_TABS, "generate")}>
           {/* #2654 — the saved-drafts list leads the tab: newest first, New / Clone / label /
               Delete per row, staleness nudge where the nightly added publications since. */}
           {generations.length > 0 && (
@@ -717,6 +757,19 @@ export function BiosketchTool({
             </div>
           )}
 
+          {/* What the form below IS. Without this the page showed a list of saved drafts and
+              then, with no break, a form — and nothing said whether that form was a new draft
+              or an edit of whichever row you last touched. (It is always a new draft: a saved
+              draft is never edited in place.) */}
+          <h3
+            className="text-foreground text-sm font-semibold"
+            data-testid="biosketch-form-heading"
+          >
+            {params.mode === "personal_statement"
+              ? "New personal statement"
+              : "New contributions draft"}
+          </h3>
+
           {clonedFrom && (
             <Alert data-testid="biosketch-cloned-from">
               <AlertDescription>
@@ -730,24 +783,6 @@ export function BiosketchTool({
             </Alert>
           )}
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="biosketch-label" className="text-foreground text-sm font-medium">
-              Label{" "}
-              <span className="text-muted-foreground text-xs font-normal">
-                (optional — the application this draft is for)
-              </span>
-            </label>
-            <Input
-              id="biosketch-label"
-              value={label}
-              maxLength={LABEL_MAX}
-              disabled={isGenerating}
-              placeholder="e.g. R01 resubmission, Oct 2026"
-              onChange={(e) => setLabel(e.target.value)}
-              data-testid="biosketch-label"
-            />
-          </div>
-
           <BiosketchGenerateControls
             value={params}
             onChange={setParams}
@@ -756,14 +791,32 @@ export function BiosketchTool({
             model={model}
             versions={versions}
             canSelectVersion={canSelectVersion}
+            invalidFields={showValidation ? missing : []}
+            label={label}
+            onLabelChange={setLabel}
+            labelMax={LABEL_MAX}
           />
+
+          {/* #1569 / #1990 — exactly ONE AI-content warning is on screen at any time. This one
+              carries the caution while no draft exists, so it is read before there is anything to
+              copy; the moment a result lands (a fresh generation OR a history row opened with
+              "View draft") it hands off to the identical warning at the top of the result card,
+              which sits directly above Copy / Download — the point where the text actually leaves
+              the app. Both placements used to render unconditionally, and because they are
+              adjacent siblings the pair was co-visible from the first draft onward, which reads
+              as boilerplate rather than as a caution.
+
+              It sits ABOVE the Generate button, not below it: the caution is about what the user
+              is about to ask for, so it belongs on the path to the action rather than trailing
+              the whole form where it was the last thing on the page, below the fold. */}
+          {!result && <BiosketchAiWarning />}
 
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
               variant="apollo"
               onClick={generate}
-              disabled={disabled}
+              disabled={isGenerating}
               data-testid="biosketch-generate"
             >
               <Sparkles className="size-4" />
@@ -792,16 +845,6 @@ export function BiosketchTool({
             </span>
           </div>
 
-          {/* #1569 / #1990 — exactly ONE AI-content warning is on screen at any time. This one
-              carries the caution while no draft exists, so it is read before there is anything to
-              copy; the moment a result lands (a fresh generation OR a history row opened with
-              "View draft") it hands off to the identical warning at the top of the result card,
-              which sits directly above Copy / Download — the point where the text actually leaves
-              the app. Both placements used to render unconditionally, and because they are
-              adjacent siblings the pair was co-visible from the first draft onward, which reads
-              as boilerplate rather than as a caution. */}
-          {!result && <BiosketchAiWarning />}
-
           {isGenerating && progress && (
             <BiosketchProgress state={progress} mode={params.mode} elapsedMs={elapsedMs} />
           )}
@@ -813,28 +856,34 @@ export function BiosketchTool({
           )}
 
           {result && <BiosketchResultCard result={result} />}
-        </>
+        </div>
       )}
 
       {toolMode === "suggest" && (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4" {...tabPanelProps(TOOL_MODE_TABS, "suggest")}>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="biosketch-statement" className="text-foreground text-sm font-medium">
               Your statement or themes
             </label>
+            {/* The instruction is helper text, not a placeholder: a placeholder disappears
+                the moment you start typing, is the lowest-contrast text on the surface, and
+                is not reliably announced. The placeholder keeps only a short example. */}
+            <span id="biosketch-statement-help" className="text-muted-foreground text-sm">
+              Write or paste the narrative, aims, or themes in your own words. Your publications
+              that overlap it are surfaced — a grounded, deterministic match against your indexed
+              publications, with nothing generated and no text written by AI.
+            </span>
             <Textarea
               id="biosketch-statement"
               value={statement}
               onChange={(e) => setStatement(e.target.value)}
               disabled={isSuggesting}
               rows={6}
-              placeholder="Write or paste the narrative, aims, or themes in your own words. We'll surface your publications that overlap it — nothing is generated."
+              className="max-w-[70ch]"
+              aria-describedby="biosketch-statement-help"
+              placeholder="e.g. My work centers on the metabolic rewiring of pancreatic tumors…"
               data-testid="biosketch-statement"
             />
-            <span className="text-muted-foreground text-sm">
-              A grounded, deterministic match against your indexed publications — no text is
-              AI-generated.
-            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -857,6 +906,18 @@ export function BiosketchTool({
           )}
 
           {suggestions && <BiosketchSuggestedPubsCard pubs={suggestions} />}
+
+          {/* Without this the panel is one small card in an empty viewport, which reads as a
+              page that failed to load rather than one waiting for input. */}
+          {!suggestions && !suggestError && !isSuggesting && (
+            <p
+              className="border-apollo-border bg-apollo-surface-2 text-muted-foreground rounded-md border border-dashed p-4 text-sm"
+              data-testid="biosketch-suggest-empty"
+            >
+              Your matching publications will appear here, ranked by overlap with what you wrote,
+              each with its PMID so you can copy them straight into a worksheet.
+            </p>
+          )}
         </div>
       )}
 
@@ -876,13 +937,40 @@ export function BiosketchTool({
         confirmVariant="destructive"
         onConfirm={() => (pendingDelete ? deleteGeneration(pendingDelete) : Promise.resolve())}
       />
-    </div>
+    </EditPanel>
   );
 }
 
-/** What a history row IS, in words — the noun plus the date. The row's own text is a
- *  version/model line, so this is what names the artifact in the delete button's accessible
- *  name and in the confirm dialog. */
+/** The row's visible headline when it carries no label: the artifact noun, capitalized.
+ *  The DATE is deliberately not here — it is the last thing on the meta line below, and
+ *  stating it in both places was the row's most obvious redundancy. */
+function genHeadline(gen: BiosketchGenerationItem): string {
+  return gen.mode === "personal_statement" ? "Personal statement" : "Contributions draft";
+}
+
+/** The row's single meta line: prompt version · model · entry count · who ran it · when.
+ *  Parts that do not apply are dropped rather than rendered empty. */
+function genMetaLine(gen: BiosketchGenerationItem): string {
+  const version = gen.promptVersion ?? gen.params.promptVersion ?? "";
+  const actor = `Generated by ${gen.createdByCwid}${
+    gen.impersonatedCwid ? ` (as ${gen.impersonatedCwid})` : ""
+  }`;
+  return [
+    version,
+    humanizeModelId(gen.model),
+    gen.mode === "contributions"
+      ? `${gen.entries.length} ${gen.entries.length === 1 ? "contribution" : "contributions"}`
+      : "",
+    actor,
+    formatGenDate(gen.createdAt),
+  ]
+    .filter((part) => part.length > 0)
+    .join(" · ");
+}
+
+/** What a history row IS, in words — the noun plus the date. The row's own headline is the
+ *  bare noun, so this is what names the artifact in the delete button's accessible
+ *  name and in the confirm dialog, where the date disambiguates one draft from another. */
 function describeGen(gen: BiosketchGenerationItem): string {
   const noun = gen.mode === "personal_statement" ? "personal statement" : "contributions draft";
   return `${noun} generated ${formatGenDate(gen.createdAt)}`;

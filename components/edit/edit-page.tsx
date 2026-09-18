@@ -136,7 +136,12 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // read-only; appears only when the scholar has ≥1 invention (the loader gates
   // it on AVAILABLE_TECHNOLOGIES_SECTION, so the array is empty otherwise). Public
   // info like publications/coi, so it stays visible to proxy / unit-admin too.
-  { key: "technologies", label: "Available technologies", readonly: true, modes: ["self", "superuser"] },
+  {
+    key: "technologies",
+    label: "Available technologies",
+    readonly: true,
+    modes: ["self", "superuser"],
+  },
   // News mentions (NEWS_MENTIONS_SECTION) — WCM newsroom articles that mention the
   // scholar, scraped by etl/news. Interactive (hide / "Not me"), like publications;
   // appears only when the scholar has ≥1 published mention (loader-gated).
@@ -184,7 +189,12 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // superuser (operator decision — trusted, with a UI nag before any action), but
   // NOT to a proxy / unit-admin (excluded in `attrsForMode`). The rail item
   // appears only when there are candidates AND the flag is on.
-  { key: "coi-gap", label: "Disclosed in publications", readonly: true, modes: ["self", "superuser"] },
+  {
+    key: "coi-gap",
+    label: "Disclosed in publications",
+    readonly: true,
+    modes: ["self", "superuser"],
+  },
   // RePORTER "Is this you?" (REPORTER_MATCH_V2) — K=2 PMID-overlap matches the
   // scholar confirms/rejects, plus a revocable confirmed-match history. Self OR a
   // genuine superuser (on their behalf); never a proxy / unit-admin (excluded in
@@ -463,10 +473,13 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
 // info button beside the group header (see attribute-rail.tsx / group-info-button.tsx).
 // "Yours to edit" and its third-person "Profile content" reframe are
 // self-explanatory and carry no note.
-const RAIL_V2_GROUP_META: Record<string, { description?: string }> = {
+const RAIL_V2_GROUP_META: Record<string, { description?: string; locked?: boolean }> = {
   [RAIL_V2_WCM_GROUP]: {
     description:
       "Sourced from WCM. Show, hide, or flag here — corrections happen in the source system.",
+    // Everything under this header is managed at its source: the rail says so with a lock
+    // beside the label, rather than leaving it to be inferred from which group an item is in.
+    locked: true,
   },
   Tools: { description: "Generators that produce an artifact to use elsewhere." },
   Settings: { description: "Profile administration." },
@@ -1228,7 +1241,12 @@ function renderPanel(
       // the array is empty. `voiceMode` reframes the intro copy for a
       // third-person editor.
       return (
-        <DatasetsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} datasets={ctx.datasets} />
+        <DatasetsCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          datasets={ctx.datasets}
+        />
       );
     case "appointments":
       return (

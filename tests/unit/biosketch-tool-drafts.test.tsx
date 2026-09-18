@@ -138,9 +138,10 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(q(container, "biosketch-version-label-gen-ps")?.textContent).toBe("R01 resubmission");
-    expect(q(container, "biosketch-version-label-gen-c")?.textContent).toBe(
-      "contributions draft generated Jul 18, 2026",
-    );
+    // The unlabeled headline is the artifact noun alone — the date lives once, on the
+    // meta line below, instead of being stated twice in the same row.
+    expect(q(container, "biosketch-version-label-gen-c")?.textContent).toBe("Contributions draft");
+    expect(q(container, "biosketch-version-actor-gen-c")?.textContent).toContain("Jul 18, 2026");
     // Sections open by default — the rows are visible without a click.
     expect(q(container, "biosketch-versions-personal-statement")?.hasAttribute("open")).toBe(true);
   });
@@ -261,6 +262,33 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     });
   });
 
+  it("Generate with a Personal Statement missing its required inputs validates instead of firing", async () => {
+    const { container } = renderTool();
+    // Clone a personal statement, then empty the title so the form is incomplete.
+    fireEvent.click(await findQ(container, "biosketch-version-clone-gen-ps"));
+    await findQ(container, "biosketch-project-title");
+    fireEvent.change(q(container, "biosketch-project-title") as HTMLElement, {
+      target: { value: "" },
+    });
+
+    // The button is PRESSABLE — the gate is enforced on click, not by disabling it.
+    const button = q(container, "biosketch-generate") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+
+    // Nothing was sent, and the field says what is wrong.
+    expect(sent.some(([u]) => u.includes("/generate"))).toBe(false);
+    const err = await findQ(container, "biosketch-project-title-error");
+    expect(err.textContent).toContain("Add the title");
+    const title = q(container, "biosketch-project-title") as HTMLInputElement;
+    expect(title.getAttribute("aria-invalid")).toBe("true");
+    expect(title.getAttribute("aria-describedby")).toBe("biosketch-project-title-error");
+
+    // Filling it in clears the message without another click.
+    fireEvent.change(title, { target: { value: "A new title" } });
+    await waitFor(() => expect(q(container, "biosketch-project-title-error")).toBeNull());
+  });
+
   it("New draft resets the form, label and clone notice", async () => {
     const { container } = renderTool();
     fireEvent.click(await findQ(container, "biosketch-version-clone-gen-ps"));
@@ -276,7 +304,9 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
   it("nudge renders only where publications were added, and its click re-runs suggestion only", async () => {
     const { container } = renderTool();
     const stale = await findQ(container, "biosketch-version-stale-gen-ps");
-    expect(stale.textContent).toContain("2 publications added since this draft");
+    // "added or updated": the count keys on `lastRefreshedAt`, which the nightly reconcile
+    // bumps on an authorship UPDATE too, so the sentence cannot promise "added".
+    expect(stale.textContent).toContain("2 publications added or updated since this draft");
     expect(q(container, "biosketch-version-stale-gen-c")).toBeNull();
 
     fireEvent.click(q(container, "biosketch-version-suggest-gen-ps") as HTMLElement);
