@@ -64,7 +64,10 @@ export const EMPTY_MENTORING_BUCKETS: MentoringPmidBuckets = {
 let cache: { buckets: MentoringPmidBuckets; ts: number; ok: boolean } | null = null;
 let inflight: Promise<MentoringPmidBuckets> | null = null;
 
-function bucketProgramType(programType: string | null): MentoringProgramKey | null {
+/** Source `programType` → facet bucket. Exported (not duplicated) for the
+ *  Mentored publications report (`lib/edit/mentored-publications-report.ts`),
+ *  which scopes `aoc_mentee` rows by the SAME mapping the facet uses. */
+export function bucketProgramType(programType: string | null): MentoringProgramKey | null {
   if (!programType) return null;
   if (programType === "MDPHD" || programType === "MD-PhD") return "mdphd";
   if (programType === "PhD") return "phd";

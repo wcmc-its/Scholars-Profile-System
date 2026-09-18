@@ -26,8 +26,10 @@
  *      `getMenteesForMentor` + the relationship check in `getMentorMenteePair`.
  *      One object per RAW row (duplicate pairs allowed — a student repeats across
  *      programs; NOT deduped):
- *        { mentorCwid, menteeCwid, firstName, lastName, graduationYear, programType }
- *      (any of name / year / programType may be null).
+ *        { mentorCwid, menteeCwid, firstName, lastName, graduationYear, entryYear, programType }
+ *      (any of name / year / entryYear / programType may be null). `entryYear`
+ *      is `studentEntryYear` — the program ENTRY year the Mentored publications
+ *      report (`/edit/reports/7`) needs for its "in program window" rule.
  *
  *   3. copub-list.ndjson  (#928, mentee_copublication_pub) — the FULL co-pub LIST
  *      per (mentor, mentee) pair, drives the dedicated co-pubs page
@@ -115,6 +117,8 @@ type AocMenteeRow = {
   firstName: string | null;
   lastName: string | null;
   graduationYear: number | null;
+  /** `reporting_students_mentors.studentEntryYear` — nullable at the source. */
+  entryYear: number | null;
   programType: string | null;
 };
 
@@ -227,7 +231,7 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
   const raw = (await withReciterConnection(async (conn) =>
     (await conn.query(
       `SELECT mentorCWID, studentCWID, studentFirstName, studentLastName,
-              studentGraduationYear, programType
+              studentGraduationYear, studentEntryYear, programType
          FROM reporting_students_mentors
         WHERE mentorCWID IS NOT NULL AND mentorCWID != ''
           AND studentCWID IS NOT NULL AND studentCWID != ''`,
@@ -237,6 +241,7 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
       studentFirstName: string | null;
       studentLastName: string | null;
       studentGraduationYear: number | null;
+      studentEntryYear: number | null;
       programType: string | null;
     }[],
   ).catch((err) => {
@@ -252,6 +257,7 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
     firstName: r.studentFirstName ?? null,
     lastName: r.studentLastName ?? null,
     graduationYear: r.studentGraduationYear ?? null,
+    entryYear: r.studentEntryYear ?? null,
     programType: r.programType ?? null,
   }));
 }

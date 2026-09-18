@@ -8,18 +8,25 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { mockGetEditSession, mockNotFound, mockRedirect, mockLoadReportableUnits, mockReportsIndex } =
-  vi.hoisted(() => ({
-    mockGetEditSession: vi.fn(),
-    mockNotFound: vi.fn(() => {
-      throw new Error("__NOT_FOUND__");
-    }),
-    mockRedirect: vi.fn((url: string) => {
-      throw new Error(`__REDIRECT__:${url}`);
-    }),
-    mockLoadReportableUnits: vi.fn(),
-    mockReportsIndex: vi.fn(() => null),
-  }));
+const {
+  mockGetEditSession,
+  mockNotFound,
+  mockRedirect,
+  mockLoadReportableUnits,
+  mockReportsIndex,
+  mockGetReportScopes,
+} = vi.hoisted(() => ({
+  mockGetEditSession: vi.fn(),
+  mockNotFound: vi.fn(() => {
+    throw new Error("__NOT_FOUND__");
+  }),
+  mockRedirect: vi.fn((url: string) => {
+    throw new Error(`__REDIRECT__:${url}`);
+  }),
+  mockLoadReportableUnits: vi.fn(),
+  mockReportsIndex: vi.fn(() => null),
+  mockGetReportScopes: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({ notFound: mockNotFound, redirect: mockRedirect }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
@@ -47,6 +54,11 @@ vi.mock("@/lib/edit/slug-request", () => ({
   countPendingSlugRequests: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/edit/manageable-units", () => ({ unitEditHref: () => "/edit/center/x" }));
+// Program reports (report 7) ride a `report_access` row — default: none held.
+vi.mock("@/lib/edit/report-access", () => ({
+  getReportScopes: mockGetReportScopes,
+  MENTORED_PUBS_REPORT: "mentored-publications",
+}));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 
 import EditReportsIndexPage from "@/app/edit/reports/page";
@@ -73,9 +85,26 @@ function findByType(node: unknown, type: unknown): El | null {
   return null;
 }
 
+/** Walks the returned element tree for an element whose component is the
+ *  page-local function named `name` (the un-rendered `<ProgramReportsCard />`
+ *  element — its own JSX only exists once React calls it). */
+function findByTypeName(node: unknown, name: string): El | null {
+  if (node === null || node === undefined || typeof node !== "object") return null;
+  const el = asEl(node);
+  if (typeof el.type === "function" && (el.type as { name?: string }).name === name) return el;
+  const children = el.props?.children;
+  const list = Array.isArray(children) ? children : [children];
+  for (const c of list) {
+    const found = findByTypeName(c, name);
+    if (found) return found;
+  }
+  return null;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockLoadReportableUnits.mockResolvedValue([]);
+  mockGetReportScopes.mockResolvedValue(new Set());
 });
 
 describe("/edit/reports — Gap 5: zero reportable units", () => {
@@ -92,5 +121,28 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     mockGetEditSession.mockResolvedValue(CURATOR);
     await expect(EditReportsIndexPage({ searchParams: sp() })).rejects.toThrow("__NOT_FOUND__");
     expect(mockReportsIndex).not.toHaveBeenCalled();
+  });
+
+  it("a report_access holder with zero unit grants → the Program reports card alone, no 404", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockGetReportScopes.mockResolvedValue(new Set(["md"]));
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    expect(mockNotFound).not.toHaveBeenCalled();
+    expect(mockReportsIndex).not.toHaveBeenCalled();
+    expect(findByTypeName(result, "ProgramReportsCard")).not.toBeNull();
+  });
+
+  it("superuser (scopes '*') → the empty index AND the Program reports card", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockGetReportScopes.mockResolvedValue(new Set(["*"]));
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    expect(findByType(result, mockReportsIndex)).not.toBeNull();
+    expect(findByTypeName(result, "ProgramReportsCard")).not.toBeNull();
+  });
+
+  it("superuser with no report grant machinery still sees no card when scopes are empty", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    expect(findByTypeName(result, "ProgramReportsCard")).toBeNull();
   });
 });
