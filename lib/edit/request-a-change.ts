@@ -48,8 +48,9 @@ const WEILL_RESEARCH_GATEWAY_URL = "https://wrg.weill.cornell.edu";
  *  the "reject a misattributed paper at the source" link, reused by the
  *  publications "Request a change" path and the first-hide notice (#570). */
 export const PUBLICATION_MANAGER_URL = "https://reciter.weill.cornell.edu/";
-/** ORCID self-management; `{cwid}` is substituted by the panel at render. */
-const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
+/** ORCID self-management; `{cwid}` is substituted by the panel at render. Also the
+ *  fix-it link on the Name & Title ORCID row (`orcid-value.tsx`, #2650). */
+export const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
 
 const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
 const FACULTY_AFFAIRS_EMAIL = "facultyaffairs@med.cornell.edu"; // degrees + education (ASMS)
