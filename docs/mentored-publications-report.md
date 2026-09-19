@@ -50,7 +50,7 @@ confidence. The page's closed "Sources" disclosure and every hover read `MENTORS
 | Postdoc supervisor | `postdoc_mentor_relationship` (ED appointment record) | The postdoc's reporting manager; appointment start and end dates (no end = ongoing) | A PI guarantee: roughly one in seven managers on record is a lab administrator (#2633) | On, for every holder | #2677 |
 | Likely mentee (from co-authorship) | `mentee_suggestion`, tier `presumptive` (#2634) | A trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with the faculty member; pubs from the suggestion's own evidence list | Any year; confirmation | Off | #2677 |
 | Possible mentee (from co-authorship) | `mentee_suggestion`, tier `ambiguous` | The same inference for research staff or MD alumni, who may be peers | Any year; confirmation | Off | #2677 |
-| Faculty-asserted | `field_override` (`scholar`, `manualMentees`) — the mentor's own list on `/edit`, including accepted co-authorship suggestions | Mentee name, optional CWID, optional completion year, optional degree bucket | Entries with no CWID (listed nowhere; counted in `droppedNoCwid`); entry year | On, for a `*` holder | PR C |
+| Faculty-asserted | `field_override` (`scholar`, `manualMentees`) — the mentor's own list on `/edit`, including accepted co-authorship suggestions | Mentee name, optional CWID, optional completion year, optional degree bucket | Entries with no CWID (listed nowhere; counted in `droppedNoCwid`); entry year | On, for a `*` holder | #2684 |
 
 Publications for the pairing-sheet, Jenzabar and ED sources come from the mentoring co-pub bridge
 (`mentee_copublication_pub`, one row per mentor × mentee × pub). Co-author pairs' pubs come from the
