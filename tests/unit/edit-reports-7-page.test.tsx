@@ -11,8 +11,10 @@
  * outside the caller's scopes silently falls back to their own "all"; the
  * view tabs carry every param; `pubs` is a select in the filter form and
  * reaches the loader and the download link (never `view`); the filter form
- * is the auto-submit island; an unloaded all-pubs bridge renders the notice,
- * not a table.
+ * is the auto-submit island; the tables are the `MentoredPublicationsTable`
+ * island and receive `view` / `summary` / `publications` / `pubsMode`; an
+ * unloaded all-pubs bridge renders the notice, not the island; the PubMed-
+ * only sentence names the dropped count.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +31,7 @@ const h = vi.hoisted(() => ({
   mockLoadGradYears: vi.fn(),
   mockLoadReport: vi.fn(),
   mockPanel: vi.fn(() => null),
+  mockTable: vi.fn(() => null),
   mockAutoSubmitForm: vi.fn(({ children }: { children: React.ReactNode }) => children),
 }));
 
@@ -43,6 +46,7 @@ vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
   return { ...actual, loadMentoredGradYears: h.mockLoadGradYears, loadMentoredPublicationsReport: h.mockLoadReport };
 });
 vi.mock("@/components/edit/report-access-panel", () => ({ ReportAccessPanel: h.mockPanel }));
+vi.mock("@/components/edit/mentored-publications-table", () => ({ MentoredPublicationsTable: h.mockTable }));
 vi.mock("@/components/edit/auto-submit-form", () => ({ AutoSubmitForm: h.mockAutoSubmitForm }));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: ({ children }: { children: React.ReactNode }) => children,
@@ -99,17 +103,6 @@ function textOf(node: unknown): string {
   if (Array.isArray(node)) return node.map(textOf).join("");
   if (typeof node !== "object") return "";
   return childrenOf(asEl(node)).map(textOf).join("");
-}
-
-function findByHref(node: unknown, pattern: RegExp): El | null {
-  if (node === null || node === undefined || typeof node !== "object") return null;
-  const el = asEl(node);
-  if (typeof el.props?.href === "string" && pattern.test(el.props.href)) return el;
-  for (const c of childrenOf(el)) {
-    const found = findByHref(c, pattern);
-    if (found) return found;
-  }
-  return null;
 }
 
 function findByTestId(node: unknown, testId: string): El | null {
@@ -268,45 +261,60 @@ describe("/edit/reports/7 — wiring", () => {
     expect(findByTestId(result, "mentored-pubs-download")?.props.href).toBe(
       `/api/edit/reports/mentored-publications?${base}&pubs=all`,
     );
-    // Publications view renders its table (empty state here), not the summary.
-    expect(findByTestId(result, "mentored-pubs-summary")).toBeNull();
+    // The island gets the view; the notice is absent.
+    expect(findByType(result, h.mockTable)?.props).toMatchObject({ view: "publications", pubsMode: "all" });
     expect(findByTestId(result, "mentored-pubs-all-missing")).toBeNull();
   });
 
 
-  it("with data: the learner row shows each mentor's name AND cwid; a publication row links its PMID to PubMed", async () => {
+  it("with data: the island receives view / summary / publications / pubsMode; the description names the four sources and the dropped counts", async () => {
     const summaryRow = {
       gradYear: 2025, entryYear: 2021, entryYearSource: "bridge", cwid: "stu0001",
       firstName: "Ada", lastName: "Learner", program: "MD",
-      mentors: [{ cwid: "men0001", name: "Grace Mentor" }],
+      mentors: [{ cwid: "men0001", name: "Grace Mentor", mentorship: { program: "md", source: "roster", tier: "confirmed" } }],
       pubsInWindow: 1, withMentorInWindow: 1, pubsAllTime: 1, highImpactInWindow: 0, firstAuthorInWindow: 1,
     };
     const pub = {
       pmid: 12345678, title: "A paper", journal: "J Test", year: 2024, citation: "Learner A, Mentor G. A paper. J Test. 2024.",
       jif: 3.2, citations: 4, dateAdded: null, authorCount: 2,
-      learners: [{ cwid: "stu0001", firstName: "Ada", lastName: "Learner", firstAuthor: true, inWindow: true }],
-      mentors: [{ cwid: "men0001", name: "Grace Mentor" }], withMentor: true,
+      learners: [{ cwid: "stu0001", firstName: "Ada", lastName: "Learner", firstAuthor: true, authorPosition: 1, inWindow: true }],
+      mentors: [{ cwid: "men0001", name: "Grace Mentor", mentorships: [{ program: "md", source: "roster", tier: "confirmed" }] }],
+      withMentor: true,
     };
     h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
       summary: [summaryRow], detail: [], publications: [pub],
       generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
+      droppedNonPubmed: 0, droppedUnresolved: 0,
     }));
 
     const summary = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
-    const learnerRow = findByTestId(summary, "mentored-pubs-learner-stu0001");
-    expect(learnerRow).not.toBeNull();
-    const rowText = textOf(learnerRow);
-    expect(rowText).toContain("Grace Mentor");
-    expect(rowText).toContain("men0001");
+    expect(findByType(summary, h.mockTable)?.props).toEqual({
+      view: "summary",
+      summary: [summaryRow],
+      publications: [pub],
+      pubsMode: "mentored",
+      highImpactThreshold: 10,
+    });
+    expect(textOf(summary)).toContain(
+      "Pairs come from the AOC roster, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship patterns (presumptive — unchecked by default).",
+    );
+    expect(textOf(summary)).toContain(
+      "PubMed-indexed publications only; Scopus-only co-publications are excluded when the bridge is imported.",
+    );
 
     const pubs = await EditReportsMentoredPublicationsPage({ searchParams: sp({ view: "publications" }) });
-    const pubRow = findByTestId(pubs, "mentored-pubs-pub-12345678");
-    expect(pubRow).not.toBeNull();
-    expect(findByHref(pubRow, /pubmed\.ncbi\.nlm\.nih\.gov\/12345678/)).not.toBeNull();
-    const pubText = textOf(pubRow);
-    expect(pubText).toContain("A paper");
-    expect(pubText).toContain("men0001");
-    expect(pubText).toContain("stu0001");
+    expect(findByType(pubs, h.mockTable)?.props).toMatchObject({ view: "publications", publications: [pub] });
+
+    // Suggestion-evidence pubs the loader dropped are folded into the PubMed-only sentence.
+    h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
+      summary: [summaryRow], detail: [], publications: [pub],
+      generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
+      droppedNonPubmed: 3, droppedUnresolved: 1,
+    }));
+    const dropped = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
+    expect(textOf(dropped)).toContain(
+      "excluded when the bridge is imported (co-publications not shown: 3 non-PubMed, 1 not yet in the local corpus).",
+    );
   });
 
   it("all mode with an unloaded bridge renders the notice and no table", async () => {
@@ -336,8 +344,7 @@ describe("/edit/reports/7 — wiring", () => {
     }));
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ pubs: "all" }) });
     expect(findByTestId(result, "mentored-pubs-all-missing")).not.toBeNull();
-    expect(findByTestId(result, "mentored-pubs-summary")).toBeNull();
-    expect(findByTestId(result, "mentored-pubs-learner-stu0001")).toBeNull();
+    expect(findByType(result, h.mockTable)).toBeNull();
   });
 
   it("a superuser: the chosen program's scope reaches BOTH loaders, and the Viewers panel renders with the current rows", async () => {

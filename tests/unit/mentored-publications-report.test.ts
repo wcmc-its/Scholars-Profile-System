@@ -8,6 +8,9 @@
  *   - `journalImpactFactor.findMany`     (JIF by normalized abbreviation)
  *   - `scholar.findMany`                 (mentor display names)
  *   - `aocMenteePublication.findMany/findFirst` (the learner's full list, "all" mode)
+ *   - `phdMentorRelationship.findMany`     (Jenzabar thesis advisors)
+ *   - `postdocMentorRelationship.findMany` (ED postdoc appointments)
+ *   - `menteeSuggestion.findMany`          (co-author-inferred pairs + evidence)
  *
  * Behaviors protected: the window rule incl. the `gradYear - 4` fallback and
  * the tail; a pub shared with two mentors counts ONCE in the learner's
@@ -15,8 +18,13 @@
  * learner's author position derived from the bridge's per-author CWIDs;
  * citations from iCite (`citedByCount`), never the Scopus count in the JSON;
  * mentor name precedence scholar → roster → cwid; newest class first; the
- * per-pmid Publications view deduped across learners; "all" mode's subset /
- * `withMentor` flag and the empty-bridge signal.
+ * per-pmid Publications view deduped across learners, most recently added to
+ * PubMed first (NOT by year); "all" mode's subset / `withMentor` flag and the
+ * empty-bridge signal; every (learner, mentor) pair typed `{ bucket, roster,
+ * confirmed }`; the three other sources land typed, year-filtered by their
+ * own year, no 4-year guess for a PhD, an ongoing postdoc's open window,
+ * suggestion evidence resolved from `publication` (PubMed only, unresolved
+ * counted).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,6 +36,9 @@ const hoisted = vi.hoisted(() => ({
   mockScholarFindMany: vi.fn(),
   mockLearnerPubFindMany: vi.fn(),
   mockLearnerPubFindFirst: vi.fn(),
+  mockPhdFindMany: vi.fn(),
+  mockPostdocFindMany: vi.fn(),
+  mockSuggestionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -42,6 +53,9 @@ vi.mock("@/lib/db", () => ({
         findMany: hoisted.mockLearnerPubFindMany,
         findFirst: hoisted.mockLearnerPubFindFirst,
       },
+      phdMentorRelationship: { findMany: hoisted.mockPhdFindMany },
+      postdocMentorRelationship: { findMany: hoisted.mockPostdocFindMany },
+      menteeSuggestion: { findMany: hoisted.mockSuggestionFindMany },
     },
     write: {},
   },
@@ -135,6 +149,9 @@ beforeEach(() => {
   hoisted.mockScholarFindMany.mockResolvedValue([]);
   hoisted.mockLearnerPubFindMany.mockResolvedValue([]);
   hoisted.mockLearnerPubFindFirst.mockResolvedValue(null);
+  hoisted.mockPhdFindMany.mockResolvedValue([]);
+  hoisted.mockPostdocFindMany.mockResolvedValue([]);
+  hoisted.mockSuggestionFindMany.mockResolvedValue([]);
 });
 
 describe("window rule", () => {
@@ -150,9 +167,18 @@ describe("window rule", () => {
     expect(inProgramWindow(null, null, null, 1)).toBeNull();
   });
 
-  it("effectiveEntryYear: bridge value wins, else gradYear - 4, else null", () => {
+  it("ongoing (no end date): in window iff year >= entryYear, grad year irrelevant; no entry year → still null", () => {
+    expect(inProgramWindow(2022, 2022, null, 1, true)).toBe(true);
+    expect(inProgramWindow(2040, 2022, null, 1, true)).toBe(true);
+    expect(inProgramWindow(2021, 2022, null, 1, true)).toBe(false);
+    expect(inProgramWindow(null, 2022, null, 1, true)).toBe(false);
+    expect(inProgramWindow(2022, null, null, 1, true)).toBeNull();
+  });
+
+  it("effectiveEntryYear: bridge value wins, else gradYear - 4 (roster only), else null", () => {
     expect(effectiveEntryYear(2020, 2025)).toEqual({ entryYear: 2020, source: "bridge" });
     expect(effectiveEntryYear(null, 2025)).toEqual({ entryYear: 2021, source: "fallback" });
+    expect(effectiveEntryYear(null, 2025, false)).toEqual({ entryYear: null, source: null });
     expect(effectiveEntryYear(null, null)).toEqual({ entryYear: null, source: null });
   });
 });
@@ -239,8 +265,8 @@ describe("loadMentoredPublicationsReport", () => {
       firstAuthorInWindow: 1,
       // Resolved name for the scholar row; the bare cwid for the unresolved one; sorted by name.
       mentors: [
-        { cwid: "men0002", name: "men0002" },
-        { cwid: "men0001", name: "Zed Mentor" },
+        { cwid: "men0002", name: "men0002", mentorship: { program: "md", source: "roster", tier: "confirmed" } },
+        { cwid: "men0001", name: "Zed Mentor", mentorship: { program: "md", source: "roster", tier: "confirmed" } },
       ],
     });
     expect(report.detail).toHaveLength(2);
@@ -252,6 +278,7 @@ describe("loadMentoredPublicationsReport", () => {
       learnerAuthorPosition: 1,
       authorCount: 3,
       mentorName: "Zed Mentor",
+      mentorship: "MD · roster",
       paperMentors: [
         { cwid: "men0002", name: "men0002" },
         { cwid: "men0001", name: "Zed Mentor" },
@@ -267,10 +294,10 @@ describe("loadMentoredPublicationsReport", () => {
       jif: 96.2,
       citations: 12,
       withMentor: true,
-      learners: [{ cwid: "stu0001", firstAuthor: true, inWindow: true }],
+      learners: [{ cwid: "stu0001", firstAuthor: true, authorPosition: 1, inWindow: true }],
       mentors: [
-        { cwid: "men0002", name: "men0002" },
-        { cwid: "men0001", name: "Zed Mentor" },
+        { cwid: "men0002", name: "men0002", mentorships: [{ program: "md", source: "roster", tier: "confirmed" }] },
+        { cwid: "men0001", name: "Zed Mentor", mentorships: [{ program: "md", source: "roster", tier: "confirmed" }] },
       ],
     });
     expect(report.publications[0].citation).toBe(
@@ -426,15 +453,15 @@ describe("loadMentoredPublicationsReport", () => {
     ]);
     hoisted.mockCopubFindMany.mockResolvedValue([copub("men0003", "stu0001", 1, 2023)]);
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.summary[0].mentors).toEqual([
-      { cwid: "men0003", name: "men0003" },
-      { cwid: "men0002", name: "Only Roster" },
-      { cwid: "men0001", name: "Scholar Name" },
+    expect(report.summary[0].mentors.map((m) => [m.cwid, m.name])).toEqual([
+      ["men0003", "men0003"],
+      ["men0002", "Only Roster"],
+      ["men0001", "Scholar Name"],
     ]);
     expect(report.detail[0]).toMatchObject({ mentorCwid: "men0003", mentorName: "men0003" });
   });
 
-  it("Publications view: a pub co-authored by two learners is ONE row listing both, newest first then title", async () => {
+  it("Publications view: a pub co-authored by two learners is ONE row listing both, most recently added to PubMed first", async () => {
     hoisted.mockAocFindMany.mockResolvedValue([
       aoc({
         mentorCwid: "men0001",
@@ -462,16 +489,48 @@ describe("loadMentoredPublicationsReport", () => {
       },
       copub("men0002", "stu0002", 4, 2024),
     ]);
+    // dateAdded DISAGREES with year: 5 (2023) was added after 4 (2024); 6 has
+    // no local row and sorts last.
+    hoisted.mockPubFindMany.mockResolvedValue([
+      { pmid: "5", journalAbbrev: null, dateAddedToEntrez: new Date("2024-06-01"), citedByCount: null },
+      { pmid: "4", journalAbbrev: null, dateAddedToEntrez: new Date("2024-01-01"), citedByCount: null },
+    ]);
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.publications.map((p) => p.pmid)).toEqual([4, 6, 5]);
+    expect(report.publications.map((p) => p.pmid)).toEqual([5, 4, 6]);
     const shared = report.publications.find((p) => p.pmid === 5)!;
     expect(shared.learners).toEqual([
-      { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, inWindow: true },
-      { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, inWindow: false },
+      { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, authorPosition: 1, inWindow: true },
+      { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, authorPosition: null, inWindow: false },
     ]);
     expect(shared.mentors.map((m) => m.cwid)).toEqual(["men0001", "men0002"]);
     // The detail sheet still has one row per (learner, mentor, pub).
     expect(report.detail.filter((d) => d.pmid === 5)).toHaveLength(2);
+  });
+
+  it("a mentor shared by two learners of different types lists both, deduped by key", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", programType: "AOC" }),
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0002", programType: "MDPHD", graduationYear: null }),
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0003", programType: "AOC-2025" }),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0001", "stu0001", 9, 2024),
+      copub("men0001", "stu0002", 9, 2024),
+      copub("men0001", "stu0003", 9, 2024),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.publications).toHaveLength(1);
+    expect(report.publications[0].mentors).toEqual([
+      {
+        cwid: "men0001",
+        name: "men0001",
+        mentorships: [
+          { program: "md", source: "roster", tier: "confirmed" },
+          { program: "mdphd", source: "roster", tier: "confirmed" },
+        ],
+      },
+    ]);
+    expect(report.summary.map((s) => s.mentors[0].mentorship.program)).toEqual(["md", "md", "mdphd"]);
   });
 
   describe("pubs: 'all'", () => {
@@ -528,6 +587,7 @@ describe("loadMentoredPublicationsReport", () => {
         [1, true],
         [3, false],
       ]);
+      expect(report.detail.every((d) => d.mentorship === null)).toBe(true);
     });
 
     it("a mentored mode report never touches the learner-pubs bridge", async () => {
@@ -558,6 +618,280 @@ describe("loadMentoredPublicationsReport", () => {
       expect(report.detail).toEqual([]);
       expect(report.publications).toEqual([]);
     });
+  });
+});
+
+describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)", () => {
+  const phd = (o: Partial<Record<string, unknown>> & { mentorCwid: string; menteeCwid: string }) => ({
+    menteeFirstName: "Pia",
+    menteeLastName: "Doctoral",
+    conferralYear: 2024,
+    programType: "PhD",
+    mentorFirstName: "Jen",
+    mentorLastName: "Zabar",
+    ...o,
+  });
+  const postdoc = (o: Partial<Record<string, unknown>> & { mentorCwid: string; menteeCwid: string }) => ({
+    menteeFirstName: "Pat",
+    menteeLastName: "Postdoc",
+    startDate: new Date("2022-07-01"),
+    endDate: null,
+    ...o,
+  });
+  const suggestion = (o: Partial<Record<string, unknown>> & { mentorCwid: string; menteeCwid: string }) => ({
+    menteeName: "Vic Van Volunteer",
+    kind: "volunteer",
+    tier: "presumptive",
+    evidence: [{ id: "101", year: 2024, menteeRank: 1, mentorRank: 3, total: 3 }],
+    ...o,
+  });
+  /** A local `publication` row as BOTH reads see it (evidence resolve + enrich). */
+  const localPub = (pmid: number) => ({
+    pmid: String(pmid),
+    title: `Local ${pmid}`,
+    journal: "J Local",
+    year: 2024,
+    volume: "5",
+    issue: "2",
+    pages: "10-20",
+    authorsString: "((Van Volunteer V)), Second AB, ((Mentor Z))",
+    fullAuthorsString: null,
+    journalAbbrev: null,
+    dateAddedToEntrez: null,
+    citedByCount: null,
+  });
+
+  it("one learner from each source lands typed, regardless of scope; the suggestion read skips dismissed / unknown-tier rows", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([aoc({ mentorCwid: "men0001", menteeCwid: "stu0001" })]);
+    hoisted.mockPhdFindMany.mockResolvedValue([
+      phd({ mentorCwid: "men0002", menteeCwid: "phd0001" }),
+      phd({ mentorCwid: "men0002", menteeCwid: "phd0002", programType: "MD-PhD", conferralYear: 2023 }),
+    ]);
+    hoisted.mockPostdocFindMany.mockResolvedValue([postdoc({ mentorCwid: "men0003", menteeCwid: "pd0001" })]);
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({ mentorCwid: "men0004", menteeCwid: "sug0001" }),
+      suggestion({ mentorCwid: "men0004", menteeCwid: "sug0002", menteeName: "Mononym", kind: "resident", tier: "ambiguous", evidence: [] }),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(101)]);
+
+    const report = await loadMentoredPublicationsReport({ scopes: ["md"] });
+    expect(hoisted.mockSuggestionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { dismissedAt: null, tier: { in: ["presumptive", "ambiguous"] } } }),
+    );
+    // Newest grad year first, unknown last; the row is the learner, the type is per pair.
+    expect(report.summary.map((s) => [s.cwid, s.program, s.gradYear, s.mentors[0].mentorship])).toEqual([
+      ["stu0001", "MD", 2025, { program: "md", source: "roster", tier: "confirmed" }],
+      ["phd0001", "PhD", 2024, { program: "phd", source: "jenzabar", tier: "confirmed" }],
+      ["phd0002", "MD-PhD", 2023, { program: "mdphd", source: "jenzabar", tier: "confirmed" }],
+      ["sug0002", "Resident", null, { program: "resident", source: "coauthor", tier: "ambiguous" }],
+      ["pd0001", "Postdoc", null, { program: "postdoc", source: "ed", tier: "confirmed" }],
+      ["sug0001", "Volunteer", null, { program: "volunteer", source: "coauthor", tier: "presumptive" }],
+    ]);
+    // Learner names: Jenzabar / ED first+last; a suggestion's display name split on its last space.
+    expect(report.summary.map((s) => [s.firstName, s.lastName])).toEqual([
+      ["Ada", "Learner"],
+      ["Pia", "Doctoral"],
+      ["Pia", "Doctoral"],
+      [null, "Mononym"],
+      ["Pat", "Postdoc"],
+      ["Vic Van", "Volunteer"],
+    ]);
+    // Jenzabar's own mentor name reaches the roster-name map.
+    expect(report.summary[1].mentors[0].name).toBe("Jen Zabar");
+  });
+  it("a co-author pair a surer source also claims leaves NO trace: no kind in Program, no coauthor type", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", programType: "AOC", graduationYear: 2025 }),
+    ]);
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({ mentorCwid: "men0001", menteeCwid: "stu0001", kind: "volunteer" }),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary).toHaveLength(1);
+    expect(report.summary[0].program).toBe("MD");
+    expect(report.summary[0].mentors.map((m) => m.mentorship.source)).toEqual(["roster"]);
+  });
+
+  it("a malformed evidence blob is skipped, never thrown", async () => {
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({ mentorCwid: "men0004", menteeCwid: "sug0001", evidence: { id: "101" } }),
+      suggestion({ mentorCwid: "men0004", menteeCwid: "sug0002", evidence: [null, 7, { id: 101 }, { id: "101", menteeRank: 1 }] }),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(101)]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary.map((s) => [s.cwid, s.pubsAllTime])).toEqual([
+      ["sug0001", 0],
+      ["sug0002", 1],
+    ]);
+  });
+
+  it("a suggestion's evidence resolves from `publication`: parsed byline, authorPosition = menteeRank, mentor on the paper; SCOPUS: and unresolved ids are counted", async () => {
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({
+        mentorCwid: "men0004",
+        menteeCwid: "sug0001",
+        evidence: [
+          { id: "101", year: 2024, menteeRank: 1, mentorRank: 3, total: 3 },
+          { id: "SCOPUS:2-s2.0-85000000001", year: 2024, menteeRank: 1, mentorRank: 2, total: 2 },
+          { id: "-5", year: 2024, menteeRank: 1, mentorRank: 2, total: 2 },
+          { id: "102", year: 2023, menteeRank: 2, mentorRank: 1, total: 2 }, // no local row
+        ],
+      }),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(101)]);
+    hoisted.mockScholarFindMany.mockResolvedValue([{ cwid: "men0004", preferredName: "Zed Mentor" }]);
+
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.droppedNonPubmed).toBe(2);
+    expect(report.droppedUnresolved).toBe(1);
+    expect(report.publications).toHaveLength(1);
+    expect(report.publications[0]).toMatchObject({
+      pmid: 101,
+      title: "Local 101",
+      citation: "Van Volunteer V, Second AB, Mentor Z. Local 101. J Local. 2024;5(2):10-20.",
+      authorCount: 3,
+      withMentor: true,
+      learners: [{ cwid: "sug0001", firstAuthor: true, authorPosition: 1, inWindow: null }],
+      mentors: [
+        {
+          cwid: "men0004",
+          name: "Zed Mentor",
+          mentorships: [{ program: "volunteer", source: "coauthor", tier: "presumptive" }],
+        },
+      ],
+    });
+    expect(report.detail).toHaveLength(1);
+    expect(report.detail[0]).toMatchObject({
+      pmid: 101,
+      mentorCwid: "men0004",
+      mentorship: "Volunteer · co-author (presumptive)",
+      learnerAuthorPosition: 1,
+      withMentor: true,
+      inWindow: null,
+    });
+    expect(report.summary[0]).toMatchObject({ cwid: "sug0001", pubsAllTime: 1, pubsInWindow: null, entryYearSource: null });
+  });
+
+  it("a pair the roster already confirms keeps its roster type and reads the bridge, not the suggestion's evidence", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([aoc({ mentorCwid: "men0001", menteeCwid: "stu0001" })]);
+    hoisted.mockSuggestionFindMany.mockResolvedValue([suggestion({ mentorCwid: "men0001", menteeCwid: "stu0001" })]);
+    hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "stu0001", 7, 2023)]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary).toHaveLength(1);
+    expect(report.summary[0].mentors).toEqual([
+      { cwid: "men0001", name: "men0001", mentorship: { program: "md", source: "roster", tier: "confirmed" } },
+    ]);
+    expect(report.publications.map((p) => p.pmid)).toEqual([7]);
+    expect(report.droppedUnresolved).toBe(0);
+  });
+
+  it("an ongoing postdoc's window has no upper bound: pubs from the start year on count, grad year stays null", async () => {
+    hoisted.mockPostdocFindMany.mockResolvedValue([
+      postdoc({ mentorCwid: "men0003", menteeCwid: "pd0001" }),
+      postdoc({ mentorCwid: "men0003", menteeCwid: "pd0002", menteeLastName: "Ended", endDate: new Date("2024-06-30") }),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0003", "pd0001", 1, 2021), // before the start
+      copub("men0003", "pd0001", 2, 2023),
+      copub("men0003", "pd0001", 3, 2030), // no upper bound
+      copub("men0003", "pd0002", 4, 2026), // end 2024 + tail 1 → out
+      copub("men0003", "pd0002", 5, 2025),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary.map((s) => [s.cwid, s.gradYear, s.entryYear, s.entryYearSource, s.pubsInWindow, s.pubsAllTime])).toEqual([
+      ["pd0002", 2024, 2022, "bridge", 1, 2],
+      ["pd0001", null, 2022, "bridge", 2, 3],
+    ]);
+    expect(report.detail.filter((d) => d.learnerCwid === "pd0001").map((d) => [d.pmid, d.inWindow])).toEqual([
+      [3, true],
+      [2, true],
+      [1, false],
+    ]);
+  });
+
+  it("a Jenzabar PhD with a conferral year and no entry year gets NO 4-year guess (window unknown)", async () => {
+    hoisted.mockPhdFindMany.mockResolvedValue([phd({ mentorCwid: "men0002", menteeCwid: "phd0001" })]);
+    hoisted.mockCopubFindMany.mockResolvedValue([copub("men0002", "phd0001", 1, 2022)]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary[0]).toMatchObject({
+      cwid: "phd0001",
+      gradYear: 2024,
+      entryYear: null,
+      entryYearSource: null,
+      pubsInWindow: null,
+      pubsAllTime: 1,
+    });
+    expect(report.detail[0].inWindow).toBeNull();
+  });
+
+  it("a roster MD-PhD with no years plus a Jenzabar conferral year still gets NO 4-year guess (the fallback reads the roster's own grad year)", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", programType: "MDPHD", graduationYear: null, entryYear: null }),
+    ]);
+    hoisted.mockPhdFindMany.mockResolvedValue([
+      phd({
+        mentorCwid: "men0002",
+        menteeCwid: "stu0001",
+        programType: "MD-PhD",
+        conferralYear: 2027,
+      }),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0001", "stu0001", 1, 2021),
+      copub("men0002", "stu0001", 2, 2024),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary[0]).toMatchObject({
+      cwid: "stu0001",
+      gradYear: 2027,
+      entryYear: null,
+      entryYearSource: null,
+      pubsInWindow: null,
+      pubsAllTime: 2,
+    });
+    expect(report.detail.map((d) => d.inWindow)).toEqual([null, null]);
+  });
+
+  it("gradYears filters Jenzabar by conferralYear and postdocs by end year; only a null admits the year-less rows and reads suggestions at all", async () => {
+    hoisted.mockPhdFindMany.mockResolvedValue([
+      phd({ mentorCwid: "men0002", menteeCwid: "phd0001", conferralYear: 2024 }),
+      phd({ mentorCwid: "men0002", menteeCwid: "phd0002", conferralYear: 2023 }),
+      phd({ mentorCwid: "men0002", menteeCwid: "phd0003", conferralYear: null }),
+    ]);
+    hoisted.mockPostdocFindMany.mockResolvedValue([
+      postdoc({ mentorCwid: "men0003", menteeCwid: "pd0001", endDate: new Date("2024-06-30") }),
+      postdoc({ mentorCwid: "men0003", menteeCwid: "pd0002", endDate: new Date("2023-06-30") }),
+      postdoc({ mentorCwid: "men0003", menteeCwid: "pd0003" }), // ongoing = no year
+    ]);
+    hoisted.mockSuggestionFindMany.mockResolvedValue([suggestion({ mentorCwid: "men0004", menteeCwid: "sug0001" })]);
+
+    const one = await loadMentoredPublicationsReport({ scopes: ["*"], gradYears: [2024] });
+    expect(one.summary.map((s) => s.cwid).sort()).toEqual(["pd0001", "phd0001"]);
+    expect(hoisted.mockSuggestionFindMany).not.toHaveBeenCalled();
+
+    const withNull = await loadMentoredPublicationsReport({ scopes: ["*"], gradYears: [2024, null] });
+    expect(withNull.summary.map((s) => s.cwid).sort()).toEqual(["pd0001", "pd0003", "phd0001", "phd0003", "sug0001"]);
+    expect(hoisted.mockSuggestionFindMany).toHaveBeenCalledTimes(1);
+
+    const all = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(all.summary).toHaveLength(7);
+  });
+
+  it("'all' mode: a learner the roster never had has no all-pubs list, so their mentored set stands in", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", entryYear: 2021 })]);
+    hoisted.mockPhdFindMany.mockResolvedValue([phd({ mentorCwid: "men0002", menteeCwid: "phd0001" })]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0001", "stu0001", 1, 2023),
+      copub("men0002", "phd0001", 2, 2023),
+    ]);
+    hoisted.mockLearnerPubFindFirst.mockResolvedValue({ pmid: 1 });
+    hoisted.mockLearnerPubFindMany.mockResolvedValue([learnerPub("stu0001", 1, 2023), learnerPub("stu0001", 3, 2024)]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"], pubs: "all" });
+    expect(report.summary.map((s) => [s.cwid, s.pubsAllTime])).toEqual([
+      ["stu0001", 2],
+      ["phd0001", 1],
+    ]);
+    expect(report.detail.filter((d) => d.learnerCwid === "phd0001").map((d) => [d.pmid, d.withMentor])).toEqual([[2, true]]);
   });
 });
 
