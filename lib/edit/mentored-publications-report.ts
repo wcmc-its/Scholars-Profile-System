@@ -367,7 +367,7 @@ type PairRow = {
 
 /** Whether any roster key is selected — the gate on reading `aoc_mentee`. */
 function rosterSelected(selected: ReadonlySet<string>): boolean {
-  return Object.values(ROSTER_TYPE_BY_SCOPE).some((k) => selected.has(k));
+  return Object.values(ROSTER_TYPE_BY_SCOPE).some((k) => k !== undefined && selected.has(k));
 }
 
 /** Fold one (mentor, learner) pair into the map. Sources are merged in
@@ -380,7 +380,7 @@ function mergePair(
   r: PairRow,
   selected: ReadonlySet<string>,
 ): void {
-  if (!selected.has(mentorshipTypeKey(r.type))) return;
+  if (!selected.has(mentorshipTypeKey(r.type) ?? "")) return;
   let l = learners.get(r.menteeCwid);
   if (!l) {
     l = {
@@ -437,7 +437,7 @@ function admittedRows(
     const bucket = bucketProgramType(r.programType);
     if (!bucket) continue;
     if (!scopeAdmits(scopeSet, bucket)) continue;
-    if (!selected.has(ROSTER_TYPE_BY_SCOPE[bucket])) continue;
+    if (!selected.has(ROSTER_TYPE_BY_SCOPE[bucket] ?? "")) continue;
     out.push({ ...r, bucket });
   }
   return out;
@@ -504,7 +504,7 @@ export async function loadMentoredGradYears(
   scopes: ReadonlyArray<string>,
   types: ReadonlyArray<MentorshipTypeKey>,
 ): Promise<Array<number | null>> {
-  const selected = new Set(types);
+  const selected = new Set<string>(types);
   const scopeSet = new Set(scopes);
   const years = new Set<number>();
   let unknown = false;
@@ -518,7 +518,7 @@ export async function loadMentoredGradYears(
     });
     for (const r of rows) {
       const bucket = bucketProgramType(r.programType);
-      if (!bucket || !scopeAdmits(scopeSet, bucket) || !selected.has(ROSTER_TYPE_BY_SCOPE[bucket]))
+      if (!bucket || !scopeAdmits(scopeSet, bucket) || !selected.has(ROSTER_TYPE_BY_SCOPE[bucket] ?? ""))
         continue;
       add(r.graduationYear);
     }

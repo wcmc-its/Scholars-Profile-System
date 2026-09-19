@@ -1042,6 +1042,18 @@ describe("types of mentorship (the server-side filter)", () => {
     );
   });
 
+  it("the per-pair guard holds even when a read returns an unselected tier: ['possible'] with a presumptive row in the result keeps only the ambiguous pair", async () => {
+    // Belt and braces for the source-level gates: the mock ignores the
+    // `tier` where clause, so only mergePair's own check can drop the row.
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion("men0004", "sug0001", "presumptive"),
+      suggestion("men0004", "sug0002", "ambiguous"),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub]);
+    const possible = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["possible"] });
+    expect(possible.summary.map((s) => s.cwid)).toEqual(["sug0002"]);
+  });
+
   it("roster keys gate per bucket: ['aoc'] under '*' drops MD-PhD and ECR rows; a roster pair the suggestion also claims is unaffected", async () => {
     hoisted.mockAocFindMany.mockResolvedValue([
       aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", programType: "AOC" }),

@@ -78,9 +78,11 @@ export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
 /** `report_access` scope key (`MENTORED_PUBS_SCOPES`, `lib/edit/report-access.ts`)
  *  → the type its `aoc_mentee` rows fall under. The three keys are repeated
  *  here rather than imported because report-access reads `@/lib/db`. An
- *  `aoc_mentee` bucket outside them (`phd` / `postdoc` never occur there)
- *  maps to nothing, so it can never be selected. */
-export const ROSTER_TYPE_BY_SCOPE: Record<string, MentorshipTypeKey> = {
+ *  `aoc_mentee` bucket outside them (`bucketProgramType` can also yield
+ *  `phd` / `postdoc`, though the roster carries neither) maps to nothing,
+ *  so such a row can never be selected — the miss is explicit, not a
+ *  typing lie. */
+export const ROSTER_TYPE_BY_SCOPE: Partial<Record<string, MentorshipTypeKey>> = {
   md: "aoc",
   mdphd: "mdphd",
   ecr: "ecr",
@@ -96,11 +98,12 @@ const CONFIRMED_TYPE_KEYS: ReadonlyArray<MentorshipTypeKey> = [
   "postdoc",
 ];
 
-/** Which filter key a pair falls under. */
-export function mentorshipTypeKey(t: MentorshipType): MentorshipTypeKey {
+/** Which filter key a pair falls under; null for a roster bucket no scope
+ *  maps to (such a pair is never selectable). */
+export function mentorshipTypeKey(t: MentorshipType): MentorshipTypeKey | null {
   switch (t.source) {
     case "roster":
-      return ROSTER_TYPE_BY_SCOPE[t.program];
+      return ROSTER_TYPE_BY_SCOPE[t.program] ?? null;
     case "jenzabar":
       return "thesis";
     case "ed":
@@ -124,7 +127,9 @@ export function allowedMentorshipTypes(scopes: ReadonlySet<string>): MentorshipT
  *  Co-author keys are NEVER in a default. */
 export function defaultMentorshipTypes(scopes: ReadonlySet<string>): MentorshipTypeKey[] {
   const held = new Set(
-    scopes.has("*") ? CONFIRMED_TYPE_KEYS : [...scopes].map((s) => ROSTER_TYPE_BY_SCOPE[s]),
+    scopes.has("*")
+      ? CONFIRMED_TYPE_KEYS
+      : [...scopes].flatMap((s) => ROSTER_TYPE_BY_SCOPE[s] ?? []),
   );
   return MENTORSHIP_TYPE_KEYS.filter((k) => held.has(k));
 }
