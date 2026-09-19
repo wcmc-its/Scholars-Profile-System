@@ -532,7 +532,8 @@ model AocMentee {
 /// Scholar/Publication (alumni learners, GH #181).
 model AocMenteePublication {
   menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
-  pmid        Int
+  /// The SPS `Publication.pmid` key (round 5): digits for PubMed, `SCOPUS:…` for Scopus-only.
+  pmid        String   @db.VarChar(32)
   pubYear     Int?     @map("pub_year")
   pub         Json
   refreshedAt DateTime @default(now()) @map("refreshed_at")
@@ -556,7 +557,8 @@ model AocMenteePublication {
 model MenteeCopublicationPub {
   mentorCwid  String   @map("mentor_cwid") @db.VarChar(32)
   menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
-  pmid        Int
+  /// The SPS `Publication.pmid` key (round 5): digits for PubMed, `SCOPUS:…` for Scopus-only.
+  pmid        String   @db.VarChar(32)
   pubYear     Int?     @map("pub_year")
   pub         Json
   refreshedAt DateTime @default(now()) @map("refreshed_at")

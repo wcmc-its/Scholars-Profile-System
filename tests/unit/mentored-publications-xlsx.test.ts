@@ -34,7 +34,6 @@ const REPORT: MentoredPublicationsReport = {
   generatedAt: new Date("2026-09-18T15:04:05Z"),
   filters: { scopes: ["md"], gradYears: [2025, 2024], tail: 1, pubs: "mentored" },
   allPubsLoaded: null,
-  droppedNonPubmed: 0,
   droppedUnresolved: 0,
   publications: [],
   summary: [
@@ -67,7 +66,7 @@ const REPORT: MentoredPublicationsReport = {
       mentorship: "MD · roster",
       paperMentors: [ZED],
       withMentor: true,
-      pmid: 7,
+      pmid: "7",
       title: "A very long title ".repeat(10),
       journal: "N Engl J Med",
       jif: 96.2,
@@ -90,7 +89,7 @@ const REPORT: MentoredPublicationsReport = {
       mentorship: "MD · roster",
       paperMentors: [ZED],
       withMentor: true,
-      pmid: 8,
+      pmid: "SCOPUS:105037533819",
       title: "Older",
       journal: null,
       jif: null,
@@ -146,19 +145,21 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(RAW_HEADERS[8]).toBe("Type of mentorship");
     const first = rowValues(ws, 2);
     expect(first.slice(0, 14)).toEqual([
-      2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "MD · roster", 7,
+      2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "MD · roster", "7",
       "A very long title ".repeat(10), "N Engl J Med", 96.2, 2023,
     ]);
     expect((first[14] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
     expect(first.slice(15)).toEqual([12, 2, 3, "Yes"]);
     const second = rowValues(ws, 3);
+    expect(second[9]).toBe("SCOPUS:105037533819"); // the key string, Scopus-only row
     expect(second[18]).toBe("No");
     // Nulls are blank cells, not the string "null".
     expect(ws.getCell("L3").value).toBeNull();
     expect(ws.getCell("M3").value).toBeNull();
-    // Title column: longest content is 180 chars → capped at 60; PMID column: header wins.
+    // Title column: longest content is 180 chars → capped at 60; key column: the Scopus key outgrows the header.
     expect(ws.getColumn(11).width).toBe(60);
-    expect(ws.getColumn(10).width).toBe("PMID".length + 3);
+    expect(RAW_HEADERS[9]).toBe("PMID / Scopus ID");
+    expect(ws.getColumn(10).width).toBe("SCOPUS:105037533819".length + 3);
   });
 
   it("Query & Assumptions names the window rule, counting rule, JIF and iCite sources", async () => {
@@ -254,10 +255,10 @@ describe("buildMentoredPublicationsWorkbook", () => {
       expect(rowValues(ws, 1)).toEqual([...RAW_HEADERS_ALL]);
       expect(RAW_HEADERS_ALL).not.toContain("Type of mentorship");
       expect(RAW_HEADERS_ALL[6]).toBe("Mentor(s) on this paper");
-      expect(rowValues(ws, 2).slice(6, 9)).toEqual(["Yan Other; Zed Mentor", "men0002; men0001", 7]);
+      expect(rowValues(ws, 2).slice(6, 9)).toEqual(["Yan Other; Zed Mentor", "men0002; men0001", "7"]);
       expect(ws.getCell("G3").value).toBeNull();
       expect(ws.getCell("H3").value).toBeNull();
-      expect(rowValues(ws, 3)[8]).toBe(8);
+      expect(rowValues(ws, 3)[8]).toBe("SCOPUS:105037533819");
     });
 
     it("Query & Assumptions names the mode and the mentored-subset rule", async () => {

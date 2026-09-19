@@ -60,6 +60,9 @@ async function loadHiddenMenteeSet(mentorCwid: string): Promise<Set<string>> {
 }
 
 export type CoPublication = {
+  /** The SPS `Publication.pmid` key (see `CoPublicationFull.id`); absent on
+   *  bridge JSON written before round 5. */
+  id?: string;
   pmid: number;
   title: string;
   journal: string | null;
@@ -80,6 +83,12 @@ export type CoPublicationAuthor = {
  *  journal / doi / pmcid + structured author list for the page and
  *  exports. */
 export type CoPublicationFull = {
+  /** The SPS `Publication.pmid` key: `String(pmid)` for PubMed rows,
+   *  `SCOPUS:…` for Scopus-only rows; absent on bridge JSON written before
+   *  round 5. */
+  id?: string;
+  /** For a Scopus-only row this is ReciterDB's synthetic negative and must
+   *  never be used for a link or a join — `id` is the key. */
   pmid: number;
   title: string;
   journal: string | null;
@@ -834,7 +843,7 @@ export async function getMenteesForMentor(
   // path — getCoPublications, which has it, suppresses exactly).
   const previewPmids = [
     ...new Set(
-      [...copubPreviewByCwid.values()].flat().map((p) => String(p.pmid)),
+      [...copubPreviewByCwid.values()].flat().map((p) => p.id ?? String(p.pmid)),
     ),
   ];
   if (previewPmids.length > 0) {
@@ -842,7 +851,7 @@ export async function getMenteesForMentor(
     const darkPmids = await resolveDarkPmids(previewPmids, suppressions, prisma);
     if (darkPmids.size > 0) {
       for (const [menteeCwid, preview] of copubPreviewByCwid) {
-        const kept = preview.filter((p) => !darkPmids.has(String(p.pmid)));
+        const kept = preview.filter((p) => !darkPmids.has(p.id ?? String(p.pmid)));
         const dropped = preview.length - kept.length;
         if (dropped === 0) continue;
         copubPreviewByCwid.set(menteeCwid, kept);
@@ -940,19 +949,21 @@ async function applyCoPubSuppression(
 ): Promise<CoPublicationFull[]> {
   if (pubs.length === 0) return [];
 
-  const pmidStrings = pubs.map((p) => String(p.pmid));
+  // Suppression is keyed on `Publication.pmid`, which for a Scopus-only row
+  // is the `id` (`SCOPUS:…`), never the synthetic negative pmid.
+  const pmidStrings = pubs.map((p) => p.id ?? String(p.pmid));
   const suppressions = await loadPublicationSuppressions(pmidStrings, prisma);
   const darkPmids = await resolveDarkPmids(pmidStrings, suppressions, prisma);
 
   return pubs
-    .filter((p) => !darkPmids.has(String(p.pmid)))
+    .filter((p) => !darkPmids.has(p.id ?? String(p.pmid)))
     .map<CoPublicationFull>((p) => ({
       ...p,
       // #356 — drop the chip of a co-author who hid this publication.
       authors: p.authors.filter(
         (a) =>
           a.personIdentifier === null ||
-          !isAuthorHidden(suppressions, String(p.pmid), a.personIdentifier),
+          !isAuthorHidden(suppressions, p.id ?? String(p.pmid), a.personIdentifier),
       ),
     }));
 }
@@ -977,6 +988,7 @@ async function fetchCoPublicationsRaw(
     try {
       const rows = await prisma.menteeCopublicationPub.findMany({
         where: { mentorCwid, menteeCwid },
+        // `pmid` is the string key since round 5 — the tiebreak is lexicographic.
         orderBy: [{ pubYear: "desc" }, { pmid: "desc" }],
         select: { pub: true },
       });

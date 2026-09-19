@@ -145,6 +145,22 @@ describe("getCoPublications — bridge source, flag ON (issue #928)", () => {
     expect(pubs.map((p) => p.pmid)).toEqual([222]);
   });
 
+  it("suppression is keyed on the stable id, never the synthetic negative pmid of a Scopus-only row", async () => {
+    // A taken-down Scopus-only pub: `Publication.pmid` (and so the dark set)
+    // carries `SCOPUS:…`; the bridge JSON's `pmid` is ReciterDB's churning
+    // negative. Keying on the number would let the title leak.
+    menteeCopubPubFindMany.mockResolvedValue([
+      { pmid: "222", pub: fullPub({ pmid: 222 }) },
+      { pmid: "SCOPUS:105037533819", pub: fullPub({ pmid: -4242, id: "SCOPUS:105037533819", title: "Taken down" }) },
+    ]);
+    resolveDarkPmids.mockResolvedValue(new Set<string>(["SCOPUS:105037533819"]));
+
+    const pubs = await getCoPublications("mentor01", "aoc1");
+
+    expect(loadPublicationSuppressions).toHaveBeenCalledWith(["222", "SCOPUS:105037533819"], expect.anything());
+    expect(pubs.map((p) => p.pmid)).toEqual([222]);
+  });
+
   it("filters a per-author-hidden co-author chip from a surviving publication", async () => {
     menteeCopubPubFindMany.mockResolvedValue([{ pmid: 111, pub: fullPub({ pmid: 111 }) }]);
     // Hide aoc1 on pmid 111.

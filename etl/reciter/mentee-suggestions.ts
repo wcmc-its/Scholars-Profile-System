@@ -29,6 +29,7 @@
 import type { PoolConnection } from "mariadb";
 import { db, disconnect } from "@/lib/db";
 import { assertPruneVolume } from "@/lib/etl-guard";
+import { pubKey } from "@/lib/pub-key";
 import {
   classifyMenteeKind,
   tierOf,
@@ -108,14 +109,6 @@ function chunks<T>(arr: T[], size: number): T[][] {
 }
 
 const pairKey = (mentorCwid: string, menteeCwid: string) => `${mentorCwid}:${menteeCwid}`;
-
-/** SPS `Publication.pmid` key for a ReCiterDB article — mirrors `pubKey` in
- *  etl/reciter/index.ts: external rows key on the stable source-prefixed
- *  article_id (their synthetic negative pmid churns nightly), PubMed rows on
- *  the pmid. */
-export function pubKey(pmid: number, articleId: string | null): string {
-  return articleId != null && articleId.length <= 32 ? articleId : String(pmid);
-}
 
 /** Q1 — the heavy aggregation, in SQL. Shared with the Phase 0 probe, which
  *  passes the ground-truth mentee set. */
