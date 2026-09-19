@@ -389,8 +389,11 @@ function mergePair(learners: Map<string, Learner>, r: PairRow): void {
     }
   }
   if (r.ongoing) l.ongoing = true;
+  // The surest source for a mentor wins; a pair it discards contributes
+  // nothing (else a co-author KIND would leak into the Program column).
+  if (l.mentors.has(r.mentorCwid)) return;
+  l.mentors.set(r.mentorCwid, r.type);
   l.buckets.add(r.type.program);
-  if (!l.mentors.has(r.mentorCwid)) l.mentors.set(r.mentorCwid, r.type);
 }
 
 /** Keep the rows whose program bucket the scope set admits; a row with an
@@ -686,7 +689,11 @@ export async function loadMentoredPublicationsReport({
   for (const s of suggestions) {
     // A pair a surer source also claims reads from the bridge instead.
     if (learners.get(s.menteeCwid)?.mentors.get(s.mentorCwid)?.source !== "coauthor") continue;
-    for (const e of (s.evidence ?? []) as Evidence[]) {
+    // A malformed evidence blob (not an array, or a non-object entry) is
+    // skipped, never thrown — one bad row must not take the whole report down.
+    const list = Array.isArray(s.evidence) ? (s.evidence as unknown[]) : [];
+    for (const e of list as Evidence[]) {
+      if (!e || typeof e !== "object" || typeof e.id !== "string") continue;
       if (!/^[1-9]\d*$/.test(e.id)) {
         droppedNonPubmed.add(e.id);
         continue;

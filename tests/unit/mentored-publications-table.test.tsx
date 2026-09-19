@@ -52,7 +52,21 @@ const learner = (cwid: string, lastName: string, authorPosition: number | null, 
 });
 
 const PUBS: MentoredPubsPublicationRow[] = [
-  // Loader order: dateAdded desc, nulls last — which is NOT year order.
+  // Deliberately NOT in loader order (dateAdded desc, nulls last): a no-op
+  // sort would render 4, 1, 2 — the order assertion pins the island's sort.
+  pub({
+    pmid: 3,
+    year: 2023,
+    learners: [learner("stu0002", "Park", 2, null)],
+    mentors: [{ ...NKEMELU, mentorships: [VOL] }],
+  }),
+  pub({
+    pmid: 4,
+    year: 2021,
+    dateAdded: new Date("2023-06-01"),
+    learners: [learner("stu0003", "Wu", 2, null)],
+    mentors: [{ ...OKAFOR, mentorships: [PHD] }],
+  }),
   pub({
     pmid: 1,
     year: 2022,
@@ -68,19 +82,6 @@ const PUBS: MentoredPubsPublicationRow[] = [
     jif: 2,
     learners: [learner("stu0001", "Learner", 3, false)],
     mentors: [{ ...CHEN, mentorships: [MD] }],
-  }),
-  pub({
-    pmid: 4,
-    year: 2021,
-    dateAdded: new Date("2023-06-01"),
-    learners: [learner("stu0003", "Wu", 2, null)],
-    mentors: [{ ...OKAFOR, mentorships: [PHD] }],
-  }),
-  pub({
-    pmid: 3,
-    year: 2023,
-    learners: [learner("stu0002", "Park", 2, null)],
-    mentors: [{ ...NKEMELU, mentorships: [VOL] }],
   }),
 ];
 
@@ -103,15 +104,9 @@ function summaryRow(o: Partial<MentoredPubsSummaryRow> & Pick<MentoredPubsSummar
 }
 
 const LEARNERS: MentoredPubsSummaryRow[] = [
-  summaryRow({
-    cwid: "stu0004",
-    gradYear: 2026,
-    lastName: "Zed",
-    firstName: "Zo",
-    mentors: [{ ...CHEN, mentorship: MD }],
-    pubsInWindow: 2,
-    pubsAllTime: 2,
-  }),
+  // Reversed on purpose: a no-op sort would render Park, Wu, Learner, Zed.
+  summaryRow({ cwid: "stu0002", lastName: "Park", firstName: "Jun", mentors: [{ ...NKEMELU, mentorship: VOL }] }),
+  summaryRow({ cwid: "stu0003", lastName: "Wu", firstName: "Hana", mentors: [{ ...OKAFOR, mentorship: MDPHD }] }),
   summaryRow({
     cwid: "stu0001",
     gradYear: 2025,
@@ -124,8 +119,15 @@ const LEARNERS: MentoredPubsSummaryRow[] = [
     pubsInWindow: 4,
     pubsAllTime: 6,
   }),
-  summaryRow({ cwid: "stu0003", lastName: "Wu", firstName: "Hana", mentors: [{ ...OKAFOR, mentorship: MDPHD }] }),
-  summaryRow({ cwid: "stu0002", lastName: "Park", firstName: "Jun", mentors: [{ ...NKEMELU, mentorship: VOL }] }),
+  summaryRow({
+    cwid: "stu0004",
+    gradYear: 2026,
+    lastName: "Zed",
+    firstName: "Zo",
+    mentors: [{ ...CHEN, mentorship: MD }],
+    pubsInWindow: 2,
+    pubsAllTime: 2,
+  }),
 ];
 
 const rowIds = (table: HTMLElement, prefix: string) =>

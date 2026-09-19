@@ -699,6 +699,31 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     // Jenzabar's own mentor name reaches the roster-name map.
     expect(report.summary[1].mentors[0].name).toBe("Jen Zabar");
   });
+  it("a co-author pair a surer source also claims leaves NO trace: no kind in Program, no coauthor type", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", programType: "AOC", graduationYear: 2025 }),
+    ]);
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({ mentorCwid: "men0001", menteeCwid: "stu0001", kind: "volunteer" }),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary).toHaveLength(1);
+    expect(report.summary[0].program).toBe("MD");
+    expect(report.summary[0].mentors.map((m) => m.mentorship.source)).toEqual(["roster"]);
+  });
+
+  it("a malformed evidence blob is skipped, never thrown", async () => {
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({ mentorCwid: "men0004", menteeCwid: "sug0001", evidence: { id: "101" } }),
+      suggestion({ mentorCwid: "men0004", menteeCwid: "sug0002", evidence: [null, 7, { id: 101 }, { id: "101", menteeRank: 1 }] }),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(101)]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.summary.map((s) => [s.cwid, s.pubsAllTime])).toEqual([
+      ["sug0001", 0],
+      ["sug0002", 1],
+    ]);
+  });
 
   it("a suggestion's evidence resolves from `publication`: parsed byline, authorPosition = menteeRank, mentor on the paper; SCOPUS: and unresolved ids are counted", async () => {
     hoisted.mockSuggestionFindMany.mockResolvedValue([
@@ -708,6 +733,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
         evidence: [
           { id: "101", year: 2024, menteeRank: 1, mentorRank: 3, total: 3 },
           { id: "SCOPUS:2-s2.0-85000000001", year: 2024, menteeRank: 1, mentorRank: 2, total: 2 },
+          { id: "-5", year: 2024, menteeRank: 1, mentorRank: 2, total: 2 },
           { id: "102", year: 2023, menteeRank: 2, mentorRank: 1, total: 2 }, // no local row
         ],
       }),
@@ -716,7 +742,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     hoisted.mockScholarFindMany.mockResolvedValue([{ cwid: "men0004", preferredName: "Zed Mentor" }]);
 
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.droppedNonPubmed).toBe(1);
+    expect(report.droppedNonPubmed).toBe(2);
     expect(report.droppedUnresolved).toBe(1);
     expect(report.publications).toHaveLength(1);
     expect(report.publications[0]).toMatchObject({
