@@ -42,6 +42,24 @@
  *     authors. An evidence id with no local row is skipped and counted in
  *     `droppedUnresolved`. A pair the roster / Jenzabar / ED already
  *     confirm keeps that type and reads from the bridge instead.
+ *   - `field_override(scholar, <mentor cwid>, 'manualMentees')` — the
+ *     mentees a faculty member asserted on their own `/edit` profile
+ *     (`lib/edit/manual-mentee.ts`): hand-entered, or a co-authorship
+ *     suggestion they ACCEPTED on the "From your publications" card (the
+ *     accept flow writes the suggestion's cwid + a `programType`). Confirmed
+ *     — it is the mentor's word. Before this source the report read
+ *     `mentee_suggestion` alone, so an accepted suggestion still showed as
+ *     an inference, off by default: the confirmation was lost. Program =
+ *     the entry's `programType` (AOC → md, MD-PhD → mdphd, PhD → phd,
+ *     POSTDOC → postdoc) or `other`; grad year = the entry's `year`, no
+ *     entry year. An entry with NO cwid cannot be a pair (nothing to join
+ *     on): skipped and counted in `droppedNoCwid`. Pubs: not in the bridge
+ *     either — a `mentee_suggestion` row for the pair (any tier, dismissed
+ *     or not: a later dismissal must not lose the pubs of a pair the mentor
+ *     asserted) supplies its evidence exactly as a co-author pair's does;
+ *     otherwise the pair's confirmed `publication_author` rows are
+ *     intersected by pmid, the mentee's `position` standing in for
+ *     `menteeRank` (0 = rank unknown → no byline CWID, position null).
  *   The Jenzabar and ED pairs' co-pubs are already in the bridge (the export
  *   unions all three). In `"all"` mode `aoc_mentee_publication` is a
  *   roster-only product, so a learner known ONLY through these sources has
@@ -96,7 +114,8 @@
  * already resolved against its scopes): the loader reads ONLY the sources a
  * selected key needs — `aoc_mentee` for aoc / mdphd / ecr (each bucket kept
  * only when its own key is selected), Jenzabar for thesis, ED for postdoc,
- * `mentee_suggestion` for likely (presumptive) / possible (ambiguous) — and
+ * `mentee_suggestion` for likely (presumptive) / possible (ambiguous), the
+ * `manualMentees` overrides for faculty — and
  * `mergePair` refuses any pair whose key is not selected, so a learner is
  * present only through selected pairs: their mentor lines, Program column,
  * counts and workbook rows all describe selected pairs and nothing else.
@@ -114,6 +133,7 @@ import { bucketProgramType, type MentoringProgramKey } from "@/lib/api/mentoring
 import { stripWcmMarkers } from "@/lib/author-byline";
 import { db } from "@/lib/db";
 import { HIGH_IMPACT_THRESHOLD } from "@/lib/edit/cancer-center-publications-report";
+import { validateManualMentees, type ManualMentee } from "@/lib/edit/manual-mentee";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import {
   mentorshipKey,
@@ -271,6 +291,9 @@ export type MentoredPublicationsReport = {
   allPubsLoaded: boolean | null;
   /** Distinct suggestion-evidence pmids with no local `publication` row yet. */
   droppedUnresolved: number;
+  /** Faculty-asserted mentees entered without a CWID — no pair to join on,
+   *  so not shown (0 unless `faculty` is selected). */
+  droppedNoCwid: number;
 };
 
 /** Whether `year` falls in the learner's program window. Unknown grad year
@@ -369,16 +392,55 @@ type PairRow = {
   ongoing?: boolean;
 };
 
+/** A faculty-asserted mentee WITH a cwid, keyed to the mentor who asserted
+ *  them (`field_override.entityId`). */
+type FacultyPair = { mentorCwid: string; entry: ManualMentee & { cwid: string } };
+
+/** `manualMentees` `programType` → the report's program bucket. */
+const FACULTY_PROGRAM: Record<string, string> = {
+  AOC: "md",
+  "MD-PhD": "mdphd",
+  PhD: "phd",
+  POSTDOC: "postdoc",
+};
+
+/** Every faculty-asserted mentee with a cwid, across every mentor, plus the
+ *  count of entries without one. One scan of the `manualMentees` overrides
+ *  (ponytail: `field_override` is small and the unique (entityType,
+ *  entityId, fieldName) index narrows by entityType; a fieldName-led index
+ *  is the upgrade path if the table ever outgrows the scan). A malformed
+ *  value is skipped, never thrown — `validateManualMentees` is the same
+ *  gate the write path applies. Used by the loader and the year picker. */
+async function readFacultyPairs(): Promise<{ pairs: FacultyPair[]; droppedNoCwid: number }> {
+  const rows = await db.read.fieldOverride.findMany({
+    where: { entityType: "scholar", fieldName: "manualMentees" },
+    select: { entityId: true, value: true },
+  });
+  const pairs: FacultyPair[] = [];
+  let droppedNoCwid = 0;
+  for (const r of rows) {
+    const parsed = validateManualMentees(r.value);
+    if (!parsed.ok) continue;
+    for (const entry of parsed.value) {
+      if (entry.cwid) pairs.push({ mentorCwid: r.entityId, entry: { ...entry, cwid: entry.cwid } });
+      else droppedNoCwid += 1;
+    }
+  }
+  return { pairs, droppedNoCwid };
+}
+
 /** Whether any roster key is selected — the gate on reading `aoc_mentee`. */
 function rosterSelected(selected: ReadonlySet<string>): boolean {
   return Object.values(ROSTER_TYPE_BY_SCOPE).some((k) => k !== undefined && selected.has(k));
 }
 
 /** Fold one (mentor, learner) pair into the map. Sources are merged in
- *  confidence order (roster, Jenzabar, ED, co-author) so a pair two sources
- *  claim keeps the surer type. A pair whose type is not selected is refused
- *  outright (the per-source reads already skip it; this keeps "surest source
- *  wins" honest when a caller widens a read). */
+ *  confidence order (roster, Jenzabar, ED, faculty-asserted, co-author) so
+ *  a pair two sources claim keeps the surer type — a system of record over
+ *  the mentor's word, the mentor's word over an inference. A pair whose
+ *  type is not selected is refused outright (the per-source reads already
+ *  skip it; this keeps "surest source wins" honest when a caller widens a
+ *  read). */
 function mergePair(
   learners: Map<string, Learner>,
   r: PairRow,
@@ -503,7 +565,8 @@ function programLabel(buckets: ReadonlySet<string>): string {
  *  page's year-picker choices. Per type: the roster's `graduationYear` for
  *  each admitted + selected bucket; Jenzabar's `conferralYear` for thesis;
  *  the postdoc `endDate` year for postdoc (ongoing = null = "unknown");
- *  co-author pairs carry no year, so likely / possible contribute "unknown". */
+ *  co-author pairs carry no year, so likely / possible contribute "unknown";
+ *  a faculty-asserted entry's own `year`, "unknown" when it has none. */
 export async function loadMentoredGradYears(
   scopes: ReadonlyArray<string>,
   types: ReadonlyArray<MentorshipTypeKey>,
@@ -536,6 +599,9 @@ export async function loadMentoredGradYears(
     for (const r of rows) add(r.endDate?.getUTCFullYear() ?? null);
   }
   if (selected.has("likely") || selected.has("possible")) unknown = true;
+  if (selected.has("faculty")) {
+    for (const p of (await readFacultyPairs()).pairs) add(p.entry.year ?? null);
+  }
   const out: Array<number | null> = [...years].sort((a, b) => b - a);
   if (unknown) out.push(null);
   return out;
@@ -567,8 +633,10 @@ function authorPosition(pub: CoPublicationFull, cwid: string): number | null {
  * `gradYears` narrows learners by graduation year (null = all); `tail`
  * widens the window past graduation; `pubs` picks the publication set (see
  * the module doc). Batched reads after the `aoc_mentee` / Jenzabar / postdoc
- * / suggestion scans (each only when a selected type needs it): co-pubs per
- * (mentor, learner) pair, `publication` per suggestion-evidence pmid,
+ * / suggestion / `manualMentees` scans (each only when a selected type
+ * needs it): co-pubs per (mentor, learner) pair, `mentee_suggestion` and
+ * `publication_author` per faculty-asserted pair, `publication` per
+ * suggestion-evidence pmid,
  * `aoc_mentee_publication` per learner (`"all"` only), `publication` per
  * pmid, `journal_impact_factor` per abbreviation, `scholar` per mentor cwid.
  */
@@ -595,6 +663,11 @@ export async function loadMentoredPublicationsReport({
   };
   const selected = new Set<string>(types);
   const allMode = pubs === "all";
+  // Faculty-asserted entries without a cwid are counted even when no learner
+  // survives the other filters — the page's sentence must not vanish with them.
+  const faculty = selected.has("faculty")
+    ? await readFacultyPairs()
+    : { pairs: [], droppedNoCwid: 0 };
   const empty = (allPubsLoaded: boolean | null): MentoredPublicationsReport => ({
     summary: [],
     detail: [],
@@ -603,6 +676,7 @@ export async function loadMentoredPublicationsReport({
     filters,
     allPubsLoaded,
     droppedUnresolved: 0,
+    droppedNoCwid: faculty.droppedNoCwid,
   });
 
   // A `null` in `gradYears` admits the rows with no graduation year.
@@ -631,7 +705,7 @@ export async function loadMentoredPublicationsReport({
   const rows = admittedRows(aocRows, scopes, selected);
   const learners = collapseLearners(rows, selected);
 
-  // The three other pair sources (module doc): not scope-gated, year-filtered
+  // The four other pair sources (module doc): not scope-gated, year-filtered
   // in memory by the source's own year (small tables), merged in confidence
   // order so a pair two sources claim keeps the surer type.
   const yearAdmitted = (y: number | null) =>
@@ -697,6 +771,31 @@ export async function loadMentoredPublicationsReport({
         entryYear: r.startDate?.getUTCFullYear() ?? null,
         type: { program: "postdoc", source: "ed", tier: "confirmed" },
         ongoing: r.endDate === null,
+      },
+      selected,
+    );
+  }
+  // Faculty-asserted pairs: after the systems of record, before the
+  // inferences — the mentor's own word beats a co-author pattern for the
+  // same pair, and a roster / Jenzabar / ED row beats the mentor's word.
+  for (const { mentorCwid, entry } of faculty.pairs) {
+    const year = entry.year ?? null;
+    if (!yearAdmitted(year)) continue;
+    const cut = entry.name.lastIndexOf(" ");
+    mergePair(
+      learners,
+      {
+        mentorCwid,
+        menteeCwid: entry.cwid,
+        firstName: cut < 0 ? null : entry.name.slice(0, cut),
+        lastName: cut < 0 ? entry.name : entry.name.slice(cut + 1),
+        gradYear: year,
+        entryYear: null,
+        type: {
+          program: (entry.programType && FACULTY_PROGRAM[entry.programType]) || "other",
+          source: "faculty",
+          tier: "confirmed",
+        },
       },
       selected,
     );
@@ -783,21 +882,84 @@ export async function loadMentoredPublicationsReport({
   };
   for (const c of copubs) addMentorOnPaper(c.menteeCwid, c.pmid, c.mentorCwid);
 
+  // Faculty-asserted pairs are not in the bridge either. Those that survived
+  // as `faculty` (a surer source did not claim them) read their pubs from
+  // the pair's `mentee_suggestion` row when one exists — ANY tier, dismissed
+  // or not: an accepted suggestion is never dismissed, but a later dismissal
+  // must not lose the pubs of a pair the mentor asserted — else from the
+  // `publication_author` intersection below. The read is per pair, so no
+  // tier filter: the tier read above only covers the selected inference keys.
+  const pairKey = (p: { mentorCwid: string; menteeCwid: string }) =>
+    `${p.mentorCwid}::${p.menteeCwid}`;
+  const facultyPairs = faculty.pairs
+    .map(({ mentorCwid, entry }) => ({ mentorCwid, menteeCwid: entry.cwid }))
+    .filter((p) => learners.get(p.menteeCwid)?.mentors.get(p.mentorCwid)?.source === "faculty");
+  const facultySuggestions: Array<{ mentorCwid: string; menteeCwid: string; evidence: unknown }> =
+    [];
+  for (const batch of chunks(facultyPairs, PAIR_BATCH)) {
+    const found = await db.read.menteeSuggestion.findMany({
+      where: { OR: batch },
+      select: { mentorCwid: true, menteeCwid: true, evidence: true },
+    });
+    facultySuggestions.push(...found);
+  }
+  const suggestedPairs = new Set(facultySuggestions.map(pairKey));
+
   // Suggestion pairs are not in the bridge: their pubs are the suggestion's
   // evidence (ponytail: the builder's last-8-years window, 50 per pair),
   // resolved from the local `publication` row by its `id` (the same key).
   const droppedUnresolved = new Set<string>();
   type Evidence = { id: string; menteeRank: number };
   const evidence: Array<{ mentorCwid: string; menteeCwid: string; pmid: string; menteeRank: number }> = [];
-  for (const s of suggestions) {
-    // A pair a surer source also claims reads from the bridge instead.
-    if (learners.get(s.menteeCwid)?.mentors.get(s.mentorCwid)?.source !== "coauthor") continue;
+  for (const s of [...suggestions, ...facultySuggestions]) {
+    // A pair a surer source also claims reads from the bridge instead. A
+    // faculty pair reads its evidence too (the same row may arrive twice
+    // when its inference tier is also selected; `addPub` dedupes by pmid).
+    const source = learners.get(s.menteeCwid)?.mentors.get(s.mentorCwid)?.source;
+    if (source !== "coauthor" && source !== "faculty") continue;
     // A malformed evidence blob (not an array, or a non-object entry) is
     // skipped, never thrown — one bad row must not take the whole report down.
     const list = Array.isArray(s.evidence) ? (s.evidence as unknown[]) : [];
     for (const e of list as Evidence[]) {
       if (!e || typeof e !== "object" || typeof e.id !== "string" || !e.id || e.id.length > 32) continue;
       evidence.push({ mentorCwid: s.mentorCwid, menteeCwid: s.menteeCwid, pmid: e.id, menteeRank: e.menteeRank });
+    }
+  }
+  // A faculty pair with no suggestion row: intersect the two authors'
+  // confirmed `publication_author` rows by pmid (the SPS key, digits or
+  // `SCOPUS:…`). Grouped by cwid LOWERCASED — the `IN` filter matches
+  // case-insensitively under the column's collation but returns the STORED
+  // spelling (see `localCoPublications`, `lib/api/mentoring.ts`). The
+  // mentee's `position` stands in for `menteeRank`; 0 ("rank unknown",
+  // #2227) attaches no byline CWID, so the position reads null.
+  const unsuggested = facultyPairs.filter((p) => !suggestedPairs.has(pairKey(p)));
+  const pmidsByCwid = new Map<string, Map<string, number>>();
+  const authorCwids = [...new Set(unsuggested.flatMap((p) => [p.mentorCwid, p.menteeCwid]))];
+  for (const batch of chunks(authorCwids, PMID_BATCH)) {
+    const found = await db.read.publicationAuthor.findMany({
+      where: { cwid: { in: batch }, isConfirmed: true },
+      select: { cwid: true, pmid: true, position: true },
+    });
+    for (const r of found) {
+      if (!r.cwid) continue;
+      const key = r.cwid.toLowerCase();
+      let m = pmidsByCwid.get(key);
+      if (!m) pmidsByCwid.set(key, (m = new Map()));
+      m.set(r.pmid, r.position);
+    }
+  }
+  for (const p of unsuggested) {
+    const mentorPmids = pmidsByCwid.get(p.mentorCwid.toLowerCase());
+    const menteePmids = pmidsByCwid.get(p.menteeCwid.toLowerCase());
+    if (!mentorPmids || !menteePmids) continue;
+    for (const [pmid, position] of menteePmids) {
+      if (!mentorPmids.has(pmid)) continue;
+      evidence.push({
+        mentorCwid: p.mentorCwid,
+        menteeCwid: p.menteeCwid,
+        pmid,
+        menteeRank: position,
+      });
     }
   }
   type LocalPub = {
@@ -866,8 +1028,8 @@ export async function loadMentoredPublicationsReport({
   };
 
   // The publication set per learner: the co-pub rows' distinct pmids plus
-  // the suggestion evidence, or in "all" mode every `aoc_mentee_publication`
-  // row for the learner.
+  // the suggestion / faculty-pair evidence, or in "all" mode every
+  // `aoc_mentee_publication` row for the learner.
   const mentoredByLearner = new Map<string, Map<string, CoPublicationFull>>();
   const addPub = (into: Map<string, Map<string, CoPublicationFull>>, cwid: string, pmid: string, pub: unknown) => {
     let m = into.get(cwid);
@@ -1174,5 +1336,6 @@ export async function loadMentoredPublicationsReport({
     filters,
     allPubsLoaded,
     droppedUnresolved: droppedUnresolved.size,
+    droppedNoCwid: faculty.droppedNoCwid,
   };
 }

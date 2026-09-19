@@ -10,7 +10,10 @@
  *   - `aocMenteePublication.findMany/findFirst` (the learner's full list, "all" mode)
  *   - `phdMentorRelationship.findMany`     (Jenzabar thesis advisors)
  *   - `postdocMentorRelationship.findMany` (ED postdoc appointments)
- *   - `menteeSuggestion.findMany`          (co-author-inferred pairs + evidence)
+ *   - `menteeSuggestion.findMany`          (co-author-inferred pairs + evidence,
+ *                                           and the per-pair read for faculty pairs)
+ *   - `fieldOverride.findMany`             (the mentors' `manualMentees` overrides)
+ *   - `publicationAuthor.findMany`         (faculty-pair co-pubs with no suggestion row)
  *
  * Behaviors protected: the window rule incl. the `gradYear - 4` fallback and
  * the tail; a pub shared with two mentors counts ONCE in the learner's
@@ -29,7 +32,12 @@
  * (round 6) reads only the sources the selected keys need and admits only
  * selected pairs — a learner with a roster pair and co-author pairs shows
  * the roster pair alone under `["aoc"]`, and the year chips are the union
- * over the selected sources. Every pre-types test selects `ALL`.
+ * over the selected sources. Every pre-types test selects `ALL`. Faculty-
+ * asserted pairs (`manualMentees`, PR C): typed confirmed, program from the
+ * entry's `programType` or "other", ranked below roster / Jenzabar / ED and
+ * above a co-author inference for the same pair; pubs from the pair's
+ * suggestion row (any tier, dismissed or not) else the `publication_author`
+ * intersection; CWID-less entries counted in `droppedNoCwid`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -44,6 +52,8 @@ const hoisted = vi.hoisted(() => ({
   mockPhdFindMany: vi.fn(),
   mockPostdocFindMany: vi.fn(),
   mockSuggestionFindMany: vi.fn(),
+  mockOverrideFindMany: vi.fn(),
+  mockAuthorFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -61,6 +71,8 @@ vi.mock("@/lib/db", () => ({
       phdMentorRelationship: { findMany: hoisted.mockPhdFindMany },
       postdocMentorRelationship: { findMany: hoisted.mockPostdocFindMany },
       menteeSuggestion: { findMany: hoisted.mockSuggestionFindMany },
+      fieldOverride: { findMany: hoisted.mockOverrideFindMany },
+      publicationAuthor: { findMany: hoisted.mockAuthorFindMany },
     },
     write: {},
   },
@@ -163,6 +175,8 @@ beforeEach(() => {
   hoisted.mockPhdFindMany.mockResolvedValue([]);
   hoisted.mockPostdocFindMany.mockResolvedValue([]);
   hoisted.mockSuggestionFindMany.mockResolvedValue([]);
+  hoisted.mockOverrideFindMany.mockResolvedValue([]);
+  hoisted.mockAuthorFindMany.mockResolvedValue([]);
 });
 
 describe("window rule", () => {
@@ -1113,6 +1127,304 @@ describe("types of mentorship (the server-side filter)", () => {
     expect(postdoc.summary.map((s) => s.cwid)).toEqual(["pd0001"]);
     expect(hoisted.mockAocFindMany).not.toHaveBeenCalled();
     expect(hoisted.mockPhdFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("faculty-asserted mentees (`manualMentees`)", () => {
+  /** One mentor's `manualMentees` override row, as the scan returns it. */
+  const override = (mentorCwid: string, entries: unknown) => ({
+    entityId: mentorCwid,
+    value: typeof entries === "string" ? entries : JSON.stringify(entries),
+  });
+  const localPub = (pmid: number | string, authorsString = "Mentee M, Second AB, Mentor Z") => ({
+    pmid: String(pmid),
+    title: `Local ${pmid}`,
+    journal: "J Local",
+    year: 2024,
+    volume: null,
+    issue: null,
+    pages: null,
+    authorsString,
+    fullAuthorsString: null,
+    journalAbbrev: null,
+    dateAddedToEntrez: null,
+    citedByCount: null,
+  });
+  const authorRow = (cwid: string, pmid: number | string, position: number) => ({
+    cwid,
+    pmid: String(pmid),
+    position,
+  });
+
+  it("not read unless 'faculty' is selected", async () => {
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [{ name: "Mia Mentee", cwid: "stu0009", programType: "POSTDOC" }]),
+    ]);
+    const report = await loadMentoredPublicationsReport({
+      scopes: ["*"],
+      types: ["aoc", "likely"],
+    });
+    expect(hoisted.mockOverrideFindMany).not.toHaveBeenCalled();
+    expect(report.summary).toEqual([]);
+    expect(report.droppedNoCwid).toBe(0);
+  });
+
+  it("an entry with a cwid lands as a confirmed faculty pair: program from programType (POSTDOC → Postdoc), name split at the last space, year as grad year; no programType → Other", async () => {
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [
+        { name: "Mia Van Mentee", cwid: "stu0009", programType: "POSTDOC", year: 2024 },
+        { name: "Mononym", cwid: "stu0010", programLabel: "Visiting student" },
+      ]),
+    ]);
+    hoisted.mockScholarFindMany.mockResolvedValue([
+      { cwid: "men0001", preferredName: "Zed Mentor" },
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
+    expect(hoisted.mockOverrideFindMany).toHaveBeenCalledWith({
+      where: { entityType: "scholar", fieldName: "manualMentees" },
+      select: { entityId: true, value: true },
+    });
+    expect(hoisted.mockAocFindMany).not.toHaveBeenCalled();
+    expect(
+      report.summary.map((s) => [s.cwid, s.program, s.gradYear, s.firstName, s.lastName]),
+    ).toEqual([
+      ["stu0009", "Postdoc", 2024, "Mia Van", "Mentee"],
+      ["stu0010", "Other", null, null, "Mononym"],
+    ]);
+    expect(report.summary[0].mentors).toEqual([
+      {
+        cwid: "men0001",
+        name: "Zed Mentor",
+        mentorship: { program: "postdoc", source: "faculty", tier: "confirmed" },
+      },
+    ]);
+    expect(report.summary[1].mentors[0].mentorship).toEqual({
+      program: "other",
+      source: "faculty",
+      tier: "confirmed",
+    });
+    // No 4-year guess for a faculty entry's year: the window is unknown.
+    expect(report.summary[0]).toMatchObject({
+      entryYear: null,
+      entryYearSource: null,
+      pubsInWindow: null,
+    });
+    expect(report.droppedNoCwid).toBe(0);
+  });
+
+  it("pubs come from the pair's mentee_suggestion row when one exists — read per pair, no tier or dismissedAt filter — and the row label ends 'faculty-asserted'", async () => {
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [{ name: "Mia Mentee", cwid: "stu0009", programType: "PhD" }]),
+    ]);
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      {
+        mentorCwid: "men0001",
+        menteeCwid: "stu0009",
+        evidence: [{ id: "301", year: 2024, menteeRank: 1, mentorRank: 3, total: 3 }],
+      },
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(301)]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
+    expect(hoisted.mockSuggestionFindMany).toHaveBeenCalledTimes(1);
+    expect(hoisted.mockSuggestionFindMany).toHaveBeenCalledWith({
+      where: { OR: [{ mentorCwid: "men0001", menteeCwid: "stu0009" }] },
+      select: { mentorCwid: true, menteeCwid: true, evidence: true },
+    });
+    expect(hoisted.mockAuthorFindMany).not.toHaveBeenCalled();
+    expect(report.summary[0]).toMatchObject({ cwid: "stu0009", program: "PhD", pubsAllTime: 1 });
+    expect(report.detail).toHaveLength(1);
+    expect(report.detail[0]).toMatchObject({
+      pmid: "301",
+      mentorCwid: "men0001",
+      mentorship: "PhD · faculty-asserted",
+      learnerAuthorPosition: 1,
+      withMentor: true,
+    });
+    expect(report.publications[0].mentors[0].mentorships).toEqual([
+      { program: "phd", source: "faculty", tier: "confirmed" },
+    ]);
+  });
+
+  it("no suggestion row: pubs are the publication_author intersection (confirmed rows of both cwids); one-sided pmids drop; a case-different stored cwid still matches; position 0 → position null", async () => {
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [{ name: "Mia Mentee", cwid: "stu0009", programType: "AOC" }]),
+    ]);
+    hoisted.mockAuthorFindMany.mockResolvedValue([
+      authorRow("MEN0001", 401, 3),
+      authorRow("men0001", 402, 2),
+      authorRow("men0001", 403, 1), // mentor only
+      authorRow("stu0009", 401, 1),
+      authorRow("STU0009", 402, 0), // rank unknown
+      authorRow("stu0009", 404, 1), // mentee only
+    ]);
+    hoisted.mockPubFindMany.mockImplementation(
+      async ({ where }: { where: { pmid: { in: string[] } } }) =>
+        where.pmid.in.map((pmid) => localPub(pmid)),
+    );
+    const report = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
+    expect(hoisted.mockAuthorFindMany).toHaveBeenCalledTimes(1);
+    expect(hoisted.mockAuthorFindMany).toHaveBeenCalledWith({
+      where: { cwid: { in: ["men0001", "stu0009"] }, isConfirmed: true },
+      select: { cwid: true, pmid: true, position: true },
+    });
+    expect(report.summary[0]).toMatchObject({ cwid: "stu0009", program: "AOC", pubsAllTime: 2 });
+    expect(
+      report.detail.map((d) => [d.pmid, d.learnerAuthorPosition, d.mentorCwid, d.withMentor]),
+    ).toEqual([
+      ["402", null, "men0001", true],
+      ["401", 1, "men0001", true],
+    ]);
+    expect(report.droppedUnresolved).toBe(0);
+  });
+
+  it("roster wins over faculty for the same pair: type stays roster, pubs from the bridge, no per-pair suggestion or publication_author read", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001" }),
+    ]);
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [{ name: "Ada Learner", cwid: "stu0001", programType: "POSTDOC" }]),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "stu0001", 7, 2023)]);
+    const report = await loadMentoredPublicationsReport({
+      scopes: ["*"],
+      types: ["aoc", "faculty"],
+    });
+    expect(report.summary).toHaveLength(1);
+    expect(report.summary[0].program).toBe("AOC");
+    expect(report.summary[0].mentors).toEqual([
+      {
+        cwid: "men0001",
+        name: "men0001",
+        mentorship: { program: "md", source: "roster", tier: "confirmed" },
+      },
+    ]);
+    expect(report.publications.map((p) => p.pmid)).toEqual(["7"]);
+    expect(hoisted.mockSuggestionFindMany).not.toHaveBeenCalled();
+    expect(hoisted.mockAuthorFindMany).not.toHaveBeenCalled();
+  });
+
+  it("ED wins over faculty for the same pair (the merge order is roster, Jenzabar, ED, faculty, co-author)", async () => {
+    hoisted.mockPostdocFindMany.mockResolvedValue([
+      {
+        mentorCwid: "men0001",
+        menteeCwid: "pd0001",
+        menteeFirstName: "Pat",
+        menteeLastName: "Postdoc",
+        startDate: new Date("2022-07-01"),
+        endDate: null,
+      },
+    ]);
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [{ name: "Pat Postdoc", cwid: "pd0001" }]),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "pd0001", 7, 2023)]);
+    const report = await loadMentoredPublicationsReport({
+      scopes: ["*"],
+      types: ["postdoc", "faculty"],
+    });
+    expect(report.summary.map((s) => [s.cwid, s.program])).toEqual([["pd0001", "Postdoc"]]);
+    expect(report.summary[0].mentors[0].mentorship).toEqual({
+      program: "postdoc",
+      source: "ed",
+      tier: "confirmed",
+    });
+    expect(report.publications.map((p) => p.pmid)).toEqual(["7"]);
+    expect(hoisted.mockAuthorFindMany).not.toHaveBeenCalled();
+  });
+
+  it("faculty wins over a co-author suggestion for the same pair when both are selected: type faculty, pubs = the suggestion's evidence, nothing inferred leaks into Program", async () => {
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [{ name: "Vic Volunteer", cwid: "sug0001", programType: "POSTDOC" }]),
+    ]);
+    const row = {
+      mentorCwid: "men0001",
+      menteeCwid: "sug0001",
+      menteeName: "Vic Volunteer",
+      kind: "volunteer",
+      tier: "presumptive",
+      evidence: [{ id: "501", year: 2024, menteeRank: 2, mentorRank: 3, total: 3 }],
+    };
+    hoisted.mockSuggestionFindMany.mockResolvedValue([row]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(501)]);
+    const report = await loadMentoredPublicationsReport({
+      scopes: ["md"],
+      types: ["faculty", "likely"],
+    });
+    expect(report.summary).toHaveLength(1);
+    expect(report.summary[0]).toMatchObject({
+      cwid: "sug0001",
+      program: "Postdoc",
+      pubsAllTime: 1,
+    });
+    expect(report.summary[0].mentors.map((m) => m.mentorship)).toEqual([
+      { program: "postdoc", source: "faculty", tier: "confirmed" },
+    ]);
+    expect(report.detail.map((d) => [d.pmid, d.mentorship, d.learnerAuthorPosition])).toEqual([
+      ["501", "Postdoc · faculty-asserted", 2],
+    ]);
+    expect(hoisted.mockAuthorFindMany).not.toHaveBeenCalled();
+  });
+
+  it("an entry with no cwid is counted in droppedNoCwid and makes no learner — even when nothing else is in scope; a malformed value is skipped", async () => {
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [
+        { name: "No Cwid", programLabel: "Visiting student" },
+        { name: "Also None", year: 2020 },
+      ]),
+      override("men0002", "{not json"),
+      override("men0003", [{ name: "", cwid: "stu0011" }]), // fails validation as a whole
+      override("men0004", [{ name: "Real Mentee", cwid: "stu0012" }]),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
+    expect(report.droppedNoCwid).toBe(2);
+    expect(report.summary.map((s) => s.cwid)).toEqual(["stu0012"]);
+
+    hoisted.mockOverrideFindMany.mockResolvedValue([override("men0001", [{ name: "No Cwid" }])]);
+    const none = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
+    expect(none.summary).toEqual([]);
+    expect(none.droppedNoCwid).toBe(1);
+  });
+
+  it("gradYears admits a faculty entry by its year, and a year-less one only with 'unknown'", async () => {
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [
+        { name: "Dated Mentee", cwid: "stu0021", year: 2023 },
+        { name: "Undated Mentee", cwid: "stu0022" },
+      ]),
+    ]);
+    const dated = await loadMentoredPublicationsReport({
+      scopes: ["md"],
+      types: ["faculty"],
+      gradYears: [2023],
+    });
+    expect(dated.summary.map((s) => s.cwid)).toEqual(["stu0021"]);
+    const unknown = await loadMentoredPublicationsReport({
+      scopes: ["md"],
+      types: ["faculty"],
+      gradYears: [null],
+    });
+    expect(unknown.summary.map((s) => s.cwid)).toEqual(["stu0022"]);
+    const neither = await loadMentoredPublicationsReport({
+      scopes: ["md"],
+      types: ["faculty"],
+      gradYears: [2020],
+    });
+    expect(neither.summary).toEqual([]);
+  });
+
+  it("loadMentoredGradYears unions the faculty entries' years (a cwid-less entry's year is NOT a choice; a cwid'd entry without a year adds 'unknown')", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([{ graduationYear: 2025, programType: "AOC" }]);
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [
+        { name: "Dated Mentee", cwid: "stu0021", year: 2019 },
+        { name: "No Cwid", year: 2010 },
+      ]),
+      override("men0002", [{ name: "Undated Mentee", cwid: "stu0022" }]),
+    ]);
+    expect(await loadMentoredGradYears(["*"], ["aoc"])).toEqual([2025]);
+    expect(hoisted.mockOverrideFindMany).not.toHaveBeenCalled();
+    expect(await loadMentoredGradYears(["*"], ["aoc", "faculty"])).toEqual([2025, 2019, null]);
+    expect(await loadMentoredGradYears(["md"], ["faculty"])).toEqual([2019, null]);
   });
 });
 

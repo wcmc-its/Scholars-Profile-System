@@ -38,7 +38,7 @@ live in the table, never in this repo.
 
 ## Sources
 
-The "Type of mentorship" filter has seven keys (`MENTORSHIP_TYPE_KEYS`), each one source and one
+The "Type of mentorship" filter has eight keys (`MENTORSHIP_TYPE_KEYS`), each one source and one
 confidence. The page's closed "Sources" disclosure and every hover read `MENTORSHIP_TYPE_DESCRIPTION`.
 
 | Label | Table | What it carries | What it lacks | Default | Since |
@@ -50,12 +50,15 @@ confidence. The page's closed "Sources" disclosure and every hover read `MENTORS
 | Postdoc supervisor | `postdoc_mentor_relationship` (ED appointment record) | The postdoc's reporting manager; appointment start and end dates (no end = ongoing) | A PI guarantee: roughly one in seven managers on record is a lab administrator (#2633) | On, for every holder | #2677 |
 | Likely mentee (from co-authorship) | `mentee_suggestion`, tier `presumptive` (#2634) | A trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with the faculty member; pubs from the suggestion's own evidence list | Any year; confirmation | Off | #2677 |
 | Possible mentee (from co-authorship) | `mentee_suggestion`, tier `ambiguous` | The same inference for research staff or MD alumni, who may be peers | Any year; confirmation | Off | #2677 |
+| Faculty-asserted | `field_override` (`scholar`, `manualMentees`) — the mentor's own list on `/edit`, including accepted co-authorship suggestions | Mentee name, optional CWID, optional completion year, optional degree bucket | Entries with no CWID (listed nowhere; counted in `droppedNoCwid`); entry year | On, for a `*` holder | #2684 |
 
-Publications for every source but the co-author inferences come from the mentoring co-pub bridge
+Publications for the pairing-sheet, Jenzabar and ED sources come from the mentoring co-pub bridge
 (`mentee_copublication_pub`, one row per mentor × mentee × pub). Co-author pairs' pubs come from the
 suggestion's `evidence` JSON (last 8 years, capped at 50 per pair), each resolved against the local
 `publication` row; an evidence id with no local row is skipped and counted in `droppedUnresolved`,
-which the page names in one sentence.
+which the page names in one sentence. A faculty-asserted pair is not in the bridge: it reads the
+pair's suggestion evidence when a `mentee_suggestion` row exists (whatever its tier or dismissal),
+else the intersection of both people's confirmed `publication_author` rows.
 
 The bridge is refreshed by the mentoring bridge refresh script (export / import `<env>`), which lives
 in the private pubs skill, not in this repo. The nightly does not refresh it.
@@ -116,7 +119,8 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   learner known only through Jenzabar, ED or an inference has no all-pubs list, so their mentored
   set stands in. An environment where the bridge has never been loaded shows a notice, not zeros.
 - **Surest source wins.** A pair two sources claim takes the surest selected source (roster, then
-  Jenzabar, then ED, then co-author) and reads its pubs from the bridge, not the suggestion evidence.
+  Jenzabar, then ED, then faculty-asserted, then co-author) and reads its pubs from that source — a
+  bridge-backed pair never falls back to suggestion evidence.
 - **The type filter reads only the selected sources.** This is why a learner is present only
   through selected pairs (an in-memory rail facet let a learner through on one roster pair and then
   listed every co-author pair beside it). Documented ceiling: with only co-author keys selected, a

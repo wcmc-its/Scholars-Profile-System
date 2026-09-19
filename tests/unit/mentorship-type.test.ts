@@ -1,10 +1,12 @@
 /**
- * `lib/edit/mentorship-type.ts` — key / label per pair, the seven-key filter
+ * `lib/edit/mentorship-type.ts` — key / label per pair, the eight-key filter
  * vocabulary (`mentorshipTypeKey`), and the per-scope allowed / default /
  * resolved selections the page and route share. The labels are pinned in
  * the office's words: the key keeps the schema words (`md:roster:confirmed`
  * is a dedupe key), the label never does — no "presumptive" / "ambiguous" /
- * "roster" / "Jenzabar" / "ED" reaches a user.
+ * "roster" / "Jenzabar" / "ED" reaches a user. Faculty-asserted pairs
+ * (`manualMentees`) are a confirmed source: in a `"*"` holder's default,
+ * never in a scoped holder's, always selectable.
  */
 import { describe, expect, it } from "vitest";
 
@@ -55,6 +57,16 @@ const CASES: Array<[MentorshipType, string, string]> = [
     "resident:coauthor:ambiguous",
     "Resident · possible mentee (from co-authorship)",
   ],
+  [
+    { program: "postdoc", source: "faculty", tier: "confirmed" },
+    "postdoc:faculty:confirmed",
+    "Postdoc · faculty-asserted",
+  ],
+  [
+    { program: "other", source: "faculty", tier: "confirmed" },
+    "other:faculty:confirmed",
+    "Other · faculty-asserted",
+  ],
 ];
 
 const SCHEMA_WORDS = /presumptive|ambiguous|roster|Jenzabar|\bED\b/;
@@ -84,7 +96,7 @@ describe("mentorship type", () => {
   });
 });
 
-describe("mentorshipTypeKey — every pair folds into one of the seven filter keys", () => {
+describe("mentorshipTypeKey — every pair folds into one of the eight filter keys", () => {
   const KEYS: Array<[MentorshipType, string]> = [
     [{ program: "md", source: "roster", tier: "confirmed" }, "aoc"],
     [{ program: "mdphd", source: "roster", tier: "confirmed" }, "mdphd"],
@@ -94,6 +106,8 @@ describe("mentorshipTypeKey — every pair folds into one of the seven filter ke
     [{ program: "postdoc", source: "ed", tier: "confirmed" }, "postdoc"],
     [{ program: "volunteer", source: "coauthor", tier: "presumptive" }, "likely"],
     [{ program: "alumni_md", source: "coauthor", tier: "ambiguous" }, "possible"],
+    [{ program: "postdoc", source: "faculty", tier: "confirmed" }, "faculty"],
+    [{ program: "other", source: "faculty", tier: "confirmed" }, "faculty"],
   ];
   it.each(KEYS)("%o → %s", (t, key) => {
     expect(mentorshipTypeKey(t)).toBe(key);
@@ -108,11 +122,13 @@ describe("mentorshipTypeKey — every pair folds into one of the seven filter ke
       "postdoc",
       "likely",
       "possible",
+      "faculty",
     ]);
     for (const k of MENTORSHIP_TYPE_KEYS) {
       expect(MENTORSHIP_TYPE_LABEL[k]).toBeTruthy();
       expect(MENTORSHIP_TYPE_DESCRIPTION[k]).toMatch(/\.$/);
     }
+    expect(MENTORSHIP_TYPE_LABEL.faculty).toBe("Faculty-asserted");
   });
 });
 
@@ -120,13 +136,28 @@ describe("allowed / default / resolved selections per scope", () => {
   it("'*' → every key allowed, every confirmed key default, co-author keys never default", () => {
     const all = new Set(["*"]);
     expect(allowedMentorshipTypes(all)).toEqual([...MENTORSHIP_TYPE_KEYS]);
-    expect(defaultMentorshipTypes(all)).toEqual(["aoc", "mdphd", "ecr", "thesis", "postdoc"]);
+    expect(defaultMentorshipTypes(all)).toEqual([
+      "aoc",
+      "mdphd",
+      "ecr",
+      "thesis",
+      "postdoc",
+      "faculty",
+    ]);
   });
 
-  it("an md holder: only AOC of the roster keys, plus the four non-roster keys; default = [aoc]", () => {
+  it("an md holder: only AOC of the roster keys, plus the five non-roster keys; default = [aoc] (faculty is selectable, not default)", () => {
     const md = new Set(["md"]);
-    expect(allowedMentorshipTypes(md)).toEqual(["aoc", "thesis", "postdoc", "likely", "possible"]);
+    expect(allowedMentorshipTypes(md)).toEqual([
+      "aoc",
+      "thesis",
+      "postdoc",
+      "likely",
+      "possible",
+      "faculty",
+    ]);
     expect(defaultMentorshipTypes(md)).toEqual(["aoc"]);
+    expect(resolveMentorshipTypes(["faculty"], md)).toEqual(["faculty"]);
   });
 
   it("md + ecr: both roster keys, in vocabulary order regardless of grant order", () => {
@@ -138,6 +169,7 @@ describe("allowed / default / resolved selections per scope", () => {
       "postdoc",
       "likely",
       "possible",
+      "faculty",
     ]);
   });
 

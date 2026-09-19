@@ -2,11 +2,14 @@
  * "Type of mentorship" for `/edit/reports/7` — one value per (learner,
  * mentor) pair: the program bucket × where the pair came from × how sure
  * we are. Roster / Jenzabar / ED pairs are facts; co-author pairs
- * (`mentee_suggestion`, #2634) are inferences and read as such. PURE — no
- * `@/lib/db` — the report's table is a client island and labels from here.
+ * (`mentee_suggestion`, #2634) are inferences and read as such; a
+ * faculty-asserted pair (the mentor's own `manualMentees` field-override —
+ * hand-entered on `/edit`, or a co-authorship suggestion they ACCEPTED
+ * there) is the mentor's word, confirmed. PURE — no `@/lib/db` — the
+ * report's table is a client island and labels from here.
  *
  * Two layers: the per-pair `MentorshipType` (what a pair IS, labelled by
- * `mentorshipLabel`) and the seven-key `MentorshipTypeKey` vocabulary the
+ * `mentorshipLabel`) and the eight-key `MentorshipTypeKey` vocabulary the
  * page's "Type of mentorship" filter speaks (`mentorshipTypeKey` folds a
  * pair into it). Every user-facing string here speaks the office's
  * language, not the schema's: the `md` bucket IS the Areas of Concentration
@@ -23,7 +26,7 @@
  */
 import { KIND_LABEL, type MenteeKind } from "@/lib/mentee-suggestions/kind";
 
-export type MentorshipSource = "roster" | "jenzabar" | "ed" | "coauthor";
+export type MentorshipSource = "roster" | "jenzabar" | "ed" | "coauthor" | "faculty";
 export type MentorshipTier = "confirmed" | "presumptive" | "ambiguous";
 /** One (learner, mentor) pair's provenance: the program bucket (a
  *  `MentoringProgramKey`, or a `MenteeKind` for co-author pairs) and where
@@ -41,6 +44,9 @@ export const PROGRAM_LABEL: Record<string, string> = {
   phd: "PhD",
   postdoc: "Postdoc",
   ecr: "ECR",
+  /** A faculty-asserted mentee with no degree bucket (hand entry leaves
+   *  `programType` unset). */
+  other: "Other",
 };
 
 /** `program:source:tier` — the dedupe / React key for a pair. NOT a label:
@@ -55,7 +61,8 @@ export function mentorshipKey(t: MentorshipType): string {
  *  program ("AOC", "MD-PhD (program office)", "ECR"); a Jenzabar pair is
  *  "<program> thesis advisor"; an ED pair "Postdoc supervisor"; a co-author
  *  pair "<kind> · likely mentee (from co-authorship)" (or "possible"). A
- *  roster bucket no filter key maps to falls back to its program label. */
+ *  roster bucket no filter key maps to falls back to its program label; a
+ *  faculty-asserted pair is "<program> · faculty-asserted". */
 export function mentorshipLabel(t: MentorshipType): string {
   switch (t.source) {
     case "roster": {
@@ -70,11 +77,15 @@ export function mentorshipLabel(t: MentorshipType): string {
       const kind = KIND_LABEL[t.program as MenteeKind] ?? t.program;
       return `${kind} · ${t.tier === "presumptive" ? "likely" : "possible"} mentee (from co-authorship)`;
     }
+    case "faculty":
+      return `${PROGRAM_LABEL[t.program] ?? t.program} · faculty-asserted`;
   }
 }
 
 /** The filter's vocabulary, in display order: the three roster buckets,
- *  the two other confirmed sources, then the two co-author inference tiers. */
+ *  the two other confirmed sources, the two co-author inference tiers, then
+ *  the mentor's own assertions (appended last so no existing link's `types=`
+ *  order shifts). */
 export const MENTORSHIP_TYPE_KEYS = [
   "aoc",
   "mdphd",
@@ -83,6 +94,7 @@ export const MENTORSHIP_TYPE_KEYS = [
   "postdoc",
   "likely",
   "possible",
+  "faculty",
 ] as const;
 export type MentorshipTypeKey = (typeof MENTORSHIP_TYPE_KEYS)[number];
 
@@ -94,6 +106,7 @@ export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
   postdoc: "Postdoc supervisor",
   likely: "Likely mentee (from co-authorship)",
   possible: "Possible mentee (from co-authorship)",
+  faculty: "Faculty-asserted",
 };
 
 /** One sentence per key: what the source is and how sure it is — the
@@ -113,6 +126,8 @@ export const MENTORSHIP_TYPE_DESCRIPTION: Record<MentorshipTypeKey, string> = {
     "Not on any roster: a trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with this faculty member. Inferred, unconfirmed.",
   possible:
     "The same inference for research staff or MD alumni, who may be peers rather than trainees. Off by default.",
+  faculty:
+    "Added by the mentor on their Scholars profile, or confirmed there from a co-authorship suggestion.",
 };
 
 /** `report_access` scope key (`MENTORED_PUBS_SCOPES`, `lib/edit/report-access.ts`)
@@ -128,14 +143,16 @@ export const ROSTER_TYPE_BY_SCOPE: Partial<Record<string, MentorshipTypeKey>> = 
   ecr: "ecr",
 };
 
-/** The keys a `"*"` holder starts with — every sourced type; co-author
- *  inferences are opt-in for everyone. */
+/** The keys a `"*"` holder starts with — every sourced type, including
+ *  what a mentor asserted themselves; co-author inferences are opt-in for
+ *  everyone. */
 const CONFIRMED_TYPE_KEYS: ReadonlyArray<MentorshipTypeKey> = [
   "aoc",
   "mdphd",
   "ecr",
   "thesis",
   "postdoc",
+  "faculty",
 ];
 
 /** Which filter key a pair falls under; null for a roster bucket no scope
@@ -150,11 +167,13 @@ export function mentorshipTypeKey(t: MentorshipType): MentorshipTypeKey | null {
       return "postdoc";
     case "coauthor":
       return t.tier === "presumptive" ? "likely" : "possible";
+    case "faculty":
+      return "faculty";
   }
 }
 
 /** The keys a scope set may select: a roster key only when its scope is
- *  held (or `"*"`); the four non-roster keys always. */
+ *  held (or `"*"`); the non-roster keys always. */
 export function allowedMentorshipTypes(scopes: ReadonlySet<string>): MentorshipTypeKey[] {
   return MENTORSHIP_TYPE_KEYS.filter((k) => {
     const scope = Object.keys(ROSTER_TYPE_BY_SCOPE).find((s) => ROSTER_TYPE_BY_SCOPE[s] === k);
