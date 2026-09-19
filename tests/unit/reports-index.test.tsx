@@ -113,6 +113,22 @@ const CORE: ReportsIndexUnit = {
   perReport: perReport([3, 6], UNIT_REPORTS),
 };
 
+// The person-granted Mentored publications report as a one-report pseudo-unit
+// (2026-09-18): rides the same list as a unit so it is never a card floating
+// under the table.
+const PROGRAM: ReportsIndexUnit = {
+  code: "mentoring-programs",
+  kind: "program",
+  name: "Mentoring programs",
+  centerType: null,
+  editHref: "/edit/reports/7",
+  liveCount: 1,
+  totalCount: 1,
+  lastRefreshedAt: null,
+  reports: [{ n: 7, label: "7. Mentored publications", description: "Learner–mentor co-publications." }],
+  perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
+};
+
 describe("ReportsIndex — table mode (2a)", () => {
   it("renders one row per (unit, report) pair, not one row per unit", () => {
     render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
@@ -218,6 +234,23 @@ describe("ReportsIndex — table mode (2a)", () => {
     );
   });
 
+  it("the program pseudo-unit is a row like any other: shown by default, labelled Program, linking to /edit/reports/7 with no unit param, governed by its own checkbox", () => {
+    render(<ReportsIndex units={[MEYER, PROGRAM]} mode="table" />);
+    const row = screen.getByTestId("reports-index-row-mentoring-programs-7");
+    expect(row.textContent).toContain("Program");
+    expect(row.textContent).toContain("Mentoring programs");
+    expect(row.textContent).toContain("Live");
+    expect(screen.getByTestId("reports-index-link-mentoring-programs-7").getAttribute("href")).toBe("/edit/reports/7");
+    expect(screen.getByTestId("reports-index-filter-program").closest("label")?.textContent).toContain("1");
+    fireEvent.click(screen.getByTestId("reports-index-filter-program"));
+    expect(screen.queryByTestId("reports-index-row-mentoring-programs-7")).toBeNull();
+  });
+
+  it("no program unit → no Program checkbox at all", () => {
+    render(<ReportsIndex units={[MEYER]} mode="table" />);
+    expect(screen.queryByTestId("reports-index-filter-program")).toBeNull();
+  });
+
   it("Unit type counts stay unit-scoped (not row-scoped) — a department with 2 reports still counts as 1 department", () => {
     render(<ReportsIndex units={[MEYER, DEPT]} mode="table" />);
     expect(screen.getByTestId("reports-index-filter-department").closest("label")?.textContent).toContain("1");
@@ -265,6 +298,15 @@ describe("ReportsIndex — bands mode (1a)", () => {
     expect(band.textContent).toContain("Institute");
     expect(band.textContent).toContain("0 of 6 reports live");
     expect(screen.getByTestId("reports-index-edit-epic").getAttribute("href")).toBe("/edit/center/epic");
+  });
+
+  it("a program band lists its one report and has no profile to edit", () => {
+    render(<ReportsIndex units={[PROGRAM]} mode="bands" />);
+    expect(screen.getByTestId("reports-index-band-link-mentoring-programs-7").getAttribute("href")).toBe(
+      "/edit/reports/7",
+    );
+    expect(screen.getByTestId("reports-index-band-mentoring-programs").textContent).toContain("Program · 1 of 1 reports live");
+    expect(screen.queryByTestId("reports-index-edit-mentoring-programs")).toBeNull();
   });
 
   it("a department band only lists its own 2-report catalog, never a report 1/2/4/5 row", () => {

@@ -85,22 +85,6 @@ function findByType(node: unknown, type: unknown): El | null {
   return null;
 }
 
-/** Walks the returned element tree for an element whose component is the
- *  page-local function named `name` (the un-rendered `<ProgramReportsCard />`
- *  element — its own JSX only exists once React calls it). */
-function findByTypeName(node: unknown, name: string): El | null {
-  if (node === null || node === undefined || typeof node !== "object") return null;
-  const el = asEl(node);
-  if (typeof el.type === "function" && (el.type as { name?: string }).name === name) return el;
-  const children = el.props?.children;
-  const list = Array.isArray(children) ? children : [children];
-  for (const c of list) {
-    const found = findByTypeName(c, name);
-    if (found) return found;
-  }
-  return null;
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   mockLoadReportableUnits.mockResolvedValue([]);
@@ -123,26 +107,30 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(mockReportsIndex).not.toHaveBeenCalled();
   });
 
-  it("a report_access holder with zero unit grants → the Program reports card alone, no 404", async () => {
+  it("a report_access holder with zero unit grants → the index with the program row alone (bands), no 404", async () => {
     mockGetEditSession.mockResolvedValue(CURATOR);
     mockGetReportScopes.mockResolvedValue(new Set(["md"]));
     const result = await EditReportsIndexPage({ searchParams: sp() });
     expect(mockNotFound).not.toHaveBeenCalled();
-    expect(mockReportsIndex).not.toHaveBeenCalled();
-    expect(findByTypeName(result, "ProgramReportsCard")).not.toBeNull();
+    const index = findByType(result, mockReportsIndex);
+    expect(index?.props.mode).toBe("bands");
+    expect(index?.props.units).toEqual([
+      expect.objectContaining({ kind: "program", reports: [expect.objectContaining({ n: 7 })] }),
+    ]);
   });
 
-  it("superuser (scopes '*') → the empty index AND the Program reports card", async () => {
+  it("superuser (scopes '*') → the index carries the program row alongside the (empty) unit list", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     const result = await EditReportsIndexPage({ searchParams: sp() });
-    expect(findByType(result, mockReportsIndex)).not.toBeNull();
-    expect(findByTypeName(result, "ProgramReportsCard")).not.toBeNull();
+    const index = findByType(result, mockReportsIndex);
+    expect(index?.props.mode).toBe("table");
+    expect((index?.props.units as Array<{ kind: string }>).map((u) => u.kind)).toEqual(["program"]);
   });
 
-  it("superuser with no report grant machinery still sees no card when scopes are empty", async () => {
+  it("superuser with no report grant sees no program row when scopes are empty", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     const result = await EditReportsIndexPage({ searchParams: sp() });
-    expect(findByTypeName(result, "ProgramReportsCard")).toBeNull();
+    expect(findByType(result, mockReportsIndex)?.props.units).toEqual([]);
   });
 });
