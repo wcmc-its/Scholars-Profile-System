@@ -870,6 +870,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
       "admin-tab-activity",
       "admin-tab-usage",
+      "admin-tab-orcid-coverage",
       "admin-tab-etl-status",
     ]);
   });
@@ -881,7 +882,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
         "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
-        "administrators", "methods", "reports", "activity", "usage", "etl-status", "cores",
+        "administrators", "methods", "reports", "activity", "usage", "orcid-coverage", "etl-status", "cores",
       ].map((id) => `admin-tab-${id}`),
     );
     for (const g of ["queues", "registries", "insights", "tools"])

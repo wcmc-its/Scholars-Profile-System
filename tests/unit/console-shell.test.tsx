@@ -61,6 +61,7 @@ const NO_TABS: ConsoleTabState = {
   dataSharing: false,
   activity: false,
   usage: false,
+  orcidCoverage: false,
   etlStatus: false,
   cores: false,
   matcha: false,
