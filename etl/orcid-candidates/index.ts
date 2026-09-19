@@ -10,10 +10,16 @@
  *     (`source_provided`, a Cornell-Ithaca CSV) are not ours and are skipped.
  *   - `admin_orcid` → `source = 'rpm_admin'` (hand-entered by an RPM admin).
  *
- * Full mirror each run: rows the source no longer has are deleted, so the table
- * never accumulates a retracted candidate. Only cwids that exist in `scholar`
- * are written (FK); the rest are counted. `scholar.orcid` (WCM Identity) is
- * untouched — this table is read by `/edit/orcid-coverage` only.
+ * Full mirror each run for its own source values (`rpm_inferred` / `rpm_admin`):
+ * rows RPM no longer has are deleted, so the table never accumulates a retracted
+ * candidate. The table key is (cwid, orcid, source), so `etl/orcid-registry`'s
+ * `orcid_*` row for the same person and iD sits beside ours — neither mirror
+ * ever overwrites the other's row, and the delete pass is scoped to our sources.
+ * Within this mirror one row per (cwid, orcid): an admin row beats an inferred
+ * one, and a pair that moves between the two leaves the stale row to the delete
+ * pass. Only cwids that exist in `scholar` are written (FK); the rest are
+ * counted. `scholar.orcid` (WCM Identity) is untouched — this table is read by
+ * `/edit/orcid-coverage` only.
  *
  * Usage: `npm run etl:orcid-candidates`. Runs on the sources task family
  * (needs `SCHOLARS_RECITERDB_*`).
@@ -24,6 +30,8 @@ import { withEtlRun } from "@/lib/etl-run";
 
 const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 const BATCH = 500;
+/** The source values this mirror owns; the delete pass never touches any other. */
+const RPM_SOURCES = ["rpm_inferred", "rpm_admin"];
 
 export type SourceRow = {
   cwid: string;
@@ -131,17 +139,19 @@ async function main(): Promise<number> {
     `${keep.length} rows for known scholars (${noScholar} rows for cwids not in scholar).`,
   );
 
-  // Mirror: upsert everything, then delete what the source no longer has.
+  // Mirror: upsert everything, then delete what the source no longer has — scoped to
+  // OUR sources so this never wipes `etl/orcid-registry`'s rows (or vice-versa).
+  // `source` is part of the key, so an `orcid_*` row for the same (cwid, orcid)
+  // is a different row and is never touched here.
   const now = new Date();
   for (let i = 0; i < keep.length; i += BATCH) {
     const batch = keep.slice(i, i + BATCH);
     await db.write.$transaction(
       batch.map((r) =>
         db.write.orcidCandidate.upsert({
-          where: { cwid_orcid: { cwid: r.cwid, orcid: r.orcid } },
+          where: { cwid_orcid_source: { cwid: r.cwid, orcid: r.orcid, source: r.source } },
           create: { ...r, syncedAt: now },
           update: {
-            source: r.source,
             articlesAccepted: r.articlesAccepted,
             articlesRejected: r.articlesRejected,
             sourceUpdatedAt: r.sourceUpdatedAt,
@@ -152,7 +162,7 @@ async function main(): Promise<number> {
     );
   }
   const { count: removed } = await db.write.orcidCandidate.deleteMany({
-    where: { syncedAt: { lt: now } },
+    where: { source: { in: RPM_SOURCES }, syncedAt: { lt: now } },
   });
   const bySource = keep.reduce<Record<string, number>>(
     (m, r) => ((m[r.source] = (m[r.source] ?? 0) + 1), m),

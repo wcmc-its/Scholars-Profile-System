@@ -721,14 +721,19 @@ model StudentPhdProgram {
 /// `principal_investigators[]` from NIH RePORTER's /projects/search and
 /// resolves each profile_id back to a WCM cwid via grant-join (primary)
 /// + fuzzy name match against scholars with NIH grants (fallback).
-/// ORCID iDs the ReCiter Publication Manager (RPM) holds for a scholar that SPS
-/// does NOT treat as asserted: mirrored nightly from reciterdb by
-/// `etl/orcid-candidates`. `source` = `rpm_inferred` (an ORCID seen on the
-/// person's PubMed author record across the articles they accepted in RPM;
-/// `articlesAccepted` / `articlesRejected` are the support) or `rpm_admin`
-/// (hand-entered by an RPM administrator — treated as asserted). Consumed ONLY
-/// by `/edit/orcid-coverage`; never rendered on the public profile or JSON-LD —
-/// `scholar.orcid` (WCM Identity) stays the sole asserted source there.
+/// Candidate ORCID iDs for a scholar that SPS does NOT treat as asserted, from
+/// two mirrors that each own their `source` values and full-replace them per
+/// run: `etl/orcid-candidates` (nightly, reciterdb — `rpm_inferred`: an ORCID
+/// seen on the person's PubMed author record across the articles they accepted
+/// in RPM, `articlesAccepted` / `articlesRejected` the support; `rpm_admin`:
+/// hand-entered by an RPM administrator, treated as asserted) and
+/// `etl/orcid-registry` (weekly, pub.orcid.org — `orcid_email` / `orcid_works` /
+/// `orcid_name`; `articlesAccepted` = works shared with the person's own
+/// publications). `source` is part of the key so the two mirrors never overwrite
+/// each other: the same (cwid, orcid) from RPM and from the registry is two
+/// rows, which is the "two sources agree" case `/edit/orcid-coverage` grades
+/// strong. Consumed ONLY by that page; never rendered on the public profile or
+/// JSON-LD — `scholar.orcid` (WCM Identity) stays the sole asserted source there.
 model OrcidCandidate {
   cwid             String    @db.VarChar(32)
   scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
@@ -740,7 +745,7 @@ model OrcidCandidate {
   sourceUpdatedAt  DateTime? @map("source_updated_at")
   syncedAt         DateTime  @default(now()) @map("synced_at")
 
-  @@id([cwid, orcid])
+  @@id([cwid, orcid, source])
   @@index([source])
   @@map("orcid_candidate")
 }
