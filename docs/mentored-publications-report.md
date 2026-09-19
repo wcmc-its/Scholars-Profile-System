@@ -45,7 +45,7 @@ confidence. The page's closed "Sources" disclosure and every hover read `MENTORS
 |---|---|---|---|---|---|
 | AOC | `aoc_mentee` (mirror of `reporting_students_mentors`, bucket `md`) | Pairs the AOC program records in its pairing sheet; graduation year; entry year for recent classes | Entry year for older classes (see the fallback below) | On, for an `md` or `*` holder | #2664 |
 | MD-PhD (program office) | `aoc_mentee` (bucket `mdphd`) | Pairs from the MD-PhD program office's list, loaded with the AOC sheet | Any year — no entry, no graduation | On, for an `mdphd` or `*` holder | #2664 |
-| ECR | `aoc_mentee` (bucket `ecr`) | Early Career Research pairs, classes 2018–2023; graduation year | Entry year | On, for an `ecr` or `*` holder | #2664 |
+| ECR | `aoc_mentee` (bucket `ecr`) | Early Career Research pairs, classes 2018–2023; graduation year | Entry year (the fallback below applies) | On, for an `ecr` or `*` holder | #2664 |
 | PhD / MD-PhD thesis advisor | `phd_mentor_relationship` (Jenzabar, MAJSP) | Thesis-advisor pairs; conferral year | Start year | On, for every holder | #2677 |
 | Postdoc supervisor | `postdoc_mentor_relationship` (ED appointment record) | The postdoc's reporting manager; appointment start and end dates (no end = ongoing) | A PI guarantee: roughly one in seven managers on record is a lab administrator (#2633) | On, for every holder | #2677 |
 | Likely mentee (from co-authorship) | `mentee_suggestion`, tier `presumptive` (#2634) | A trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with the faculty member; pubs from the suggestion's own evidence list | Any year; confirmation | Off | #2677 |
@@ -94,9 +94,10 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   carries both counts.
 - **Entry-year fallback.** When the pairing sheet has no entry year, an AOC row assumes
   graduation year − 4 (the 4-year MD track) and the row wears an "(entry est. YYYY)" chip. This
-  applies to AOC roster rows ONLY — never to a Jenzabar conferral year or a postdoc end year, whose
-  programs have no fixed length. A roster MD-PhD row with no years plus a Jenzabar conferral year
-  still gets no guess: the fallback reads the roster's own graduation year.
+  applies to pairing-sheet rows only (AOC, and an ECR row with a graduation year but no entry
+  year) — never to a Jenzabar conferral year or a postdoc end year, whose programs have no fixed
+  length. A roster MD-PhD row with no years plus a Jenzabar conferral year still gets no guess:
+  the fallback reads the roster's own graduation year.
 - **Unknown years are null, never 0.** A learner with no graduation year gets an "Unknown grad
   year" chip; every in-window count is `null` (a blank cell in the workbook, "—" on the page). A 0
   would read as "published nothing".

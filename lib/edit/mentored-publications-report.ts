@@ -2,7 +2,7 @@
  * `/edit/reports/7` ("Mentored publications") data layer — for every learner
  * on the AOC pairing sheet (`aoc_mentee`; the Areas of Concentration program
  * IS the MD scholarly-concentration program, bucket `md`, labelled "AOC"),
- * every publication co-authored with one of their AOC mentors, with Journal
+ * every publication co-authored with one of their mentors, with Journal
  * Impact Factor and citations, plus a per-learner count.
  *
  * The AOC office asks for this spreadsheet every year and has built it by
@@ -55,7 +55,7 @@
  * learner's summary (distinct pmids).
  *
  * Two publication sets (`pubs`): `"mentored"` (default) is every co-pub with
- * one of the learner's AOC mentors; `"all"` is every publication of the
+ * one of the learner's selected mentors; `"all"` is every publication of the
  * learner from the `aoc_mentee_publication` bridge, each marked `withMentor`
  * when it also appears in `mentee_copublication_pub` for one of the learner's
  * mentors. In `"all"` mode the detail rows are per (learner, pub) — the

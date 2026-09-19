@@ -34,7 +34,7 @@
  * offered only when its scope is held, co-author inferences are never on by
  * default). Two publication sets (`pubs=mentored|all`, a select in the
  * filter form):
- * the co-pubs with an AOC mentor (default), or every publication of the
+ * the co-pubs with a mentor (default), or every publication of the
  * learner from the `aoc_mentee_publication` bridge, each flagged for a mentor
  * co-author. Both params ride every tab link and the download link; `view`
  * is page-only.
