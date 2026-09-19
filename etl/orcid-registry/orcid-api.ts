@@ -26,6 +26,9 @@ export type ExternalId = {
   "external-id-type": string;
   "external-id-value": string;
   "external-id-normalized": { value: string } | null;
+  /** `self` = this work's own id; `part-of` / `version-of` = its container (book,
+   *  proceedings volume) — not the person's work. Absent on some older records. */
+  "external-id-relationship"?: string | null;
 };
 type ExternalIds = { "external-id": ExternalId[] | null } | null;
 export type WorksResponse = {
@@ -37,6 +40,19 @@ export type WorksResponse = {
       }>
     | null;
 };
+
+/** A non-2xx reply after retries. `status` lets the caller tell an auth/blocking
+ *  failure (401/403 — every further call will fail too) from a per-record one
+ *  (404 unknown iD, 409 deactivated or locked record). */
+export class OrcidHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    url: string,
+  ) {
+    super(`ORCID HTTP ${status} for ${url}`);
+    this.name = "OrcidHttpError";
+  }
+}
 
 let token: string | null = null;
 let lastRequestAt = 0;
@@ -97,7 +113,7 @@ async function orcidGet(url: string): Promise<unknown> {
       continue;
     }
     if (resp.ok) return resp.json();
-    lastErr = new Error(`ORCID HTTP ${resp.status} for ${url}`);
+    lastErr = new OrcidHttpError(resp.status, url);
     if (!RETRYABLE.has(resp.status)) throw lastErr;
     await sleep(Math.max(retryAfterMs(resp) ?? 0, 1000 * 2 ** attempt));
   }

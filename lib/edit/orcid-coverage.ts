@@ -22,10 +22,15 @@
  *    `rpm_inferred` row when it has ≥ STRONG_MIN_ACCEPTED accepted articles and
  *    no rejected one; or an ORCID that an `rpm_*` row and an `orcid_*` row
  *    agree on (two independent sources, so the counts no longer matter). WEAK =
- *    any other candidate (a name-only registry match, thin support, a
- *    contradiction, or several candidate ORCIDs). Tiers are exclusive:
+ *    no single strong candidate: a name-only registry match, thin support, a
+ *    contradiction, or two or more strong candidate ORCIDs (a second candidate
+ *    that is NOT strong-eligible — a homonym's name-only iD beside a
+ *    well-supported RPM one — does not demote). Tiers are exclusive:
  *    asserted > strong > weak > none. Inferred ORCIDs never reach the public
  *    profile; the outreach ask is "is this yours? confirm it".
+ *    `orcid_candidate`'s key is (cwid, orcid, source): the RPM and registry
+ *    mirrors write disjoint rows, so one iD seen by both is two rows for the
+ *    cwid — that is what the agreement rule reads.
  *  - "eRA account" = a preferred `person_nih_profile` row: the RePORTER
  *    `profile_id`. Inferred, and the inference is one-directional — nobody is
  *    listed as a PI in RePORTER without an eRA Commons account, but RePORTER
@@ -110,7 +115,8 @@ export type ScholarRow = {
 export type CandidateRow = {
   cwid: string;
   /** The candidate iD itself — the fold counts DISTINCT iDs and cross-references
-   *  the RPM and registry sources on it. `(cwid, orcid)` is the table's PK. */
+   *  the RPM and registry sources on it. `(cwid, orcid, source)` is the table's PK,
+   *  so an `rpm_*` row and an `orcid_*` row can carry the same iD for one cwid. */
   orcid: string;
   source: string;
   /** RPM: accepted articles carrying the iD. Registry (`orcid_works` / `orcid_name`):

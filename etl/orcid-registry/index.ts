@@ -3,36 +3,55 @@
  * that names the institution (affiliation phrase, ROR, GRID, or a public email
  * on its domain) and ties each to a WCM scholar three ways:
  *
- *   - `orcid_email`  — a public email on the record equals `scholar.email`
- *                      (only emails that map to exactly ONE scholar count).
+ *   - `orcid_email`  — the record's public emails resolve to exactly ONE
+ *                      scholar via `scholar.email` (an email held by several
+ *                      scholars never maps; a record whose emails point at two
+ *                      scholars is not settled and falls through to the name
+ *                      step instead).
  *   - `orcid_works`  — a surname-key + `namesMatch` name match confirmed by
  *                      ≥3 DOIs/PMIDs shared between the record's `/works` and
- *                      the scholar's `publication_author` rows, and no other
- *                      name-matched scholar also shares ≥3 with that iD.
- *                      `articles_accepted` holds the shared-works count.
- *   - `orcid_name`   — every other name match (0–2 shared works, or an iD two
- *                      scholars both share ≥3 with). `articles_accepted` holds
- *                      the shared count so the dashboard can see near-misses.
+ *                      the scholar's `publication_author` rows, a FULL given
+ *                      name in common (an initial is not enough — "J Smith"
+ *                      matches both John and Mary J. Smith, and a same-surname
+ *                      co-author shares works with a departed owner's iD), and
+ *                      no other such scholar with ≥3 works of its own that the
+ *                      iD does not also share with this one (exclusive
+ *                      overlap). `articles_accepted` holds the shared count.
+ *   - `orcid_name`   — every other name match (0–2 shared works, initial-only
+ *                      name agreement, or an ambiguous overlap). The shared
+ *                      count is stored so the dashboard can see near-misses.
  *
  * `source_updated_at` is the record's works `last-modified-date`. Same mirror
  * contract as `etl/orcid-candidates` — full replace per run for OUR source
- * values only, refuse to write an empty set, only cwids in `scholar`, one row
- * per (cwid, orcid) with orcid_email > orcid_works > orcid_name. Never writes
- * `scholar.orcid`; read by `/edit/orcid-coverage` only.
+ * values only, refuse to write an empty set, only cwids in `scholar`. Within
+ * this mirror one row per (cwid, orcid), orcid_email > orcid_works >
+ * orcid_name; the table key is (cwid, orcid, source), so an `rpm_*` row for the
+ * same person and iD sits beside ours — that is the "two sources agree" case
+ * the dashboard grades strong. Never writes `scholar.orcid`; read by
+ * `/edit/orcid-coverage` only.
+ *
+ * Fails loud instead of writing a degraded mirror: 0 registry records, a 401/403
+ * from ORCID, or more than WORKS_FAIL_SHARE of the `/works` calls failing all
+ * abort the run before the write (a single failed iD is orcid_name with 0
+ * shared, and a re-run heals it).
  *
  * Usage: `npm run etl:orcid-registry [-- --dry-run]` (weekly; base task
  * family — HTTPS to ORCID + Aurora only). Env: `ORCID_CLIENT_ID` /
- * `ORCID_CLIENT_SECRET` (optional), `ORCID_REGISTRY_DRY_RUN=1`,
- * `ORCID_REGISTRY_MAX_RECORDS=<n>` (local smoke: truncate the deduped union).
+ * `ORCID_CLIENT_SECRET` (optional; the deployed task has neither today and runs
+ * anonymously — see scripts/release/flag-parity-allowlist.txt),
+ * `ORCID_REGISTRY_DRY_RUN=1`, `ORCID_REGISTRY_MAX_RECORDS=<n>` (local smoke:
+ * truncates the deduped union and FORCES a dry run — a truncated set must never
+ * reach the write path, where the delete pass would remove every other row).
  */
 import { db } from "../../lib/db";
 import { withEtlRun } from "@/lib/etl-run";
 import { lastNameKey } from "@/lib/last-name-key";
-import { namesMatch } from "@/etl/nih-profile/resolver";
+import { nameTokens, namesMatch } from "@/etl/nih-profile/resolver";
 import {
   expandedSearchAll,
   fetchWorks,
   initOrcidAuth,
+  OrcidHttpError,
   type ExpandedResult,
   type ExternalId,
   type WorksResponse,
@@ -40,6 +59,11 @@ import {
 
 const BATCH = 500;
 const MIN_SHARED_WORKS = 3;
+/** More than this share of `/works` calls failing (after retries) is an ORCID
+ *  outage, not a few odd records: abort rather than demote every affected
+ *  scholar to orcid_name. Small runs tolerate a couple of failures outright. */
+const WORKS_FAIL_SHARE = 0.02;
+const WORKS_FAIL_FLOOR = 2;
 export const ORCID_SOURCES = ["orcid_email", "orcid_works", "orcid_name"] as const;
 export type OrcidSource = (typeof ORCID_SOURCES)[number];
 
@@ -107,29 +131,39 @@ export function emailToCwid(scholars: Array<Pick<ScholarRow, "cwid" | "email">>)
   return out;
 }
 
-/** Records with a public email on a scholar → orcid_email rows; returns the settled iDs too. Pure. */
+/** Records whose public emails resolve to exactly ONE scholar → orcid_email rows; returns the
+ *  settled iDs too. A record listing emails of two different scholars (a lab or shared
+ *  address stored on someone else's row) is `ambiguous`: no row, not settled, so the
+ *  name/works step still gets to look at it. Pure. */
 export function matchEmails(
   records: ExpandedResult[],
   emailMap: Map<string, string>,
-): { rows: SourceRow[]; matched: Set<string> } {
+): { rows: SourceRow[]; matched: Set<string>; ambiguous: number } {
   const rows: SourceRow[] = [];
   const matched = new Set<string>();
+  let ambiguous = 0;
   for (const r of records) {
+    const cwids = new Set<string>();
     for (const raw of r.email ?? []) {
       const cwid = emailMap.get(raw.trim().toLowerCase());
-      if (!cwid) continue;
-      matched.add(r["orcid-id"]);
-      rows.push({
-        cwid,
-        orcid: r["orcid-id"],
-        source: "orcid_email",
-        articlesAccepted: 0,
-        articlesRejected: 0,
-        sourceUpdatedAt: null,
-      });
+      if (cwid) cwids.add(cwid);
     }
+    if (cwids.size === 0) continue;
+    if (cwids.size > 1) {
+      ambiguous++;
+      continue;
+    }
+    matched.add(r["orcid-id"]);
+    rows.push({
+      cwid: [...cwids][0]!,
+      orcid: r["orcid-id"],
+      source: "orcid_email",
+      articlesAccepted: 0,
+      articlesRejected: 0,
+      sourceUpdatedAt: null,
+    });
   }
-  return { rows, matched };
+  return { rows, matched, ambiguous };
 }
 
 /** Name strings to try for a record: credit-name, "given family", each other-name. Pure. */
@@ -175,14 +209,40 @@ export function matchNames(
   return out;
 }
 
+/** The full given-name tokens of a name (everything before the surname, ≥2 letters,
+ *  hyphens dropped) plus their concatenation, so "Xiao-Wei Wang", "Xiao Wei Wang" and
+ *  "Xiaowei Wang" all carry `xiaowei`. Initials carry nothing: "J A Smith" → {}. Pure. */
+export function givenNameKeys(name: string): Set<string> {
+  const given = [...nameTokens(name)].slice(0, -1).map((t) => t.replace(/-/g, ""));
+  const keys = new Set(given.filter((t) => t.length >= 2));
+  // Glue "Xiao Wei" → "xiaowei"; never glue bare initials ("J A" is not a given name "ja").
+  if (keys.size > 0 && given.length > 1) keys.add(given.join(""));
+  return keys;
+}
+
+/** A FULL given name (not just an initial) shared between one of the record's names and
+ *  the scholar's fullName or preferredName. `namesMatch` alone lets "J Smith" match
+ *  "Mary J Smith" through the middle initial, which is how a same-surname co-author
+ *  inherits a departed owner's iD; the works tier requires this on top. Pure. */
+export function givenNamesAgree(recordNames: string[], scholar: NamedScholar): boolean {
+  const mine = new Set<string>();
+  for (const n of [scholar.fullName, scholar.preferredName]) for (const k of givenNameKeys(n)) mine.add(k);
+  if (mine.size === 0) return false;
+  return recordNames.some((n) => [...givenNameKeys(n)].some((k) => mine.has(k)));
+}
+
 export const doiKey = (doi: string) => `doi:${doi.trim().toLowerCase()}`;
 export const pmidKey = (pmid: string) => `pmid:${pmid.trim()}`;
 
-/** Every DOI (normalized, lowercased) and PMID on the works response, group- and summary-level. Pure. */
+/** Every DOI (normalized, lowercased) and PMID on the works response, group- and summary-level.
+ *  Container ids (`external-id-relationship` = part-of / version-of: the book or proceedings
+ *  volume, not the work) are skipped; a missing relationship counts as `self`. Pure. */
 export function extractWorkIds(works: WorksResponse): Set<string> {
   const ids = new Set<string>();
   const add = (xs: ExternalId[] | null | undefined) => {
     for (const x of xs ?? []) {
+      const rel = x["external-id-relationship"]?.toLowerCase();
+      if (rel && rel !== "self") continue;
       const type = x["external-id-type"]?.toLowerCase();
       const value = x["external-id-normalized"]?.value ?? x["external-id-value"];
       if (!value) continue;
@@ -197,16 +257,42 @@ export function extractWorkIds(works: WorksResponse): Set<string> {
   return ids;
 }
 
-/** Per-scholar shared-works counts for one iD → sources: exactly one cwid ≥3 → orcid_works, the rest orcid_name. Pure. */
+/** What the works step knows about one (iD, name-matched scholar) pair. */
+export type WorksEvidence = {
+  /** doi:/pmid: keys on both the record's `/works` and the scholar's publications. */
+  shared: Set<string>;
+  /** `givenNamesAgree` for the pair. */
+  givenNameAgrees: boolean;
+};
+
+/** Per-scholar works evidence for one iD → sources. A scholar is confirmed by ≥3 shared
+ *  works AND a full given name in common; exactly one confirmed scholar → orcid_works.
+ *  Several confirmed → the one with ≥3 works the iD shares with nobody else confirmed
+ *  (exclusive overlap), so a genuine owner is not demoted beside a co-authoring homonym
+ *  whose shared works are all joint papers; a tie or nobody exclusive → all orcid_name.
+ *  Every name-matched scholar gets a row; `shared` is the count. Pure. */
 export function decide(
-  sharedByCwid: Map<string, number>,
+  byCwid: Map<string, WorksEvidence>,
 ): Array<{ cwid: string; source: "orcid_works" | "orcid_name"; shared: number }> {
-  const confirmed = [...sharedByCwid].filter(([, n]) => n >= MIN_SHARED_WORKS);
-  const winner = confirmed.length === 1 ? confirmed[0]![0] : null;
-  return [...sharedByCwid].map(([cwid, shared]) => ({
+  const confirmed = [...byCwid].filter(
+    ([, e]) => e.shared.size >= MIN_SHARED_WORKS && e.givenNameAgrees,
+  );
+  let winner: string | null = null;
+  if (confirmed.length === 1) winner = confirmed[0]![0];
+  else if (confirmed.length > 1) {
+    const exclusive = confirmed.filter(([cwid, e]) => {
+      let n = 0;
+      for (const id of e.shared) {
+        if (!confirmed.some(([o, oe]) => o !== cwid && oe.shared.has(id))) n++;
+      }
+      return n >= MIN_SHARED_WORKS;
+    });
+    if (exclusive.length === 1) winner = exclusive[0]![0];
+  }
+  return [...byCwid].map(([cwid, e]) => ({
     cwid,
     source: cwid === winner ? "orcid_works" : "orcid_name",
-    shared,
+    shared: e.shared.size,
   }));
 }
 
@@ -251,7 +337,11 @@ async function loadScholarWorkIds(cwids: string[]): Promise<Map<string, Set<stri
   return out;
 }
 
-const dryRun = process.argv.includes("--dry-run") || process.env.ORCID_REGISTRY_DRY_RUN === "1";
+const maxRecords = Number(process.env.ORCID_REGISTRY_MAX_RECORDS);
+// A truncated union is a local smoke only: on the write path the delete pass would
+// remove every registry row the sample did not cover, so the knob forces a dry run.
+const dryRun =
+  process.argv.includes("--dry-run") || process.env.ORCID_REGISTRY_DRY_RUN === "1" || maxRecords > 0;
 
 async function main(): Promise<number> {
   await initOrcidAuth();
@@ -266,9 +356,10 @@ async function main(): Promise<number> {
     }
   }
   let records = dedupeRecords(batches);
-  const maxRecords = Number(process.env.ORCID_REGISTRY_MAX_RECORDS);
   if (maxRecords > 0 && records.length > maxRecords) {
-    console.log(`ORCID_REGISTRY_MAX_RECORDS=${maxRecords}: truncating ${records.length} records`);
+    console.log(
+      `ORCID_REGISTRY_MAX_RECORDS=${maxRecords}: truncating ${records.length} records (dry run forced)`,
+    );
     records = records.slice(0, maxRecords);
   }
   console.log(`Registry union: ${records.length} records`);
@@ -281,8 +372,10 @@ async function main(): Promise<number> {
   });
   const byCwid = new Map(scholars.map((s) => [s.cwid, s]));
 
-  // 2. Email match; those iDs are settled and skip the name step.
-  const { rows: emailRows, matched: settled } = matchEmails(records, emailToCwid(scholars));
+  // 2. Email match; iDs that resolve to exactly one scholar are settled and skip the
+  //    name step. Ambiguous ones (emails of two scholars) fall through to it.
+  const { rows: emailRows, matched: settled, ambiguous } = matchEmails(records, emailToCwid(scholars));
+  if (ambiguous) console.log(`${ambiguous} records list emails of more than one scholar → left to the name step`);
 
   // 3. Name match on the rest.
   const nameMatched = matchNames(
@@ -293,6 +386,7 @@ async function main(): Promise<number> {
 
   // 4. Works confirmation, one /works call per name-matched iD.
   const scholarIds = await loadScholarWorkIds([...new Set([...nameMatched.values()].flatMap((s) => [...s]))]);
+  const recordById = new Map(records.map((r) => [r["orcid-id"], r]));
   const rows: SourceRow[] = [...emailRows];
   let worksFailed = 0;
   for (const [orcid, cwids] of nameMatched) {
@@ -303,17 +397,22 @@ async function main(): Promise<number> {
       ids = extractWorkIds(works);
       updatedAt = works["last-modified-date"]?.value ? new Date(works["last-modified-date"].value) : null;
     } catch (err) {
+      // Auth/blocking: every further call fails the same way — stop before the write.
+      if (err instanceof OrcidHttpError && (err.status === 401 || err.status === 403)) {
+        throw new Error(`ORCID refused /works (HTTP ${err.status}) — aborting before the write`, { cause: err });
+      }
       worksFailed++;
       if (worksFailed <= 3) console.warn(`works fetch failed for ${orcid}: ${(err as Error).message}`);
     }
-    const shared = new Map<string, number>();
+    const names = candidateNames(recordById.get(orcid)!);
+    const evidence = new Map<string, WorksEvidence>();
     for (const cwid of cwids) {
       const mine = scholarIds.get(cwid);
-      let n = 0;
-      if (mine) for (const id of ids) if (mine.has(id)) n++;
-      shared.set(cwid, n);
+      const shared = new Set<string>();
+      if (mine) for (const id of ids) if (mine.has(id)) shared.add(id);
+      evidence.set(cwid, { shared, givenNameAgrees: givenNamesAgree(names, byCwid.get(cwid)!) });
     }
-    for (const d of decide(shared)) {
+    for (const d of decide(evidence)) {
       rows.push({
         cwid: d.cwid,
         orcid,
@@ -323,6 +422,14 @@ async function main(): Promise<number> {
         sourceUpdatedAt: updatedAt,
       });
     }
+  }
+  const maxWorksFailed = Math.max(WORKS_FAIL_FLOOR, Math.ceil(WORKS_FAIL_SHARE * nameMatched.size));
+  if (worksFailed > maxWorksFailed) {
+    // Fail-soft on a path that WRITES is a wipe: every affected scholar would be demoted
+    // to orcid_name with 0 shared and the run would still read green.
+    throw new Error(
+      `${worksFailed} of ${nameMatched.size} /works fetches failed after retries (> ${maxWorksFailed}) — an ORCID outage, refusing to mirror`,
+    );
   }
   if (worksFailed) console.warn(`${worksFailed} /works fetches failed after retries → treated as orcid_name with 0 shared`);
 
@@ -355,19 +462,25 @@ async function main(): Promise<number> {
     console.table(table("orcid_works", 20));
     console.log("orcid_email sample:");
     console.table(table("orcid_email", 10));
+    // The weak tier is where a loose name hit lands — the near-misses (2 shared) and
+    // the initial-only matches are the rows an eyeball has to be able to see.
+    console.log("orcid_name sample (shared desc):");
+    console.table(table("orcid_name", 20));
     return keep.length;
   }
 
   // Mirror: upsert everything, then delete what THIS step's sources no longer have.
+  // `source` is part of the key, so an `rpm_*` row for the same (cwid, orcid) is a
+  // different row and is never touched here; a pair that moved between our own
+  // sources leaves its old row to the delete pass.
   const now = new Date();
   for (const batch of chunk(keep, BATCH)) {
     await db.write.$transaction(
       batch.map((r) =>
         db.write.orcidCandidate.upsert({
-          where: { cwid_orcid: { cwid: r.cwid, orcid: r.orcid } },
+          where: { cwid_orcid_source: { cwid: r.cwid, orcid: r.orcid, source: r.source } },
           create: { ...r, syncedAt: now },
           update: {
-            source: r.source,
             articlesAccepted: r.articlesAccepted,
             articlesRejected: r.articlesRejected,
             sourceUpdatedAt: r.sourceUpdatedAt,

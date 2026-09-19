@@ -130,6 +130,12 @@ describe("/edit/orcid-coverage", () => {
     expect((form.elements.namedItem("nih") as HTMLSelectElement).value).toBe("ever");
     // Never a per-person cell.
     expect(getByTestId("orcid-coverage-page").textContent).not.toMatch(/f1|0000-0002/);
+    // The weak definition must match the fold: a second candidate demotes only when it is
+    // itself strong-eligible (orcidTiers r6), so the copy must not say "several candidates".
+    expect(getByTestId("orcid-coverage-page").textContent).toContain(
+      "weak = no single strong candidate (a name-only registry match, thin support, a contradiction, or two or more strong candidate ORCIDs)",
+    );
+    expect(getByTestId("orcid-coverage-page").textContent).not.toContain("several candidate");
   });
 
   it("loader failure → unavailable notice, page root still renders", async () => {
