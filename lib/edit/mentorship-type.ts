@@ -8,7 +8,14 @@
  * Two layers: the per-pair `MentorshipType` (what a pair IS, labelled by
  * `mentorshipLabel`) and the seven-key `MentorshipTypeKey` vocabulary the
  * page's "Type of mentorship" filter speaks (`mentorshipTypeKey` folds a
- * pair into it). The filter is SERVER-side: the loader reads only the
+ * pair into it). Every user-facing string here speaks the office's
+ * language, not the schema's: the `md` bucket IS the Areas of Concentration
+ * (AOC) program, so it reads "AOC"; a pair reads by its category
+ * ("PhD thesis advisor", "Postdoc supervisor", "likely mentee") and never
+ * by its table ("roster", "Jenzabar", "ED") or the suggestion tier's
+ * internal name ("presumptive" confused the office — it is "likely" here).
+ * `MENTORSHIP_TYPE_DESCRIPTION` is the one-sentence hover / Sources text
+ * per key. The filter is SERVER-side: the loader reads only the
  * sources a selected key needs, so an AOC-office holder (scope `md`) sees
  * AOC-defined pairs and nothing inferred — the in-memory rail facet it
  * replaces let a learner through on one roster pair and then listed every
@@ -23,33 +30,47 @@ export type MentorshipTier = "confirmed" | "presumptive" | "ambiguous";
  *  the pair came from. */
 export type MentorshipType = { program: string; source: MentorshipSource; tier: MentorshipTier };
 
-/** Human label per program bucket (`MentoringProgramKey`). */
+/** Human label per program bucket (`MentoringProgramKey`). The `md` KEY
+ *  stays (it is `bucketProgramType`'s output and the `report_access` scope
+ *  key); its LABEL is the program's own name — the Program column, the
+ *  Viewers panel's scope options and the workbook all read "AOC". The
+ *  public search facet keeps its own "MD" wording (a different audience). */
 export const PROGRAM_LABEL: Record<string, string> = {
-  md: "MD",
+  md: "AOC",
   mdphd: "MD-PhD",
   phd: "PhD",
   postdoc: "Postdoc",
   ecr: "ECR",
 };
 
-const SOURCE_LABEL: Record<MentorshipSource, string> = {
-  roster: "roster",
-  jenzabar: "Jenzabar",
-  ed: "ED",
-  coauthor: "co-author",
-};
-
-/** `program:source:tier` — the facet value. */
+/** `program:source:tier` — the dedupe / React key for a pair. NOT a label:
+ *  it keeps the schema words on purpose so it never moves when the wording
+ *  does. */
 export function mentorshipKey(t: MentorshipType): string {
   return `${t.program}:${t.source}:${t.tier}`;
 }
 
-/** "MD · roster", "PhD · Jenzabar", "Postdoc · ED", "Volunteer · co-author
- *  (presumptive)" — the tier suffix only when not confirmed. */
+/** The per-pair label (the Learners "Type of mentorship" column, the
+ *  mentor cell lines, the workbook), read by CATEGORY: a roster pair is its
+ *  program ("AOC", "MD-PhD (program office)", "ECR"); a Jenzabar pair is
+ *  "<program> thesis advisor"; an ED pair "Postdoc supervisor"; a co-author
+ *  pair "<kind> · likely mentee (from co-authorship)" (or "possible"). A
+ *  roster bucket no filter key maps to falls back to its program label. */
 export function mentorshipLabel(t: MentorshipType): string {
-  const program = PROGRAM_LABEL[t.program] ?? KIND_LABEL[t.program as MenteeKind] ?? t.program;
-  const tier = t.tier === "confirmed" ? "" : ` (${t.tier})`;
-  return `${program} · ${SOURCE_LABEL[t.source]}${tier}`;
+  switch (t.source) {
+    case "roster": {
+      const key = ROSTER_TYPE_BY_SCOPE[t.program];
+      return key ? MENTORSHIP_TYPE_LABEL[key] : (PROGRAM_LABEL[t.program] ?? t.program);
+    }
+    case "jenzabar":
+      return `${PROGRAM_LABEL[t.program] ?? t.program} thesis advisor`;
+    case "ed":
+      return MENTORSHIP_TYPE_LABEL.postdoc;
+    case "coauthor": {
+      const kind = KIND_LABEL[t.program as MenteeKind] ?? t.program;
+      return `${kind} · ${t.tier === "presumptive" ? "likely" : "possible"} mentee (from co-authorship)`;
+    }
+  }
 }
 
 /** The filter's vocabulary, in display order: the three roster buckets,
@@ -73,6 +94,25 @@ export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
   postdoc: "Postdoc supervisor",
   likely: "Likely mentee (from co-authorship)",
   possible: "Possible mentee (from co-authorship)",
+};
+
+/** One sentence per key: what the source is and how sure it is — the
+ *  filter checkbox's hover, each pair line's hover, and the page's
+ *  "Sources" disclosure (which adds the date facts). Plain words for the
+ *  office that asked what each category means. */
+export const MENTORSHIP_TYPE_DESCRIPTION: Record<MentorshipTypeKey, string> = {
+  aoc: "Pairs recorded by the Areas of Concentration program (the MD scholarly-concentration program) in its pairing sheet.",
+  mdphd:
+    "Pairs from the MD-PhD program office's list, loaded with the AOC sheet. No entry or graduation years yet.",
+  ecr: "Early Career Research pairs from the same sheet (classes 2018–2023).",
+  thesis:
+    "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.",
+  postdoc:
+    "The postdoc's reporting manager from the ED appointment record, with appointment dates. For roughly one in seven, the manager on record is a lab administrator rather than the PI.",
+  likely:
+    "Not on any roster: a trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with this faculty member. Inferred, unconfirmed.",
+  possible:
+    "The same inference for research staff or MD alumni, who may be peers rather than trainees. Off by default.",
 };
 
 /** `report_access` scope key (`MENTORED_PUBS_SCOPES`, `lib/edit/report-access.ts`)

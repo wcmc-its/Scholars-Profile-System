@@ -9,10 +9,19 @@
  * Type facet either; grad-year default sort with null last; the
  * Learner header sorts by last, first. A Scopus-only row (`SCOPUS:` key)
  * prints "Scopus:" with no PubMed link. Every query is scoped to the table's
- * test id or the render container, never `document.body`.
+ * test id or the render container, never `document.body`. Type lines read
+ * in the office's words ("AOC", "PhD thesis advisor") and hover their
+ * category's description — `HoverTooltip` is mocked to surface `text` as an
+ * attribute, `publications-report-table.test.tsx`'s convention.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, within } from "@testing-library/react";
+
+vi.mock("@/components/ui/hover-tooltip", () => ({
+  HoverTooltip: ({ text, children }: { text: string; children: React.ReactNode }) => (
+    <span data-tooltip={text}>{children}</span>
+  ),
+}));
 
 import { MentoredPublicationsTable } from "@/components/edit/mentored-publications-table";
 import type {
@@ -101,7 +110,7 @@ function summaryRow(o: Partial<MentoredPubsSummaryRow> & Pick<MentoredPubsSummar
     entryYearSource: null,
     firstName: "Ada",
     lastName: "Learner",
-    program: "MD",
+    program: "AOC",
     mentors: [],
     pubsInWindow: null,
     withMentorInWindow: null,
@@ -120,7 +129,7 @@ const LEARNERS: MentoredPubsSummaryRow[] = [
     cwid: "stu0001",
     gradYear: 2025,
     lastName: "Learner",
-    program: "MD / PhD",
+    program: "AOC / PhD",
     mentors: [
       { ...CHEN, mentorship: MD },
       { ...OKAFOR, mentorship: PHD },
@@ -163,7 +172,10 @@ describe("MentoredPublicationsTable — publications", () => {
     expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 5 of 5 publications");
     const row1 = within(table()).getByTestId("mentored-pubs-pub-1");
     expect(within(row1).getByText("2024-03-01")).toBeTruthy();
-    expect(within(row1).getByText("MD · roster")).toBeTruthy();
+    const type = within(row1).getByText("AOC");
+    expect(type.parentElement?.getAttribute("data-tooltip")).toMatch(
+      /^Pairs recorded by the Areas of Concentration program/,
+    );
     expect(within(row1).getByText("1st author")).toBeTruthy();
     expect(within(row1).getByRole("link", { name: "1" }).getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/1/");
     // A Scopus-only row: "Scopus:" label, the bare id, no PubMed link.
@@ -202,9 +214,9 @@ describe("MentoredPublicationsTable — publications", () => {
       "Mentor",
     ]);
     expect(
-      rail.queryByRole("button", { name: /Volunteer · co-author \(presumptive\)/ }),
+      rail.queryByRole("button", { name: /Volunteer · likely mentee \(from co-authorship\)/ }),
     ).toBeNull();
-    expect(rail.queryByRole("button", { name: /MD · roster/ })).toBeNull();
+    expect(rail.queryByRole("button", { name: /^AOC/ })).toBeNull();
     fireEvent.click(rail.getByRole("button", { name: /Chen, Lin/ }));
     expect(ids()).toEqual(["1", "2", "SCOPUS:105037533819"]);
     expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 3 of 5 publications");
@@ -232,12 +244,23 @@ describe("MentoredPublicationsTable — learners", () => {
         .getAllByRole("heading", { level: 3 })
         .map((h) => h.textContent),
     ).toEqual(["In program window", "Mentor"]);
-    expect(within(container).queryByRole("button", { name: /MD · roster/ })).toBeNull();
+    expect(within(container).queryByRole("button", { name: /^AOC/ })).toBeNull();
     expect(within(container).queryByRole("button", { name: /co-author/ })).toBeNull();
     expect(within(container).getByRole("button", { name: /Chen, Lin/ })).toBeTruthy();
     const row = within(table()).getByTestId("mentored-pubs-learner-stu0001");
     const typeCell = row.querySelectorAll("td")[3];
-    expect([...typeCell.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["MD · roster", "PhD · Jenzabar"]);
+    expect([...typeCell.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "AOC",
+      "PhD thesis advisor",
+    ]);
+    // Each line hovers its category's description; nothing in a user-facing word is a table name.
+    expect(
+      [...typeCell.querySelectorAll("[data-tooltip]")].map((el) => el.getAttribute("data-tooltip")),
+    ).toEqual([
+      expect.stringMatching(/^Pairs recorded by the Areas of Concentration program/),
+      expect.stringMatching(/^Thesis-advisor pairs from the Graduate School/),
+    ]);
+    expect(typeCell.textContent).not.toMatch(/roster|Jenzabar|presumptive/);
     expect(within(table()).getByRole("columnheader", { name: /Grad year/ }).getAttribute("aria-sort")).toBe("descending");
     expect(within(table()).getByRole("columnheader", { name: /JIF ≥ 10/ })).toBeTruthy();
   });

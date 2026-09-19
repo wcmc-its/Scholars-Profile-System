@@ -1,6 +1,7 @@
 /**
  * The Mentored publications report as a three-sheet workbook — the exact
- * artifact the Medical Education office has been assembling by hand:
+ * artifact the Areas of Concentration (AOC) office has been assembling by
+ * hand:
  *   - "Summary"            one row per learner (counts + mentors + mentor CWIDs
  *                          + each pair's mentorship type);
  *   - "Raw Data"           one row per (learner, mentor, publication) with the
@@ -277,7 +278,7 @@ export async function buildMentoredPublicationsWorkbook(
     ],
     [
       "Entry year",
-      `The learner's program entry year from the Medical Education roster when present; otherwise graduation year - 4 (4-year MD track). ${fallbackCount} of ${report.summary.length} learner${report.summary.length === 1 ? "" : "s"} used the fallback.`,
+      `The learner's program entry year from the AOC pairing sheet when present; otherwise graduation year - 4 (4-year MD track). ${fallbackCount} of ${report.summary.length} learner${report.summary.length === 1 ? "" : "s"} used the fallback.`,
     ],
     [
       "Counting rule",
@@ -293,7 +294,7 @@ export async function buildMentoredPublicationsWorkbook(
     ],
     [
       "Mentor names",
-      "The mentor's name from their Scholars profile when they have one; otherwise the name on the Medical Education roster; otherwise the CWID alone.",
+      "The mentor's name from their Scholars profile when they have one; otherwise the name on the AOC pairing sheet (or the Jenzabar record); otherwise the CWID alone.",
     ],
     [
       "Journal impact factor",
