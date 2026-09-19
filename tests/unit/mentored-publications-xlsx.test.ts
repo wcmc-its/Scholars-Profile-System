@@ -32,7 +32,13 @@ const YAN = { cwid: "men0002", name: "Yan Other", mentorship: { ...MD_ROSTER, pr
 
 const REPORT: MentoredPublicationsReport = {
   generatedAt: new Date("2026-09-18T15:04:05Z"),
-  filters: { scopes: ["md"], gradYears: [2025, 2024], tail: 1, pubs: "mentored" },
+  filters: {
+    scopes: ["md"],
+    types: ["aoc", "thesis"],
+    gradYears: [2025, 2024],
+    tail: 1,
+    pubs: "mentored",
+  },
   allPubsLoaded: null,
   droppedUnresolved: 0,
   publications: [],
@@ -171,7 +177,8 @@ describe("buildMentoredPublicationsWorkbook", () => {
     });
     expect(items.get("Generated")).toBe("2026-09-18");
     expect(items.get("Graduation years")).toBe("2024, 2025");
-    expect(items.get("Programs")).toBe("MD");
+    expect(items.get("Types of mentorship")).toBe("AOC, PhD / MD-PhD thesis advisor");
+    expect(items.has("Programs")).toBe(false);
     expect(String(items.get("Window rule"))).toContain("entry year <= publication year <= graduation year + 1");
     expect(String(items.get("Entry year"))).toContain("1 of 1 learner used the fallback");
     expect(String(items.get("Counting rule"))).toContain("counts once");
@@ -209,14 +216,29 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(wb.getWorksheet(ASSUMPTIONS_SHEET)!.getRow(3).getCell(2).value).toBe("2025, Unknown");
   });
 
-  it("downloadFilename: program or All, years joined by -, ' All Pubs' in all mode, ISO day", () => {
+  it("downloadFilename: the caller's types label (path characters → -), years joined by -, ' All Pubs' in all mode, ISO day", () => {
     const d = new Date("2026-09-18T23:59:59Z");
-    expect(downloadFilename("md", [2024, 2025], d)).toBe("Mentored Publications MD 2024-2025 - 2026-09-18.xlsx");
-    expect(downloadFilename("md", [2026, null], d)).toBe("Mentored Publications MD 2026-unknown - 2026-09-18.xlsx");
-    expect(downloadFilename(null, [2025], d)).toBe("Mentored Publications All 2025 - 2026-09-18.xlsx");
-    expect(downloadFilename("mdphd", [], d)).toBe("Mentored Publications MD-PhD all-years - 2026-09-18.xlsx");
-    expect(downloadFilename("md", [2025], d, "all")).toBe("Mentored Publications MD 2025 All Pubs - 2026-09-18.xlsx");
-    expect(downloadFilename("md", [2025], d, "mentored")).toBe("Mentored Publications MD 2025 - 2026-09-18.xlsx");
+    expect(downloadFilename("AOC", [2024, 2025], d)).toBe(
+      "Mentored Publications AOC 2024-2025 - 2026-09-18.xlsx",
+    );
+    expect(downloadFilename("AOC", [2026, null], d)).toBe(
+      "Mentored Publications AOC 2026-unknown - 2026-09-18.xlsx",
+    );
+    expect(downloadFilename("Mixed", [2025], d)).toBe(
+      "Mentored Publications Mixed 2025 - 2026-09-18.xlsx",
+    );
+    expect(downloadFilename("MD-PhD (program office)", [], d)).toBe(
+      "Mentored Publications MD-PhD (program office) all-years - 2026-09-18.xlsx",
+    );
+    expect(downloadFilename("PhD / MD-PhD thesis advisor+AOC", [2025], d)).toBe(
+      "Mentored Publications PhD-MD-PhD thesis advisor+AOC 2025 - 2026-09-18.xlsx",
+    );
+    expect(downloadFilename("AOC", [2025], d, "all")).toBe(
+      "Mentored Publications AOC 2025 All Pubs - 2026-09-18.xlsx",
+    );
+    expect(downloadFilename("AOC", [2025], d, "mentored")).toBe(
+      "Mentored Publications AOC 2025 - 2026-09-18.xlsx",
+    );
   });
 
   describe("pubs: 'all' mode", () => {

@@ -44,7 +44,13 @@ beforeEach(() => {
   h.mockGetReportScopes.mockResolvedValue(new Set(["md", "ecr"]));
   h.mockLoadGradYears.mockResolvedValue([2026, 2025, 2024]);
   h.mockLoadReport.mockImplementation(
-    async (args: { scopes: string[]; gradYears: number[] | null; tail: number; pubs: "mentored" | "all" }) => ({
+    async (args: {
+      scopes: string[];
+      types: string[];
+      gradYears: number[] | null;
+      tail: number;
+      pubs: "mentored" | "all";
+    }) => ({
       summary: [],
       detail: [],
       publications: [],
@@ -57,6 +63,8 @@ beforeEach(() => {
 });
 
 const MENTORED = { pubs: "mentored" } as const;
+/** An md+ecr holder's default types. */
+const AOC_ECR = { types: ["aoc", "ecr"] } as const;
 
 describe("gating", () => {
   it("401 with no session", async () => {
@@ -73,16 +81,31 @@ describe("gating", () => {
     expect(h.mockLoadReport).not.toHaveBeenCalled();
   });
 
-  it("403 when program is outside the caller's scopes", async () => {
-    const res = await GET(req("?program=mdphd"));
-    expect(res.status).toBe(403);
-    expect(h.mockLoadReport).not.toHaveBeenCalled();
+  it("a roster type outside the caller's scopes is dropped, never a 403; nothing left → the default", async () => {
+    const res = await GET(req("?types=mdphd,thesis&years=2025"));
+    expect(res.status).toBe(200);
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["md", "ecr"],
+      types: ["thesis"],
+      gradYears: [2025],
+      tail: 1,
+      ...MENTORED,
+    });
+    await GET(req("?types=mdphd&years=2025"));
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      scopes: ["md", "ecr"],
+      ...AOC_ECR,
+      gradYears: [2025],
+      tail: 1,
+      ...MENTORED,
+    });
   });
 
   it("400 on malformed params", async () => {
     expect((await GET(req("?years=20x4"))).status).toBe(400);
     expect((await GET(req("?tail=9"))).status).toBe(400);
-    expect((await GET(req("?program=phd"))).status).toBe(400);
+    expect((await GET(req("?types=phd"))).status).toBe(400);
+    expect(await (await GET(req("?types=phd"))).text()).toBe("invalid_types");
     expect((await GET(req("?pubs=everything"))).status).toBe(400);
     expect(await (await GET(req("?pubs=everything"))).text()).toBe("invalid_pubs");
     expect((await GET(req("?view=raw"))).status).toBe(400);
@@ -91,12 +114,13 @@ describe("gating", () => {
 });
 
 describe("response", () => {
-  it("defaults to the two most recent years across the caller's scopes and names the file for them", async () => {
+  it("defaults to the caller's roster types and the two most recent years across them, and names the file for both", async () => {
     const res = await GET(req());
     expect(res.status).toBe(200);
-    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md", "ecr"]);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md", "ecr"], ["aoc", "ecr"]);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
       scopes: ["md", "ecr"],
+      ...AOC_ECR,
       gradYears: [2026, 2025],
       tail: 1,
       ...MENTORED,
@@ -105,7 +129,7 @@ describe("response", () => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="Mentored Publications All 2026-2025 - 2026-09-18.xlsx"',
+      'attachment; filename="Mentored Publications AOC+ECR 2026-2025 - 2026-09-18.xlsx"',
     );
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(Buffer.from(await res.arrayBuffer()).toString()).toBe("xlsx-bytes");
@@ -116,6 +140,7 @@ describe("response", () => {
     const res = await GET(req());
     expect(h.mockLoadReport).toHaveBeenCalledWith({
       scopes: ["md", "ecr"],
+      ...AOC_ECR,
       gradYears: [2026, 2025, null],
       tail: 1,
       ...MENTORED,
@@ -123,36 +148,85 @@ describe("response", () => {
     expect(res.headers.get("content-disposition")).toContain("2026-2025-unknown");
   });
 
-  it("an explicit program narrows the loader to that one scope and names the file for it", async () => {
-    const res = await GET(req("?program=md&years=2024,2025&tail=2"));
+  it("explicit types reach the loader (scopes untouched) and name the file: one or two labels joined by +, more = Mixed", async () => {
+    const res = await GET(req("?types=aoc&years=2024,2025&tail=2"));
     expect(res.status).toBe(200);
     expect(h.mockLoadGradYears).not.toHaveBeenCalled();
-    expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["md"], gradYears: [2024, 2025], tail: 2, ...MENTORED });
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["md", "ecr"],
+      types: ["aoc"],
+      gradYears: [2024, 2025],
+      tail: 2,
+      ...MENTORED,
+    });
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="Mentored Publications MD 2024-2025 - 2026-09-18.xlsx"',
+      'attachment; filename="Mentored Publications AOC 2024-2025 - 2026-09-18.xlsx"',
     );
+    const two = await GET(req("?types=thesis,likely&years=2025"));
+    expect(two.headers.get("content-disposition")).toBe(
+      'attachment; filename="Mentored Publications PhD-MD-PhD thesis advisor+Likely mentee (from co-authorship) 2025 - 2026-09-18.xlsx"',
+    );
+    const three = await GET(req("?types=aoc,ecr,thesis&years=2025"));
+    expect(three.headers.get("content-disposition")).toBe(
+      'attachment; filename="Mentored Publications Mixed 2025 - 2026-09-18.xlsx"',
+    );
+  });
+
+  it("a legacy program=<scope> link still works: it reads as that roster type", async () => {
+    await GET(req("?program=md&years=2025"));
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["md", "ecr"],
+      types: ["aoc"],
+      gradYears: [2025],
+      tail: 1,
+      ...MENTORED,
+    });
   });
 
   it("years=all passes no year filter", async () => {
     await GET(req("?years=all"));
-    expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["md", "ecr"], gradYears: null, tail: 1, ...MENTORED });
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["md", "ecr"],
+      ...AOC_ECR,
+      gradYears: null,
+      tail: 1,
+      ...MENTORED,
+    });
   });
 
   it("pubs=all reaches the loader and suffixes the filename; view is accepted and ignored", async () => {
-    const res = await GET(req("?program=md&years=2025&pubs=all&view=publications"));
+    const res = await GET(req("?types=aoc&years=2025&pubs=all&view=publications"));
     expect(res.status).toBe(200);
-    expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["md"], gradYears: [2025], tail: 1, pubs: "all" });
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["md", "ecr"],
+      types: ["aoc"],
+      gradYears: [2025],
+      tail: 1,
+      pubs: "all",
+    });
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="Mentored Publications MD 2025 All Pubs - 2026-09-18.xlsx"',
+      'attachment; filename="Mentored Publications AOC 2025 All Pubs - 2026-09-18.xlsx"',
     );
   });
 
-  it("a superuser's '*' scope reaches the loader as '*'", async () => {
+  it("a superuser's '*' scope reaches the loader as '*', every confirmed type by default, any type on request", async () => {
     h.mockSession.mockResolvedValue({ cwid: "adm0001", isSuperuser: true, isCommsSteward: false });
     h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
-    await GET(req("?program=mdphd&years=2025"));
-    expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["mdphd"], gradYears: [2025], tail: 1, ...MENTORED });
+    await GET(req("?types=mdphd&years=2025"));
+    expect(h.mockLoadReport).toHaveBeenCalledWith({
+      scopes: ["*"],
+      types: ["mdphd"],
+      gradYears: [2025],
+      tail: 1,
+      ...MENTORED,
+    });
     await GET(req("?years=2025"));
-    expect(h.mockLoadReport).toHaveBeenLastCalledWith({ scopes: ["*"], gradYears: [2025], tail: 1, ...MENTORED });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      scopes: ["*"],
+      types: ["aoc", "mdphd", "ecr", "thesis", "postdoc"],
+      gradYears: [2025],
+      tail: 1,
+      ...MENTORED,
+    });
   });
 });

@@ -25,13 +25,12 @@ import ExcelJS from "exceljs";
 
 import {
   HIGH_IMPACT_THRESHOLD,
-  PROGRAM_LABEL,
   type MentoredPublicationsReport,
   type MentoredPubsSet,
   type MentorPair,
   type MentorRef,
 } from "@/lib/edit/mentored-publications-report";
-import { mentorshipLabel } from "@/lib/edit/mentorship-type";
+import { MENTORSHIP_TYPE_LABEL, mentorshipLabel } from "@/lib/edit/mentorship-type";
 
 export const SUMMARY_SHEET = "Summary";
 export const RAW_SHEET = "Raw Data";
@@ -161,23 +160,21 @@ function yesNo(b: boolean | null): string | null {
   return b === null ? null : b ? "Yes" : "No";
 }
 
-function scopeLabel(scopes: ReadonlyArray<string>): string {
-  if (scopes.includes("*")) return "All programs (MD, MD-PhD, ECR)";
-  return scopes.map((s) => PROGRAM_LABEL[s] ?? s).join(", ");
-}
-
-/** `Mentored Publications <program or All> <years joined by -> [All Pubs] - YYYY-MM-DD.xlsx`
- *  (a `null` year reads `unknown`). */
+/** `Mentored Publications <types label> <years joined by -> [All Pubs] - YYYY-MM-DD.xlsx`
+ *  (a `null` year reads `unknown`). `typesLabel` is the caller's plain
+ *  string (the route joins up to two `MENTORSHIP_TYPE_LABEL`s with `+`, else
+ *  "Mixed"); a path or quote character in it becomes `-`, since a label such
+ *  as "PhD / MD-PhD thesis advisor" must not split the filename. */
 export function downloadFilename(
-  program: string | null,
+  typesLabel: string,
   years: ReadonlyArray<number | null>,
   generatedAt: Date,
   pubs: MentoredPubsSet = "mentored",
 ): string {
-  const programLabel = program ? (PROGRAM_LABEL[program] ?? program) : "All";
+  const safeTypes = typesLabel.replace(/\s*[\\/:*?"<>|]+\s*/g, "-");
   const yearsLabel = years.length > 0 ? years.map((y) => y ?? "unknown").join("-") : "all-years";
   const mode = pubs === "all" ? " All Pubs" : "";
-  return `Mentored Publications ${programLabel} ${yearsLabel}${mode} - ${isoDate(generatedAt)}.xlsx`;
+  return `Mentored Publications ${safeTypes} ${yearsLabel}${mode} - ${isoDate(generatedAt)}.xlsx`;
 }
 
 /** `; `-joined, or null (a blank cell) when there are none. */
@@ -265,7 +262,7 @@ export async function buildMentoredPublicationsWorkbook(
   const assumptions: CellValue[][] = [
     ["Generated", isoDate(report.generatedAt)],
     ["Graduation years", years],
-    ["Programs", scopeLabel(filters.scopes)],
+    ["Types of mentorship", filters.types.map((k) => MENTORSHIP_TYPE_LABEL[k]).join(", ")],
     [
       "Publication set",
       allMode

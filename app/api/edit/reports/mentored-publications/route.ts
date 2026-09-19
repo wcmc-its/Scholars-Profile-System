@@ -1,16 +1,17 @@
 /**
  * GET /api/edit/reports/mentored-publications — the Mentored publications
  * report (`/edit/reports/7`) as a three-sheet `.xlsx` attachment. Same query
- * string the page renders (`years`, `program`, `tail`, `pubs` — see
+ * string the page renders (`years`, `types`, `tail`, `pubs` — see
  * `parseMentoredPubsParams`; `view` is accepted and ignored, it is page-only),
- * same scope gate (`getReportScopes`). `pubs=all` builds the "all learner
- * publications" workbook (different Summary / Raw Data columns, " All Pubs"
- * in the filename).
+ * same scope gate (`getReportScopes`), same type resolution
+ * (`resolveMentorshipTypes`: absent → the caller's default, a roster type
+ * outside their scopes silently dropped, never widened). `pubs=all` builds
+ * the "all learner publications" workbook (different Summary / Raw Data
+ * columns, " All Pubs" in the filename).
  *
  * Gate order: no session → 401 · no report scope at all → 403 · malformed
- * params → 400 · `program` outside the caller's scopes → 403 · else the
- * workbook. The middleware's `/api/edit/*` 401 is only the coarse layer; the
- * scope check is this handler's.
+ * params → 400 · else the workbook. The middleware's `/api/edit/*` 401 is
+ * only the coarse layer; the scope check is this handler's.
  *
  * `force-dynamic` + `no-store`: a download is never cached. Data volume is
  * ~1–2k rows, well inside CloudFront's 30s origin-read budget.
@@ -28,7 +29,8 @@ import {
   buildMentoredPublicationsWorkbook,
   downloadFilename,
 } from "@/lib/edit/mentored-publications-xlsx";
-import { getReportScopes, MENTORED_PUBS_REPORT, scopeAdmits } from "@/lib/edit/report-access";
+import { MENTORSHIP_TYPE_LABEL, resolveMentorshipTypes } from "@/lib/edit/mentorship-type";
+import { getReportScopes, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
 
 export const dynamic = "force-dynamic";
 
@@ -46,23 +48,28 @@ export async function GET(request: Request) {
   if (!parsed.ok) {
     return new NextResponse(parsed.error, { status: 400 });
   }
-  const { program, tail, pubs } = parsed.value;
-  if (program !== null && !scopeAdmits(scopes, program)) {
-    return new NextResponse("Forbidden", { status: 403 });
-  }
-  const loaderScopes = program !== null ? [program] : [...scopes];
+  const { tail, pubs } = parsed.value;
+  const types = resolveMentorshipTypes(parsed.value.types, scopes);
+  const loaderScopes = [...scopes];
 
-  // Same default as the page: the two most recent graduation years in scope,
-  // plus "unknown" when the scope has learners with no graduation year.
-  const years = parsed.value.years ?? defaultMentoredPubsYears(await loadMentoredGradYears(loaderScopes));
+  // Same default as the page: the two most recent graduation years across
+  // the selected types, plus "unknown" when they have year-less learners.
+  const years =
+    parsed.value.years ??
+    defaultMentoredPubsYears(await loadMentoredGradYears(loaderScopes, types));
   const report = await loadMentoredPublicationsReport({
     scopes: loaderScopes,
+    types,
     gradYears: years.length > 0 ? years : null,
     tail,
     pubs,
   });
   const buffer = await buildMentoredPublicationsWorkbook(report);
-  const filename = downloadFilename(program, years, report.generatedAt, pubs);
+  // ponytail: up to two type labels fit a filename; more reads "Mixed" — the
+  // Query & Assumptions sheet carries the full list.
+  const typesLabel =
+    types.length <= 2 ? types.map((k) => MENTORSHIP_TYPE_LABEL[k]).join("+") : "Mixed";
+  const filename = downloadFilename(typesLabel, years, report.generatedAt, pubs);
 
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,

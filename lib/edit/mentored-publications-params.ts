@@ -9,7 +9,12 @@
  *               with no graduation year (`null` in the parsed list);
  *               `years=all` = every year; absent → the caller's default
  *               (`defaultMentoredPubsYears`);
- *   - `program` one of `MENTORED_PUBS_SCOPES`, or `all` / absent;
+ *   - `types`   which types of mentorship (`MENTORSHIP_TYPE_KEYS`), comma-
+ *               separated and/or repeated like `years`; absent → the caller's
+ *               default (`defaultMentorshipTypes`). LEGACY: a pre-types link's
+ *               `program=<scope>` reads as that scope's roster type
+ *               (`ROSTER_TYPE_BY_SCOPE`); `program=all` or an unknown program
+ *               reads as absent — an old link never 400s;
  *   - `tail`    integer 0..MAX_TAIL, default DEFAULT_TAIL;
  *   - `pubs`    which publication set: `mentored` (co-pubs with an AOC mentor,
  *               the default) or `all` (every publication of the learner, from
@@ -21,7 +26,11 @@
  * defaults) rather than a silent coercion. Pure — no DB, safe anywhere.
  */
 import { DEFAULT_TAIL, MAX_TAIL } from "@/lib/edit/mentored-publications-report";
-import { MENTORED_PUBS_SCOPES, type MentoredPubsScope } from "@/lib/edit/report-access";
+import {
+  MENTORSHIP_TYPE_KEYS,
+  ROSTER_TYPE_BY_SCOPE,
+  type MentorshipTypeKey,
+} from "@/lib/edit/mentorship-type";
 
 export const MENTORED_PUBS_MODES = ["mentored", "all"] as const;
 export type MentoredPubsMode = (typeof MENTORED_PUBS_MODES)[number];
@@ -34,8 +43,9 @@ export type MentoredPubsParams = {
    *  `[]` = every year (`years=all`); null = not given, the caller applies
    *  its default. */
   years: Array<number | null> | null;
-  /** A single program bucket, or null for "every scope the caller holds". */
-  program: MentoredPubsScope | null;
+  /** The types of mentorship kept, in `MENTORSHIP_TYPE_KEYS` order; null =
+   *  not given, the caller applies its default (`resolveMentorshipTypes`). */
+  types: MentorshipTypeKey[] | null;
   tail: number;
   pubs: MentoredPubsMode;
   view: MentoredPubsView;
@@ -45,7 +55,7 @@ export type ParsedMentoredPubsParams =
   | { ok: true; value: MentoredPubsParams }
   | {
       ok: false;
-      error: "invalid_years" | "invalid_program" | "invalid_tail" | "invalid_pubs" | "invalid_view";
+      error: "invalid_years" | "invalid_types" | "invalid_tail" | "invalid_pubs" | "invalid_view";
     };
 
 const YEAR_MIN = 1900;
@@ -92,13 +102,24 @@ export function parseMentoredPubsParams(
     if (unknown) years.push(null);
   }
 
-  let program: MentoredPubsScope | null = null;
-  const rawProgram = get("program")?.trim().toLowerCase();
-  if (rawProgram && rawProgram !== "all") {
-    if (!(MENTORED_PUBS_SCOPES as readonly string[]).includes(rawProgram)) {
-      return { ok: false, error: "invalid_program" };
+  let types: MentorshipTypeKey[] | null = null;
+  const typeTokens = getAll("types")
+    .flatMap((v) => v.split(","))
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t.length > 0);
+  if (typeTokens.length > 0) {
+    const out = new Set<string>();
+    for (const t of typeTokens) {
+      if (!(MENTORSHIP_TYPE_KEYS as readonly string[]).includes(t))
+        return { ok: false, error: "invalid_types" };
+      out.add(t);
     }
-    program = rawProgram as MentoredPubsScope;
+    types = MENTORSHIP_TYPE_KEYS.filter((k) => out.has(k));
+  } else {
+    // Legacy `program=<scope>` (the select this filter replaced): that
+    // scope's roster type; `all` / unknown → not given.
+    const legacy = ROSTER_TYPE_BY_SCOPE[get("program")?.trim().toLowerCase() ?? ""];
+    if (legacy) types = [legacy];
   }
 
   let tail = DEFAULT_TAIL;
@@ -127,19 +148,21 @@ export function parseMentoredPubsParams(
     view = rawView as MentoredPubsView;
   }
 
-  return { ok: true, value: { years, program, tail, pubs, view } };
+  return { ok: true, value: { years, types, tail, pubs, view } };
 }
 
 /** The query string the page's links and the download button carry — the
- *  inverse of `parseMentoredPubsParams`, so a round-trip is lossless. `pubs`
- *  is always written (the download link must carry the mode); `view` only
- *  when it is not the default, so the download link stays view-free. */
+ *  inverse of `parseMentoredPubsParams`, so a round-trip is lossless. `types`
+ *  and `pubs` are written whenever known (the download link must carry
+ *  them; the page always resolves both); `view` only when it is not the
+ *  default, so the download link stays view-free. `program` is never
+ *  written — it is read-only legacy. */
 export function mentoredPubsQueryString(p: MentoredPubsParams): string {
   const sp = new URLSearchParams();
   if (p.years !== null) {
     sp.set("years", p.years.length > 0 ? p.years.map((y) => y ?? "unknown").join(",") : "all");
   }
-  sp.set("program", p.program ?? "all");
+  if (p.types !== null) sp.set("types", p.types.join(","));
   sp.set("tail", String(p.tail));
   sp.set("pubs", p.pubs);
   if (p.view !== "summary") sp.set("view", p.view);

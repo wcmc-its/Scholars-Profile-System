@@ -4,6 +4,15 @@
  * we are. Roster / Jenzabar / ED pairs are facts; co-author pairs
  * (`mentee_suggestion`, #2634) are inferences and read as such. PURE — no
  * `@/lib/db` — the report's table is a client island and labels from here.
+ *
+ * Two layers: the per-pair `MentorshipType` (what a pair IS, labelled by
+ * `mentorshipLabel`) and the seven-key `MentorshipTypeKey` vocabulary the
+ * page's "Type of mentorship" filter speaks (`mentorshipTypeKey` folds a
+ * pair into it). The filter is SERVER-side: the loader reads only the
+ * sources a selected key needs, so an AOC-office holder (scope `md`) sees
+ * AOC-defined pairs and nothing inferred — the in-memory rail facet it
+ * replaces let a learner through on one roster pair and then listed every
+ * co-author pair beside it.
  */
 import { KIND_LABEL, type MenteeKind } from "@/lib/mentee-suggestions/kind";
 
@@ -43,8 +52,97 @@ export function mentorshipLabel(t: MentorshipType): string {
   return `${program} · ${SOURCE_LABEL[t.source]}${tier}`;
 }
 
-/** The rail's starting selection: sourced pairs checked, co-author
- *  inferences unchecked until someone opts in. */
-export function mentorshipDefaultSelected(t: MentorshipType): boolean {
-  return t.source !== "coauthor";
+/** The filter's vocabulary, in display order: the three roster buckets,
+ *  the two other confirmed sources, then the two co-author inference tiers. */
+export const MENTORSHIP_TYPE_KEYS = [
+  "aoc",
+  "mdphd",
+  "ecr",
+  "thesis",
+  "postdoc",
+  "likely",
+  "possible",
+] as const;
+export type MentorshipTypeKey = (typeof MENTORSHIP_TYPE_KEYS)[number];
+
+export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
+  aoc: "AOC",
+  mdphd: "MD-PhD (program office)",
+  ecr: "ECR",
+  thesis: "PhD / MD-PhD thesis advisor",
+  postdoc: "Postdoc supervisor",
+  likely: "Likely mentee (from co-authorship)",
+  possible: "Possible mentee (from co-authorship)",
+};
+
+/** `report_access` scope key (`MENTORED_PUBS_SCOPES`, `lib/edit/report-access.ts`)
+ *  → the type its `aoc_mentee` rows fall under. The three keys are repeated
+ *  here rather than imported because report-access reads `@/lib/db`. An
+ *  `aoc_mentee` bucket outside them (`bucketProgramType` can also yield
+ *  `phd` / `postdoc`, though the roster carries neither) maps to nothing,
+ *  so such a row can never be selected — the miss is explicit, not a
+ *  typing lie. */
+export const ROSTER_TYPE_BY_SCOPE: Partial<Record<string, MentorshipTypeKey>> = {
+  md: "aoc",
+  mdphd: "mdphd",
+  ecr: "ecr",
+};
+
+/** The keys a `"*"` holder starts with — every sourced type; co-author
+ *  inferences are opt-in for everyone. */
+const CONFIRMED_TYPE_KEYS: ReadonlyArray<MentorshipTypeKey> = [
+  "aoc",
+  "mdphd",
+  "ecr",
+  "thesis",
+  "postdoc",
+];
+
+/** Which filter key a pair falls under; null for a roster bucket no scope
+ *  maps to (such a pair is never selectable). */
+export function mentorshipTypeKey(t: MentorshipType): MentorshipTypeKey | null {
+  switch (t.source) {
+    case "roster":
+      return ROSTER_TYPE_BY_SCOPE[t.program] ?? null;
+    case "jenzabar":
+      return "thesis";
+    case "ed":
+      return "postdoc";
+    case "coauthor":
+      return t.tier === "presumptive" ? "likely" : "possible";
+  }
+}
+
+/** The keys a scope set may select: a roster key only when its scope is
+ *  held (or `"*"`); the four non-roster keys always. */
+export function allowedMentorshipTypes(scopes: ReadonlySet<string>): MentorshipTypeKey[] {
+  return MENTORSHIP_TYPE_KEYS.filter((k) => {
+    const scope = Object.keys(ROSTER_TYPE_BY_SCOPE).find((s) => ROSTER_TYPE_BY_SCOPE[s] === k);
+    return scope === undefined || scopes.has("*") || scopes.has(scope);
+  });
+}
+
+/** The page's / route's starting selection: `"*"` → every confirmed key;
+ *  otherwise the roster key of each held scope (an `md` holder → `["aoc"]`).
+ *  Co-author keys are NEVER in a default. */
+export function defaultMentorshipTypes(scopes: ReadonlySet<string>): MentorshipTypeKey[] {
+  const held = new Set(
+    scopes.has("*")
+      ? CONFIRMED_TYPE_KEYS
+      : [...scopes].flatMap((s) => ROSTER_TYPE_BY_SCOPE[s] ?? []),
+  );
+  return MENTORSHIP_TYPE_KEYS.filter((k) => held.has(k));
+}
+
+/** What the page and the download route both apply to a request: not
+ *  given → the default; given → only the allowed keys; nothing left → the
+ *  default (the same fallback shape the graduation years use — a disallowed
+ *  roster key is dropped silently, never a 403, never a wider set). */
+export function resolveMentorshipTypes(
+  requested: ReadonlyArray<MentorshipTypeKey> | null,
+  scopes: ReadonlySet<string>,
+): MentorshipTypeKey[] {
+  const allowed = new Set(allowedMentorshipTypes(scopes));
+  const kept = (requested ?? []).filter((k) => allowed.has(k));
+  return kept.length > 0 ? kept : defaultMentorshipTypes(scopes);
 }

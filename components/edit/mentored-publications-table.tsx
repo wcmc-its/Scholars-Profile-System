@@ -10,12 +10,7 @@ import type {
   MentoredPubsSummaryRow,
   MentorRef,
 } from "@/lib/edit/mentored-publications-report";
-import {
-  mentorshipDefaultSelected,
-  mentorshipKey,
-  mentorshipLabel,
-  type MentorshipType,
-} from "@/lib/edit/mentorship-type";
+import { mentorshipKey, mentorshipLabel, type MentorshipType } from "@/lib/edit/mentorship-type";
 
 /**
  * `/edit/reports/7` — the Learners / Publications tables as a client island:
@@ -25,15 +20,16 @@ import {
  * fetch, no URL state); the rail is `RosterFacet`, each facet counting the
  * rows that pass every OTHER facet (the cross-facet convention it documents).
  * A facet with no selection passes every row. The .xlsx download is
- * server-filtered only (program / years / set / tail) — never by the rail.
+ * server-filtered only (types / years / set / tail) — never by the rail.
  *
- * "Type of mentorship" (`lib/edit/mentorship-type.ts`) is the one facet that
- * starts with a selection: roster / Jenzabar / ED pairs checked, co-author
- * inferences unchecked; clearing it passes every row like any other facet,
- * so it is never a dead end. Sortable headers are a `<button>` in the `<th>`
- * (`aria-sort` on the active one); clicking the active header flips the
- * direction; nulls sort last either way. Rows render capped at `ROW_CAP`
- * behind "Show all N".
+ * "Type of mentorship" is NOT a rail facet: it is the page's server-side
+ * `types=` filter (`lib/edit/mentorship-type.ts`), because a rail facet
+ * filters learner ROWS — a learner passing on one roster pair still listed
+ * every co-author pair beside it and counted their papers. The type still
+ * shows as a Learners column and under each mentor. Sortable headers are a
+ * `<button>` in the `<th>` (`aria-sort` on the active one); clicking the
+ * active header flips the direction; nulls sort last either way. Rows
+ * render capped at `ROW_CAP` behind "Show all N".
  *
  * The Learners | Publications tabs live here too: both views ride on the same
  * loaded report, so a tab click swaps the view in state and only rewrites the
@@ -61,9 +57,6 @@ type Facet<Row> = {
   label?: (value: string) => string;
   /** Option order; default count desc, then label. */
   compare?: (a: FacetOption, b: FacetOption) => number;
-  /** A row with NO value passes any selection — "all" mode's solo pubs have
-   *  no mentor and so no type, and must not vanish behind the default rail. */
-  emptyPasses?: boolean;
   collapseAfter?: number;
   searchable?: boolean;
 };
@@ -71,10 +64,7 @@ type Selection = Record<string, ReadonlySet<string>>;
 const NONE: ReadonlySet<string> = new Set();
 
 function passes<Row>(row: Row, f: Facet<Row>, sel: ReadonlySet<string>): boolean {
-  if (sel.size === 0) return true;
-  const values = f.values(row);
-  if (values.length === 0) return !!f.emptyPasses;
-  return values.some((v) => sel.has(v));
+  return sel.size === 0 || f.values(row).some((v) => sel.has(v));
 }
 
 /** Every value of `facet` across ALL rows (so the option list is stable),
@@ -95,8 +85,8 @@ function facetOptions<Row>(
     .sort(facet.compare ?? ((a, b) => b.count - a.count || a.label.localeCompare(b.label)));
 }
 
-function useFacetRail<Row>(rows: readonly Row[], facets: Facet<Row>[], initial: Selection) {
-  const [selected, setSelected] = React.useState<Selection>(initial);
+function useFacetRail<Row>(rows: readonly Row[], facets: Facet<Row>[]) {
+  const [selected, setSelected] = React.useState<Selection>({});
   const toggle = (id: string) => (value: string) =>
     setSelected((prev) => {
       const next = new Set(prev[id] ?? NONE);
@@ -120,31 +110,6 @@ function useFacetRail<Row>(rows: readonly Row[], facets: Facet<Row>[], initial: 
     />
   ));
   return { filtered, rail };
-}
-
-/** "Type of mentorship": sourced pairs first, then co-author, each group by
- *  count desc; the initial selection is every sourced type. */
-function typeFacet<Row>(
-  rows: readonly Row[],
-  types: (row: Row) => MentorshipType[],
-): { facet: Facet<Row>; initial: ReadonlySet<string> } {
-  const byKey = new Map<string, MentorshipType>();
-  for (const r of rows) for (const t of types(r)) byKey.set(mentorshipKey(t), t);
-  const coauthor = (o: FacetOption) => (byKey.get(o.value)?.source === "coauthor" ? 1 : 0);
-  return {
-    facet: {
-      id: "type",
-      title: "Type of mentorship",
-      values: (r) => types(r).map(mentorshipKey),
-      label: (k) => {
-        const t = byKey.get(k);
-        return t ? mentorshipLabel(t) : k;
-      },
-      compare: (a, b) => coauthor(a) - coauthor(b) || b.count - a.count || a.label.localeCompare(b.label),
-      emptyPasses: true,
-    },
-    initial: new Set([...byKey].filter(([, t]) => mentorshipDefaultSelected(t)).map(([k]) => k)),
-  };
 }
 
 const fixedOrder = (order: readonly string[]) => (a: FacetOption, b: FacetOption) =>
@@ -312,10 +277,8 @@ const PUB_COLS: Record<string, SortCol<MentoredPubsPublicationRow>> = {
 };
 
 function PublicationsView({ rows, allMode }: { rows: MentoredPubsPublicationRow[]; allMode: boolean }) {
-  const { facets, initial } = React.useMemo(() => {
-    const type = typeFacet(rows, (r) => r.mentors.flatMap((m) => m.mentorships));
-    const facets: Facet<MentoredPubsPublicationRow>[] = [
-      type.facet,
+  const facets = React.useMemo(
+    (): Facet<MentoredPubsPublicationRow>[] => [
       {
         id: "year",
         title: "Year",
@@ -339,10 +302,10 @@ function PublicationsView({ rows, allMode }: { rows: MentoredPubsPublicationRow[
         compare: fixedOrder(["yes", "no", "unknown"]),
       },
       { id: "mentor", title: "Mentor", values: (r) => r.mentors.map((m) => m.name), collapseAfter: 8, searchable: true },
-    ];
-    return { facets, initial: { type: type.initial } };
-  }, [rows]);
-  const { filtered, rail } = useFacetRail(rows, facets, initial);
+    ],
+    [],
+  );
+  const { filtered, rail } = useFacetRail(rows, facets);
   const { sorted, sort, onSort } = useSort(filtered, PUB_COLS, "date");
   const { shown, button } = useRowCap(sorted);
   const th = { sort, onSort };
@@ -483,10 +446,8 @@ function LearnersView({
   allMode: boolean;
   highImpactThreshold: number;
 }) {
-  const { facets, initial } = React.useMemo(() => {
-    const type = typeFacet(rows, (r) => r.mentors.map((m) => m.mentorship));
-    const facets: Facet<MentoredPubsSummaryRow>[] = [
-      type.facet,
+  const facets = React.useMemo(
+    (): Facet<MentoredPubsSummaryRow>[] => [
       {
         id: "window",
         title: "In program window",
@@ -495,10 +456,10 @@ function LearnersView({
         compare: fixedOrder(["known", "unknown"]),
       },
       { id: "mentor", title: "Mentor", values: (r) => r.mentors.map((m) => m.name), collapseAfter: 8, searchable: true },
-    ];
-    return { facets, initial: { type: type.initial } };
-  }, [rows]);
-  const { filtered, rail } = useFacetRail(rows, facets, initial);
+    ],
+    [],
+  );
+  const { filtered, rail } = useFacetRail(rows, facets);
   const { sorted, sort, onSort } = useSort(filtered, LEARNER_COLS, "gradYear");
   const { shown, button } = useRowCap(sorted);
   const th = { sort, onSort, className: "text-right" };
