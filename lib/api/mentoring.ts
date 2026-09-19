@@ -843,7 +843,7 @@ export async function getMenteesForMentor(
   // path — getCoPublications, which has it, suppresses exactly).
   const previewPmids = [
     ...new Set(
-      [...copubPreviewByCwid.values()].flat().map((p) => String(p.pmid)),
+      [...copubPreviewByCwid.values()].flat().map((p) => p.id ?? String(p.pmid)),
     ),
   ];
   if (previewPmids.length > 0) {
@@ -851,7 +851,7 @@ export async function getMenteesForMentor(
     const darkPmids = await resolveDarkPmids(previewPmids, suppressions, prisma);
     if (darkPmids.size > 0) {
       for (const [menteeCwid, preview] of copubPreviewByCwid) {
-        const kept = preview.filter((p) => !darkPmids.has(String(p.pmid)));
+        const kept = preview.filter((p) => !darkPmids.has(p.id ?? String(p.pmid)));
         const dropped = preview.length - kept.length;
         if (dropped === 0) continue;
         copubPreviewByCwid.set(menteeCwid, kept);

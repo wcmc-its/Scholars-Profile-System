@@ -6,6 +6,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { Badge } from "@/components/ui/badge";
+import { citationIdentifier } from "@/lib/citation";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
@@ -544,23 +545,31 @@ function CoPubInlinePanel({
       className="border-t border-border px-3 py-2.5"
     >
       <ul className="space-y-2">
-        {mentee.copublicationPreview.map((p) => (
-          <li key={p.pmid} className="text-xs leading-snug">
-            <a
-              href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
-              target="_blank"
-              rel="noopener noreferrer"
-              {...pubTitleProps(sanitizePubTitle(p.title), "font-medium hover:underline")}
-            />
-            {(p.journal || p.year) && (
-              <div className="text-muted-foreground mt-0.5">
-                <PubJournal as="span" value={p.journal} />
-                {p.journal && p.year ? " · " : ""}
-                {p.year}
-              </div>
-            )}
-          </li>
-        ))}
+        {mentee.copublicationPreview.map((p) => {
+          // A Scopus-only row (id `SCOPUS:…`) has no PubMed page to link.
+          const href = citationIdentifier(p.id ?? p.pmid).href;
+          return (
+            <li key={p.id ?? p.pmid} className="text-xs leading-snug">
+              {href ? (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  {...pubTitleProps(sanitizePubTitle(p.title), "font-medium hover:underline")}
+                />
+              ) : (
+                <span {...pubTitleProps(sanitizePubTitle(p.title), "font-medium")} />
+              )}
+              {(p.journal || p.year) && (
+                <div className="text-muted-foreground mt-0.5">
+                  <PubJournal as="span" value={p.journal} />
+                  {p.journal && p.year ? " · " : ""}
+                  {p.year}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
       <div className="mt-3">
         <a

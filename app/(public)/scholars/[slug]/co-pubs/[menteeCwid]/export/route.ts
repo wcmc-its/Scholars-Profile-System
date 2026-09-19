@@ -108,7 +108,7 @@ const CSV_HEADERS = ["pmid", "year", "journal", "title", "authors"] as const;
 
 function renderCsv(pubs: CoPublicationFull[]): string {
   const rows = pubs.map((p) => [
-    String(p.pmid),
+    p.id ?? String(p.pmid),
     p.year,
     p.journal ?? "",
     // PubMed titles carry inline HTML (`<i>`, `<sup>`); strip for CSV so
@@ -217,7 +217,7 @@ function buildCitationParagraph(
   // `PMID:` and link as `pubmed.ncbi.nlm.nih.gov/-3/` — dead in the reader's
   // Word document. The shared helper labels such a row "Source: External" and
   // returns no href.
-  const id = citationIdentifier(pub.pmid);
+  const id = citationIdentifier(pub.id ?? pub.pmid);
   const idRuns: (TextRun | ExternalHyperlink)[] = [
     new TextRun({ text: `${id.label}: ` }),
     id.href

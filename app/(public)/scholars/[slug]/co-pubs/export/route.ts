@@ -124,7 +124,7 @@ function renderCsv(groups: MenteeCoPubGroup[]): string {
   for (const g of groups) {
     for (const e of g.entries) {
       rows.push([
-        String(e.publication.pmid),
+        e.publication.id ?? String(e.publication.pmid),
         e.publication.year,
         e.publication.journal ?? "",
         // PubMed titles carry inline HTML (`<i>`, `<sup>`); strip for CSV
@@ -280,7 +280,7 @@ function buildCitationParagraph(
   // `PMID:` and link as `pubmed.ncbi.nlm.nih.gov/-3/` — dead in the reader's
   // Word document. The shared helper labels such a row "Source: External" and
   // returns no href.
-  const id = citationIdentifier(pub.pmid);
+  const id = citationIdentifier(pub.id ?? pub.pmid);
   const idRuns: (TextRun | ExternalHyperlink)[] = [
     new TextRun({ text: `${id.label}: ` }),
     id.href
