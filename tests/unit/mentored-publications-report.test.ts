@@ -1303,6 +1303,35 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
     expect(hoisted.mockAuthorFindMany).not.toHaveBeenCalled();
   });
 
+  it("ED wins over faculty for the same pair (the merge order is roster, Jenzabar, ED, faculty, co-author)", async () => {
+    hoisted.mockPostdocFindMany.mockResolvedValue([
+      {
+        mentorCwid: "men0001",
+        menteeCwid: "pd0001",
+        menteeFirstName: "Pat",
+        menteeLastName: "Postdoc",
+        startDate: new Date("2022-07-01"),
+        endDate: null,
+      },
+    ]);
+    hoisted.mockOverrideFindMany.mockResolvedValue([
+      override("men0001", [{ name: "Pat Postdoc", cwid: "pd0001" }]),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "pd0001", 7, 2023)]);
+    const report = await loadMentoredPublicationsReport({
+      scopes: ["*"],
+      types: ["postdoc", "faculty"],
+    });
+    expect(report.summary.map((s) => [s.cwid, s.program])).toEqual([["pd0001", "Postdoc"]]);
+    expect(report.summary[0].mentors[0].mentorship).toEqual({
+      program: "postdoc",
+      source: "ed",
+      tier: "confirmed",
+    });
+    expect(report.publications.map((p) => p.pmid)).toEqual(["7"]);
+    expect(hoisted.mockAuthorFindMany).not.toHaveBeenCalled();
+  });
+
   it("faculty wins over a co-author suggestion for the same pair when both are selected: type faculty, pubs = the suggestion's evidence, nothing inferred leaks into Program", async () => {
     hoisted.mockOverrideFindMany.mockResolvedValue([
       override("men0001", [{ name: "Vic Volunteer", cwid: "sug0001", programType: "POSTDOC" }]),
