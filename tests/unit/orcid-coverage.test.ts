@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOrcidCoverage,
   neither,
+  nihNoEra,
   nihNoOrcid,
   orcidCoverageCsv,
   orcidCoverageQuery,
@@ -23,20 +24,27 @@ const s = (cwid: string, roleCategory: string | null, primaryDepartment: string 
   primaryDepartment,
   orcid: orcid ? "0000-0002-1825-0097" : null,
 });
+// Insertion order is deliberately ANTI-sorted (null role first, small departments
+// before big ones, Dept B before Dept A) so every sort and tiebreak in the fold is
+// load-bearing — a dropped sort must fail, not ride on Map insertion order.
 const SCHOLARS: ScholarRow[] = [
-  s("f1", "full_time_faculty", "Dept A", true),
-  s("f2", "full_time_faculty", "Dept A"),
-  s("f3", "full_time_faculty", "Dept B"),
-  s("f4", "full_time_faculty", null),
-  s("p1", "postdoc", "Dept A", true),
   s("u1", null, "Dept B"),
+  s("p1", "postdoc", "Dept B", true),
+  s("p2", "postdoc", "Dept A"),
+  s("f4", "full_time_faculty", null),
+  s("f3", "full_time_faculty", "Dept B"),
+  s("f1", "full_time_faculty", "Dept A", true),
+  s("f2", "full_time_faculty", "Dept A", true),
+  s("f5", "full_time_faculty", "Dept C"),
+  s("f6", "full_time_faculty", "Dept C"),
 ];
-// f2 current NIH, f3 expired NIH, f4 current NIH, u1 expired NIH.
+// NIH: u1 + f3 expired, f4 ends today, f2 + f5 current. f2 is the one NIH-funded person WITH an ORCID.
 const NIH = [
-  { cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z") },
+  { cwid: "u1", latestEnd: new Date("2021-01-01T00:00:00Z") },
   { cwid: "f3", latestEnd: new Date("2020-01-01T00:00:00Z") },
   { cwid: "f4", latestEnd: new Date("2026-09-18T00:00:00Z") },
-  { cwid: "u1", latestEnd: new Date("2021-01-01T00:00:00Z") },
+  { cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z") },
+  { cwid: "f5", latestEnd: new Date("2028-01-01T00:00:00Z") },
 ];
 const ERA = ["f1", "f3"];
 const ALL = parseOrcidCoverageParams({ role: "all" });
@@ -44,50 +52,56 @@ const ALL = parseOrcidCoverageParams({ role: "all" });
 describe("buildOrcidCoverage", () => {
   it("tiles are the unfiltered population regardless of filters", () => {
     const r = buildOrcidCoverage(SCHOLARS, NIH, ERA, parseOrcidCoverageParams({ nih: "none", dept: "Dept B" }), TODAY);
-    expect(r.tiles.overall).toEqual({ people: 6, orcid: 2, era: 2, both: 1, nihPeople: 4, nihOrcid: 0 });
-    expect(r.tiles.fullTime).toEqual({ people: 4, orcid: 1, era: 2, both: 1, nihPeople: 3, nihOrcid: 0 });
-    expect(r.tiles.nihFullTime).toEqual({ people: 3, orcid: 0, era: 1, both: 0, nihPeople: 3, nihOrcid: 0 });
-    expect(neither(r.tiles.overall)).toBe(3);
+    expect(r.tiles.overall).toEqual({ people: 9, orcid: 3, era: 2, both: 1, nihPeople: 5, nihOrcid: 1, nihEra: 1 });
+    expect(r.tiles.fullTime).toEqual({ people: 6, orcid: 2, era: 2, both: 1, nihPeople: 4, nihOrcid: 1, nihEra: 1 });
+    expect(r.tiles.nihFullTime).toEqual({ people: 4, orcid: 1, era: 1, both: 0, nihPeople: 4, nihOrcid: 1, nihEra: 1 });
+    expect(neither(r.tiles.overall)).toBe(5);
+    expect(nihNoOrcid(r.tiles.nihFullTime)).toBe(3);
+    expect(nihNoEra(r.tiles.nihFullTime)).toBe(3);
   });
 
   it("groups by role_category, null → Unclassified, people desc; ignores `role`", () => {
     const r = buildOrcidCoverage(SCHOLARS, NIH, ERA, parseOrcidCoverageParams({}), TODAY);
     expect(r.byRole.map((x) => [x.key, x.label, x.people])).toEqual([
-      ["full_time_faculty", "Full-time faculty", 4],
-      ["postdoc", "Postdoc", 1],
+      ["full_time_faculty", "Full-time faculty", 6],
+      ["postdoc", "Postdoc", 2],
       [null, "Unclassified", 1],
     ]);
   });
 
-  it("department table defaults to full-time faculty, sorted by NIH-funded-without-ORCID then people", () => {
+  it("department table defaults to full-time faculty, sorted by NIH-funded-without-ORCID, then people, then label", () => {
     const r = buildOrcidCoverage(SCHOLARS, NIH, ERA, parseOrcidCoverageParams({}), TODAY);
     expect(r.params.role).toBe("full_time_faculty");
-    // Dept A: f1 (orcid) + f2 (nih, no orcid) → 1; Dept B: f3 → 1; null: f4 → 1. Tie → people desc.
     expect(r.byDept.map((x) => [x.label, x.people, nihNoOrcid(x)])).toEqual([
-      ["Dept A", 2, 1],
+      ["Dept C", 2, 1],
       ["Dept B", 1, 1],
       ["No department", 1, 1],
+      ["Dept A", 2, 0],
     ]);
     const all = buildOrcidCoverage(SCHOLARS, NIH, ERA, ALL, TODAY);
-    expect(all.byDept.find((x) => x.label === "Dept B")?.people).toBe(2);
+    expect(all.byDept.find((x) => x.label === "Dept B")?.people).toBe(3);
   });
 
   it("nih=ever / current / none partition on the grant end date", () => {
     const of = (nih: "ever" | "current" | "none") =>
       buildOrcidCoverage(SCHOLARS, NIH, ERA, parseOrcidCoverageParams({ role: "all", nih }), TODAY)
         .byRole.reduce((n, x) => n + x.people, 0);
-    expect(of("ever")).toBe(4);
-    expect(of("current")).toBe(2); // f2 (future) + f4 (ends today) — f3/u1 expired
-    expect(of("none")).toBe(2);
+    expect(of("ever")).toBe(5);
+    expect(of("current")).toBe(3); // f4 (ends today) + f2 + f5 — u1/f3 expired
+    expect(of("none")).toBe(4);
   });
 
   it("dept filter narrows the person-type table only; role filter narrows the department table only", () => {
     const r = buildOrcidCoverage(SCHOLARS, NIH, ERA, parseOrcidCoverageParams({ role: "postdoc", dept: "Dept B" }), TODAY);
     expect(r.byRole.map((x) => [x.key, x.people])).toEqual([
       ["full_time_faculty", 1],
+      ["postdoc", 1],
       [null, 1],
     ]);
-    expect(r.byDept.map((x) => [x.label, x.people])).toEqual([["Dept A", 1]]);
+    expect(r.byDept.map((x) => [x.label, x.people])).toEqual([
+      ["Dept A", 1],
+      ["Dept B", 1],
+    ]);
   });
 
   it("select choices come from the data: roles by headcount (no null), departments A–Z", () => {
@@ -96,7 +110,7 @@ describe("buildOrcidCoverage", () => {
       ["full_time_faculty", "Full-time faculty"],
       ["postdoc", "Postdoc"],
     ]);
-    expect(r.depts).toEqual(["Dept A", "Dept B"]);
+    expect(r.depts).toEqual(["Dept A", "Dept B", "Dept C"]);
   });
 });
 
@@ -135,10 +149,11 @@ describe("orcidCoverageCsv", () => {
     const csv = orcidCoverageCsv(r.byDept);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "Department,People,ORCID iD on file,ORCID %,eRA profile on file,Both,Neither,NIH-funded,NIH-funded with ORCID,NIH-funded without ORCID",
+      "Department,People,ORCID iD on file,ORCID %,eRA profile on file,Both,Neither,NIH-funded,NIH-funded with ORCID,NIH-funded without ORCID,NIH-funded without eRA profile",
     );
-    expect(lines).toContain("Dept A,3,2,66.7,1,1,1,1,0,1");
+    expect(lines).toContain("Dept A,3,2,66.7,1,1,1,1,1,0,1");
+    expect(lines).toContain("Dept B,3,1,33.3,1,0,1,2,0,2,1");
     expect(lines).toHaveLength(1 + r.byDept.length);
-    expect(csv).not.toMatch(/f1|0000-0002/);
+    expect(csv).not.toMatch(/f1|p1|0000-0002/);
   });
 });

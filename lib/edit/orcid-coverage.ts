@@ -96,6 +96,9 @@ export type CoverageCounts = {
   both: number;
   nihPeople: number;
   nihOrcid: number;
+  /** NIH-funded AND a preferred eRA profile. The gap (nihPeople - nihEra) is as
+   *  much a resolver miss (#2651) as a missing Commons account. */
+  nihEra: number;
 };
 export type CoverageRow = CoverageCounts & { key: string | null; label: string };
 
@@ -114,6 +117,7 @@ export type OrcidCoverage = {
 
 export const neither = (c: CoverageCounts) => c.people - c.orcid - c.era + c.both;
 export const nihNoOrcid = (c: CoverageCounts) => c.nihPeople - c.nihOrcid;
+export const nihNoEra = (c: CoverageCounts) => c.nihPeople - c.nihEra;
 export const pct = (n: number, d: number) => (d === 0 ? "—" : `${((100 * n) / d).toFixed(1)}%`);
 
 const roleLabel = (key: string | null) => formatRoleCategory(key) ?? "Unclassified";
@@ -142,7 +146,7 @@ export function buildOrcidCoverage(
           : !isNih(s);
 
   const count = (rows: ScholarRow[]): CoverageCounts => {
-    const c = { people: 0, orcid: 0, era: 0, both: 0, nihPeople: 0, nihOrcid: 0 };
+    const c = { people: 0, orcid: 0, era: 0, both: 0, nihPeople: 0, nihOrcid: 0, nihEra: 0 };
     for (const s of rows) {
       const o = s.orcid !== null;
       const e = era.has(s.cwid);
@@ -153,6 +157,7 @@ export function buildOrcidCoverage(
       if (isNih(s)) {
         c.nihPeople++;
         if (o) c.nihOrcid++;
+        if (e) c.nihEra++;
       }
     }
     return c;
@@ -175,15 +180,15 @@ export function buildOrcidCoverage(
     nihFiltered.filter((s) => params.dept === null || s.primaryDepartment === params.dept),
     (s) => s.roleCategory,
     roleLabel,
-  ).sort((a, b) => b.people - a.people);
+  ).sort((a, b) => b.people - a.people || a.label.localeCompare(b.label));
   const byDept = group(
     nihFiltered.filter((s) => params.role === null || s.roleCategory === params.role),
     (s) => s.primaryDepartment,
     (k) => k ?? "No department",
-  ).sort((a, b) => nihNoOrcid(b) - nihNoOrcid(a) || b.people - a.people);
+  ).sort((a, b) => nihNoOrcid(b) - nihNoOrcid(a) || b.people - a.people || a.label.localeCompare(b.label));
 
   const roles = group(scholars, (s) => s.roleCategory, roleLabel)
-    .sort((a, b) => b.people - a.people)
+    .sort((a, b) => b.people - a.people || a.label.localeCompare(b.label))
     .filter((r): r is CoverageRow & { key: string } => r.key !== null)
     .map((r) => [r.key, r.label] as [string, string]);
   const depts = [...new Set(scholars.map((s) => s.primaryDepartment))]
@@ -238,6 +243,7 @@ export const CSV_HEADERS = [
   "NIH-funded",
   "NIH-funded with ORCID",
   "NIH-funded without ORCID",
+  "NIH-funded without eRA profile",
 ] as const;
 
 /** The department table as CSV — aggregates only, no per-person rows. */
@@ -255,6 +261,7 @@ export function orcidCoverageCsv(rows: CoverageRow[]): string {
       r.nihPeople,
       r.nihOrcid,
       nihNoOrcid(r),
+      nihNoEra(r),
     ]),
   );
 }

@@ -33,6 +33,7 @@ The matrix is `tests/unit/console-tab-matrix.fixture.ts`, not this table. That f
 | Data quality | ✓ (flag) | ✓ | ✗ | ✓ (`manageableUnitCount > 0`) | ✓ same | ✗ |
 | Data sharing | ✓ (flag) | ✓ | ✗ | ✗ (no unit-scoped variant exists — no decision doc cites this yet, unlike Data Quality) | ✗ | ✗ |
 | Usage | ✓ | ✗ (`canViewUsage` has no steward carve-out) | ✗ | ✓ any `UnitAdmin` grant, either role | ✓ same | ✗ |
+| ORCID coverage | ✓ | ✗ | ✗ | ✓ same predicate as Usage (`viewerCanViewUsage`) | ✓ same | ✗ |
 | Funding matcher / Matcha | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ (Matcha also flag-gated) |
 
 Every cell above is a single predicate in `TAB_PREDICATES`; there is no second merge step, no per-page override, and no case where two different code paths compute the same tab's visibility. That collapse is the actual content of "kill the contract" (Part B §2) — everything else follows from it.

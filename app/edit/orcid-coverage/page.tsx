@@ -31,11 +31,14 @@ import {
   NIH_FILTERS,
   loadOrcidCoverage,
   neither,
+  nihNoEra,
   nihNoOrcid,
   orcidCoverageQuery,
   parseOrcidCoverageParams,
   pct,
 } from "@/lib/edit/orcid-coverage";
+// `ORCID_MANAGE_URL` is per-person (`{cwid}`); this page is aggregate-only, so
+// it links the ReCiter front door and names the Manage profile page in prose.
 import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { canViewUsage } from "@/lib/edit/usage-access";
@@ -65,8 +68,8 @@ function Tile({ label, c }: { label: string; c: CoverageCounts }) {
   );
 }
 
-/** Both tables share one column set; the department table adds the outreach
- *  column ("NIH-funded without ORCID") the page sorts it by. */
+/** Both tables share one column set. "NIH-funded, no ORCID" is the outreach
+ *  number the department table sorts by. */
 function CoverageTable({
   caption,
   firstHeader,
@@ -94,12 +97,13 @@ function CoverageTable({
             <th className={thNum}>NIH-funded</th>
             <th className={thNum}>NIH-funded, ORCID</th>
             <th className={thNum}>NIH-funded, no ORCID</th>
+            <th className={thNum}>NIH-funded, no eRA</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td className={`${tdClass} text-muted-foreground`} colSpan={10}>
+              <td className={`${tdClass} text-muted-foreground`} colSpan={11}>
                 No one matches these filters.
               </td>
             </tr>
@@ -118,6 +122,7 @@ function CoverageTable({
                   {r.nihOrcid.toLocaleString()} ({pct(r.nihOrcid, r.nihPeople)})
                 </td>
                 <td className={`${tdNum} font-semibold`}>{nihNoOrcid(r).toLocaleString()}</td>
+                <td className={tdNum}>{nihNoEra(r).toLocaleString()}</td>
               </tr>
             ))
           )}
@@ -195,15 +200,16 @@ function Body({ data }: { data: OrcidCoverage }) {
           ReCiter
         </a>
         . &ldquo;eRA profile&rdquo; is a RePORTER-resolved NIH profile_id: a proxy for an eRA
-        Commons account, not proof — someone funded but without one is as likely a gap in our
-        resolver as in their account. NIH requires an ORCID iD linked to eRA Commons for every
+        Commons account, not proof — &ldquo;NIH-funded, no eRA&rdquo; is as likely a gap in our
+        resolver as in their account. &ldquo;NIH-funded&rdquo; = any NIH award on file for the
+        person, whatever its dates. NIH requires an ORCID iD linked to eRA Commons for every
         SciENcv biosketch.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-3" data-testid="orcid-coverage-tiles">
         <Tile label="All active people" c={tiles.overall} />
         <Tile label="Full-time faculty" c={tiles.fullTime} />
-        <Tile label="NIH-funded full-time faculty" c={tiles.nihFullTime} />
+        <Tile label="NIH-funded (any award) full-time faculty" c={tiles.nihFullTime} />
       </div>
 
       <Filters data={data} />
@@ -211,7 +217,7 @@ function Body({ data }: { data: OrcidCoverage }) {
       <section className="mt-8">
         <h2 className="text-base font-semibold">By person type</h2>
         <CoverageTable
-          caption={`Every person type${params.dept ? ` in ${params.dept}` : ""}${nihLabel}. "NIH-funded" = any NIH award on file for the person.`}
+          caption={`Every person type${params.dept ? ` in ${params.dept}` : ""}${nihLabel}.`}
           firstHeader="Person type"
           rows={data.byRole}
           testId="orcid-coverage-by-role"
@@ -230,7 +236,11 @@ function Body({ data }: { data: OrcidCoverage }) {
           </Link>
         </div>
         <CoverageTable
-          caption={`${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}${nihLabel}, sorted by NIH-funded people without an ORCID iD — the outreach list.`}
+          caption={`${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}${nihLabel}, ${
+            params.nih === "none"
+              ? "sorted by people."
+              : "sorted by NIH-funded people without an ORCID iD — the outreach list."
+          }`}
           firstHeader="Department"
           rows={data.byDept}
           testId="orcid-coverage-by-dept"

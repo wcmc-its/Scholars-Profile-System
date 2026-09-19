@@ -28,6 +28,7 @@ export const ROLE_DISPLAY: Record<string, string> = {
   DOCTORAL_STUDENT_MDPHD: "MD-PhD student",
   NON_FACULTY_ACADEMIC: "Non-faculty academic",
   NON_ACADEMIC: "Non-academic",
+  AFFILIATE_ALUMNI: "Affiliate alumni",
   full_time_faculty: "Full-time faculty",
   affiliated_faculty: "Affiliated faculty",
   voluntary_faculty: "Voluntary faculty",
@@ -46,6 +47,7 @@ export const ROLE_DISPLAY: Record<string, string> = {
   doctoral_student_mdphd: "MD-PhD student",
   non_faculty_academic: "Non-faculty academic",
   non_academic: "Non-academic",
+  affiliate_alumni: "Affiliate alumni",
 };
 
 export function formatRoleCategory(raw: string | null | undefined): string | null {
