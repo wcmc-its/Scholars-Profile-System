@@ -5,17 +5,24 @@
  * `uid` (= CWID, lowercase). Only scholars carrying a non-null, well-formed
  * ORCID in Identity get their row updated; everyone else is left null.
  *
- * Identity record shape (sample):
+ * Identity record shape (OBSERVED 2026-09-18 via a names-only scan — the ORCID is NESTED
+ * under an `identity` map, not top-level; the earlier top-level sample was assumed and the
+ * scan matched 0 rows for months while grading green, see #2675):
  *   {
  *     uid: "meb7002",
- *     primaryName: { ... },
- *     orcid: "0000-0002-1825-0097" | null,
- *     ...other identity fields we don't read here
+ *     identity: {
+ *       uid: "meb7002",
+ *       primaryName: { ... },
+ *       orcid: "0000-0002-1825-0097" | NULL,   // DynamoDB NULL type when absent
+ *       ...other identity fields we don't read here
+ *     }
  *   }
  *
  * Strategy:
  *   1. Scan the Identity table with a filter that projects only the keys we
- *      need (uid, orcid). Skips records with orcid: null at the server.
+ *      need (uid, identity.orcid). `attribute_type(identity.orcid, S)` keeps only
+ *      string-typed values server-side — a typed NULL never matches, and a
+ *      `<>` against a NULL-typed operand would be a cross-type comparison.
  *   2. Validate each ORCID string against the canonical 19-char form
  *      (16 digits in 4-char groups, with an optional 'X' check digit).
  *   3. For every Scholar whose cwid matches a uid, update the orcid column.
@@ -42,8 +49,24 @@ const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 
 type IdentityRow = {
   uid?: string;
-  orcid?: string | null;
+  identity?: { orcid?: string | null } | null;
 };
+
+/** The scan's server-side shape: only rows whose NESTED `identity.orcid` is a string, and
+ *  only the two attributes the ETL reads. `identity` is aliased through
+ *  ExpressionAttributeNames so a reserved-word collision can never bite. */
+export const IDENTITY_ORCID_SCAN = {
+  FilterExpression: "attribute_type(#identity.orcid, :s)",
+  ProjectionExpression: "uid, #identity.orcid",
+  ExpressionAttributeNames: { "#identity": "identity" },
+  ExpressionAttributeValues: { ":s": "S" },
+} as const;
+
+/** The trimmed ORCID string off an Identity item, or "" when absent / not a string. */
+export function orcidFromIdentityItem(row: IdentityRow): string {
+  const v = row.identity?.orcid;
+  return typeof v === "string" ? v.trim() : "";
+}
 
 async function main() {
   const start = Date.now();
@@ -61,11 +84,9 @@ async function main() {
       const resp = await ddb.send(
         new ScanCommand({
           TableName: TABLE,
-          // Server-side filter cuts the scan payload roughly in half — most
-          // identity rows have orcid: null.
-          FilterExpression: "attribute_exists(orcid) AND orcid <> :null",
-          ExpressionAttributeValues: { ":null": null },
-          ProjectionExpression: "uid, orcid",
+          // Server-side filter: only rows carrying a string ORCID (most carry a typed
+          // NULL), and only the two attributes read below.
+          ...IDENTITY_ORCID_SCAN,
           ExclusiveStartKey: lastKey,
         }),
       );
@@ -89,7 +110,7 @@ async function main() {
 
     for (const row of rows) {
       const uid = typeof row.uid === "string" ? row.uid.trim() : "";
-      const orcid = typeof row.orcid === "string" ? row.orcid.trim() : "";
+      const orcid = orcidFromIdentityItem(row);
       if (!uid || !orcid) continue;
       if (!ORCID_PATTERN.test(orcid)) {
         invalidFormat += 1;
@@ -139,4 +160,10 @@ async function main() {
   }
 }
 
-main();
+// Run only when invoked directly (`npm run etl:identity` / the nightly task) — the module is
+// also imported by its unit test for the scan shape + item reader.
+const isDirectInvocation =
+  typeof process !== "undefined" &&
+  process.argv[1] !== undefined &&
+  import.meta.url === `file://${process.argv[1]}`;
+if (isDirectInvocation) main();
