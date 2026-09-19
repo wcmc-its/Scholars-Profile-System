@@ -53,7 +53,7 @@ beforeEach(() => {
         { cwid: "f2", roleCategory: "full_time_faculty", primaryDepartment: "Dept A", orcid: null },
         { cwid: "p1", roleCategory: "postdoc", primaryDepartment: "Dept B", orcid: null },
       ],
-      [{ cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z") }],
+      [{ cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: true }],
       ["f2"],
       params,
       TODAY,

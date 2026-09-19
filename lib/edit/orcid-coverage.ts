@@ -7,11 +7,14 @@
  *  - "ORCID iD on file" = `scholar.orcid` is set. The ONLY source is the WCM
  *    Identity table (#2675/#2676), so a scholar can hold an ORCID the feed
  *    doesn't know about. Never NULLed on absence — Identity may lag ED.
- *  - "eRA profile" = a preferred `person_nih_profile` row: the RePORTER-
- *    resolved NIH person key. A proxy for an eRA Commons account, not proof
- *    (a Commons account with no funded award never reaches RePORTER), and
- *    ~half are name-matched (#2651). The eRA Commons *username* has no source
- *    in SPS at all and is deliberately not a column here.
+ *  - "eRA account" = a preferred `person_nih_profile` row: the RePORTER
+ *    `profile_id`. Inferred, and the inference is one-directional — nobody is
+ *    listed as a PI in RePORTER without an eRA Commons account, but RePORTER
+ *    lists PIs only, so a Co-I / key person on someone else's award has an
+ *    account we can never see. That is why the gap column is "NIH PI, no eRA
+ *    account" (a resolver miss, #2651 — actionable) rather than every
+ *    NIH-funded person. The eRA Commons *username* has no source anywhere
+ *    (Identity, InfoEd, RePORTER all probed 2026-09-18) and is not a column.
  *  - "NIH-funded" = any `grant` row for the cwid with `nih_ic` set (`nihIc` is
  *    populated only for NIH awards); "current" additionally needs an award
  *    whose `end_date` is today or later.
@@ -21,6 +24,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { toCsv } from "@/lib/csv";
+import { PI_ROLES } from "@/lib/funding-roles";
 import { formatRoleCategory } from "@/lib/role-display";
 
 export const NIH_FILTERS = ["all", "ever", "current", "none"] as const;
@@ -84,21 +88,23 @@ export type ScholarRow = {
   primaryDepartment: string | null;
   orcid: string | null;
 };
-/** One row per NIH-funded cwid; `latestEnd` = MAX(grant.end_date) among its NIH awards. */
-export type NihRow = { cwid: string; latestEnd: Date | null };
+/** One row per NIH-funded cwid; `latestEnd` = MAX(grant.end_date) among its NIH
+ *  awards, `pi` = holds a `PI_ROLES` role on at least one of them. */
+export type NihRow = { cwid: string; latestEnd: Date | null; pi: boolean };
 
 export type CoverageCounts = {
   people: number;
   /** ORCID iD on file. */
   orcid: number;
-  /** Preferred eRA profile_id on file. */
+  /** Preferred eRA profile_id on file (= eRA Commons account, inferred). */
   era: number;
   both: number;
   nihPeople: number;
   nihOrcid: number;
-  /** NIH-funded AND a preferred eRA profile. The gap (nihPeople - nihEra) is as
-   *  much a resolver miss (#2651) as a missing Commons account. */
-  nihEra: number;
+  /** NIH-funded as a PI (`PI_ROLES`) — the population RePORTER can resolve. */
+  nihPi: number;
+  /** …of whom with an eRA account. `nihPi - nihPiEra` is the resolver gap. */
+  nihPiEra: number;
 };
 export type CoverageRow = CoverageCounts & { key: string | null; label: string };
 
@@ -117,7 +123,7 @@ export type OrcidCoverage = {
 
 export const neither = (c: CoverageCounts) => c.people - c.orcid - c.era + c.both;
 export const nihNoOrcid = (c: CoverageCounts) => c.nihPeople - c.nihOrcid;
-export const nihNoEra = (c: CoverageCounts) => c.nihPeople - c.nihEra;
+export const piNoEra = (c: CoverageCounts) => c.nihPi - c.nihPiEra;
 export const pct = (n: number, d: number) => (d === 0 ? "—" : `${((100 * n) / d).toFixed(1)}%`);
 
 const roleLabel = (key: string | null) => formatRoleCategory(key) ?? "Unclassified";
@@ -130,6 +136,7 @@ export function buildOrcidCoverage(
   today: Date,
 ): OrcidCoverage {
   const nihEnd = new Map(nih.map((r) => [r.cwid, r.latestEnd]));
+  const nihPi = new Set(nih.filter((r) => r.pi).map((r) => r.cwid));
   const era = new Set(eraCwids);
   const isNih = (s: ScholarRow) => nihEnd.has(s.cwid);
   const isCurrent = (s: ScholarRow) => {
@@ -146,7 +153,7 @@ export function buildOrcidCoverage(
           : !isNih(s);
 
   const count = (rows: ScholarRow[]): CoverageCounts => {
-    const c = { people: 0, orcid: 0, era: 0, both: 0, nihPeople: 0, nihOrcid: 0, nihEra: 0 };
+    const c = { people: 0, orcid: 0, era: 0, both: 0, nihPeople: 0, nihOrcid: 0, nihPi: 0, nihPiEra: 0 };
     for (const s of rows) {
       const o = s.orcid !== null;
       const e = era.has(s.cwid);
@@ -157,7 +164,10 @@ export function buildOrcidCoverage(
       if (isNih(s)) {
         c.nihPeople++;
         if (o) c.nihOrcid++;
-        if (e) c.nihEra++;
+        if (nihPi.has(s.cwid)) {
+          c.nihPi++;
+          if (e) c.nihPiEra++;
+        }
       }
     }
     return c;
@@ -218,14 +228,23 @@ export async function loadOrcidCoverage(
       where: { deletedAt: null, status: "active" },
       select: { cwid: true, roleCategory: true, primaryDepartment: true, orcid: true },
     }),
-    db.grant.groupBy({ by: ["cwid"], where: { nihIc: { not: null } }, _max: { endDate: true } }),
+    db.grant.groupBy({ by: ["cwid", "role"], where: { nihIc: { not: null } }, _max: { endDate: true } }),
     db.personNihProfile.findMany({ where: { isPreferred: true }, select: { cwid: true } }),
   ]);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
+  // (cwid, role) rows → one NihRow per cwid.
+  const byCwid = new Map<string, NihRow>();
+  for (const r of nih) {
+    const cur = byCwid.get(r.cwid) ?? { cwid: r.cwid, latestEnd: null, pi: false };
+    const end = r._max.endDate;
+    if (end && (cur.latestEnd === null || end > cur.latestEnd)) cur.latestEnd = end;
+    if ((PI_ROLES as readonly string[]).includes(r.role)) cur.pi = true;
+    byCwid.set(r.cwid, cur);
+  }
   return buildOrcidCoverage(
     scholars,
-    nih.map((r) => ({ cwid: r.cwid, latestEnd: r._max.endDate })),
+    [...byCwid.values()],
     era.map((r) => r.cwid),
     params,
     today,
@@ -237,13 +256,14 @@ export const CSV_HEADERS = [
   "People",
   "ORCID iD on file",
   "ORCID %",
-  "eRA profile on file",
+  "eRA account (inferred)",
   "Both",
   "Neither",
   "NIH-funded",
   "NIH-funded with ORCID",
   "NIH-funded without ORCID",
-  "NIH-funded without eRA profile",
+  "NIH PI",
+  "NIH PI without eRA account",
 ] as const;
 
 /** The department table as CSV — aggregates only, no per-person rows. */
@@ -261,7 +281,8 @@ export function orcidCoverageCsv(rows: CoverageRow[]): string {
       r.nihPeople,
       r.nihOrcid,
       nihNoOrcid(r),
-      nihNoEra(r),
+      r.nihPi,
+      piNoEra(r),
     ]),
   );
 }

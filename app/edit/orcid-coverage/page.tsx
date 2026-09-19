@@ -31,8 +31,8 @@ import {
   NIH_FILTERS,
   loadOrcidCoverage,
   neither,
-  nihNoEra,
   nihNoOrcid,
+  piNoEra,
   orcidCoverageQuery,
   parseOrcidCoverageParams,
   pct,
@@ -91,19 +91,20 @@ function CoverageTable({
             <th className={thNum}>People</th>
             <th className={thNum}>ORCID iD</th>
             <th className={thNum}>ORCID %</th>
-            <th className={thNum}>eRA profile</th>
+            <th className={thNum}>eRA account</th>
             <th className={thNum}>Both</th>
             <th className={thNum}>Neither</th>
             <th className={thNum}>NIH-funded</th>
             <th className={thNum}>NIH-funded, ORCID</th>
             <th className={thNum}>NIH-funded, no ORCID</th>
-            <th className={thNum}>NIH-funded, no eRA</th>
+            <th className={thNum}>NIH PI</th>
+            <th className={thNum}>NIH PI, no eRA</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td className={`${tdClass} text-muted-foreground`} colSpan={11}>
+              <td className={`${tdClass} text-muted-foreground`} colSpan={12}>
                 No one matches these filters.
               </td>
             </tr>
@@ -122,7 +123,8 @@ function CoverageTable({
                   {r.nihOrcid.toLocaleString()} ({pct(r.nihOrcid, r.nihPeople)})
                 </td>
                 <td className={`${tdNum} font-semibold`}>{nihNoOrcid(r).toLocaleString()}</td>
-                <td className={tdNum}>{nihNoEra(r).toLocaleString()}</td>
+                <td className={tdNum}>{r.nihPi.toLocaleString()}</td>
+                <td className={tdNum}>{piNoEra(r).toLocaleString()}</td>
               </tr>
             ))
           )}
@@ -199,11 +201,12 @@ function Body({ data }: { data: OrcidCoverage }) {
         <a href={PUBLICATION_MANAGER_URL} className="underline" target="_blank" rel="noreferrer">
           ReCiter
         </a>
-        . &ldquo;eRA profile&rdquo; is a RePORTER-resolved NIH profile_id: a proxy for an eRA
-        Commons account, not proof — &ldquo;NIH-funded, no eRA&rdquo; is as likely a gap in our
-        resolver as in their account. &ldquo;NIH-funded&rdquo; = any NIH award on file for the
-        person, whatever its dates. NIH requires an ORCID iD linked to eRA Commons for every
-        SciENcv biosketch.
+        . &ldquo;eRA account&rdquo; is inferred from NIH RePORTER (a PI listed there necessarily
+        holds one); RePORTER lists PIs only, so a Co-I or key person on someone else&apos;s award
+        has an account we cannot see — that is why the gap column is &ldquo;NIH PI, no eRA&rdquo;,
+        which is a miss in our RePORTER resolver, not in their account. &ldquo;NIH-funded&rdquo; =
+        any NIH award on file for the person, whatever its dates. NIH requires an ORCID iD linked
+        to eRA Commons for every SciENcv biosketch.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-3" data-testid="orcid-coverage-tiles">

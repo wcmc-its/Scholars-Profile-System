@@ -9,8 +9,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildOrcidCoverage,
   neither,
-  nihNoEra,
   nihNoOrcid,
+  piNoEra,
   orcidCoverageCsv,
   orcidCoverageQuery,
   parseOrcidCoverageParams,
@@ -38,13 +38,14 @@ const SCHOLARS: ScholarRow[] = [
   s("f5", "full_time_faculty", "Dept C"),
   s("f6", "full_time_faculty", "Dept C"),
 ];
-// NIH: u1 + f3 expired, f4 ends today, f2 + f5 current. f2 is the one NIH-funded person WITH an ORCID.
+// NIH: u1 + f3 expired, f4 ends today, f2 + f5 current. f2 is the one NIH-funded person WITH
+// an ORCID. u1 + f4 are non-PI (Co-I) — NIH-funded but never resolvable from RePORTER.
 const NIH = [
-  { cwid: "u1", latestEnd: new Date("2021-01-01T00:00:00Z") },
-  { cwid: "f3", latestEnd: new Date("2020-01-01T00:00:00Z") },
-  { cwid: "f4", latestEnd: new Date("2026-09-18T00:00:00Z") },
-  { cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z") },
-  { cwid: "f5", latestEnd: new Date("2028-01-01T00:00:00Z") },
+  { cwid: "u1", latestEnd: new Date("2021-01-01T00:00:00Z"), pi: false },
+  { cwid: "f3", latestEnd: new Date("2020-01-01T00:00:00Z"), pi: true },
+  { cwid: "f4", latestEnd: new Date("2026-09-18T00:00:00Z"), pi: false },
+  { cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: true },
+  { cwid: "f5", latestEnd: new Date("2028-01-01T00:00:00Z"), pi: true },
 ];
 const ERA = ["f1", "f3"];
 const ALL = parseOrcidCoverageParams({ role: "all" });
@@ -52,12 +53,14 @@ const ALL = parseOrcidCoverageParams({ role: "all" });
 describe("buildOrcidCoverage", () => {
   it("tiles are the unfiltered population regardless of filters", () => {
     const r = buildOrcidCoverage(SCHOLARS, NIH, ERA, parseOrcidCoverageParams({ nih: "none", dept: "Dept B" }), TODAY);
-    expect(r.tiles.overall).toEqual({ people: 9, orcid: 3, era: 2, both: 1, nihPeople: 5, nihOrcid: 1, nihEra: 1 });
-    expect(r.tiles.fullTime).toEqual({ people: 6, orcid: 2, era: 2, both: 1, nihPeople: 4, nihOrcid: 1, nihEra: 1 });
-    expect(r.tiles.nihFullTime).toEqual({ people: 4, orcid: 1, era: 1, both: 0, nihPeople: 4, nihOrcid: 1, nihEra: 1 });
+    const c = { people: 9, orcid: 3, era: 2, both: 1, nihPeople: 5, nihOrcid: 1, nihPi: 3, nihPiEra: 1 };
+    expect(r.tiles.overall).toEqual(c);
+    expect(r.tiles.fullTime).toEqual({ ...c, people: 6, orcid: 2, nihPeople: 4 });
+    expect(r.tiles.nihFullTime).toEqual({ ...c, people: 4, orcid: 1, era: 1, both: 0, nihPeople: 4 });
     expect(neither(r.tiles.overall)).toBe(5);
     expect(nihNoOrcid(r.tiles.nihFullTime)).toBe(3);
-    expect(nihNoEra(r.tiles.nihFullTime)).toBe(3);
+    // f2 + f5 are PIs without an eRA row; u1/f4 are Co-Is and do NOT count as a resolver gap.
+    expect(piNoEra(r.tiles.overall)).toBe(2);
   });
 
   it("groups by role_category, null → Unclassified, people desc; ignores `role`", () => {
@@ -149,10 +152,11 @@ describe("orcidCoverageCsv", () => {
     const csv = orcidCoverageCsv(r.byDept);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "Department,People,ORCID iD on file,ORCID %,eRA profile on file,Both,Neither,NIH-funded,NIH-funded with ORCID,NIH-funded without ORCID,NIH-funded without eRA profile",
+      "Department,People,ORCID iD on file,ORCID %,eRA account (inferred),Both,Neither,NIH-funded,NIH-funded with ORCID,NIH-funded without ORCID,NIH PI,NIH PI without eRA account",
     );
-    expect(lines).toContain("Dept A,3,2,66.7,1,1,1,1,1,0,1");
-    expect(lines).toContain("Dept B,3,1,33.3,1,0,1,2,0,2,1");
+    expect(lines).toContain("Dept A,3,2,66.7,1,1,1,1,1,0,1,1");
+    // Dept B: u1 is a Co-I (not a PI) so its missing eRA row is not a gap; f3 is a PI with one.
+    expect(lines).toContain("Dept B,3,1,33.3,1,0,1,2,0,2,1,0");
     expect(lines).toHaveLength(1 + r.byDept.length);
     expect(csv).not.toMatch(/f1|p1|0000-0002/);
   });
