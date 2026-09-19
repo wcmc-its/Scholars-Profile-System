@@ -163,10 +163,14 @@ describe("orcidTiers", () => {
     expect(t.get("m1")).toBe("weak");
   });
 
-  it("RPM and the registry agreeing on one iD is strong whatever the counts; disagreeing is weak; admin still wins", () => {
+  it("RPM and the registry agreeing on one iD is strong whatever the accepted counts — unless the RPM row has rejections; disagreeing is weak; admin still wins", () => {
     // a1 is two rows on the SAME token under different sources — legal only because `source`
     // is in the PK; the RPM nightly and the registry weekly never overwrite each other.
+    // a4: the RPM side saw the iD on articles the person REJECTED (a homonym's iD), and a
+    // name-only registry hit on that iD is the same homonym — not a second witness.
     const rows = [
+      cand("a4", "orcid_name", 0),
+      cand("a4", "rpm_inferred", 1, 2),
       cand("a3", "orcid_email", 0, 0, "iD-b"),
       cand("a3", "rpm_admin"),
       cand("a2", "orcid_name", 0, 0, "iD-b"),
@@ -181,9 +185,10 @@ describe("orcidTiers", () => {
         ["a1", "strong"],
         ["a2", "weak"],
         ["a3", "asserted"],
+        ["a4", "weak"],
       ]),
     );
-    expect(t.size).toBe(3);
+    expect(t.size).toBe(4);
   });
 });
 

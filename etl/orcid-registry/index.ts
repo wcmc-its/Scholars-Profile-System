@@ -9,17 +9,26 @@
  *                      scholars is not settled and falls through to the name
  *                      step instead).
  *   - `orcid_works`  — a surname-key + `namesMatch` name match confirmed by
- *                      ≥3 DOIs/PMIDs shared between the record's `/works` and
- *                      the scholar's `publication_author` rows, a FULL given
- *                      name in common (an initial is not enough — "J Smith"
- *                      matches both John and Mary J. Smith, and a same-surname
- *                      co-author shares works with a departed owner's iD), and
- *                      no other such scholar with ≥3 works of its own that the
- *                      iD does not also share with this one (exclusive
- *                      overlap). `articles_accepted` holds the shared count.
- *   - `orcid_name`   — every other name match (0–2 shared works, initial-only
+ *                      ≥3 shared publications (a scholar paper whose PMID or
+ *                      DOI appears on the record's `/works`; a paper carrying
+ *                      both ids counts ONCE — the count is distinct papers,
+ *                      never id keys), a FULL given name in common (an initial
+ *                      is not enough — "J Smith" matches both John and Mary J.
+ *                      Smith, and a same-surname co-author shares works with a
+ *                      departed owner's iD), and no other such scholar with ≥3
+ *                      papers of its own that the iD does not also share with
+ *                      this one (exclusive overlap). `articles_accepted` holds
+ *                      the distinct-paper count.
+ *   - `orcid_name`   — every other name match (0–2 shared papers, initial-only
  *                      name agreement, or an ambiguous overlap). The shared
  *                      count is stored so the dashboard can see near-misses.
+ *
+ * Names on BOTH sides are diacritic-folded (`fold`: "Muñoz" → "Munoz") before
+ * the surname key, `namesMatch` and the given-name guard — `nameTokens` maps
+ * every non-[a-z0-9] character to a space, so an unfolded "Léo" would tokenise
+ * as "l" + "o" and never match. Normalisation only; the matcher is not wider.
+ * A record with `family-names` null and the whole name in `given-names` (26 of
+ * 400 live records) is tried as that full name.
  *
  * `source_updated_at` is the record's works `last-modified-date`. Same mirror
  * contract as `etl/orcid-candidates` — full replace per run for OUR source
@@ -166,23 +175,31 @@ export function matchEmails(
   return { rows, matched, ambiguous };
 }
 
-/** Name strings to try for a record: credit-name, "given family", each other-name. Pure. */
+/** Strips diacritics ("José Muñoz" → "Jose Munoz") so `nameTokens` (which maps every
+ *  non-[a-z0-9] to a space) sees whole tokens. Applied to every name on both sides. */
+export const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+/** Name strings to try for a record, diacritic-folded: credit-name, "given family" (or
+ *  given-names alone when family-names is empty and it holds ≥2 tokens — the whole
+ *  name in one field), each other-name. Pure. */
 export function candidateNames(r: ExpandedResult): string[] {
   const names: string[] = [];
   if (r["credit-name"]?.trim()) names.push(r["credit-name"].trim());
-  if (r["given-names"]?.trim() && r["family-names"]?.trim())
-    names.push(`${r["given-names"].trim()} ${r["family-names"].trim()}`);
+  const given = r["given-names"]?.trim();
+  const family = r["family-names"]?.trim();
+  if (given && family) names.push(`${given} ${family}`);
+  else if (given && given.split(/\s+/).length >= 2) names.push(given);
   for (const n of r["other-name"] ?? []) if (n?.trim()) names.push(n.trim());
-  return names;
+  return names.map(fold);
 }
 
 type NamedScholar = Pick<ScholarRow, "cwid" | "fullName" | "preferredName">;
 
-/** Scholars indexed by the surname key of fullName and of preferredName. Pure. */
+/** Scholars indexed by the surname key of fullName and of preferredName (folded). Pure. */
 export function buildNameIndex(scholars: NamedScholar[]): Map<string, NamedScholar[]> {
   const idx = new Map<string, NamedScholar[]>();
   for (const s of scholars) {
-    for (const k of new Set([lastNameKey(s.fullName), lastNameKey(s.preferredName)])) {
+    for (const k of new Set([lastNameKey(fold(s.fullName)), lastNameKey(fold(s.preferredName))])) {
       if (!k) continue;
       if (!idx.has(k)) idx.set(k, []);
       idx.get(k)!.push(s);
@@ -200,7 +217,7 @@ export function matchNames(
   for (const r of records) {
     for (const name of candidateNames(r)) {
       for (const s of index.get(lastNameKey(name)) ?? []) {
-        if (!namesMatch(name, s.fullName) && !namesMatch(name, s.preferredName)) continue;
+        if (!namesMatch(name, fold(s.fullName)) && !namesMatch(name, fold(s.preferredName))) continue;
         if (!out.has(r["orcid-id"])) out.set(r["orcid-id"], new Set());
         out.get(r["orcid-id"])!.add(s.cwid);
       }
@@ -213,7 +230,7 @@ export function matchNames(
  *  hyphens dropped) plus their concatenation, so "Xiao-Wei Wang", "Xiao Wei Wang" and
  *  "Xiaowei Wang" all carry `xiaowei`. Initials carry nothing: "J A Smith" → {}. Pure. */
 export function givenNameKeys(name: string): Set<string> {
-  const given = [...nameTokens(name)].slice(0, -1).map((t) => t.replace(/-/g, ""));
+  const given = [...nameTokens(fold(name))].slice(0, -1).map((t) => t.replace(/-/g, ""));
   const keys = new Set(given.filter((t) => t.length >= 2));
   // Glue "Xiao Wei" → "xiaowei"; never glue bare initials ("J A" is not a given name "ja").
   if (keys.size > 0 && given.length > 1) keys.add(given.join(""));
@@ -257,20 +274,47 @@ export function extractWorkIds(works: WorksResponse): Set<string> {
   return ids;
 }
 
+/** cwid → (doi:/pmid: key → the PMID of the publication that carries it). A paper
+ *  contributes both its keys, and both point back at the ONE paper, so the works step
+ *  counts papers rather than keys. Pure. */
+export type ScholarWorkIndex = Map<string, Map<string, string>>;
+export function indexScholarWorks(
+  rows: Array<{ cwid: string; pmid: string; doi: string | null }>,
+): ScholarWorkIndex {
+  const out: ScholarWorkIndex = new Map();
+  for (const r of rows) {
+    if (!out.has(r.cwid)) out.set(r.cwid, new Map());
+    const mine = out.get(r.cwid)!;
+    mine.set(pmidKey(r.pmid), r.pmid);
+    if (r.doi) mine.set(doiKey(r.doi), r.pmid);
+  }
+  return out;
+}
+
+/** PMIDs of the scholar's papers that share a PMID or DOI with the record's `/works`.
+ *  A paper present under both its ids is one PMID, so it counts once — before this a
+ *  2-paper overlap could reach MIN_SHARED_WORKS as 4 keys. Pure. */
+export function sharedPapers(workIds: Set<string>, mine: Map<string, string> | undefined): Set<string> {
+  const shared = new Set<string>();
+  if (mine) for (const [key, pmid] of mine) if (workIds.has(key)) shared.add(pmid);
+  return shared;
+}
+
 /** What the works step knows about one (iD, name-matched scholar) pair. */
 export type WorksEvidence = {
-  /** doi:/pmid: keys on both the record's `/works` and the scholar's publications. */
+  /** PMIDs of the scholar's publications that the record's `/works` also carries
+   *  (by PMID or DOI) — distinct papers, see `sharedPapers`. */
   shared: Set<string>;
   /** `givenNamesAgree` for the pair. */
   givenNameAgrees: boolean;
 };
 
 /** Per-scholar works evidence for one iD → sources. A scholar is confirmed by ≥3 shared
- *  works AND a full given name in common; exactly one confirmed scholar → orcid_works.
- *  Several confirmed → the one with ≥3 works the iD shares with nobody else confirmed
+ *  papers AND a full given name in common; exactly one confirmed scholar → orcid_works.
+ *  Several confirmed → the one with ≥3 papers the iD shares with nobody else confirmed
  *  (exclusive overlap), so a genuine owner is not demoted beside a co-authoring homonym
- *  whose shared works are all joint papers; a tie or nobody exclusive → all orcid_name.
- *  Every name-matched scholar gets a row; `shared` is the count. Pure. */
+ *  whose shared papers are all joint papers; a tie or nobody exclusive → all orcid_name.
+ *  Every name-matched scholar gets a row; `shared` is the distinct-paper count. Pure. */
 export function decide(
   byCwid: Map<string, WorksEvidence>,
 ): Array<{ cwid: string; source: "orcid_works" | "orcid_name"; shared: number }> {
@@ -318,9 +362,9 @@ export function mergeForScholars(
 const chunk = <T>(xs: T[], n: number): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
-/** cwid → set of doi:/pmid: keys from the scholar's matched publication_author rows. */
-async function loadScholarWorkIds(cwids: string[]): Promise<Map<string, Set<string>>> {
-  const out = new Map<string, Set<string>>();
+/** cwid → (doi:/pmid: key → owning pmid) from the scholar's matched publication_author rows. */
+async function loadScholarWorkIds(cwids: string[]): Promise<ScholarWorkIndex> {
+  const flat: Array<{ cwid: string; pmid: string; doi: string | null }> = [];
   for (const part of chunk(cwids, BATCH)) {
     const rows = await db.write.publicationAuthor.findMany({
       where: { cwid: { in: part } },
@@ -328,13 +372,10 @@ async function loadScholarWorkIds(cwids: string[]): Promise<Map<string, Set<stri
     });
     for (const r of rows) {
       if (!r.cwid) continue;
-      if (!out.has(r.cwid)) out.set(r.cwid, new Set());
-      const ids = out.get(r.cwid)!;
-      ids.add(pmidKey(r.publication.pmid));
-      if (r.publication.doi) ids.add(doiKey(r.publication.doi));
+      flat.push({ cwid: r.cwid, pmid: r.publication.pmid, doi: r.publication.doi });
     }
   }
-  return out;
+  return indexScholarWorks(flat);
 }
 
 const maxRecords = Number(process.env.ORCID_REGISTRY_MAX_RECORDS);
@@ -407,10 +448,10 @@ async function main(): Promise<number> {
     const names = candidateNames(recordById.get(orcid)!);
     const evidence = new Map<string, WorksEvidence>();
     for (const cwid of cwids) {
-      const mine = scholarIds.get(cwid);
-      const shared = new Set<string>();
-      if (mine) for (const id of ids) if (mine.has(id)) shared.add(id);
-      evidence.set(cwid, { shared, givenNameAgrees: givenNamesAgree(names, byCwid.get(cwid)!) });
+      evidence.set(cwid, {
+        shared: sharedPapers(ids, scholarIds.get(cwid)),
+        givenNameAgrees: givenNamesAgree(names, byCwid.get(cwid)!),
+      });
     }
     for (const d of decide(evidence)) {
       rows.push({

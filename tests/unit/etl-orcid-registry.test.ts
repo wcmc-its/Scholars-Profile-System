@@ -1,11 +1,12 @@
 /**
  * `etl/orcid-registry` — the pure transforms behind the ORCID public-registry sweep:
  * union deduped by orcid-id, a shared mailbox never email-matches and a record naming
- * two scholars' emails settles nobody, name candidates and the (unwidened) `namesMatch`
- * gate, the full-given-name guard on top of it, DOI/PMID extraction from `/works`
- * (container ids skipped), the ≥3-shared + given-name "exactly one scholar" decision
- * with its exclusive-overlap tie-break, and source precedence per (cwid, orcid) within
- * the mirror. Synthetic ids only (ORCID's doc example iD).
+ * two scholars' emails settles nobody, name candidates (family-names-null records, diacritic
+ * folding on both sides) and the (unwidened) `namesMatch` gate, the full-given-name guard on
+ * top of it, DOI/PMID extraction from `/works` (container ids skipped), the shared count as
+ * distinct PAPERS rather than id keys, the ≥3-shared + given-name "exactly one scholar"
+ * decision with its exclusive-overlap tie-break, and source precedence per (cwid, orcid)
+ * within the mirror. Synthetic ids only (ORCID's doc example iD).
  */
 import { describe, expect, it } from "vitest";
 
@@ -18,9 +19,11 @@ import {
   extractWorkIds,
   givenNameKeys,
   givenNamesAgree,
+  indexScholarWorks,
   matchEmails,
   matchNames,
   mergeForScholars,
+  sharedPapers,
   type SourceRow,
   type WorksEvidence,
 } from "@/etl/orcid-registry/index";
@@ -112,6 +115,34 @@ describe("name match", () => {
     expect(candidateNames(rec({ "given-names": null }))).toEqual([]);
   });
 
+  it("family-names null with the whole name in given-names is tried as that name; a lone given name is not", () => {
+    expect(candidateNames(rec({ "given-names": "John Smith", "family-names": null }))).toEqual(["John Smith"]);
+    expect(candidateNames(rec({ "given-names": " John  A. Smith ", "family-names": " " }))).toEqual(["John  A. Smith"]);
+    expect(candidateNames(rec({ "given-names": "John", "family-names": null }))).toEqual([]);
+  });
+
+  it("diacritics are folded on both sides: José Muñoz ↔ Jose Munoz match either way; Léo carries `leo`", () => {
+    expect(candidateNames(rec({ "given-names": "José", "family-names": "Muñoz" }))).toEqual(["Jose Munoz"]);
+    const index = buildNameIndex([
+      { cwid: "plain1", fullName: "Jose Munoz", preferredName: "Jose Munoz" },
+      { cwid: "acc1", fullName: "José Muñoz", preferredName: "José Muñoz" },
+      { cwid: "leo1", fullName: "Léo Dupont", preferredName: "Léo Dupont" },
+    ]);
+    const out = matchNames(
+      [
+        rec({ "given-names": "José", "family-names": "Muñoz" }),
+        rec({ "orcid-id": ORCID_2, "given-names": "Jose", "family-names": "Munoz" }),
+        rec({ "orcid-id": "0000-0001-0000-0005", "credit-name": "Leo Dupont", "given-names": null }),
+      ],
+      index,
+    );
+    expect(out.get(ORCID)).toEqual(new Set(["plain1", "acc1"]));
+    expect(out.get(ORCID_2)).toEqual(new Set(["plain1", "acc1"]));
+    expect(out.get("0000-0001-0000-0005")).toEqual(new Set(["leo1"]));
+    expect(givenNameKeys("Léo Dupont")).toEqual(new Set(["leo"]));
+    expect(givenNamesAgree(["Leo Dupont"], { cwid: "leo1", fullName: "Léo Dupont", preferredName: "Léo Dupont" })).toBe(true);
+  });
+
   it("John Smith never matches Jane Smith; an initial (J A Smith) matches both and leaves it to the works step; preferredName counts", () => {
     const index = buildNameIndex([
       { cwid: "john1", fullName: "John A Smith", preferredName: "John Smith" },
@@ -201,9 +232,27 @@ describe("extractWorkIds", () => {
   });
 });
 
+describe("sharedPapers", () => {
+  it("counts distinct PAPERS: a scholar paper whose PMID and DOI are both on the works is one, not two", () => {
+    const mine = indexScholarWorks([
+      { cwid: "a1", pmid: "111", doi: "10.1000/AAA" },
+      { cwid: "a1", pmid: "222", doi: null },
+      { cwid: "a1", pmid: "333", doi: "10.1000/ccc" },
+      { cwid: "b2", pmid: "111", doi: "10.1000/AAA" },
+    ]);
+    // Both ids of paper 111 and the PMID of 222 are on the record → 2 papers (4 keys before).
+    const works = new Set(["pmid:111", "doi:10.1000/aaa", "pmid:222", "doi:10.1000/zzz"]);
+    expect(sharedPapers(works, mine.get("a1"))).toEqual(new Set(["111", "222"]));
+    // DOI-only hit still resolves to the owning paper's PMID.
+    expect(sharedPapers(new Set(["doi:10.1000/ccc"]), mine.get("a1"))).toEqual(new Set(["333"]));
+    expect(sharedPapers(works, mine.get("b2"))).toEqual(new Set(["111"]));
+    expect(sharedPapers(works, mine.get("nobody"))).toEqual(new Set());
+  });
+});
+
 describe("decide", () => {
-  // Shared works as id lists so the exclusive-overlap tie-break is testable; `n(k)` = k
-  // distinct ids, `ids(...)` = a named set.
+  // Shared papers as PMID lists so the exclusive-overlap tie-break is testable; `n(k)` = k
+  // distinct papers, `ids(...)` = a named set.
   const ids = (...xs: string[]) => new Set(xs);
   const n = (k: number, prefix = "w") => new Set(Array.from({ length: k }, (_, i) => `${prefix}${i}`));
   const ev = (o: Record<string, [Set<string>, boolean?]>) =>

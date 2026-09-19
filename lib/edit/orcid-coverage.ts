@@ -20,8 +20,11 @@
  *    across the person's rows, where strong-eligible is: any `orcid_email` row;
  *    an `orcid_works` row with ≥ STRONG_MIN_ACCEPTED shared works; the SOLE
  *    `rpm_inferred` row when it has ≥ STRONG_MIN_ACCEPTED accepted articles and
- *    no rejected one; or an ORCID that an `rpm_*` row and an `orcid_*` row
- *    agree on (two independent sources, so the counts no longer matter). WEAK =
+ *    no rejected one; or an ORCID that an `rpm_*` row with NO rejected article
+ *    and an `orcid_*` row agree on (two independent sources, so the accepted
+ *    counts no longer matter — but an RPM row with rejections saw the iD on
+ *    articles the person REJECTED, a homonym's iD, and a registry name hit on
+ *    that same iD is the same homonym, not a second witness). WEAK =
  *    no single strong candidate: a name-only registry match, thin support, a
  *    contradiction, or two or more strong candidate ORCIDs (a second candidate
  *    that is NOT strong-eligible — a homonym's name-only iD beside a
@@ -153,7 +156,13 @@ export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
     // still grades weak here.
     const inferred = rows.filter((r) => r.source === "rpm_inferred");
     const soleInferred = inferred.length === 1 ? inferred[0] : null;
-    const rpmOrcids = new Set(rows.filter((r) => isRpmSource(r.source)).map((r) => r.orcid));
+    // Only rejection-free RPM rows take part in the agreement rule: an rpm_inferred
+    // row with rejections means the iD also sat on articles the person REJECTED (a
+    // homonym's iD), and a name-only registry hit on the same iD is that same
+    // homonym, not independent evidence. rpm_admin rows carry 0 rejections anyway.
+    const rpmOrcids = new Set(
+      rows.filter((r) => isRpmSource(r.source) && r.articlesRejected === 0).map((r) => r.orcid),
+    );
     const registryOrcids = new Set(
       rows.filter((r) => isRegistrySource(r.source)).map((r) => r.orcid),
     );
@@ -163,7 +172,7 @@ export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
       (r === soleInferred &&
         r.articlesRejected === 0 &&
         r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
-      // Two independent sources agreeing on one iD outweighs either one's counts.
+      // Two independent sources agreeing on one iD outweighs either one's accepted counts.
       (rpmOrcids.has(r.orcid) && registryOrcids.has(r.orcid));
     const strongOrcids = new Set(rows.filter(strongEligible).map((r) => r.orcid));
     out.set(cwid, strongOrcids.size === 1 ? "strong" : "weak");

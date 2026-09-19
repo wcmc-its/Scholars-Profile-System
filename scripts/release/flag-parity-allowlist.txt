@@ -20,7 +20,7 @@ VITEST                                 # test-runner guard
 AI_GATEWAY_API_KEY
 NCBI_API_KEY
 OPENALEX_MAILTO
-ORCID_CLIENT_ID                     # etl/orcid-registry: optional /read-public token; unset = anonymous pub.orcid.org pool. The deployed weekly run is anonymous BY DESIGN until scholars/<env>/orcid-client is wired to the ETL base family (and the app task, for the Connect-your-iD OAuth) — a new secret is a cdk deploy, not a merge
+ORCID_CLIENT_ID                     # etl/orcid-registry: optional /read-public token; unset = anonymous pub.orcid.org pool. The deployed weekly run is anonymous BY DESIGN until scholars/<env>/orcid-api is wired to the ETL base family (and the app task, for the Connect-your-iD OAuth) — a new secret is a cdk deploy, not a merge
 ORCID_CLIENT_SECRET                 # with ORCID_CLIENT_ID
 SERPAPI_KEY
 

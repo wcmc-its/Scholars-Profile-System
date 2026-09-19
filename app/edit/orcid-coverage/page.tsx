@@ -215,7 +215,8 @@ function Body({ data }: { data: OrcidCoverage }) {
         is carried by {STRONG_MIN_ACCEPTED}+ accepted articles and no rejected one, or shares{" "}
         {STRONG_MIN_ACCEPTED}+ works between the registry record and the person&apos;s own
         publications, or the registry record carries the person&apos;s WCM email (and whenever
-        Publication Manager and the registry agree on the same iD); <em>weak</em> = no single
+        Publication Manager and the registry agree on the same iD, provided no rejected article
+        carried it); <em>weak</em> = no single
         strong candidate (a name-only registry match, thin support, a contradiction, or two or
         more strong candidate ORCIDs). An inference
         never reaches the public profile — it is the &ldquo;is this yours? confirm it&rdquo;
