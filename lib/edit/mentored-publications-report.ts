@@ -66,13 +66,12 @@
  * the workbook). Every (learner, mentor) pair carries its `MentorshipType`
  * (`lib/edit/mentorship-type.ts`); AOC rows are `{ bucket, roster, confirmed }`.
  *
- * PubMed only: ReciterDB gives Scopus-only articles a synthetic negative id,
- * and both bridge importers (`etl/mentoring/import-copub-list.ts`,
- * `import-learner-pubs.ts`) drop those before insert, so every bridge row
- * here is a real pmid. The report cannot say how many were excluded — the
- * importer's `droppedPubs` log line is the only tally (round 5 widens the key).
- * Suggestion evidence DOES carry them (as source-prefixed `SCOPUS:` keys);
- * those are dropped and counted in `droppedNonPubmed`.
+ * PubMed and Scopus-only publications alike (round 5): every pub key here is
+ * the SPS `Publication.pmid` string — digits for a PubMed article, `SCOPUS:…`
+ * for a Scopus-only one (the bridge tables' `pmid` column and suggestion
+ * evidence `id`s both carry it). iCite citations are null for Scopus-only rows
+ * by nature (NIH iCite is PubMed-only); JIF resolves through the journal
+ * abbreviation either way.
  *
  * Mentor display name: the mentor's Scholar row (`preferredName`, canonical)
  * when there is one, else the roster's own `mentorFirstName mentorLastName`
@@ -184,7 +183,7 @@ export type MentoredPubsDetailRow = {
    *  this paper (via the co-pub bridge). Empty only in `"all"` mode. */
   paperMentors: MentorRef[];
   withMentor: boolean;
-  pmid: number;
+  pmid: string;
   title: string;
   journal: string | null;
   /** Current-year Journal Impact Factor, null when the journal did not match. */
@@ -217,7 +216,7 @@ export type MentoredPubsLearnerOnPub = {
  *  Publications view. A pub co-authored by two learners appears once,
  *  listing both. Not part of the workbook. */
 export type MentoredPubsPublicationRow = {
-  pmid: number;
+  pmid: string;
   title: string;
   journal: string | null;
   year: number | null;
@@ -247,9 +246,6 @@ export type MentoredPublicationsReport = {
    *  (any row at all). `false` = the bridge has not run in this env, so every
    *  count is a vacuous zero — the page says so. `null` in `"mentored"` mode. */
   allPubsLoaded: boolean | null;
-  /** Distinct suggestion-evidence ids that are not PubMed pmids (ReciterDB's
-   *  source-prefixed `SCOPUS:` keys) — PubMed only, so not shown. */
-  droppedNonPubmed: number;
   /** Distinct suggestion-evidence pmids with no local `publication` row yet. */
   droppedUnresolved: number;
 };
@@ -532,7 +528,6 @@ export async function loadMentoredPublicationsReport({
     generatedAt,
     filters,
     allPubsLoaded,
-    droppedNonPubmed: 0,
     droppedUnresolved: 0,
   });
 
@@ -652,7 +647,7 @@ export async function loadMentoredPublicationsReport({
     }
   }
 
-  type CopubRow = { mentorCwid: string; menteeCwid: string; pmid: number; pub: unknown };
+  type CopubRow = { mentorCwid: string; menteeCwid: string; pmid: string; pub: unknown };
   const copubs: CopubRow[] = [];
   for (const batch of chunks(pairs, PAIR_BATCH)) {
     const found = await db.read.menteeCopublicationPub.findMany({
@@ -662,8 +657,8 @@ export async function loadMentoredPublicationsReport({
     copubs.push(...found);
   }
   // learner → pmid → the mentors on that paper (the co-pub bridge's fact).
-  const mentorsOnPaper = new Map<string, Map<number, Set<string>>>();
-  const addMentorOnPaper = (menteeCwid: string, pmid: number, mentorCwid: string) => {
+  const mentorsOnPaper = new Map<string, Map<string, Set<string>>>();
+  const addMentorOnPaper = (menteeCwid: string, pmid: string, mentorCwid: string) => {
     let byPmid = mentorsOnPaper.get(menteeCwid);
     if (!byPmid) {
       byPmid = new Map();
@@ -680,12 +675,10 @@ export async function loadMentoredPublicationsReport({
 
   // Suggestion pairs are not in the bridge: their pubs are the suggestion's
   // evidence (ponytail: the builder's last-8-years window, 50 per pair),
-  // resolved from the local `publication` row. PubMed only — a
-  // source-prefixed id (`SCOPUS:…`) is counted and dropped.
-  const droppedNonPubmed = new Set<string>();
-  const droppedUnresolved = new Set<number>();
+  // resolved from the local `publication` row by its `id` (the same key).
+  const droppedUnresolved = new Set<string>();
   type Evidence = { id: string; menteeRank: number };
-  const evidence: Array<{ mentorCwid: string; menteeCwid: string; pmid: number; menteeRank: number }> = [];
+  const evidence: Array<{ mentorCwid: string; menteeCwid: string; pmid: string; menteeRank: number }> = [];
   for (const s of suggestions) {
     // A pair a surer source also claims reads from the bridge instead.
     if (learners.get(s.menteeCwid)?.mentors.get(s.mentorCwid)?.source !== "coauthor") continue;
@@ -693,12 +686,8 @@ export async function loadMentoredPublicationsReport({
     // skipped, never thrown — one bad row must not take the whole report down.
     const list = Array.isArray(s.evidence) ? (s.evidence as unknown[]) : [];
     for (const e of list as Evidence[]) {
-      if (!e || typeof e !== "object" || typeof e.id !== "string") continue;
-      if (!/^[1-9]\d*$/.test(e.id)) {
-        droppedNonPubmed.add(e.id);
-        continue;
-      }
-      evidence.push({ mentorCwid: s.mentorCwid, menteeCwid: s.menteeCwid, pmid: Number(e.id), menteeRank: e.menteeRank });
+      if (!e || typeof e !== "object" || typeof e.id !== "string" || !e.id || e.id.length > 32) continue;
+      evidence.push({ mentorCwid: s.mentorCwid, menteeCwid: s.menteeCwid, pmid: e.id, menteeRank: e.menteeRank });
     }
   }
   type LocalPub = {
@@ -713,7 +702,7 @@ export async function loadMentoredPublicationsReport({
     fullAuthorsString: string | null;
   };
   const localPub = new Map<string, LocalPub>();
-  for (const batch of chunks([...new Set(evidence.map((e) => String(e.pmid)))], PMID_BATCH)) {
+  for (const batch of chunks([...new Set(evidence.map((e) => e.pmid))], PMID_BATCH)) {
     const found = (await db.read.publication.findMany({
       where: { pmid: { in: batch } },
       select: {
@@ -733,7 +722,7 @@ export async function loadMentoredPublicationsReport({
   // "Last FM" byline tokens → authors; the initials are spaced ("F M") so
   // `vancouverAuthorToken` re-joins them to the same "Last FM" text. The
   // learner's CWID goes on their `menteeRank` so `authorPosition` finds it.
-  const evidencePub = (p: LocalPub, e: { pmid: number; menteeCwid: string; menteeRank: number }): CoPublicationFull => {
+  const evidencePub = (p: LocalPub, e: { pmid: string; menteeCwid: string; menteeRank: number }): CoPublicationFull => {
     const authors: CoPublicationAuthor[] = stripWcmMarkers(p.fullAuthorsString ?? p.authorsString ?? "")
       .split(", ")
       .filter((t) => t.length > 0)
@@ -749,7 +738,9 @@ export async function loadMentoredPublicationsReport({
     const me = authors[e.menteeRank - 1];
     if (me) me.personIdentifier = e.menteeCwid;
     return {
-      pmid: e.pmid,
+      id: e.pmid,
+      // ponytail: `pmid` is legacy — `id` is the key; a Scopus row has no honest number.
+      pmid: /^\d+$/.test(e.pmid) ? Number(e.pmid) : -1,
       title: p.title,
       journal: p.journal,
       year: p.year,
@@ -767,8 +758,8 @@ export async function loadMentoredPublicationsReport({
   // The publication set per learner: the co-pub rows' distinct pmids plus
   // the suggestion evidence, or in "all" mode every `aoc_mentee_publication`
   // row for the learner.
-  const mentoredByLearner = new Map<string, Map<number, CoPublicationFull>>();
-  const addPub = (into: Map<string, Map<number, CoPublicationFull>>, cwid: string, pmid: number, pub: unknown) => {
+  const mentoredByLearner = new Map<string, Map<string, CoPublicationFull>>();
+  const addPub = (into: Map<string, Map<string, CoPublicationFull>>, cwid: string, pmid: string, pub: unknown) => {
     let m = into.get(cwid);
     if (!m) {
       m = new Map();
@@ -778,7 +769,7 @@ export async function loadMentoredPublicationsReport({
   };
   for (const c of copubs) addPub(mentoredByLearner, c.menteeCwid, c.pmid, c.pub);
   for (const e of evidence) {
-    const p = localPub.get(String(e.pmid));
+    const p = localPub.get(e.pmid);
     if (!p) {
       droppedUnresolved.add(e.pmid);
       continue;
@@ -805,9 +796,9 @@ export async function loadMentoredPublicationsReport({
   }
 
   // Enrich from the local corpus (date added, JIF join key, iCite citations).
-  const pmidSet = new Set<number>();
+  const pmidSet = new Set<string>();
   for (const m of pubsByLearner.values()) for (const pmid of m.keys()) pmidSet.add(pmid);
-  const pmids = [...pmidSet].map(String);
+  const pmids = [...pmidSet];
   type PubRow = {
     pmid: string;
     journalAbbrev: string | null;
@@ -856,11 +847,11 @@ export async function loadMentoredPublicationsReport({
     cwid,
     name: scholarName.get(cwid) ?? rosterName.get(cwid) ?? cwid,
   });
-  const paperMentorsFor = (learnerCwid: string, pmid: number): MentorRef[] =>
+  const paperMentorsFor = (learnerCwid: string, pmid: string): MentorRef[] =>
     [...(mentorsOnPaper.get(learnerCwid)?.get(pmid) ?? [])].map(mentorRef).sort(compareMentor);
 
-  const enrich = (pmid: number) => {
-    const local = pubByPmid.get(String(pmid));
+  const enrich = (pmid: string) => {
+    const local = pubByPmid.get(pmid);
     const abbrev = local?.journalAbbrev ? normalizeJournalAbbrev(local.journalAbbrev) : null;
     const jif = abbrev ? (jifByAbbrev.get(abbrev) ?? null) : null;
     return {
@@ -873,11 +864,11 @@ export async function loadMentoredPublicationsReport({
   // Per-learner distinct-pmid accumulators (a pub shared with two mentors
   // counts once), the detail rows, and the per-pmid publication rows.
   type Acc = {
-    all: Set<number>;
-    inWindow: Set<number>;
-    withMentorInWindow: Set<number>;
-    highImpact: Set<number>;
-    firstAuthor: Set<number>;
+    all: Set<string>;
+    inWindow: Set<string>;
+    withMentorInWindow: Set<string>;
+    highImpact: Set<string>;
+    firstAuthor: Set<string>;
   };
   const acc = new Map<string, Acc>();
   const detail: MentoredPubsDetailRow[] = [];
@@ -886,7 +877,7 @@ export async function loadMentoredPublicationsReport({
     learners: Map<string, MentoredPubsLearnerOnPub>;
     mentors: Map<string, MentorRef & { mentorships: MentorshipType[] }>;
   };
-  const pubAgg = new Map<number, PubAgg>();
+  const pubAgg = new Map<string, PubAgg>();
 
   for (const l of learners.values()) {
     const learnerPubs = pubsByLearner.get(l.cwid);
@@ -1022,7 +1013,7 @@ export async function loadMentoredPublicationsReport({
       ) ||
       a.learnerCwid.localeCompare(b.learnerCwid) ||
       compareDescNullsLast(a.year, b.year) ||
-      b.pmid - a.pmid ||
+      b.pmid.localeCompare(a.pmid) ||
       (a.mentorCwid ?? "").localeCompare(b.mentorCwid ?? ""),
   );
 
@@ -1062,7 +1053,7 @@ export async function loadMentoredPublicationsReport({
       compareDateDescNullsLast(a.dateAdded, b.dateAdded) ||
       compareDescNullsLast(a.year, b.year) ||
       compareName(a.title, b.title) ||
-      b.pmid - a.pmid,
+      b.pmid.localeCompare(a.pmid),
   );
 
   return {
@@ -1072,7 +1063,6 @@ export async function loadMentoredPublicationsReport({
     generatedAt,
     filters,
     allPubsLoaded,
-    droppedNonPubmed: droppedNonPubmed.size,
     droppedUnresolved: droppedUnresolved.size,
   };
 }

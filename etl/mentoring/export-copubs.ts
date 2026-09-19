@@ -18,7 +18,7 @@
  *   1. copubs.ndjson  (#443, mentee_copublication) — per (mentor, mentee) co-pub
  *      COUNT + 3-pub preview, drives the chip badge + popover in
  *      `getMenteesForMentor`. One object per line:
- *        { mentorCwid, menteeCwid, count, preview: [{ pmid, title, journal, year }] }
+ *        { mentorCwid, menteeCwid, count, preview: [{ id, pmid, title, journal, year }] }
  *      Only pairs with count > 0 are emitted (a 0 is the absence of a row).
  *
  *   2. aoc-mentees.ndjson  (#928, aoc_mentee) — the RAW AOC / med-student mentee
@@ -50,6 +50,13 @@
  *      product 3 (`hydrateArticles`), so the co-pub set is a strict subset by
  *      pmid. One object per learner with ≥1 pub:
  *        { menteeCwid, pubs: CoPublicationFull[] }
+ *
+ * Every publication row carries `id` (round 5) next to `pmid`: the SPS
+ * `Publication.pmid` key — the pmid as digits for a PubMed article, the
+ * source-prefixed `analysis_summary_article.article_id` (`SCOPUS:…`) for a
+ * Scopus-only one, whose ReciterDB `pmid` is a synthetic negative that churns
+ * nightly. The importers key their tables on `id` (falling back to a positive
+ * `pmid` for a product written before round 5).
  *
  * Mentor→mentee pairs come from THREE sources: `reporting_students_mentors`
  * (ReciterDB) + `phd_mentor_relationship` + `postdoc_mentor_relationship` (the
@@ -88,6 +95,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { PoolConnection } from "mariadb";
 import { writeFileSync } from "node:fs";
 import { db, disconnect } from "../../lib/db";
+import { pubKey } from "@/lib/pub-key";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import type {
   CoPublication,
@@ -219,6 +227,7 @@ async function copubsForMentor(
     const rows = (await conn.query(
       `SELECT DISTINCT a2.personIdentifier AS mentee_cwid,
               a1.pmid AS pmid,
+              art.article_id AS article_id,
               art.articleTitle AS title,
               art.journalTitleVerbose AS journal,
               art.articleYear AS year
@@ -234,6 +243,7 @@ async function copubsForMentor(
     )) as {
       mentee_cwid: string;
       pmid: number | bigint;
+      article_id: string | null;
       title: string;
       journal: string | null;
       year: number | null;
@@ -242,8 +252,10 @@ async function copubsForMentor(
       const entry = out.get(r.mentee_cwid) ?? { count: 0, preview: [] as CoPublication[] };
       entry.count += 1;
       if (entry.preview.length < 3) {
+        const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
         entry.preview.push({
-          pmid: typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
+          id: pubKey(pmid, r.article_id),
+          pmid,
           title: r.title,
           journal: r.journal,
           year: r.year,
@@ -306,6 +318,7 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
 type ArticleRow = {
   mentee_cwid: string;
   pmid: number | bigint;
+  article_id: string | null;
   title: string | null;
   journal: string | null;
   year: number | null;
@@ -323,6 +336,7 @@ type ArticleRow = {
  *  row that names the learner; the caller supplies the FROM/WHERE. */
 const ARTICLE_SELECT = `SELECT a2.personIdentifier AS mentee_cwid,
               art.pmid          AS pmid,
+              art.article_id    AS article_id,
               art.articleTitle  AS title,
               art.journalTitleVerbose AS journal,
               art.articleYear   AS year,
@@ -383,6 +397,7 @@ async function hydrateArticles(
     const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
     const list = out.get(r.mentee_cwid) ?? [];
     list.push({
+      id: pubKey(pmid, r.article_id),
       pmid,
       title: r.title ?? "",
       journal: r.journal,

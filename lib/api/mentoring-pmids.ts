@@ -112,7 +112,9 @@ async function refresh(): Promise<MentoringPmidBuckets> {
  * `analysis_summary_article` row (the export joins it), so a co-authored pmid
  * lacking article metadata is absent here. That is harmless — and arguably more
  * correct — for a Publications-browse facet, whose targets must have article
- * data to be browsable. Coverage is otherwise identical.
+ * data to be browsable. Since round 5 the bridge keys on the SPS
+ * `Publication.pmid` string, so the facet carries Scopus-only co-pubs
+ * (`SCOPUS:…`) too — which the live path never did.
  *
  * Like the live path, an empty bridge table (not yet imported) yields empty
  * buckets, which equals the current in-VPC behavior (honest degradation).

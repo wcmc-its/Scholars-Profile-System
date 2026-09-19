@@ -6,7 +6,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EtlGuardError } from "@/lib/etl-guard";
 import {
-  pubKey,
   rankPairs,
   writeSuggestions,
   type PairStats,
@@ -64,14 +63,6 @@ describe("rankPairs", () => {
     expect(profA[0].strong).toBe(true);
     expect(droppedByCap).toBe(2);
     expect(rows.filter((r) => r.mentorCwid === "prof_b")).toHaveLength(1);
-  });
-});
-
-describe("pubKey", () => {
-  it("keys external rows on article_id and PubMed rows on the pmid, like etl/reciter/index.ts", () => {
-    expect(pubKey(-12, "SCOPUS:1234567890")).toBe("SCOPUS:1234567890");
-    expect(pubKey(12345678, null)).toBe("12345678");
-    expect(pubKey(-13, "X".repeat(33))).toBe("-13");
   });
 });
 

@@ -18,9 +18,12 @@
  * NDJSON contract: one object per learner with >=1 publication —
  *   { menteeCwid, pubs: CoPublicationFull[] }
  * Blank lines are skipped; a line missing menteeCwid or whose `pubs` is not an
- * array is skipped + counted. A pub without a valid positive-integer pmid is
- * dropped and counted separately (`droppedPubs`) so a malformed artifact is
- * visible in the log rather than silently lossy.
+ * array is skipped + counted. The row key (`pmid`, a string since round 5) is
+ * the pub's `id` — the SPS `Publication.pmid` key, `SCOPUS:…` for a
+ * Scopus-only article — else `String(pmid)` for a positive-integer pmid (a
+ * product written before round 5); a pub with neither is dropped and counted
+ * separately (`droppedPubs`) so a malformed artifact is visible in the log
+ * rather than silently lossy.
  *
  * Empty-export floor guard: a 0-row parse ABORTS before the delete-stale step
  * (which, with nothing upserted, would remove every row), so a corrupt/partial/
@@ -60,7 +63,7 @@ function resolveKey(): string {
 /** Flattened DB row: one (learner, pmid) with its raw `CoPublicationFull` JSON. */
 export type LearnerPubDbRow = {
   menteeCwid: string;
-  pmid: number;
+  pmid: string;
   pubYear: number | null;
   pub: Prisma.InputJsonValue;
 };
@@ -75,9 +78,16 @@ function isPositiveInt(n: unknown): n is number {
   return typeof n === "number" && Number.isInteger(n) && n > 0;
 }
 
+/** The row key: `id` when present, else a positive-integer `pmid` (an old
+ *  product), else null (dropped). */
+function rowKey(pub: { id?: unknown; pmid?: unknown }): string | null {
+  if (typeof pub.id === "string" && pub.id.length > 0 && pub.id.length <= 32) return pub.id;
+  return isPositiveInt(pub.pmid) ? String(pub.pmid) : null;
+}
+
 /** Parse NDJSON → flattened (learner, pmid) rows. `skipped` counts whole lines
  *  dropped (bad JSON / missing cwid / non-array pubs); `droppedPubs` counts
- *  individual pubs dropped for a missing/invalid pmid. A learner repeating
+ *  individual pubs dropped for a missing/invalid key. A learner repeating
  *  across lines (the export emits one line per learner, but a hand-edited
  *  artifact might not) collapses to one row per pmid — the LAST wins. Exported
  *  for its unit test; the S3 read and the writes stay in `main`. */
@@ -99,12 +109,12 @@ export function parseLearnerPubsNdjson(text: string): {
         skipped++;
         continue;
       }
-      for (const pub of o.pubs as Array<{ pmid?: unknown; year?: unknown }>) {
-        if (!pub || !isPositiveInt(pub.pmid)) {
-          droppedPubs++; // a pub with no valid pmid — counted, not silently lost
+      for (const pub of o.pubs as Array<{ id?: unknown; pmid?: unknown; year?: unknown }>) {
+        const pmid = pub ? rowKey(pub) : null;
+        if (pmid === null) {
+          droppedPubs++; // a pub with no valid key — counted, not silently lost
           continue;
         }
-        const pmid = Number(pub.pmid);
         byKey.set(`${menteeCwid}::${pmid}`, {
           menteeCwid,
           pmid,
@@ -134,7 +144,7 @@ async function main() {
 
     const { rows, skipped, droppedPubs } = parseLearnerPubsNdjson(text);
     console.log(
-      `Parsed ${rows.length} learner-pub rows (${skipped} lines skipped, ${droppedPubs} pubs dropped for invalid pmid).`,
+      `Parsed ${rows.length} learner-pub rows (${skipped} lines skipped, ${droppedPubs} pubs dropped for invalid key).`,
     );
 
     // Empty-export floor guard: with nothing upserted, the delete-stale step

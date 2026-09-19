@@ -275,7 +275,7 @@ describe("/edit/reports/7 — wiring", () => {
       pubsInWindow: 1, withMentorInWindow: 1, pubsAllTime: 1, highImpactInWindow: 0, firstAuthorInWindow: 1,
     };
     const pub = {
-      pmid: 12345678, title: "A paper", journal: "J Test", year: 2024, citation: "Learner A, Mentor G. A paper. J Test. 2024.",
+      pmid: "12345678", title: "A paper", journal: "J Test", year: 2024, citation: "Learner A, Mentor G. A paper. J Test. 2024.",
       jif: 3.2, citations: 4, dateAdded: null, authorCount: 2,
       learners: [{ cwid: "stu0001", firstName: "Ada", lastName: "Learner", firstAuthor: true, authorPosition: 1, inWindow: true }],
       mentors: [{ cwid: "men0001", name: "Grace Mentor", mentorships: [{ program: "md", source: "roster", tier: "confirmed" }] }],
@@ -284,7 +284,7 @@ describe("/edit/reports/7 — wiring", () => {
     h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
       summary: [summaryRow], detail: [], publications: [pub],
       generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
-      droppedNonPubmed: 0, droppedUnresolved: 0,
+      droppedUnresolved: 0,
     }));
 
     const summary = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
@@ -298,22 +298,21 @@ describe("/edit/reports/7 — wiring", () => {
     expect(textOf(summary)).toContain(
       "Pairs come from the AOC roster, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship patterns (presumptive — unchecked by default).",
     );
-    expect(textOf(summary)).toContain(
-      "PubMed-indexed publications only; Scopus-only co-publications are excluded when the bridge is imported.",
-    );
+    expect(textOf(summary)).not.toContain("PubMed-indexed publications only");
+    expect(textOf(summary)).not.toContain("not yet in the local corpus");
 
     const pubs = await EditReportsMentoredPublicationsPage({ searchParams: sp({ view: "publications" }) });
     expect(findByType(pubs, h.mockTable)?.props).toMatchObject({ view: "publications", publications: [pub] });
 
-    // Suggestion-evidence pubs the loader dropped are folded into the PubMed-only sentence.
+    // Suggestion-evidence pubs with no local row yet get one sentence.
     h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
       summary: [summaryRow], detail: [], publications: [pub],
       generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
-      droppedNonPubmed: 3, droppedUnresolved: 1,
+      droppedUnresolved: 1,
     }));
     const dropped = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
     expect(textOf(dropped)).toContain(
-      "excluded when the bridge is imported (co-publications not shown: 3 non-PubMed, 1 not yet in the local corpus).",
+      "is assumed to have entered four years before graduating. 1 co-publications not yet in the local corpus are not shown.",
     );
   });
 

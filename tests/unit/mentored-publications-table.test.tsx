@@ -6,7 +6,8 @@
  * until its Type checkbox is ticked; a Mentor tick filters; "Showing X of Y"
  * follows; the type label renders under the mentor. Learners: the Type
  * column is one line per mentor; grad-year default sort with null last; the
- * Learner header sorts by last, first. Every query is scoped to the table's
+ * Learner header sorts by last, first. A Scopus-only row (`SCOPUS:` key)
+ * prints "Scopus:" with no PubMed link. Every query is scoped to the table's
  * test id or the render container, never `document.body`.
  */
 import { describe, expect, it } from "vitest";
@@ -55,20 +56,20 @@ const PUBS: MentoredPubsPublicationRow[] = [
   // Deliberately NOT in loader order (dateAdded desc, nulls last): a no-op
   // sort would render 4, 1, 2 — the order assertion pins the island's sort.
   pub({
-    pmid: 3,
+    pmid: "3",
     year: 2023,
     learners: [learner("stu0002", "Park", 2, null)],
     mentors: [{ ...NKEMELU, mentorships: [VOL] }],
   }),
   pub({
-    pmid: 4,
+    pmid: "4",
     year: 2021,
     dateAdded: new Date("2023-06-01"),
     learners: [learner("stu0003", "Wu", 2, null)],
     mentors: [{ ...OKAFOR, mentorships: [PHD] }],
   }),
   pub({
-    pmid: 1,
+    pmid: "1",
     year: 2022,
     dateAdded: new Date("2024-03-01"),
     jif: 5.5,
@@ -76,11 +77,18 @@ const PUBS: MentoredPubsPublicationRow[] = [
     mentors: [{ ...CHEN, mentorships: [MD] }],
   }),
   pub({
-    pmid: 2,
+    pmid: "2",
     year: 2024,
     dateAdded: new Date("2024-01-01"),
     jif: 2,
     learners: [learner("stu0001", "Learner", 3, false)],
+    mentors: [{ ...CHEN, mentorships: [MD] }],
+  }),
+  pub({
+    pmid: "SCOPUS:105037533819",
+    year: 2020,
+    dateAdded: new Date("2023-01-01"),
+    learners: [learner("stu0001", "Learner", 1, true)],
     mentors: [{ ...CHEN, mentorships: [MD] }],
   }),
 ];
@@ -144,13 +152,17 @@ function renderPubs() {
 describe("MentoredPublicationsTable — publications", () => {
   it("defaults to dateAdded desc (not year), hides co-author-typed rows, prints the date and the type under the mentor", () => {
     const { table, ids, getByTestId } = renderPubs();
-    expect(ids()).toEqual(["1", "2", "4"]);
-    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 3 of 4 publications");
+    expect(ids()).toEqual(["1", "2", "4", "SCOPUS:105037533819"]);
+    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 4 of 5 publications");
     const row1 = within(table()).getByTestId("mentored-pubs-pub-1");
     expect(within(row1).getByText("2024-03-01")).toBeTruthy();
     expect(within(row1).getByText("MD · roster")).toBeTruthy();
     expect(within(row1).getByText("1st author")).toBeTruthy();
     expect(within(row1).getByRole("link", { name: "1" }).getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/1/");
+    // A Scopus-only row: "Scopus:" label, the bare id, no PubMed link.
+    const scopus = within(table()).getByTestId("mentored-pubs-pub-SCOPUS:105037533819");
+    expect(scopus.textContent).toContain("Scopus: 105037533819");
+    expect(within(scopus).queryByRole("link", { name: "105037533819" })).toBeNull();
     expect(within(within(table()).getByTestId("mentored-pubs-pub-2")).getByText("last author")).toBeTruthy();
     const dateTh = within(table()).getByRole("columnheader", { name: /Date added/ });
     expect(dateTh.getAttribute("aria-sort")).toBe("descending");
@@ -161,11 +173,11 @@ describe("MentoredPublicationsTable — publications", () => {
     const yearTh = within(table()).getByRole("columnheader", { name: /^Year/ });
     expect(yearTh.getAttribute("aria-sort")).toBe("none");
     fireEvent.click(within(yearTh).getByRole("button"));
-    expect(ids()).toEqual(["2", "1", "4"]);
+    expect(ids()).toEqual(["2", "1", "4", "SCOPUS:105037533819"]);
     expect(within(table()).getByRole("columnheader", { name: /^Year/ }).getAttribute("aria-sort")).toBe("descending");
     expect(within(table()).getByRole("columnheader", { name: /Date added/ }).getAttribute("aria-sort")).toBe("none");
     fireEvent.click(within(within(table()).getByRole("columnheader", { name: /^Year/ })).getByRole("button"));
-    expect(ids()).toEqual(["4", "1", "2"]);
+    expect(ids()).toEqual(["SCOPUS:105037533819", "4", "1", "2"]);
     expect(within(table()).getByRole("columnheader", { name: /^Year/ }).getAttribute("aria-sort")).toBe("ascending");
     // JIF asc: the two null JIFs stay last.
     fireEvent.click(within(within(table()).getByRole("columnheader", { name: /^JIF/ })).getByRole("button"));
@@ -177,11 +189,11 @@ describe("MentoredPublicationsTable — publications", () => {
     const { container, ids, getByTestId } = renderPubs();
     const rail = within(container);
     fireEvent.click(rail.getByRole("button", { name: /Volunteer · co-author \(presumptive\)/ }));
-    expect(ids()).toEqual(["1", "2", "4", "3"]);
-    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 4 of 4 publications");
+    expect(ids()).toEqual(["1", "2", "4", "SCOPUS:105037533819", "3"]);
+    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 5 of 5 publications");
     fireEvent.click(rail.getByRole("button", { name: /Chen, Lin/ }));
-    expect(ids()).toEqual(["1", "2"]);
-    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 2 of 4 publications");
+    expect(ids()).toEqual(["1", "2", "SCOPUS:105037533819"]);
+    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 3 of 5 publications");
     // Position facet: "Last" is only pmid 2 of the rows passing the other facets.
     expect(rail.getByRole("button", { name: /^Last/ }).textContent).toBe("Last1");
   });

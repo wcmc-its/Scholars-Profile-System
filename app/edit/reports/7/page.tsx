@@ -269,12 +269,6 @@ export default async function EditReportsMentoredPublicationsPage({
   const allPubsMissing = allMode && report.allPubsLoaded === false;
   // The download never carries `view` (the workbook has no Publications view).
   const qs = mentoredPubsQueryString({ ...params, view: "summary" });
-  // Suggestion-evidence pubs the report could not show (PubMed only / no local row).
-  const notShown = [
-    report.droppedNonPubmed > 0 && `${report.droppedNonPubmed.toLocaleString()} non-PubMed`,
-    report.droppedUnresolved > 0 && `${report.droppedUnresolved.toLocaleString()} not yet in the local corpus`,
-  ].filter(Boolean);
-
   return (
     <ConsoleShell
       active="reports"
@@ -295,9 +289,9 @@ export default async function EditReportsMentoredPublicationsPage({
         thesis-advisor records, ED postdoc appointments, and co-authorship patterns (presumptive
         &mdash; unchecked by default). &ldquo;In window&rdquo; means entry year &le; publication year
         &le; graduation year + {params.tail}; an MD-program learner with no entry year on the roster
-        is assumed to have entered four years before graduating. PubMed-indexed publications only;
-        Scopus-only co-publications are excluded when the bridge is imported
-        {notShown.length > 0 && ` (co-publications not shown: ${notShown.join(", ")})`}.
+        is assumed to have entered four years before graduating.
+        {report.droppedUnresolved > 0 &&
+          ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
       </p>
       <FilterForm params={params} yearChoices={yearChoices} programChoices={programChoices} />
       <ViewControls params={params} />

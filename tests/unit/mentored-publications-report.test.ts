@@ -23,8 +23,9 @@
  * empty-bridge signal; every (learner, mentor) pair typed `{ bucket, roster,
  * confirmed }`; the three other sources land typed, year-filtered by their
  * own year, no 4-year guess for a PhD, an ongoing postdoc's open window,
- * suggestion evidence resolved from `publication` (PubMed only, unresolved
- * counted).
+ * suggestion evidence resolved from `publication` (unresolved counted); a
+ * Scopus-only key (`SCOPUS:…`, round 5) flows through the bridge and the
+ * evidence alike, with JIF and null iCite citations.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -97,19 +98,21 @@ const aoc = (o: Partial<Aoc> & Pick<Aoc, "mentorCwid" | "menteeCwid">): Aoc => (
 /** An `aoc_mentee_publication` row (the learner's full list, "all" mode). */
 function learnerPub(
   menteeCwid: string,
-  pmid: number,
+  pmid: number | string,
   year: number | null,
   opts: { position?: number | null } = {},
 ) {
   const { pub } = copub("nobody", menteeCwid, pmid, year, opts);
-  return { menteeCwid, pmid, pub };
+  return { menteeCwid, pmid: String(pmid), pub };
 }
 
-/** A bridge row whose `pub` JSON carries the learner at `position` on the byline. */
+/** A bridge row whose `pub` JSON carries the learner at `position` on the
+ *  byline. The row key is the SPS string key; a string `pmid` is a
+ *  Scopus-only key, whose JSON `pmid` is ReciterDB's synthetic negative. */
 function copub(
   mentorCwid: string,
   menteeCwid: string,
-  pmid: number,
+  pmid: number | string,
   year: number | null,
   opts: { position?: number | null; journal?: string; scopus?: number } = {},
 ) {
@@ -122,9 +125,10 @@ function copub(
   return {
     mentorCwid,
     menteeCwid,
-    pmid,
+    pmid: String(pmid),
     pub: {
-      pmid,
+      id: String(pmid),
+      pmid: typeof pmid === "number" ? pmid : -4242,
       title: `Paper ${pmid}`,
       journal: opts.journal ?? "Journal of Tests",
       year,
@@ -218,11 +222,11 @@ describe("loadMentoredPublicationsReport", () => {
       pubsAllTime: 5,
     });
     expect(report.detail.map((d) => [d.pmid, d.inWindow])).toEqual([
-      [4, false],
-      [3, true],
-      [2, true],
-      [1, false],
-      [5, false],
+      ["4", false],
+      ["3", true],
+      ["2", true],
+      ["1", false],
+      ["5", false],
     ]);
 
     const wider = await loadMentoredPublicationsReport({ scopes: ["*"], tail: 2 });
@@ -272,7 +276,7 @@ describe("loadMentoredPublicationsReport", () => {
     expect(report.detail).toHaveLength(2);
     expect(report.detail.map((d) => d.mentorCwid)).toEqual(["men0001", "men0002"]);
     expect(report.detail[0]).toMatchObject({
-      pmid: 7,
+      pmid: "7",
       jif: 96.2,
       citations: 12, // iCite, NOT the Scopus 999 in the bridge JSON
       learnerAuthorPosition: 1,
@@ -290,7 +294,7 @@ describe("loadMentoredPublicationsReport", () => {
     // The Publications view: ONE row for the pmid, both mentors, the learner once.
     expect(report.publications).toHaveLength(1);
     expect(report.publications[0]).toMatchObject({
-      pmid: 7,
+      pmid: "7",
       jif: 96.2,
       citations: 12,
       withMentor: true,
@@ -324,6 +328,26 @@ describe("loadMentoredPublicationsReport", () => {
       inWindow: true,
     });
     expect(report.summary[0]).toMatchObject({ pubsInWindow: 1, highImpactInWindow: 0, firstAuthorInWindow: 0 });
+  });
+
+  it("a Scopus-only bridge row (SCOPUS: key) lands with JIF from its publication row and null iCite citations", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", graduationYear: 2025, entryYear: 2021 }),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0001", "stu0001", "SCOPUS:105037533819", 2024, { position: 1 }),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([
+      { pmid: "SCOPUS:105037533819", journalAbbrev: "N Engl J Med", dateAddedToEntrez: null, citedByCount: null },
+    ]);
+    hoisted.mockJifFindMany.mockResolvedValue([{ journalAbbrev: "N ENGL J MED", impactScore1: "96.2" }]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(hoisted.mockPubFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { pmid: { in: ["SCOPUS:105037533819"] } } }),
+    );
+    expect(report.detail[0]).toMatchObject({ pmid: "SCOPUS:105037533819", jif: 96.2, citations: null, dateAdded: null });
+    expect(report.publications[0]).toMatchObject({ pmid: "SCOPUS:105037533819", jif: 96.2, citations: null });
+    expect(report.summary[0]).toMatchObject({ pubsInWindow: 1, highImpactInWindow: 1, firstAuthorInWindow: 1 });
   });
 
   it("scope filtering keeps only rows whose program bucket is admitted", async () => {
@@ -413,15 +437,17 @@ describe("loadMentoredPublicationsReport", () => {
     hoisted.mockCopubFindMany.mockResolvedValue([
       copub("men0001", "stu0001", 1, 2021),
       copub("men0001", "stu0001", 2, 2023),
+      copub("men0001", "stu0001", 10, 2023), // same year as 2: the key tiebreak is lexicographic
       copub("men0001", "stu0003", 3, 2022),
     ]);
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
     // Newest graduating class first; unknown year last.
     expect(report.summary.map((s) => s.cwid)).toEqual(["stu0003", "stu0001", "stu0002", "stu0004"]);
     expect(report.detail.map((d) => [d.learnerCwid, d.pmid])).toEqual([
-      ["stu0003", 3],
-      ["stu0001", 2],
-      ["stu0001", 1],
+      ["stu0003", "3"],
+      ["stu0001", "2"],
+      ["stu0001", "10"],
+      ["stu0001", "1"],
     ]);
   });
 
@@ -496,15 +522,15 @@ describe("loadMentoredPublicationsReport", () => {
       { pmid: "4", journalAbbrev: null, dateAddedToEntrez: new Date("2024-01-01"), citedByCount: null },
     ]);
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.publications.map((p) => p.pmid)).toEqual([5, 4, 6]);
-    const shared = report.publications.find((p) => p.pmid === 5)!;
+    expect(report.publications.map((p) => p.pmid)).toEqual(["5", "4", "6"]);
+    const shared = report.publications.find((p) => p.pmid === "5")!;
     expect(shared.learners).toEqual([
       { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, authorPosition: 1, inWindow: true },
       { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, authorPosition: null, inWindow: false },
     ]);
     expect(shared.mentors.map((m) => m.cwid)).toEqual(["men0001", "men0002"]);
     // The detail sheet still has one row per (learner, mentor, pub).
-    expect(report.detail.filter((d) => d.pmid === 5)).toHaveLength(2);
+    expect(report.detail.filter((d) => d.pmid === "5")).toHaveLength(2);
   });
 
   it("a mentor shared by two learners of different types lists both, deduped by key", async () => {
@@ -578,14 +604,14 @@ describe("loadMentoredPublicationsReport", () => {
           d.paperMentors.map((m) => m.name),
         ]),
       ).toEqual([
-        [2, null, false, []],
-        [1, null, true, ["Zed Mentor"]],
-        [3, null, false, []],
+        ["2", null, false, []],
+        ["1", null, true, ["Zed Mentor"]],
+        ["3", null, false, []],
       ]);
       expect(report.publications.map((p) => [p.pmid, p.withMentor])).toEqual([
-        [2, false],
-        [1, true],
-        [3, false],
+        ["2", false],
+        ["1", true],
+        ["3", false],
       ]);
       expect(report.detail.every((d) => d.mentorship === null)).toBe(true);
     });
@@ -646,7 +672,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     ...o,
   });
   /** A local `publication` row as BOTH reads see it (evidence resolve + enrich). */
-  const localPub = (pmid: number) => ({
+  const localPub = (pmid: number | string) => ({
     pmid: String(pmid),
     title: `Local ${pmid}`,
     journal: "J Local",
@@ -725,7 +751,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     ]);
   });
 
-  it("a suggestion's evidence resolves from `publication`: parsed byline, authorPosition = menteeRank, mentor on the paper; SCOPUS: and unresolved ids are counted", async () => {
+  it("a suggestion's evidence resolves from `publication`: parsed byline, authorPosition = menteeRank, mentor on the paper; a SCOPUS: id resolves too; unresolved ids are counted", async () => {
     hoisted.mockSuggestionFindMany.mockResolvedValue([
       suggestion({
         mentorCwid: "men0004",
@@ -733,20 +759,20 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
         evidence: [
           { id: "101", year: 2024, menteeRank: 1, mentorRank: 3, total: 3 },
           { id: "SCOPUS:2-s2.0-85000000001", year: 2024, menteeRank: 1, mentorRank: 2, total: 2 },
-          { id: "-5", year: 2024, menteeRank: 1, mentorRank: 2, total: 2 },
+          { id: "", year: 2024, menteeRank: 1, mentorRank: 2, total: 2 }, // no key — skipped, not counted
           { id: "102", year: 2023, menteeRank: 2, mentorRank: 1, total: 2 }, // no local row
         ],
       }),
     ]);
-    hoisted.mockPubFindMany.mockResolvedValue([localPub(101)]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(101), localPub("SCOPUS:2-s2.0-85000000001")]);
     hoisted.mockScholarFindMany.mockResolvedValue([{ cwid: "men0004", preferredName: "Zed Mentor" }]);
 
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.droppedNonPubmed).toBe(2);
     expect(report.droppedUnresolved).toBe(1);
-    expect(report.publications).toHaveLength(1);
+    expect(report.publications.map((p) => p.pmid)).toEqual(["101", "SCOPUS:2-s2.0-85000000001"]);
+    expect(report.publications[1]).toMatchObject({ pmid: "SCOPUS:2-s2.0-85000000001", citations: null, withMentor: true });
     expect(report.publications[0]).toMatchObject({
-      pmid: 101,
+      pmid: "101",
       title: "Local 101",
       citation: "Van Volunteer V, Second AB, Mentor Z. Local 101. J Local. 2024;5(2):10-20.",
       authorCount: 3,
@@ -760,16 +786,16 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
         },
       ],
     });
-    expect(report.detail).toHaveLength(1);
+    expect(report.detail).toHaveLength(2);
     expect(report.detail[0]).toMatchObject({
-      pmid: 101,
+      pmid: "SCOPUS:2-s2.0-85000000001",
       mentorCwid: "men0004",
       mentorship: "Volunteer · co-author (presumptive)",
       learnerAuthorPosition: 1,
       withMentor: true,
       inWindow: null,
     });
-    expect(report.summary[0]).toMatchObject({ cwid: "sug0001", pubsAllTime: 1, pubsInWindow: null, entryYearSource: null });
+    expect(report.summary[0]).toMatchObject({ cwid: "sug0001", pubsAllTime: 2, pubsInWindow: null, entryYearSource: null });
   });
 
   it("a pair the roster already confirms keeps its roster type and reads the bridge, not the suggestion's evidence", async () => {
@@ -781,7 +807,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     expect(report.summary[0].mentors).toEqual([
       { cwid: "men0001", name: "men0001", mentorship: { program: "md", source: "roster", tier: "confirmed" } },
     ]);
-    expect(report.publications.map((p) => p.pmid)).toEqual([7]);
+    expect(report.publications.map((p) => p.pmid)).toEqual(["7"]);
     expect(report.droppedUnresolved).toBe(0);
   });
 
@@ -803,9 +829,9 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
       ["pd0001", null, 2022, "bridge", 2, 3],
     ]);
     expect(report.detail.filter((d) => d.learnerCwid === "pd0001").map((d) => [d.pmid, d.inWindow])).toEqual([
-      [3, true],
-      [2, true],
-      [1, false],
+      ["3", true],
+      ["2", true],
+      ["1", false],
     ]);
   });
 
@@ -891,7 +917,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
       ["stu0001", 2],
       ["phd0001", 1],
     ]);
-    expect(report.detail.filter((d) => d.learnerCwid === "phd0001").map((d) => [d.pmid, d.withMentor])).toEqual([[2, true]]);
+    expect(report.detail.filter((d) => d.learnerCwid === "phd0001").map((d) => [d.pmid, d.withMentor])).toEqual([["2", true]]);
   });
 });
 

@@ -72,7 +72,7 @@ export const SUMMARY_HEADERS_ALL = [
 ] as const;
 
 const RAW_PUB_HEADERS = [
-  "PMID",
+  "PMID / Scopus ID",
   "Title",
   "Journal",
   "Journal impact factor",
