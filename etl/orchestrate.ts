@@ -68,6 +68,7 @@ async function main() {
     // than failing, so it is safe in the chain on the same footing as ReCiter
     // even before #443 lands.
     ["ReCiter-COI-Statements", "etl/reciter/backfill-coi-statements.ts"],
+    ["RPM-orcid-candidates", "etl/orcid-candidates/index.ts"],
     ["ASMS", "etl/asms/index.ts"],
     ["InfoEd", "etl/infoed/index.ts"],
     ["Jenzabar", "etl/jenzabar/index.ts"],

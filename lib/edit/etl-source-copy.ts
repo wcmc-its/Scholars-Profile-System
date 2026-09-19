@@ -104,6 +104,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Each scholar's ORCID iD, used by search engines and shown in the editor.",
     origin: "external", // WCM Identity DynamoDB table
   },
+  "RPM-orcid-candidates": {
+    label: "ORCID candidates from Publication Manager",
+    description:
+      "ORCID iDs the ReCiter Publication Manager has inferred from a scholar's accepted publications, or an administrator entered there. Feeds the ORCID coverage dashboard only.",
+    origin: "external", // WCM ReciterDB
+  },
   Tools: {
     label: "Methods & Tools",
     description: "Fills the Methods & tools list of techniques and models on profiles.",

@@ -97,6 +97,7 @@
     "etl:dynamodb:probe-synopsis": "tsx etl/dynamodb/probe-synopsis.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
     "etl:identity": "tsx etl/identity/index.ts",
+    "etl:orcid-candidates": "tsx etl/orcid-candidates/index.ts",
     "etl:hierarchy": "tsx etl/hierarchy/index.ts",
     "etl:mesh": "tsx etl/mesh-descriptors/index.ts",
     "etl:cancer-taxonomy": "tsx etl/cancer-taxonomy/index.ts",

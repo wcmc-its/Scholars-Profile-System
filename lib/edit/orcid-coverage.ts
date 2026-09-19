@@ -1,0 +1,388 @@
+/**
+ * `/edit/orcid-coverage` — ORCID iD and eRA-profile coverage by person type
+ * and by department, over active scholars. Aggregates only; never a per-person
+ * list (`SCHOLAR_EXPORT_CAP` in `lib/api/export-scholars.ts` is policy).
+ *
+ * Definitions, because the copy on the page repeats them:
+ *  - "Asserted ORCID" = `scholar.orcid` is set (WCM Identity, #2675/#2676) OR
+ *    an RPM administrator entered one (`orcid_candidate.source = rpm_admin`).
+ *    Identity is never NULLed on absence — it may lag ED.
+ *  - "Inferred" = the ReCiter Publication Manager saw an ORCID on the person's
+ *    PubMed author record across articles they accepted (`orcid_candidate`,
+ *    `source = rpm_inferred`, mirrored nightly). STRONG = exactly one candidate
+ *    ORCID, carried by ≥ STRONG_MIN_ACCEPTED accepted articles and by no
+ *    rejected one; WEAK = any other inferred candidate (thin support, a
+ *    contradiction, or several candidate ORCIDs). Tiers are exclusive:
+ *    asserted > strong > weak > none. Inferred ORCIDs never reach the public
+ *    profile; the outreach ask is "is this yours? confirm it".
+ *  - "eRA account" = a preferred `person_nih_profile` row: the RePORTER
+ *    `profile_id`. Inferred, and the inference is one-directional — nobody is
+ *    listed as a PI in RePORTER without an eRA Commons account, but RePORTER
+ *    lists PIs only, so a Co-I / key person on someone else's award has an
+ *    account we can never see. That is why the gap column is "NIH PI, no eRA
+ *    account" (a resolver miss, #2651 — actionable) rather than every
+ *    NIH-funded person. The eRA Commons *username* has no source anywhere
+ *    (Identity, InfoEd, RePORTER all probed 2026-09-18) and is not a column.
+ *  - "NIH-funded" = any `grant` row for the cwid with `nih_ic` set (`nihIc` is
+ *    populated only for NIH awards); "current" additionally needs an award
+ *    whose `end_date` is today or later.
+ *
+ * Three flat reads + one pure fold (`buildOrcidCoverage`), so the fold is
+ * testable on a fixture with no DB. ~11k scholar rows; no cache.
+ */
+import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { toCsv } from "@/lib/csv";
+import { PI_ROLES } from "@/lib/funding-roles";
+import { formatRoleCategory } from "@/lib/role-display";
+
+export const NIH_FILTERS = ["all", "ever", "current", "none"] as const;
+export type NihFilter = (typeof NIH_FILTERS)[number];
+
+export const NIH_FILTER_LABELS: Record<NihFilter, string> = {
+  all: "Everyone",
+  ever: "NIH-funded (any award on file)",
+  current: "NIH-funded (award ending today or later)",
+  none: "No NIH award on file",
+};
+
+/** The department table's default population — the outreach list NIH's
+ *  ORCID-for-SciENcv rule is about. The person-type table ignores `role`
+ *  (it IS the role breakdown). */
+export const DEFAULT_ROLE = "full_time_faculty";
+
+export type OrcidCoverageParams = {
+  /** `scholar.role_category` key; null = every person type. */
+  role: string | null;
+  nih: NihFilter;
+  /** `scholar.primary_department`; null = every department. */
+  dept: string | null;
+};
+
+/** Plain `<select>` values straight off the query string; an unknown `nih`
+ *  falls back to `all`, an unknown role/dept just matches nothing (they are
+ *  JS-side equality filters, never SQL). */
+export function parseOrcidCoverageParams(
+  raw: Record<string, string | string[] | undefined> | URLSearchParams,
+): OrcidCoverageParams {
+  const get = (k: string) => {
+    const v = raw instanceof URLSearchParams ? raw.get(k) : raw[k];
+    const s = Array.isArray(v) ? v[0] : v;
+    return s?.trim() || undefined;
+  };
+  const role = get("role");
+  const nih = get("nih") ?? "all";
+  const dept = get("dept");
+  return {
+    role: role === undefined ? DEFAULT_ROLE : role === "all" ? null : role,
+    nih: (NIH_FILTERS as readonly string[]).includes(nih) ? (nih as NihFilter) : "all",
+    dept: dept === undefined || dept === "all" ? null : dept,
+  };
+}
+
+/** `""` or `?role=…&nih=…&dept=…` — the page and its CSV route share it. A
+ *  `role` of null spells `role=all` (absent means the default). */
+export function orcidCoverageQuery(params: Partial<OrcidCoverageParams>): string {
+  const q = new URLSearchParams();
+  if (params.role !== undefined) q.set("role", params.role ?? "all");
+  if (params.nih !== undefined && params.nih !== "all") q.set("nih", params.nih);
+  if (params.dept) q.set("dept", params.dept);
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+export type ScholarRow = {
+  cwid: string;
+  roleCategory: string | null;
+  primaryDepartment: string | null;
+  orcid: string | null;
+};
+export type CandidateRow = {
+  cwid: string;
+  source: string;
+  articlesAccepted: number;
+  articlesRejected: number;
+};
+/** Accepted articles carrying the ORCID for an inference to count as strong. */
+export const STRONG_MIN_ACCEPTED = 3;
+export type OrcidTier = "asserted" | "strong" | "weak" | "none";
+
+/** One tier per cwid from the candidate rows; `scholar.orcid` is folded in by the caller. */
+export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
+  const byCwid = new Map<string, CandidateRow[]>();
+  for (const c of candidates) {
+    const b = byCwid.get(c.cwid);
+    if (b) b.push(c);
+    else byCwid.set(c.cwid, [c]);
+  }
+  const out = new Map<string, OrcidTier>();
+  for (const [cwid, rows] of byCwid) {
+    if (rows.some((r) => r.source === "rpm_admin")) {
+      out.set(cwid, "asserted");
+      continue;
+    }
+    const inferred = rows.filter((r) => r.source === "rpm_inferred");
+    if (inferred.length === 0) continue;
+    const [only] = inferred;
+    out.set(
+      cwid,
+      inferred.length === 1 &&
+        only.articlesRejected === 0 &&
+        only.articlesAccepted >= STRONG_MIN_ACCEPTED
+        ? "strong"
+        : "weak",
+    );
+  }
+  return out;
+}
+/** One row per NIH-funded cwid; `latestEnd` = MAX(grant.end_date) among its NIH
+ *  awards, `pi` = holds a `PI_ROLES` role on at least one of them. */
+export type NihRow = { cwid: string; latestEnd: Date | null; pi: boolean };
+
+export type CoverageCounts = {
+  people: number;
+  /** Asserted ORCID (Identity or RPM admin). */
+  orcid: number;
+  /** Strong RPM inference, no asserted ORCID. */
+  strong: number;
+  /** Weak RPM inference, no asserted ORCID. */
+  weak: number;
+  /** Preferred eRA profile_id on file (= eRA Commons account, inferred). */
+  era: number;
+  both: number;
+  nihPeople: number;
+  nihOrcid: number;
+  /** NIH-funded, no asserted ORCID, but a strong inference — the easy outreach. */
+  nihStrong: number;
+  /** NIH-funded as a PI (`PI_ROLES`) — the population RePORTER can resolve. */
+  nihPi: number;
+  /** …of whom with an eRA account. `nihPi - nihPiEra` is the resolver gap. */
+  nihPiEra: number;
+};
+export type CoverageRow = CoverageCounts & { key: string | null; label: string };
+
+export type OrcidCoverage = {
+  params: OrcidCoverageParams;
+  /** Always the unfiltered population — the three numbers anyone asks for. */
+  tiles: { overall: CoverageCounts; fullTime: CoverageCounts; nihFullTime: CoverageCounts };
+  /** Filtered by `nih` + `dept`; every person type; people desc. */
+  byRole: CoverageRow[];
+  /** Filtered by `role` + `nih`; NIH-funded-without-ORCID desc (the action list). */
+  byDept: CoverageRow[];
+  /** Select choices from the data: [key, label] by headcount desc; departments A–Z. */
+  roles: Array<[string, string]>;
+  depts: string[];
+};
+
+export const neither = (c: CoverageCounts) => c.people - c.orcid - c.era + c.both;
+export const nihNoOrcid = (c: CoverageCounts) => c.nihPeople - c.nihOrcid;
+export const piNoEra = (c: CoverageCounts) => c.nihPi - c.nihPiEra;
+export const pct = (n: number, d: number) => (d === 0 ? "—" : `${((100 * n) / d).toFixed(1)}%`);
+
+const roleLabel = (key: string | null) => formatRoleCategory(key) ?? "Unclassified";
+
+export function buildOrcidCoverage(
+  scholars: ScholarRow[],
+  nih: NihRow[],
+  eraCwids: Iterable<string>,
+  params: OrcidCoverageParams,
+  today: Date,
+  candidates: CandidateRow[] = [],
+): OrcidCoverage {
+  const tiers = orcidTiers(candidates);
+  const tierOf = (s: ScholarRow): OrcidTier =>
+    s.orcid !== null ? "asserted" : (tiers.get(s.cwid) ?? "none");
+  const nihEnd = new Map(nih.map((r) => [r.cwid, r.latestEnd]));
+  const nihPi = new Set(nih.filter((r) => r.pi).map((r) => r.cwid));
+  const era = new Set(eraCwids);
+  const isNih = (s: ScholarRow) => nihEnd.has(s.cwid);
+  const isCurrent = (s: ScholarRow) => {
+    const end = nihEnd.get(s.cwid);
+    return end != null && end.getTime() >= today.getTime();
+  };
+  const nihOk = (s: ScholarRow) =>
+    params.nih === "all"
+      ? true
+      : params.nih === "ever"
+        ? isNih(s)
+        : params.nih === "current"
+          ? isCurrent(s)
+          : !isNih(s);
+
+  const count = (rows: ScholarRow[]): CoverageCounts => {
+    const c = {
+      people: 0,
+      orcid: 0,
+      strong: 0,
+      weak: 0,
+      era: 0,
+      both: 0,
+      nihPeople: 0,
+      nihOrcid: 0,
+      nihStrong: 0,
+      nihPi: 0,
+      nihPiEra: 0,
+    };
+    for (const s of rows) {
+      const t = tierOf(s);
+      const o = t === "asserted";
+      const e = era.has(s.cwid);
+      c.people++;
+      if (o) c.orcid++;
+      else if (t === "strong") c.strong++;
+      else if (t === "weak") c.weak++;
+      if (e) c.era++;
+      if (o && e) c.both++;
+      if (isNih(s)) {
+        c.nihPeople++;
+        if (o) c.nihOrcid++;
+        else if (t === "strong") c.nihStrong++;
+        if (nihPi.has(s.cwid)) {
+          c.nihPi++;
+          if (e) c.nihPiEra++;
+        }
+      }
+    }
+    return c;
+  };
+  const group = (
+    rows: ScholarRow[],
+    key: (s: ScholarRow) => string | null,
+    label: (k: string | null) => string,
+  ) => {
+    const buckets = new Map<string | null, ScholarRow[]>();
+    for (const s of rows) {
+      const k = key(s);
+      const b = buckets.get(k);
+      if (b) b.push(s);
+      else buckets.set(k, [s]);
+    }
+    return [...buckets].map(([k, b]) => ({ key: k, label: label(k), ...count(b) }));
+  };
+
+  const fullTime = scholars.filter((s) => s.roleCategory === DEFAULT_ROLE);
+  const nihFiltered = scholars.filter(nihOk);
+
+  const byRole = group(
+    nihFiltered.filter((s) => params.dept === null || s.primaryDepartment === params.dept),
+    (s) => s.roleCategory,
+    roleLabel,
+  ).sort((a, b) => b.people - a.people || a.label.localeCompare(b.label));
+  const byDept = group(
+    nihFiltered.filter((s) => params.role === null || s.roleCategory === params.role),
+    (s) => s.primaryDepartment,
+    (k) => k ?? "No department",
+  ).sort(
+    (a, b) =>
+      nihNoOrcid(b) - nihNoOrcid(a) || b.people - a.people || a.label.localeCompare(b.label),
+  );
+
+  const roles = group(scholars, (s) => s.roleCategory, roleLabel)
+    .sort((a, b) => b.people - a.people || a.label.localeCompare(b.label))
+    .filter((r): r is CoverageRow & { key: string } => r.key !== null)
+    .map((r) => [r.key, r.label] as [string, string]);
+  const depts = [...new Set(scholars.map((s) => s.primaryDepartment))]
+    .filter((d): d is string => d !== null)
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    params,
+    tiles: {
+      overall: count(scholars),
+      fullTime: count(fullTime),
+      nihFullTime: count(fullTime.filter(isNih)),
+    },
+    byRole,
+    byDept,
+    roles,
+    depts,
+  };
+}
+
+export type OrcidCoverageClient = Pick<
+  PrismaClient,
+  "scholar" | "grant" | "personNihProfile" | "orcidCandidate"
+>;
+
+export async function loadOrcidCoverage(
+  db: OrcidCoverageClient,
+  params: OrcidCoverageParams,
+): Promise<OrcidCoverage> {
+  const [scholars, nih, era, candidates] = await Promise.all([
+    // Same population the Identity ETL writes to (`etl/identity/index.ts`),
+    // narrowed to status=active like every other console aggregate.
+    db.scholar.findMany({
+      where: { deletedAt: null, status: "active" },
+      select: { cwid: true, roleCategory: true, primaryDepartment: true, orcid: true },
+    }),
+    db.grant.groupBy({
+      by: ["cwid", "role"],
+      where: { nihIc: { not: null } },
+      _max: { endDate: true },
+    }),
+    db.personNihProfile.findMany({ where: { isPreferred: true }, select: { cwid: true } }),
+    db.orcidCandidate.findMany({
+      select: { cwid: true, source: true, articlesAccepted: true, articlesRejected: true },
+    }),
+  ]);
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  // (cwid, role) rows → one NihRow per cwid.
+  const byCwid = new Map<string, NihRow>();
+  for (const r of nih) {
+    const cur = byCwid.get(r.cwid) ?? { cwid: r.cwid, latestEnd: null, pi: false };
+    const end = r._max.endDate;
+    if (end && (cur.latestEnd === null || end > cur.latestEnd)) cur.latestEnd = end;
+    if ((PI_ROLES as readonly string[]).includes(r.role)) cur.pi = true;
+    byCwid.set(r.cwid, cur);
+  }
+  return buildOrcidCoverage(
+    scholars,
+    [...byCwid.values()],
+    era.map((r) => r.cwid),
+    params,
+    today,
+    candidates,
+  );
+}
+
+export const CSV_HEADERS = [
+  "Department",
+  "People",
+  "Asserted ORCID",
+  "Asserted %",
+  "Inferred ORCID (strong)",
+  "Inferred ORCID (weak)",
+  "eRA account (inferred)",
+  "Both",
+  "Neither",
+  "NIH-funded",
+  "NIH-funded with asserted ORCID",
+  "NIH-funded without asserted ORCID",
+  "NIH-funded without asserted but strong inference",
+  "NIH PI",
+  "NIH PI without eRA account",
+] as const;
+
+/** The department table as CSV — aggregates only, no per-person rows. */
+export function orcidCoverageCsv(rows: CoverageRow[]): string {
+  return toCsv(
+    CSV_HEADERS,
+    rows.map((r) => [
+      r.label,
+      r.people,
+      r.orcid,
+      r.people === 0 ? "" : ((100 * r.orcid) / r.people).toFixed(1),
+      r.strong,
+      r.weak,
+      r.era,
+      r.both,
+      neither(r),
+      r.nihPeople,
+      r.nihOrcid,
+      nihNoOrcid(r),
+      r.nihStrong,
+      r.nihPi,
+      piNoEra(r),
+    ]),
+  );
+}

@@ -61,6 +61,7 @@ const NO_TABS: ConsoleTabState = {
   dataSharing: false,
   activity: false,
   usage: false,
+  orcidCoverage: false,
   etlStatus: false,
   cores: false,
   matcha: false,
@@ -159,6 +160,22 @@ describe("ConsoleShell", () => {
     // straight from `session.isSuperuser`, independent of `loadConsoleTabs`.
     expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
+    expect(screen.queryByTestId("admin-tab-activity")).toBeNull();
+  });
+
+  it("shows Usage + ORCID coverage to a non-superuser unit admin — both ride the same canViewUsage grant", async () => {
+    mockLoadConsoleTabs.mockResolvedValue(tabs({ profiles: true, units: true, usage: true, orcidCoverage: true }));
+    render(
+      await ConsoleShell({
+        active: "orcid-coverage",
+        session: session({}),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        children: <h1>ORCID coverage</h1>,
+      }),
+    );
+    expect(screen.getByTestId("admin-tab-usage")).toBeTruthy();
+    expect(screen.getByTestId("admin-tab-orcid-coverage").getAttribute("aria-current")).toBe("page");
     expect(screen.queryByTestId("admin-tab-activity")).toBeNull();
   });
 

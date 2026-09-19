@@ -1088,6 +1088,7 @@ export class EtlStack extends Stack {
     const SOURCES_SCRIPTS = new Set([
       "etl:reciter",
       "etl:reciter:coi-statements",
+      "etl:orcid-candidates",
       "etl:asms",
       "etl:infoed",
       "etl:coi",
@@ -1424,6 +1425,11 @@ export class EtlStack extends Stack {
         external: true,
         tier: "continue",
       },
+      // RPM ORCID candidates (inferred + admin-entered) → orcid_candidate, read by
+      // /edit/orcid-coverage only. Same ReciterDB path as Reciter, so external:true
+      // and placed with it; tier:"continue" — a missed night just leaves last
+      // night's mirror, and the step refuses to write on an empty read.
+      { id: "OrcidCandidates", npmScript: "etl:orcid-candidates", external: true, tier: "continue" },
       { id: "Asms", npmScript: "etl:asms", external: true, tier: "continue" },
       // etl:infoed is EXCLUDED from the STAGING cadence (Paul, 2026-06-22).
       // InfoEd's on-prem address sits in a range that overlaps the Sps VPC's

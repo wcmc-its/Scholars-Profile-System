@@ -45,6 +45,7 @@ export type AdminSubnavActive =
   | "data-sharing"
   | "activity"
   | "usage"
+  | "orcid-coverage"
   | "etl-status"
   | "reports"
   | "cores"
@@ -104,6 +105,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   "data-sharing": "insights",
   activity: "insights",
   usage: "insights",
+  "orcid-coverage": "insights",
   "etl-status": "insights",
   // Its own single-member group (Reports IA redesign, 2026-08-14) — a
   // dedicated top-level tab, not an Insights peer. Reverses the 2026-08-12
@@ -140,6 +142,7 @@ export function AdminSubnav({
   profilesTab = false,
   unitsTab = false,
   usageTab = false,
+  orcidCoverageTab = false,
   reportsTab = false,
   newsTab = false,
   coresTab = false,
@@ -199,6 +202,9 @@ export function AdminSubnav({
    *  `superuserSurfaces`; this is the escape hatch so a unit admin who can view
    *  usage (`canViewUsage`) sees the tab too. Default `false`. */
   usageTab?: boolean;
+  /** Show the "ORCID coverage" tab (`/edit/orcid-coverage`) — same audience
+   *  and gate as `usageTab` (`canViewUsage`). Default `false`. */
+  orcidCoverageTab?: boolean;
   /** Show the "Reports" tab (`/edit/reports`, the Cancer Center reports console)
    *  to a non-superuser unit admin (owner/curator) with at least one reportable
    *  unit. Superusers already get it via `superuserSurfaces`; this is the
@@ -325,6 +331,12 @@ export function AdminSubnav({
       // Wider audience than the other superuser tabs: a superuser OR any unit admin
       // (via `usageTab`, set when `canViewUsage` passes).
       { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
+      {
+        show: superuserSurfaces || orcidCoverageTab,
+        id: "orcid-coverage",
+        href: "/edit/orcid-coverage",
+        label: "ORCID coverage",
+      },
       // Read-only ETL health board. Superuser-only; no separate flag — same
       // rationale as Activity above, the superuser gate on the page IS the control.
       { show: superuserSurfaces, id: "etl-status", href: "/edit/etl-status", label: "ETL status" },

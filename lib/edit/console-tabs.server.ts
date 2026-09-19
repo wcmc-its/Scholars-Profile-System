@@ -69,6 +69,7 @@ export const CONSOLE_TAB_IDS = [
   "dataSharing",
   "activity",
   "usage",
+  "orcidCoverage",
   "etlStatus",
   "cores",
   "matcha",
@@ -174,6 +175,8 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // Gap 4 (usage half): any UnitAdmin grant, from any page. `canViewUsage`
   // already ORs in `isSuperuser`.
   usage: (_s, g) => g.viewerCanViewUsage,
+  // `/edit/orcid-coverage` — same audience as Usage (org-wide aggregates).
+  orcidCoverage: (_s, g) => g.viewerCanViewUsage,
 
   // Gap 1b: developers get these from the `/edit` landing page too, because
   // visibility no longer depends on which page you're standing on.

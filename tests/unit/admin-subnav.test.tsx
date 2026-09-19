@@ -776,6 +776,30 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       expect(screen.queryByTestId("admin-group-insights")).toBeNull();
     });
 
+    // The real unit-admin shape: `usage` and `orcidCoverage` share one predicate
+    // (`viewerCanViewUsage`), so a grant holder always gets BOTH and Insights
+    // becomes a 2-member group rather than a promoted lone Usage tab.
+    it("non-superuser unit admin with both usage tabs → Insights grouped, ORCID coverage inside it", async () => {
+      grouped();
+      render(
+        <AdminSubnav
+          active="orcid-coverage"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          unitsTab
+          usageTab
+          orcidCoverageTab
+        />,
+      );
+      expect(screen.getByTestId("admin-group-insights").getAttribute("aria-current")).toBe("page");
+      fireEvent.focus(screen.getByTestId("admin-group-insights"));
+      expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
+        "admin-tab-usage",
+        "admin-tab-orcid-coverage",
+      ]);
+    });
+
     it("dev-role viewer → Tools={Matcha} promoted while GRANT_MATCHA is off, grouped when on", () => {
       vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
       vi.stubEnv("MATCHA", "on");
@@ -870,6 +894,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
       "admin-tab-activity",
       "admin-tab-usage",
+      "admin-tab-orcid-coverage",
       "admin-tab-etl-status",
     ]);
   });
@@ -881,7 +906,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
         "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
-        "administrators", "methods", "reports", "activity", "usage", "etl-status", "cores",
+        "administrators", "methods", "reports", "activity", "usage", "orcid-coverage", "etl-status", "cores",
       ].map((id) => `admin-tab-${id}`),
     );
     for (const g of ["queues", "registries", "insights", "tools"])

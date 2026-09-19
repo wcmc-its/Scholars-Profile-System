@@ -87,6 +87,7 @@ export async function ConsoleShell({
         newsTab={tabs.news}
         coresTab={tabs.cores}
         usageTab={tabs.usage}
+        orcidCoverageTab={tabs.orcidCoverage}
         viewerIsDeveloper={session.isDeveloper === true}
       />
       <main id="console-main" tabIndex={-1} className="mx-auto max-w-[var(--max-content)] px-6 py-8">
