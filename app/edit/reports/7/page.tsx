@@ -16,10 +16,17 @@
  * citation with its PMID link, JIF, iCite count, the learner(s) and
  * mentor(s) on it. Both tables are ONE client island
  * (`components/edit/mentored-publications-table.tsx`): an in-memory facet
- * rail (type of mentorship, year, author position, window, mentor) and
- * sortable headers over the rows this page loads in one shot; the download
- * is server-filtered only (program / years / set / tail), never by the rail.
- * Two publication sets (`pubs=mentored|all`, a select in the filter form):
+ * rail (year, author position, window, mentor) and sortable headers over
+ * the rows this page loads in one shot; the download is server-filtered
+ * only (types / years / set / tail), never by the rail.
+ * "Type of mentorship" (`types=`, a checkbox group in the filter form) is
+ * SERVER-side on purpose: the loader reads only the sources the selected
+ * types need, so an AOC-office holder sees AOC-defined pairs and nothing
+ * inferred (`lib/edit/mentorship-type.ts`; the choices offered and the
+ * default are resolved against the caller's scopes — a roster type is
+ * offered only when its scope is held, co-author inferences are never on by
+ * default). Two publication sets (`pubs=mentored|all`, a select in the
+ * filter form):
  * the co-pubs with an AOC mentor (default), or every publication of the
  * learner from the `aoc_mentee_publication` bridge, each flagged for a mentor
  * co-author. Both params ride every tab link and the download link; `view`
@@ -63,13 +70,18 @@ import {
   PROGRAM_LABEL,
 } from "@/lib/edit/mentored-publications-report";
 import {
+  allowedMentorshipTypes,
+  MENTORSHIP_TYPE_LABEL,
+  resolveMentorshipTypes,
+  type MentorshipTypeKey,
+} from "@/lib/edit/mentorship-type";
+import {
   ALL_SCOPES,
   canManageReportAccess,
   getReportScopes,
   listReportAccess,
   MENTORED_PUBS_REPORT,
   MENTORED_PUBS_SCOPES,
-  scopeAdmits,
 } from "@/lib/edit/report-access";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -88,14 +100,15 @@ function pageHref(params: MentoredPubsParams): string {
 function FilterForm({
   params,
   yearChoices,
-  programChoices,
+  typeChoices,
 }: {
   params: MentoredPubsParams;
   yearChoices: ReadonlyArray<number | null>;
-  programChoices: ReadonlyArray<readonly [string, string]>;
+  typeChoices: ReadonlyArray<MentorshipTypeKey>;
 }) {
   const selected = new Set(params.years ?? []);
   const allYears = params.years !== null && params.years.length === 0;
+  const selectedTypes = new Set(params.types ?? []);
   return (
     <AutoSubmitForm
       id="mentored-pubs-filters"
@@ -105,6 +118,17 @@ function FilterForm({
     >
       {/* The current view rides along as a hidden input the island owns
           (`form="mentored-pubs-filters"`), so a filter change keeps it. */}
+      <fieldset className="flex flex-col gap-1">
+        <legend className="text-foreground font-medium">Type of mentorship</legend>
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {typeChoices.map((k) => (
+            <label key={k} className="inline-flex items-center gap-1">
+              <input type="checkbox" name="types" value={k} defaultChecked={selectedTypes.has(k)} />
+              {MENTORSHIP_TYPE_LABEL[k]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <fieldset className="flex flex-col gap-1">
         <legend className="text-foreground font-medium">Graduation year</legend>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -120,23 +144,6 @@ function FilterForm({
           </label>
         </div>
       </fieldset>
-      {programChoices.length > 1 && (
-        <label className="flex flex-col gap-1">
-          <span className="text-foreground font-medium">Program</span>
-          <select
-            name="program"
-            defaultValue={params.program ?? "all"}
-            className="border-foreground/40 rounded border px-2 py-1"
-          >
-            <option value="all">All programs</option>
-            {programChoices.map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
       <label className="flex flex-col gap-1">
         <span className="text-foreground font-medium">Publications</span>
         <select
@@ -192,16 +199,15 @@ export default async function EditReportsMentoredPublicationsPage({
   const parsed = parseMentoredPubsParams((await searchParams) ?? {});
   const requested: MentoredPubsParams = parsed.ok
     ? parsed.value
-    : { years: null, program: null, tail: DEFAULT_TAIL, pubs: "mentored", view: "summary" };
-  // A `program` outside the caller's scopes is silently the "all" view of
-  // what they DO hold — never a wider set.
-  const program = requested.program !== null && scopeAdmits(scopes, requested.program) ? requested.program : null;
-  const loaderScopes = program !== null ? [program] : [...scopes];
+    : { years: null, types: null, tail: DEFAULT_TAIL, pubs: "mentored", view: "summary" };
+  // Types outside the caller's scopes are silently dropped — never a wider set.
+  const types = resolveMentorshipTypes(requested.types, scopes);
+  const loaderScopes = [...scopes];
 
-  const yearChoices = await loadMentoredGradYears(loaderScopes);
-  // Years the chosen program has no class in are dropped (the Program
-  // select auto-submits with the previous program's years); nothing left
-  // → this program's default.
+  const yearChoices = await loadMentoredGradYears(loaderScopes, types);
+  // Years the chosen types have no class in are dropped (a type checkbox
+  // auto-submits with the previous selection's years); nothing left → this
+  // selection's default.
   const choiceSet = new Set(yearChoices);
   const kept = (requested.years ?? []).filter((y) => choiceSet.has(y));
   const years =
@@ -210,7 +216,7 @@ export default async function EditReportsMentoredPublicationsPage({
       : kept;
   const params: MentoredPubsParams = {
     years,
-    program,
+    types,
     tail: requested.tail,
     pubs: requested.pubs,
     view: requested.view,
@@ -220,6 +226,7 @@ export default async function EditReportsMentoredPublicationsPage({
   const [report, pendingSlugRequests, pendingHonors, accessRows] = await Promise.all([
     loadMentoredPublicationsReport({
       scopes: loaderScopes,
+      types,
       gradYears: years.length > 0 ? years : null,
       tail: params.tail,
       pubs: params.pubs,
@@ -229,9 +236,7 @@ export default async function EditReportsMentoredPublicationsPage({
     canManage ? listReportAccess(MENTORED_PUBS_REPORT) : Promise.resolve([]),
   ]);
 
-  const programChoices: Array<readonly [string, string]> = MENTORED_PUBS_SCOPES.filter((s) =>
-    scopeAdmits(scopes, s),
-  ).map((s) => [s, PROGRAM_LABEL[s] ?? s] as const);
+  const typeChoices = allowedMentorshipTypes(scopes);
   const scopeOptions: Array<readonly [string, string]> = [
     [ALL_SCOPES, "All programs"] as const,
     ...MENTORED_PUBS_SCOPES.map((s) => [s, PROGRAM_LABEL[s] ?? s] as const),
@@ -269,7 +274,7 @@ export default async function EditReportsMentoredPublicationsPage({
         {report.droppedUnresolved > 0 &&
           ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
       </p>
-      <FilterForm params={params} yearChoices={yearChoices} programChoices={programChoices} />
+      <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
       {allPubsMissing && (
         <p
           className="border-apollo-border bg-apollo-surface-2 mt-4 rounded-md border px-3 py-2 text-sm"

@@ -23,7 +23,7 @@
  *     only in `pubs: "all"` mode; the mentored set is a strict subset by pmid.
  *
  * Three more pair sources (round 4), merged into the same learner map and
- * NOT scope-gated — every `report_access` holder sees them:
+ * NOT scope-gated — every `report_access` holder may select them:
  *   - `phd_mentor_relationship` — Jenzabar thesis advisors; grad year =
  *     `conferralYear`, no entry year (Jenzabar carries no start);
  *   - `postdoc_mentor_relationship` — ED postdoc appointments; entry =
@@ -88,6 +88,20 @@
  * (`bucketProgramType`, the SAME mapping the Publications-browse mentoring
  * facet uses) isn't admitted are dropped before any pub is read.
  *
+ * Types of mentorship (`types`, a `MentorshipTypeKey` list the caller has
+ * already resolved against its scopes): the loader reads ONLY the sources a
+ * selected key needs — `aoc_mentee` for aoc / mdphd / ecr (each bucket kept
+ * only when its own key is selected), Jenzabar for thesis, ED for postdoc,
+ * `mentee_suggestion` for likely (presumptive) / possible (ambiguous) — and
+ * `mergePair` refuses any pair whose key is not selected, so a learner is
+ * present only through selected pairs: their mentor lines, Program column,
+ * counts and workbook rows all describe selected pairs and nothing else.
+ * The rail facet this replaced kept a learner on one roster pair and then
+ * listed every co-author pair beside it. ponytail: a pair two sources claim
+ * takes the surest SELECTED source — with only co-author keys selected, a
+ * roster-confirmed pair reads as a co-author inference, since the roster
+ * was never read; the upgrade path is a "confirmed elsewhere" annotation.
+ *
  * Server-only (reads `@/lib/db`); imported by the page and the download
  * route, never from a `"use client"` component.
  */
@@ -100,9 +114,12 @@ import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import {
   mentorshipKey,
   mentorshipLabel,
+  mentorshipTypeKey,
   PROGRAM_LABEL,
+  ROSTER_TYPE_BY_SCOPE,
   type MentorshipTier,
   type MentorshipType,
+  type MentorshipTypeKey,
 } from "@/lib/edit/mentorship-type";
 import { scopeAdmits } from "@/lib/edit/report-access";
 import { normalizeJournalAbbrev } from "@/lib/journal-abbrev";
@@ -123,6 +140,8 @@ const PMID_BATCH = 1000;
 export type MentoredPublicationsFilters = {
   /** The scope keys the caller may see (`"*"` = every bucket). */
   scopes: ReadonlyArray<string>;
+  /** The types of mentorship selected (see the module doc). */
+  types: ReadonlyArray<MentorshipTypeKey>;
   /** Graduation years kept (`null` in the list = learners with no graduation
    *  year); `null` = every year. */
   gradYears: ReadonlyArray<number | null> | null;
@@ -346,10 +365,22 @@ type PairRow = {
   ongoing?: boolean;
 };
 
+/** Whether any roster key is selected — the gate on reading `aoc_mentee`. */
+function rosterSelected(selected: ReadonlySet<string>): boolean {
+  return Object.values(ROSTER_TYPE_BY_SCOPE).some((k) => selected.has(k));
+}
+
 /** Fold one (mentor, learner) pair into the map. Sources are merged in
  *  confidence order (roster, Jenzabar, ED, co-author) so a pair two sources
- *  claim keeps the surer type. */
-function mergePair(learners: Map<string, Learner>, r: PairRow): void {
+ *  claim keeps the surer type. A pair whose type is not selected is refused
+ *  outright (the per-source reads already skip it; this keeps "surest source
+ *  wins" honest when a caller widens a read). */
+function mergePair(
+  learners: Map<string, Learner>,
+  r: PairRow,
+  selected: ReadonlySet<string>,
+): void {
+  if (!selected.has(mentorshipTypeKey(r.type))) return;
   let l = learners.get(r.menteeCwid);
   if (!l) {
     l = {
@@ -392,12 +423,13 @@ function mergePair(learners: Map<string, Learner>, r: PairRow): void {
   l.buckets.add(r.type.program);
 }
 
-/** Keep the rows whose program bucket the scope set admits; a row with an
- *  unbucketable `programType` is never admitted (not even by `"*"`, since it
- *  belongs to no program the report describes). */
+/** Keep the rows whose program bucket the scope set admits AND whose type
+ *  is selected; a row with an unbucketable `programType` is never admitted
+ *  (not even by `"*"`, since it belongs to no program the report describes). */
 function admittedRows(
   rows: readonly AocRow[],
   scopes: ReadonlyArray<string>,
+  selected: ReadonlySet<string>,
 ): Array<AocRow & { bucket: MentoringProgramKey }> {
   const scopeSet = new Set(scopes);
   const out: Array<AocRow & { bucket: MentoringProgramKey }> = [];
@@ -405,23 +437,31 @@ function admittedRows(
     const bucket = bucketProgramType(r.programType);
     if (!bucket) continue;
     if (!scopeAdmits(scopeSet, bucket)) continue;
+    if (!selected.has(ROSTER_TYPE_BY_SCOPE[bucket])) continue;
     out.push({ ...r, bucket });
   }
   return out;
 }
 
-function collapseLearners(rows: ReadonlyArray<AocRow & { bucket: MentoringProgramKey }>): Map<string, Learner> {
+function collapseLearners(
+  rows: ReadonlyArray<AocRow & { bucket: MentoringProgramKey }>,
+  selected: ReadonlySet<string>,
+): Map<string, Learner> {
   const learners = new Map<string, Learner>();
   for (const r of rows) {
-    mergePair(learners, {
-      mentorCwid: r.mentorCwid,
-      menteeCwid: r.menteeCwid,
-      firstName: r.firstName,
-      lastName: r.lastName,
-      gradYear: r.graduationYear,
-      entryYear: r.entryYear,
-      type: { program: r.bucket, source: "roster", tier: "confirmed" },
-    });
+    mergePair(
+      learners,
+      {
+        mentorCwid: r.mentorCwid,
+        menteeCwid: r.menteeCwid,
+        firstName: r.firstName,
+        lastName: r.lastName,
+        gradYear: r.graduationYear,
+        entryYear: r.entryYear,
+        type: { program: r.bucket, source: "roster", tier: "confirmed" },
+      },
+      selected,
+    );
   }
   return learners;
 }
@@ -454,24 +494,44 @@ function programLabel(buckets: ReadonlySet<string>): string {
     .join(" / ");
 }
 
-/** Distinct graduation years present in `aoc_mentee` within `scopes`, newest
- *  first, then a trailing `null` when any admitted row has no graduation
- *  year — the page's year-picker choices. ponytail: roster years only; a
- *  Jenzabar conferral year or postdoc end year outside them is reachable
- *  through "All years". */
-export async function loadMentoredGradYears(scopes: ReadonlyArray<string>): Promise<Array<number | null>> {
-  const rows = await db.read.aocMentee.findMany({
-    select: { graduationYear: true, programType: true },
-  });
+/** Distinct graduation years across the SELECTED types, newest first, then
+ *  a trailing `null` when any selected source has a year-less learner — the
+ *  page's year-picker choices. Per type: the roster's `graduationYear` for
+ *  each admitted + selected bucket; Jenzabar's `conferralYear` for thesis;
+ *  the postdoc `endDate` year for postdoc (ongoing = null = "unknown");
+ *  co-author pairs carry no year, so likely / possible contribute "unknown". */
+export async function loadMentoredGradYears(
+  scopes: ReadonlyArray<string>,
+  types: ReadonlyArray<MentorshipTypeKey>,
+): Promise<Array<number | null>> {
+  const selected = new Set(types);
   const scopeSet = new Set(scopes);
   const years = new Set<number>();
   let unknown = false;
-  for (const r of rows) {
-    const bucket = bucketProgramType(r.programType);
-    if (!bucket || !scopeAdmits(scopeSet, bucket)) continue;
-    if (r.graduationYear === null) unknown = true;
-    else years.add(r.graduationYear);
+  const add = (y: number | null) => {
+    if (y === null) unknown = true;
+    else years.add(y);
+  };
+  if (rosterSelected(selected)) {
+    const rows = await db.read.aocMentee.findMany({
+      select: { graduationYear: true, programType: true },
+    });
+    for (const r of rows) {
+      const bucket = bucketProgramType(r.programType);
+      if (!bucket || !scopeAdmits(scopeSet, bucket) || !selected.has(ROSTER_TYPE_BY_SCOPE[bucket]))
+        continue;
+      add(r.graduationYear);
+    }
   }
+  if (selected.has("thesis")) {
+    const rows = await db.read.phdMentorRelationship.findMany({ select: { conferralYear: true } });
+    for (const r of rows) add(r.conferralYear);
+  }
+  if (selected.has("postdoc")) {
+    const rows = await db.read.postdocMentorRelationship.findMany({ select: { endDate: true } });
+    for (const r of rows) add(r.endDate?.getUTCFullYear() ?? null);
+  }
+  if (selected.has("likely") || selected.has("possible")) unknown = true;
   const out: Array<number | null> = [...years].sort((a, b) => b - a);
   if (unknown) out.push(null);
   return out;
@@ -498,28 +558,38 @@ function authorPosition(pub: CoPublicationFull, cwid: string): number | null {
 
 /**
  * Build the report. `scopes` is the caller's resolved scope set (never
- * empty — the page/route refuse before calling this); `gradYears` narrows
- * learners by graduation year (null = all); `tail` widens the window past
- * graduation; `pubs` picks the publication set (see the module doc). Batched
- * reads after the `aoc_mentee` / Jenzabar / postdoc / suggestion scans:
- * co-pubs per (mentor, learner) pair, `publication` per suggestion-evidence
- * pmid, `aoc_mentee_publication` per learner (`"all"` only), `publication`
- * per pmid, `journal_impact_factor` per abbreviation, `scholar` per mentor
- * cwid.
+ * empty — the page/route refuse before calling this); `types` the resolved
+ * types of mentorship (never empty either — `resolveMentorshipTypes`);
+ * `gradYears` narrows learners by graduation year (null = all); `tail`
+ * widens the window past graduation; `pubs` picks the publication set (see
+ * the module doc). Batched reads after the `aoc_mentee` / Jenzabar / postdoc
+ * / suggestion scans (each only when a selected type needs it): co-pubs per
+ * (mentor, learner) pair, `publication` per suggestion-evidence pmid,
+ * `aoc_mentee_publication` per learner (`"all"` only), `publication` per
+ * pmid, `journal_impact_factor` per abbreviation, `scholar` per mentor cwid.
  */
 export async function loadMentoredPublicationsReport({
   scopes,
+  types,
   gradYears = null,
   tail = DEFAULT_TAIL,
   pubs = "mentored",
 }: {
   scopes: ReadonlyArray<string>;
+  types: ReadonlyArray<MentorshipTypeKey>;
   gradYears?: ReadonlyArray<number | null> | null;
   tail?: number;
   pubs?: MentoredPubsSet;
 }): Promise<MentoredPublicationsReport> {
   const generatedAt = new Date();
-  const filters: MentoredPublicationsFilters = { scopes: [...scopes], gradYears, tail, pubs };
+  const filters: MentoredPublicationsFilters = {
+    scopes: [...scopes],
+    types: [...types],
+    gradYears,
+    tail,
+    pubs,
+  };
+  const selected = new Set<string>(types);
   const allMode = pubs === "all";
   const empty = (allPubsLoaded: boolean | null): MentoredPublicationsReport => ({
     summary: [],
@@ -533,99 +603,135 @@ export async function loadMentoredPublicationsReport({
 
   // A `null` in `gradYears` admits the rows with no graduation year.
   const knownYears = gradYears?.filter((y): y is number => y !== null) ?? [];
-  const aocRows = (await db.read.aocMentee.findMany({
-    where: !gradYears
-      ? undefined
-      : gradYears.includes(null)
-        ? { OR: [{ graduationYear: { in: knownYears } }, { graduationYear: null }] }
-        : { graduationYear: { in: knownYears } },
-    select: {
-      mentorCwid: true,
-      menteeCwid: true,
-      firstName: true,
-      lastName: true,
-      graduationYear: true,
-      entryYear: true,
-      programType: true,
-      mentorFirstName: true,
-      mentorLastName: true,
-    },
-  })) as AocRow[];
-  const rows = admittedRows(aocRows, scopes);
-  const learners = collapseLearners(rows);
+  // Each source is read only when a selected type needs it (module doc).
+  const aocRows = rosterSelected(selected)
+    ? ((await db.read.aocMentee.findMany({
+        where: !gradYears
+          ? undefined
+          : gradYears.includes(null)
+            ? { OR: [{ graduationYear: { in: knownYears } }, { graduationYear: null }] }
+            : { graduationYear: { in: knownYears } },
+        select: {
+          mentorCwid: true,
+          menteeCwid: true,
+          firstName: true,
+          lastName: true,
+          graduationYear: true,
+          entryYear: true,
+          programType: true,
+          mentorFirstName: true,
+          mentorLastName: true,
+        },
+      })) as AocRow[])
+    : [];
+  const rows = admittedRows(aocRows, scopes, selected);
+  const learners = collapseLearners(rows, selected);
 
   // The three other pair sources (module doc): not scope-gated, year-filtered
   // in memory by the source's own year (small tables), merged in confidence
   // order so a pair two sources claim keeps the surer type.
   const yearAdmitted = (y: number | null) =>
     !gradYears || (y === null ? gradYears.includes(null) : knownYears.includes(y));
-  const phdRows = await db.read.phdMentorRelationship.findMany({
-    select: {
-      mentorCwid: true,
-      menteeCwid: true,
-      menteeFirstName: true,
-      menteeLastName: true,
-      conferralYear: true,
-      programType: true,
-      mentorFirstName: true,
-      mentorLastName: true,
-    },
-  });
+  const phdRows = selected.has("thesis")
+    ? await db.read.phdMentorRelationship.findMany({
+        select: {
+          mentorCwid: true,
+          menteeCwid: true,
+          menteeFirstName: true,
+          menteeLastName: true,
+          conferralYear: true,
+          programType: true,
+          mentorFirstName: true,
+          mentorLastName: true,
+        },
+      })
+    : [];
   for (const r of phdRows) {
     if (!yearAdmitted(r.conferralYear)) continue;
-    mergePair(learners, {
-      mentorCwid: r.mentorCwid,
-      menteeCwid: r.menteeCwid,
-      firstName: r.menteeFirstName,
-      lastName: r.menteeLastName,
-      gradYear: r.conferralYear,
-      // ponytail: Jenzabar carries no start; upgrade path = ED student SOR start dates.
-      entryYear: null,
-      type: { program: r.programType === "MD-PhD" ? "mdphd" : "phd", source: "jenzabar", tier: "confirmed" },
-    });
+    mergePair(
+      learners,
+      {
+        mentorCwid: r.mentorCwid,
+        menteeCwid: r.menteeCwid,
+        firstName: r.menteeFirstName,
+        lastName: r.menteeLastName,
+        gradYear: r.conferralYear,
+        // ponytail: Jenzabar carries no start; upgrade path = ED student SOR start dates.
+        entryYear: null,
+        type: {
+          program: r.programType === "MD-PhD" ? "mdphd" : "phd",
+          source: "jenzabar",
+          tier: "confirmed",
+        },
+      },
+      selected,
+    );
   }
-  const postdocRows = await db.read.postdocMentorRelationship.findMany({
-    select: {
-      mentorCwid: true,
-      menteeCwid: true,
-      menteeFirstName: true,
-      menteeLastName: true,
-      startDate: true,
-      endDate: true,
-    },
-  });
+  const postdocRows = selected.has("postdoc")
+    ? await db.read.postdocMentorRelationship.findMany({
+        select: {
+          mentorCwid: true,
+          menteeCwid: true,
+          menteeFirstName: true,
+          menteeLastName: true,
+          startDate: true,
+          endDate: true,
+        },
+      })
+    : [];
   for (const r of postdocRows) {
     const endYear = r.endDate?.getUTCFullYear() ?? null;
     if (!yearAdmitted(endYear)) continue;
-    mergePair(learners, {
-      mentorCwid: r.mentorCwid,
-      menteeCwid: r.menteeCwid,
-      firstName: r.menteeFirstName,
-      lastName: r.menteeLastName,
-      gradYear: endYear,
-      entryYear: r.startDate?.getUTCFullYear() ?? null,
-      type: { program: "postdoc", source: "ed", tier: "confirmed" },
-      ongoing: r.endDate === null,
-    });
+    mergePair(
+      learners,
+      {
+        mentorCwid: r.mentorCwid,
+        menteeCwid: r.menteeCwid,
+        firstName: r.menteeFirstName,
+        lastName: r.menteeLastName,
+        gradYear: endYear,
+        entryYear: r.startDate?.getUTCFullYear() ?? null,
+        type: { program: "postdoc", source: "ed", tier: "confirmed" },
+        ongoing: r.endDate === null,
+      },
+      selected,
+    );
   }
-  // Co-author suggestions carry no year: admitted only with "unknown" selected.
-  const suggestions = yearAdmitted(null)
-    ? await db.read.menteeSuggestion.findMany({
-        where: { dismissedAt: null, tier: { in: ["presumptive", "ambiguous"] } },
-        select: { mentorCwid: true, menteeCwid: true, menteeName: true, kind: true, tier: true, evidence: true },
-      })
-    : [];
+  // Co-author suggestions carry no year: admitted only with "unknown"
+  // selected, and only the selected tier(s).
+  const tiers: MentorshipTier[] = [
+    ...(selected.has("likely") ? (["presumptive"] as const) : []),
+    ...(selected.has("possible") ? (["ambiguous"] as const) : []),
+  ];
+  const suggestions =
+    tiers.length > 0 && yearAdmitted(null)
+      ? await db.read.menteeSuggestion.findMany({
+          where: { dismissedAt: null, tier: { in: tiers } },
+          select: {
+            mentorCwid: true,
+            menteeCwid: true,
+            menteeName: true,
+            kind: true,
+            tier: true,
+            evidence: true,
+          },
+        })
+      : [];
   for (const s of suggestions) {
     const cut = s.menteeName.lastIndexOf(" ");
-    mergePair(learners, {
-      mentorCwid: s.mentorCwid,
-      menteeCwid: s.menteeCwid,
-      firstName: cut < 0 ? null : s.menteeName.slice(0, cut),
-      lastName: cut < 0 ? s.menteeName : s.menteeName.slice(cut + 1),
-      gradYear: null,
-      entryYear: null,
-      type: { program: s.kind, source: "coauthor", tier: s.tier as MentorshipTier },
-    });
+    mergePair(
+      learners,
+      {
+        mentorCwid: s.mentorCwid,
+        menteeCwid: s.menteeCwid,
+        firstName: cut < 0 ? null : s.menteeName.slice(0, cut),
+        lastName: cut < 0 ? s.menteeName : s.menteeName.slice(cut + 1),
+        gradYear: null,
+        entryYear: null,
+        type: { program: s.kind, source: "coauthor", tier: s.tier as MentorshipTier },
+      },
+      selected,
+    );
   }
 
   // "All" mode: has the learner-pubs bridge EVER been loaded here? An empty

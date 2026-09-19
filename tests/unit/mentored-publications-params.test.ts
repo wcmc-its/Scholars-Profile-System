@@ -9,10 +9,10 @@ vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
 
 import { mentoredPubsQueryString, parseMentoredPubsParams } from "@/lib/edit/mentored-publications-params";
 
-const DEFAULTS = { years: null, program: null, tail: 1, pubs: "mentored", view: "summary" } as const;
+const DEFAULTS = { years: null, types: null, tail: 1, pubs: "mentored", view: "summary" } as const;
 
 describe("parseMentoredPubsParams", () => {
-  it("defaults: no years (null), every scope (program null), tail 1, mentored set, summary view", () => {
+  it("defaults: no years (null), no types (null), tail 1, mentored set, summary view", () => {
     expect(parseMentoredPubsParams({})).toEqual({ ok: true, value: DEFAULTS });
     expect(parseMentoredPubsParams(new URLSearchParams(""))).toEqual({ ok: true, value: DEFAULTS });
   });
@@ -64,12 +64,70 @@ describe("parseMentoredPubsParams", () => {
     expect(parseMentoredPubsParams({ years: "1800" })).toEqual({ ok: false, error: "invalid_years" });
   });
 
-  it("program: a bucket, 'all', or absent; anything else is an error", () => {
-    expect(parseMentoredPubsParams({ program: "md" })).toMatchObject({ ok: true, value: { program: "md" } });
-    expect(parseMentoredPubsParams({ program: "MDPHD" })).toMatchObject({ ok: true, value: { program: "mdphd" } });
-    expect(parseMentoredPubsParams({ program: "all" })).toMatchObject({ ok: true, value: { program: null } });
-    expect(parseMentoredPubsParams({ program: "phd" })).toEqual({ ok: false, error: "invalid_program" });
-    expect(parseMentoredPubsParams({ program: "*" })).toEqual({ ok: false, error: "invalid_program" });
+  it("types: comma list, repeated keys, or both; deduped, in vocabulary order; case-insensitive", () => {
+    expect(parseMentoredPubsParams({ types: "thesis,aoc" })).toMatchObject({
+      ok: true,
+      value: { types: ["aoc", "thesis"] },
+    });
+    expect(parseMentoredPubsParams({ types: ["likely", "aoc", "likely"] })).toMatchObject({
+      ok: true,
+      value: { types: ["aoc", "likely"] },
+    });
+    expect(
+      parseMentoredPubsParams(new URLSearchParams("types=postdoc&types=aoc,ecr")),
+    ).toMatchObject({
+      ok: true,
+      value: { types: ["aoc", "ecr", "postdoc"] },
+    });
+    expect(parseMentoredPubsParams({ types: "AOC" })).toMatchObject({
+      ok: true,
+      value: { types: ["aoc"] },
+    });
+    expect(parseMentoredPubsParams({ types: "" })).toMatchObject({
+      ok: true,
+      value: { types: null },
+    });
+  });
+
+  it("types: an unknown key is an error, not a silent drop", () => {
+    expect(parseMentoredPubsParams({ types: "aoc,phd" })).toEqual({
+      ok: false,
+      error: "invalid_types",
+    });
+    expect(parseMentoredPubsParams({ types: "md" })).toEqual({ ok: false, error: "invalid_types" });
+    expect(parseMentoredPubsParams({ types: "*" })).toEqual({ ok: false, error: "invalid_types" });
+  });
+
+  it("legacy program=<scope> with no types reads as that scope's roster type; all / unknown → null, never an error", () => {
+    expect(parseMentoredPubsParams({ program: "md" })).toMatchObject({
+      ok: true,
+      value: { types: ["aoc"] },
+    });
+    expect(parseMentoredPubsParams({ program: "MDPHD" })).toMatchObject({
+      ok: true,
+      value: { types: ["mdphd"] },
+    });
+    expect(parseMentoredPubsParams({ program: "ecr" })).toMatchObject({
+      ok: true,
+      value: { types: ["ecr"] },
+    });
+    expect(parseMentoredPubsParams({ program: "all" })).toMatchObject({
+      ok: true,
+      value: { types: null },
+    });
+    expect(parseMentoredPubsParams({ program: "phd" })).toMatchObject({
+      ok: true,
+      value: { types: null },
+    });
+    expect(parseMentoredPubsParams({ program: "*" })).toMatchObject({
+      ok: true,
+      value: { types: null },
+    });
+    // `types` wins over a stray `program`.
+    expect(parseMentoredPubsParams({ program: "md", types: "thesis" })).toMatchObject({
+      ok: true,
+      value: { types: ["thesis"] },
+    });
   });
 
   it("tail: 0..3 only", () => {
@@ -84,25 +142,52 @@ describe("parseMentoredPubsParams", () => {
 describe("mentoredPubsQueryString", () => {
   it("round-trips through the parser", () => {
     const cases = [
-      { years: [2024, 2025], program: "md" as const, tail: 2, pubs: "mentored" as const, view: "summary" as const },
-      { years: [], program: null, tail: 0, pubs: "all" as const, view: "publications" as const },
-      { years: null, program: "ecr" as const, tail: 1, pubs: "all" as const, view: "summary" as const },
-      { years: [2025, null], program: null, tail: 1, pubs: "mentored" as const, view: "summary" as const },
+      {
+        years: [2024, 2025],
+        types: ["aoc" as const],
+        tail: 2,
+        pubs: "mentored" as const,
+        view: "summary" as const,
+      },
+      { years: [], types: null, tail: 0, pubs: "all" as const, view: "publications" as const },
+      {
+        years: null,
+        types: ["aoc" as const, "ecr" as const, "thesis" as const, "likely" as const],
+        tail: 1,
+        pubs: "all" as const,
+        view: "summary" as const,
+      },
+      {
+        years: [2025, null],
+        types: ["possible" as const],
+        tail: 1,
+        pubs: "mentored" as const,
+        view: "summary" as const,
+      },
     ];
     for (const value of cases) {
       const qs = mentoredPubsQueryString(value);
       expect(parseMentoredPubsParams(new URLSearchParams(qs))).toEqual({ ok: true, value });
     }
-    // `pubs` always written (the download carries it); `view` only when not the default.
-    expect(mentoredPubsQueryString({ ...DEFAULTS, years: [2024, 2025] })).toBe(
-      "years=2024%2C2025&program=all&tail=1&pubs=mentored",
+    // `types` (comma-joined) and `pubs` always written when known (the
+    // download carries them); `program` never; `view` only when not the default.
+    expect(
+      mentoredPubsQueryString({ ...DEFAULTS, years: [2024, 2025], types: ["aoc", "thesis"] }),
+    ).toBe("years=2024%2C2025&types=aoc%2Cthesis&tail=1&pubs=mentored");
+    expect(mentoredPubsQueryString({ ...DEFAULTS, years: [] })).toBe(
+      "years=all&tail=1&pubs=mentored",
     );
-    expect(mentoredPubsQueryString({ ...DEFAULTS, years: [] })).toBe("years=all&program=all&tail=1&pubs=mentored");
-    expect(mentoredPubsQueryString({ ...DEFAULTS, years: [2025, null] })).toBe(
-      "years=2025%2Cunknown&program=all&tail=1&pubs=mentored",
+    expect(mentoredPubsQueryString({ ...DEFAULTS, years: [2025, null], types: ["aoc"] })).toBe(
+      "years=2025%2Cunknown&types=aoc&tail=1&pubs=mentored",
     );
-    expect(mentoredPubsQueryString({ ...DEFAULTS, years: [], pubs: "all", view: "publications" })).toBe(
-      "years=all&program=all&tail=1&pubs=all&view=publications",
-    );
+    expect(
+      mentoredPubsQueryString({
+        ...DEFAULTS,
+        years: [],
+        types: ["aoc"],
+        pubs: "all",
+        view: "publications",
+      }),
+    ).toBe("years=all&types=aoc&tail=1&pubs=all&view=publications");
   });
 });

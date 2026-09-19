@@ -2,10 +2,11 @@
  * `components/edit/mentored-publications-table.tsx` — the report 7 client
  * island, rendered with RTL. Publications: default order is dateAdded desc
  * (the fixture's year order DISAGREES on purpose); a header click sorts and
- * sets `aria-sort`, a second click flips; a co-author-typed row is hidden
- * until its Type checkbox is ticked; a Mentor tick filters; "Showing X of Y"
- * follows; the type label renders under the mentor. Learners: the Type
- * column is one line per mentor; grad-year default sort with null last; the
+ * sets `aria-sort`, a second click flips; there is NO "Type of mentorship"
+ * facet (the type is the page's server-side filter) so every row shows; a
+ * Mentor tick filters; "Showing X of Y" follows; the type label renders
+ * under the mentor. Learners: the Type column is one line per mentor, no
+ * Type facet either; grad-year default sort with null last; the
  * Learner header sorts by last, first. A Scopus-only row (`SCOPUS:` key)
  * prints "Scopus:" with no PubMed link. Every query is scoped to the table's
  * test id or the render container, never `document.body`.
@@ -138,8 +139,11 @@ const LEARNERS: MentoredPubsSummaryRow[] = [
   }),
 ];
 
-const HREFS = { summary: "/edit/reports/7?years=2025&program=all", publications: "/edit/reports/7?years=2025&program=all&view=publications" };
-const DOWNLOAD = "/api/edit/reports/mentored-publications?years=2025";
+const HREFS = {
+  summary: "/edit/reports/7?years=2025&types=aoc",
+  publications: "/edit/reports/7?years=2025&types=aoc&view=publications",
+};
+const DOWNLOAD = "/api/edit/reports/mentored-publications?years=2025&types=aoc";
 
 const rowIds = (table: HTMLElement, prefix: string) =>
   [...table.querySelectorAll("tbody tr")].map((tr) => tr.getAttribute("data-testid")?.replace(prefix, ""));
@@ -153,10 +157,10 @@ function renderPubs() {
 }
 
 describe("MentoredPublicationsTable — publications", () => {
-  it("defaults to dateAdded desc (not year), hides co-author-typed rows, prints the date and the type under the mentor", () => {
+  it("defaults to dateAdded desc (not year), shows every row (no Type facet), prints the date and the type under the mentor", () => {
     const { table, ids, getByTestId } = renderPubs();
-    expect(ids()).toEqual(["1", "2", "4", "SCOPUS:105037533819"]);
-    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 4 of 5 publications");
+    expect(ids()).toEqual(["1", "2", "4", "SCOPUS:105037533819", "3"]);
+    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 5 of 5 publications");
     const row1 = within(table()).getByTestId("mentored-pubs-pub-1");
     expect(within(row1).getByText("2024-03-01")).toBeTruthy();
     expect(within(row1).getByText("MD · roster")).toBeTruthy();
@@ -176,11 +180,11 @@ describe("MentoredPublicationsTable — publications", () => {
     const yearTh = within(table()).getByRole("columnheader", { name: /^Year/ });
     expect(yearTh.getAttribute("aria-sort")).toBe("none");
     fireEvent.click(within(yearTh).getByRole("button"));
-    expect(ids()).toEqual(["2", "1", "4", "SCOPUS:105037533819"]);
+    expect(ids()).toEqual(["2", "3", "1", "4", "SCOPUS:105037533819"]);
     expect(within(table()).getByRole("columnheader", { name: /^Year/ }).getAttribute("aria-sort")).toBe("descending");
     expect(within(table()).getByRole("columnheader", { name: /Date added/ }).getAttribute("aria-sort")).toBe("none");
     fireEvent.click(within(within(table()).getByRole("columnheader", { name: /^Year/ })).getByRole("button"));
-    expect(ids()).toEqual(["SCOPUS:105037533819", "4", "1", "2"]);
+    expect(ids()).toEqual(["SCOPUS:105037533819", "4", "1", "3", "2"]);
     expect(within(table()).getByRole("columnheader", { name: /^Year/ }).getAttribute("aria-sort")).toBe("ascending");
     // JIF asc: the two null JIFs stay last.
     fireEvent.click(within(within(table()).getByRole("columnheader", { name: /^JIF/ })).getByRole("button"));
@@ -188,12 +192,19 @@ describe("MentoredPublicationsTable — publications", () => {
     expect(ids().slice(0, 2)).toEqual(["2", "1"]);
   });
 
-  it("ticking the co-author Type checkbox reveals the row; ticking a Mentor narrows; Showing X of Y follows", () => {
+  it("the rail has no Type facet (Year · Learner author position · In program window · Mentor); ticking a Mentor narrows; Showing X of Y follows", () => {
     const { container, ids, getByTestId } = renderPubs();
     const rail = within(container);
-    fireEvent.click(rail.getByRole("button", { name: /Volunteer · co-author \(presumptive\)/ }));
-    expect(ids()).toEqual(["1", "2", "4", "SCOPUS:105037533819", "3"]);
-    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 5 of 5 publications");
+    expect(rail.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+      "Year",
+      "Learner author position",
+      "In program window",
+      "Mentor",
+    ]);
+    expect(
+      rail.queryByRole("button", { name: /Volunteer · co-author \(presumptive\)/ }),
+    ).toBeNull();
+    expect(rail.queryByRole("button", { name: /MD · roster/ })).toBeNull();
     fireEvent.click(rail.getByRole("button", { name: /Chen, Lin/ }));
     expect(ids()).toEqual(["1", "2", "SCOPUS:105037533819"]);
     expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 3 of 5 publications");
@@ -211,10 +222,19 @@ function renderLearners() {
 }
 
 describe("MentoredPublicationsTable — learners", () => {
-  it("Type column is one line per mentor; grad-year desc default with null last; co-author learner hidden", () => {
-    const { table, ids, getByTestId } = renderLearners();
-    expect(ids()).toEqual(["stu0004", "stu0001", "stu0003"]);
-    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 3 of 4 learners");
+  it("Type column is one line per mentor; grad-year desc default with null last; every learner shows, no Type facet in the rail", () => {
+    const { table, ids, getByTestId, container } = renderLearners();
+    expect(ids()).toEqual(["stu0004", "stu0001", "stu0002", "stu0003"]);
+    expect(getByTestId("mentored-pubs-shown").textContent).toBe("Showing 4 of 4 learners");
+    // The column stays; the facet (a button per type label) is gone.
+    expect(
+      within(container)
+        .getAllByRole("heading", { level: 3 })
+        .map((h) => h.textContent),
+    ).toEqual(["In program window", "Mentor"]);
+    expect(within(container).queryByRole("button", { name: /MD · roster/ })).toBeNull();
+    expect(within(container).queryByRole("button", { name: /co-author/ })).toBeNull();
+    expect(within(container).getByRole("button", { name: /Chen, Lin/ })).toBeTruthy();
     const row = within(table()).getByTestId("mentored-pubs-learner-stu0001");
     const typeCell = row.querySelectorAll("td")[3];
     expect([...typeCell.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["MD · roster", "PhD · Jenzabar"]);
@@ -225,7 +245,7 @@ describe("MentoredPublicationsTable — learners", () => {
   it("the Learner header sorts by last, first", () => {
     const { table, ids } = renderLearners();
     fireEvent.click(within(within(table()).getByRole("columnheader", { name: /^Learner/ })).getByRole("button"));
-    expect(ids()).toEqual(["stu0001", "stu0003", "stu0004"]);
+    expect(ids()).toEqual(["stu0001", "stu0002", "stu0003", "stu0004"]);
     expect(within(table()).getByRole("columnheader", { name: /^Learner/ }).getAttribute("aria-sort")).toBe("ascending");
   });
 
