@@ -9,8 +9,9 @@
  * three-sheet workbook behind "Download .xlsx"
  * (`/api/edit/reports/mentored-publications`, same query string).
  *
- * Two in-page views (`view=summary|publications`, underline tabs above the
- * table): Learners — the per-learner summary — and Publications — one row per
+ * Two in-page views (`view=summary|publications`, underline tabs the client
+ * island owns — both views ride on the same loaded report, so a tab click
+ * switches instantly and only rewrites the URL): Learners — the per-learner summary — and Publications — one row per
  * distinct paper, most recently added to PubMed first, as a Vancouver
  * citation with its PMID link, JIF, iCite count, the learner(s) and
  * mentor(s) on it. Both tables are ONE client island
@@ -80,9 +81,6 @@ export const metadata = {
 };
 
 // Underline tabs, as `components/edit/matcha-tab.tsx` draws them.
-const TAB_ACTIVE = "border-apollo-maroon inline-block border-b-2 py-2.5 text-base font-medium";
-const TAB_IDLE = "text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-2.5 text-base";
-
 function pageHref(params: MentoredPubsParams): string {
   return `/edit/reports/7?${mentoredPubsQueryString(params)}`;
 }
@@ -100,12 +98,13 @@ function FilterForm({
   const allYears = params.years !== null && params.years.length === 0;
   return (
     <AutoSubmitForm
+      id="mentored-pubs-filters"
       action="/edit/reports/7"
       className="group border-apollo-border bg-apollo-surface mt-4 flex flex-wrap items-end gap-4 rounded-md border p-3 text-sm"
       data-testid="mentored-pubs-filters"
     >
-      {/* The view rides along so a filter change keeps it. */}
-      {params.view !== "summary" && <input type="hidden" name="view" value={params.view} />}
+      {/* The current view rides along as a hidden input the island owns
+          (`form="mentored-pubs-filters"`), so a filter change keeps it. */}
       <fieldset className="flex flex-col gap-1">
         <legend className="text-foreground font-medium">Graduation year</legend>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -168,27 +167,6 @@ function FilterForm({
         Apply
       </button>
     </AutoSubmitForm>
-  );
-}
-
-/** The Learners | Publications view tabs — plain links that keep every other
- *  param. */
-function ViewControls({ params }: { params: MentoredPubsParams }) {
-  const tab = (view: MentoredPubsParams["view"], label: string) => (
-    <Link
-      href={pageHref({ ...params, view })}
-      className={params.view === view ? TAB_ACTIVE : TAB_IDLE}
-      aria-current={params.view === view ? "page" : undefined}
-      data-testid={`mentored-pubs-view-${view}`}
-    >
-      {label}
-    </Link>
-  );
-  return (
-    <nav className="border-apollo-border mt-4 flex gap-4 border-b" aria-label="View">
-      {tab("summary", "Learners")}
-      {tab("publications", "Publications")}
-    </nav>
   );
 }
 
@@ -263,8 +241,6 @@ export default async function EditReportsMentoredPublicationsPage({
     grantedAt: r.grantedAt.toISOString(),
   }));
 
-  const totalInWindow = report.summary.reduce((n, r) => n + (r.pubsInWindow ?? 0), 0);
-  const totalAllTime = report.summary.reduce((n, r) => n + r.pubsAllTime, 0);
   const allMode = params.pubs === "all";
   const allPubsMissing = allMode && report.allPubsLoaded === false;
   // The download never carries `view` (the workbook has no Publications view).
@@ -294,7 +270,6 @@ export default async function EditReportsMentoredPublicationsPage({
           ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
       </p>
       <FilterForm params={params} yearChoices={yearChoices} programChoices={programChoices} />
-      <ViewControls params={params} />
       {allPubsMissing && (
         <p
           className="border-apollo-border bg-apollo-surface-2 mt-4 rounded-md border px-3 py-2 text-sm"
@@ -307,26 +282,14 @@ export default async function EditReportsMentoredPublicationsPage({
           with a mentor&rdquo; or run the import.
         </p>
       )}
-      <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
-        <p data-testid="mentored-pubs-total">
-          <strong>{report.summary.length.toLocaleString()}</strong>{" "}
-          {report.summary.length === 1 ? "learner" : "learners"} ·{" "}
-          <strong>{totalInWindow.toLocaleString()}</strong> publications in window ·{" "}
-          <strong>{totalAllTime.toLocaleString()}</strong> all years ·{" "}
-          <strong>{report.publications.length.toLocaleString()}</strong> distinct{" "}
-          {report.publications.length === 1 ? "publication" : "publications"}
-        </p>
-        <a
-          href={`/api/edit/reports/mentored-publications?${qs}`}
-          className="bg-apollo-maroon text-apollo-maroon-foreground hover:bg-apollo-maroon/90 inline-flex h-8 items-center rounded-md px-3 text-sm font-medium"
-          data-testid="mentored-pubs-download"
-        >
-          Download .xlsx
-        </a>
-      </div>
       {allPubsMissing ? null : (
         <MentoredPublicationsTable
           view={params.view}
+          viewHrefs={{
+            summary: pageHref({ ...params, view: "summary" }),
+            publications: pageHref({ ...params, view: "publications" }),
+          }}
+          downloadHref={`/api/edit/reports/mentored-publications?${qs}`}
           summary={report.summary}
           publications={report.publications}
           pubsMode={params.pubs}

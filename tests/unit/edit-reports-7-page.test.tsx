@@ -159,8 +159,7 @@ describe("/edit/reports/7 — wiring", () => {
     expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["md"], gradYears: [2026, 2025], tail: 1, ...MENTORED });
     expect(findByType(result, h.mockPanel)).toBeNull();
     expect(h.mockListReportAccess).not.toHaveBeenCalled();
-    const download = findByTestId(result, "mentored-pubs-download");
-    expect(download?.props.href).toBe(
+    expect(findByType(result, h.mockTable)?.props.downloadHref).toBe(
       "/api/edit/reports/mentored-publications?years=2026%2C2025&program=all&tail=1&pubs=mentored",
     );
   });
@@ -208,7 +207,7 @@ describe("/edit/reports/7 — wiring", () => {
       ["all", false],
     ]);
     expect(textOf(findByType(result, h.mockAutoSubmitForm))).toContain("Unknown grad year");
-    expect(findByTestId(result, "mentored-pubs-download")?.props.href).toBe(
+    expect(findByType(result, h.mockTable)?.props.downloadHref).toBe(
       "/api/edit/reports/mentored-publications?years=2026%2C2025%2Cunknown&program=all&tail=1&pubs=mentored",
     );
   });
@@ -223,7 +222,7 @@ describe("/edit/reports/7 — wiring", () => {
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({ scopes: ["md"], gradYears: null, tail: 1, ...MENTORED });
   });
 
-  it("the filter form is the auto-submit island, carrying the view as a hidden field and the set as a select", async () => {
+  it("the filter form is the auto-submit island (id'd for the island's hidden view input), carrying the set as a select", async () => {
     const result = await EditReportsMentoredPublicationsPage({
       searchParams: sp({ years: "2025", pubs: "all", view: "publications" }),
     });
@@ -241,7 +240,8 @@ describe("/edit/reports/7 — wiring", () => {
       for (const c of childrenOf(el)) walk(c);
     };
     walk(form);
-    expect(hidden).toEqual([["view", "publications"]]);
+    expect(hidden).toEqual([]);
+    expect(form!.props.id).toBe("mentored-pubs-filters");
     expect(selects).toContainEqual(["pubs", "all"]);
     expect(findByTestId(form, "mentored-pubs-set")?.props.name).toBe("pubs");
   });
@@ -252,17 +252,18 @@ describe("/edit/reports/7 — wiring", () => {
     });
     expect(h.mockLoadReport).toHaveBeenCalledWith({ scopes: ["md"], gradYears: [2025], tail: 2, pubs: "all" });
     const base = "years=2025&program=all&tail=2";
-    expect(findByTestId(result, "mentored-pubs-view-summary")?.props.href).toBe(`/edit/reports/7?${base}&pubs=all`);
-    expect(findByTestId(result, "mentored-pubs-view-publications")?.props.href).toBe(
-      `/edit/reports/7?${base}&pubs=all&view=publications`,
-    );
-    expect(findByTestId(result, "mentored-pubs-view-publications")?.props["aria-current"]).toBe("page");
+    // The island owns the tabs and the download link; it gets every href
+    // with the other params kept, and the download carries pubs but never view.
+    expect(findByType(result, h.mockTable)?.props).toMatchObject({
+      view: "publications",
+      pubsMode: "all",
+      viewHrefs: {
+        summary: `/edit/reports/7?${base}&pubs=all`,
+        publications: `/edit/reports/7?${base}&pubs=all&view=publications`,
+      },
+      downloadHref: `/api/edit/reports/mentored-publications?${base}&pubs=all`,
+    });
     expect(findByTestId(result, "mentored-pubs-set-all")).toBeNull();
-    expect(findByTestId(result, "mentored-pubs-download")?.props.href).toBe(
-      `/api/edit/reports/mentored-publications?${base}&pubs=all`,
-    );
-    // The island gets the view; the notice is absent.
-    expect(findByType(result, h.mockTable)?.props).toMatchObject({ view: "publications", pubsMode: "all" });
     expect(findByTestId(result, "mentored-pubs-all-missing")).toBeNull();
   });
 
@@ -290,6 +291,11 @@ describe("/edit/reports/7 — wiring", () => {
     const summary = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
     expect(findByType(summary, h.mockTable)?.props).toEqual({
       view: "summary",
+      viewHrefs: {
+        summary: "/edit/reports/7?years=2026%2C2025&program=all&tail=1&pubs=mentored",
+        publications: "/edit/reports/7?years=2026%2C2025&program=all&tail=1&pubs=mentored&view=publications",
+      },
+      downloadHref: "/api/edit/reports/mentored-publications?years=2026%2C2025&program=all&tail=1&pubs=mentored",
       summary: [summaryRow],
       publications: [pub],
       pubsMode: "mentored",

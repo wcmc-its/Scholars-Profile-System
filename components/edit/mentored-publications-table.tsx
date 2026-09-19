@@ -34,6 +34,14 @@ import {
  * (`aria-sort` on the active one); clicking the active header flips the
  * direction; nulls sort last either way. Rows render capped at `ROW_CAP`
  * behind "Show all N".
+ *
+ * The Learners | Publications tabs live here too: both views ride on the same
+ * loaded report, so a tab click swaps the view in state and only rewrites the
+ * URL (`history.replaceState`, which Next's router picks up) — no server
+ * round trip, nothing to wait for. The current view is carried to the filter
+ * form by a hidden input bound with `form="mentored-pubs-filters"`, so a
+ * filter change submits the view the user is looking at; without JS the tab
+ * is a plain link and the server renders `?view=`.
  */
 
 const TH_CLASS = "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
@@ -606,24 +614,82 @@ function LearnersView({
   );
 }
 
+type View = "summary" | "publications";
+
+const TAB_ACTIVE = "border-apollo-maroon inline-block border-b-2 py-2.5 text-base font-medium";
+const TAB_IDLE =
+  "text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-2.5 text-base";
+
 export function MentoredPublicationsTable({
-  view,
+  view: initialView,
+  viewHrefs,
+  downloadHref,
   summary,
   publications,
   pubsMode,
   highImpactThreshold,
 }: {
-  view: "summary" | "publications";
+  view: View;
+  /** The page URL for each view with every other param kept — the tab's
+   *  href (no-JS fallback) and what a click writes into the address bar. */
+  viewHrefs: Record<View, string>;
+  downloadHref: string;
   summary: MentoredPubsSummaryRow[];
   publications: MentoredPubsPublicationRow[];
   pubsMode: "mentored" | "all";
   /** `HIGH_IMPACT_THRESHOLD` — its module reads `@/lib/db`, so it is a prop. */
   highImpactThreshold: number;
 }) {
+  const [view, setView] = React.useState<View>(initialView);
   const allMode = pubsMode === "all";
-  return view === "publications" ? (
-    <PublicationsView rows={publications} allMode={allMode} />
-  ) : (
-    <LearnersView rows={summary} allMode={allMode} highImpactThreshold={highImpactThreshold} />
+  const pick = (next: View) => (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // new tab / window: let the link be
+    e.preventDefault();
+    setView(next);
+    window.history.replaceState(null, "", viewHrefs[next]);
+  };
+  const tab = (v: View, label: string) => (
+    <a
+      href={viewHrefs[v]}
+      onClick={pick(v)}
+      className={view === v ? TAB_ACTIVE : TAB_IDLE}
+      aria-current={view === v ? "page" : undefined}
+      data-testid={`mentored-pubs-view-${v}`}
+    >
+      {label}
+    </a>
+  );
+  const totalInWindow = summary.reduce((n, r) => n + (r.pubsInWindow ?? 0), 0);
+  const totalAllTime = summary.reduce((n, r) => n + r.pubsAllTime, 0);
+  return (
+    <>
+      <input type="hidden" name="view" value={view} form="mentored-pubs-filters" />
+      <nav className="border-apollo-border mt-4 flex gap-4 border-b" aria-label="View">
+        {tab("summary", "Learners")}
+        {tab("publications", "Publications")}
+      </nav>
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
+        <p data-testid="mentored-pubs-total">
+          <strong>{summary.length.toLocaleString()}</strong>{" "}
+          {summary.length === 1 ? "learner" : "learners"} ·{" "}
+          <strong>{totalInWindow.toLocaleString()}</strong> publications in window ·{" "}
+          <strong>{totalAllTime.toLocaleString()}</strong> all years ·{" "}
+          <strong>{publications.length.toLocaleString()}</strong> distinct{" "}
+          {publications.length === 1 ? "publication" : "publications"}
+        </p>
+        <a
+          href={downloadHref}
+          className="bg-apollo-maroon text-apollo-maroon-foreground hover:bg-apollo-maroon/90 inline-flex h-8 items-center rounded-md px-3 text-sm font-medium"
+          data-testid="mentored-pubs-download"
+        >
+          Download .xlsx
+        </a>
+      </div>
+      {view === "publications" ? (
+        <PublicationsView rows={publications} allMode={allMode} />
+      ) : (
+        <LearnersView rows={summary} allMode={allMode} highImpactThreshold={highImpactThreshold} />
+      )}
+    </>
   );
 }
