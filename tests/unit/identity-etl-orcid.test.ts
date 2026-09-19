@@ -5,7 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { IDENTITY_ORCID_SCAN, orcidFromIdentityItem } from "@/etl/identity/index";
+import {
+  IDENTITY_ORCID_SCAN,
+  cwidFromIdentityItem,
+  orcidFromIdentityItem,
+} from "@/etl/identity/index";
 
 describe("identity ETL — nested identity.orcid", () => {
   it("scans the nested path for string-typed values only, projecting just uid + identity.orcid", () => {
@@ -26,5 +30,12 @@ describe("identity ETL — nested identity.orcid", () => {
     expect(orcidFromIdentityItem({ uid: "abc1234", orcid: "0000-0002-1825-0097" } as never)).toBe(
       "",
     );
+  });
+
+  it("uppercases the lowercase Identity uid to the scholar.cwid form (3,794 read / 0 matched otherwise)", () => {
+    expect(cwidFromIdentityItem({ uid: " abc1234 " })).toBe("ABC1234");
+    expect(cwidFromIdentityItem({ uid: "ABC1234" })).toBe("ABC1234");
+    expect(cwidFromIdentityItem({})).toBe("");
+    expect(cwidFromIdentityItem({ uid: 42 } as never)).toBe("");
   });
 });
