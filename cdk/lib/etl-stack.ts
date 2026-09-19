@@ -1621,6 +1621,14 @@ export class EtlStack extends Stack {
       // are indexed; nih-profile feeds profile/grant deep-links, not the index.
       { id: "GatesWeekly", npmScript: "etl:gates", external: false, tier: "continue" },
       { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false, tier: "continue" },
+      // ORCID registry sweep (etl/orcid-registry) -> orcid_candidate. Reads the PUBLIC
+      // pub.orcid.org API over NAT egress with no credential today (an ORCID client
+      // token is optional and read from env when present), so external: false like
+      // NSF/Gates; writes Aurora only (same mirror contract as etl:orcid-candidates,
+      // which stays on the nightly + sources family for its reciterdb read). Weekly
+      // because the registry moves slowly; `continue` because the only consumer is
+      // the advisory /edit/orcid-coverage dashboard, never the public profile.
+      { id: "OrcidRegistryWeekly", npmScript: "etl:orcid-registry", external: false, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public
       // directory (no secret); reporter-grants + clinical-trials read ReciterDB

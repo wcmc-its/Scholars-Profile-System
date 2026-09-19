@@ -7,14 +7,33 @@
  *  - "Asserted ORCID" = `scholar.orcid` is set (WCM Identity, #2675/#2676) OR
  *    an RPM administrator entered one (`orcid_candidate.source = rpm_admin`).
  *    Identity is never NULLed on absence — it may lag ED.
- *  - "Inferred" = the ReCiter Publication Manager saw an ORCID on the person's
- *    PubMed author record across articles they accepted (`orcid_candidate`,
- *    `source = rpm_inferred`, mirrored nightly). STRONG = exactly one candidate
- *    ORCID, carried by ≥ STRONG_MIN_ACCEPTED accepted articles and by no
- *    rejected one; WEAK = any other inferred candidate (thin support, a
- *    contradiction, or several candidate ORCIDs). Tiers are exclusive:
+ *  - "Inferred" = a candidate ORCID in `orcid_candidate` from either mirror:
+ *    the ReCiter Publication Manager saw it on the person's PubMed author
+ *    record across articles they accepted (`source = rpm_inferred`, nightly),
+ *    or the public ORCID registry sweep matched a WCM-affiliated record to the
+ *    person (`etl/orcid-registry`, weekly): by a public WCM email on the record
+ *    (`orcid_email`), by name plus ≥3 works shared with the person's own
+ *    publications and no other scholar sharing ≥3 (`orcid_works`,
+ *    `articles_accepted` = the shared count), or by name alone with 0–2 shared
+ *    works or an ambiguous overlap (`orcid_name`). `articles_rejected` is 0 on
+ *    every registry row. STRONG = exactly one distinct strong-eligible ORCID
+ *    across the person's rows, where strong-eligible is: any `orcid_email` row;
+ *    an `orcid_works` row with ≥ STRONG_MIN_ACCEPTED shared works; the SOLE
+ *    `rpm_inferred` row when it has ≥ STRONG_MIN_ACCEPTED accepted articles and
+ *    no rejected one; or an ORCID that an `rpm_*` row with NO rejected article
+ *    and an `orcid_*` row agree on (two independent sources, so the accepted
+ *    counts no longer matter — but an RPM row with rejections saw the iD on
+ *    articles the person REJECTED, a homonym's iD, and a registry name hit on
+ *    that same iD is the same homonym, not a second witness). WEAK =
+ *    no single strong candidate: a name-only registry match, thin support, a
+ *    contradiction, or two or more strong candidate ORCIDs (a second candidate
+ *    that is NOT strong-eligible — a homonym's name-only iD beside a
+ *    well-supported RPM one — does not demote). Tiers are exclusive:
  *    asserted > strong > weak > none. Inferred ORCIDs never reach the public
  *    profile; the outreach ask is "is this yours? confirm it".
+ *    `orcid_candidate`'s key is (cwid, orcid, source): the RPM and registry
+ *    mirrors write disjoint rows, so one iD seen by both is two rows for the
+ *    cwid — that is what the agreement rule reads.
  *  - "eRA account" = a preferred `person_nih_profile` row: the RePORTER
  *    `profile_id`. Inferred, and the inference is one-directional — nobody is
  *    listed as a PI in RePORTER without an eRA Commons account, but RePORTER
@@ -98,13 +117,24 @@ export type ScholarRow = {
 };
 export type CandidateRow = {
   cwid: string;
+  /** The candidate iD itself — the fold counts DISTINCT iDs and cross-references
+   *  the RPM and registry sources on it. `(cwid, orcid, source)` is the table's PK,
+   *  so an `rpm_*` row and an `orcid_*` row can carry the same iD for one cwid. */
+  orcid: string;
   source: string;
+  /** RPM: accepted articles carrying the iD. Registry (`orcid_works` / `orcid_name`):
+   *  works shared between the record and the person's publications. */
   articlesAccepted: number;
   articlesRejected: number;
 };
-/** Accepted articles carrying the ORCID for an inference to count as strong. */
+/** Support for an inference to count as strong: 3+ accepted articles carrying the
+ *  ORCID (RPM), or 3+ shared works in the ORCID registry (`orcid_works`), or a
+ *  public WCM email on the registry record (`orcid_email` — no count needed). */
 export const STRONG_MIN_ACCEPTED = 3;
 export type OrcidTier = "asserted" | "strong" | "weak" | "none";
+
+const isRpmSource = (source: string) => source.startsWith("rpm_");
+const isRegistrySource = (source: string) => source.startsWith("orcid_");
 
 /** One tier per cwid from the candidate rows; `scholar.orcid` is folded in by the caller. */
 export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
@@ -120,17 +150,32 @@ export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
       out.set(cwid, "asserted");
       continue;
     }
+    // The RPM rule is unchanged: only a SOLE rpm_inferred row can be strong on
+    // its own counts. The fold does not trust the ETL's thresholds either — an
+    // orcid_works row under STRONG_MIN_ACCEPTED (which the sweep never writes)
+    // still grades weak here.
     const inferred = rows.filter((r) => r.source === "rpm_inferred");
-    if (inferred.length === 0) continue;
-    const [only] = inferred;
-    out.set(
-      cwid,
-      inferred.length === 1 &&
-        only.articlesRejected === 0 &&
-        only.articlesAccepted >= STRONG_MIN_ACCEPTED
-        ? "strong"
-        : "weak",
+    const soleInferred = inferred.length === 1 ? inferred[0] : null;
+    // Only rejection-free RPM rows take part in the agreement rule: an rpm_inferred
+    // row with rejections means the iD also sat on articles the person REJECTED (a
+    // homonym's iD), and a name-only registry hit on the same iD is that same
+    // homonym, not independent evidence. rpm_admin rows carry 0 rejections anyway.
+    const rpmOrcids = new Set(
+      rows.filter((r) => isRpmSource(r.source) && r.articlesRejected === 0).map((r) => r.orcid),
     );
+    const registryOrcids = new Set(
+      rows.filter((r) => isRegistrySource(r.source)).map((r) => r.orcid),
+    );
+    const strongEligible = (r: CandidateRow) =>
+      r.source === "orcid_email" ||
+      (r.source === "orcid_works" && r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
+      (r === soleInferred &&
+        r.articlesRejected === 0 &&
+        r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
+      // Two independent sources agreeing on one iD outweighs either one's accepted counts.
+      (rpmOrcids.has(r.orcid) && registryOrcids.has(r.orcid));
+    const strongOrcids = new Set(rows.filter(strongEligible).map((r) => r.orcid));
+    out.set(cwid, strongOrcids.size === 1 ? "strong" : "weak");
   }
   return out;
 }
@@ -142,9 +187,9 @@ export type CoverageCounts = {
   people: number;
   /** Asserted ORCID (Identity or RPM admin). */
   orcid: number;
-  /** Strong RPM inference, no asserted ORCID. */
+  /** Strong inference (RPM or ORCID registry), no asserted ORCID. */
   strong: number;
-  /** Weak RPM inference, no asserted ORCID. */
+  /** Weak inference (RPM or ORCID registry), no asserted ORCID. */
   weak: number;
   /** Preferred eRA profile_id on file (= eRA Commons account, inferred). */
   era: number;
@@ -321,7 +366,13 @@ export async function loadOrcidCoverage(
     }),
     db.personNihProfile.findMany({ where: { isPreferred: true }, select: { cwid: true } }),
     db.orcidCandidate.findMany({
-      select: { cwid: true, source: true, articlesAccepted: true, articlesRejected: true },
+      select: {
+        cwid: true,
+        orcid: true,
+        source: true,
+        articlesAccepted: true,
+        articlesRejected: true,
+      },
     }),
   ]);
   const today = new Date();

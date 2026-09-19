@@ -210,12 +210,18 @@ function Body({ data }: { data: OrcidCoverage }) {
       <p className="text-muted-foreground mt-2 max-w-prose">
         <strong>Asserted ORCID</strong> = on file in WCM Identity, or entered by a Publication
         Manager administrator. <strong>Inferred</strong> = the Publication Manager saw an ORCID on
-        the person&apos;s PubMed author record across articles they accepted: <em>strong</em> when
-        one ORCID is carried by {STRONG_MIN_ACCEPTED}+ accepted articles and no rejected one,{" "}
-        <em>weak</em> otherwise (thin support, a contradiction, or several candidate iDs). An
-        inference never reaches the public profile — it is the &ldquo;is this yours? confirm
-        it&rdquo; outreach list; the number in parentheses under NIH-funded is that easy subset. A
-        scholar adds theirs under Manage profile in{" "}
+        the person&apos;s PubMed author record across articles they accepted, or the public ORCID
+        registry lists a WCM-affiliated iD that matches the person: <em>strong</em> when one ORCID
+        is carried by {STRONG_MIN_ACCEPTED}+ accepted articles and no rejected one, or shares{" "}
+        {STRONG_MIN_ACCEPTED}+ works between the registry record and the person&apos;s own
+        publications, or the registry record carries the person&apos;s WCM email (and whenever
+        Publication Manager and the registry agree on the same iD, provided no rejected article
+        carried it); <em>weak</em> = no single
+        strong candidate (a name-only registry match, thin support, a contradiction, or two or
+        more strong candidate ORCIDs). An inference
+        never reaches the public profile — it is the &ldquo;is this yours? confirm it&rdquo;
+        outreach list; the number in parentheses under NIH-funded is that easy subset. A scholar
+        adds theirs under Manage profile in{" "}
         <a href={PUBLICATION_MANAGER_URL} className="underline" target="_blank" rel="noreferrer">
           ReCiter
         </a>

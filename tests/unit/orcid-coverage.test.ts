@@ -57,13 +57,21 @@ const NIH = [
 const ERA = ["f1", "f3"];
 // RPM candidates: f3 strong; f4 thin; f5 two candidate iDs; u1 contradicted; f6 admin-entered
 // (asserted); p1 already asserted via Identity so its inference must not double count.
+// Candidate iDs are opaque tokens ("iD-a", "iD-b"), never real ORCIDs. `(cwid, orcid, source)`
+// is the table's PK: two rows for one cwid carry different tokens OR different sources (the
+// RPM mirror and the registry mirror writing the same iD — the agreement case). Every
+// fixture below is checked against that key so no test feeds a state the table cannot hold.
+const pkValid = (rows: CandidateRow[]) =>
+  new Set(rows.map((r) => `${r.cwid}|${r.orcid}|${r.source}`)).size === rows.length;
 const cand = (
   cwid: string,
   source: string,
   articlesAccepted = 0,
   articlesRejected = 0,
+  orcid = "iD-a",
 ): CandidateRow => ({
   cwid,
+  orcid,
   source,
   articlesAccepted,
   articlesRejected,
@@ -72,7 +80,7 @@ const CANDIDATES: CandidateRow[] = [
   cand("f3", "rpm_inferred", 5),
   cand("f4", "rpm_inferred", 1),
   cand("f5", "rpm_inferred", 10),
-  cand("f5", "rpm_inferred", 4),
+  cand("f5", "rpm_inferred", 4, 0, "iD-b"),
   cand("u1", "rpm_inferred", 3, 1),
   cand("f6", "rpm_admin"),
   cand("p1", "rpm_inferred", 20),
@@ -82,14 +90,16 @@ const build = (params = ALL) => buildOrcidCoverage(SCHOLARS, NIH, ERA, params, T
 
 describe("orcidTiers", () => {
   it("admin beats inferred; strong needs one candidate, ≥3 accepted, 0 rejected; everything else inferred is weak", () => {
-    const t = orcidTiers([
+    const rows = [
       ...CANDIDATES,
       cand("x1", "rpm_inferred", 3),
       cand("x2", "rpm_inferred", 2),
       cand("x3", "rpm_inferred", 30, 1),
       cand("x4", "rpm_admin"),
-      cand("x4", "rpm_inferred", 1, 5),
-    ]);
+      cand("x4", "rpm_inferred", 1, 5, "iD-b"),
+    ];
+    expect(pkValid(rows)).toBe(true);
+    const t = orcidTiers(rows);
     expect([...t]).toEqual(
       expect.arrayContaining([
         ["f3", "strong"],
@@ -104,6 +114,81 @@ describe("orcidTiers", () => {
       ]),
     );
     expect(t.has("p2")).toBe(false);
+  });
+
+  // Registry-derived rows (etl/orcid-registry): orcid_email and orcid_works (≥3 shared works)
+  // are strong on their own, orcid_name is only ever weak, and the fold re-checks the works
+  // threshold rather than trusting the ETL's. Rows are listed weak-before-strong and
+  // registry-before-RPM within a cwid so nothing rides on row order.
+  it("registry rows: email or ≥3 shared works → strong; name-only or under-threshold works → weak", () => {
+    const rows = [
+      // orcid_name carrying ≥3 is the sweep's AMBIGUOUS case (another scholar shares ≥3
+      // with the same iD) — the count must not promote it.
+      cand("r7", "orcid_name", 5),
+      cand("r4", "orcid_name", 2),
+      cand("r3", "orcid_works", 2),
+      cand("r2", "orcid_works", 3),
+      cand("r1", "orcid_email"),
+      // Two different registry iDs, each strong on its own — the person has two candidates,
+      // which is exactly the ambiguity "strong" must not paper over.
+      cand("r5", "orcid_works", 4, 0, "iD-b"),
+      cand("r5", "orcid_works", 3),
+      // A registry name match next to a strong sole RPM inference on a DIFFERENT iD: the
+      // second candidate is not strong-eligible, so it does not demote (the page copy says
+      // "two or more STRONG candidate ORCIDs", not "several candidates").
+      cand("r6", "orcid_name", 1, 0, "iD-b"),
+      cand("r6", "rpm_inferred", 5),
+    ];
+    expect(pkValid(rows)).toBe(true);
+    const t = orcidTiers(rows);
+    expect([...t]).toEqual(
+      expect.arrayContaining([
+        ["r1", "strong"],
+        ["r2", "strong"],
+        ["r3", "weak"],
+        ["r4", "weak"],
+        ["r5", "weak"],
+        ["r6", "strong"],
+        ["r7", "weak"],
+      ]),
+    );
+    expect(t.size).toBe(7);
+  });
+
+  it("the RPM rule is unchanged: a second rpm_inferred iD demotes even a well-supported first one", () => {
+    const t = orcidTiers([
+      cand("m1", "rpm_inferred", 1, 0, "iD-b"),
+      cand("m1", "rpm_inferred", 10),
+    ]);
+    expect(t.get("m1")).toBe("weak");
+  });
+
+  it("RPM and the registry agreeing on one iD is strong whatever the accepted counts — unless the RPM row has rejections; disagreeing is weak; admin still wins", () => {
+    // a1 is two rows on the SAME token under different sources — legal only because `source`
+    // is in the PK; the RPM nightly and the registry weekly never overwrite each other.
+    // a4: the RPM side saw the iD on articles the person REJECTED (a homonym's iD), and a
+    // name-only registry hit on that iD is the same homonym — not a second witness.
+    const rows = [
+      cand("a4", "orcid_name", 0),
+      cand("a4", "rpm_inferred", 1, 2),
+      cand("a3", "orcid_email", 0, 0, "iD-b"),
+      cand("a3", "rpm_admin"),
+      cand("a2", "orcid_name", 0, 0, "iD-b"),
+      cand("a2", "rpm_inferred", 1),
+      cand("a1", "orcid_name", 0),
+      cand("a1", "rpm_inferred", 1),
+    ];
+    expect(pkValid(rows)).toBe(true);
+    const t = orcidTiers(rows);
+    expect([...t]).toEqual(
+      expect.arrayContaining([
+        ["a1", "strong"],
+        ["a2", "weak"],
+        ["a3", "asserted"],
+        ["a4", "weak"],
+      ]),
+    );
+    expect(t.size).toBe(4);
   });
 });
 
