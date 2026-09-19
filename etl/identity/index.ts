@@ -62,6 +62,15 @@ export const IDENTITY_ORCID_SCAN = {
   ExpressionAttributeValues: { ":s": "S" },
 } as const;
 
+/** The Identity `uid` as a Scholar cwid: Identity stores it lowercase ("meb7002"),
+ *  `scholar.cwid` is UPPERCASE ("MEB7002") -- the first nightly after #2676 read 3,794
+ *  ORCIDs and matched 0 scholars on the exact-case Map lookup. "" when absent. Most
+ *  Identity uids are Ithaca NetIDs (aa999 / aaa99 ...) that never match a scholar;
+ *  only the aaa9999-shaped ~5% are WCM CWIDs. */
+export function cwidFromIdentityItem(row: IdentityRow): string {
+  return typeof row.uid === "string" ? row.uid.trim().toUpperCase() : "";
+}
+
 /** The trimmed ORCID string off an Identity item, or "" when absent / not a string. */
 export function orcidFromIdentityItem(row: IdentityRow): string {
   const v = row.identity?.orcid;
@@ -109,7 +118,7 @@ async function main() {
     let noScholar = 0;
 
     for (const row of rows) {
-      const uid = typeof row.uid === "string" ? row.uid.trim() : "";
+      const uid = cwidFromIdentityItem(row);
       const orcid = orcidFromIdentityItem(row);
       if (!uid || !orcid) continue;
       if (!ORCID_PATTERN.test(orcid)) {
