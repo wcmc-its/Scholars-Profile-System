@@ -267,7 +267,7 @@ describe("/edit/reports/7 — wiring", () => {
   });
 
 
-  it("with data: the island receives view / summary / publications / pubsMode; the PubMed-only sentence names the Scopus exclusion", async () => {
+  it("with data: the island receives view / summary / publications / pubsMode; the description names the four sources and the dropped counts", async () => {
     const summaryRow = {
       gradYear: 2025, entryYear: 2021, entryYearSource: "bridge", cwid: "stu0001",
       firstName: "Ada", lastName: "Learner", program: "MD",
@@ -284,6 +284,7 @@ describe("/edit/reports/7 — wiring", () => {
     h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
       summary: [summaryRow], detail: [], publications: [pub],
       generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
+      droppedNonPubmed: 0, droppedUnresolved: 0,
     }));
 
     const summary = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
@@ -295,11 +296,25 @@ describe("/edit/reports/7 — wiring", () => {
       highImpactThreshold: 10,
     });
     expect(textOf(summary)).toContain(
+      "Pairs come from the AOC roster, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship patterns (presumptive — unchecked by default).",
+    );
+    expect(textOf(summary)).toContain(
       "PubMed-indexed publications only; Scopus-only co-publications are excluded when the bridge is imported.",
     );
 
     const pubs = await EditReportsMentoredPublicationsPage({ searchParams: sp({ view: "publications" }) });
     expect(findByType(pubs, h.mockTable)?.props).toMatchObject({ view: "publications", publications: [pub] });
+
+    // Suggestion-evidence pubs the loader dropped are folded into the PubMed-only sentence.
+    h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
+      summary: [summaryRow], detail: [], publications: [pub],
+      generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
+      droppedNonPubmed: 3, droppedUnresolved: 1,
+    }));
+    const dropped = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
+    expect(textOf(dropped)).toContain(
+      "excluded when the bridge is imported (co-publications not shown: 3 non-PubMed, 1 not yet in the local corpus).",
+    );
   });
 
   it("all mode with an unloaded bridge renders the notice and no table", async () => {

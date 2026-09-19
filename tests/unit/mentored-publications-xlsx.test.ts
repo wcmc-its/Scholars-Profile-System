@@ -34,6 +34,8 @@ const REPORT: MentoredPublicationsReport = {
   generatedAt: new Date("2026-09-18T15:04:05Z"),
   filters: { scopes: ["md"], gradYears: [2025, 2024], tail: 1, pubs: "mentored" },
   allPubsLoaded: null,
+  droppedNonPubmed: 0,
+  droppedUnresolved: 0,
   publications: [],
   summary: [
     {

@@ -1,7 +1,9 @@
 /**
- * `/edit/reports/7` — "Mentored publications". For every MD-program learner
- * (`aoc_mentee`), every publication co-authored with one of their AOC mentors,
- * with Journal Impact Factor and NIH iCite citations, plus per-learner counts
+ * `/edit/reports/7` — "Mentored publications". For every learner in a
+ * (learner, mentor) pair — the AOC roster, Jenzabar thesis advisors, ED
+ * postdoc appointments, co-author suggestions — every publication
+ * co-authored with one of their mentors, with Journal Impact Factor and NIH
+ * iCite citations, plus per-learner counts
  * (`lib/edit/mentored-publications-report.ts`). The Medical Education office's
  * annual spreadsheet, on demand: the summary table in-page and the full
  * three-sheet workbook behind "Download .xlsx"
@@ -267,6 +269,11 @@ export default async function EditReportsMentoredPublicationsPage({
   const allPubsMissing = allMode && report.allPubsLoaded === false;
   // The download never carries `view` (the workbook has no Publications view).
   const qs = mentoredPubsQueryString({ ...params, view: "summary" });
+  // Suggestion-evidence pubs the report could not show (PubMed only / no local row).
+  const notShown = [
+    report.droppedNonPubmed > 0 && `${report.droppedNonPubmed.toLocaleString()} non-PubMed`,
+    report.droppedUnresolved > 0 && `${report.droppedUnresolved.toLocaleString()} not yet in the local corpus`,
+  ].filter(Boolean);
 
   return (
     <ConsoleShell
@@ -282,12 +289,15 @@ export default async function EditReportsMentoredPublicationsPage({
       <h1 className="mb-1 text-xl font-bold">Mentored publications</h1>
       <p className="text-muted-foreground text-sm">
         {allMode
-          ? "Every publication of each learner, with the ones co-authored with one of their AOC mentors flagged, "
-          : "Every publication a learner co-authored with one of their AOC mentors, "}
-        with Journal Impact Factor and NIH iCite citations. &ldquo;In window&rdquo; means entry year
-        &le; publication year &le; graduation year + {params.tail}; a learner with no entry year on
-        the roster is assumed to have entered four years before graduating. PubMed-indexed
-        publications only; Scopus-only co-publications are excluded when the bridge is imported.
+          ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
+          : "Every publication a learner co-authored with one of their mentors, "}
+        with Journal Impact Factor and NIH iCite citations. Pairs come from the AOC roster, Jenzabar
+        thesis-advisor records, ED postdoc appointments, and co-authorship patterns (presumptive
+        &mdash; unchecked by default). &ldquo;In window&rdquo; means entry year &le; publication year
+        &le; graduation year + {params.tail}; an MD-program learner with no entry year on the roster
+        is assumed to have entered four years before graduating. PubMed-indexed publications only;
+        Scopus-only co-publications are excluded when the bridge is imported
+        {notShown.length > 0 && ` (co-publications not shown: ${notShown.join(", ")})`}.
       </p>
       <FilterForm params={params} yearChoices={yearChoices} programChoices={programChoices} />
       <ViewControls params={params} />
