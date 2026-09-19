@@ -143,6 +143,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "Identity-orcid": { cadence: "nightly" },
   // RPM ORCID candidates (inferred + admin-entered) mirrored from reciterdb → orcid_candidate.
   "RPM-orcid-candidates": { cadence: "nightly" },
+  // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_name); weekly step.
+  "ORCID-registry": { cadence: "weekly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
   //

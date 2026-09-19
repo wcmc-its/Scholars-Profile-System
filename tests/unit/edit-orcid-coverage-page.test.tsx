@@ -76,7 +76,15 @@ beforeEach(() => {
         ["f2"],
         params,
         TODAY,
-        [{ cwid: "p1", source: "rpm_inferred", articlesAccepted: 5, articlesRejected: 0 }],
+        [
+          {
+            cwid: "p1",
+            orcid: "iD-a",
+            source: "rpm_inferred",
+            articlesAccepted: 5,
+            articlesRejected: 0,
+          },
+        ],
       ),
   );
 });
