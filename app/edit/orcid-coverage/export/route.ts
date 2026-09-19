@@ -10,7 +10,11 @@ import { NextResponse } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { loadOrcidCoverage, orcidCoverageCsv, parseOrcidCoverageParams } from "@/lib/edit/orcid-coverage";
+import {
+  loadOrcidCoverage,
+  orcidCoverageCsv,
+  parseOrcidCoverageParams,
+} from "@/lib/edit/orcid-coverage";
 import { canViewUsage } from "@/lib/edit/usage-access";
 
 export const dynamic = "force-dynamic";
@@ -18,12 +22,18 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const session = await getEffectiveEditSession();
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
-  if (!(await canViewUsage(session, db.read))) return new NextResponse("Not found", { status: 404 });
+  if (!(await canViewUsage(session, db.read)))
+    return new NextResponse("Not found", { status: 404 });
 
   const params = parseOrcidCoverageParams(new URL(request.url).searchParams);
   const { byDept } = await loadOrcidCoverage(db.read, params);
   console.log(
-    JSON.stringify({ event: "export_orcid_coverage", cwid: session.cwid, ...params, rows: byDept.length }),
+    JSON.stringify({
+      event: "export_orcid_coverage",
+      cwid: session.cwid,
+      ...params,
+      rows: byDept.length,
+    }),
   );
   const date = new Date().toISOString().slice(0, 10);
   return new NextResponse(orcidCoverageCsv(byDept), {

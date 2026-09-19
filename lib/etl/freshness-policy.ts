@@ -141,6 +141,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "ReCiterAI-projection": { cadence: "nightly" },
   // #918 — Scholar.orcid from the WCM Identity table.
   "Identity-orcid": { cadence: "nightly" },
+  // RPM ORCID candidates (inferred + admin-entered) mirrored from reciterdb → orcid_candidate.
+  "RPM-orcid-candidates": { cadence: "nightly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
   //

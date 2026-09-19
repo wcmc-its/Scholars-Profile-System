@@ -28,10 +28,18 @@ vi.mock("@/components/edit/forbidden-edit-page", () => ({
   ForbiddenEditPage: () => <div data-testid="forbidden" />,
 }));
 vi.mock("@/components/edit/auto-submit-form", () => ({
-  AutoSubmitForm: ({ children, ...rest }: { children: React.ReactNode }) => <form {...rest}>{children}</form>,
+  AutoSubmitForm: ({ children, ...rest }: { children: React.ReactNode }) => (
+    <form {...rest}>{children}</form>
+  ),
 }));
-vi.mock("@/lib/edit/honor-queue", () => ({ isHonorsQueueTabVisible: () => false, countPendingHonors: vi.fn() }));
-vi.mock("@/lib/edit/slug-request", () => ({ isSlugRequestEnabled: () => false, countPendingSlugRequests: vi.fn() }));
+vi.mock("@/lib/edit/honor-queue", () => ({
+  isHonorsQueueTabVisible: () => false,
+  countPendingHonors: vi.fn(),
+}));
+vi.mock("@/lib/edit/slug-request", () => ({
+  isSlugRequestEnabled: () => false,
+  countPendingSlugRequests: vi.fn(),
+}));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 
@@ -46,18 +54,30 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.mockGetEditSession.mockResolvedValue(ADMIN);
   h.mockCanViewUsage.mockResolvedValue(true);
-  h.mockLoad.mockImplementation(async (_db: unknown, params: ReturnType<typeof parseOrcidCoverageParams>) =>
-    buildOrcidCoverage(
-      [
-        { cwid: "f1", roleCategory: "full_time_faculty", primaryDepartment: "Dept A", orcid: "0000-0002-1825-0097" },
-        { cwid: "f2", roleCategory: "full_time_faculty", primaryDepartment: "Dept A", orcid: null },
-        { cwid: "p1", roleCategory: "postdoc", primaryDepartment: "Dept B", orcid: null },
-      ],
-      [{ cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: true }],
-      ["f2"],
-      params,
-      TODAY,
-    ),
+  h.mockLoad.mockImplementation(
+    async (_db: unknown, params: ReturnType<typeof parseOrcidCoverageParams>) =>
+      buildOrcidCoverage(
+        [
+          {
+            cwid: "f1",
+            roleCategory: "full_time_faculty",
+            primaryDepartment: "Dept A",
+            orcid: "0000-0002-1825-0097",
+          },
+          {
+            cwid: "f2",
+            roleCategory: "full_time_faculty",
+            primaryDepartment: "Dept A",
+            orcid: null,
+          },
+          { cwid: "p1", roleCategory: "postdoc", primaryDepartment: "Dept B", orcid: null },
+        ],
+        [{ cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: true }],
+        ["f2"],
+        params,
+        TODAY,
+        [{ cwid: "p1", source: "rpm_inferred", articlesAccepted: 5, articlesRejected: 0 }],
+      ),
   );
 });
 
@@ -78,10 +98,17 @@ describe("/edit/orcid-coverage", () => {
   });
 
   it("renders tiles, both tables and the filtered CSV link inside the page root", async () => {
-    const { getByTestId } = render(await EditOrcidCoveragePage({ searchParams: sp({ nih: "ever", role: "all" }) }));
+    const { getByTestId } = render(
+      await EditOrcidCoveragePage({ searchParams: sp({ nih: "ever", role: "all" }) }),
+    );
     const page = within(getByTestId("orcid-coverage-page"));
     expect(h.mockLoad).toHaveBeenCalledWith({}, { role: null, nih: "ever", dept: null });
-    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain("1 of 3 with an ORCID iD on file");
+    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
+      "1 of 3 with an asserted ORCID iD",
+    );
+    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
+      "+1 strong inference (66.7% incl.)",
+    );
     const byRole = within(page.getByTestId("orcid-coverage-by-role"));
     expect(byRole.getByText("Full-time faculty")).toBeTruthy();
     expect(byRole.queryByText("Postdoc")).toBeNull(); // nih=ever drops p1
@@ -100,6 +127,8 @@ describe("/edit/orcid-coverage", () => {
   it("loader failure → unavailable notice, page root still renders", async () => {
     h.mockLoad.mockRejectedValue(new Error("boom"));
     const { getByTestId } = render(await EditOrcidCoveragePage({ searchParams: sp() }));
-    expect(within(getByTestId("orcid-coverage-page")).getByTestId("orcid-coverage-unavailable")).toBeTruthy();
+    expect(
+      within(getByTestId("orcid-coverage-page")).getByTestId("orcid-coverage-unavailable"),
+    ).toBeTruthy();
   });
 });

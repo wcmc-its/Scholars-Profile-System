@@ -132,6 +132,7 @@ model Scholar {
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
+  orcidCandidates      OrcidCandidate[]
   reporterCandidates   ReporterProfileCandidate[]
   clinicalTrials       PersonClinicalTrial[]
   datasetDeposits      PersonDatasetDeposit[]
@@ -720,6 +721,30 @@ model StudentPhdProgram {
 /// `principal_investigators[]` from NIH RePORTER's /projects/search and
 /// resolves each profile_id back to a WCM cwid via grant-join (primary)
 /// + fuzzy name match against scholars with NIH grants (fallback).
+/// ORCID iDs the ReCiter Publication Manager (RPM) holds for a scholar that SPS
+/// does NOT treat as asserted: mirrored nightly from reciterdb by
+/// `etl/orcid-candidates`. `source` = `rpm_inferred` (an ORCID seen on the
+/// person's PubMed author record across the articles they accepted in RPM;
+/// `articlesAccepted` / `articlesRejected` are the support) or `rpm_admin`
+/// (hand-entered by an RPM administrator — treated as asserted). Consumed ONLY
+/// by `/edit/orcid-coverage`; never rendered on the public profile or JSON-LD —
+/// `scholar.orcid` (WCM Identity) stays the sole asserted source there.
+model OrcidCandidate {
+  cwid             String    @db.VarChar(32)
+  scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid            String    @db.VarChar(19)
+  source           String    @db.VarChar(32)
+  articlesAccepted Int       @default(0) @map("articles_accepted")
+  articlesRejected Int       @default(0) @map("articles_rejected")
+  /// The source row's own last-update time, so the dashboard can say how stale RPM's view is.
+  sourceUpdatedAt  DateTime? @map("source_updated_at")
+  syncedAt         DateTime  @default(now()) @map("synced_at")
+
+  @@id([cwid, orcid])
+  @@index([source])
+  @@map("orcid_candidate")
+}
+
 model PersonNihProfile {
   cwid             String   @db.VarChar(32)
   scholar          Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)

@@ -29,6 +29,7 @@ import {
   type OrcidCoverage,
   NIH_FILTER_LABELS,
   NIH_FILTERS,
+  STRONG_MIN_ACCEPTED,
   loadOrcidCoverage,
   neither,
   nihNoOrcid,
@@ -62,7 +63,10 @@ function Tile({ label, c }: { label: string; c: CoverageCounts }) {
       <div className="text-muted-foreground text-xs">{label}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{pct(c.orcid, c.people)}</div>
       <div className="text-muted-foreground mt-1 text-xs tabular-nums">
-        {c.orcid.toLocaleString()} of {c.people.toLocaleString()} with an ORCID iD on file
+        {c.orcid.toLocaleString()} of {c.people.toLocaleString()} with an asserted ORCID iD
+      </div>
+      <div className="text-muted-foreground mt-0.5 text-xs tabular-nums">
+        +{c.strong.toLocaleString()} strong inference ({pct(c.orcid + c.strong, c.people)} incl.)
       </div>
     </div>
   );
@@ -89,14 +93,16 @@ function CoverageTable({
           <tr className="border-apollo-border border-b">
             <th className={thClass}>{firstHeader}</th>
             <th className={thNum}>People</th>
-            <th className={thNum}>ORCID iD</th>
-            <th className={thNum}>ORCID %</th>
+            <th className={thNum}>Asserted ORCID</th>
+            <th className={thNum}>Asserted %</th>
+            <th className={thNum}>Inferred, strong</th>
+            <th className={thNum}>Inferred, weak</th>
             <th className={thNum}>eRA account</th>
             <th className={thNum}>Both</th>
             <th className={thNum}>Neither</th>
             <th className={thNum}>NIH-funded</th>
-            <th className={thNum}>NIH-funded, ORCID</th>
-            <th className={thNum}>NIH-funded, no ORCID</th>
+            <th className={thNum}>NIH-funded, asserted</th>
+            <th className={thNum}>NIH-funded, no asserted (strong inference)</th>
             <th className={thNum}>NIH PI</th>
             <th className={thNum}>NIH PI, no eRA</th>
           </tr>
@@ -104,7 +110,7 @@ function CoverageTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td className={`${tdClass} text-muted-foreground`} colSpan={12}>
+              <td className={`${tdClass} text-muted-foreground`} colSpan={14}>
                 No one matches these filters.
               </td>
             </tr>
@@ -115,6 +121,8 @@ function CoverageTable({
                 <td className={tdNum}>{r.people.toLocaleString()}</td>
                 <td className={tdNum}>{r.orcid.toLocaleString()}</td>
                 <td className={tdNum}>{pct(r.orcid, r.people)}</td>
+                <td className={tdNum}>{r.strong.toLocaleString()}</td>
+                <td className={tdNum}>{r.weak.toLocaleString()}</td>
                 <td className={tdNum}>{r.era.toLocaleString()}</td>
                 <td className={tdNum}>{r.both.toLocaleString()}</td>
                 <td className={tdNum}>{neither(r).toLocaleString()}</td>
@@ -122,7 +130,12 @@ function CoverageTable({
                 <td className={tdNum}>
                   {r.nihOrcid.toLocaleString()} ({pct(r.nihOrcid, r.nihPeople)})
                 </td>
-                <td className={`${tdNum} font-semibold`}>{nihNoOrcid(r).toLocaleString()}</td>
+                <td className={`${tdNum} font-semibold`}>
+                  {nihNoOrcid(r).toLocaleString()}{" "}
+                  <span className="text-muted-foreground font-normal">
+                    ({r.nihStrong.toLocaleString()})
+                  </span>
+                </td>
                 <td className={tdNum}>{r.nihPi.toLocaleString()}</td>
                 <td className={tdNum}>{piNoEra(r).toLocaleString()}</td>
               </tr>
@@ -195,9 +208,14 @@ function Body({ data }: { data: OrcidCoverage }) {
   return (
     <>
       <p className="text-muted-foreground mt-2 max-w-prose">
-        Share of active people with an <strong>ORCID iD on file in WCM Identity</strong> — the only
-        source we read, so someone can hold an ORCID the feed doesn&apos;t know about. A scholar adds
-        theirs under Manage profile in{" "}
+        <strong>Asserted ORCID</strong> = on file in WCM Identity, or entered by a Publication
+        Manager administrator. <strong>Inferred</strong> = the Publication Manager saw an ORCID on
+        the person&apos;s PubMed author record across articles they accepted: <em>strong</em> when
+        one ORCID is carried by {STRONG_MIN_ACCEPTED}+ accepted articles and no rejected one,{" "}
+        <em>weak</em> otherwise (thin support, a contradiction, or several candidate iDs). An
+        inference never reaches the public profile — it is the &ldquo;is this yours? confirm
+        it&rdquo; outreach list; the number in parentheses under NIH-funded is that easy subset. A
+        scholar adds theirs under Manage profile in{" "}
         <a href={PUBLICATION_MANAGER_URL} className="underline" target="_blank" rel="noreferrer">
           ReCiter
         </a>
@@ -205,8 +223,8 @@ function Body({ data }: { data: OrcidCoverage }) {
         holds one); RePORTER lists PIs only, so a Co-I or key person on someone else&apos;s award
         has an account we cannot see — that is why the gap column is &ldquo;NIH PI, no eRA&rdquo;,
         which is a miss in our RePORTER resolver, not in their account. &ldquo;NIH-funded&rdquo; =
-        any NIH award on file for the person, whatever its dates. NIH requires an ORCID iD linked
-        to eRA Commons for every SciENcv biosketch.
+        any NIH award on file for the person, whatever its dates. NIH requires an ORCID iD linked to
+        eRA Commons for every SciENcv biosketch.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-3" data-testid="orcid-coverage-tiles">
@@ -242,7 +260,7 @@ function Body({ data }: { data: OrcidCoverage }) {
           caption={`${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}${nihLabel}, ${
             params.nih === "none"
               ? "sorted by people."
-              : "sorted by NIH-funded people without an ORCID iD — the outreach list."
+              : "sorted by NIH-funded people without an asserted ORCID iD — the outreach list."
           }`}
           firstHeader="Department"
           rows={data.byDept}
@@ -270,7 +288,12 @@ export default async function EditOrcidCoveragePage({
       reason: "not_superuser_or_unit_admin",
     });
     return (
-      <ConsoleShell active="orcid-coverage" session={session} pendingSlugRequests={null} pendingHonors={null}>
+      <ConsoleShell
+        active="orcid-coverage"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
         <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
