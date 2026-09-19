@@ -427,4 +427,12 @@ describe("SciencvWorksheet — plain-text lines", () => {
       "https://pubmed.ncbi.nlm.nih.gov/?term=1%5Bpmid%5D%20OR%202%5Bpmid%5D",
     );
   });
+
+  it("explains the block-by-block layout in a closed-by-default disclosure", () => {
+    const { container } = render(<SciencvWorksheet {...props()} />);
+    const why = container.querySelector('[data-testid="ws-why"]') as HTMLDetailsElement;
+    expect(why.open).toBe(false);
+    expect(why.querySelector("summary")?.textContent).toBe("Why copy block by block?");
+    expect(why.textContent).toContain("SciENcv has no import for the Biographical Sketch");
+  });
 });
