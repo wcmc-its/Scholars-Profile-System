@@ -10,7 +10,7 @@
  * prints "Scopus:" with no PubMed link. Every query is scoped to the table's
  * test id or the render container, never `document.body`.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, within } from "@testing-library/react";
 
 import { MentoredPublicationsTable } from "@/components/edit/mentored-publications-table";
@@ -138,12 +138,15 @@ const LEARNERS: MentoredPubsSummaryRow[] = [
   }),
 ];
 
+const HREFS = { summary: "/edit/reports/7?years=2025&program=all", publications: "/edit/reports/7?years=2025&program=all&view=publications" };
+const DOWNLOAD = "/api/edit/reports/mentored-publications?years=2025";
+
 const rowIds = (table: HTMLElement, prefix: string) =>
   [...table.querySelectorAll("tbody tr")].map((tr) => tr.getAttribute("data-testid")?.replace(prefix, ""));
 
 function renderPubs() {
   const utils = render(
-    <MentoredPublicationsTable view="publications" summary={[]} publications={PUBS} pubsMode="mentored" highImpactThreshold={10} />,
+    <MentoredPublicationsTable view="publications" viewHrefs={HREFS} downloadHref={DOWNLOAD} summary={[]} publications={PUBS} pubsMode="mentored" highImpactThreshold={10} />,
   );
   const table = () => utils.getByTestId("mentored-pubs-publications");
   return { ...utils, table, ids: () => rowIds(table(), "mentored-pubs-pub-") };
@@ -201,7 +204,7 @@ describe("MentoredPublicationsTable — publications", () => {
 
 function renderLearners() {
   const utils = render(
-    <MentoredPublicationsTable view="summary" summary={LEARNERS} publications={[]} pubsMode="mentored" highImpactThreshold={10} />,
+    <MentoredPublicationsTable view="summary" viewHrefs={HREFS} downloadHref={DOWNLOAD} summary={LEARNERS} publications={[]} pubsMode="mentored" highImpactThreshold={10} />,
   );
   const table = () => utils.getByTestId("mentored-pubs-summary");
   return { ...utils, table, ids: () => rowIds(table(), "mentored-pubs-learner-") };
@@ -228,9 +231,47 @@ describe("MentoredPublicationsTable — learners", () => {
 
   it("an empty report renders the empty copy and no table", () => {
     const { queryByTestId, getByTestId } = render(
-      <MentoredPublicationsTable view="summary" summary={[]} publications={[]} pubsMode="mentored" highImpactThreshold={10} />,
+      <MentoredPublicationsTable view="summary" viewHrefs={HREFS} downloadHref={DOWNLOAD} summary={[]} publications={[]} pubsMode="mentored" highImpactThreshold={10} />,
     );
     expect(getByTestId("mentored-pubs-empty").textContent).toBe("No learners match these filters.");
     expect(queryByTestId("mentored-pubs-summary")).toBeNull();
+  });
+});
+
+describe("MentoredPublicationsTable — view tabs", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("a tab click swaps the view in place, rewrites the URL, and keeps the form's hidden view current", () => {
+    const replaceState = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
+    const { getByTestId, queryByTestId, container } = render(
+      <MentoredPublicationsTable view="summary" viewHrefs={HREFS} downloadHref={DOWNLOAD} summary={LEARNERS} publications={PUBS} pubsMode="mentored" highImpactThreshold={10} />,
+    );
+    const hidden = () => container.querySelector<HTMLInputElement>('input[name="view"][form="mentored-pubs-filters"]');
+    expect(getByTestId("mentored-pubs-summary")).toBeTruthy();
+    expect(getByTestId("mentored-pubs-view-summary").getAttribute("aria-current")).toBe("page");
+    expect(getByTestId("mentored-pubs-view-publications").getAttribute("href")).toBe(HREFS.publications);
+    expect(hidden()?.value).toBe("summary");
+    expect(getByTestId("mentored-pubs-download").getAttribute("href")).toBe(DOWNLOAD);
+
+    fireEvent.click(getByTestId("mentored-pubs-view-publications"));
+
+    expect(getByTestId("mentored-pubs-publications")).toBeTruthy();
+    expect(queryByTestId("mentored-pubs-summary")).toBeNull();
+    expect(getByTestId("mentored-pubs-view-publications").getAttribute("aria-current")).toBe("page");
+    expect(hidden()?.value).toBe("publications");
+    expect(replaceState).toHaveBeenCalledWith(null, "", HREFS.publications);
+  });
+
+  it("a modifier-click is left to the browser (opens the real link, no in-place swap)", () => {
+    const replaceState = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
+    const { getByTestId, queryByTestId } = render(
+      <MentoredPublicationsTable view="summary" viewHrefs={HREFS} downloadHref={DOWNLOAD} summary={LEARNERS} publications={PUBS} pubsMode="mentored" highImpactThreshold={10} />,
+    );
+    const link = getByTestId("mentored-pubs-view-publications");
+    // jsdom cannot navigate; stand in for the browser so the default is consumed here, not logged.
+    link.addEventListener("click", (e) => e.preventDefault());
+    fireEvent.click(link, { metaKey: true });
+    expect(queryByTestId("mentored-pubs-publications")).toBeNull();
+    expect(replaceState).not.toHaveBeenCalled();
   });
 });

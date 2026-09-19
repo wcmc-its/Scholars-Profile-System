@@ -23,6 +23,8 @@ export function AutoSubmitForm({
   action?: string;
   className?: string;
   children: ReactNode;
+  /** Lets a control elsewhere on the page join the form (`form="<id>"`). */
+  id?: string;
   "data-testid"?: string;
 }) {
   const [hydrated, setHydrated] = useState(false);

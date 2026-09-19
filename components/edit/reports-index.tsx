@@ -43,9 +43,13 @@ const TH_CLASS =
 /** Mirrors `ReportableUnitKind` (`lib/edit/cancer-center-reports.ts`). Declared
  *  locally rather than imported: this is a client component, and that module
  *  pulls the server-only reports data layer. */
-export type ReportsIndexUnitKind = "center" | "department" | "division" | "core";
+export type ReportsIndexUnitKind = "center" | "department" | "division" | "core" | "program";
+/** `"program"` is the one pseudo-unit: the person-granted Mentored
+ *  publications report (`/edit/reports/7`) rides the same list as a unit with
+ *  one report, so it is filterable and sortable like every other row. */
+export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export type ReportsIndexReport = { n: 1 | 2 | 3 | 4 | 5 | 6; label: string; description: string };
+export type ReportsIndexReport = { n: ReportN; label: string; description: string };
 
 export type ReportsIndexUnit = {
   code: string;
@@ -63,7 +67,7 @@ export type ReportsIndexUnit = {
    *  to labels/descriptions. A center carries all six; department/division/
    *  core carry only Publications + NIH-funded pubs. */
   reports: ReadonlyArray<ReportsIndexReport>;
-  perReport: ReadonlyArray<{ n: 1 | 2 | 3 | 4 | 5 | 6; live: boolean; lastRefreshedAt: string | null }>;
+  perReport: ReadonlyArray<{ n: ReportN; live: boolean; lastRefreshedAt: string | null }>;
 };
 
 function formatDate(iso: string | null): string {
@@ -75,6 +79,7 @@ function typeLabel(u: { kind: ReportsIndexUnitKind; centerType: "center" | "inst
   if (u.kind === "department") return "Department";
   if (u.kind === "division") return "Division";
   if (u.kind === "core") return "Core";
+  if (u.kind === "program") return "Program";
   return u.centerType === "institute" ? "Institute" : "Center";
 }
 
@@ -83,6 +88,8 @@ function typeLabel(u: { kind: ReportsIndexUnitKind; centerType: "center" | "inst
  *  (implied `kind=center`) keeps resolving exactly as it always has. For a
  *  core, `<code>` is the core id. */
 function reportHref(n: number, code: string, kind: ReportsIndexUnitKind): string {
+  // Report 7 is granted per person (`report_access`), never unit-scoped.
+  if (n === 7) return "/edit/reports/7";
   const params = new URLSearchParams({ center: code });
   if (kind !== "center") params.set("kind", kind);
   return `/edit/reports/${n}?${params.toString()}`;
@@ -108,7 +115,7 @@ type FlatRow = {
   unitKind: ReportsIndexUnitKind;
   unitName: string;
   centerType: "center" | "institute" | null;
-  reportN: 1 | 2 | 3 | 4 | 5 | 6;
+  reportN: ReportN;
   reportLabel: string;
   live: boolean;
   lastRefreshedAt: string | null;
@@ -128,6 +135,8 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   // Same default-off posture as department/division — cores are the newest
   // reportable kind and only a handful carry any unit_admin grant at all.
   const [showCores, setShowCores] = React.useState(false);
+  // On by default: the one program row is what a report_access holder came for.
+  const [showPrograms, setShowPrograms] = React.useState(true);
   const [liveOnly, setLiveOnly] = React.useState(false);
   const [noneYetOnly, setNoneYetOnly] = React.useState(false);
 
@@ -159,6 +168,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       departments: units.filter((u) => u.kind === "department").length,
       divisions: units.filter((u) => u.kind === "division").length,
       cores: units.filter((u) => u.kind === "core").length,
+      programs: units.filter((u) => u.kind === "program").length,
       // Row-scoped (per report), not unit-scoped — a unit with 1 of 6 reports
       // live now contributes 1 row to liveOnly and 5 to noneYet, instead of
       // reading as "has a live report" and never surfacing in "In progress".
@@ -176,6 +186,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       if (r.unitKind === "department" && !showDepartments) return false;
       if (r.unitKind === "division" && !showDivisions) return false;
       if (r.unitKind === "core" && !showCores) return false;
+      if (r.unitKind === "program" && !showPrograms) return false;
       if (liveOnly && !r.live) return false;
       if (noneYetOnly && r.live) return false;
       if (trimmed.length === 0) return true;
@@ -208,6 +219,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
     showDepartments,
     showDivisions,
     showCores,
+    showPrograms,
     liveOnly,
     noneYetOnly,
   ]);
@@ -256,6 +268,15 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                 count={counts.cores}
                 testid="reports-index-filter-core"
               />
+              {counts.programs > 0 && (
+                <FilterCheckbox
+                  checked={showPrograms}
+                  onChange={setShowPrograms}
+                  label="Program"
+                  count={counts.programs}
+                  testid="reports-index-filter-program"
+                />
+              )}
             </div>
           </fieldset>
           <fieldset className="border-apollo-border border-t">
@@ -499,13 +520,15 @@ function ReportsBands({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                 </span>
               </td>
               <td className="border-apollo-border border-t px-3 py-2 text-right">
-                <Link
-                  href={u.editHref}
-                  className="text-foreground relative z-10 text-xs hover:underline"
-                  data-testid={`reports-index-edit-${u.code}`}
-                >
-                  Edit {u.kind === "center" ? "center" : u.kind} profile
-                </Link>
+                {u.kind !== "program" && (
+                  <Link
+                    href={u.editHref}
+                    className="text-foreground relative z-10 text-xs hover:underline"
+                    data-testid={`reports-index-edit-${u.code}`}
+                  >
+                    Edit {u.kind === "center" ? "center" : u.kind} profile
+                  </Link>
+                )}
               </td>
             </tr>
             <ReportRows perReport={u.perReport} reports={u.reports} unitCode={u.code} unitKind={u.kind} />
