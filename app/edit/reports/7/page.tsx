@@ -32,7 +32,9 @@
  * inferred (`lib/edit/mentorship-type.ts`; the choices offered and the
  * default are resolved against the caller's scopes — a roster type is
  * offered only when its scope is held, co-author inferences are never on by
- * default). Two publication sets (`pubs=mentored|all`, a select in the
+ * default; "Faculty-asserted" — the mentor's own `manualMentees` — is a
+ * confirmed source, on for a `"*"` holder, and its CWID-less entries get
+ * their own count sentence). Two publication sets (`pubs=mentored|all`, a select in the
  * filter form):
  * the co-pubs with a mentor (default), or every publication of the
  * learner from the `aoc_mentee_publication` bridge, each flagged for a mentor
@@ -316,12 +318,14 @@ export default async function EditReportsMentoredPublicationsPage({
           ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
           : "Every publication a learner co-authored with one of their mentors, "}
         with Journal Impact Factor and NIH iCite citations. Pairs come from the AOC pairing sheet, the
-        MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship
-        inferences (off by default) &mdash; see Sources below. &ldquo;In window&rdquo; means entry year
+        MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty
+        add on their own profile, and co-authorship inferences (off by default) &mdash; see Sources below. &ldquo;In window&rdquo; means entry year
         &le; publication year &le; graduation year + {params.tail}; an AOC learner with no entry year on
         the pairing sheet is assumed to have entered four years before graduating.
         {report.droppedUnresolved > 0 &&
           ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
+        {report.droppedNoCwid > 0 &&
+          ` ${report.droppedNoCwid.toLocaleString()} faculty-asserted mentees have no CWID and are not shown.`}
       </p>
       <SourcesDisclosure />
       <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />

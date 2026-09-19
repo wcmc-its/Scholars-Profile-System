@@ -22,6 +22,8 @@
  * Faculty Review Tool named as not yet a source) and the Viewers panel's
  * `md` scope reads "AOC". `HoverTooltip` is mocked to its children — the
  * walker calls plain function components, and Radix's provider uses hooks.
+ * "Faculty-asserted" is offered to every holder, checked by default for
+ * `"*"` only, and its CWID-less entries get their own sentence.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -204,7 +206,7 @@ describe("/edit/reports/7 — wiring", () => {
     );
   });
 
-  it("Type of mentorship: an md holder sees AOC (checked) and the four non-roster types, never MD-PhD / ECR; no Program select", async () => {
+  it("Type of mentorship: an md holder sees AOC (checked) and the five non-roster types, never MD-PhD / ECR; faculty offered but unchecked; no Program select", async () => {
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
     const form = findByType(result, h.mockAutoSubmitForm);
     expect(checkboxes(form).filter(([name]) => name === "types")).toEqual([
@@ -213,6 +215,7 @@ describe("/edit/reports/7 — wiring", () => {
       ["types", "postdoc", false],
       ["types", "likely", false],
       ["types", "possible", false],
+      ["types", "faculty", false],
     ]);
     const text = textOf(form);
     expect(text).toContain("Type of mentorship");
@@ -236,6 +239,7 @@ describe("/edit/reports/7 — wiring", () => {
       expect.stringContaining("reporting manager from the ED appointment record"),
       expect.stringContaining("Not on any roster"),
       expect.stringContaining("research staff or MD alumni"),
+      expect.stringContaining("Added by the mentor on their Scholars profile"),
     ]);
     const selects: string[] = [];
     const walk = (node: unknown) => {
@@ -464,7 +468,7 @@ describe("/edit/reports/7 — wiring", () => {
       highImpactThreshold: 10,
     });
     expect(textOf(summary)).toContain(
-      "Pairs come from the AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship inferences (off by default) — see Sources below.",
+      "Pairs come from the AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty add on their own profile, and co-authorship inferences (off by default) — see Sources below.",
     );
     expect(textOf(summary)).toContain("an AOC learner with no entry year on the pairing sheet");
     expect(textOf(summary)).not.toContain("MD-program");
@@ -485,6 +489,20 @@ describe("/edit/reports/7 — wiring", () => {
     expect(textOf(dropped)).toContain(
       "is assumed to have entered four years before graduating. 1 co-publications not yet in the local corpus are not shown.",
     );
+    expect(textOf(dropped)).not.toContain("faculty-asserted mentees");
+
+    // Faculty-asserted entries with no CWID get the same sentence slot.
+    h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
+      summary: [summaryRow], detail: [], publications: [pub],
+      generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
+      droppedUnresolved: 0,
+      droppedNoCwid: 2,
+    }));
+    const noCwid = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
+    expect(textOf(noCwid)).toContain(
+      "is assumed to have entered four years before graduating. 2 faculty-asserted mentees have no CWID and are not shown.",
+    );
+    expect(textOf(noCwid)).not.toContain("not yet in the local corpus");
   });
 
   it("all mode with an unloaded bridge renders the notice and no table", async () => {
@@ -517,7 +535,7 @@ describe("/edit/reports/7 — wiring", () => {
     expect(findByType(result, h.mockTable)).toBeNull();
   });
 
-  it("a superuser: every type offered, the confirmed ones checked by default, co-author inferences unchecked", async () => {
+  it("a superuser: every type offered, the confirmed ones (faculty included) checked by default, co-author inferences unchecked", async () => {
     h.mockGetEditSession.mockResolvedValue(SUPERUSER);
     h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
@@ -531,8 +549,9 @@ describe("/edit/reports/7 — wiring", () => {
       ["types", "postdoc", true],
       ["types", "likely", false],
       ["types", "possible", false],
+      ["types", "faculty", true],
     ]);
-    const confirmed = ["aoc", "mdphd", "ecr", "thesis", "postdoc"];
+    const confirmed = ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty"];
     expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], confirmed);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
       scopes: ["*"],
