@@ -1,13 +1,20 @@
 /**
  * `/edit/reports/7` — "Mentored publications". For every learner in a
- * (learner, mentor) pair — the AOC roster, Jenzabar thesis advisors, ED
- * postdoc appointments, co-author suggestions — every publication
- * co-authored with one of their mentors, with Journal Impact Factor and NIH
- * iCite citations, plus per-learner counts
- * (`lib/edit/mentored-publications-report.ts`). The Medical Education office's
- * annual spreadsheet, on demand: the summary table in-page and the full
- * three-sheet workbook behind "Download .xlsx"
- * (`/api/edit/reports/mentored-publications`, same query string).
+ * (learner, mentor) pair — the AOC pairing sheet (which also carries the
+ * MD-PhD program office's list), Jenzabar thesis advisors, ED postdoc
+ * appointments, co-author inferences — every publication co-authored with
+ * one of their mentors, with Journal Impact Factor and NIH iCite citations,
+ * plus per-learner counts (`lib/edit/mentored-publications-report.ts`). The
+ * Areas of Concentration (AOC) office's annual spreadsheet, on demand: the
+ * summary table in-page and the full three-sheet workbook behind
+ * "Download .xlsx" (`/api/edit/reports/mentored-publications`, same query
+ * string). Every label speaks the office's language (`AOC`, never the
+ * `md` bucket key; "likely", never "presumptive") — `lib/edit/mentorship-type.ts`
+ * — and each type carries a hover (`HoverTooltip`, a client module, so it
+ * is safe in this server page) plus a closed "Sources" disclosure under the
+ * description that says what each source carries and lacks, and names the
+ * one not yet loaded (the Faculty Review Tool's self-reported mentees).
+ * `docs/mentored-publications-report.md` is the long form.
  *
  * Two in-page views (`view=summary|publications`, underline tabs the client
  * island owns — both views ride on the same loaded report, so a tab click
@@ -27,7 +34,7 @@
  * offered only when its scope is held, co-author inferences are never on by
  * default). Two publication sets (`pubs=mentored|all`, a select in the
  * filter form):
- * the co-pubs with an AOC mentor (default), or every publication of the
+ * the co-pubs with a mentor (default), or every publication of the
  * learner from the `aoc_mentee_publication` bridge, each flagged for a mentor
  * co-author. Both params ride every tab link and the download link; `view`
  * is page-only.
@@ -47,11 +54,13 @@
  */
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import * as React from "react";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { MentoredPublicationsTable } from "@/components/edit/mentored-publications-table";
 import { ReportAccessPanel, type ReportAccessPanelRow } from "@/components/edit/report-access-panel";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -71,6 +80,8 @@ import {
 } from "@/lib/edit/mentored-publications-report";
 import {
   allowedMentorshipTypes,
+  MENTORSHIP_TYPE_DESCRIPTION,
+  MENTORSHIP_TYPE_KEYS,
   MENTORSHIP_TYPE_LABEL,
   resolveMentorshipTypes,
   type MentorshipTypeKey,
@@ -124,7 +135,11 @@ function FilterForm({
           {typeChoices.map((k) => (
             <label key={k} className="inline-flex items-center gap-1">
               <input type="checkbox" name="types" value={k} defaultChecked={selectedTypes.has(k)} />
-              {MENTORSHIP_TYPE_LABEL[k]}
+              {/* The hover wraps the TEXT only — never the input, whose click
+                  must stay a plain toggle. */}
+              <HoverTooltip text={MENTORSHIP_TYPE_DESCRIPTION[k]} wide>
+                <span>{MENTORSHIP_TYPE_LABEL[k]}</span>
+              </HoverTooltip>
             </label>
           ))}
         </div>
@@ -174,6 +189,40 @@ function FilterForm({
         Apply
       </button>
     </AutoSubmitForm>
+  );
+}
+
+/** The date facts a description does not already state, appended in the
+ *  Sources disclosure (the hover text stays one sentence; MD-PhD and thesis
+ *  say theirs inline, co-author pairs carry no years). */
+const SOURCE_DATES: Partial<Record<MentorshipTypeKey, string>> = {
+  aoc: "Carries the graduation year and, for recent classes, the entry year.",
+  ecr: "Carries the graduation year.",
+  postdoc: "Carries the appointment start and end dates.",
+};
+
+/** Closed by default: one entry per type in filter order, then the source
+ *  not yet loaded. Plain `<details>` so there is nothing to hydrate. */
+function SourcesDisclosure() {
+  return (
+    <details className="text-muted-foreground mt-2 text-sm" data-testid="mentored-pubs-sources">
+      <summary className="cursor-pointer">Sources</summary>
+      <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+        {MENTORSHIP_TYPE_KEYS.map((k) => (
+          <React.Fragment key={k}>
+            <dt className="text-foreground font-medium">{MENTORSHIP_TYPE_LABEL[k]}</dt>
+            <dd className="m-0">
+              {MENTORSHIP_TYPE_DESCRIPTION[k]}
+              {SOURCE_DATES[k] ? ` ${SOURCE_DATES[k]}` : null}
+            </dd>
+          </React.Fragment>
+        ))}
+        <dd className="col-span-2 m-0" data-testid="mentored-pubs-sources-frt">
+          Not yet a source: the Faculty Review Tool&rsquo;s self-reported mentees &mdash; the
+          mentoring extract from that system has not been provided.
+        </dd>
+      </dl>
+    </details>
   );
 }
 
@@ -266,14 +315,15 @@ export default async function EditReportsMentoredPublicationsPage({
         {allMode
           ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
           : "Every publication a learner co-authored with one of their mentors, "}
-        with Journal Impact Factor and NIH iCite citations. Pairs come from the AOC roster, Jenzabar
-        thesis-advisor records, ED postdoc appointments, and co-authorship patterns (presumptive
-        &mdash; unchecked by default). &ldquo;In window&rdquo; means entry year &le; publication year
-        &le; graduation year + {params.tail}; an MD-program learner with no entry year on the roster
-        is assumed to have entered four years before graduating.
+        with Journal Impact Factor and NIH iCite citations. Pairs come from the AOC pairing sheet, the
+        MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship
+        inferences (off by default) &mdash; see Sources below. &ldquo;In window&rdquo; means entry year
+        &le; publication year &le; graduation year + {params.tail}; an AOC learner with no entry year on
+        the pairing sheet is assumed to have entered four years before graduating.
         {report.droppedUnresolved > 0 &&
           ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
       </p>
+      <SourcesDisclosure />
       <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
       {allPubsMissing && (
         <p

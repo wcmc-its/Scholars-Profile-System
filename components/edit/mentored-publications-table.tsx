@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { citationIdentifier } from "@/lib/citation";
 import type {
   MentoredPubsLearnerOnPub,
@@ -10,7 +11,13 @@ import type {
   MentoredPubsSummaryRow,
   MentorRef,
 } from "@/lib/edit/mentored-publications-report";
-import { mentorshipKey, mentorshipLabel, type MentorshipType } from "@/lib/edit/mentorship-type";
+import {
+  MENTORSHIP_TYPE_DESCRIPTION,
+  mentorshipKey,
+  mentorshipLabel,
+  mentorshipTypeKey,
+  type MentorshipType,
+} from "@/lib/edit/mentorship-type";
 
 /**
  * `/edit/reports/7` — the Learners / Publications tables as a client island:
@@ -26,7 +33,8 @@ import { mentorshipKey, mentorshipLabel, type MentorshipType } from "@/lib/edit/
  * `types=` filter (`lib/edit/mentorship-type.ts`), because a rail facet
  * filters learner ROWS — a learner passing on one roster pair still listed
  * every co-author pair beside it and counted their papers. The type still
- * shows as a Learners column and under each mentor. Sortable headers are a
+ * shows as a Learners column and under each mentor, each line hovering the
+ * plain-language description of its category (`TypeLine`). Sortable headers are a
  * `<button>` in the `<th>` (`aria-sort` on the active one); clicking the
  * active header flips the direction; nulls sort last either way. Rows
  * render capped at `ROW_CAP` behind "Show all N".
@@ -234,6 +242,21 @@ function Empty({ noun }: { noun: string }) {
 const learnerName = (l: { firstName: string | null; lastName: string | null }) =>
   [l.lastName, l.firstName].filter(Boolean).join(", ");
 
+/** One pair's type label, hovering its category's description — the same
+ *  sentence the filter checkbox hovers, so the words match end to end. A
+ *  pair no filter key maps to (an unselectable roster bucket) has no
+ *  description and renders bare. */
+function TypeLine({ type }: { type: MentorshipType }) {
+  const key = mentorshipTypeKey(type);
+  const label = mentorshipLabel(type);
+  if (key === null) return <>{label}</>;
+  return (
+    <HoverTooltip text={MENTORSHIP_TYPE_DESCRIPTION[key]} wide>
+      <span>{label}</span>
+    </HoverTooltip>
+  );
+}
+
 /** "Name  cwid", the type label(s) beneath when the mentor carries them. */
 function MentorCell({ mentors }: { mentors: ReadonlyArray<MentorRef & { mentorships?: MentorshipType[] }> }) {
   if (mentors.length === 0) return <span className="text-muted-foreground">—</span>;
@@ -245,7 +268,7 @@ function MentorCell({ mentors }: { mentors: ReadonlyArray<MentorRef & { mentorsh
           <span className={CWID_CLASS}>{m.cwid}</span>
           {m.mentorships?.map((t) => (
             <div key={mentorshipKey(t)} className="text-muted-foreground text-xs">
-              {mentorshipLabel(t)}
+              <TypeLine type={t} />
             </div>
           ))}
         </li>
@@ -390,7 +413,7 @@ function PublicationsView({ rows, allMode }: { rows: MentoredPubsPublicationRow[
                                 className={CHIP_CLASS}
                                 title={
                                   l.inWindow === null
-                                    ? "Program window unknown (no graduation or entry year on the roster)"
+                                    ? "Program window unknown (no graduation or entry year on record)"
                                     : "Publication year inside this learner's program window"
                                 }
                               >
@@ -528,7 +551,7 @@ function LearnersView({
                     {learnerName(r)}
                     <span className={CWID_CLASS}>{r.cwid}</span>
                     {r.entryYearSource === "fallback" && (
-                      <span className={CHIP_CLASS} title="Entry year not on the roster; window assumes a 4-year track.">
+                      <span className={CHIP_CLASS} title="Entry year not on the pairing sheet; window assumes a 4-year track.">
                         (entry est. {r.entryYear})
                       </span>
                     )}
@@ -539,7 +562,7 @@ function LearnersView({
                     <ul className="m-0 list-none p-0">
                       {r.mentors.map((m) => (
                         <li key={m.cwid} className="whitespace-nowrap">
-                          {mentorshipLabel(m.mentorship)}
+                          <TypeLine type={m.mentorship} />
                         </li>
                       ))}
                     </ul>

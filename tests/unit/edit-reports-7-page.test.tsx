@@ -17,7 +17,11 @@
  * is the auto-submit island; the tables are the `MentoredPublicationsTable`
  * island and receive `view` / `summary` / `publications` / `pubsMode`; an
  * unloaded all-pubs bridge renders the notice, not the island; the PubMed-
- * only sentence names the dropped count.
+ * only sentence names the dropped count; the description and the closed
+ * "Sources" disclosure speak the office's words (AOC, pairing sheet; the
+ * Faculty Review Tool named as not yet a source) and the Viewers panel's
+ * `md` scope reads "AOC". `HoverTooltip` is mocked to its children — the
+ * walker calls plain function components, and Radix's provider uses hooks.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +40,7 @@ const h = vi.hoisted(() => ({
   mockPanel: vi.fn(() => null),
   mockTable: vi.fn(() => null),
   mockAutoSubmitForm: vi.fn(({ children }: { children: React.ReactNode }) => children),
+  mockHoverTooltip: vi.fn(({ children }: { children: React.ReactNode }) => children),
 }));
 
 vi.mock("next/navigation", () => ({ notFound: h.mockNotFound, redirect: h.mockRedirect }));
@@ -51,6 +56,9 @@ vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
 vi.mock("@/components/edit/report-access-panel", () => ({ ReportAccessPanel: h.mockPanel }));
 vi.mock("@/components/edit/mentored-publications-table", () => ({ MentoredPublicationsTable: h.mockTable }));
 vi.mock("@/components/edit/auto-submit-form", () => ({ AutoSubmitForm: h.mockAutoSubmitForm }));
+vi.mock("@/components/ui/hover-tooltip", () => ({
+  HoverTooltip: h.mockHoverTooltip,
+}));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -211,6 +219,24 @@ describe("/edit/reports/7 — wiring", () => {
     expect(text).toContain("AOC");
     expect(text).toContain("Likely mentee (from co-authorship)");
     expect(text).not.toContain("All programs");
+    // Each label hovers its plain-language description — the text, never the input.
+    const hovers: Array<{ text: string; wide?: boolean; children: El }> = [];
+    const collect = (node: unknown) => {
+      if (node === null || node === undefined || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(collect);
+      const el = asEl(node);
+      if (el.type === h.mockHoverTooltip) hovers.push(el.props as (typeof hovers)[number]);
+      for (const c of childrenOf(el)) collect(c);
+    };
+    collect(form);
+    expect(hovers.every((p) => p.wide === true && p.children.type === "span")).toBe(true);
+    expect(hovers.map((p) => p.text)).toEqual([
+      "Pairs recorded by the Areas of Concentration program (the MD scholarly-concentration program) in its pairing sheet.",
+      "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.",
+      expect.stringContaining("reporting manager from the ED appointment record"),
+      expect.stringContaining("Not on any roster"),
+      expect.stringContaining("research staff or MD alumni"),
+    ]);
     const selects: string[] = [];
     const walk = (node: unknown) => {
       if (node === null || node === undefined || typeof node !== "object") return;
@@ -402,10 +428,10 @@ describe("/edit/reports/7 — wiring", () => {
   });
 
 
-  it("with data: the island receives view / summary / publications / pubsMode; the description names the four sources and the dropped counts", async () => {
+  it("with data: the island receives view / summary / publications / pubsMode; the description names the five sources and the dropped counts", async () => {
     const summaryRow = {
       gradYear: 2025, entryYear: 2021, entryYearSource: "bridge", cwid: "stu0001",
-      firstName: "Ada", lastName: "Learner", program: "MD",
+      firstName: "Ada", lastName: "Learner", program: "AOC",
       mentors: [{ cwid: "men0001", name: "Grace Mentor", mentorship: { program: "md", source: "roster", tier: "confirmed" } }],
       pubsInWindow: 1, withMentorInWindow: 1, pubsAllTime: 1, highImpactInWindow: 0, firstAuthorInWindow: 1,
     };
@@ -438,8 +464,11 @@ describe("/edit/reports/7 — wiring", () => {
       highImpactThreshold: 10,
     });
     expect(textOf(summary)).toContain(
-      "Pairs come from the AOC roster, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship patterns (presumptive — unchecked by default).",
+      "Pairs come from the AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, and co-authorship inferences (off by default) — see Sources below.",
     );
+    expect(textOf(summary)).toContain("an AOC learner with no entry year on the pairing sheet");
+    expect(textOf(summary)).not.toContain("MD-program");
+    expect(textOf(summary)).not.toContain("presumptive");
     expect(textOf(summary)).not.toContain("PubMed-indexed publications only");
     expect(textOf(summary)).not.toContain("not yet in the local corpus");
 
@@ -468,7 +497,7 @@ describe("/edit/reports/7 — wiring", () => {
           cwid: "stu0001",
           firstName: "Ada",
           lastName: "Learner",
-          program: "MD",
+          program: "AOC",
           mentors: [],
           pubsInWindow: 0,
           withMentorInWindow: 0,
@@ -544,6 +573,42 @@ describe("/edit/reports/7 — wiring", () => {
     expect(panel!.props.initialRows).toEqual([
       expect.objectContaining({ cwid: "usr0001", scopeKey: "md", grantedAt: "2026-09-18T12:00:00.000Z" }),
     ]);
-    expect((panel!.props.scopeOptions as Array<[string, string]>).map(([k]) => k)).toEqual(["*", "md", "mdphd", "ecr"]);
+    expect(panel!.props.scopeOptions).toEqual([
+      ["*", "All programs"],
+      ["md", "AOC"],
+      ["mdphd", "MD-PhD"],
+      ["ecr", "ECR"],
+    ]);
+  });
+
+  it("Sources: a closed disclosure under the description, one entry per type in filter order, ending with the Faculty Review Tool as not yet a source", async () => {
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
+    const sources = findByTestId(result, "mentored-pubs-sources");
+    expect(sources).not.toBeNull();
+    expect(sources!.type).toBe("details");
+    expect(sources!.props.open).toBeUndefined();
+    const text = textOf(sources);
+    expect(text.startsWith("Sources")).toBe(true);
+    for (const label of [
+      "AOC",
+      "MD-PhD (program office)",
+      "ECR",
+      "PhD / MD-PhD thesis advisor",
+      "Postdoc supervisor",
+      "Likely mentee (from co-authorship)",
+      "Possible mentee (from co-authorship)",
+    ]) {
+      expect(text).toContain(label);
+    }
+    // The date facts the one-sentence descriptions lack.
+    expect(text).toContain("Carries the graduation year and, for recent classes, the entry year.");
+    expect(text).toContain("No entry or graduation years yet.");
+    expect(text).toContain("Conferral year known; start year not.");
+    expect(text).toContain("Carries the appointment start and end dates.");
+    expect(text).not.toContain("presumptive");
+    const frt = findByTestId(result, "mentored-pubs-sources-frt");
+    expect(textOf(frt)).toBe(
+      "Not yet a source: the Faculty Review Tool’s self-reported mentees — the mentoring extract from that system has not been provided.",
+    );
   });
 });

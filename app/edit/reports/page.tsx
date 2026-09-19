@@ -299,7 +299,7 @@ const PROGRAM_UNIT: ReportsIndexUnit = {
       n: 7,
       label: "7. Mentored publications",
       description:
-        "Every publication a learner co-authored with a mentor — AOC roster, Jenzabar thesis advisors, ED postdoc appointments, co-author suggestions — with impact factor and citations. Access is granted per person.",
+        "Every publication a learner co-authored with a mentor — AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc appointments, co-authorship inferences — with impact factor and citations. Access is granted per person.",
     },
   ],
   perReport: [{ n: 7, live: true, lastRefreshedAt: null }],

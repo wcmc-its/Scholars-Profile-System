@@ -1,14 +1,18 @@
 /**
- * `/edit/reports/7` ("Mentored publications") data layer — for every MD-program
- * learner (`aoc_mentee`), every publication co-authored with one of their AOC
- * mentors, with Journal Impact Factor and citations, plus a per-learner count.
+ * `/edit/reports/7` ("Mentored publications") data layer — for every learner
+ * on the AOC pairing sheet (`aoc_mentee`; the Areas of Concentration program
+ * IS the MD scholarly-concentration program, bucket `md`, labelled "AOC"),
+ * every publication co-authored with one of their mentors, with Journal
+ * Impact Factor and citations, plus a per-learner count.
  *
- * The Medical Education office asks for this spreadsheet every year and has
- * built it by hand. Every input already lives in this env's Aurora because of
- * the mentoring co-pub bridge (#443 / #928):
- *   - `aoc_mentee` — the raw `reporting_students_mentors` mirror: one row per
- *     (mentor, learner, program), with the learner's name, graduation year,
- *     program type and (once the bridge carries it) entry year;
+ * The AOC office asks for this spreadsheet every year and has built it by
+ * hand. Every input already lives in this env's Aurora because of the
+ * mentoring co-pub bridge (#443 / #928):
+ *   - `aoc_mentee` — the raw `reporting_students_mentors` mirror of the AOC
+ *     pairing sheet (which also carries the MD-PhD program office's list and
+ *     the ECR classes): one row per (mentor, learner, program), with the
+ *     learner's name, graduation year, program type and (once the bridge
+ *     carries it) entry year;
  *   - `mentee_copublication_pub` — one row per (mentor, mentee, pmid), the pub
  *     itself stored as `CoPublicationFull` JSON (title / journal / year /
  *     full author list with CWIDs);
@@ -51,7 +55,7 @@
  * learner's summary (distinct pmids).
  *
  * Two publication sets (`pubs`): `"mentored"` (default) is every co-pub with
- * one of the learner's AOC mentors; `"all"` is every publication of the
+ * one of the learner's selected mentors; `"all"` is every publication of the
  * learner from the `aoc_mentee_publication` bridge, each marked `withMentor`
  * when it also appears in `mentee_copublication_pub` for one of the learner's
  * mentors. In `"all"` mode the detail rows are per (learner, pub) — the
@@ -164,7 +168,7 @@ export type MentoredPubsSummaryRow = {
   cwid: string;
   firstName: string | null;
   lastName: string | null;
-  /** "MD", "MD-PhD", "ECR" — joined with " / " when the learner's rows span
+  /** "AOC", "MD-PhD", "ECR" — joined with " / " when the learner's rows span
    *  more than one bucket. */
   program: string;
   /** The learner's mentors (every `aoc_mentee` row), sorted by display name. */

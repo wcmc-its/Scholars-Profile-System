@@ -1,6 +1,7 @@
 /**
  * The Mentored publications report as a three-sheet workbook — the exact
- * artifact the Medical Education office has been assembling by hand:
+ * artifact the Areas of Concentration (AOC) office has been assembling by
+ * hand:
  *   - "Summary"            one row per learner (counts + mentors + mentor CWIDs
  *                          + each pair's mentorship type);
  *   - "Raw Data"           one row per (learner, mentor, publication) with the
@@ -266,8 +267,8 @@ export async function buildMentoredPublicationsWorkbook(
     [
       "Publication set",
       allMode
-        ? "All learner publications: every PubMed- or Scopus-indexed publication on which the learner is a WCM-identified author (ReCiter author graph), whether or not a mentor is on it. Publications with a mentor = the subset also co-authored by one of the learner's AOC mentors (the mentored co-publication set)."
-        : "Mentored co-publications: every PubMed- or Scopus-indexed publication on which the learner and one of their AOC mentors are both WCM-identified authors.",
+        ? "All learner publications: every PubMed- or Scopus-indexed publication on which the learner is a WCM-identified author (ReCiter author graph), whether or not a mentor is on it. Publications with a mentor = the subset also co-authored by one of the learner's selected mentors (the mentored co-publication set)."
+        : "Mentored co-publications: every PubMed- or Scopus-indexed publication on which the learner and one of their selected mentors are both WCM-identified authors.",
     ],
     ["Learners", report.summary.length],
     ["Publication rows", report.detail.length],
@@ -277,7 +278,7 @@ export async function buildMentoredPublicationsWorkbook(
     ],
     [
       "Entry year",
-      `The learner's program entry year from the Medical Education roster when present; otherwise graduation year - 4 (4-year MD track). ${fallbackCount} of ${report.summary.length} learner${report.summary.length === 1 ? "" : "s"} used the fallback.`,
+      `The learner's program entry year from the AOC pairing sheet when present; otherwise graduation year - 4 (4-year MD track). ${fallbackCount} of ${report.summary.length} learner${report.summary.length === 1 ? "" : "s"} used the fallback.`,
     ],
     [
       "Counting rule",
@@ -289,11 +290,11 @@ export async function buildMentoredPublicationsWorkbook(
       "Publication source",
       allMode
         ? "ReCiter author graph via the mentoring bridge (learner publication list + mentor co-publication list)."
-        : "Every PubMed- or Scopus-indexed publication on which the learner and one of their AOC mentors are both WCM-identified authors (ReCiter author graph, via the mentoring co-publication bridge).",
+        : "Every PubMed- or Scopus-indexed publication on which the learner and one of their selected mentors are both WCM-identified authors (ReCiter author graph, via the mentoring co-publication bridge or, for co-authorship inferences, the suggestion's own evidence).",
     ],
     [
       "Mentor names",
-      "The mentor's name from their Scholars profile when they have one; otherwise the name on the Medical Education roster; otherwise the CWID alone.",
+      "The mentor's name from their Scholars profile when they have one; otherwise the name on the AOC pairing sheet (or the Jenzabar record); otherwise the CWID alone.",
     ],
     [
       "Journal impact factor",
