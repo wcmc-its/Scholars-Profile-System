@@ -1,10 +1,12 @@
 /**
  * The Mentored publications report as a three-sheet workbook — the exact
  * artifact the Medical Education office has been assembling by hand:
- *   - "Summary"            one row per learner (counts + mentors + mentor CWIDs);
- *   - "Raw Data"           one row per (learner, mentor, publication) — or, in
- *                          the "all learner publications" mode, one row per
- *                          (learner, publication) with the mentor(s) on it;
+ *   - "Summary"            one row per learner (counts + mentors + mentor CWIDs
+ *                          + each pair's mentorship type);
+ *   - "Raw Data"           one row per (learner, mentor, publication) with the
+ *                          pair's "Type of mentorship" — or, in the "all
+ *                          learner publications" mode, one row per (learner,
+ *                          publication) with the mentor(s) on it;
  *   - "Query & Assumptions" what was asked for and the rules applied (which
  *                          publication set, the mentored-subset rule), so the
  *                          sheet is self-describing a year later.
@@ -26,8 +28,10 @@ import {
   PROGRAM_LABEL,
   type MentoredPublicationsReport,
   type MentoredPubsSet,
+  type MentorPair,
   type MentorRef,
 } from "@/lib/edit/mentored-publications-report";
+import { mentorshipLabel } from "@/lib/edit/mentorship-type";
 
 export const SUMMARY_SHEET = "Summary";
 export const RAW_SHEET = "Raw Data";
@@ -42,6 +46,7 @@ export const SUMMARY_HEADERS = [
   "Last name",
   "Mentors",
   "Mentor CWIDs",
+  "Mentorship types",
   "Publications in program window",
   "Publications (all years)",
   `High-impact publications in window (JIF ≥ ${HIGH_IMPACT_THRESHOLD})`,
@@ -58,6 +63,7 @@ export const SUMMARY_HEADERS_ALL = [
   "Last name",
   "Mentors",
   "Mentor CWIDs",
+  "Mentorship types",
   "All publications in program window",
   "Publications with a mentor in window",
   "First-author publications in window",
@@ -87,6 +93,7 @@ export const RAW_HEADERS = [
   "Learner last name",
   "Mentor CWID",
   "Mentor",
+  "Type of mentorship",
   ...RAW_PUB_HEADERS,
 ] as const;
 
@@ -182,6 +189,10 @@ function mentorCwids(mentors: ReadonlyArray<MentorRef>): string | null {
   return mentors.length > 0 ? mentors.map((m) => m.cwid).join("; ") : null;
 }
 
+function mentorshipTypes(mentors: ReadonlyArray<MentorPair>): string | null {
+  return mentors.length > 0 ? mentors.map((m) => mentorshipLabel(m.mentorship)).join("; ") : null;
+}
+
 /** Build the workbook and return it as a `Buffer`. */
 export async function buildMentoredPublicationsWorkbook(
   report: MentoredPublicationsReport,
@@ -195,7 +206,7 @@ export async function buildMentoredPublicationsWorkbook(
 
   const summaryRows: CellValue[][] = report.summary.map((r) => {
     const learner = [r.gradYear, r.entryYear, r.program, r.cwid, r.firstName, r.lastName];
-    const mentors = [mentorNames(r.mentors), mentorCwids(r.mentors)];
+    const mentors = [mentorNames(r.mentors), mentorCwids(r.mentors), mentorshipTypes(r.mentors)];
     return allMode
       ? [
           ...learner,
@@ -230,7 +241,7 @@ export async function buildMentoredPublicationsWorkbook(
     r.learnerLastName,
     ...(allMode
       ? [mentorNames(r.paperMentors), mentorCwids(r.paperMentors)]
-      : [r.mentorCwid, r.mentorName]),
+      : [r.mentorCwid, r.mentorName, r.mentorship]),
     r.pmid,
     r.title,
     r.journal,

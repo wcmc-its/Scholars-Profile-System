@@ -39,8 +39,16 @@
  *
  * Three shapes come back: `summary` (one row per learner), `detail` (the Raw
  * Data sheet's rows) and `publications` (one row per DISTINCT pmid across
- * every learner and mentor in scope, most recent first, with the learners and
- * mentors on it — the page's Publications view; not in the workbook).
+ * every learner and mentor in scope, most recently added to PubMed first,
+ * with the learners and mentors on it — the page's Publications view; not in
+ * the workbook). Every (learner, mentor) pair carries its `MentorshipType`
+ * (`lib/edit/mentorship-type.ts`); AOC rows are `{ bucket, roster, confirmed }`.
+ *
+ * PubMed only: ReciterDB gives Scopus-only articles a synthetic negative id,
+ * and both bridge importers (`etl/mentoring/import-copub-list.ts`,
+ * `import-learner-pubs.ts`) drop those before insert, so every bridge row
+ * here is a real pmid. The report cannot say how many were excluded — the
+ * importer's `droppedPubs` log line is the only tally (round 5 widens the key).
  *
  * Mentor display name: the mentor's Scholar row (`preferredName`, canonical)
  * when there is one, else the roster's own `mentorFirstName mentorLastName`
@@ -65,10 +73,16 @@ import { bucketProgramType, type MentoringProgramKey } from "@/lib/api/mentoring
 import { db } from "@/lib/db";
 import { HIGH_IMPACT_THRESHOLD } from "@/lib/edit/cancer-center-publications-report";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
+import {
+  mentorshipKey,
+  mentorshipLabel,
+  PROGRAM_LABEL,
+  type MentorshipType,
+} from "@/lib/edit/mentorship-type";
 import { scopeAdmits } from "@/lib/edit/report-access";
 import { normalizeJournalAbbrev } from "@/lib/journal-abbrev";
 
-export { HIGH_IMPACT_THRESHOLD };
+export { HIGH_IMPACT_THRESHOLD, PROGRAM_LABEL };
 
 /** Which publication set the report describes — see the module doc. */
 export type MentoredPubsSet = "mentored" | "all";
@@ -76,13 +90,6 @@ export type MentoredPubsSet = "mentored" | "all";
 /** Years past graduation a publication may still count as "in program". */
 export const DEFAULT_TAIL = 1;
 export const MAX_TAIL = 3;
-
-/** Human label per `aoc_mentee` program bucket. */
-export const PROGRAM_LABEL: Record<string, string> = {
-  md: "MD",
-  mdphd: "MD-PhD",
-  ecr: "ECR",
-};
 
 const PAIR_BATCH = 500;
 const PMID_BATCH = 1000;
@@ -99,6 +106,8 @@ export type MentoredPublicationsFilters = {
 
 /** A mentor as the report shows them: resolved display name + CWID. */
 export type MentorRef = { cwid: string; name: string };
+/** A learner's mentor with the (learner, mentor) pair's provenance. */
+export type MentorPair = MentorRef & { mentorship: MentorshipType };
 
 export type MentoredPubsSummaryRow = {
   gradYear: number | null;
@@ -114,7 +123,7 @@ export type MentoredPubsSummaryRow = {
    *  more than one bucket. */
   program: string;
   /** The learner's mentors (every `aoc_mentee` row), sorted by display name. */
-  mentors: MentorRef[];
+  mentors: MentorPair[];
   /** Distinct pmids inside the program window (of the selected set). The
    *  four in-window counts are `null` (never 0) when the learner's window is
    *  unknowable — no effective entry year or no graduation year. */
@@ -142,6 +151,8 @@ export type MentoredPubsDetailRow = {
    *  pair per pub. `"all"` mode: null — rows are per (learner, pub). */
   mentorCwid: string | null;
   mentorName: string | null;
+  /** `mentorshipLabel` of the (learner, mentor) pair; null in `"all"` mode. */
+  mentorship: string | null;
   /** Every one of the learner's mentors who is a WCM-identified co-author on
    *  this paper (via the co-pub bridge). Empty only in `"all"` mode. */
   paperMentors: MentorRef[];
@@ -170,6 +181,8 @@ export type MentoredPubsLearnerOnPub = {
   firstName: string | null;
   lastName: string | null;
   firstAuthor: boolean;
+  /** 1-based byline rank, null when the byline does not carry their CWID. */
+  authorPosition: number | null;
   inWindow: boolean | null;
 };
 
@@ -190,8 +203,10 @@ export type MentoredPubsPublicationRow = {
   authorCount: number;
   /** Learners on this paper, in summary order. */
   learners: MentoredPubsLearnerOnPub[];
-  /** Mentors (of those learners) on this paper, sorted by display name. */
-  mentors: MentorRef[];
+  /** Mentors (of those learners) on this paper, sorted by display name, each
+   *  with the type of every (learner, mentor) pair it stands in on this
+   *  paper (two learners of different types → two, deduped by key). */
+  mentors: Array<MentorRef & { mentorships: MentorshipType[] }>;
   withMentor: boolean;
 };
 
@@ -246,6 +261,10 @@ function compareDescNullsLast(a: number | null, b: number | null): number {
   return b - a;
 }
 
+function compareDateDescNullsLast(a: Date | null, b: Date | null): number {
+  return compareDescNullsLast(a?.getTime() ?? null, b?.getTime() ?? null);
+}
+
 function compareName(a: string | null, b: string | null): number {
   return (a ?? "").localeCompare(b ?? "", "en", { sensitivity: "base" });
 }
@@ -271,7 +290,8 @@ type Learner = {
   gradYear: number | null;
   entryYear: number | null;
   buckets: Set<MentoringProgramKey>;
-  mentorCwids: Set<string>;
+  /** mentor cwid → the pair's type (the first seen wins). */
+  mentors: Map<string, MentorshipType>;
 };
 
 /** Keep the rows whose program bucket the scope set admits; a row with an
@@ -304,7 +324,7 @@ function collapseLearners(rows: ReadonlyArray<AocRow & { bucket: MentoringProgra
         gradYear: null,
         entryYear: null,
         buckets: new Set(),
-        mentorCwids: new Set(),
+        mentors: new Map(),
       };
       learners.set(r.menteeCwid, l);
     }
@@ -320,7 +340,9 @@ function collapseLearners(rows: ReadonlyArray<AocRow & { bucket: MentoringProgra
       l.entryYear = r.entryYear;
     }
     l.buckets.add(r.bucket);
-    l.mentorCwids.add(r.mentorCwid);
+    if (!l.mentors.has(r.mentorCwid)) {
+      l.mentors.set(r.mentorCwid, { program: r.bucket, source: "roster", tier: "confirmed" });
+    }
   }
   return learners;
 }
@@ -457,7 +479,7 @@ export async function loadMentoredPublicationsReport({
   const pairs: Array<{ mentorCwid: string; menteeCwid: string }> = [];
   const pairKeys = new Set<string>();
   for (const l of learners.values()) {
-    for (const mentorCwid of l.mentorCwids) {
+    for (const mentorCwid of l.mentors.keys()) {
       const key = `${mentorCwid}::${l.cwid}`;
       if (pairKeys.has(key)) continue;
       pairKeys.add(key);
@@ -594,7 +616,7 @@ export async function loadMentoredPublicationsReport({
   type PubAgg = {
     pub: CoPublicationFull;
     learners: Map<string, MentoredPubsLearnerOnPub>;
-    mentors: Map<string, MentorRef>;
+    mentors: Map<string, MentorRef & { mentorships: MentorshipType[] }>;
   };
   const pubAgg = new Map<number, PubAgg>();
 
@@ -649,11 +671,18 @@ export async function loadMentoredPublicationsReport({
         inWindow,
       };
       if (allMode) {
-        detail.push({ ...base, mentorCwid: null, mentorName: null });
+        detail.push({ ...base, mentorCwid: null, mentorName: null, mentorship: null });
       } else {
         // One row per (learner, mentor, pub) — the pair is the bridge's key.
-        for (const m of paperMentors)
-          detail.push({ ...base, mentorCwid: m.cwid, mentorName: m.name });
+        for (const m of paperMentors) {
+          const t = l.mentors.get(m.cwid);
+          detail.push({
+            ...base,
+            mentorCwid: m.cwid,
+            mentorName: m.name,
+            mentorship: t ? mentorshipLabel(t) : null,
+          });
+        }
       }
 
       let agg = pubAgg.get(pmid);
@@ -666,9 +695,21 @@ export async function loadMentoredPublicationsReport({
         firstName: l.firstName,
         lastName: l.lastName,
         firstAuthor: position === 1,
+        authorPosition: position,
         inWindow,
       });
-      for (const m of paperMentors) agg.mentors.set(m.cwid, m);
+      // The mentor once, with the type of every (learner, mentor) pair on it.
+      for (const m of paperMentors) {
+        let am = agg.mentors.get(m.cwid);
+        if (!am) {
+          am = { ...m, mentorships: [] };
+          agg.mentors.set(m.cwid, am);
+        }
+        const t = l.mentors.get(m.cwid);
+        if (t && !am.mentorships.some((x) => mentorshipKey(x) === mentorshipKey(t))) {
+          am.mentorships.push(t);
+        }
+      }
     }
   }
 
@@ -685,7 +726,9 @@ export async function loadMentoredPublicationsReport({
       firstName: l.firstName,
       lastName: l.lastName,
       program: programLabel(l.buckets),
-      mentors: [...l.mentorCwids].map(mentorRef).sort(compareMentor),
+      mentors: [...l.mentors]
+        .map(([cwid, mentorship]) => ({ ...mentorRef(cwid), mentorship }))
+        .sort(compareMentor),
       pubsInWindow: windowed(a?.inWindow.size ?? 0),
       withMentorInWindow: windowed(a?.withMentorInWindow.size ?? 0),
       pubsAllTime: a?.all.size ?? 0,
@@ -744,10 +787,14 @@ export async function loadMentoredPublicationsReport({
       withMentor: mentors.length > 0,
     };
   });
-  // Most recent first, then title, then pmid desc — the Publications view.
+  // Most recently added to PubMed first, then year, title, pmid desc — the
+  // Publications view's default order.
   publications.sort(
     (a, b) =>
-      compareDescNullsLast(a.year, b.year) || compareName(a.title, b.title) || b.pmid - a.pmid,
+      compareDateDescNullsLast(a.dateAdded, b.dateAdded) ||
+      compareDescNullsLast(a.year, b.year) ||
+      compareName(a.title, b.title) ||
+      b.pmid - a.pmid,
   );
 
   return { summary, detail, publications, generatedAt, filters, allPubsLoaded };

@@ -15,8 +15,10 @@
  * learner's author position derived from the bridge's per-author CWIDs;
  * citations from iCite (`citedByCount`), never the Scopus count in the JSON;
  * mentor name precedence scholar → roster → cwid; newest class first; the
- * per-pmid Publications view deduped across learners; "all" mode's subset /
- * `withMentor` flag and the empty-bridge signal.
+ * per-pmid Publications view deduped across learners, most recently added to
+ * PubMed first (NOT by year); "all" mode's subset / `withMentor` flag and the
+ * empty-bridge signal; every (learner, mentor) pair typed `{ bucket, roster,
+ * confirmed }`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -239,8 +241,8 @@ describe("loadMentoredPublicationsReport", () => {
       firstAuthorInWindow: 1,
       // Resolved name for the scholar row; the bare cwid for the unresolved one; sorted by name.
       mentors: [
-        { cwid: "men0002", name: "men0002" },
-        { cwid: "men0001", name: "Zed Mentor" },
+        { cwid: "men0002", name: "men0002", mentorship: { program: "md", source: "roster", tier: "confirmed" } },
+        { cwid: "men0001", name: "Zed Mentor", mentorship: { program: "md", source: "roster", tier: "confirmed" } },
       ],
     });
     expect(report.detail).toHaveLength(2);
@@ -252,6 +254,7 @@ describe("loadMentoredPublicationsReport", () => {
       learnerAuthorPosition: 1,
       authorCount: 3,
       mentorName: "Zed Mentor",
+      mentorship: "MD · roster",
       paperMentors: [
         { cwid: "men0002", name: "men0002" },
         { cwid: "men0001", name: "Zed Mentor" },
@@ -267,10 +270,10 @@ describe("loadMentoredPublicationsReport", () => {
       jif: 96.2,
       citations: 12,
       withMentor: true,
-      learners: [{ cwid: "stu0001", firstAuthor: true, inWindow: true }],
+      learners: [{ cwid: "stu0001", firstAuthor: true, authorPosition: 1, inWindow: true }],
       mentors: [
-        { cwid: "men0002", name: "men0002" },
-        { cwid: "men0001", name: "Zed Mentor" },
+        { cwid: "men0002", name: "men0002", mentorships: [{ program: "md", source: "roster", tier: "confirmed" }] },
+        { cwid: "men0001", name: "Zed Mentor", mentorships: [{ program: "md", source: "roster", tier: "confirmed" }] },
       ],
     });
     expect(report.publications[0].citation).toBe(
@@ -426,15 +429,15 @@ describe("loadMentoredPublicationsReport", () => {
     ]);
     hoisted.mockCopubFindMany.mockResolvedValue([copub("men0003", "stu0001", 1, 2023)]);
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.summary[0].mentors).toEqual([
-      { cwid: "men0003", name: "men0003" },
-      { cwid: "men0002", name: "Only Roster" },
-      { cwid: "men0001", name: "Scholar Name" },
+    expect(report.summary[0].mentors.map((m) => [m.cwid, m.name])).toEqual([
+      ["men0003", "men0003"],
+      ["men0002", "Only Roster"],
+      ["men0001", "Scholar Name"],
     ]);
     expect(report.detail[0]).toMatchObject({ mentorCwid: "men0003", mentorName: "men0003" });
   });
 
-  it("Publications view: a pub co-authored by two learners is ONE row listing both, newest first then title", async () => {
+  it("Publications view: a pub co-authored by two learners is ONE row listing both, most recently added to PubMed first", async () => {
     hoisted.mockAocFindMany.mockResolvedValue([
       aoc({
         mentorCwid: "men0001",
@@ -462,16 +465,48 @@ describe("loadMentoredPublicationsReport", () => {
       },
       copub("men0002", "stu0002", 4, 2024),
     ]);
+    // dateAdded DISAGREES with year: 5 (2023) was added after 4 (2024); 6 has
+    // no local row and sorts last.
+    hoisted.mockPubFindMany.mockResolvedValue([
+      { pmid: "5", journalAbbrev: null, dateAddedToEntrez: new Date("2024-06-01"), citedByCount: null },
+      { pmid: "4", journalAbbrev: null, dateAddedToEntrez: new Date("2024-01-01"), citedByCount: null },
+    ]);
     const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
-    expect(report.publications.map((p) => p.pmid)).toEqual([4, 6, 5]);
+    expect(report.publications.map((p) => p.pmid)).toEqual([5, 4, 6]);
     const shared = report.publications.find((p) => p.pmid === 5)!;
     expect(shared.learners).toEqual([
-      { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, inWindow: true },
-      { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, inWindow: false },
+      { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, authorPosition: 1, inWindow: true },
+      { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, authorPosition: null, inWindow: false },
     ]);
     expect(shared.mentors.map((m) => m.cwid)).toEqual(["men0001", "men0002"]);
     // The detail sheet still has one row per (learner, mentor, pub).
     expect(report.detail.filter((d) => d.pmid === 5)).toHaveLength(2);
+  });
+
+  it("a mentor shared by two learners of different types lists both, deduped by key", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", programType: "AOC" }),
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0002", programType: "MDPHD", graduationYear: null }),
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0003", programType: "AOC-2025" }),
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0001", "stu0001", 9, 2024),
+      copub("men0001", "stu0002", 9, 2024),
+      copub("men0001", "stu0003", 9, 2024),
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"] });
+    expect(report.publications).toHaveLength(1);
+    expect(report.publications[0].mentors).toEqual([
+      {
+        cwid: "men0001",
+        name: "men0001",
+        mentorships: [
+          { program: "md", source: "roster", tier: "confirmed" },
+          { program: "mdphd", source: "roster", tier: "confirmed" },
+        ],
+      },
+    ]);
+    expect(report.summary.map((s) => s.mentors[0].mentorship.program)).toEqual(["md", "md", "mdphd"]);
   });
 
   describe("pubs: 'all'", () => {
@@ -528,6 +563,7 @@ describe("loadMentoredPublicationsReport", () => {
         [1, true],
         [3, false],
       ]);
+      expect(report.detail.every((d) => d.mentorship === null)).toBe(true);
     });
 
     it("a mentored mode report never touches the learner-pubs bridge", async () => {

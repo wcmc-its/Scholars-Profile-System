@@ -2,7 +2,8 @@
  * `lib/edit/mentored-publications-xlsx.ts` — builds the three-sheet workbook
  * and reads it back with exceljs: sheet names, header rows, a data row per
  * sheet, the frozen + bold header, Arial 12, the Yes/No window column, the
- * Mentor CWIDs column, and the "all learner publications" mode's headers /
+ * Mentor CWIDs + Mentorship types columns, the Raw Data "Type of mentorship"
+ * column, and the "all learner publications" mode's headers /
  * mentor-on-paper columns / filename suffix / assumptions.
  * `@/lib/db` is stubbed only because the report module (imported for its
  * types/constants) pulls it in at module scope; nothing here reads it.
@@ -25,8 +26,9 @@ import {
   SUMMARY_SHEET,
 } from "@/lib/edit/mentored-publications-xlsx";
 
-const ZED = { cwid: "men0001", name: "Zed Mentor" };
-const YAN = { cwid: "men0002", name: "Yan Other" };
+const MD_ROSTER = { program: "md", source: "roster", tier: "confirmed" } as const;
+const ZED = { cwid: "men0001", name: "Zed Mentor", mentorship: MD_ROSTER };
+const YAN = { cwid: "men0002", name: "Yan Other", mentorship: { ...MD_ROSTER, program: "mdphd" } };
 
 const REPORT: MentoredPublicationsReport = {
   generatedAt: new Date("2026-09-18T15:04:05Z"),
@@ -60,6 +62,7 @@ const REPORT: MentoredPublicationsReport = {
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
+      mentorship: "MD · roster",
       paperMentors: [ZED],
       withMentor: true,
       pmid: 7,
@@ -82,6 +85,7 @@ const REPORT: MentoredPublicationsReport = {
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
+      mentorship: "MD · roster",
       paperMentors: [ZED],
       withMentor: true,
       pmid: 8,
@@ -121,8 +125,10 @@ describe("buildMentoredPublicationsWorkbook", () => {
     const wb = await load(await buildMentoredPublicationsWorkbook(REPORT));
     const ws = wb.getWorksheet(SUMMARY_SHEET)!;
     expect(rowValues(ws, 1)).toEqual([...SUMMARY_HEADERS]);
+    expect(SUMMARY_HEADERS[8]).toBe("Mentorship types");
     expect(rowValues(ws, 2)).toEqual([
-      2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001", 1, 2, 1, 0,
+      2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
+      "MD-PhD · roster; MD · roster", 1, 2, 1, 0,
     ]);
     expect(ws.rowCount).toBe(2);
     expect(ws.views[0]).toMatchObject({ state: "frozen", ySplit: 1 });
@@ -135,21 +141,22 @@ describe("buildMentoredPublicationsWorkbook", () => {
     const wb = await load(await buildMentoredPublicationsWorkbook(REPORT));
     const ws = wb.getWorksheet(RAW_SHEET)!;
     expect(rowValues(ws, 1)).toEqual([...RAW_HEADERS]);
+    expect(RAW_HEADERS[8]).toBe("Type of mentorship");
     const first = rowValues(ws, 2);
-    expect(first.slice(0, 13)).toEqual([
-      2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", 7,
+    expect(first.slice(0, 14)).toEqual([
+      2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "MD · roster", 7,
       "A very long title ".repeat(10), "N Engl J Med", 96.2, 2023,
     ]);
-    expect((first[13] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
-    expect(first.slice(14)).toEqual([12, 2, 3, "Yes"]);
+    expect((first[14] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
+    expect(first.slice(15)).toEqual([12, 2, 3, "Yes"]);
     const second = rowValues(ws, 3);
-    expect(second[17]).toBe("No");
+    expect(second[18]).toBe("No");
     // Nulls are blank cells, not the string "null".
-    expect(ws.getCell("K3").value).toBeNull();
     expect(ws.getCell("L3").value).toBeNull();
+    expect(ws.getCell("M3").value).toBeNull();
     // Title column: longest content is 180 chars → capped at 60; PMID column: header wins.
-    expect(ws.getColumn(10).width).toBe(60);
-    expect(ws.getColumn(9).width).toBe("PMID".length + 3);
+    expect(ws.getColumn(11).width).toBe(60);
+    expect(ws.getColumn(10).width).toBe("PMID".length + 3);
   });
 
   it("Query & Assumptions names the window rule, counting rule, JIF and iCite sources", async () => {
@@ -191,11 +198,11 @@ describe("buildMentoredPublicationsWorkbook", () => {
       }),
     );
     const summary = wb.getWorksheet(SUMMARY_SHEET)!;
-    expect(summary.getCell("I2").value).toBeNull();
-    expect(summary.getCell("J2").value).toBe(2);
-    expect(summary.getCell("K2").value).toBeNull();
+    expect(summary.getCell("J2").value).toBeNull();
+    expect(summary.getCell("K2").value).toBe(2);
     expect(summary.getCell("L2").value).toBeNull();
-    expect(wb.getWorksheet(RAW_SHEET)!.getCell("R2").value).toBeNull();
+    expect(summary.getCell("M2").value).toBeNull();
+    expect(wb.getWorksheet(RAW_SHEET)!.getCell("S2").value).toBeNull();
     expect(wb.getWorksheet(ASSUMPTIONS_SHEET)!.getRow(3).getCell(2).value).toBe("2025, Unknown");
   });
 
@@ -216,8 +223,8 @@ describe("buildMentoredPublicationsWorkbook", () => {
       allPubsLoaded: true,
       summary: [{ ...REPORT.summary[0], pubsInWindow: 3, withMentorInWindow: 1, firstAuthorInWindow: 2, pubsAllTime: 5 }],
       detail: [
-        { ...REPORT.detail[0], mentorCwid: null, mentorName: null, paperMentors: [YAN, ZED], withMentor: true },
-        { ...REPORT.detail[1], mentorCwid: null, mentorName: null, paperMentors: [], withMentor: false },
+        { ...REPORT.detail[0], mentorCwid: null, mentorName: null, mentorship: null, paperMentors: [YAN, ZED], withMentor: true },
+        { ...REPORT.detail[1], mentorCwid: null, mentorName: null, mentorship: null, paperMentors: [], withMentor: false },
       ],
     };
 
@@ -225,7 +232,8 @@ describe("buildMentoredPublicationsWorkbook", () => {
       const wb = await load(await buildMentoredPublicationsWorkbook(ALL));
       const ws = wb.getWorksheet(SUMMARY_SHEET)!;
       expect(rowValues(ws, 1)).toEqual([...SUMMARY_HEADERS_ALL]);
-      expect(SUMMARY_HEADERS_ALL.slice(8)).toEqual([
+      expect(SUMMARY_HEADERS_ALL[8]).toBe("Mentorship types");
+      expect(SUMMARY_HEADERS_ALL.slice(9)).toEqual([
         "All publications in program window",
         "Publications with a mentor in window",
         "First-author publications in window",
@@ -233,7 +241,8 @@ describe("buildMentoredPublicationsWorkbook", () => {
         "Publications (all years)",
       ]);
       expect(rowValues(ws, 2)).toEqual([
-        2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001", 3, 1, 2, 1, 5,
+        2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
+        "MD-PhD · roster; MD · roster", 3, 1, 2, 1, 5,
       ]);
     });
 
@@ -241,6 +250,7 @@ describe("buildMentoredPublicationsWorkbook", () => {
       const wb = await load(await buildMentoredPublicationsWorkbook(ALL));
       const ws = wb.getWorksheet(RAW_SHEET)!;
       expect(rowValues(ws, 1)).toEqual([...RAW_HEADERS_ALL]);
+      expect(RAW_HEADERS_ALL).not.toContain("Type of mentorship");
       expect(RAW_HEADERS_ALL[6]).toBe("Mentor(s) on this paper");
       expect(rowValues(ws, 2).slice(6, 9)).toEqual(["Yan Other; Zed Mentor", "men0002; men0001", 7]);
       expect(ws.getCell("G3").value).toBeNull();
