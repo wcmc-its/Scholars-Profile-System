@@ -58,6 +58,7 @@ import {
   listReportAccess,
   loadReportScopesForCwid,
   MENTORED_PUBS_REPORT,
+  MENTORED_PUBS_SCOPE_OPTIONS,
   MENTORED_PUBS_SCOPES,
   revokeReportAccess,
   scopeAdmits,
@@ -221,6 +222,19 @@ describe("canManageReportAccess / scope keys", () => {
     expect(isMentoredPubsScopeKey("phd")).toBe(false);
     expect(isMentoredPubsScopeKey("")).toBe(false);
     expect(isMentoredPubsScopeKey(null)).toBe(false);
+  });
+
+  it("MENTORED_PUBS_SCOPE_OPTIONS: the wildcard first, then every grantable bucket under its office name (md reads AOC)", () => {
+    expect(MENTORED_PUBS_SCOPE_OPTIONS).toEqual([
+      [ALL_SCOPES, "All programs"],
+      ["md", "AOC"],
+      ["mdphd", "MD-PhD"],
+      ["ecr", "ECR"],
+    ]);
+    // Every option's key is grantable — the add form can never offer a key
+    // the route would reject.
+    expect(MENTORED_PUBS_SCOPE_OPTIONS.every(([key]) => isMentoredPubsScopeKey(key))).toBe(true);
+    expect(MENTORED_PUBS_SCOPE_OPTIONS).toHaveLength(MENTORED_PUBS_SCOPES.length + 1);
   });
 });
 

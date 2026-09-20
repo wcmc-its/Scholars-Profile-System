@@ -11,9 +11,28 @@
  * the same report-row shape as one band's body, without the band header —
  * used when an actor has exactly one reportable unit, which is the common
  * case today.
+ *
+ * Every report row carries "Who can run this report" (`ReportAccessPopover`,
+ * mocked here to a marker that echoes its props): live AND not-live rows, in
+ * all three renderings, each with ITS row's `access` — and the marker sits
+ * beside the row link, never inside it, lifted above the stretched anchor.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+
+import type { ReportAccessPopoverProps } from "@/components/edit/report-access-popover";
+
+vi.mock("@/components/edit/report-access-popover", () => ({
+  ReportAccessPopover: (props: ReportAccessPopoverProps) => (
+    <span
+      data-testid="report-access-marker"
+      data-mode={props.mode}
+      data-report-key={props.mode === "person" ? props.reportKey : ""}
+      data-can-manage={props.mode === "person" ? String(props.canManage) : ""}
+      data-rows={props.mode === "person" ? String(props.initialRows.length) : ""}
+    />
+  ),
+}));
 
 import {
   ReportsIndex,
@@ -22,18 +41,50 @@ import {
   type ReportsIndexUnit,
 } from "@/components/edit/reports-index";
 
+const UNIT_ACCESS = { mode: "unit" } as const;
+const PROGRAM_ACCESS: ReportAccessPopoverProps = {
+  mode: "person",
+  reportKey: "mentored-publications",
+  initialRows: [
+    {
+      reportKey: "mentored-publications",
+      scopeKey: "md",
+      cwid: "usr0001",
+      granteeName: "Holder Person",
+      name: "Holder Person",
+      grantedBy: "adm0001",
+      grantedAt: "2026-09-18T12:00:00.000Z",
+    },
+  ],
+  scopeOptions: [
+    ["*", "All programs"],
+    ["md", "AOC"],
+  ],
+  canManage: true,
+};
+
 const CENTER_REPORTS: ReportsIndexReport[] = [
-  { n: 1, label: "1. Optimize membership", description: "Membership recs." },
-  { n: 2, label: "2. NCI Table 2a", description: "Funding review." },
-  { n: 3, label: "3. Publications", description: "Pubs by program." },
-  { n: 4, label: "4. Grants", description: "Active grants." },
-  { n: 5, label: "5. Clinical Trials", description: "Active trials." },
-  { n: 6, label: "6. NIH-funded pubs", description: "NIH RePORTER-linked pubs." },
+  { n: 1, label: "1. Optimize membership", description: "Membership recs.", access: UNIT_ACCESS },
+  { n: 2, label: "2. NCI Table 2a", description: "Funding review.", access: UNIT_ACCESS },
+  { n: 3, label: "3. Publications", description: "Pubs by program.", access: UNIT_ACCESS },
+  { n: 4, label: "4. Grants", description: "Active grants.", access: UNIT_ACCESS },
+  { n: 5, label: "5. Clinical Trials", description: "Active trials.", access: UNIT_ACCESS },
+  {
+    n: 6,
+    label: "6. NIH-funded pubs",
+    description: "NIH RePORTER-linked pubs.",
+    access: UNIT_ACCESS,
+  },
 ];
 
 const UNIT_REPORTS: ReportsIndexReport[] = [
-  { n: 3, label: "3. Publications", description: "Pubs by member." },
-  { n: 6, label: "6. NIH-funded pubs", description: "NIH RePORTER-linked pubs." },
+  { n: 3, label: "3. Publications", description: "Pubs by member.", access: UNIT_ACCESS },
+  {
+    n: 6,
+    label: "6. NIH-funded pubs",
+    description: "NIH RePORTER-linked pubs.",
+    access: UNIT_ACCESS,
+  },
 ];
 
 function perReport(liveNs: number[], reports: ReportsIndexReport[] = CENTER_REPORTS): ReportsIndexUnit["perReport"] {
@@ -125,7 +176,14 @@ const PROGRAM: ReportsIndexUnit = {
   liveCount: 1,
   totalCount: 1,
   lastRefreshedAt: null,
-  reports: [{ n: 7, label: "7. Mentored publications", description: "Learner–mentor co-publications." }],
+  reports: [
+    {
+      n: 7,
+      label: "7. Mentored publications",
+      description: "Learner–mentor co-publications.",
+      access: PROGRAM_ACCESS,
+    },
+  ],
   perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
 };
 
@@ -272,6 +330,94 @@ describe("ReportsIndex — table mode (2a)", () => {
     // First two rows are Meyer's live reports 1 and 2.
     expect(rows[0].getAttribute("data-testid")).toBe("reports-index-row-meyer-1");
     expect(rows[1].getAttribute("data-testid")).toBe("reports-index-row-meyer-2");
+  });
+});
+
+/** The `[mode, reportKey, canManage, rows]` echoed by the popover marker in `row`. */
+function accessMarker(row: HTMLElement): [string, string, string, string] {
+  const m = within(row).getByTestId("report-access-marker");
+  return [
+    m.getAttribute("data-mode") ?? "",
+    m.getAttribute("data-report-key") ?? "",
+    m.getAttribute("data-can-manage") ?? "",
+    m.getAttribute("data-rows") ?? "",
+  ];
+}
+
+describe("ReportsIndex — Who can run this report, every row", () => {
+  it("table: every (unit, report) row renders the popover with THAT row's access props — live, not-live, unit and program alike", () => {
+    render(<ReportsIndex units={[MEYER, PROGRAM]} mode="table" />);
+    for (let n = 1; n <= 6; n++) {
+      // Meyer: 1–2 live, 3–6 not — all six carry the unit rule.
+      expect(accessMarker(screen.getByTestId(`reports-index-row-meyer-${n}`))).toEqual([
+        "unit",
+        "",
+        "",
+        "",
+      ]);
+    }
+    expect(accessMarker(screen.getByTestId("reports-index-row-mentoring-programs-7"))).toEqual([
+      "person",
+      "mentored-publications",
+      "true",
+      "1",
+    ]);
+    expect(screen.getAllByTestId("report-access-marker")).toHaveLength(7);
+  });
+
+  it("table: the marker is the row link's SIBLING inside the label cell, lifted above the stretched anchor — never inside the link", () => {
+    render(<ReportsIndex units={[MEYER]} mode="table" />);
+    const link = screen.getByTestId("reports-index-link-meyer-1");
+    const wrap = within(screen.getByTestId("reports-index-row-meyer-1")).getByTestId(
+      "reports-index-access",
+    );
+    expect(link.contains(wrap)).toBe(false);
+    expect(wrap.parentElement).toBe(link.parentElement);
+    expect(wrap.className).toContain("relative");
+    expect(wrap.className).toContain("z-10");
+    expect(link.className).toContain("after:absolute");
+  });
+
+  it("bands: live and not-live rows both carry the popover, with the band's unit rule", () => {
+    render(<ReportsIndex units={[MEYER, PROGRAM]} mode="bands" />);
+    const meyer = screen.getByTestId("reports-index-band-meyer");
+    // 6 report rows; the band header row carries none.
+    expect(within(meyer).getAllByTestId("report-access-marker")).toHaveLength(6);
+    const liveRow = screen.getByTestId("reports-index-band-link-meyer-1").closest("tr")!;
+    expect(accessMarker(liveRow)).toEqual(["unit", "", "", ""]);
+    const notLiveRow = within(meyer).getByText("3. Publications").closest("tr")!;
+    expect(accessMarker(notLiveRow)).toEqual(["unit", "", "", ""]);
+    const program = screen.getByTestId("reports-index-band-mentoring-programs");
+    expect(
+      accessMarker(within(program).getByTestId("report-access-marker").closest("tr")!),
+    ).toEqual(["person", "mentored-publications", "true", "1"]);
+  });
+
+  it("bands: the marker sits beside the band link, not inside it", () => {
+    render(<ReportsIndex units={[MEYER]} mode="bands" />);
+    const link = screen.getByTestId("reports-index-band-link-meyer-1");
+    const wrap = within(link.closest("td")!).getByTestId("reports-index-access");
+    expect(link.contains(wrap)).toBe(false);
+    expect(wrap.parentElement).toBe(link.parentElement);
+    expect(wrap.className).toContain("z-10");
+  });
+
+  it("single-unit table: every row carries the popover, live or not", () => {
+    render(
+      <SingleUnitReportsTable
+        unitCode="meyer"
+        perReport={perReport([1, 2])}
+        reports={CENTER_REPORTS}
+      />,
+    );
+    const table = screen.getByTestId("single-unit-reports-table");
+    expect(within(table).getAllByTestId("report-access-marker")).toHaveLength(6);
+    expect(accessMarker(within(table).getByText("3. Publications").closest("tr")!)).toEqual([
+      "unit",
+      "",
+      "",
+      "",
+    ]);
   });
 });
 

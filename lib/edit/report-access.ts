@@ -48,6 +48,7 @@ import { db } from "@/lib/db";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { EditSession } from "@/lib/auth/superuser";
 import { appendAuditRow } from "@/lib/edit/audit";
+import { PROGRAM_LABEL } from "@/lib/edit/mentorship-type";
 
 /** The one report this table gates today. `reportKey` is a column, not an
  *  enum, so a second program report is one more constant, not a migration. */
@@ -63,6 +64,18 @@ export type MentoredPubsScope = (typeof MENTORED_PUBS_SCOPES)[number];
 
 /** The wildcard scope — "every bucket". */
 export const ALL_SCOPES = "*";
+
+/** The `[scopeKey, label]` pairs the "Who can run this report" popover's
+ *  add form offers for the Mentored publications report — the wildcard
+ *  first, then every grantable bucket under its office-facing name
+ *  (`PROGRAM_LABEL`: `md` reads "AOC"). ONE definition, handed to the popover
+ *  by `/edit/reports/7` AND by the index's program row
+ *  (`app/edit/reports/page.tsx`), so the two cannot drift. Plain tuples —
+ *  serializable across the server/client boundary as-is. */
+export const MENTORED_PUBS_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string]> = [
+  [ALL_SCOPES, "All programs"],
+  ...MENTORED_PUBS_SCOPES.map((s) => [s, PROGRAM_LABEL[s] ?? s] as const),
+];
 
 /** Whether `value` is a grantable scope key for the Mentored publications
  *  report: one of `MENTORED_PUBS_SCOPES` or `"*"`. */

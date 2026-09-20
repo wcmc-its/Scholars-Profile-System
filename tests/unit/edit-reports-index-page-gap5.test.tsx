@@ -4,7 +4,10 @@
  * is an empty roster, not a nonexistent route. Everyone else with zero
  * reportable units still 404s. Scoped narrowly to this one behavior, not a
  * full page test suite — the page's other paths (?center=, 1 unit, 2+ units)
- * are unchanged by this fix.
+ * are unchanged by this fix. Also home to the program row's "Who can run
+ * this report" props (the grant rows via `listReportAccess`, read only when
+ * the row is shown; `canManage` per session; unit rows get the unit rule),
+ * since this is the scaffold that already drives the program row.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -15,6 +18,7 @@ const {
   mockLoadReportableUnits,
   mockReportsIndex,
   mockGetReportScopes,
+  mockListReportAccess,
   mockReportMetaFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
@@ -27,6 +31,7 @@ const {
   mockLoadReportableUnits: vi.fn(),
   mockReportsIndex: vi.fn(() => null),
   mockGetReportScopes: vi.fn(),
+  mockListReportAccess: vi.fn(),
   mockReportMetaFindMany: vi.fn(),
 }));
 
@@ -57,9 +62,18 @@ vi.mock("@/lib/edit/slug-request", () => ({
 }));
 vi.mock("@/lib/edit/manageable-units", () => ({ unitEditHref: () => "/edit/center/x" }));
 // Program reports (report 7) ride a `report_access` row — default: none held.
+// `listReportAccess` / `canManageReportAccess` / the scope options feed the
+// program row's "Who can run this report" popover props.
 vi.mock("@/lib/edit/report-access", () => ({
   getReportScopes: mockGetReportScopes,
+  listReportAccess: mockListReportAccess,
+  canManageReportAccess: (s: { isSuperuser: boolean; isCommsSteward: boolean }) =>
+    s.isSuperuser || s.isCommsSteward,
   MENTORED_PUBS_REPORT: "mentored-publications",
+  MENTORED_PUBS_SCOPE_OPTIONS: [
+    ["*", "All programs"],
+    ["md", "AOC"],
+  ],
 }));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.
@@ -95,6 +109,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLoadReportableUnits.mockResolvedValue([]);
   mockGetReportScopes.mockResolvedValue(new Set());
+  mockListReportAccess.mockResolvedValue([]);
   mockReportMetaFindMany.mockResolvedValue([]);
 });
 
@@ -147,6 +162,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
         n: 7,
         label: "7. Mentored publications",
         description: expect.stringContaining("Access is granted per person."),
+        access: expect.objectContaining({ mode: "person" }),
       },
     ]);
 
@@ -163,7 +179,71 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(
       (findByType(edited, mockReportsIndex)?.props.units as Array<{ reports: unknown[] }>)[0]
         .reports,
-    ).toEqual([{ n: 7, label: "7. Mentee co-publications", description: "Edited blurb." }]);
+    ).toEqual([
+      {
+        n: 7,
+        label: "7. Mentee co-publications",
+        description: "Edited blurb.",
+        access: expect.objectContaining({ mode: "person" }),
+      },
+    ]);
+  });
+
+  it("the program row's popover props: the grant rows (ISO dates), the shared scope options, canManage per session; unit rows get the unit rule; no read when the row is hidden", async () => {
+    // Hidden (no scopes) → `listReportAccess` is never read.
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    await EditReportsIndexPage({ searchParams: sp() });
+    expect(mockListReportAccess).not.toHaveBeenCalled();
+
+    const row = {
+      reportKey: "mentored-publications",
+      scopeKey: "md",
+      cwid: "usr0001",
+      granteeName: "Holder Person",
+      name: "Holder Person",
+      grantedBy: "adm0001",
+      grantedAt: new Date("2026-09-18T12:00:00Z"),
+    };
+    mockListReportAccess.mockResolvedValue([row]);
+
+    // A plain holder: the rows, canManage=false.
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockGetReportScopes.mockResolvedValue(new Set(["md"]));
+    const holder = await EditReportsIndexPage({ searchParams: sp() });
+    expect(mockListReportAccess).toHaveBeenCalledTimes(1);
+    expect(mockListReportAccess).toHaveBeenCalledWith("mentored-publications");
+    const holderUnits = findByType(holder, mockReportsIndex)!.props.units as Array<{
+      reports: Array<{ access: unknown }>;
+    }>;
+    expect(holderUnits[0].reports[0].access).toEqual({
+      mode: "person",
+      reportKey: "mentored-publications",
+      initialRows: [{ ...row, grantedAt: "2026-09-18T12:00:00.000Z" }],
+      scopeOptions: [
+        ["*", "All programs"],
+        ["md", "AOC"],
+      ],
+      canManage: false,
+    });
+
+    // A superuser with a unit too: canManage=true on the program row; the
+    // unit's own reports carry the unit rule.
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockGetReportScopes.mockResolvedValue(new Set(["*"]));
+    mockLoadReportableUnits.mockResolvedValue([
+      { code: "a", name: "A", kind: "center", centerType: "center" },
+      { code: "b", name: "B", kind: "center", centerType: "center" },
+    ]);
+    const superuser = await EditReportsIndexPage({ searchParams: sp() });
+    const units = findByType(superuser, mockReportsIndex)!.props.units as Array<{
+      kind: string;
+      reports: Array<{ n: number; access: unknown }>;
+    }>;
+    expect(units.map((u) => u.kind)).toEqual(["center", "center", "program"]);
+    expect(units[0].reports.map((r) => r.access)).toEqual(Array(6).fill({ mode: "unit" }));
+    expect(units[2].reports[0].access).toEqual(
+      expect.objectContaining({ mode: "person", canManage: true }),
+    );
   });
 
   it("superuser with no report grant sees no program row when scopes are empty", async () => {

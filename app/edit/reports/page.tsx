@@ -48,11 +48,20 @@
  * card under whichever unit view above they'd otherwise see (superuser /
  * comms_steward always; a plain holder with zero reportable units gets the
  * card alone instead of the 404). The unit-scoped rendering is untouched.
+ *
+ * Every report row also carries "Who can run this report"
+ * (`ReportAccessPopover`, rendered by `ReportsIndex`): this page builds each
+ * report's popover PROPS (`ReportsIndexReport.access`) — the static unit rule
+ * for reports 1–6; for report 7 the grant rows (`listReportAccess`, read once
+ * per request and only when the program row is shown), the shared scope
+ * options and `canManageReportAccess` — exactly what `/edit/reports/7` hands
+ * its own header, so the two never disagree.
  */
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import type { ReportAccessPopoverPersonProps } from "@/components/edit/report-access-popover";
 import {
   ReportsIndex,
   SingleUnitReportsTable,
@@ -75,7 +84,13 @@ import {
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
-import { getReportScopes, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import {
+  canManageReportAccess,
+  getReportScopes,
+  listReportAccess,
+  MENTORED_PUBS_REPORT,
+  MENTORED_PUBS_SCOPE_OPTIONS,
+} from "@/lib/edit/report-access";
 import { loadReportMeta, reportLabel, type ReportKey, type ReportMeta } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -106,20 +121,25 @@ type ReportCatalog = {
 };
 
 /** One index card off the loaded meta: the numbered label + the one-line
- *  summary. `meta` always has every key (`loadReportMeta` merges defaults).
- *  Generic in `n` so the same helper serves the unit catalog (`ReportNumber`,
- *  1–6) and the program pseudo-unit's report 7. */
+ *  summary + the report's "Who can run this report" popover props. `meta`
+ *  always has every key (`loadReportMeta` merges defaults). Generic in `n`
+ *  so the same helper serves the unit catalog (`ReportNumber`, 1–6) and the
+ *  program pseudo-unit's report 7. */
 function catalogEntry<N extends ReportsIndexReport["n"]>(
   meta: Map<ReportKey, ReportMeta>,
   n: N,
+  access: ReportsIndexReport["access"],
 ): ReportsIndexReport & { n: N } {
   const m = meta.get(String(n) as ReportKey);
   if (!m) throw new Error(`report_meta: no entry for report ${n}`);
-  return { n, label: reportLabel(m), description: m.summary };
+  return { n, label: reportLabel(m), description: m.summary, access };
 }
 
 function buildCatalog(meta: Map<ReportKey, ReportMeta>): ReportCatalog {
-  const all: readonly ReportDef[] = ([1, 2, 3, 4, 5, 6] as const).map((n) => catalogEntry(meta, n));
+  // Reports 1–6 are unit-gated: the popover states the Owner/Curator rule.
+  const all: readonly ReportDef[] = ([1, 2, 3, 4, 5, 6] as const).map((n) =>
+    catalogEntry(meta, n, { mode: "unit" }),
+  );
   return {
     all,
     byKind: {
@@ -159,7 +179,8 @@ export default async function EditReportsIndexPage({
   // Names + blurbs come from `report_meta` (editable), read once per request.
   const meta = await loadReportMeta();
   const catalog = buildCatalog(meta);
-  const programUnit = programScopes.size > 0 ? buildProgramUnit(meta) : null;
+  const programUnit =
+    programScopes.size > 0 ? buildProgramUnit(meta, await loadProgramReportAccess(session)) : null;
 
   const { center, kind: kindParam } = (await searchParams) ?? {};
   const kind = parseKind(kindParam);
@@ -275,12 +296,34 @@ export default async function EditReportsIndexPage({
   );
 }
 
+/** Report 7's "Who can run this report" props for the index row — the same
+ *  three things `/edit/reports/7` hands its own header: the grant rows
+ *  (`grantedAt` as ISO, plain-serializable), the shared scope options and
+ *  whether this session may Add / Remove. Read only when the program row is
+ *  shown (`getReportScopes` non-empty), once per request. */
+async function loadProgramReportAccess(
+  session: EditSession,
+): Promise<ReportAccessPopoverPersonProps> {
+  const rows = await listReportAccess(MENTORED_PUBS_REPORT);
+  return {
+    mode: "person",
+    reportKey: MENTORED_PUBS_REPORT,
+    initialRows: rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
+    scopeOptions: MENTORED_PUBS_SCOPE_OPTIONS,
+    canManage: canManageReportAccess(session),
+  };
+}
+
 /** The person-granted Mentored publications report as a one-report
  *  pseudo-unit, so it rides the same list (and filter rail) as every unit —
  *  never a card floating under the table. Not tied to an org unit; access is
  *  a `report_access` row. Rendered only when `getReportScopes` is non-empty.
- *  Its label/blurb come from `report_meta` like every other card. */
-function buildProgramUnit(meta: Map<ReportKey, ReportMeta>): ReportsIndexUnit {
+ *  Its label/blurb come from `report_meta` like every other card; `access`
+ *  is `loadProgramReportAccess`'s popover props. */
+function buildProgramUnit(
+  meta: Map<ReportKey, ReportMeta>,
+  access: ReportAccessPopoverPersonProps,
+): ReportsIndexUnit {
   return {
     code: "mentoring-programs",
     kind: "program",
@@ -290,7 +333,7 @@ function buildProgramUnit(meta: Map<ReportKey, ReportMeta>): ReportsIndexUnit {
     liveCount: 1,
     totalCount: 1,
     lastRefreshedAt: null,
-    reports: [catalogEntry(meta, 7)],
+    reports: [catalogEntry(meta, 7, access)],
     perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
   };
 }

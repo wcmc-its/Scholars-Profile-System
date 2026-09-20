@@ -1,13 +1,15 @@
 /**
  * The shared `<h1>` block of every `/edit/reports/[n]` page — the report's
- * numbered name from `report_meta` (`lib/edit/report-meta.ts`), the
- * superuser-only pencil that edits it (`ReportMetaEditor`, a client island),
- * the page's own dynamic subtitle (`children` — kind- or mode-dependent
- * wording each page still owns), and, when the report has a description, a
- * closed-by-default "About this report" disclosure. An async SERVER
- * component: the meta read is `cache()`d, so it shares the page's
- * `generateMetadata` read; no client state of its own — the `<details>` is
- * native, nothing to hydrate.
+ * numbered name from `report_meta` (`lib/edit/report-meta.ts`), the page's
+ * "Who can run this report" popover (`access` — composed by the page, since
+ * only it knows whether the report is unit- or row-gated and what rows to
+ * hand over), the superuser-only pencil that edits the meta
+ * (`ReportMetaEditor`, a client island), the page's own dynamic subtitle
+ * (`children` — kind- or mode-dependent wording each page still owns), and,
+ * when the report has a description, a closed-by-default "About this
+ * report" disclosure. An async SERVER component: the meta read is
+ * `cache()`d, so it shares the page's `generateMetadata` read; no client
+ * state of its own — the `<details>` is native, nothing to hydrate.
  *
  * The description is stored write-sanitized (`sanitizeOverview`, the route)
  * and re-sanitized here on read (`sanitizeOverviewHtml`) before the raw
@@ -26,11 +28,18 @@ export type ReportHeaderProps = {
   n: ReportKey;
   /** The effective session; only `isSuperuser` is read (the pencil's gate). */
   session: Pick<EditSession, "isSuperuser">;
+  /** The report's "Who can run this report" popover (`ReportAccessPopover`,
+   *  `components/edit/report-access-popover.tsx`), rendered in the heading
+   *  row right after the `<h1>`, before the pencil. The page composes it —
+   *  `mode="unit"` for a unit-gated report, `mode="person"` with the grant
+   *  rows for a row-gated one — and this header only places it. Omitted →
+   *  nothing extra in the row. */
+  access?: React.ReactNode;
   /** The page's dynamic subtitle `<p>`, rendered between the `<h1>` and the disclosure. */
   children?: React.ReactNode;
 };
 
-export async function ReportHeader({ n, session, children }: ReportHeaderProps) {
+export async function ReportHeader({ n, session, access, children }: ReportHeaderProps) {
   const meta = await reportMetaFor(n);
   return (
     <>
@@ -38,6 +47,12 @@ export async function ReportHeader({ n, session, children }: ReportHeaderProps) 
           `basis-full`, so it wraps onto its own row beneath. */}
       <div className="flex flex-wrap items-start gap-2">
         <h1 className="mb-1 text-xl font-bold">{reportLabel(meta)}</h1>
+        {/* `mt-1.5` centres the 16px glyph on the h1's 28px line box. */}
+        {access !== undefined && access !== null && (
+          <span className="mt-1.5 inline-flex" data-testid="report-header-access">
+            {access}
+          </span>
+        )}
         {session.isSuperuser && (
           <ReportMetaEditor
             n={n}

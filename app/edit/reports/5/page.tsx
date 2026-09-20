@@ -14,6 +14,7 @@ import { redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportAccessPopover } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { loadClinicalTrialsReport } from "@/lib/center-collaboration/clinical-trials-report";
@@ -79,7 +80,7 @@ export default async function EditReportsClinicalTrialsPage({
       >
         &larr; All reports
       </Link>
-      <ReportHeader n="5" session={session}>
+      <ReportHeader n="5" session={session} access={<ReportAccessPopover mode="unit" />}>
         <p className="text-muted-foreground mb-4 text-sm">
           {rows.length === 0
             ? "Current members' clinical-trial links (Principal Investigator or Investigator)."

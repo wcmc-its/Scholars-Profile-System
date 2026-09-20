@@ -52,9 +52,12 @@
  * (`parseMentoredPubsParams`) — a server re-render per change, no client
  * state, like `/edit/data-sharing`'s filter bar; the form is the
  * `AutoSubmitForm` island so a change submits without an Apply click (the
- * button stays as the no-JS fallback). The "Viewers" panel
- * (`ReportAccessPanel`) is the other client island, rendered only for
- * `canManageReportAccess`.
+ * button stays as the no-JS fallback). "Who can run this report"
+ * (`ReportAccessPopover`, `mode="person"`, handed to `ReportHeader` as its
+ * `access`) is the other client island: EVERY viewer gets it with the
+ * report's grant rows — who else can open this is not a secret — and only
+ * its Add / Remove controls are gated (`canManageReportAccess`, the same
+ * gate the route enforces).
  */
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -62,7 +65,10 @@ import { notFound, redirect } from "next/navigation";
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { MentoredPublicationsTable } from "@/components/edit/mentored-publications-table";
-import { ReportAccessPanel, type ReportAccessPanelRow } from "@/components/edit/report-access-panel";
+import {
+  ReportAccessPopover,
+  type ReportAccessPopoverRow,
+} from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -80,7 +86,6 @@ import {
   loadMentoredGradYears,
   loadMentoredPublicationsReport,
   MAX_TAIL,
-  PROGRAM_LABEL,
 } from "@/lib/edit/mentored-publications-report";
 import {
   allowedMentorshipTypes,
@@ -90,12 +95,11 @@ import {
   type MentorshipTypeKey,
 } from "@/lib/edit/mentorship-type";
 import {
-  ALL_SCOPES,
   canManageReportAccess,
   getReportScopes,
   listReportAccess,
   MENTORED_PUBS_REPORT,
-  MENTORED_PUBS_SCOPES,
+  MENTORED_PUBS_SCOPE_OPTIONS,
 } from "@/lib/edit/report-access";
 import { reportPageMetadata } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -240,6 +244,8 @@ export default async function EditReportsMentoredPublicationsPage({
     view: requested.view,
   };
 
+  // The grant list is read for EVERY viewer — the popover shows who else can
+  // run the report to anyone who can; only Add / Remove ride `canManage`.
   const canManage = canManageReportAccess(session);
   const [report, pendingSlugRequests, pendingHonors, accessRows] = await Promise.all([
     loadMentoredPublicationsReport({
@@ -251,15 +257,12 @@ export default async function EditReportsMentoredPublicationsPage({
     }),
     session.isSuperuser && isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
-    canManage ? listReportAccess(MENTORED_PUBS_REPORT) : Promise.resolve([]),
+    listReportAccess(MENTORED_PUBS_REPORT),
   ]);
 
   const typeChoices = allowedMentorshipTypes(scopes);
-  const scopeOptions: Array<readonly [string, string]> = [
-    [ALL_SCOPES, "All programs"] as const,
-    ...MENTORED_PUBS_SCOPES.map((s) => [s, PROGRAM_LABEL[s] ?? s] as const),
-  ];
-  const panelRows: ReportAccessPanelRow[] = accessRows.map((r) => ({
+  const scopeOptions = MENTORED_PUBS_SCOPE_OPTIONS;
+  const initialRows: ReportAccessPopoverRow[] = accessRows.map((r) => ({
     ...r,
     grantedAt: r.grantedAt.toISOString(),
   }));
@@ -279,7 +282,19 @@ export default async function EditReportsMentoredPublicationsPage({
       <Link href="/edit/reports" className="text-apollo-slate mb-4 inline-block text-sm hover:underline">
         &larr; All reports
       </Link>
-      <ReportHeader n="7" session={session}>
+      <ReportHeader
+        n="7"
+        session={session}
+        access={
+          <ReportAccessPopover
+            mode="person"
+            reportKey={MENTORED_PUBS_REPORT}
+            initialRows={initialRows}
+            scopeOptions={scopeOptions}
+            canManage={canManage}
+          />
+        }
+      >
         <p className="text-muted-foreground text-sm">
           {allMode
             ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
@@ -322,9 +337,6 @@ export default async function EditReportsMentoredPublicationsPage({
           pubsMode={params.pubs}
           highImpactThreshold={HIGH_IMPACT_THRESHOLD}
         />
-      )}
-      {canManage && (
-        <ReportAccessPanel reportKey={MENTORED_PUBS_REPORT} initialRows={panelRows} scopeOptions={scopeOptions} />
       )}
     </ConsoleShell>
   );

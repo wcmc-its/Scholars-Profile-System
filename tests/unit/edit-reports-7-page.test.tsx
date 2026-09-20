@@ -7,8 +7,11 @@
  * the loader and default to the two most recent years (plus "unknown" when
  * the selection has year-less learners), the choices being the SELECTED
  * types'; requested years the selection has no class in are dropped; the
- * "Viewers" panel is rendered ONLY for superuser / comms_steward; "Type of
- * mentorship" is a checkbox group (no Program select): a holder is offered
+ * "Who can run this report" popover (`ReportAccessPopover`, mocked to a
+ * marker) is `ReportHeader`'s `access` for EVERY viewer, with the grant
+ * rows (`listReportAccess` read for a plain holder too) and the shared
+ * scope options — `canManage` false for a holder, true for a superuser;
+ * "Type of mentorship" is a checkbox group (no Program select): a holder is offered
  * only the roster types they hold, the default is their roster type(s) — a
  * superuser's every confirmed type — co-author inferences never; a roster
  * type outside the caller's scopes is silently dropped, never widened; the
@@ -20,8 +23,8 @@
  * only sentence names the dropped count; the description speaks the
  * office's words (AOC, pairing sheet) and points at the "About this report"
  * disclosure (the former hardcoded "Sources" disclosure is gone — the h1 and
- * the disclosure are `ReportHeader`'s, over `report_meta`) and the Viewers
- * panel's `md` scope reads "AOC". `HoverTooltip` is mocked to its children —
+ * the disclosure are `ReportHeader`'s, over `report_meta`) and the
+ * popover's `md` scope reads "AOC". `HoverTooltip` is mocked to its children —
  * the walker calls plain function components, and Radix's provider uses hooks.
  * "Faculty-asserted" is offered to every holder, checked by default for
  * `"*"` only, and its CWID-less entries get their own sentence.
@@ -40,7 +43,7 @@ const h = vi.hoisted(() => ({
   mockListReportAccess: vi.fn(),
   mockLoadGradYears: vi.fn(),
   mockLoadReport: vi.fn(),
-  mockPanel: vi.fn(() => null),
+  mockPopover: vi.fn(() => null),
   mockTable: vi.fn(() => null),
   mockAutoSubmitForm: vi.fn(({ children }: { children: React.ReactNode }) => children),
   mockHoverTooltip: vi.fn(({ children }: { children: React.ReactNode }) => children),
@@ -57,7 +60,7 @@ vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/edit/mentored-publications-report")>();
   return { ...actual, loadMentoredGradYears: h.mockLoadGradYears, loadMentoredPublicationsReport: h.mockLoadReport };
 });
-vi.mock("@/components/edit/report-access-panel", () => ({ ReportAccessPanel: h.mockPanel }));
+vi.mock("@/components/edit/report-access-popover", () => ({ ReportAccessPopover: h.mockPopover }));
 // The h1 + "About this report" disclosure live in `ReportHeader` (an async
 // Server Component over `report_meta`, covered by `report-header.test.tsx`);
 // here it is a pass-through so the walk still reaches the page's subtitle.
@@ -88,6 +91,25 @@ import EditReportsMentoredPublicationsPage from "@/app/edit/reports/7/page";
 const HOLDER = { cwid: "usr0001", isSuperuser: false, isCommsSteward: false };
 const SUPERUSER = { cwid: "adm0001", isSuperuser: true, isCommsSteward: false };
 const sp = (q: Record<string, string> = {}) => Promise.resolve(q);
+
+/** One grant row as `listReportAccess` hands it (a `Date`, a resolved `name`). */
+const ACCESS_ROW = {
+  reportKey: "mentored-publications",
+  scopeKey: "md",
+  cwid: "usr0001",
+  granteeName: "Holder Person",
+  name: "Holder Person",
+  grantedBy: "adm0001",
+  grantedAt: new Date("2026-09-18T12:00:00Z"),
+};
+/** `MENTORED_PUBS_SCOPE_OPTIONS` — the real constant (the module is spread
+ *  from the original), pinned here by value so a wording drift is visible. */
+const SCOPE_OPTIONS = [
+  ["*", "All programs"],
+  ["md", "AOC"],
+  ["mdphd", "MD-PhD"],
+  ["ecr", "ECR"],
+];
 
 type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
@@ -136,6 +158,17 @@ function findByTestId(node: unknown, testId: string): El | null {
     if (found) return found;
   }
   return null;
+}
+
+/** The popover element the page hands `ReportHeader` as `access`. The mocked
+ *  header is opaque to the walk (its `access` is a prop, not a child), so it
+ *  is read off the header's props directly. */
+function accessPopover(result: unknown): El {
+  const header = findByType(result, h.mockReportHeader);
+  expect(header).not.toBeNull();
+  const access = asEl(header!.props.access);
+  expect(access.type).toBe(h.mockPopover);
+  return access;
 }
 
 beforeEach(() => {
@@ -198,7 +231,8 @@ describe("/edit/reports/7 — gate", () => {
 });
 
 describe("/edit/reports/7 — wiring", () => {
-  it("a holder: loader gets their scopes, their roster type and the two most recent years; the download carries types; no Viewers panel", async () => {
+  it("a holder: loader gets their scopes, their roster type and the two most recent years; the download carries types; the popover is the header's access with canManage=false and the rows", async () => {
+    h.mockListReportAccess.mockResolvedValue([ACCESS_ROW]);
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
     expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md"], ["aoc"]);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
@@ -208,8 +242,19 @@ describe("/edit/reports/7 — wiring", () => {
       tail: 1,
       ...MENTORED,
     });
-    expect(findByType(result, h.mockPanel)).toBeNull();
-    expect(h.mockListReportAccess).not.toHaveBeenCalled();
+    // Who can run it is shown to everyone who can — the list is read for a
+    // plain holder too; only the controls are gated.
+    expect(h.mockListReportAccess).toHaveBeenCalledWith("mentored-publications");
+    const popover = accessPopover(result);
+    expect(popover.props).toEqual({
+      mode: "person",
+      reportKey: "mentored-publications",
+      initialRows: [{ ...ACCESS_ROW, grantedAt: "2026-09-18T12:00:00.000Z" }],
+      scopeOptions: SCOPE_OPTIONS,
+      canManage: false,
+    });
+    // Nothing else of it below the tables — the bottom-of-page card is gone.
+    expect(findByTestId(result, "report-access-panel")).toBeNull();
     expect(findByType(result, h.mockTable)?.props.downloadHref).toBe(
       "/api/edit/reports/mentored-publications?years=2026%2C2025&types=aoc&tail=1&pubs=mentored",
     );
@@ -571,18 +616,10 @@ describe("/edit/reports/7 — wiring", () => {
     });
   });
 
-  it("a superuser: the chosen types reach BOTH loaders with the '*' scope, and the Viewers panel renders with the current rows", async () => {
+  it("a superuser: the chosen types reach BOTH loaders with the '*' scope, and the popover carries the current rows with canManage=true", async () => {
     h.mockGetEditSession.mockResolvedValue(SUPERUSER);
     h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
-    h.mockListReportAccess.mockResolvedValue([
-      {
-        reportKey: "mentored-publications",
-        scopeKey: "md",
-        cwid: "usr0001",
-        grantedBy: "adm0001",
-        grantedAt: new Date("2026-09-18T12:00:00Z"),
-      },
-    ]);
+    h.mockListReportAccess.mockResolvedValue([ACCESS_ROW]);
     const result = await EditReportsMentoredPublicationsPage({
       searchParams: sp({ types: "ecr" }),
     });
@@ -595,18 +632,16 @@ describe("/edit/reports/7 — wiring", () => {
       tail: 1,
       ...MENTORED,
     });
-    const panel = findByType(result, h.mockPanel);
-    expect(panel).not.toBeNull();
-    expect(panel!.props.reportKey).toBe("mentored-publications");
-    expect(panel!.props.initialRows).toEqual([
+    expect(h.mockListReportAccess).toHaveBeenCalledWith("mentored-publications");
+    const popover = accessPopover(result);
+    expect(popover.props.mode).toBe("person");
+    expect(popover.props.reportKey).toBe("mentored-publications");
+    expect(popover.props.canManage).toBe(true);
+    expect(popover.props.initialRows).toEqual([
       expect.objectContaining({ cwid: "usr0001", scopeKey: "md", grantedAt: "2026-09-18T12:00:00.000Z" }),
     ]);
-    expect(panel!.props.scopeOptions).toEqual([
-      ["*", "All programs"],
-      ["md", "AOC"],
-      ["mdphd", "MD-PhD"],
-      ["ecr", "ECR"],
-    ]);
+    // The `md` scope reads "AOC" — the office's word, from the ONE shared list.
+    expect(popover.props.scopeOptions).toEqual(SCOPE_OPTIONS);
   });
 
   it("the hardcoded Sources disclosure is gone: the h1 and description ride ReportHeader (report_meta row 7)", async () => {

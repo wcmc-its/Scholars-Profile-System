@@ -1,10 +1,11 @@
 /**
  * "Who can run this report" — the per-report access popover for the `/edit`
- * reports. Relocates the bottom-of-page "Viewers" card
- * (`report-access-panel.tsx`) into a `Users` icon beside a report's heading,
- * so the answer to "who else can open this?" sits next to the report instead
- * of below its data, and so every report — not only the one with a grant
- * table — can carry the same affordance.
+ * reports. Replaced the bottom-of-page "Viewers" card (the former
+ * `report-access-panel.tsx`, deleted) with a `Users` icon beside a report's
+ * heading (`ReportHeader`'s `access`) and beside every row of the index
+ * (`reports-index.tsx`), so the answer to "who else can open this?" sits
+ * next to the report instead of below its data, and so every report — not
+ * only the one with a grant table — carries the same affordance.
  *
  * Two modes, a discriminated union on `mode`:
  *
@@ -21,8 +22,9 @@
  *     row plus an add form — `DirectoryPeopleTypeahead` + program `<select>`
  *     + Add. Every write is a POST to `/api/edit/report-access`, which
  *     answers with the updated row list; the popover re-renders from that
- *     server truth (the panel's fetch idiom, no optimistic overlay — a grant
- *     list is short and a round-trip is instant).
+ *     server truth (the `mentee-suggestions-card.tsx` fetch idiom, no
+ *     optimistic overlay — a grant list is short and a round-trip is
+ *     instant).
  *
  * Why the grant carries `name`: the popover is the only place a grantee's
  * name is ever in hand. The people picker returns the directory name at

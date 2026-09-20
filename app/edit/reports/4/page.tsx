@@ -15,6 +15,7 @@ import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportAccessPopover } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { Input } from "@/components/ui/input";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -99,7 +100,7 @@ export default async function EditReportsGrantsPage({
       >
         &larr; All reports
       </Link>
-      <ReportHeader n="4" session={session}>
+      <ReportHeader n="4" session={session} access={<ReportAccessPopover mode="unit" />}>
         <p className="text-muted-foreground mb-4 text-sm">
           This center’s members’ grants active as of the chosen date.
         </p>
