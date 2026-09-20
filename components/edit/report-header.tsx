@@ -41,7 +41,12 @@ export async function ReportHeader({ n, session, children }: ReportHeaderProps) 
         {session.isSuperuser && (
           <ReportMetaEditor
             n={n}
-            meta={{ name: meta.name, summary: meta.summary, descriptionHtml: meta.descriptionHtml }}
+            meta={{
+              slug: meta.slug,
+              name: meta.name,
+              summary: meta.summary,
+              descriptionHtml: meta.descriptionHtml,
+            }}
           />
         )}
       </div>

@@ -2442,6 +2442,7 @@ model ReportAccess {
 /// the impersonation target).
 model ReportMeta {
   reportKey       String   @id @map("report_key") @db.VarChar(64)
+  slug            String   @unique @db.VarChar(64)
   name            String   @db.VarChar(120)
   summary         String   @db.VarChar(500)
   descriptionHtml String?  @map("description_html") @db.Text

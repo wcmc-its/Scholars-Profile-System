@@ -1,7 +1,7 @@
 /**
  * Editable report metadata for the `/edit/reports` console (`report_meta`) —
- * the NAME, one-line SUMMARY and optional rich-text DESCRIPTION of each
- * numbered report (`/edit/reports/{1..7}`), moved out of the hardcoded
+ * the NAME, one-line SUMMARY, optional rich-text DESCRIPTION and URL SLUG of
+ * each numbered report (`/edit/reports/{1..7}`), moved out of the hardcoded
  * `ALL_REPORTS` / `PROGRAM_UNIT` literals in `app/edit/reports/page.tsx` and
  * the per-page `<h1>` / `metadata.title` strings so a superuser can edit them
  * in place (`components/edit/report-meta-editor.tsx` →
@@ -28,6 +28,11 @@
  * `sanitizeOverviewHtml` on read as defense in depth (the overview precedent,
  * `lib/api/manual-layer.ts` `getEffectiveOverview`).
  *
+ * The slug is the report's future address (`/edit/reports/<slug>`, the
+ * registry plan of 2026-09-20); the NUMBER stays the stable key, so a slug is
+ * a renameable field, not an identity. Unique in the table; stored but not
+ * yet routed on — nothing reads it until the dynamic page lands.
+ *
  * Server-only (reads `@/lib/db`); imported by server pages, `ReportHeader`
  * and the route handler, never by a `"use client"` component — the editor
  * island takes the meta as props.
@@ -47,6 +52,22 @@ export function isReportKey(v: unknown): v is ReportKey {
 
 /** Cap on `name` (the `report_meta.name` column width). */
 export const REPORT_NAME_MAX = 120;
+/** Cap on `slug` (the `report_meta.slug` column width). */
+export const REPORT_SLUG_MAX = 64;
+
+/** Whether `v` is a storable slug: lowercase letters, digits and single
+ *  hyphens (`a-b-c`), 1..`REPORT_SLUG_MAX` chars, and NOT all digits — the
+ *  digit namespace is the stable key (`/edit/reports/7` redirects to the
+ *  slug), so a numeric slug would shadow it. Validation is shared by the
+ *  route and the editor; uniqueness is the table's constraint. */
+export function isValidReportSlug(v: unknown): v is string {
+  return (
+    typeof v === "string" &&
+    v.length <= REPORT_SLUG_MAX &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v) &&
+    !/^\d+$/.test(v)
+  );
+}
 /** Cap on `summary` (the `report_meta.summary` column width). The description
  *  cap is `OVERVIEW_MAX_LENGTH` (`lib/edit/validators.ts`), shared with the
  *  sanitizer. */
@@ -77,44 +98,53 @@ const MENTORED_PUBS_DESCRIPTION_HTML = [
  *  wins over these entirely. */
 export const REPORT_META_DEFAULTS: Record<
   ReportKey,
-  { name: string; summary: string; descriptionHtml: string | null }
+  { slug: string; name: string; summary: string; descriptionHtml: string | null }
 > = {
   "1": {
+    slug: "optimize-membership",
     name: "Optimize membership",
     summary:
       "REMOVE / ADD membership recommendations from PubMed co-authorship and MeSH cancer-relevance signals.",
     descriptionHtml: null,
   },
   "2": {
+    slug: "nci-table-2a",
     name: "NCI Table 2a",
     summary:
       "NCI CCSG Data Table 2A funding review — program-code allocation and the Cancer-Relevant Percent judgment column.",
     descriptionHtml: null,
   },
   "3": {
+    slug: "publications",
     // Kind-neutral wording: for a core this report's set is confirmed core
     // usages, not member publications. One shared catalog serves all four
     // kinds, so the blurb must be true of each.
     name: "Publications",
-    summary: "This unit's publications, joined to Journal Impact Factor and paper-level impact-score data.",
+    summary:
+      "This unit's publications, joined to Journal Impact Factor and paper-level impact-score data.",
     descriptionHtml: null,
   },
   "4": {
+    slug: "grants",
     name: "Grants",
     summary: "Active grants for the center's members, as of a chosen date.",
     descriptionHtml: null,
   },
   "5": {
+    slug: "clinical-trials",
     name: "Clinical Trials",
-    summary: "Active clinical trials involving the center's members, with ClinicalTrials.gov links.",
+    summary:
+      "Active clinical trials involving the center's members, with ClinicalTrials.gov links.",
     descriptionHtml: null,
   },
   "6": {
+    slug: "nih-funded-pubs",
     name: "NIH-funded pubs",
     summary: "This unit's publications with a matched NIH RePORTER funding link.",
     descriptionHtml: null,
   },
   "7": {
+    slug: "mentored-publications",
     name: "Mentored publications",
     summary:
       "Every publication a learner co-authored with a mentor — AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc appointments, co-authorship inferences — with impact factor and citations. Access is granted per person.",
@@ -126,6 +156,7 @@ export const REPORT_META_DEFAULTS: Record<
  *  is the stored (write-sanitized) HTML, or `null` for "no description". */
 export type ReportMeta = {
   key: ReportKey;
+  slug: string;
   name: string;
   summary: string;
   descriptionHtml: string | null;
@@ -141,13 +172,19 @@ export type ReportMeta = {
  */
 export const loadReportMeta = cache(async (): Promise<Map<ReportKey, ReportMeta>> => {
   const rows = await db.read.reportMeta.findMany({
-    select: { reportKey: true, name: true, summary: true, descriptionHtml: true },
+    select: { reportKey: true, slug: true, name: true, summary: true, descriptionHtml: true },
   });
   const byKey = new Map(rows.map((r) => [r.reportKey, r] as const));
   const out = new Map<ReportKey, ReportMeta>();
   for (const key of REPORT_KEYS) {
     const src = byKey.get(key) ?? REPORT_META_DEFAULTS[key];
-    out.set(key, { key, name: src.name, summary: src.summary, descriptionHtml: src.descriptionHtml });
+    out.set(key, {
+      key,
+      slug: src.slug,
+      name: src.name,
+      summary: src.summary,
+      descriptionHtml: src.descriptionHtml,
+    });
   }
   return out;
 });

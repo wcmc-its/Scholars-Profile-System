@@ -1,6 +1,6 @@
 /**
  * The superuser-only pencil next to a report page's `<h1>` (`ReportHeader`)
- * that edits the report's name, one-line summary and rich-text description
+ * that edits the report's slug, name, one-line summary and rich-text description
  * in place (`report_meta`, `lib/edit/report-meta.ts`). Collapsed: one icon
  * button. Open: an inline form — name, summary, the shared `OverviewEditor`
  * (Tiptap, the same eight-tag schema as the profile bio) — that PUTs
@@ -18,17 +18,21 @@ import { Pencil } from "lucide-react";
 
 import { OverviewEditor } from "@/components/edit/overview-editor";
 import { Button } from "@/components/ui/button";
-import type { ReportKey } from "@/lib/edit/report-meta";
+import { isValidReportSlug, type ReportKey } from "@/lib/edit/report-meta";
 
 export type ReportMetaEditorProps = {
   n: ReportKey;
-  meta: { name: string; summary: string; descriptionHtml: string | null };
+  meta: { slug: string; name: string; summary: string; descriptionHtml: string | null };
 };
 
 const GENERIC_ERROR = "That didn't save. Try again.";
 
 function errorMessage(code: string | undefined): string {
   switch (code) {
+    case "invalid_slug":
+      return "Slug: lowercase letters, digits and hyphens (e.g. mentored-publications), not just digits.";
+    case "slug_taken":
+      return "Another report already uses that slug.";
     case "invalid_name":
       return "Enter a name (up to 120 characters).";
     case "invalid_summary":
@@ -48,6 +52,7 @@ function errorMessage(code: string | undefined): string {
 export function ReportMetaEditor({ n, meta }: ReportMetaEditorProps) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
+  const [slug, setSlug] = React.useState(meta.slug);
   const [name, setName] = React.useState(meta.name);
   const [summary, setSummary] = React.useState(meta.summary);
   const [html, setHtml] = React.useState(meta.descriptionHtml ?? "");
@@ -55,6 +60,7 @@ export function ReportMetaEditor({ n, meta }: ReportMetaEditorProps) {
   const [error, setError] = React.useState<string | null>(null);
 
   function openForm(): void {
+    setSlug(meta.slug);
     setName(meta.name);
     setSummary(meta.summary);
     setHtml(meta.descriptionHtml ?? "");
@@ -69,7 +75,12 @@ export function ReportMetaEditor({ n, meta }: ReportMetaEditorProps) {
       const res = await fetch(`/api/edit/report-meta/${n}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), summary: summary.trim(), descriptionHtml: html }),
+        body: JSON.stringify({
+          slug: slug.trim(),
+          name: name.trim(),
+          summary: summary.trim(),
+          descriptionHtml: html,
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || data.ok !== true) {
@@ -121,7 +132,24 @@ export function ReportMetaEditor({ n, meta }: ReportMetaEditorProps) {
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground text-xs">Summary (one line, shown on the reports index)</span>
+        <span className="text-muted-foreground text-xs">
+          Slug (the report&rsquo;s address, /edit/reports/&hellip;; lowercase, hyphens)
+        </span>
+        <input
+          type="text"
+          value={slug}
+          maxLength={64}
+          onChange={(e) => setSlug(e.target.value)}
+          className="border-apollo-border rounded border px-2 py-1 font-mono"
+          autoComplete="off"
+          spellCheck={false}
+          data-testid="report-meta-slug"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-muted-foreground text-xs">
+          Summary (one line, shown on the reports index)
+        </span>
         <textarea
           value={summary}
           maxLength={500}
@@ -142,11 +170,19 @@ export function ReportMetaEditor({ n, meta }: ReportMetaEditorProps) {
           type="submit"
           variant="apollo"
           size="sm"
-          disabled={busy || name.trim() === "" || summary.trim() === ""}
+          disabled={
+            busy || !isValidReportSlug(slug.trim()) || name.trim() === "" || summary.trim() === ""
+          }
         >
           Save
         </Button>
-        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setOpen(false)}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => setOpen(false)}
+        >
           Cancel
         </Button>
         {error && (

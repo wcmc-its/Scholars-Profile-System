@@ -139,17 +139,31 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     const byDefault = await EditReportsIndexPage({ searchParams: sp() });
-    expect((findByType(byDefault, mockReportsIndex)?.props.units as Array<{ reports: unknown[] }>)[0].reports).toEqual([
-      { n: 7, label: "7. Mentored publications", description: expect.stringContaining("Access is granted per person.") },
+    expect(
+      (findByType(byDefault, mockReportsIndex)?.props.units as Array<{ reports: unknown[] }>)[0]
+        .reports,
+    ).toEqual([
+      {
+        n: 7,
+        label: "7. Mentored publications",
+        description: expect.stringContaining("Access is granted per person."),
+      },
     ]);
 
     mockReportMetaFindMany.mockResolvedValue([
-      { reportKey: "7", name: "Mentee co-publications", summary: "Edited blurb.", descriptionHtml: null },
+      {
+        reportKey: "7",
+        slug: "mentee-co-publications",
+        name: "Mentee co-publications",
+        summary: "Edited blurb.",
+        descriptionHtml: null,
+      },
     ]);
     const edited = await EditReportsIndexPage({ searchParams: sp() });
-    expect((findByType(edited, mockReportsIndex)?.props.units as Array<{ reports: unknown[] }>)[0].reports).toEqual([
-      { n: 7, label: "7. Mentee co-publications", description: "Edited blurb." },
-    ]);
+    expect(
+      (findByType(edited, mockReportsIndex)?.props.units as Array<{ reports: unknown[] }>)[0]
+        .reports,
+    ).toEqual([{ n: 7, label: "7. Mentee co-publications", description: "Edited blurb." }]);
   });
 
   it("superuser with no report grant sees no program row when scopes are empty", async () => {

@@ -33,6 +33,7 @@ const PLAIN = { isSuperuser: false };
 
 const META = {
   key: "3" as const,
+  slug: "publications",
   name: "Publications",
   summary: "This unit's publications.",
   descriptionHtml: "<p>Joined to <strong>JIF</strong>.</p><ul><li>one</li></ul>",
@@ -65,7 +66,12 @@ describe("ReportHeader", () => {
     expect(h.mockEditor).toHaveBeenCalledWith(
       expect.objectContaining({
         n: "3",
-        meta: { name: META.name, summary: META.summary, descriptionHtml: META.descriptionHtml },
+        meta: {
+          slug: META.slug,
+          name: META.name,
+          summary: META.summary,
+          descriptionHtml: META.descriptionHtml,
+        },
       }),
       undefined,
     );
@@ -93,7 +99,9 @@ describe("ReportHeader", () => {
     const h1 = q.getByRole("heading", { level: 1 });
     const subtitle = q.getByTestId("subtitle");
     expect(h1.compareDocumentPosition(subtitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(subtitle.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      subtitle.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("description null → no <details> at all; children still render", async () => {

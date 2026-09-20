@@ -57,7 +57,12 @@ function asGenuine(cwid: string, roles: { isSuperuser?: boolean; isCommsSteward?
   h.mockImpersonationActive.mockReturnValue(false);
 }
 
-const VALID = { name: "Publications", summary: "This unit's publications.", descriptionHtml: "<p>About.</p>" };
+const VALID = {
+  slug: "publications",
+  name: "Publications",
+  summary: "This unit's publications.",
+  descriptionHtml: "<p>About.</p>",
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -67,6 +72,7 @@ beforeEach(() => {
   // Echo the write back the way Prisma would (the `select`ed columns).
   h.mockUpsert.mockImplementation(async (args: { create: Record<string, unknown> }) => ({
     reportKey: args.create.reportKey,
+    slug: args.create.slug,
     name: args.create.name,
     summary: args.create.summary,
     descriptionHtml: args.create.descriptionHtml,
@@ -87,7 +93,11 @@ describe("PUT /api/edit/report-meta/[n] — gating", () => {
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ ok: false, error: "not_superuser" });
     expect(h.mockLogEditDenial).toHaveBeenCalledWith(
-      expect.objectContaining({ actorCwid: PLAIN, reason: "not_superuser", path: "/api/edit/report-meta/[n]" }),
+      expect.objectContaining({
+        actorCwid: PLAIN,
+        reason: "not_superuser",
+        path: "/api/edit/report-meta/[n]",
+      }),
     );
     expect(h.mockUpsert).not.toHaveBeenCalled();
   });
@@ -110,6 +120,13 @@ describe("PUT /api/edit/report-meta/[n] — gating", () => {
 
 describe("PUT /api/edit/report-meta/[n] — validation", () => {
   it.each([
+    [{ ...VALID, slug: "" }, "invalid_slug", "slug"],
+    [{ ...VALID, slug: "Publications" }, "invalid_slug", "slug"],
+    [{ ...VALID, slug: "a--b" }, "invalid_slug", "slug"],
+    [{ ...VALID, slug: "-a" }, "invalid_slug", "slug"],
+    [{ ...VALID, slug: "7" }, "invalid_slug", "slug"],
+    [{ ...VALID, slug: "x".repeat(65) }, "invalid_slug", "slug"],
+    [{ ...VALID, slug: 3 }, "invalid_slug", "slug"],
     [{ ...VALID, name: "" }, "invalid_name", "name"],
     [{ ...VALID, name: "   " }, "invalid_name", "name"],
     [{ ...VALID, name: "x".repeat(121) }, "invalid_name", "name"],
@@ -118,7 +135,11 @@ describe("PUT /api/edit/report-meta/[n] — validation", () => {
     [{ ...VALID, summary: "x".repeat(501) }, "invalid_summary", "summary"],
     [{ ...VALID, descriptionHtml: null }, "invalid_description", "descriptionHtml"],
     [{ ...VALID, descriptionHtml: 7 }, "invalid_description", "descriptionHtml"],
-    [{ name: VALID.name, summary: VALID.summary }, "invalid_description", "descriptionHtml"],
+    [
+      { slug: VALID.slug, name: VALID.name, summary: VALID.summary },
+      "invalid_description",
+      "descriptionHtml",
+    ],
   ])("400 for %j → %s", async (body, error, field) => {
     const res = await put("3", body);
     expect(res.status).toBe(400);
@@ -134,7 +155,11 @@ describe("PUT /api/edit/report-meta/[n] — validation", () => {
   });
 
   it("name/summary at exactly the caps pass, trimmed", async () => {
-    const res = await put("3", { ...VALID, name: ` ${"n".repeat(120)} `, summary: "s".repeat(500) });
+    const res = await put("3", {
+      ...VALID,
+      name: ` ${"n".repeat(120)} `,
+      summary: "s".repeat(500),
+    });
     expect(res.status).toBe(200);
     expect(h.mockUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -168,7 +193,13 @@ describe("PUT /api/edit/report-meta/[n] — the write", () => {
     expect(stored).toContain("<p>x</p>");
     expect(await res.json()).toEqual({
       ok: true,
-      meta: { key: "7", name: VALID.name, summary: VALID.summary, descriptionHtml: stored },
+      meta: {
+        key: "7",
+        slug: VALID.slug,
+        name: VALID.name,
+        summary: VALID.summary,
+        descriptionHtml: stored,
+      },
     });
   });
 
@@ -210,9 +241,24 @@ describe("PUT /api/edit/report-meta/[n] — the write", () => {
     expect(args.update.updatedBy).toBe(ADMIN);
   });
 
+  it("a trimmed slug is stored on both create and update; a taken slug (P2002) → 409 slug_taken, not 500", async () => {
+    await put("3", { ...VALID, slug: " nih-pubs-2 " });
+    expect(h.mockUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ slug: "nih-pubs-2" }),
+        update: expect.objectContaining({ slug: "nih-pubs-2" }),
+      }),
+    );
+    h.mockUpsert.mockRejectedValue(Object.assign(new Error("dup"), { code: "P2002" }));
+    const res = await put("3", VALID);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "slug_taken", field: "slug" });
+  });
+
   it("answers with the row the write returned, keyed on the report", async () => {
     h.mockUpsert.mockResolvedValue({
       reportKey: "3",
+      slug: "papers",
       name: "Stored name",
       summary: "Stored summary",
       descriptionHtml: "<p>Stored.</p>",
@@ -220,7 +266,13 @@ describe("PUT /api/edit/report-meta/[n] — the write", () => {
     const res = await put("3", VALID);
     expect(await res.json()).toEqual({
       ok: true,
-      meta: { key: "3", name: "Stored name", summary: "Stored summary", descriptionHtml: "<p>Stored.</p>" },
+      meta: {
+        key: "3",
+        slug: "papers",
+        name: "Stored name",
+        summary: "Stored summary",
+        descriptionHtml: "<p>Stored.</p>",
+      },
     });
   });
 

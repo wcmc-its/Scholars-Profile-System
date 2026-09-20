@@ -18,7 +18,13 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: h.refresh, push: vi.fn(), replace: vi.fn() }),
 }));
 vi.mock("@/components/edit/overview-editor", () => ({
-  OverviewEditor: ({ initialHtml, onChange }: { initialHtml: string; onChange: (v: string) => void }) => (
+  OverviewEditor: ({
+    initialHtml,
+    onChange,
+  }: {
+    initialHtml: string;
+    onChange: (v: string) => void;
+  }) => (
     <textarea
       data-testid="overview-editor"
       defaultValue={initialHtml}
@@ -29,7 +35,12 @@ vi.mock("@/components/edit/overview-editor", () => ({
 
 import { ReportMetaEditor } from "@/components/edit/report-meta-editor";
 
-const META = { name: "Publications", summary: "This unit's publications.", descriptionHtml: "<p>About.</p>" };
+const META = {
+  slug: "publications",
+  name: "Publications",
+  summary: "This unit's publications.",
+  descriptionHtml: "<p>About.</p>",
+};
 
 const fetchMock = vi.fn();
 
@@ -43,10 +54,15 @@ afterEach(() => {
 });
 
 function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
-function setup(meta: { name: string; summary: string; descriptionHtml: string | null } = META) {
+function setup(
+  meta: { slug: string; name: string; summary: string; descriptionHtml: string | null } = META,
+) {
   const { container } = render(<ReportMetaEditor n="3" meta={meta} />);
   return within(container);
 }
@@ -74,6 +90,17 @@ describe("ReportMetaEditor", () => {
     expect((q.getByTestId("report-meta-summary") as HTMLTextAreaElement).maxLength).toBe(500);
   });
 
+  it("an invalid slug disables Save; a valid one re-enables it", () => {
+    const q = setup();
+    fireEvent.click(q.getByTestId("report-meta-edit"));
+    const save = q.getByText("Save") as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.change(q.getByTestId("report-meta-slug"), { target: { value: "Bad Slug" } });
+    expect(save.disabled).toBe(true);
+    fireEvent.change(q.getByTestId("report-meta-slug"), { target: { value: "good-slug" } });
+    expect(save.disabled).toBe(false);
+  });
+
   it("a null description opens the editor empty", () => {
     const q = setup({ ...META, descriptionHtml: null });
     fireEvent.click(q.getByTestId("report-meta-edit"));
@@ -82,10 +109,14 @@ describe("ReportMetaEditor", () => {
 
   it("Save PUTs the right URL and body, then closes and refreshes", async () => {
     fetchMock.mockResolvedValue(
-      jsonResponse(200, { ok: true, meta: { key: "3", name: "Papers", summary: "S", descriptionHtml: null } }),
+      jsonResponse(200, {
+        ok: true,
+        meta: { key: "3", name: "Papers", summary: "S", descriptionHtml: null },
+      }),
     );
     const q = setup();
     fireEvent.click(q.getByTestId("report-meta-edit"));
+    fireEvent.change(q.getByTestId("report-meta-slug"), { target: { value: " papers " } });
     fireEvent.change(q.getByTestId("report-meta-name"), { target: { value: "  Papers " } });
     fireEvent.change(q.getByTestId("report-meta-summary"), { target: { value: "Renamed blurb." } });
     fireEvent.change(q.getByTestId("overview-editor"), { target: { value: "<p>New about.</p>" } });
@@ -97,6 +128,7 @@ describe("ReportMetaEditor", () => {
     expect(init.method).toBe("PUT");
     expect(init.headers).toEqual({ "Content-Type": "application/json" });
     expect(JSON.parse(init.body as string)).toEqual({
+      slug: "papers",
       name: "Papers",
       summary: "Renamed blurb.",
       descriptionHtml: "<p>New about.</p>",
@@ -107,7 +139,9 @@ describe("ReportMetaEditor", () => {
   });
 
   it("a failed save shows the alert mapped from the error code and stays open", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(400, { ok: false, error: "invalid_summary", field: "summary" }));
+    fetchMock.mockResolvedValue(
+      jsonResponse(400, { ok: false, error: "invalid_summary", field: "summary" }),
+    );
     const q = setup();
     fireEvent.click(q.getByTestId("report-meta-edit"));
     fireEvent.click(q.getByRole("button", { name: "Save" }));
@@ -129,7 +163,9 @@ describe("ReportMetaEditor", () => {
 
     fetchMock.mockRejectedValueOnce(new Error("offline"));
     fireEvent.click(q.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(q.getByRole("alert").textContent).toBe("That didn't save. Try again."));
+    await waitFor(() =>
+      expect(q.getByRole("alert").textContent).toBe("That didn't save. Try again."),
+    );
   });
 
   it("Save is disabled while name or summary is blank", () => {

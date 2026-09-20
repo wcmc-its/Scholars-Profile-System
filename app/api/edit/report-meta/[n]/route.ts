@@ -1,11 +1,13 @@
 /**
- * PUT /api/edit/report-meta/[n] — a superuser edits one report's name,
+ * PUT /api/edit/report-meta/[n] — a superuser edits one report's slug, name,
  * one-line summary and rich-text description (`report_meta`,
  * `lib/edit/report-meta.ts`) from the pencil on `/edit/reports/[n]`
  * (`components/edit/report-meta-editor.tsx`).
  *
- * Body: `{ name, summary, descriptionHtml }` — `name` 1..`REPORT_NAME_MAX`
- * and `summary` 1..`REPORT_SUMMARY_MAX` after trimming; `descriptionHtml` a
+ * Body: `{ slug, name, summary, descriptionHtml }` — `slug` per
+ * `isValidReportSlug` (a taken slug ⇒ 409 `slug_taken`, the unique index);
+ * `name` 1..`REPORT_NAME_MAX` and `summary` 1..`REPORT_SUMMARY_MAX` after
+ * trimming; `descriptionHtml` a
  * string (`""` = no description), run through the `overview` sanitizer
  * (`sanitizeOverview`, `lib/edit/validators.ts` — the security boundary; the
  * Tiptap schema on the client is only a UX convenience). The SANITIZED output
@@ -25,6 +27,7 @@ import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import {
   isReportKey,
+  isValidReportSlug,
   REPORT_NAME_MAX,
   REPORT_SUMMARY_MAX,
   type ReportMeta,
@@ -63,6 +66,8 @@ export async function PUT(
   const { n } = await params;
   if (!isReportKey(n)) return editError(404, "unknown_report");
 
+  const slug = typeof body.slug === "string" ? body.slug.trim() : body.slug;
+  if (!isValidReportSlug(slug)) return editError(400, "invalid_slug", "slug");
   const name = boundedText(body.name, REPORT_NAME_MAX);
   if (name === null) return editError(400, "invalid_name", "name");
   const summary = boundedText(body.summary, REPORT_SUMMARY_MAX);
@@ -78,12 +83,23 @@ export async function PUT(
   try {
     const row = await db.write.reportMeta.upsert({
       where: { reportKey: n },
-      create: { reportKey: n, name, summary, descriptionHtml, updatedBy: realCwid },
-      update: { name, summary, descriptionHtml, updatedBy: realCwid },
-      select: { reportKey: true, name: true, summary: true, descriptionHtml: true },
+      create: { reportKey: n, slug, name, summary, descriptionHtml, updatedBy: realCwid },
+      update: { slug, name, summary, descriptionHtml, updatedBy: realCwid },
+      select: { reportKey: true, slug: true, name: true, summary: true, descriptionHtml: true },
     });
-    meta = { key: n, name: row.name, summary: row.summary, descriptionHtml: row.descriptionHtml };
+    meta = {
+      key: n,
+      slug: row.slug,
+      name: row.name,
+      summary: row.summary,
+      descriptionHtml: row.descriptionHtml,
+    };
   } catch (err) {
+    // The slug's unique index — another report already has it. Same P2002
+    // shape check `/api/edit/roles` and `report-access.ts` use.
+    if ((err as { code?: string } | null)?.code === "P2002") {
+      return editError(409, "slug_taken", "slug");
+    }
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
