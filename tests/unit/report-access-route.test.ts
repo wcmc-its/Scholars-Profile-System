@@ -69,7 +69,8 @@ function asGenuine(cwid: string, roles: { isSuperuser?: boolean; isCommsSteward?
 
 const VALID = { op: "grant", reportKey: "mentored-publications", scopeKey: "md", cwid: "Abc1234" };
 
-/** The list as the write hands it back (writer-side, in-transaction). */
+/** The list as the write hands it back (writer-side, in-transaction), each
+ *  row already carrying its stored `granteeName` and resolved `name`. */
 const WRITTEN_ROWS = [
   {
     reportKey: "mentored-publications",
@@ -77,6 +78,8 @@ const WRITTEN_ROWS = [
     cwid: "abc1234",
     grantedBy: ADMIN,
     grantedAt: new Date("2026-09-18T12:00:00Z"),
+    granteeName: "Staff Person",
+    name: "Staff Person",
   },
 ];
 /** What a reader-side `listReportAccess` would answer — deliberately
@@ -149,13 +152,54 @@ describe("POST /api/edit/report-access — writes", () => {
       actorCwid: ADMIN,
       impersonatedCwid: null,
       requestId: expect.any(String),
+      granteeName: null,
     });
     const body = await res.json();
     expect(body).toMatchObject({ ok: true, op: "grant", changed: true });
     expect(body.rows).toEqual([
-      expect.objectContaining({ cwid: "abc1234", scopeKey: "md", grantedAt: "2026-09-18T12:00:00.000Z" }),
+      expect.objectContaining({
+        cwid: "abc1234",
+        scopeKey: "md",
+        grantedAt: "2026-09-18T12:00:00.000Z",
+        granteeName: "Staff Person",
+        name: "Staff Person",
+      }),
     ]);
     expect(h.mockRevoke).not.toHaveBeenCalled();
+  });
+
+  describe("grant `name` → granteeName (a display convenience, never a 400)", () => {
+    it("a string is trimmed and passed through", async () => {
+      const res = await POST(post({ ...VALID, name: "  Staff Person  " }));
+      expect(res.status).toBe(200);
+      expect(h.mockGrant).toHaveBeenCalledWith(expect.objectContaining({ granteeName: "Staff Person" }));
+    });
+
+    it("a 300-char name is stored as null (VARCHAR(255)), the grant still lands", async () => {
+      const res = await POST(post({ ...VALID, name: "x".repeat(300) }));
+      expect(res.status).toBe(200);
+      expect(h.mockGrant).toHaveBeenCalledWith(expect.objectContaining({ granteeName: null }));
+    });
+
+    it("a 255-char name is kept whole", async () => {
+      const res = await POST(post({ ...VALID, name: "y".repeat(255) }));
+      expect(res.status).toBe(200);
+      expect(h.mockGrant).toHaveBeenCalledWith(expect.objectContaining({ granteeName: "y".repeat(255) }));
+    });
+
+    it.each([[42], [null], [{ first: "A" }], [""], ["   "]])("%j → null", async (name) => {
+      const res = await POST(post({ ...VALID, name }));
+      expect(res.status).toBe(200);
+      expect(h.mockGrant).toHaveBeenCalledWith(expect.objectContaining({ granteeName: null }));
+    });
+
+    it("revoke ignores name — none reaches revokeReportAccess", async () => {
+      const res = await POST(post({ ...VALID, op: "revoke", name: "Staff Person" }));
+      expect(res.status).toBe(200);
+      expect(h.mockRevoke).toHaveBeenCalledTimes(1);
+      expect(h.mockRevoke.mock.calls[0][0]).not.toHaveProperty("granteeName");
+      expect(h.mockGrant).not.toHaveBeenCalled();
+    });
   });
 
   it("answers with the rows the WRITE returned, never a reader-side re-fetch", async () => {

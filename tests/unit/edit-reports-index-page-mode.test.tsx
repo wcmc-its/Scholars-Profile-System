@@ -52,7 +52,10 @@ vi.mock("@/lib/edit/manageable-units", () => ({ unitEditHref: () => "/edit/cente
 // mode choice under test is the unit-scoped rendering, which it never touches.
 vi.mock("@/lib/edit/report-access", () => ({
   getReportScopes: vi.fn().mockResolvedValue(new Set()),
+  listReportAccess: vi.fn().mockResolvedValue([]),
+  canManageReportAccess: () => false,
   MENTORED_PUBS_REPORT: "mentored-publications",
+  MENTORED_PUBS_SCOPE_OPTIONS: [["*", "All programs"]],
 }));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.

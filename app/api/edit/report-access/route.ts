@@ -1,13 +1,21 @@
 /**
  * POST /api/edit/report-access — grant / revoke a per-report access row
- * (`report_access`, `lib/edit/report-access.ts`) from the "Viewers" panel on
+ * (`report_access`, `lib/edit/report-access.ts`) from the "Who can run this
+ * report" popover (`components/edit/report-access-popover.tsx`) on
  * `/edit/reports/7`.
  *
- * Body: `{ op: "grant" | "revoke", reportKey, scopeKey, cwid }`.
+ * Body: `{ op: "grant" | "revoke", reportKey, scopeKey, cwid, name? }`.
  *   - `reportKey` must be `MENTORED_PUBS_REPORT` (the one report this table
  *     gates today);
  *   - `scopeKey` one of `MENTORED_PUBS_SCOPES` or `"*"`;
- *   - `cwid` lowercased, then `/^[a-z][a-z0-9]{1,11}$/`.
+ *   - `cwid` lowercased, then `/^[a-z][a-z0-9]{1,11}$/`;
+ *   - `name` (grant only, optional): the grantee's directory display name as
+ *     the people picker returned it, stored on the row as `grantee_name` so
+ *     the popover can show a name for a grantee with no Scholar row (the
+ *     runtime cannot reach LDAP). Trimmed and kept when 1–255 chars; anything
+ *     else — absent, not a string, empty, over-long — is stored as null, never
+ *     a 400: the name is a display convenience, not part of the grant. A
+ *     revoke ignores it.
  *
  * Gate order (mirrors `/api/edit/roles`): shared preamble (`readEditRequest`
  * — origin / content-type / session / body) → not superuser or comms_steward
@@ -15,7 +23,8 @@
  * validation ⇒ 400 → the write, one transaction with its
  * `report_access_grant` / `report_access_revoke` audit row (`actorCwid` is
  * always `realCwid`, never the "View as" target). Responds with the updated
- * list for the report so the panel re-renders from the server's truth — the
+ * list for the report (each row with its resolved display `name` and stored
+ * `granteeName`) so the popover re-renders from the server's truth — the
  * list the write itself returned, read inside its transaction on the WRITER.
  * It is never re-fetched here through `listReportAccess`'s reader default:
  * `db.read` is the Aurora reader replica in prod, and a post-write read there
@@ -40,6 +49,18 @@ const PATH = "/api/edit/report-access";
  *  house `CWID_PATTERN` on length by design (2–12 chars covers every real
  *  staff CWID this panel is for). */
 const GRANTEE_PATTERN = /^[a-z][a-z0-9]{1,11}$/;
+
+/** `report_access.grantee_name` is VARCHAR(255). */
+const GRANTEE_NAME_MAX = 255;
+
+/** The optional `name` a grant carries, normalized for storage: a string is
+ *  trimmed and kept when 1–`GRANTEE_NAME_MAX` chars; anything else is null.
+ *  Never rejects — see the header. */
+function granteeNameFrom(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length >= 1 && trimmed.length <= GRANTEE_NAME_MAX ? trimmed : null;
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
@@ -74,7 +95,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const args = { reportKey, scopeKey, cwid, actorCwid: realCwid, impersonatedCwid, requestId };
   let result: ReportAccessWriteResult;
   try {
-    result = op === "grant" ? await grantReportAccess(args) : await revokeReportAccess(args);
+    result =
+      op === "grant"
+        ? await grantReportAccess({ ...args, granteeName: granteeNameFrom(body.name) })
+        : await revokeReportAccess(args);
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");

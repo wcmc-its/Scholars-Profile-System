@@ -3,7 +3,9 @@
  * `/edit/reports/[n]` page. An async Server Component: each test awaits the
  * element and renders it. Protects: the numbered label from `report_meta`;
  * the pencil (`ReportMetaEditor`, mocked to a marker) for a superuser ONLY
- * and with the loaded meta as props; the page's subtitle (`children`)
+ * and with the loaded meta as props; the page's "Who can run this report"
+ * node (`access`) placed in the heading row between the h1 and the pencil,
+ * and nothing extra when it is omitted; the page's subtitle (`children`)
  * rendered between the h1 and the disclosure; the "About this report"
  * `<details>` rendered closed (no `open` attribute) with the sanitized HTML
  * inside when a description exists, and not at all when it is null; a
@@ -81,6 +83,34 @@ describe("ReportHeader", () => {
     const q = await renderHeader({ n: "3", session: PLAIN });
     expect(q.queryByTestId("report-meta-edit")).toBeNull();
     expect(h.mockEditor).not.toHaveBeenCalled();
+  });
+
+  it("access node → rendered in the heading row, after the h1 and before the pencil", async () => {
+    const q = await renderHeader({
+      n: "3",
+      session: SUPERUSER,
+      access: <button type="button" data-testid="access-stub" />,
+      children: <p data-testid="subtitle">Subtitle</p>,
+    });
+    const h1 = q.getByRole("heading", { level: 1 });
+    const wrap = q.getByTestId("report-header-access");
+    const stub = q.getByTestId("access-stub");
+    expect(wrap.contains(stub)).toBe(true);
+    // Same flex row as the h1 (the pencil's row), not down with the subtitle.
+    expect(wrap.parentElement).toBe(h1.parentElement);
+    const pencil = q.getByTestId("report-meta-edit");
+    expect(h1.compareDocumentPosition(wrap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(wrap.compareDocumentPosition(pencil) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      wrap.compareDocumentPosition(q.getByTestId("subtitle")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("no access node → nothing extra in the heading row", async () => {
+    const q = await renderHeader({ n: "3", session: PLAIN });
+    expect(q.queryByTestId("report-header-access")).toBeNull();
+    const h1 = q.getByRole("heading", { level: 1 });
+    expect(h1.parentElement?.children).toHaveLength(1);
   });
 
   it("description present → a CLOSED <details> with the HTML inside, after the children", async () => {

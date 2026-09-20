@@ -15,6 +15,7 @@ import { redirect } from "next/navigation";
 import { CancerCenterCollabReportCard } from "@/components/edit/cancer-center-collab-report-card";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportAccessPopover } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -70,7 +71,7 @@ export default async function EditReportsOptimizeMembershipPage({
       >
         &larr; All reports
       </Link>
-      <ReportHeader n="1" session={session} />
+      <ReportHeader n="1" session={session} access={<ReportAccessPopover mode="unit" />} />
       {/* ConsoleShell owns only the chrome — see app/edit/reports/page.tsx. */}
       <div className="apollo-card">
         <CancerCenterCollabReportCard centerCode={code} centerName={ctx.unit.name} />

@@ -31,11 +31,26 @@
  * "Live" / "In progress" (table) and "N of M reports live" (bands' per-unit
  * summary) are both real per-report data presence, not a static catalog flag
  * — a not-live report renders as muted text, not a link, wherever it appears.
+ *
+ * Every report row also carries "Who can run this report"
+ * (`ReportAccessPopover`) right after its label, in all three renderings:
+ * the page hands each report its popover PROPS (`access`, plain data — the
+ * unit rule for reports 1–6, the grant rows for report 7) and this component
+ * renders the island. The row's click target is a STRETCHED anchor
+ * (`after:absolute after:inset-0`) that would otherwise sit over the glyph
+ * and eat its clicks, so the trigger is wrapped in a `relative z-10` span —
+ * a sibling of the `Link`, never inside it, so neither the trigger's click
+ * nor the (portalled) content's bubbles into a navigation.
  */
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
+
+import {
+  ReportAccessPopover,
+  type ReportAccessPopoverProps,
+} from "@/components/edit/report-access-popover";
 
 const TH_CLASS =
   "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
@@ -49,7 +64,15 @@ export type ReportsIndexUnitKind = "center" | "department" | "division" | "core"
  *  one report, so it is filterable and sortable like every other row. */
 export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export type ReportsIndexReport = { n: ReportN; label: string; description: string };
+export type ReportsIndexReport = {
+  n: ReportN;
+  label: string;
+  description: string;
+  /** The "Who can run this report" popover's props — `{ mode: "unit" }` for
+   *  reports 1–6, the person variant (grant rows, scope options, `canManage`)
+   *  for report 7. Plain data, so it crosses the server/client boundary. */
+  access: ReportAccessPopoverProps;
+};
 
 export type ReportsIndexUnit = {
   code: string;
@@ -81,6 +104,22 @@ function typeLabel(u: { kind: ReportsIndexUnitKind; centerType: "center" | "inst
   if (u.kind === "core") return "Core";
   if (u.kind === "program") return "Program";
   return u.centerType === "institute" ? "Institute" : "Center";
+}
+
+/** The "Who can run this report" glyph beside a row's label. `relative z-10`
+ *  lifts it above the row's stretched anchor (`after:absolute after:inset-0`
+ *  on the `Link`) so the trigger — not the row link — takes the click; it is
+ *  rendered as the `Link`'s SIBLING so the portalled content never sits
+ *  inside the anchor's React tree either. */
+function RowAccess({ access }: { access: ReportAccessPopoverProps }) {
+  return (
+    <span
+      className="relative z-10 ml-2 inline-flex align-middle"
+      data-testid="reports-index-access"
+    >
+      <ReportAccessPopover {...access} />
+    </span>
+  );
 }
 
 /** `/edit/reports/N?center=<code>` — `&kind=` is only appended for a
@@ -117,6 +156,7 @@ type FlatRow = {
   centerType: "center" | "institute" | null;
   reportN: ReportN;
   reportLabel: string;
+  access: ReportAccessPopoverProps;
   live: boolean;
   lastRefreshedAt: string | null;
 };
@@ -153,6 +193,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
           centerType: u.centerType,
           reportN: r.n,
           reportLabel: r.label,
+          access: r.access,
           live: live?.live ?? false,
           lastRefreshedAt: live?.lastRefreshedAt ?? null,
         });
@@ -381,6 +422,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                           ) : (
                             <span className="text-muted-foreground">{r.reportLabel}</span>
                           )}
+                          <RowAccess access={r.access} />
                         </td>
                         <td className="px-3 py-2.5 align-middle">{r.unitName}</td>
                         <td className="px-3 py-2.5 align-middle whitespace-nowrap">
@@ -471,6 +513,7 @@ function ReportRows({
               >
                 {r.label}
               </Link>
+              <RowAccess access={r.access} />
             </td>
             <td className="px-3 py-2.5 align-middle">{r.description}</td>
             <td className="text-muted-foreground px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
@@ -479,7 +522,10 @@ function ReportRows({
           </tr>
         ) : (
           <tr key={r.n} className="border-apollo-border text-muted-foreground border-t">
-            <td className="px-3 py-2.5 align-middle">{r.label}</td>
+            <td className="px-3 py-2.5 align-middle">
+              {r.label}
+              <RowAccess access={r.access} />
+            </td>
             <td className="px-3 py-2.5 align-middle">Nothing live yet for this unit.</td>
             <td className="px-3 py-2.5 text-right align-middle">—</td>
           </tr>

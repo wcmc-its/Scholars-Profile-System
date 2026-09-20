@@ -6,8 +6,8 @@
  * (Tiptap, the same eight-tag schema as the profile bio) — that PUTs
  * `/api/edit/report-meta/[n]` and, on success, closes and `router.refresh()`es
  * so the server-rendered header re-reads the row (no optimistic overlay: the
- * `report-access-panel.tsx` idiom). Errors map the route's codes to one line,
- * as that panel's `errorMessage` does. Receives the current meta as props —
+ * `report-access-popover.tsx` idiom). Errors map the route's codes to one line,
+ * as that popover's `errorMessage` does. Receives the current meta as props —
  * this island never imports the server-only loader.
  */
 "use client";

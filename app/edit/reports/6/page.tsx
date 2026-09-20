@@ -17,6 +17,7 @@ import { redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportAccessPopover } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { LowerConfidenceBadge } from "@/components/funding/expanded-grant";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -92,7 +93,7 @@ export default async function EditReportsNihFundedPublicationsPage({
       >
         &larr; All reports
       </Link>
-      <ReportHeader n="6" session={session}>
+      <ReportHeader n="6" session={session} access={<ReportAccessPopover mode="unit" />}>
         <p className="text-muted-foreground text-sm">
           {kind === "core"
             ? `Every publication with a confirmed use of ${ctx.unit.name} and a matched NIH RePORTER funding link.`

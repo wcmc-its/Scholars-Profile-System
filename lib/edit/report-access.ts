@@ -20,7 +20,12 @@
  * Grants are written only through `grantReportAccess` / `revokeReportAccess`
  * (each inside one transaction with a B03 audit row), from
  * `app/api/edit/report-access/route.ts`, which is itself gated by
- * `canManageReportAccess` (superuser || comms_steward).
+ * `canManageReportAccess` (superuser || comms_steward). A grant also stores
+ * the grantee's directory name (`grantee_name`) as the people picker
+ * returned it, because the runtime cannot reach LDAP and these grantees hold
+ * no Scholar row; `listReportAccess` resolves each row's display `name` as
+ * `Scholar.preferredName ?? granteeName ?? cwid` (the administrators-roster
+ * chain).
  *
  * Reader vs writer (the `app/api/edit/core-client/route.ts` rule, PR #2620):
  * `db.read` is the Aurora READER replica in prod (staging has none, so staging
@@ -43,6 +48,7 @@ import { db } from "@/lib/db";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { EditSession } from "@/lib/auth/superuser";
 import { appendAuditRow } from "@/lib/edit/audit";
+import { PROGRAM_LABEL } from "@/lib/edit/mentorship-type";
 
 /** The one report this table gates today. `reportKey` is a column, not an
  *  enum, so a second program report is one more constant, not a migration. */
@@ -58,6 +64,18 @@ export type MentoredPubsScope = (typeof MENTORED_PUBS_SCOPES)[number];
 
 /** The wildcard scope — "every bucket". */
 export const ALL_SCOPES = "*";
+
+/** The `[scopeKey, label]` pairs the "Who can run this report" popover's
+ *  add form offers for the Mentored publications report — the wildcard
+ *  first, then every grantable bucket under its office-facing name
+ *  (`PROGRAM_LABEL`: `md` reads "AOC"). ONE definition, handed to the popover
+ *  by `/edit/reports/7` AND by the index's program row
+ *  (`app/edit/reports/page.tsx`), so the two cannot drift. Plain tuples —
+ *  serializable across the server/client boundary as-is. */
+export const MENTORED_PUBS_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string]> = [
+  [ALL_SCOPES, "All programs"],
+  ...MENTORED_PUBS_SCOPES.map((s) => [s, PROGRAM_LABEL[s] ?? s] as const),
+];
 
 /** Whether `value` is a grantable scope key for the Mentored publications
  *  report: one of `MENTORED_PUBS_SCOPES` or `"*"`. */
@@ -114,31 +132,58 @@ export function scopeAdmits(scopes: ReadonlySet<string>, bucket: string): boolea
   return scopes.has(ALL_SCOPES) || scopes.has(bucket);
 }
 
+/** One grant row as the popover renders it: the table's columns plus the
+ *  resolved display `name`. */
 export type ReportAccessRow = {
   reportKey: string;
   scopeKey: string;
   cwid: string;
   grantedBy: string;
   grantedAt: Date;
+  /** The directory name the people picker returned when the grant was made
+   *  (`report_access.grantee_name`); null on rows granted before the column
+   *  existed. Stored because the app runtime cannot reach LDAP (#443) and the
+   *  grantees this table is for hold no Scholar row — the
+   *  `UnitAdmin.granteeName` precedent. */
+  granteeName: string | null;
+  /** Display name: `Scholar.preferredName ?? granteeName ?? cwid` — the same
+   *  chain `lib/api/administrators-roster.ts` uses, so a Scholar's curated
+   *  name wins, a staff grantee shows the name captured at grant time, and a
+   *  pre-column row shows the CWID until it is re-granted. */
+  name: string;
 };
 
 /** What a list read goes through: the reader for a page render, the writer or
  *  an open write transaction for anything that must see a row this request
- *  just wrote (the tx client is structurally a `Pick` of the full client). */
-type ReportAccessReader = Pick<PrismaClient, "reportAccess">;
+ *  just wrote (the tx client is structurally a `Pick` of the full client).
+ *  `scholar` is for the one name-resolution read `listReportAccess` makes. */
+type ReportAccessReader = Pick<PrismaClient, "reportAccess" | "scholar">;
 
-/** Every grant row for `reportKey`, cwid then scope — the "Viewers" panel's
- *  initial list on the page's server render. Defaults to the READER; the write
- *  paths below pass their own transaction so the list they return cannot lag
- *  the row they just wrote. */
+/** Every grant row for `reportKey`, cwid then scope, each with its display
+ *  `name` resolved — the "Who can run this report" popover's initial list on
+ *  the page's server render. Defaults to the READER; the write paths below
+ *  pass their own transaction so the list they return cannot lag the row
+ *  they just wrote. Name resolution is ONE `scholar.findMany` over the rows'
+ *  cwids (skipped entirely when there are no rows), on the same client. */
 export async function listReportAccess(
   reportKey: string,
   client: ReportAccessReader = db.read,
 ): Promise<ReportAccessRow[]> {
-  return client.reportAccess.findMany({
+  const rows = await client.reportAccess.findMany({
     where: { reportKey },
     orderBy: [{ cwid: "asc" }, { scopeKey: "asc" }],
   });
+  if (rows.length === 0) return [];
+  const cwids = [...new Set(rows.map((r) => r.cwid))];
+  const scholars = await client.scholar.findMany({
+    where: { cwid: { in: cwids } },
+    select: { cwid: true, preferredName: true },
+  });
+  const preferredName = new Map(scholars.map((s) => [s.cwid, s.preferredName]));
+  return rows.map((r) => ({
+    ...r,
+    name: preferredName.get(r.cwid) ?? r.granteeName ?? r.cwid,
+  }));
 }
 
 /** A grant / revoke's outcome: whether a row changed, and the report's full
@@ -154,6 +199,10 @@ type GrantArgs = {
   reportKey: string;
   scopeKey: string;
   cwid: string;
+  /** The grantee's directory display name as the people picker returned it,
+   *  stored on the row (`grantee_name`) at grant time — see `ReportAccessRow`.
+   *  Null / omitted when the caller has none (a revoke never carries one). */
+  granteeName?: string | null;
   /** The REAL signed-in human (audit `actor_cwid` and `granted_by`) — never
    *  an impersonation target. */
   actorCwid: string;
@@ -193,7 +242,13 @@ export async function grantReportAccess(args: GrantArgs): Promise<ReportAccessWr
   try {
     const rows = await db.write.$transaction(async (tx) => {
       const row = await tx.reportAccess.create({
-        data: { reportKey, scopeKey, cwid, grantedBy: actorCwid },
+        data: {
+          reportKey,
+          scopeKey,
+          cwid,
+          grantedBy: actorCwid,
+          granteeName: args.granteeName ?? null,
+        },
       });
       await appendAuditRow(tx, {
         actorCwid,
@@ -207,6 +262,7 @@ export async function grantReportAccess(args: GrantArgs): Promise<ReportAccessWr
           report_key: reportKey,
           scope_key: scopeKey,
           cwid,
+          grantee_name: row.granteeName,
           granted_by: row.grantedBy,
           granted_at: row.grantedAt.toISOString(),
         },
@@ -253,6 +309,7 @@ export async function revokeReportAccess(args: GrantArgs): Promise<ReportAccessW
         report_key: reportKey,
         scope_key: scopeKey,
         cwid,
+        grantee_name: existing.granteeName,
         granted_by: existing.grantedBy,
         granted_at: existing.grantedAt.toISOString(),
       },
