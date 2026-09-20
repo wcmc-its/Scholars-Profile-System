@@ -167,7 +167,7 @@ function FilterForm({
         <select
           name="pubs"
           defaultValue={params.pubs}
-          className="border-foreground/40 w-full rounded border px-2 py-1"
+          className="w-full rounded border border-[#c8c6be] bg-white px-2 py-1"
           data-testid="mentored-pubs-set"
         >
           <option value="mentored">Co-authored with a mentor</option>
@@ -179,7 +179,7 @@ function FilterForm({
         <select
           name="tail"
           defaultValue={String(params.tail)}
-          className="border-foreground/40 w-full rounded border px-2 py-1"
+          className="w-full rounded border border-[#c8c6be] bg-white px-2 py-1"
         >
           {Array.from({ length: MAX_TAIL + 1 }, (_, i) => (
             <option key={i} value={i}>
@@ -199,7 +199,7 @@ function FilterForm({
   );
 }
 
-/** Report 7's body: the filter rail + the Learners / Publications island (or
+/** Report 7's body: the filter rail + the Summary / Publications island (or
  *  the no-bridge notice), over the scopes the person gate resolved. */
 export async function renderMentoredPublicationsReport({
   scopes,
@@ -254,11 +254,9 @@ export async function renderMentoredPublicationsReport({
         {allMode
           ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
           : "Every publication a learner co-authored with one of their mentors, "}
-        with Journal Impact Factor and NIH iCite citations. Pairs come from the MD program&rsquo;s AOC pairing sheet, the
-        MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty
-        add on their own profile, and co-authorship inferences (off by default) &mdash; see &ldquo;About
-        this report&rdquo; below. &ldquo;In window&rdquo; means entry year &le; publication year &le;
-        graduation year + {params.tail}; an AOC learner with no entry year on the pairing sheet is
+        with Journal Impact Factor and NIH iCite citations &mdash; the sources are under &ldquo;About
+        this report&rdquo;. &ldquo;In window&rdquo; means entry year &le; publication year &le;
+        graduation year + {params.tail}; an MD learner with no entry year on the pairing sheet is
         assumed to have entered four years before graduating.
         {report.droppedUnresolved > 0 &&
           ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}

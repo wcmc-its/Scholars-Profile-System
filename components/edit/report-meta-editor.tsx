@@ -116,6 +116,10 @@ export function ReportMetaEditor({ n, meta }: ReportMetaEditorProps) {
     <form
       className="border-apollo-border bg-apollo-surface mt-1 flex basis-full flex-col gap-3 rounded-md border p-3 text-sm"
       data-testid="report-meta-form"
+      // `ReportHeader` hides the rendered subtitle + "About this report"
+      // while this form is open (they are what the form edits — showing both
+      // read as the same text twice). Pure CSS on the header side.
+      data-report-meta-open=""
       onSubmit={(e) => {
         e.preventDefault();
         void save();
@@ -164,7 +168,7 @@ export function ReportMetaEditor({ n, meta }: ReportMetaEditorProps) {
         <span className="text-muted-foreground text-xs">
           Description (shown under &ldquo;About this report&rdquo;; leave empty for none)
         </span>
-        <OverviewEditor initialHtml={meta.descriptionHtml ?? ""} onChange={setHtml} />
+        <OverviewEditor initialHtml={meta.descriptionHtml ?? ""} onChange={setHtml} dense />
       </div>
       <div className="flex items-center gap-2">
         <Button

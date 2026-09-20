@@ -42,7 +42,7 @@ export type ReportHeaderProps = {
 export async function ReportHeader({ n, session, access, children }: ReportHeaderProps) {
   const meta = await reportMetaFor(n);
   return (
-    <>
+    <div className="group/report-header">
       {/* `flex-wrap`: the collapsed pencil sits beside the h1; the open form is
           `basis-full`, so it wraps onto its own row beneath. */}
       <div className="flex flex-wrap items-start gap-2">
@@ -65,16 +65,24 @@ export async function ReportHeader({ n, session, access, children }: ReportHeade
           />
         )}
       </div>
-      {children}
-      {meta.descriptionHtml !== null && (
-        <details className="text-muted-foreground mt-2 text-sm" data-testid="report-description">
-          <summary className="cursor-pointer">About this report</summary>
-          <div
-            className={OVERVIEW_HTML_CLASS}
-            dangerouslySetInnerHTML={{ __html: sanitizeOverviewHtml(meta.descriptionHtml) }}
-          />
-        </details>
-      )}
-    </>
+      {/* Hidden while the pencil's form is open (`data-report-meta-open` on
+          the form): the subtitle and the disclosure are what the form edits,
+          and both at once read as the same text twice. */}
+      <div
+        className="group-has-[[data-report-meta-open]]/report-header:hidden"
+        data-testid="report-header-rendered"
+      >
+        {children}
+        {meta.descriptionHtml !== null && (
+          <details className="text-muted-foreground mt-2 text-sm" data-testid="report-description">
+            <summary className="cursor-pointer">About this report</summary>
+            <div
+              className={OVERVIEW_HTML_CLASS}
+              dangerouslySetInnerHTML={{ __html: sanitizeOverviewHtml(meta.descriptionHtml) }}
+            />
+          </details>
+        )}
+      </div>
+    </div>
   );
 }
