@@ -303,7 +303,7 @@ describe("loadMentoredPublicationsReport", () => {
       learnerAuthorPosition: 1,
       authorCount: 3,
       mentorName: "Zed Mentor",
-      mentorship: "AOC",
+      mentorship: "MD",
       paperMentors: [
         { cwid: "men0002", name: "men0002" },
         { cwid: "men0001", name: "Zed Mentor" },
@@ -379,7 +379,7 @@ describe("loadMentoredPublicationsReport", () => {
       aoc({ mentorCwid: "men0001", menteeCwid: "stu0004", programType: "SOMETHING_ELSE" }),
     ]);
     const md = await loadMentoredPublicationsReport({ types: ALL, scopes: ["md"] });
-    expect(md.summary.map((s) => [s.cwid, s.program])).toEqual([["stu0001", "AOC"]]);
+    expect(md.summary.map((s) => [s.cwid, s.program])).toEqual([["stu0001", "MD"]]);
     // Only the admitted pair reached the bridge query.
     expect(hoisted.mockCopubFindMany).toHaveBeenCalledWith({
       where: { OR: [{ mentorCwid: "men0001", menteeCwid: "stu0001" }] },
@@ -744,7 +744,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     );
     // Newest grad year first, unknown last; the row is the learner, the type is per pair.
     expect(report.summary.map((s) => [s.cwid, s.program, s.gradYear, s.mentors[0].mentorship])).toEqual([
-      ["stu0001", "AOC", 2025, { program: "md", source: "roster", tier: "confirmed" }],
+      ["stu0001", "MD", 2025, { program: "md", source: "roster", tier: "confirmed" }],
       ["phd0001", "PhD", 2024, { program: "phd", source: "jenzabar", tier: "confirmed" }],
       ["phd0002", "MD-PhD", 2023, { program: "mdphd", source: "jenzabar", tier: "confirmed" }],
       ["sug0002", "Resident", null, { program: "resident", source: "coauthor", tier: "ambiguous" }],
@@ -772,7 +772,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     ]);
     const report = await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"] });
     expect(report.summary).toHaveLength(1);
-    expect(report.summary[0].program).toBe("AOC");
+    expect(report.summary[0].program).toBe("MD");
     expect(report.summary[0].mentors.map((m) => m.mentorship.source)).toEqual(["roster"]);
   });
 
@@ -1013,7 +1013,7 @@ describe("types of mentorship (the server-side filter)", () => {
     expect(hoisted.mockSuggestionFindMany).not.toHaveBeenCalled();
     expect(aocOnly.summary).toHaveLength(1);
     expect(aocOnly.summary[0].mentors).toHaveLength(1);
-    expect(aocOnly.summary[0]).toMatchObject({ program: "AOC", pubsAllTime: 1, pubsInWindow: 1 });
+    expect(aocOnly.summary[0]).toMatchObject({ program: "MD", pubsAllTime: 1, pubsInWindow: 1 });
     expect(aocOnly.summary[0].mentors[0]).toMatchObject({
       cwid: "men0001",
       mentorship: { source: "roster" },
@@ -1029,7 +1029,7 @@ describe("types of mentorship (the server-side filter)", () => {
       ["men0001", "roster"],
       ["men0004", "coauthor"],
     ]);
-    expect(both.summary[0]).toMatchObject({ program: "AOC / MD alum", pubsAllTime: 2 });
+    expect(both.summary[0]).toMatchObject({ program: "MD / MD alum", pubsAllTime: 2 });
   });
 
   it("['likely'] reads only presumptive suggestions and no other source; ['possible'] only ambiguous; both → both tiers", async () => {
@@ -1267,7 +1267,7 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
       where: { cwid: { in: ["men0001", "stu0009"] }, isConfirmed: true },
       select: { cwid: true, pmid: true, position: true },
     });
-    expect(report.summary[0]).toMatchObject({ cwid: "stu0009", program: "AOC", pubsAllTime: 2 });
+    expect(report.summary[0]).toMatchObject({ cwid: "stu0009", program: "MD", pubsAllTime: 2 });
     expect(
       report.detail.map((d) => [d.pmid, d.learnerAuthorPosition, d.mentorCwid, d.withMentor]),
     ).toEqual([
@@ -1290,7 +1290,7 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
       types: ["aoc", "faculty"],
     });
     expect(report.summary).toHaveLength(1);
-    expect(report.summary[0].program).toBe("AOC");
+    expect(report.summary[0].program).toBe("MD");
     expect(report.summary[0].mentors).toEqual([
       {
         cwid: "men0001",

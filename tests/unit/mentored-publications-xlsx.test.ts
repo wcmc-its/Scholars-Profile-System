@@ -51,7 +51,7 @@ const REPORT: MentoredPublicationsReport = {
       cwid: "stu0001",
       firstName: "Ada",
       lastName: "Learner",
-      program: "AOC",
+      program: "MD",
       mentors: [YAN, ZED],
       pubsInWindow: 1,
       withMentorInWindow: 1,
@@ -64,13 +64,13 @@ const REPORT: MentoredPublicationsReport = {
     {
       gradYear: 2025,
       entryYear: 2021,
-      program: "AOC",
+      program: "MD",
       learnerCwid: "stu0001",
       learnerFirstName: "Ada",
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
-      mentorship: "AOC",
+      mentorship: "MD",
       paperMentors: [ZED],
       withMentor: true,
       pmid: "7",
@@ -87,13 +87,13 @@ const REPORT: MentoredPublicationsReport = {
     {
       gradYear: 2025,
       entryYear: 2021,
-      program: "AOC",
+      program: "MD",
       learnerCwid: "stu0001",
       learnerFirstName: "Ada",
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
-      mentorship: "AOC",
+      mentorship: "MD",
       paperMentors: [ZED],
       withMentor: true,
       pmid: "SCOPUS:105037533819",
@@ -135,8 +135,8 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(rowValues(ws, 1)).toEqual([...SUMMARY_HEADERS]);
     expect(SUMMARY_HEADERS[8]).toBe("Mentorship types");
     expect(rowValues(ws, 2)).toEqual([
-      2025, 2021, "AOC", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
-      "MD-PhD (program office); AOC", 1, 2, 1, 0,
+      2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
+      "MD-PhD (program office); MD", 1, 2, 1, 0,
     ]);
     expect(ws.rowCount).toBe(2);
     expect(ws.views[0]).toMatchObject({ state: "frozen", ySplit: 1 });
@@ -152,7 +152,7 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(RAW_HEADERS[8]).toBe("Type of mentorship");
     const first = rowValues(ws, 2);
     expect(first.slice(0, 14)).toEqual([
-      2025, 2021, "AOC", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "AOC", "7",
+      2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "MD", "7",
       "A very long title ".repeat(10), "N Engl J Med", 96.2, 2023,
     ]);
     expect((first[14] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
@@ -178,7 +178,7 @@ describe("buildMentoredPublicationsWorkbook", () => {
     });
     expect(items.get("Generated")).toBe("2026-09-18");
     expect(items.get("Graduation years")).toBe("2024, 2025");
-    expect(items.get("Types of mentorship")).toBe("AOC, PhD / MD-PhD thesis advisor");
+    expect(items.get("Types of mentorship")).toBe("MD, PhD / MD-PhD thesis advisor");
     expect(items.has("Programs")).toBe(false);
     expect(String(items.get("Window rule"))).toContain("entry year <= publication year <= graduation year + 1");
     expect(String(items.get("Entry year"))).toContain("from the AOC pairing sheet when present");
@@ -221,11 +221,11 @@ describe("buildMentoredPublicationsWorkbook", () => {
 
   it("downloadFilename: the caller's types label (path characters → -), years joined by -, ' All Pubs' in all mode, ISO day", () => {
     const d = new Date("2026-09-18T23:59:59Z");
-    expect(downloadFilename("AOC", [2024, 2025], d)).toBe(
-      "Mentored Publications AOC 2024-2025 - 2026-09-18.xlsx",
+    expect(downloadFilename("MD", [2024, 2025], d)).toBe(
+      "Mentored Publications MD 2024-2025 - 2026-09-18.xlsx",
     );
-    expect(downloadFilename("AOC", [2026, null], d)).toBe(
-      "Mentored Publications AOC 2026-unknown - 2026-09-18.xlsx",
+    expect(downloadFilename("MD", [2026, null], d)).toBe(
+      "Mentored Publications MD 2026-unknown - 2026-09-18.xlsx",
     );
     expect(downloadFilename("Mixed", [2025], d)).toBe(
       "Mentored Publications Mixed 2025 - 2026-09-18.xlsx",
@@ -265,12 +265,12 @@ describe("buildMentoredPublicationsWorkbook", () => {
         "All publications in program window",
         "Publications with a mentor in window",
         "First-author publications in window",
-        "High-impact publications in window (JIF ≥ 10)",
+        "High-impact publications in window (Journal Impact Factor ≥ 10)",
         "Publications (all years)",
       ]);
       expect(rowValues(ws, 2)).toEqual([
-        2025, 2021, "AOC", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
-        "MD-PhD (program office); AOC", 3, 1, 2, 1, 5,
+        2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
+        "MD-PhD (program office); MD", 3, 1, 2, 1, 5,
       ]);
     });
 

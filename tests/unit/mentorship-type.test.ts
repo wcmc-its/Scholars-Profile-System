@@ -25,7 +25,7 @@ import {
 } from "@/lib/edit/mentorship-type";
 
 const CASES: Array<[MentorshipType, string, string]> = [
-  [{ program: "md", source: "roster", tier: "confirmed" }, "md:roster:confirmed", "AOC"],
+  [{ program: "md", source: "roster", tier: "confirmed" }, "md:roster:confirmed", "MD"],
   [
     { program: "mdphd", source: "roster", tier: "confirmed" },
     "mdphd:roster:confirmed",
@@ -83,8 +83,8 @@ describe("mentorship type", () => {
     expect(mentorshipLabel({ program: "zzz", source: "roster", tier: "confirmed" })).toBe("zzz");
   });
 
-  it("the md bucket reads AOC (the Program column, scope options and workbook), the key stays md", () => {
-    expect(PROGRAM_LABEL.md).toBe("AOC");
+  it("the md bucket reads MD (the Program column, scope options and workbook), the key stays md", () => {
+    expect(PROGRAM_LABEL.md).toBe("MD");
     expect(Object.keys(PROGRAM_LABEL)).toContain("md");
   });
 

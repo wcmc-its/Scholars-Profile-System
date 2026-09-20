@@ -68,7 +68,7 @@ export const REPORT_SUMMARY_MAX = 500;
 const MENTORED_PUBS_DESCRIPTION_HTML = [
   '<p>Pairs come from these sources. Each is a checkbox under "Type of mentorship".</p>',
   "<ul>",
-  "<li><strong>AOC</strong> — Pairs recorded by the Areas of Concentration program (the MD scholarly-concentration program) in its pairing sheet. Carries the graduation year and, for recent classes, the entry year.</li>",
+  "<li><strong>MD</strong> — MD students' pairs, recorded by the Areas of Concentration (AOC) program — the MD scholarly-concentration program — in its pairing sheet. Carries the graduation year and, for recent classes, the entry year.</li>",
   "<li><strong>MD-PhD (program office)</strong> — Pairs from the MD-PhD program office's list, loaded with the AOC sheet. No entry or graduation years yet.</li>",
   "<li><strong>ECR</strong> — Early Career Research pairs from the same sheet (classes 2018–2023). Carries the graduation year.</li>",
   "<li><strong>PhD / MD-PhD thesis advisor</strong> — Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.</li>",
@@ -135,7 +135,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "mentored-publications",
     name: "Mentored publications",
     summary:
-      "Every publication a learner co-authored with a mentor — AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc appointments, co-authorship inferences — with impact factor and citations. Access is granted per person.",
+      "Every publication a learner co-authored with a mentor — the MD program's AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc appointments, co-authorship inferences — with impact factor and citations. Access is granted per person.",
     descriptionHtml: MENTORED_PUBS_DESCRIPTION_HTML,
   },
 };

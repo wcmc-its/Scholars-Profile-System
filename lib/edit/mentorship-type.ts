@@ -35,11 +35,13 @@ export type MentorshipType = { program: string; source: MentorshipSource; tier: 
 
 /** Human label per program bucket (`MentoringProgramKey`). The `md` KEY
  *  stays (it is `bucketProgramType`'s output and the `report_access` scope
- *  key); its LABEL is the program's own name — the Program column, the
- *  Viewers panel's scope options and the workbook all read "AOC". The
- *  public search facet keeps its own "MD" wording (a different audience). */
+ *  key). Its LABEL is "MD" — the degree, not the program office's name:
+ *  "AOC" (Areas of Concentration) was what the Program column, the access
+ *  popover's scope options and the workbook read until 2026-09-20, and
+ *  nobody outside that office knows it. AOC survives in the hovers and the
+ *  report description as the SOURCE (the pairing sheet), never as a label. */
 export const PROGRAM_LABEL: Record<string, string> = {
-  md: "AOC",
+  md: "MD",
   mdphd: "MD-PhD",
   phd: "PhD",
   postdoc: "Postdoc",
@@ -99,7 +101,7 @@ export const MENTORSHIP_TYPE_KEYS = [
 export type MentorshipTypeKey = (typeof MENTORSHIP_TYPE_KEYS)[number];
 
 export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
-  aoc: "AOC",
+  aoc: "MD",
   mdphd: "MD-PhD (program office)",
   ecr: "ECR",
   thesis: "PhD / MD-PhD thesis advisor",
@@ -114,7 +116,7 @@ export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
  *  "Sources" disclosure (which adds the date facts). Plain words for the
  *  office that asked what each category means. */
 export const MENTORSHIP_TYPE_DESCRIPTION: Record<MentorshipTypeKey, string> = {
-  aoc: "Pairs recorded by the Areas of Concentration program (the MD scholarly-concentration program) in its pairing sheet.",
+  aoc: "MD students' pairs, recorded by the Areas of Concentration (AOC) program — the MD scholarly-concentration program — in its pairing sheet.",
   mdphd:
     "Pairs from the MD-PhD program office's list, loaded with the AOC sheet. No entry or graduation years yet.",
   ecr: "Early Career Research pairs from the same sheet (classes 2018–2023).",

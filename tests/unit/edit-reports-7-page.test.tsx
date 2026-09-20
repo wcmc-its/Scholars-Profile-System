@@ -24,7 +24,7 @@
  * office's words (AOC, pairing sheet) and points at the "About this report"
  * disclosure (the former hardcoded "Sources" disclosure is gone — the h1 and
  * the disclosure are `ReportHeader`'s, over `report_meta`) and the
- * popover's `md` scope reads "AOC". `HoverTooltip` is mocked to its children —
+ * popover's `md` scope reads "MD". `HoverTooltip` is mocked to its children —
  * the walker calls plain function components, and Radix's provider uses hooks.
  * "Faculty-asserted" is offered to every holder, checked by default for
  * `"*"` only, and its CWID-less entries get their own sentence.
@@ -106,7 +106,7 @@ const ACCESS_ROW = {
  *  from the original), pinned here by value so a wording drift is visible. */
 const SCOPE_OPTIONS = [
   ["*", "All programs"],
-  ["md", "AOC"],
+  ["md", "MD"],
   ["mdphd", "MD-PhD"],
   ["ecr", "ECR"],
 ];
@@ -260,7 +260,7 @@ describe("/edit/reports/7 — wiring", () => {
     );
   });
 
-  it("Type of mentorship: an md holder sees AOC (checked) and the five non-roster types, never MD-PhD / ECR; faculty offered but unchecked; no Program select", async () => {
+  it("Type of mentorship: an md holder sees MD (checked) and the five non-roster types, never MD-PhD / ECR; faculty offered but unchecked; no Program select", async () => {
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
     const form = findByType(result, h.mockAutoSubmitForm);
     expect(checkboxes(form).filter(([name]) => name === "types")).toEqual([
@@ -273,7 +273,7 @@ describe("/edit/reports/7 — wiring", () => {
     ]);
     const text = textOf(form);
     expect(text).toContain("Type of mentorship");
-    expect(text).toContain("AOC");
+    expect(text).toContain("MD");
     expect(text).toContain("Likely mentee (from co-authorship)");
     expect(text).not.toContain("All programs");
     // Each label hovers its plain-language description — the text, never the input.
@@ -288,7 +288,7 @@ describe("/edit/reports/7 — wiring", () => {
     collect(form);
     expect(hovers.every((p) => p.wide === true && p.children.type === "span")).toBe(true);
     expect(hovers.map((p) => p.text)).toEqual([
-      "Pairs recorded by the Areas of Concentration program (the MD scholarly-concentration program) in its pairing sheet.",
+      "MD students' pairs, recorded by the Areas of Concentration (AOC) program — the MD scholarly-concentration program — in its pairing sheet.",
       "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.",
       expect.stringContaining("reporting manager from the ED appointment record"),
       expect.stringContaining("Not on any roster"),
@@ -489,7 +489,7 @@ describe("/edit/reports/7 — wiring", () => {
   it("with data: the island receives view / summary / publications / pubsMode; the description names the five sources and the dropped counts", async () => {
     const summaryRow = {
       gradYear: 2025, entryYear: 2021, entryYearSource: "bridge", cwid: "stu0001",
-      firstName: "Ada", lastName: "Learner", program: "AOC",
+      firstName: "Ada", lastName: "Learner", program: "MD",
       mentors: [{ cwid: "men0001", name: "Grace Mentor", mentorship: { program: "md", source: "roster", tier: "confirmed" } }],
       pubsInWindow: 1, withMentorInWindow: 1, pubsAllTime: 1, highImpactInWindow: 0, firstAuthorInWindow: 1,
     };
@@ -520,9 +520,16 @@ describe("/edit/reports/7 — wiring", () => {
       publications: [pub],
       pubsMode: "mentored",
       highImpactThreshold: 10,
+      // The server filter form rides in as the island's children — the top
+      // of its rail, never a strip above it.
+      children: expect.objectContaining({ props: expect.objectContaining({ typeChoices: ["aoc", "thesis", "postdoc", "likely", "possible", "faculty"] }) }),
     });
+    // …and it IS the auto-submit form (the element is the page-local FilterForm; walk it).
+    expect(findByType(findByType(summary, h.mockTable)?.props.children, h.mockAutoSubmitForm)?.props.id).toBe(
+      "mentored-pubs-filters",
+    );
     expect(textOf(summary)).toContain(
-      "Pairs come from the AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty add on their own profile, and co-authorship inferences (off by default) — see “About this report” below.",
+      "Pairs come from the MD program’s AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty add on their own profile, and co-authorship inferences (off by default) — see “About this report” below.",
     );
     expect(textOf(summary)).toContain("an AOC learner with no entry year on the pairing sheet");
     expect(textOf(summary)).not.toContain("MD-program");
@@ -569,7 +576,7 @@ describe("/edit/reports/7 — wiring", () => {
           cwid: "stu0001",
           firstName: "Ada",
           lastName: "Learner",
-          program: "AOC",
+          program: "MD",
           mentors: [],
           pubsInWindow: 0,
           withMentorInWindow: 0,
@@ -640,7 +647,7 @@ describe("/edit/reports/7 — wiring", () => {
     expect(popover.props.initialRows).toEqual([
       expect.objectContaining({ cwid: "usr0001", scopeKey: "md", grantedAt: "2026-09-18T12:00:00.000Z" }),
     ]);
-    // The `md` scope reads "AOC" — the office's word, from the ONE shared list.
+    // The `md` scope reads "MD" — the degree, from the ONE shared list.
     expect(popover.props.scopeOptions).toEqual(SCOPE_OPTIONS);
   });
 

@@ -53,7 +53,7 @@ describe("loadReportMeta", () => {
     }
     const seven = meta.get("7")!.descriptionHtml!;
     for (const label of [
-      "AOC",
+      "MD",
       "MD-PhD (program office)",
       "ECR",
       "PhD / MD-PhD thesis advisor",

@@ -49,7 +49,7 @@ export const SUMMARY_HEADERS = [
   "Mentorship types",
   "Publications in program window",
   "Publications (all years)",
-  `High-impact publications in window (JIF ≥ ${HIGH_IMPACT_THRESHOLD})`,
+  `High-impact publications in window (Journal Impact Factor ≥ ${HIGH_IMPACT_THRESHOLD})`,
   "First-author publications in window",
 ] as const;
 
@@ -67,7 +67,7 @@ export const SUMMARY_HEADERS_ALL = [
   "All publications in program window",
   "Publications with a mentor in window",
   "First-author publications in window",
-  `High-impact publications in window (JIF ≥ ${HIGH_IMPACT_THRESHOLD})`,
+  `High-impact publications in window (Journal Impact Factor ≥ ${HIGH_IMPACT_THRESHOLD})`,
   "Publications (all years)",
 ] as const;
 
