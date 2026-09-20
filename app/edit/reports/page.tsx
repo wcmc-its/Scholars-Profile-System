@@ -19,11 +19,12 @@
  * Reports 1/2/4/5 stay center-only (`CenterProgram`/`CenterMembership`-family
  * data with no department/division/core equivalent — org-unit publications
  * reports plan, 2026-08-16, "Reports 1 & 2 — considered, dropped"). Reports 3
- * (Publications) and 6 (NIH-funded pubs) are unit-agnostic — `REPORTS_BY_KIND`
- * below is the single source of truth for which cards a unit's kind shows,
- * mirroring `REPORT_NUMBERS_BY_KIND` in `lib/edit/cancer-center-reports.ts`.
+ * (Publications) and 6 (NIH-funded pubs) are unit-agnostic — `buildCatalog`
+ * below (`byKind`) is the single source of truth for which cards a unit's kind
+ * shows, mirroring `REPORT_NUMBERS_BY_KIND` in `lib/edit/cancer-center-reports.ts`.
  * "Live" per unit varies with real data (`loadReportLiveness`); the catalog
- * per KIND does not.
+ * per KIND does not. Each card's name and blurb come from `report_meta`
+ * (`lib/edit/report-meta.ts`, superuser-editable), read once per request.
  *
  * Reports IA redesign (2026-08-14): `?center=` now addresses one of
  * POTENTIALLY SEVERAL reportable units, not just "the second center once one
@@ -75,6 +76,7 @@ import {
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
 import { getReportScopes, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import { loadReportMeta, reportLabel, type ReportKey, type ReportMeta } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -89,58 +91,45 @@ export const metadata = {
  *  as a real route link instead of client-side `selectedKey` state. */
 type ReportDef = ReportsIndexReport & { n: ReportNumber };
 
-/** Every report this console can show. Which of these a given unit's kind
- *  actually gets is `REPORTS_BY_KIND` below — this array is the full catalog,
- *  not a per-kind one. */
-const ALL_REPORTS: readonly ReportDef[] = [
-  {
-    n: 1,
-    label: "1. Optimize membership",
-    description:
-      "REMOVE / ADD membership recommendations from PubMed co-authorship and MeSH cancer-relevance signals.",
-  },
-  {
-    n: 2,
-    label: "2. NCI Table 2a",
-    description:
-      "NCI CCSG Data Table 2A funding review — program-code allocation and the Cancer-Relevant Percent judgment column.",
-  },
-  {
-    n: 3,
-    // Kind-neutral wording: for a core this report's set is confirmed core
-    // usages, not member publications. One shared catalog serves all four
-    // kinds, so the blurb must be true of each.
-    label: "3. Publications",
-    description: "This unit's publications, joined to Journal Impact Factor and paper-level impact-score data.",
-  },
-  {
-    n: 4,
-    label: "4. Grants",
-    description: "Active grants for the center's members, as of a chosen date.",
-  },
-  {
-    n: 5,
-    label: "5. Clinical Trials",
-    description: "Active clinical trials involving the center's members, with ClinicalTrials.gov links.",
-  },
-  {
-    n: 6,
-    label: "6. NIH-funded pubs",
-    description: "This unit's publications with a matched NIH RePORTER funding link.",
-  },
-];
-
-/** `REPORTS_BY_KIND[kind]` — the catalog `ReportsIndex`/`SingleUnitReportsTable`
- *  render for a unit of that kind, resolved from `REPORT_NUMBERS_BY_KIND`
- *  (`lib/edit/cancer-center-reports.ts`) so the two lists can never drift.
- *  Department/division/core show only Publications + NIH-funded pubs — no dead
- *  card that 404s/empty-states when opened. */
-const REPORTS_BY_KIND: Record<ReportableUnitKind, readonly ReportDef[]> = {
-  center: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.center.includes(r.n)),
-  department: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.department.includes(r.n)),
-  division: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.division.includes(r.n)),
-  core: ALL_REPORTS.filter((r) => REPORT_NUMBERS_BY_KIND.core.includes(r.n)),
+/** The per-request report catalog — `all` is every report this console can
+ *  show (reports 1–6, the full catalog, not a per-kind one); `byKind[kind]`
+ *  is what `ReportsIndex`/`SingleUnitReportsTable` render for a unit of that
+ *  kind, resolved from `REPORT_NUMBERS_BY_KIND` (`lib/edit/cancer-center-
+ *  reports.ts`) so the two lists can never drift. Department/division/core
+ *  show only Publications + NIH-funded pubs — no dead card that 404s/empty-
+ *  states when opened. Built per request from `report_meta` (`loadReportMeta`)
+ *  now that names and blurbs are editable, where it used to be two module-level
+ *  consts. */
+type ReportCatalog = {
+  all: readonly ReportDef[];
+  byKind: Record<ReportableUnitKind, readonly ReportDef[]>;
 };
+
+/** One index card off the loaded meta: the numbered label + the one-line
+ *  summary. `meta` always has every key (`loadReportMeta` merges defaults).
+ *  Generic in `n` so the same helper serves the unit catalog (`ReportNumber`,
+ *  1–6) and the program pseudo-unit's report 7. */
+function catalogEntry<N extends ReportsIndexReport["n"]>(
+  meta: Map<ReportKey, ReportMeta>,
+  n: N,
+): ReportsIndexReport & { n: N } {
+  const m = meta.get(String(n) as ReportKey);
+  if (!m) throw new Error(`report_meta: no entry for report ${n}`);
+  return { n, label: reportLabel(m), description: m.summary };
+}
+
+function buildCatalog(meta: Map<ReportKey, ReportMeta>): ReportCatalog {
+  const all: readonly ReportDef[] = ([1, 2, 3, 4, 5, 6] as const).map((n) => catalogEntry(meta, n));
+  return {
+    all,
+    byKind: {
+      center: all.filter((r) => REPORT_NUMBERS_BY_KIND.center.includes(r.n)),
+      department: all.filter((r) => REPORT_NUMBERS_BY_KIND.department.includes(r.n)),
+      division: all.filter((r) => REPORT_NUMBERS_BY_KIND.division.includes(r.n)),
+      core: all.filter((r) => REPORT_NUMBERS_BY_KIND.core.includes(r.n)),
+    },
+  };
+}
 
 const REPORTABLE_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
 
@@ -167,7 +156,10 @@ export default async function EditReportsIndexPage({
   // Program reports (report 7) ride a `report_access` row, not a unit grant —
   // one pseudo-unit row in whichever list the holder lands on below.
   const programScopes = await getReportScopes(session, MENTORED_PUBS_REPORT);
-  const programUnit = programScopes.size > 0 ? PROGRAM_UNIT : null;
+  // Names + blurbs come from `report_meta` (editable), read once per request.
+  const meta = await loadReportMeta();
+  const catalog = buildCatalog(meta);
+  const programUnit = programScopes.size > 0 ? buildProgramUnit(meta) : null;
 
   const { center, kind: kindParam } = (await searchParams) ?? {};
   const kind = parseKind(kindParam);
@@ -189,8 +181,9 @@ export default async function EditReportsIndexPage({
         ctx={ctx}
         code={code}
         kind={kind}
-        perReport={await loadSingleUnitPerReport(code, kind)}
+        perReport={await loadSingleUnitPerReport(code, kind, catalog)}
         programUnit={programUnit}
+        catalog={catalog}
         {...shell}
       />
     );
@@ -233,8 +226,9 @@ export default async function EditReportsIndexPage({
         ctx={ctx}
         code={unit.code}
         kind={unit.kind}
-        perReport={await loadSingleUnitPerReport(unit.code, unit.kind)}
+        perReport={await loadSingleUnitPerReport(unit.code, unit.kind, catalog)}
         programUnit={programUnit}
+        catalog={catalog}
         {...shell}
       />
     );
@@ -246,7 +240,7 @@ export default async function EditReportsIndexPage({
   );
   const units: ReportsIndexUnit[] = reportableUnits.map((u) => {
     const l = liveness.get(u.code);
-    const reports = REPORTS_BY_KIND[u.kind];
+    const reports = catalog.byKind[u.kind];
     return {
       code: u.code,
       kind: u.kind,
@@ -284,26 +278,22 @@ export default async function EditReportsIndexPage({
 /** The person-granted Mentored publications report as a one-report
  *  pseudo-unit, so it rides the same list (and filter rail) as every unit —
  *  never a card floating under the table. Not tied to an org unit; access is
- *  a `report_access` row. Rendered only when `getReportScopes` is non-empty. */
-const PROGRAM_UNIT: ReportsIndexUnit = {
-  code: "mentoring-programs",
-  kind: "program",
-  name: "Mentoring programs",
-  centerType: null,
-  editHref: "/edit/reports/7",
-  liveCount: 1,
-  totalCount: 1,
-  lastRefreshedAt: null,
-  reports: [
-    {
-      n: 7,
-      label: "7. Mentored publications",
-      description:
-        "Every publication a learner co-authored with a mentor — AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc appointments, co-authorship inferences — with impact factor and citations. Access is granted per person.",
-    },
-  ],
-  perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
-};
+ *  a `report_access` row. Rendered only when `getReportScopes` is non-empty.
+ *  Its label/blurb come from `report_meta` like every other card. */
+function buildProgramUnit(meta: Map<ReportKey, ReportMeta>): ReportsIndexUnit {
+  return {
+    code: "mentoring-programs",
+    kind: "program",
+    name: "Mentoring programs",
+    centerType: null,
+    editHref: "/edit/reports/7",
+    liveCount: 1,
+    totalCount: 1,
+    lastRefreshedAt: null,
+    reports: [catalogEntry(meta, 7)],
+    perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
+  };
+}
 
 type SerializedPerReport = ReadonlyArray<{
   n: ReportNumber;
@@ -331,9 +321,13 @@ function serializePerReport(
 
 /** `3a` — an actor with exactly one reportable unit (the common case today).
  *  Per-report liveness for one unit, plain-serialized for the client table. */
-async function loadSingleUnitPerReport(code: string, kind: ReportableUnitKind): Promise<SerializedPerReport> {
+async function loadSingleUnitPerReport(
+  code: string,
+  kind: ReportableUnitKind,
+  catalog: ReportCatalog,
+): Promise<SerializedPerReport> {
   const liveness = (await loadReportLiveness([{ code, kind }], db.read)).get(code);
-  return serializePerReport(liveness, REPORTS_BY_KIND[kind]);
+  return serializePerReport(liveness, catalog.byKind[kind]);
 }
 
 /** `3a` — same `Report | Focus | Last refreshed` table `1a`'s bands use per
@@ -347,6 +341,7 @@ function SingleUnitReports({
   kind,
   perReport,
   programUnit,
+  catalog,
   session,
   pendingSlugRequests,
   pendingHonors,
@@ -358,6 +353,8 @@ function SingleUnitReports({
   /** The program pseudo-unit, or null when the viewer holds no report grant —
    *  its one report joins this unit's rows (its href never carries the unit). */
   programUnit: ReportsIndexUnit | null;
+  /** This request's report catalog (`buildCatalog`). */
+  catalog: ReportCatalog;
   session: EditSession;
   pendingSlugRequests: number | null;
   pendingHonors: number | null;
@@ -383,7 +380,7 @@ function SingleUnitReports({
           unitKind={kind}
           perReport={programUnit ? [...perReport, ...programUnit.perReport] : perReport}
           reports={
-            programUnit ? [...REPORTS_BY_KIND[kind], ...programUnit.reports] : REPORTS_BY_KIND[kind]
+            programUnit ? [...catalog.byKind[kind], ...programUnit.reports] : catalog.byKind[kind]
           }
         />
       </div>

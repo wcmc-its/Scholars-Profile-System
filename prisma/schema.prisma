@@ -2429,6 +2429,28 @@ model ReportAccess {
   @@map("report_access")
 }
 
+/// Editable report metadata for the `/edit/reports` console — one row per
+/// numbered report (`reportKey` '1'..'7'): the NAME shown in the index and the
+/// page `<h1>` (without its "N. " prefix), the one-line SUMMARY the index card
+/// shows, and an optional rich-text DESCRIPTION (sanitized HTML on the
+/// `overview` allowlist, `sanitizeOverview`) rendered as a closed "About this
+/// report" disclosure on the report page. Not seeded (#584: migrations never
+/// INSERT): `lib/edit/report-meta.ts` carries the former hardcoded strings as
+/// `REPORT_META_DEFAULTS`, the fallback for a report with no row; a row wins
+/// entirely once a superuser saves one. Written only by a superuser through
+/// `app/api/edit/report-meta/[n]` (`updatedBy` is the REAL actor cwid, never
+/// the impersonation target).
+model ReportMeta {
+  reportKey       String   @id @map("report_key") @db.VarChar(64)
+  name            String   @db.VarChar(120)
+  summary         String   @db.VarChar(500)
+  descriptionHtml String?  @map("description_html") @db.Text
+  updatedBy       String   @map("updated_by") @db.VarChar(32)
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("report_meta")
+}
+
 /// Scholar-assigned proxy editor grant (scholar-proxy-spec.md / #779, ADR-005
 /// Amendment 3). One row per (scholarCwid, proxyCwid): a scholar names a specific
 /// individual to edit THEIR profile on their behalf, scoped to exactly what the

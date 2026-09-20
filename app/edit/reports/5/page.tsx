@@ -14,19 +14,20 @@ import { redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportHeader } from "@/components/edit/report-header";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { loadClinicalTrialsReport } from "@/lib/center-collaboration/clinical-trials-report";
 import { db } from "@/lib/db";
 import { loadReportsContext, resolveNumberedReportCenterCode } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { reportPageMetadata } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Clinical Trials — Scholars Profile Console",
-  robots: { index: false, follow: false },
-};
+/** `<title>` from `report_meta` (superuser-editable), one cached read shared
+ *  with `ReportHeader` below. */
+export const generateMetadata = () => reportPageMetadata("5");
 
 /** ClinicalTrials.gov study page for an NCT id — same URL form as the public
  *  profile's `ctgovUrl` (`components/profile/clinical-trials-section.tsx`);
@@ -78,12 +79,13 @@ export default async function EditReportsClinicalTrialsPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-1 text-xl font-bold">5. Clinical Trials</h1>
-      <p className="text-muted-foreground mb-4 text-sm">
-        {rows.length === 0
-          ? "Current members' clinical-trial links (Principal Investigator or Investigator)."
-          : `${rows.length} clinical-trial link${rows.length === 1 ? "" : "s"} across the center's current members.`}
-      </p>
+      <ReportHeader n="5" session={session}>
+        <p className="text-muted-foreground mb-4 text-sm">
+          {rows.length === 0
+            ? "Current members' clinical-trial links (Principal Investigator or Investigator)."
+            : `${rows.length} clinical-trial link${rows.length === 1 ? "" : "s"} across the center's current members.`}
+        </p>
+      </ReportHeader>
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">

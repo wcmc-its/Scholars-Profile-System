@@ -23,6 +23,7 @@ import { redirect } from "next/navigation";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { PublicationsReportTable } from "@/components/edit/publications-report-table";
+import { ReportHeader } from "@/components/edit/report-header";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -36,14 +37,14 @@ import {
   type ReportableUnitKind,
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { reportPageMetadata } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Publications — Scholars Profile Console",
-  robots: { index: false, follow: false },
-};
+/** `<title>` from `report_meta` (superuser-editable), one cached read shared
+ *  with `ReportHeader` below. */
+export const generateMetadata = () => reportPageMetadata("3");
 
 const ALLOWED_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
 
@@ -137,20 +138,21 @@ export default async function EditReportsPublicationsPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-1 text-xl font-bold">3. Publications</h1>
-      <p className="text-muted-foreground text-sm">
-        {kind === "core" ? (
-          <>
-            Every publication with a confirmed use of {ctx.unit.name}, joined to Journal Impact
-            Factor data where the journal matches.
-          </>
-        ) : (
-          <>
-            Every publication with a confirmed {ctx.unit.name} author, joined to Journal Impact
-            Factor data where the journal matches.
-          </>
-        )}
-      </p>
+      <ReportHeader n="3" session={session}>
+        <p className="text-muted-foreground text-sm">
+          {kind === "core" ? (
+            <>
+              Every publication with a confirmed use of {ctx.unit.name}, joined to Journal Impact
+              Factor data where the journal matches.
+            </>
+          ) : (
+            <>
+              Every publication with a confirmed {ctx.unit.name} author, joined to Journal Impact
+              Factor data where the journal matches.
+            </>
+          )}
+        </p>
+      </ReportHeader>
       <ReportSummary report={report} kind={kind} />
       {report.totalPublications > 0 ? <PublicationsReportTable rows={report.rows} /> : null}
     </ConsoleShell>

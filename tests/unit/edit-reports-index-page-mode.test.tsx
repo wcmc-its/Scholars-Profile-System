@@ -54,7 +54,11 @@ vi.mock("@/lib/edit/report-access", () => ({
   getReportScopes: vi.fn().mockResolvedValue(new Set()),
   MENTORED_PUBS_REPORT: "mentored-publications",
 }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+// `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
+// catalog renders from the hardcoded defaults.
+vi.mock("@/lib/db", () => ({
+  db: { read: { reportMeta: { findMany: vi.fn().mockResolvedValue([]) } }, write: {} },
+}));
 
 import EditReportsIndexPage from "@/app/edit/reports/page";
 

@@ -17,6 +17,7 @@ import { redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportHeader } from "@/components/edit/report-header";
 import { LowerConfidenceBadge } from "@/components/funding/expanded-grant";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -27,14 +28,14 @@ import {
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { loadNihFundedPublicationsReport } from "@/lib/edit/nih-funded-publications-report";
+import { reportPageMetadata } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "NIH-funded pubs — Scholars Profile Console",
-  robots: { index: false, follow: false },
-};
+/** `<title>` from `report_meta` (superuser-editable), one cached read shared
+ *  with `ReportHeader` below. */
+export const generateMetadata = () => reportPageMetadata("6");
 
 const ALLOWED_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
 
@@ -91,12 +92,13 @@ export default async function EditReportsNihFundedPublicationsPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-1 text-xl font-bold">6. NIH-funded pubs</h1>
-      <p className="text-muted-foreground text-sm">
-        {kind === "core"
-          ? `Every publication with a confirmed use of ${ctx.unit.name} and a matched NIH RePORTER funding link.`
-          : `Every ${ctx.unit.name} member publication with a matched NIH RePORTER funding link.`}
-      </p>
+      <ReportHeader n="6" session={session}>
+        <p className="text-muted-foreground text-sm">
+          {kind === "core"
+            ? `Every publication with a confirmed use of ${ctx.unit.name} and a matched NIH RePORTER funding link.`
+            : `Every ${ctx.unit.name} member publication with a matched NIH RePORTER funding link.`}
+        </p>
+      </ReportHeader>
 
       {report.totalPublications === 0 ? (
         // Kind-aware: a core has no members, so "for a confirmed member

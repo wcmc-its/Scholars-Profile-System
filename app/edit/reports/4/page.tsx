@@ -15,6 +15,7 @@ import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportHeader } from "@/components/edit/report-header";
 import { Input } from "@/components/ui/input";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -24,15 +25,15 @@ import {
 } from "@/lib/edit/cancer-center-grants-report";
 import { loadReportsContext, resolveNumberedReportCenterCode } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { reportPageMetadata } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { fundingRoleLabel } from "@/lib/funding-roles";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Grants — Scholars Profile Console",
-  robots: { index: false, follow: false },
-};
+/** `<title>` from `report_meta` (superuser-editable), one cached read shared
+ *  with `ReportHeader` below. */
+export const generateMetadata = () => reportPageMetadata("4");
 
 const ASOF_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -98,10 +99,11 @@ export default async function EditReportsGrantsPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-1 text-xl font-bold">4. Grants</h1>
-      <p className="text-muted-foreground mb-4 text-sm">
-        This center’s members’ grants active as of the chosen date.
-      </p>
+      <ReportHeader n="4" session={session}>
+        <p className="text-muted-foreground mb-4 text-sm">
+          This center’s members’ grants active as of the chosen date.
+        </p>
+      </ReportHeader>
 
       <form method="GET" className="mb-4 flex items-end gap-2">
         <input type="hidden" name="center" value={code} />
