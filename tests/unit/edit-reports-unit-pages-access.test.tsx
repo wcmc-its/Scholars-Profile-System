@@ -1,21 +1,25 @@
 /**
- * `app/edit/reports/{1..6}/page.tsx` — every unit-gated report page hands
- * `ReportHeader` the "Who can run this report" popover as its `access` node,
- * in the `"unit"` mode (the static Owner/Curator rule, no fetch).
+ * `app/edit/reports/[report]/page.tsx`, one page × six unit-gated slugs —
+ * every unit-gated report hands `ReportHeader` the "Who can run this report"
+ * popover as its `access` node, in the `"unit"` mode (the static
+ * Owner/Curator rule, no fetch).
  *
- * The wiring is one prop on one JSX line per page and nothing else on the
- * page depends on it, so without this file a page that DROPS the prop
- * passes every gate: `tsc` has no unused-locals check, the orphaned import
- * is only a lint warning, and `edit-reports-core-pages.test.tsx` mocks
- * `ReportHeader` to an h1 that never reads `access`. Each page is mutation-
- * tested here on its own: the popover is mocked to a marker, `ReportHeader`
- * to a pass-through that renders `access`, and the assertion reads BOTH the
+ * The wiring is one prop on one JSX line and nothing else on the page depends
+ * on it, so without this file a page that DROPS the prop passes every gate:
+ * `tsc` has no unused-locals check, the orphaned import is only a lint
+ * warning, and `edit-reports-core-pages.test.tsx` mocks `ReportHeader` to an
+ * h1 that never reads `access`. Each report is mutation-tested here on its
+ * own (the registry's `gate` is per entry, so one slug passing says nothing
+ * about the others): the popover is mocked to a marker, `ReportHeader` to a
+ * pass-through that renders `access`, and the assertion reads BOTH the
  * header's `access` prop (element of the popover's type, `mode: "unit"`)
  * and the marker the render produced.
  *
  * These are async Server Components, so each test awaits the page and then
  * renders the returned tree. Every loader is mocked to its empty state —
  * the report bodies are covered elsewhere; only the heading row matters here.
+ * `report_meta` is an empty table (`reportMeta.findMany` on the db mock), so
+ * each slug resolves through the real `loadReportMeta` defaults.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -58,12 +62,15 @@ const {
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: vi.fn() }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+vi.mock("@/lib/db", () => ({
+  db: { read: { reportMeta: { findMany: vi.fn().mockResolvedValue([]) } }, write: {} },
+}));
 vi.mock("@/lib/edit/cancer-center-reports", () => ({
   loadReportsContext: mockLoadReportsContext,
   resolveNumberedReportCenterCode: mockResolveNumbered,
+  // The registry derives each report's `allowedKinds` from this.
+  REPORT_NUMBERS_BY_KIND: { center: [1, 2, 3, 4, 5, 6], department: [3, 6], division: [3, 6], core: [3, 6] },
 }));
-vi.mock("@/lib/edit/report-meta", () => ({ reportPageMetadata: vi.fn() }));
 vi.mock("@/lib/edit/honor-queue", () => ({
   isHonorsQueueTabVisible: () => false,
   countPendingHonors: vi.fn().mockResolvedValue(null),
@@ -111,25 +118,22 @@ vi.mock("@/components/funding/expanded-grant", () => ({ LowerConfidenceBadge: ()
 vi.mock("@/components/edit/report-access-popover", () => ({ ReportAccessPopover: mockPopover }));
 vi.mock("@/components/edit/report-header", () => ({ ReportHeader: mockReportHeader }));
 
-import EditReportsCollabPage from "@/app/edit/reports/1/page";
-import EditReportsNci2aPage from "@/app/edit/reports/2/page";
-import EditReportsPublicationsPage from "@/app/edit/reports/3/page";
-import EditReportsGrantsPage from "@/app/edit/reports/4/page";
-import EditReportsClinicalTrialsPage from "@/app/edit/reports/5/page";
-import EditReportsNihFundedPublicationsPage from "@/app/edit/reports/6/page";
+import EditReportPage from "@/app/edit/reports/[report]/page";
 
 const OWNER = { cwid: "owner01", isSuperuser: false, isCommsSteward: false };
 
-type Page = (props: { searchParams?: Promise<Record<string, string>> }) => Promise<unknown>;
-
-const PAGES: Array<[n: string, page: Page]> = [
-  ["1", EditReportsCollabPage as Page],
-  ["2", EditReportsNci2aPage as Page],
-  ["3", EditReportsPublicationsPage as Page],
-  ["4", EditReportsGrantsPage as Page],
-  ["5", EditReportsClinicalTrialsPage as Page],
-  ["6", EditReportsNihFundedPublicationsPage as Page],
+/** The six unit-gated reports by their default slug (`REPORT_META_DEFAULTS`). */
+const REPORTS: Array<[n: string, slug: string]> = [
+  ["1", "optimize-membership"],
+  ["2", "nci-table-2a"],
+  ["3", "publications"],
+  ["4", "grants"],
+  ["5", "clinical-trials"],
+  ["6", "nih-funded-pubs"],
 ];
+
+const page = (slug: string) =>
+  EditReportPage({ params: Promise.resolve({ report: slug }), searchParams: Promise.resolve({}) });
 
 beforeEach(() => {
   cleanup();
@@ -139,9 +143,9 @@ beforeEach(() => {
   mockLoadReportsContext.mockResolvedValue({ unit: { name: "Meyer Cancer Center" } });
 });
 
-describe.each(PAGES)("/edit/reports/%s — heading row", (n, page) => {
+describe.each(REPORTS)("/edit/reports/%s — heading row", (n, slug) => {
   it(`hands ReportHeader n="${n}" the unit-mode "Who can run this report" popover as \`access\``, async () => {
-    const result = await page({ searchParams: Promise.resolve({}) });
+    const result = await page(slug);
     render(result as React.ReactElement);
 
     // The prop itself: an element of the popover's type in "unit" mode —

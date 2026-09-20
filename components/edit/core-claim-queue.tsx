@@ -1427,6 +1427,7 @@ export function CoreClaimQueue({
               mockup toolbar restyle landed while this branch was open, and the
               link must not quietly bring the old pill back. */}
           <a
+            // The NUMBER on purpose: it is the permanent link, and `/edit/reports/[report]` 307s it to the current slug.
             href={`/edit/reports/3?center=${encodeURIComponent(core.id)}&kind=core`}
             className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
           >

@@ -121,10 +121,11 @@ type ReportCatalog = {
 };
 
 /** One index card off the loaded meta: the numbered label + the one-line
- *  summary + the report's "Who can run this report" popover props. `meta`
- *  always has every key (`loadReportMeta` merges defaults). Generic in `n`
- *  so the same helper serves the unit catalog (`ReportNumber`, 1–6) and the
- *  program pseudo-unit's report 7. */
+ *  summary + the report's current slug (the row's link target,
+ *  `/edit/reports/<slug>`) + the report's "Who can run this report" popover
+ *  props. `meta` always has every key (`loadReportMeta` merges defaults).
+ *  Generic in `n` so the same helper serves the unit catalog (`ReportNumber`,
+ *  1–6) and the program pseudo-unit's report 7. */
 function catalogEntry<N extends ReportsIndexReport["n"]>(
   meta: Map<ReportKey, ReportMeta>,
   n: N,
@@ -132,7 +133,7 @@ function catalogEntry<N extends ReportsIndexReport["n"]>(
 ): ReportsIndexReport & { n: N } {
   const m = meta.get(String(n) as ReportKey);
   if (!m) throw new Error(`report_meta: no entry for report ${n}`);
-  return { n, label: reportLabel(m), description: m.summary, access };
+  return { n, slug: m.slug, label: reportLabel(m), description: m.summary, access };
 }
 
 function buildCatalog(meta: Map<ReportKey, ReportMeta>): ReportCatalog {
@@ -324,16 +325,19 @@ function buildProgramUnit(
   meta: Map<ReportKey, ReportMeta>,
   access: ReportAccessPopoverPersonProps,
 ): ReportsIndexUnit {
+  const report = catalogEntry(meta, 7, access);
   return {
     code: "mentoring-programs",
     kind: "program",
     name: "Mentoring programs",
     centerType: null,
-    editHref: "/edit/reports/7",
+    // The report's own canonical address (its current slug) — a program has
+    // no profile to edit, and `ReportsIndex` never renders this for one.
+    editHref: `/edit/reports/${report.slug}`,
     liveCount: 1,
     totalCount: 1,
     lastRefreshedAt: null,
-    reports: [catalogEntry(meta, 7, access)],
+    reports: [report],
     perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
   };
 }

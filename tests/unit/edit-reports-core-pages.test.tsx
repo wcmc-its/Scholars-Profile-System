@@ -1,17 +1,19 @@
 /**
- * `app/edit/reports/3/page.tsx` and `app/edit/reports/6/page.tsx` — the
- * `?center=<coreId>&kind=core` route added by the core-reports widening
- * (2026-09-06).
+ * `app/edit/reports/[report]/page.tsx` at the `publications` (report 3) and
+ * `nih-funded-pubs` (report 6) slugs — the `?center=<coreId>&kind=core` route
+ * added by the core-reports widening (2026-09-06).
  *
  * Scoped to what the widening added: `?kind=core` is accepted and threaded
  * through to BOTH the authz gate and the report loader, a denied actor gets the
  * visible 403 rather than the report, and the copy stops claiming "member"
- * anything for a core. The pages' center/department/division paths are
+ * anything for a core. The reports' center/department/division paths are
  * unchanged and keep their existing coverage.
  *
  * These are async Server Components, so each test awaits the page and then
- * renders the returned tree — the local `ReportSummary` / copy branches only
- * run if something actually renders them.
+ * renders the returned tree — the bodies' local `ReportSummary` / copy
+ * branches only run if something actually renders them. `report_meta` is an
+ * empty table (`reportMeta.findMany` on the db mock), so each slug resolves
+ * through the real `loadReportMeta` defaults.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -43,6 +45,8 @@ vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockG
 vi.mock("@/lib/edit/cancer-center-reports", () => ({
   loadReportsContext: mockLoadReportsContext,
   resolveNumberedReportCenterCode: mockResolveNumbered,
+  // The registry derives each report's `allowedKinds` from this.
+  REPORT_NUMBERS_BY_KIND: { center: [1, 2, 3, 4, 5, 6], department: [3, 6], division: [3, 6], core: [3, 6] },
 }));
 vi.mock("@/lib/edit/cancer-center-publications-report", () => ({
   HIGH_IMPACT_THRESHOLD: 10,
@@ -80,10 +84,20 @@ vi.mock("@/lib/edit/slug-request", () => ({
   isSlugRequestEnabled: () => false,
   countPendingSlugRequests: vi.fn().mockResolvedValue(null),
 }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+vi.mock("@/lib/db", () => ({
+  db: { read: { reportMeta: { findMany: vi.fn().mockResolvedValue([]) } }, write: {} },
+}));
 
-import EditReportsPublicationsPage from "@/app/edit/reports/3/page";
-import EditReportsNihFundedPublicationsPage from "@/app/edit/reports/6/page";
+import EditReportPage from "@/app/edit/reports/[report]/page";
+
+/** The dynamic page at one report's slug — the same call shape the six
+ *  numbered pages used to take, plus the segment. */
+const pageAt =
+  (slug: string) =>
+  ({ searchParams }: { searchParams: Promise<Record<string, string>> }) =>
+    EditReportPage({ params: Promise.resolve({ report: slug }), searchParams });
+const EditReportsPublicationsPage = pageAt("publications");
+const EditReportsNihFundedPublicationsPage = pageAt("nih-funded-pubs");
 
 const OWNER = { cwid: "owner01", isSuperuser: false, isCommsSteward: false };
 const OUTSIDER = { cwid: "nobody1", isSuperuser: false, isCommsSteward: false };
@@ -114,7 +128,7 @@ beforeEach(() => {
   mockLoadNihReport.mockResolvedValue({ totalPublications: 0, rows: [] });
 });
 
-describe("/edit/reports/3 — ?kind=core", () => {
+describe("/edit/reports/publications (3) — ?kind=core", () => {
   it("accepts kind=core and threads it into BOTH the authz gate and the report loader", async () => {
     await EditReportsPublicationsPage({
       searchParams: Promise.resolve({ center: "14", kind: "core" }),
@@ -199,7 +213,7 @@ describe("/edit/reports/3 — ?kind=core", () => {
   });
 });
 
-describe("/edit/reports/6 — ?kind=core", () => {
+describe("/edit/reports/nih-funded-pubs (6) — ?kind=core", () => {
   it("accepts kind=core and threads it into BOTH the authz gate and the report loader", async () => {
     await EditReportsNihFundedPublicationsPage({
       searchParams: Promise.resolve({ center: "14", kind: "core" }),

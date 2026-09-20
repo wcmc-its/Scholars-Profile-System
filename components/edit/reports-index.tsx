@@ -16,7 +16,7 @@
  *   Status column reads per-report instead of as a unit-level "N of M"
  *   rollup. Filter rail narrows by unit type (still unit-scoped) and by
  *   per-report status (Live/In progress, now row-scoped). A live row's click
- *   target is that report itself (`/edit/reports/N?center=…`); a non-live row
+ *   target is that report itself (`/edit/reports/<slug>?center=…`); a non-live row
  *   has no link. Mirrors `AllUnitsDirectory`'s contract: server-bounded list,
  *   filter in-memory, no fetch, stretched-anchor rows (R7).
  * - `mode="bands"` (1a, everyone else with >1 unit) — every unit inline on one
@@ -66,6 +66,11 @@ export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export type ReportsIndexReport = {
   n: ReportN;
+  /** The report's CURRENT `report_meta.slug` — its canonical address
+   *  (`/edit/reports/<slug>`), which the row links to directly rather than
+   *  through the number's redirect hop. The page fills it from
+   *  `loadReportMeta()`, never a constant: a superuser can rename it. */
+  slug: string;
   label: string;
   description: string;
   /** The "Who can run this report" popover's props — `{ mode: "unit" }` for
@@ -122,16 +127,17 @@ function RowAccess({ access }: { access: ReportAccessPopoverProps }) {
   );
 }
 
-/** `/edit/reports/N?center=<code>` — `&kind=` is only appended for a
+/** `/edit/reports/<slug>?center=<code>` — `&kind=` is only appended for a
  *  department/division/core so an existing `?center=<centerCode>` bookmark
  *  (implied `kind=center`) keeps resolving exactly as it always has. For a
- *  core, `<code>` is the core id. */
-function reportHref(n: number, code: string, kind: ReportsIndexUnitKind): string {
+ *  core, `<code>` is the core id. The slug (not the number) so the click is
+ *  one navigation, not a redirect hop through `/edit/reports/N`. */
+function reportHref(slug: string, n: ReportN, code: string, kind: ReportsIndexUnitKind): string {
   // Report 7 is granted per person (`report_access`), never unit-scoped.
-  if (n === 7) return "/edit/reports/7";
+  if (n === 7) return `/edit/reports/${slug}`;
   const params = new URLSearchParams({ center: code });
   if (kind !== "center") params.set("kind", kind);
-  return `/edit/reports/${n}?${params.toString()}`;
+  return `/edit/reports/${slug}?${params.toString()}`;
 }
 
 export function ReportsIndex({
@@ -155,6 +161,7 @@ type FlatRow = {
   unitName: string;
   centerType: "center" | "institute" | null;
   reportN: ReportN;
+  reportSlug: string;
   reportLabel: string;
   access: ReportAccessPopoverProps;
   live: boolean;
@@ -192,6 +199,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
           unitName: u.name,
           centerType: u.centerType,
           reportN: r.n,
+          reportSlug: r.slug,
           reportLabel: r.label,
           access: r.access,
           live: live?.live ?? false,
@@ -413,7 +421,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                         <td className="px-3 py-2.5 align-middle">
                           {r.live ? (
                             <Link
-                              href={reportHref(r.reportN, r.unitCode, r.unitKind)}
+                              href={reportHref(r.reportSlug, r.reportN, r.unitCode, r.unitKind)}
                               className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
                               data-testid={`reports-index-link-${r.unitCode}-${r.reportN}`}
                             >
@@ -480,7 +488,7 @@ type PerReport = ReportsIndexUnit["perReport"][number];
 
 /** One unit's report rows — shared by a band body (`ReportsBands`) and the
  *  band-less single-unit table (`SingleUnitReportsTable`). A live report is a
- *  stretched-anchor link to `/edit/reports/N?center=…`; not-live renders as
+ *  stretched-anchor link to `/edit/reports/<slug>?center=…`; not-live renders as
  *  plain muted text, matching the "advisory, not a promise" tone of the rest
  *  of this console. `reports` is THIS unit's own catalog — see the module
  *  doc comment for why it's no longer a shared prop. */
@@ -507,7 +515,7 @@ function ReportRows({
           >
             <td className="px-3 py-2.5 align-middle">
               <Link
-                href={reportHref(r.n, unitCode, unitKind)}
+                href={reportHref(r.slug, r.n, unitCode, unitKind)}
                 className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
                 data-testid={`reports-index-band-link-${unitCode}-${r.n}`}
               >

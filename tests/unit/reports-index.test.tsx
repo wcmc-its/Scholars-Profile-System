@@ -63,14 +63,17 @@ const PROGRAM_ACCESS: ReportAccessPopoverProps = {
   canManage: true,
 };
 
+// Each report carries its CURRENT `report_meta.slug` (the page fills it from
+// `loadReportMeta()`); the row links to `/edit/reports/<slug>`, never the number.
 const CENTER_REPORTS: ReportsIndexReport[] = [
-  { n: 1, label: "1. Optimize membership", description: "Membership recs.", access: UNIT_ACCESS },
-  { n: 2, label: "2. NCI Table 2a", description: "Funding review.", access: UNIT_ACCESS },
-  { n: 3, label: "3. Publications", description: "Pubs by program.", access: UNIT_ACCESS },
-  { n: 4, label: "4. Grants", description: "Active grants.", access: UNIT_ACCESS },
-  { n: 5, label: "5. Clinical Trials", description: "Active trials.", access: UNIT_ACCESS },
+  { n: 1, slug: "optimize-membership", label: "1. Optimize membership", description: "Membership recs.", access: UNIT_ACCESS },
+  { n: 2, slug: "nci-table-2a", label: "2. NCI Table 2a", description: "Funding review.", access: UNIT_ACCESS },
+  { n: 3, slug: "publications", label: "3. Publications", description: "Pubs by program.", access: UNIT_ACCESS },
+  { n: 4, slug: "grants", label: "4. Grants", description: "Active grants.", access: UNIT_ACCESS },
+  { n: 5, slug: "clinical-trials", label: "5. Clinical Trials", description: "Active trials.", access: UNIT_ACCESS },
   {
     n: 6,
+    slug: "nih-funded-pubs",
     label: "6. NIH-funded pubs",
     description: "NIH RePORTER-linked pubs.",
     access: UNIT_ACCESS,
@@ -78,9 +81,10 @@ const CENTER_REPORTS: ReportsIndexReport[] = [
 ];
 
 const UNIT_REPORTS: ReportsIndexReport[] = [
-  { n: 3, label: "3. Publications", description: "Pubs by member.", access: UNIT_ACCESS },
+  { n: 3, slug: "publications", label: "3. Publications", description: "Pubs by member.", access: UNIT_ACCESS },
   {
     n: 6,
+    slug: "nih-funded-pubs",
     label: "6. NIH-funded pubs",
     description: "NIH RePORTER-linked pubs.",
     access: UNIT_ACCESS,
@@ -172,13 +176,14 @@ const PROGRAM: ReportsIndexUnit = {
   kind: "program",
   name: "Mentoring programs",
   centerType: null,
-  editHref: "/edit/reports/7",
+  editHref: "/edit/reports/mentored-publications",
   liveCount: 1,
   totalCount: 1,
   lastRefreshedAt: null,
   reports: [
     {
       n: 7,
+      slug: "mentored-publications",
       label: "7. Mentored publications",
       description: "Learner–mentor co-publications.",
       access: PROGRAM_ACCESS,
@@ -197,10 +202,10 @@ describe("ReportsIndex — table mode (2a)", () => {
     }
   });
 
-  it("a live report row links to /edit/reports/N?center=…; a not-live row is plain text with no link", () => {
+  it("a live report row links to /edit/reports/<slug>?center=…; a not-live row is plain text with no link", () => {
     render(<ReportsIndex units={[MEYER]} mode="table" />);
     const link = screen.getByTestId("reports-index-link-meyer-1");
-    expect(link.getAttribute("href")).toBe("/edit/reports/1?center=meyer");
+    expect(link.getAttribute("href")).toBe("/edit/reports/optimize-membership?center=meyer");
     // Report 3 is not live for Meyer — no link, just the row with label text.
     expect(screen.queryByTestId("reports-index-link-meyer-3")).toBeNull();
     expect(screen.getByTestId("reports-index-row-meyer-3").textContent).toContain("3. Publications");
@@ -285,20 +290,22 @@ describe("ReportsIndex — table mode (2a)", () => {
     expect(screen.getByTestId("reports-index-row-14-3").textContent).toContain("Core");
     // Without &kind=core the report page resolves "14" as a CENTER code.
     expect(screen.getByTestId("reports-index-link-14-3").getAttribute("href")).toBe(
-      "/edit/reports/3?center=14&kind=core",
+      "/edit/reports/publications?center=14&kind=core",
     );
     expect(screen.getByTestId("reports-index-link-14-6").getAttribute("href")).toBe(
-      "/edit/reports/6?center=14&kind=core",
+      "/edit/reports/nih-funded-pubs?center=14&kind=core",
     );
   });
 
-  it("the program pseudo-unit is a row like any other: shown by default, labelled Program, linking to /edit/reports/7 with no unit param, governed by its own checkbox", () => {
+  it("the program pseudo-unit is a row like any other: shown by default, labelled Program, linking to /edit/reports/<slug> with no unit param, governed by its own checkbox", () => {
     render(<ReportsIndex units={[MEYER, PROGRAM]} mode="table" />);
     const row = screen.getByTestId("reports-index-row-mentoring-programs-7");
     expect(row.textContent).toContain("Program");
     expect(row.textContent).toContain("Mentoring programs");
     expect(row.textContent).toContain("Live");
-    expect(screen.getByTestId("reports-index-link-mentoring-programs-7").getAttribute("href")).toBe("/edit/reports/7");
+    expect(screen.getByTestId("reports-index-link-mentoring-programs-7").getAttribute("href")).toBe(
+      "/edit/reports/mentored-publications",
+    );
     expect(screen.getByTestId("reports-index-filter-program").closest("label")?.textContent).toContain("1");
     fireEvent.click(screen.getByTestId("reports-index-filter-program"));
     expect(screen.queryByTestId("reports-index-row-mentoring-programs-7")).toBeNull();
@@ -319,7 +326,7 @@ describe("ReportsIndex — table mode (2a)", () => {
     fireEvent.click(screen.getByTestId("reports-index-filter-department"));
     fireEvent.click(screen.getByTestId("reports-index-filter-division"));
     expect(screen.getByTestId("reports-index-link-surg-3").getAttribute("href")).toBe(
-      "/edit/reports/3?center=surg&kind=department",
+      "/edit/reports/publications?center=surg&kind=department",
     );
   });
 
@@ -428,10 +435,10 @@ describe("ReportsIndex — bands mode (1a)", () => {
     expect(screen.getByTestId("reports-index-band-epic")).toBeTruthy();
   });
 
-  it("a live report row is a link to /edit/reports/N; a not-live one is plain muted text", () => {
+  it("a live report row is a link to /edit/reports/<slug>; a not-live one is plain muted text", () => {
     render(<ReportsIndex units={[MEYER]} mode="bands" />);
     const link = screen.getByTestId("reports-index-band-link-meyer-1");
-    expect(link.getAttribute("href")).toBe("/edit/reports/1?center=meyer");
+    expect(link.getAttribute("href")).toBe("/edit/reports/optimize-membership?center=meyer");
     // Report 3 is not live for Meyer in this fixture — no link, just text.
     expect(screen.queryByTestId("reports-index-band-link-meyer-3")).toBeNull();
     const band = screen.getByTestId("reports-index-band-meyer");
@@ -449,7 +456,7 @@ describe("ReportsIndex — bands mode (1a)", () => {
   it("a program band lists its one report and has no profile to edit", () => {
     render(<ReportsIndex units={[PROGRAM]} mode="bands" />);
     expect(screen.getByTestId("reports-index-band-link-mentoring-programs-7").getAttribute("href")).toBe(
-      "/edit/reports/7",
+      "/edit/reports/mentored-publications",
     );
     expect(screen.getByTestId("reports-index-band-mentoring-programs").textContent).toContain("Program · 1 of 1 reports live");
     expect(screen.queryByTestId("reports-index-edit-mentoring-programs")).toBeNull();
@@ -468,7 +475,7 @@ describe("ReportsIndex — bands mode (1a)", () => {
   it("a department's live report link carries &kind=department", () => {
     render(<ReportsIndex units={[DEPT]} mode="bands" />);
     const link = screen.getByTestId("reports-index-band-link-surg-3");
-    expect(link.getAttribute("href")).toBe("/edit/reports/3?center=surg&kind=department");
+    expect(link.getAttribute("href")).toBe("/edit/reports/publications?center=surg&kind=department");
   });
 });
 
@@ -483,10 +490,10 @@ describe("SingleUnitReportsTable — 3a (exactly one reportable unit)", () => {
     expect(within(table).queryByText(/reports live/)).toBeNull();
   });
 
-  it("a live report is a link to /edit/reports/N?center=…; a not-live one is plain muted text", () => {
+  it("a live report is a link to /edit/reports/<slug>?center=…; a not-live one is plain muted text", () => {
     render(<SingleUnitReportsTable unitCode="meyer" perReport={perReport([1, 2])} reports={CENTER_REPORTS} />);
     const link = screen.getByTestId("reports-index-band-link-meyer-1");
-    expect(link.getAttribute("href")).toBe("/edit/reports/1?center=meyer");
+    expect(link.getAttribute("href")).toBe("/edit/reports/optimize-membership?center=meyer");
     expect(screen.queryByTestId("reports-index-band-link-meyer-3")).toBeNull();
     const table = screen.getByTestId("single-unit-reports-table");
     expect(within(table).getByText("3. Publications")).toBeTruthy();
@@ -495,7 +502,7 @@ describe("SingleUnitReportsTable — 3a (exactly one reportable unit)", () => {
   it("unitKind defaults to center — no &kind= param when omitted", () => {
     render(<SingleUnitReportsTable unitCode="meyer" perReport={perReport([1])} reports={CENTER_REPORTS} />);
     expect(screen.getByTestId("reports-index-band-link-meyer-1").getAttribute("href")).toBe(
-      "/edit/reports/1?center=meyer",
+      "/edit/reports/optimize-membership?center=meyer",
     );
   });
 
@@ -509,6 +516,6 @@ describe("SingleUnitReportsTable — 3a (exactly one reportable unit)", () => {
       />,
     );
     const link = screen.getByTestId("reports-index-band-link-surg-3");
-    expect(link.getAttribute("href")).toBe("/edit/reports/3?center=surg&kind=department");
+    expect(link.getAttribute("href")).toBe("/edit/reports/publications?center=surg&kind=department");
   });
 });

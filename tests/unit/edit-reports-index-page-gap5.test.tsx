@@ -150,7 +150,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect((index?.props.units as Array<{ kind: string }>).map((u) => u.kind)).toEqual(["program"]);
   });
 
-  it("the program card's label and blurb come from report_meta: defaults with no row, the row when present", async () => {
+  it("the program card's label, blurb and slug come from report_meta: defaults with no row, the row when present", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     const byDefault = await EditReportsIndexPage({ searchParams: sp() });
@@ -160,6 +160,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     ).toEqual([
       {
         n: 7,
+        slug: "mentored-publications",
         label: "7. Mentored publications",
         description: expect.stringContaining("Access is granted per person."),
         access: expect.objectContaining({ mode: "person" }),
@@ -182,6 +183,8 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     ).toEqual([
       {
         n: 7,
+        // The row's slug too, so the index links straight to the renamed address.
+        slug: "mentee-co-publications",
         label: "7. Mentee co-publications",
         description: "Edited blurb.",
         access: expect.objectContaining({ mode: "person" }),
