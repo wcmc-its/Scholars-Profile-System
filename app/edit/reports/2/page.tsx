@@ -17,18 +17,19 @@ import { redirect } from "next/navigation";
 import { Nci2aCard } from "@/components/edit/cancer-center-nci-2a-card";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportHeader } from "@/components/edit/report-header";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { loadReportsContext, resolveNumberedReportCenterCode } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { reportPageMetadata } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "NCI Table 2a — Scholars Profile Console",
-  robots: { index: false, follow: false },
-};
+/** `<title>` from `report_meta` (superuser-editable), one cached read shared
+ *  with `ReportHeader` below. */
+export const generateMetadata = () => reportPageMetadata("2");
 
 export default async function EditReportsNci2aPage({
   searchParams,
@@ -71,7 +72,7 @@ export default async function EditReportsNci2aPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-4 text-xl font-bold">2. NCI Table 2a</h1>
+      <ReportHeader n="2" session={session} />
       <Nci2aCard centerCode={code} />
     </ConsoleShell>
   );

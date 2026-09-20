@@ -15,6 +15,7 @@ const {
   mockLoadReportableUnits,
   mockReportsIndex,
   mockGetReportScopes,
+  mockReportMetaFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockNotFound: vi.fn(() => {
@@ -26,6 +27,7 @@ const {
   mockLoadReportableUnits: vi.fn(),
   mockReportsIndex: vi.fn(() => null),
   mockGetReportScopes: vi.fn(),
+  mockReportMetaFindMany: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ notFound: mockNotFound, redirect: mockRedirect }));
@@ -59,7 +61,11 @@ vi.mock("@/lib/edit/report-access", () => ({
   getReportScopes: mockGetReportScopes,
   MENTORED_PUBS_REPORT: "mentored-publications",
 }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+// `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
+// catalog renders from the hardcoded defaults.
+vi.mock("@/lib/db", () => ({
+  db: { read: { reportMeta: { findMany: mockReportMetaFindMany } }, write: {} },
+}));
 
 import EditReportsIndexPage from "@/app/edit/reports/page";
 
@@ -89,6 +95,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLoadReportableUnits.mockResolvedValue([]);
   mockGetReportScopes.mockResolvedValue(new Set());
+  mockReportMetaFindMany.mockResolvedValue([]);
 });
 
 describe("/edit/reports — Gap 5: zero reportable units", () => {
@@ -126,6 +133,37 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     const index = findByType(result, mockReportsIndex);
     expect(index?.props.mode).toBe("table");
     expect((index?.props.units as Array<{ kind: string }>).map((u) => u.kind)).toEqual(["program"]);
+  });
+
+  it("the program card's label and blurb come from report_meta: defaults with no row, the row when present", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockGetReportScopes.mockResolvedValue(new Set(["*"]));
+    const byDefault = await EditReportsIndexPage({ searchParams: sp() });
+    expect(
+      (findByType(byDefault, mockReportsIndex)?.props.units as Array<{ reports: unknown[] }>)[0]
+        .reports,
+    ).toEqual([
+      {
+        n: 7,
+        label: "7. Mentored publications",
+        description: expect.stringContaining("Access is granted per person."),
+      },
+    ]);
+
+    mockReportMetaFindMany.mockResolvedValue([
+      {
+        reportKey: "7",
+        slug: "mentee-co-publications",
+        name: "Mentee co-publications",
+        summary: "Edited blurb.",
+        descriptionHtml: null,
+      },
+    ]);
+    const edited = await EditReportsIndexPage({ searchParams: sp() });
+    expect(
+      (findByType(edited, mockReportsIndex)?.props.units as Array<{ reports: unknown[] }>)[0]
+        .reports,
+    ).toEqual([{ n: 7, label: "7. Mentee co-publications", description: "Edited blurb." }]);
   });
 
   it("superuser with no report grant sees no program row when scopes are empty", async () => {

@@ -17,11 +17,12 @@
  * is the auto-submit island; the tables are the `MentoredPublicationsTable`
  * island and receive `view` / `summary` / `publications` / `pubsMode`; an
  * unloaded all-pubs bridge renders the notice, not the island; the PubMed-
- * only sentence names the dropped count; the description and the closed
- * "Sources" disclosure speak the office's words (AOC, pairing sheet; the
- * Faculty Review Tool named as not yet a source) and the Viewers panel's
- * `md` scope reads "AOC". `HoverTooltip` is mocked to its children — the
- * walker calls plain function components, and Radix's provider uses hooks.
+ * only sentence names the dropped count; the description speaks the
+ * office's words (AOC, pairing sheet) and points at the "About this report"
+ * disclosure (the former hardcoded "Sources" disclosure is gone — the h1 and
+ * the disclosure are `ReportHeader`'s, over `report_meta`) and the Viewers
+ * panel's `md` scope reads "AOC". `HoverTooltip` is mocked to its children —
+ * the walker calls plain function components, and Radix's provider uses hooks.
  * "Faculty-asserted" is offered to every holder, checked by default for
  * `"*"` only, and its CWID-less entries get their own sentence.
  */
@@ -43,6 +44,7 @@ const h = vi.hoisted(() => ({
   mockTable: vi.fn(() => null),
   mockAutoSubmitForm: vi.fn(({ children }: { children: React.ReactNode }) => children),
   mockHoverTooltip: vi.fn(({ children }: { children: React.ReactNode }) => children),
+  mockReportHeader: vi.fn(({ children }: { children: React.ReactNode }) => children),
 }));
 
 vi.mock("next/navigation", () => ({ notFound: h.mockNotFound, redirect: h.mockRedirect }));
@@ -56,6 +58,13 @@ vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
   return { ...actual, loadMentoredGradYears: h.mockLoadGradYears, loadMentoredPublicationsReport: h.mockLoadReport };
 });
 vi.mock("@/components/edit/report-access-panel", () => ({ ReportAccessPanel: h.mockPanel }));
+// The h1 + "About this report" disclosure live in `ReportHeader` (an async
+// Server Component over `report_meta`, covered by `report-header.test.tsx`);
+// here it is a pass-through so the walk still reaches the page's subtitle.
+vi.mock("@/components/edit/report-header", () => ({ ReportHeader: h.mockReportHeader }));
+vi.mock("@/lib/edit/report-meta", () => ({
+  reportPageMetadata: vi.fn(),
+}));
 vi.mock("@/components/edit/mentored-publications-table", () => ({ MentoredPublicationsTable: h.mockTable }));
 vi.mock("@/components/edit/auto-submit-form", () => ({ AutoSubmitForm: h.mockAutoSubmitForm }));
 vi.mock("@/components/ui/hover-tooltip", () => ({
@@ -468,7 +477,7 @@ describe("/edit/reports/7 — wiring", () => {
       highImpactThreshold: 10,
     });
     expect(textOf(summary)).toContain(
-      "Pairs come from the AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty add on their own profile, and co-authorship inferences (off by default) — see Sources below.",
+      "Pairs come from the AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty add on their own profile, and co-authorship inferences (off by default) — see “About this report” below.",
     );
     expect(textOf(summary)).toContain("an AOC learner with no entry year on the pairing sheet");
     expect(textOf(summary)).not.toContain("MD-program");
@@ -600,34 +609,16 @@ describe("/edit/reports/7 — wiring", () => {
     ]);
   });
 
-  it("Sources: a closed disclosure under the description, one entry per type in filter order, ending with the Faculty Review Tool as not yet a source", async () => {
+  it("the hardcoded Sources disclosure is gone: the h1 and description ride ReportHeader (report_meta row 7)", async () => {
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
-    const sources = findByTestId(result, "mentored-pubs-sources");
-    expect(sources).not.toBeNull();
-    expect(sources!.type).toBe("details");
-    expect(sources!.props.open).toBeUndefined();
-    const text = textOf(sources);
-    expect(text.startsWith("Sources")).toBe(true);
-    for (const label of [
-      "AOC",
-      "MD-PhD (program office)",
-      "ECR",
-      "PhD / MD-PhD thesis advisor",
-      "Postdoc supervisor",
-      "Likely mentee (from co-authorship)",
-      "Possible mentee (from co-authorship)",
-    ]) {
-      expect(text).toContain(label);
-    }
-    // The date facts the one-sentence descriptions lack.
-    expect(text).toContain("Carries the graduation year and, for recent classes, the entry year.");
-    expect(text).toContain("No entry or graduation years yet.");
-    expect(text).toContain("Conferral year known; start year not.");
-    expect(text).toContain("Carries the appointment start and end dates.");
-    expect(text).not.toContain("presumptive");
-    const frt = findByTestId(result, "mentored-pubs-sources-frt");
-    expect(textOf(frt)).toBe(
-      "Not yet a source: the Faculty Review Tool’s self-reported mentees — the mentoring extract from that system has not been provided.",
-    );
+    expect(findByTestId(result, "mentored-pubs-sources")).toBeNull();
+    expect(findByTestId(result, "mentored-pubs-sources-frt")).toBeNull();
+    expect(findByType(result, "h1")).toBeNull();
+    const header = findByType(result, h.mockReportHeader);
+    expect(header).not.toBeNull();
+    expect(header!.props).toMatchObject({ n: "7", session: HOLDER });
+    // The page's own dynamic subtitle is the header's child, pointing at the
+    // disclosure by its summary text.
+    expect(textOf(header!.props.children)).toContain("see “About this report” below.");
   });
 });

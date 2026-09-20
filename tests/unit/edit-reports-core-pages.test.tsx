@@ -58,6 +58,16 @@ vi.mock("@/components/edit/console-shell", () => ({
   ),
 }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
+// `ReportHeader` is an async Server Component (reads `report_meta`); a sync
+// stand-in keeps `render()` viable and still surfaces the page's subtitle.
+vi.mock("@/components/edit/report-header", () => ({
+  ReportHeader: ({ n, children }: { n: string; children?: React.ReactNode }) => (
+    <>
+      <h1 data-testid="report-header">Report {n}</h1>
+      {children}
+    </>
+  ),
+}));
 vi.mock("@/components/edit/publications-report-table", () => ({
   PublicationsReportTable: mockPubsTable,
 }));
