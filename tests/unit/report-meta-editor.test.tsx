@@ -21,12 +21,15 @@ vi.mock("@/components/edit/overview-editor", () => ({
   OverviewEditor: ({
     initialHtml,
     onChange,
+    dense,
   }: {
     initialHtml: string;
     onChange: (v: string) => void;
+    dense?: boolean;
   }) => (
     <textarea
       data-testid="overview-editor"
+      data-dense={dense ? "true" : "false"}
       defaultValue={initialHtml}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -88,6 +91,13 @@ describe("ReportMetaEditor", () => {
     expect((q.getByTestId("overview-editor") as HTMLTextAreaElement).value).toBe("<p>About.</p>");
     expect((q.getByTestId("report-meta-name") as HTMLInputElement).maxLength).toBe(120);
     expect((q.getByTestId("report-meta-summary") as HTMLTextAreaElement).maxLength).toBe(500);
+  });
+
+  it("the open form carries data-report-meta-open (the header hides its rendered copy on it) and a dense editor", () => {
+    const q = setup();
+    fireEvent.click(q.getByTestId("report-meta-edit"));
+    expect(q.getByTestId("report-meta-form").hasAttribute("data-report-meta-open")).toBe(true);
+    expect(q.getByTestId("overview-editor").getAttribute("data-dense")).toBe("true");
   });
 
   it("an invalid slug disables Save; a valid one re-enables it", () => {

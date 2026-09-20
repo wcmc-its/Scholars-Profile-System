@@ -254,11 +254,9 @@ export async function renderMentoredPublicationsReport({
         {allMode
           ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
           : "Every publication a learner co-authored with one of their mentors, "}
-        with Journal Impact Factor and NIH iCite citations. Pairs come from the MD program&rsquo;s AOC pairing sheet, the
-        MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty
-        add on their own profile, and co-authorship inferences (off by default) &mdash; see &ldquo;About
-        this report&rdquo; below. &ldquo;In window&rdquo; means entry year &le; publication year &le;
-        graduation year + {params.tail}; an AOC learner with no entry year on the pairing sheet is
+        with Journal Impact Factor and NIH iCite citations &mdash; the sources are under &ldquo;About
+        this report&rdquo;. &ldquo;In window&rdquo; means entry year &le; publication year &le;
+        graduation year + {params.tail}; an MD learner with no entry year on the pairing sheet is
         assumed to have entered four years before graduating.
         {report.droppedUnresolved > 0 &&
           ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}

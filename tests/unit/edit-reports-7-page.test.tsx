@@ -542,10 +542,11 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     expect(findByType(findByType(summary, h.mockTable)?.props.children, h.mockAutoSubmitForm)?.props.id).toBe(
       "mentored-pubs-filters",
     );
-    expect(textOf(summary)).toContain(
-      "Pairs come from the MD program’s AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty add on their own profile, and co-authorship inferences (off by default) — see “About this report” below.",
-    );
-    expect(textOf(summary)).toContain("an AOC learner with no entry year on the pairing sheet");
+    // The sources list lives ONLY in the "About this report" disclosure now —
+    // the subtitle points at it instead of restating it (2026-09-20).
+    expect(textOf(summary)).toContain("the sources are under “About this report”.");
+    expect(textOf(summary)).not.toContain("Pairs come from");
+    expect(textOf(summary)).toContain("an MD learner with no entry year on the pairing sheet");
     expect(textOf(summary)).not.toContain("MD-program");
     expect(textOf(summary)).not.toContain("presumptive");
     expect(textOf(summary)).not.toContain("PubMed-indexed publications only");
@@ -675,6 +676,6 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     expect(header!.props).toMatchObject({ n: "7", session: HOLDER });
     // The page's own dynamic subtitle is the header's child, pointing at the
     // disclosure by its summary text.
-    expect(textOf(header!.props.children)).toContain("see “About this report” below.");
+    expect(textOf(header!.props.children)).toContain("the sources are under “About this report”.");
   });
 });

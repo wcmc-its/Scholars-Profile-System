@@ -134,6 +134,20 @@ describe("ReportHeader", () => {
     ).toBeTruthy();
   });
 
+  it("the subtitle + disclosure sit in one wrapper that hides while the pencil's form is open (has-[data-report-meta-open])", async () => {
+    const q = await renderHeader({
+      n: "3",
+      session: PLAIN,
+      children: <p data-testid="subtitle">Every publication with a confirmed author.</p>,
+    });
+    const rendered = q.getByTestId("report-header-rendered");
+    expect(rendered.contains(q.getByTestId("subtitle"))).toBe(true);
+    expect(rendered.contains(q.getByTestId("report-description"))).toBe(true);
+    expect(rendered.className).toContain("group-has-[[data-report-meta-open]]/report-header:hidden");
+    // …and the group the variant keys on is the header's own root.
+    expect(rendered.closest(".group\\/report-header")).not.toBeNull();
+  });
+
   it("description null → no <details> at all; children still render", async () => {
     h.mockReportMetaFor.mockResolvedValue({ ...META, descriptionHtml: null });
     const q = await renderHeader({
