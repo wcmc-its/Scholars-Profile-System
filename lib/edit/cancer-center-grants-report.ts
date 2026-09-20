@@ -1,6 +1,6 @@
 /**
  * `/edit/reports/4` — "Grants active as of a date" (report 4 of the
- * `/edit/reports/*` console, `app/edit/reports/4/page.tsx`).
+ * `/edit/reports/*` console, `components/edit/reports/grants-body.tsx`).
  *
  * One row per `Grant` row held by a Cancer Center member — NOT deduped into
  * multi-investigator "projects" the way `lib/api/unit-grant-projects.ts`

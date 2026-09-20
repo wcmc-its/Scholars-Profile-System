@@ -146,7 +146,11 @@ export default async function EditReportPage({
   const def = REPORTS[n];
 
   let back: string;
-  let access: React.ReactNode;
+  // Deferred so the grant list (person gate), the shell counts and the
+  // body's own loads all run in ONE `Promise.all` below — report 7's page
+  // ran its four reads concurrently before this refactor; a serial chain
+  // here would be a latency regression on the heaviest report.
+  let loadAccess: () => Promise<React.ReactNode>;
   let render: () => Promise<ReportRender>;
 
   if (def.gate === "unit") {
@@ -181,7 +185,7 @@ export default async function EditReportPage({
       kind === "center"
         ? `/edit/reports?center=${encodeURIComponent(code)}`
         : `/edit/reports?center=${encodeURIComponent(code)}&kind=${kind}`;
-    access = <ReportAccessPopover mode="unit" />;
+    loadAccess = async () => <ReportAccessPopover mode="unit" />;
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
   } else {
     // Row-based gate: an empty scope set reads as an unbuilt route, the same
@@ -195,29 +199,34 @@ export default async function EditReportPage({
     // can run the report to anyone who can; only Add / Remove ride
     // `canManage`. The scope options are report 7's (the one person-gated
     // report today); a second one would carry its own on the registry entry.
-    const accessRows = await listReportAccess(def.accessKey);
-    const initialRows: ReportAccessPopoverRow[] = accessRows.map((r) => ({
-      ...r,
-      grantedAt: r.grantedAt.toISOString(),
-    }));
     back = "/edit/reports";
-    access = (
-      <ReportAccessPopover
-        mode="person"
-        reportKey={def.accessKey}
-        initialRows={initialRows}
-        scopeOptions={MENTORED_PUBS_SCOPE_OPTIONS}
-        canManage={canManageReportAccess(session)}
-      />
-    );
+    loadAccess = async () => {
+      const accessRows = await listReportAccess(def.accessKey);
+      const initialRows: ReportAccessPopoverRow[] = accessRows.map((r) => ({
+        ...r,
+        grantedAt: r.grantedAt.toISOString(),
+      }));
+      return (
+        <ReportAccessPopover
+          mode="person"
+          reportKey={def.accessKey}
+          initialRows={initialRows}
+          scopeOptions={MENTORED_PUBS_SCOPE_OPTIONS}
+          canManage={canManageReportAccess(session)}
+        />
+      );
+    };
     render = () => def.render({ n, scopes, session, searchParams: sp, basePath });
   }
 
-  const pendingSlugRequests =
-    session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
-  const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
-
-  const { subtitle, main } = await render();
+  const [pendingSlugRequests, pendingHonors, access, { subtitle, main }] = await Promise.all([
+    session.isSuperuser && isSlugRequestEnabled()
+      ? countPendingSlugRequests(db.read)
+      : Promise.resolve(null),
+    isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
+    loadAccess(),
+    render(),
+  ]);
   return (
     <ConsoleShell
       active="reports"

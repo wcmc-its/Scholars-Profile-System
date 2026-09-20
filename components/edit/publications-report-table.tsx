@@ -10,7 +10,7 @@ import type { PublicationsReportRow } from "@/lib/edit/cancer-center-publication
 /**
  * `/edit/reports/3` ("Publications") — the client-island table + Person-type
  * filter rail. Org-unit publications reports plan (2026-08-16): all rows load
- * server-side in one shot (`app/edit/reports/3/page.tsx`); filtering is
+ * server-side in one shot (`components/edit/reports/publications-body.tsx`); filtering is
  * in-memory, no fetch — the SAME client-island shape `components/edit/
  * reports-index.tsx`'s own `ReportsTable` already proves out (checkboxes,
  * `React.useMemo` filter, `RosterFacet` for the checkbox list), reused rather

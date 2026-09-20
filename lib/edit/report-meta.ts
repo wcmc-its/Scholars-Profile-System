@@ -16,7 +16,7 @@
  * once present, wins ENTIRELY (its `descriptionHtml` included, so a superuser
  * can clear report 7's default description to none — a `?? default` there
  * would make NULL unreachable). Only report 7 has a default description: the
- * former hardcoded "Sources" disclosure of `app/edit/reports/7/page.tsx`, as
+ * former hardcoded "Sources" disclosure of the report 7 page (now `components/edit/reports/mentored-publications-body.tsx`), as
  * bullets.
  *
  * `loadReportMeta` is wrapped in React's `cache()` so a report page's
