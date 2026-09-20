@@ -10,11 +10,13 @@ private session handoffs; this is their durable home.
 The Areas of Concentration (AOC) office — the MD scholarly-concentration program — asks every year
 for a spreadsheet: for each learner, every publication they co-authored with one of their mentors,
 with Journal Impact Factor and NIH iCite citations, plus per-learner counts. They built it by hand.
-`/edit/reports/7` is that spreadsheet on demand: a Learners summary table and a Publications table
+`/edit/reports/7` (the permanent link; it redirects to the report's current slug URL,
+`/edit/reports/mentored-publications` by default) is that spreadsheet on demand: a Learners summary table and a Publications table
 in-page, and the full three-sheet workbook (Summary / Raw Data / Query & Assumptions) behind
 "Download .xlsx" (`/api/edit/reports/mentored-publications`, same query string).
 
-Code: `app/edit/reports/7/page.tsx` (page), `lib/edit/mentored-publications-report.ts` (loader),
+Code: `app/edit/reports/[report]/page.tsx` (the shared report page) + `lib/edit/report-registry.ts` entry `"7"` +
+`components/edit/reports/mentored-publications-body.tsx` (the report body), `lib/edit/mentored-publications-report.ts` (loader),
 `lib/edit/mentorship-type.ts` (the type vocabulary, labels, hover text),
 `lib/edit/mentored-publications-params.ts` (query contract), `lib/edit/mentored-publications-xlsx.ts`
 (workbook), `components/edit/mentored-publications-table.tsx` (the client island).

@@ -1,107 +1,48 @@
 /**
- * `/edit/reports/6` — "NIH-funded pubs" (org-unit publications reports plan,
+ * Report 6 — "NIH-funded pubs" (org-unit publications reports plan,
  * 2026-08-16). This unit's member publications that carry a `GrantPublication`
  * link to NIH RePORTER (`lib/edit/nih-funded-publications-report.ts` — see
  * that module's doc comment for the row grain and confidence trigger).
  * Center, department, division, or core — unit-agnostic from day one, same
  * `?center=<code>[&kind=department|division|core]` routing convention as
- * report 3. For `kind=core` the `<code>` is the core id, the gate is the
- * core's own owner/curator gate, and the publication set is the core's
- * confirmed `publication_core` usages rather than a member roster.
+ * report 3 (the kind resolution is the dynamic page's, `unitKindsFor("6")`).
+ * For `kind=core` the `<code>` is the core id, the gate is the core's own
+ * owner/curator gate, and the publication set is the core's confirmed
+ * `publication_core` usages rather than a member roster.
  *
  * Read-only, server-rendered — no client component, no interaction beyond
  * following a link, matching reports 1/2/4/5's tables.
+ *
+ * The body of what was `app/edit/reports/6/page.tsx`, moved verbatim into the
+ * registry shape (`lib/edit/report-registry.ts`): the session / gate / shell /
+ * header frame is the dynamic page's; this owns only the report. The kind-
+ * aware subtitle `<p>` is returned as `subtitle` (the header's children).
  */
-import Link from "next/link";
-import { redirect } from "next/navigation";
-
-import { ConsoleShell } from "@/components/edit/console-shell";
-import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { ReportAccessPopover } from "@/components/edit/report-access-popover";
-import { ReportHeader } from "@/components/edit/report-header";
 import { LowerConfidenceBadge } from "@/components/funding/expanded-grant";
-import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { db } from "@/lib/db";
-import {
-  loadReportsContext,
-  resolveNumberedReportCenterCode,
-  type ReportableUnitKind,
-} from "@/lib/edit/cancer-center-reports";
-import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { loadNihFundedPublicationsReport } from "@/lib/edit/nih-funded-publications-report";
-import { reportPageMetadata } from "@/lib/edit/report-meta";
-import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
-
-export const dynamic = "force-dynamic";
-
-/** `<title>` from `report_meta` (superuser-editable), one cached read shared
- *  with `ReportHeader` below. */
-export const generateMetadata = () => reportPageMetadata("6");
-
-const ALLOWED_KINDS: readonly ReportableUnitKind[] = ["center", "department", "division", "core"];
-
-function parseKind(raw: string | undefined): ReportableUnitKind | undefined {
-  return raw === "department" || raw === "division" || raw === "core" ? raw : undefined;
-}
+import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
 
 const thClass = "px-3 py-2 font-medium";
 const tdClass = "px-3 py-2";
 
-export default async function EditReportsNihFundedPublicationsPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ center?: string; kind?: string }>;
-}) {
-  const session = await getEffectiveEditSession();
-  if (!session) {
-    redirect("/api/auth/saml/login?return=/edit/reports/6");
-  }
-
-  const { center, kind: kindParam } = (await searchParams) ?? {};
-  const { code, kind } = await resolveNumberedReportCenterCode(session, db.read, center, {
-    allowedKinds: ALLOWED_KINDS,
-    requestedKind: parseKind(kindParam),
-  });
-  const ctx = await loadReportsContext(code, session, db.read, kind);
-  if (ctx === null) {
-    return (
-      <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage variant="unit" targetEntity={code} />
-      </ConsoleShell>
-    );
-  }
-
-  const pendingSlugRequests =
-    session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
-  const pendingHonors = isHonorsQueueTabVisible(session)
-    ? await countPendingHonors(db.read)
-    : null;
-
+/** Report 6's body: the unit's publications with a matched NIH RePORTER link. */
+export async function renderNihFundedPubsReport({
+  code,
+  kind,
+  ctx,
+}: UnitReportProps): Promise<ReportRender> {
   const report = await loadNihFundedPublicationsReport(kind, code);
 
-  return (
-    <ConsoleShell
-      active="reports"
-      session={session}
-      pendingSlugRequests={pendingSlugRequests}
-      pendingHonors={pendingHonors}
-      reportsTab
-    >
-      <Link
-        href={kind === "center" ? `/edit/reports?center=${encodeURIComponent(code)}` : `/edit/reports?center=${encodeURIComponent(code)}&kind=${kind}`}
-        className="text-apollo-slate mb-4 inline-block text-sm hover:underline"
-      >
-        &larr; All reports
-      </Link>
-      <ReportHeader n="6" session={session} access={<ReportAccessPopover mode="unit" />}>
-        <p className="text-muted-foreground text-sm">
-          {kind === "core"
-            ? `Every publication with a confirmed use of ${ctx.unit.name} and a matched NIH RePORTER funding link.`
-            : `Every ${ctx.unit.name} member publication with a matched NIH RePORTER funding link.`}
-        </p>
-      </ReportHeader>
-
-      {report.totalPublications === 0 ? (
+  return {
+    subtitle: (
+      <p className="text-muted-foreground text-sm">
+        {kind === "core"
+          ? `Every publication with a confirmed use of ${ctx.unit.name} and a matched NIH RePORTER funding link.`
+          : `Every ${ctx.unit.name} member publication with a matched NIH RePORTER funding link.`}
+      </p>
+    ),
+    main:
+      report.totalPublications === 0 ? (
         // Kind-aware: a core has no members, so "for a confirmed member
         // author" would misstate why the report is empty.
         <p className="text-muted-foreground mt-6" data-testid="nih-pubs-report-empty">
@@ -161,7 +102,6 @@ export default async function EditReportsNihFundedPublicationsPage({
             </table>
           </div>
         </>
-      )}
-    </ConsoleShell>
-  );
+      ),
+  };
 }

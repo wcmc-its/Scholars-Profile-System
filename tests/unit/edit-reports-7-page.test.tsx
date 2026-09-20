@@ -1,8 +1,13 @@
 /**
- * `app/edit/reports/7/page.tsx` — the Mentored publications page's gate and
- * wiring. Mirrors `edit-reports-index-page-gap5.test.tsx`'s scaffold: the
- * page's collaborators are mocked at the module boundary and the returned
- * element tree is walked (no render). Protects: no session → SSO redirect;
+ * `app/edit/reports/[report]/page.tsx` at the `mentored-publications` slug
+ * (report 7, the registry's one person-gated entry) — the Mentored
+ * publications page's gate and wiring. Mirrors
+ * `edit-reports-index-page-gap5.test.tsx`'s scaffold: the page's
+ * collaborators are mocked at the module boundary and the returned element
+ * tree is walked (no render). `report_meta` is an empty table
+ * (`reportMeta.findMany` on the db mock), so the slug resolves through the
+ * real `loadReportMeta` default and every in-page href is built on it.
+ * Protects: no session → SSO redirect;
  * an EMPTY scope set → `notFound()` (fail closed); a holder's scopes reach
  * the loader and default to the two most recent years (plus "unknown" when
  * the selection has year-less learners), the choices being the SELECTED
@@ -65,9 +70,6 @@ vi.mock("@/components/edit/report-access-popover", () => ({ ReportAccessPopover:
 // Server Component over `report_meta`, covered by `report-header.test.tsx`);
 // here it is a pass-through so the walk still reaches the page's subtitle.
 vi.mock("@/components/edit/report-header", () => ({ ReportHeader: h.mockReportHeader }));
-vi.mock("@/lib/edit/report-meta", () => ({
-  reportPageMetadata: vi.fn(),
-}));
 vi.mock("@/components/edit/mentored-publications-table", () => ({ MentoredPublicationsTable: h.mockTable }));
 vi.mock("@/components/edit/auto-submit-form", () => ({ AutoSubmitForm: h.mockAutoSubmitForm }));
 vi.mock("@/components/ui/hover-tooltip", () => ({
@@ -84,9 +86,21 @@ vi.mock("@/lib/edit/slug-request", () => ({
   isSlugRequestEnabled: () => false,
   countPendingSlugRequests: vi.fn().mockResolvedValue(null),
 }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
+vi.mock("@/lib/db", () => ({
+  db: { read: { reportMeta: { findMany: vi.fn().mockResolvedValue([]) } }, write: {} },
+  prisma: {},
+}));
 
-import EditReportsMentoredPublicationsPage from "@/app/edit/reports/7/page";
+import EditReportPage from "@/app/edit/reports/[report]/page";
+
+/** The dynamic page at report 7's default slug — the same call shape the
+ *  numbered page used to take, plus the segment. */
+const EditReportsMentoredPublicationsPage = ({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string>>;
+}) => EditReportPage({ params: Promise.resolve({ report: "mentored-publications" }), searchParams });
+const BASE = "/edit/reports/mentored-publications";
 
 const HOLDER = { cwid: "usr0001", isSuperuser: false, isCommsSteward: false };
 const SUPERUSER = { cwid: "adm0001", isSuperuser: true, isCommsSteward: false };
@@ -214,11 +228,11 @@ function checkboxes(node: unknown): Array<[string, string, boolean]> {
   return out;
 }
 
-describe("/edit/reports/7 — gate", () => {
+describe("/edit/reports/mentored-publications (7) — gate", () => {
   it("no session → SSO login with the return path", async () => {
     h.mockGetEditSession.mockResolvedValue(null);
     await expect(EditReportsMentoredPublicationsPage({ searchParams: sp() })).rejects.toThrow(
-      "__REDIRECT__:/api/auth/saml/login?return=/edit/reports/7",
+      "__REDIRECT__:/api/auth/saml/login?return=/edit/reports/mentored-publications",
     );
   });
 
@@ -230,7 +244,7 @@ describe("/edit/reports/7 — gate", () => {
   });
 });
 
-describe("/edit/reports/7 — wiring", () => {
+describe("/edit/reports/mentored-publications (7) — wiring", () => {
   it("a holder: loader gets their scopes, their roster type and the two most recent years; the download carries types; the popover is the header's access with canManage=false and the rows", async () => {
     h.mockListReportAccess.mockResolvedValue([ACCESS_ROW]);
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
@@ -441,7 +455,7 @@ describe("/edit/reports/7 — wiring", () => {
     const form = findByType(result, h.mockAutoSubmitForm);
     expect(form).not.toBeNull();
     expect(form!.props["data-testid"]).toBe("mentored-pubs-filters");
-    expect(form!.props.action).toBe("/edit/reports/7");
+    expect(form!.props.action).toBe(BASE);
     const hidden: Array<[string, string]> = [];
     const selects: Array<[string, string]> = [];
     const walk = (node: unknown) => {
@@ -476,8 +490,8 @@ describe("/edit/reports/7 — wiring", () => {
       view: "publications",
       pubsMode: "all",
       viewHrefs: {
-        summary: `/edit/reports/7?${base}&pubs=all`,
-        publications: `/edit/reports/7?${base}&pubs=all&view=publications`,
+        summary: `${BASE}?${base}&pubs=all`,
+        publications: `${BASE}?${base}&pubs=all&view=publications`,
       },
       downloadHref: `/api/edit/reports/mentored-publications?${base}&pubs=all`,
     });
@@ -510,9 +524,9 @@ describe("/edit/reports/7 — wiring", () => {
     expect(findByType(summary, h.mockTable)?.props).toEqual({
       view: "summary",
       viewHrefs: {
-        summary: "/edit/reports/7?years=2026%2C2025&types=aoc&tail=1&pubs=mentored",
+        summary: `${BASE}?years=2026%2C2025&types=aoc&tail=1&pubs=mentored`,
         publications:
-          "/edit/reports/7?years=2026%2C2025&types=aoc&tail=1&pubs=mentored&view=publications",
+          `${BASE}?years=2026%2C2025&types=aoc&tail=1&pubs=mentored&view=publications`,
       },
       downloadHref:
         "/api/edit/reports/mentored-publications?years=2026%2C2025&types=aoc&tail=1&pubs=mentored",

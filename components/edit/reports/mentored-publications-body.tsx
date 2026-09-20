@@ -1,5 +1,5 @@
 /**
- * `/edit/reports/7` — "Mentored publications". For every learner in a
+ * Report 7 — "Mentored publications". For every learner in a
  * (learner, mentor) pair — the AOC pairing sheet (which also carries the
  * MD-PhD program office's list), Jenzabar thesis advisors, ED postdoc
  * appointments, co-author inferences — every publication co-authored with
@@ -11,11 +11,11 @@
  * string). Every label speaks the office's language (`AOC`, never the
  * `md` bucket key; "likely", never "presumptive") — `lib/edit/mentorship-type.ts`
  * — and each type carries a hover (`HoverTooltip`, a client module, so it
- * is safe in this server page). What each source carries and lacks, and the
+ * is safe in this server module). What each source carries and lacks, and the
  * one not yet loaded (the Faculty Review Tool's self-reported mentees), is
  * the report's editable description — `report_meta` row '7', rendered by
  * `ReportHeader` as the closed "About this report" disclosure (it replaced
- * the hardcoded "Sources" disclosure this page used to draw).
+ * the hardcoded "Sources" disclosure the page used to draw).
  * `docs/mentored-publications-report.md` is the long form.
  *
  * Two in-page views (`view=summary|publications`, underline tabs the client
@@ -26,7 +26,7 @@
  * mentor(s) on it. Both tables are ONE client island
  * (`components/edit/mentored-publications-table.tsx`): an in-memory facet
  * rail (year, author position, window, mentor) and sortable headers over
- * the rows this page loads in one shot; the download is server-filtered
+ * the rows this body loads in one shot; the download is server-filtered
  * only (types / years / set / tail), never by the rail.
  * "Type of mentorship" (`types=`, a checkbox group in the filter form) is
  * SERVER-side on purpose: the loader reads only the sources the selected
@@ -44,36 +44,28 @@
  * is page-only.
  *
  * NOT unit-scoped like reports 1–6: access is a `report_access` row
- * (`lib/edit/report-access.ts`) — superuser / comms_steward always pass;
- * anyone else needs a row, and their rows' scope keys are the programs they
- * may see. Same session gate style as `/edit/data-sharing`: no session →
- * SSO login; an empty scope set → `notFound()` (the route reads as unbuilt
- * to someone it was never granted to). Filters are plain GET params
- * (`parseMentoredPubsParams`) — a server re-render per change, no client
- * state, like `/edit/data-sharing`'s filter bar; the form is the
- * `AutoSubmitForm` island so a change submits without an Apply click (the
- * button stays as the no-JS fallback). "Who can run this report"
- * (`ReportAccessPopover`, `mode="person"`, handed to `ReportHeader` as its
- * `access`) is the other client island: EVERY viewer gets it with the
- * report's grant rows — who else can open this is not a secret — and only
- * its Add / Remove controls are gated (`canManageReportAccess`, the same
- * gate the route enforces).
+ * (`lib/edit/report-access.ts`) — the dynamic page's PERSON gate (registry
+ * `accessKey: MENTORED_PUBS_REPORT`): no session → SSO login; an empty scope
+ * set → `notFound()`. This body receives the non-empty `scopes`. Filters are
+ * plain GET params (`parseMentoredPubsParams`) — a server re-render per
+ * change, no client state, like `/edit/data-sharing`'s filter bar; the form
+ * is the `AutoSubmitForm` island so a change submits without an Apply click
+ * (the button stays as the no-JS fallback). Its `action` and every tab href
+ * are built on `basePath` — the canonical `/edit/reports/<slug>` the page
+ * hands in — never a literal path, since the slug is renameable. The "Who
+ * can run this report" popover (`ReportAccessPopover`, `mode="person"`) is
+ * the PAGE's: it composes the header, so it reads the grant rows itself
+ * (`listReportAccess`) and this body never sees them.
+ *
+ * The body of what was `app/edit/reports/7/page.tsx`, moved verbatim into the
+ * registry shape (`lib/edit/report-registry.ts`) apart from `basePath`: the
+ * session / gate / shell / header frame is the dynamic page's; this owns
+ * only the report. The mode-aware subtitle `<p>` is returned as `subtitle`
+ * (the header's children).
  */
-import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
-import { ConsoleShell } from "@/components/edit/console-shell";
 import { MentoredPublicationsTable } from "@/components/edit/mentored-publications-table";
-import {
-  ReportAccessPopover,
-  type ReportAccessPopoverRow,
-} from "@/components/edit/report-access-popover";
-import { ReportHeader } from "@/components/edit/report-header";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
-import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { db } from "@/lib/db";
-import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
   mentoredPubsQueryString,
   parseMentoredPubsParams,
@@ -94,25 +86,12 @@ import {
   resolveMentorshipTypes,
   type MentorshipTypeKey,
 } from "@/lib/edit/mentorship-type";
-import {
-  canManageReportAccess,
-  getReportScopes,
-  listReportAccess,
-  MENTORED_PUBS_REPORT,
-  MENTORED_PUBS_SCOPE_OPTIONS,
-} from "@/lib/edit/report-access";
-import { reportPageMetadata } from "@/lib/edit/report-meta";
-import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
+import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
 
-export const dynamic = "force-dynamic";
-
-/** `<title>` from `report_meta` (superuser-editable), one cached read shared
- *  with `ReportHeader` below. */
-export const generateMetadata = () => reportPageMetadata("7");
-
-// Underline tabs, as `components/edit/matcha-tab.tsx` draws them.
-function pageHref(params: MentoredPubsParams): string {
-  return `/edit/reports/7?${mentoredPubsQueryString(params)}`;
+// Underline tabs, as `components/edit/matcha-tab.tsx` draws them. `basePath`
+// is the page's canonical `/edit/reports/<slug>`.
+function pageHref(basePath: string, params: MentoredPubsParams): string {
+  return `${basePath}?${mentoredPubsQueryString(params)}`;
 }
 
 /** `RosterFacet`'s heading / option / checkbox vocabulary, so the server
@@ -122,10 +101,12 @@ const RAIL_OPTION = "flex items-start gap-2 py-[3px] text-[13px] leading-[1.4]";
 const RAIL_BOX = "mt-[3px] accent-[var(--color-primary-cornell-red)]";
 
 function FilterForm({
+  basePath,
   params,
   yearChoices,
   typeChoices,
 }: {
+  basePath: string;
   params: MentoredPubsParams;
   yearChoices: ReadonlyArray<number | null>;
   typeChoices: ReadonlyArray<MentorshipTypeKey>;
@@ -139,7 +120,7 @@ function FilterForm({
     // style (`components/center/center-roster-facets.tsx`), no box of its own.
     <AutoSubmitForm
       id="mentored-pubs-filters"
-      action="/edit/reports/7"
+      action={basePath}
       className="group flex flex-col text-sm"
       data-testid="mentored-pubs-filters"
     >
@@ -218,26 +199,16 @@ function FilterForm({
   );
 }
 
-export default async function EditReportsMentoredPublicationsPage({
+/** Report 7's body: the filter rail + the Learners / Publications island (or
+ *  the no-bridge notice), over the scopes the person gate resolved. */
+export async function renderMentoredPublicationsReport({
+  scopes,
   searchParams,
-}: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const session = await getEffectiveEditSession();
-  if (!session) {
-    redirect("/api/auth/saml/login?return=/edit/reports/7");
-  }
-
-  // Row-based gate: an empty scope set reads as an unbuilt route, the same
-  // 404 `/edit/data-sharing` gives a non-viewer.
-  const scopes = await getReportScopes(session, MENTORED_PUBS_REPORT);
-  if (scopes.size === 0) {
-    notFound();
-  }
-
+  basePath,
+}: PersonReportProps): Promise<ReportRender> {
   // Malformed params fall back to the defaults (a page, unlike the download
   // route, has nothing useful to say with a 400).
-  const parsed = parseMentoredPubsParams((await searchParams) ?? {});
+  const parsed = parseMentoredPubsParams(searchParams);
   const requested: MentoredPubsParams = parsed.ok
     ? parsed.value
     : { years: null, types: null, tail: DEFAULT_TAIL, pubs: "mentored", view: "summary" };
@@ -263,109 +234,77 @@ export default async function EditReportsMentoredPublicationsPage({
     view: requested.view,
   };
 
-  // The grant list is read for EVERY viewer — the popover shows who else can
-  // run the report to anyone who can; only Add / Remove ride `canManage`.
-  const canManage = canManageReportAccess(session);
-  const [report, pendingSlugRequests, pendingHonors, accessRows] = await Promise.all([
-    loadMentoredPublicationsReport({
-      scopes: loaderScopes,
-      types,
-      gradYears: years.length > 0 ? years : null,
-      tail: params.tail,
-      pubs: params.pubs,
-    }),
-    session.isSuperuser && isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
-    isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
-    listReportAccess(MENTORED_PUBS_REPORT),
-  ]);
+  const report = await loadMentoredPublicationsReport({
+    scopes: loaderScopes,
+    types,
+    gradYears: years.length > 0 ? years : null,
+    tail: params.tail,
+    pubs: params.pubs,
+  });
 
   const typeChoices = allowedMentorshipTypes(scopes);
-  const scopeOptions = MENTORED_PUBS_SCOPE_OPTIONS;
-  const initialRows: ReportAccessPopoverRow[] = accessRows.map((r) => ({
-    ...r,
-    grantedAt: r.grantedAt.toISOString(),
-  }));
 
   const allMode = params.pubs === "all";
   const allPubsMissing = allMode && report.allPubsLoaded === false;
   // The download never carries `view` (the workbook has no Publications view).
   const qs = mentoredPubsQueryString({ ...params, view: "summary" });
-  return (
-    <ConsoleShell
-      active="reports"
-      session={session}
-      pendingSlugRequests={pendingSlugRequests}
-      pendingHonors={pendingHonors}
-      reportsTab
-    >
-      <Link href="/edit/reports" className="text-apollo-slate mb-4 inline-block text-sm hover:underline">
-        &larr; All reports
-      </Link>
-      <ReportHeader
-        n="7"
-        session={session}
-        access={
-          <ReportAccessPopover
-            mode="person"
-            reportKey={MENTORED_PUBS_REPORT}
-            initialRows={initialRows}
-            scopeOptions={scopeOptions}
-            canManage={canManage}
-          />
-        }
-      >
-        <p className="text-muted-foreground text-sm">
-          {allMode
-            ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
-            : "Every publication a learner co-authored with one of their mentors, "}
-          with Journal Impact Factor and NIH iCite citations. Pairs come from the MD program&rsquo;s AOC pairing sheet, the
-          MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty
-          add on their own profile, and co-authorship inferences (off by default) &mdash; see &ldquo;About
-          this report&rdquo; below. &ldquo;In window&rdquo; means entry year &le; publication year &le;
-          graduation year + {params.tail}; an AOC learner with no entry year on the pairing sheet is
-          assumed to have entered four years before graduating.
-          {report.droppedUnresolved > 0 &&
-            ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
-          {report.droppedNoCwid > 0 &&
-            ` ${report.droppedNoCwid.toLocaleString()} faculty-asserted mentees have no CWID and are not shown.`}
-        </p>
-      </ReportHeader>
-      {/* The filter form is the table island's `children` — the top of its
-          rail. Only the no-bridge notice below renders it standalone (the
-          island is skipped, and "Publications" must stay switchable). */}
-      {allPubsMissing && (
-        <div className="border-apollo-rail-border bg-apollo-rail mt-4 rounded-xl border p-3 md:w-64">
-          <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
-        </div>
-      )}
-      {allPubsMissing && (
-        <p
-          className="border-apollo-border bg-apollo-surface-2 mt-4 rounded-md border px-3 py-2 text-sm"
-          role="status"
-          data-testid="mentored-pubs-all-missing"
-        >
-          All-publication data has not been loaded yet. The learner publication bridge (
-          <code>etl:mentoring:import-learner-pubs</code>) has not run in this environment, so every
-          count below would be zero. Switch &ldquo;Publications&rdquo; back to &ldquo;Co-authored
-          with a mentor&rdquo; or run the import.
-        </p>
-      )}
-      {allPubsMissing ? null : (
-        <MentoredPublicationsTable
-          view={params.view}
-          viewHrefs={{
-            summary: pageHref({ ...params, view: "summary" }),
-            publications: pageHref({ ...params, view: "publications" }),
-          }}
-          downloadHref={`/api/edit/reports/mentored-publications?${qs}`}
-          summary={report.summary}
-          publications={report.publications}
-          pubsMode={params.pubs}
-          highImpactThreshold={HIGH_IMPACT_THRESHOLD}
-        >
-          <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
-        </MentoredPublicationsTable>
-      )}
-    </ConsoleShell>
-  );
+  return {
+    subtitle: (
+      <p className="text-muted-foreground text-sm">
+        {allMode
+          ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
+          : "Every publication a learner co-authored with one of their mentors, "}
+        with Journal Impact Factor and NIH iCite citations. Pairs come from the MD program&rsquo;s AOC pairing sheet, the
+        MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty
+        add on their own profile, and co-authorship inferences (off by default) &mdash; see &ldquo;About
+        this report&rdquo; below. &ldquo;In window&rdquo; means entry year &le; publication year &le;
+        graduation year + {params.tail}; an AOC learner with no entry year on the pairing sheet is
+        assumed to have entered four years before graduating.
+        {report.droppedUnresolved > 0 &&
+          ` ${report.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
+        {report.droppedNoCwid > 0 &&
+          ` ${report.droppedNoCwid.toLocaleString()} faculty-asserted mentees have no CWID and are not shown.`}
+      </p>
+    ),
+    main: (
+      <>
+        {/* The filter form is the table island's `children` — the top of its
+            rail. Only the no-bridge notice below renders it standalone (the
+            island is skipped, and "Publications" must stay switchable). */}
+        {allPubsMissing && (
+          <div className="border-apollo-rail-border bg-apollo-rail mt-4 rounded-xl border p-3 md:w-64">
+            <FilterForm basePath={basePath} params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
+          </div>
+        )}
+        {allPubsMissing && (
+          <p
+            className="border-apollo-border bg-apollo-surface-2 mt-4 rounded-md border px-3 py-2 text-sm"
+            role="status"
+            data-testid="mentored-pubs-all-missing"
+          >
+            All-publication data has not been loaded yet. The learner publication bridge (
+            <code>etl:mentoring:import-learner-pubs</code>) has not run in this environment, so every
+            count below would be zero. Switch &ldquo;Publications&rdquo; back to &ldquo;Co-authored
+            with a mentor&rdquo; or run the import.
+          </p>
+        )}
+        {allPubsMissing ? null : (
+          <MentoredPublicationsTable
+            view={params.view}
+            viewHrefs={{
+              summary: pageHref(basePath, { ...params, view: "summary" }),
+              publications: pageHref(basePath, { ...params, view: "publications" }),
+            }}
+            downloadHref={`/api/edit/reports/mentored-publications?${qs}`}
+            summary={report.summary}
+            publications={report.publications}
+            pubsMode={params.pubs}
+            highImpactThreshold={HIGH_IMPACT_THRESHOLD}
+          >
+            <FilterForm basePath={basePath} params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
+          </MentoredPublicationsTable>
+        )}
+      </>
+    ),
+  };
 }

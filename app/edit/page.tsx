@@ -165,6 +165,7 @@ export default async function EditSelfPage({
     // based grant, so this is a cheap indexed read, not a directory call.
     const reportScopes = await loadReportScopesForCwid(editCwid, MENTORED_PUBS_REPORT);
     if (reportScopes.size > 0) {
+      // The NUMBER on purpose: it is the permanent link, and `/edit/reports/[report]` 307s it to the current slug.
       redirect("/edit/reports/7");
     }
     notFound();

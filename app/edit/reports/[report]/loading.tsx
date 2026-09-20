@@ -1,19 +1,22 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
- * Route-segment loading UI for /edit/reports/7 — the page is `force-dynamic`
- * and awaits the whole report server-side (every co-pub in scope, enriched),
- * so without this a navigation or a filter change shows nothing until it
- * resolves. Same shape as `app/edit/data-sharing/loading.tsx`: cannot render
- * `ConsoleShell` (needs the session the page is still fetching); mirrors its
- * `<main>` container so the swap to real content barely shifts.
+ * Route-segment loading UI for /edit/reports/[report] — every report page is
+ * `force-dynamic` and awaits its whole report server-side (report 7: every
+ * co-pub in scope, enriched), so without this a navigation or a filter change
+ * shows nothing until it resolves. Built for `/edit/reports/7` and moved here
+ * with the registry (2026-09-20) — a segment has ONE loading file, so it now
+ * covers all seven reports. Same shape as `app/edit/data-sharing/loading.tsx`:
+ * cannot render `ConsoleShell` (needs the session the page is still
+ * fetching); mirrors its `<main>` container so the swap to real content
+ * barely shifts.
  */
-export default function MentoredPublicationsLoading() {
+export default function ReportLoading() {
   return (
     <div className="bg-apollo-page min-h-screen">
       <main aria-busy="true" className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <div role="status" className="sr-only">
-          Loading mentored publications…
+          Loading report…
         </div>
 
         {/* back link, h1, description */}

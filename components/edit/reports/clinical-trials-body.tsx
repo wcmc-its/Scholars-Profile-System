@@ -1,34 +1,20 @@
 /**
- * `/edit/reports/5` — "Clinical Trials". Lists every current Cancer Center
- * member's clinical-trial links (Principal Investigator or Investigator), one
- * row per (person, trial) pair. Same session/authz/center-resolution flow as
- * `/edit/reports/1`/`/2` (see `app/edit/reports/page.tsx`'s doc comment) —
- * duplicated per page rather than a shared server component, matching every
- * other `/edit/*` console page's convention. The query itself lives in
+ * Report 5 — "Clinical Trials". Lists every current Cancer Center member's
+ * clinical-trial links (Principal Investigator or Investigator), one row per
+ * (person, trial) pair. The query itself lives in
  * `lib/center-collaboration/clinical-trials-report.ts` — see that file's doc
  * comment for the membership-resolution and data-scope decisions (uncarved
  * membership, no CLINICAL_TRIALS_SECTION gate, withdrawn trials kept).
+ *
+ * The body of what was `app/edit/reports/5/page.tsx`, moved verbatim into the
+ * registry shape (`lib/edit/report-registry.ts`): the session / gate / shell /
+ * header frame is the dynamic page's; this owns only the report. Unit-gated,
+ * center-only (`REPORT_NUMBERS_BY_KIND`). The count-aware subtitle `<p>` is
+ * returned as `subtitle` (the header's children).
  */
-import Link from "next/link";
-import { redirect } from "next/navigation";
-
-import { ConsoleShell } from "@/components/edit/console-shell";
-import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { ReportAccessPopover } from "@/components/edit/report-access-popover";
-import { ReportHeader } from "@/components/edit/report-header";
-import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { loadClinicalTrialsReport } from "@/lib/center-collaboration/clinical-trials-report";
 import { db } from "@/lib/db";
-import { loadReportsContext, resolveNumberedReportCenterCode } from "@/lib/edit/cancer-center-reports";
-import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { reportPageMetadata } from "@/lib/edit/report-meta";
-import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
-
-export const dynamic = "force-dynamic";
-
-/** `<title>` from `report_meta` (superuser-editable), one cached read shared
- *  with `ReportHeader` below. */
-export const generateMetadata = () => reportPageMetadata("5");
+import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
 
 /** ClinicalTrials.gov study page for an NCT id — same URL form as the public
  *  profile's `ctgovUrl` (`components/profile/clinical-trials-section.tsx`);
@@ -37,58 +23,20 @@ function ctgovUrl(nct: string): string {
   return `https://clinicaltrials.gov/study/${encodeURIComponent(nct)}`;
 }
 
-export default async function EditReportsClinicalTrialsPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ center?: string }>;
-}) {
-  const session = await getEffectiveEditSession();
-  if (!session) {
-    redirect("/api/auth/saml/login?return=/edit/reports/5");
-  }
-
-  const { center } = (await searchParams) ?? {};
-  const { code } = await resolveNumberedReportCenterCode(session, db.read, center);
-  const ctx = await loadReportsContext(code, session, db.read);
-  if (ctx === null) {
-    return (
-      <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage variant="unit" targetEntity={code} />
-      </ConsoleShell>
-    );
-  }
-
-  const pendingSlugRequests =
-    session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
-  const pendingHonors = isHonorsQueueTabVisible(session)
-    ? await countPendingHonors(db.read)
-    : null;
-
+/** Report 5's body: one row per (current member, clinical trial) pair. */
+export async function renderClinicalTrialsReport({ code }: UnitReportProps): Promise<ReportRender> {
   const rows = await loadClinicalTrialsReport(db.read, code);
 
-  return (
-    <ConsoleShell
-      active="reports"
-      session={session}
-      pendingSlugRequests={pendingSlugRequests}
-      pendingHonors={pendingHonors}
-      reportsTab
-    >
-      <Link
-        href={`/edit/reports?center=${encodeURIComponent(code)}`}
-        className="text-apollo-slate mb-4 inline-block text-sm hover:underline"
-      >
-        &larr; All reports
-      </Link>
-      <ReportHeader n="5" session={session} access={<ReportAccessPopover mode="unit" />}>
-        <p className="text-muted-foreground mb-4 text-sm">
-          {rows.length === 0
-            ? "Current members' clinical-trial links (Principal Investigator or Investigator)."
-            : `${rows.length} clinical-trial link${rows.length === 1 ? "" : "s"} across the center's current members.`}
-        </p>
-      </ReportHeader>
-
-      {rows.length === 0 ? (
+  return {
+    subtitle: (
+      <p className="text-muted-foreground mb-4 text-sm">
+        {rows.length === 0
+          ? "Current members' clinical-trial links (Principal Investigator or Investigator)."
+          : `${rows.length} clinical-trial link${rows.length === 1 ? "" : "s"} across the center's current members.`}
+      </p>
+    ),
+    main:
+      rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">
           No clinical trial links found for this center&rsquo;s current members.
         </p>
@@ -144,7 +92,6 @@ export default async function EditReportsClinicalTrialsPage({
             </tbody>
           </table>
         </div>
-      )}
-    </ConsoleShell>
-  );
+      ),
+  };
 }
