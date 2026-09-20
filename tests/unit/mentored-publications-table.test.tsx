@@ -272,7 +272,10 @@ describe("MentoredPublicationsTable — learners", () => {
     expect(within(container).queryByRole("button", { name: /co-author/ })).toBeNull();
     expect(within(container).getByRole("button", { name: /Chen, Lin/ })).toBeTruthy();
     const row = within(table()).getByTestId("mentored-pubs-learner-stu0001");
-    const typeCell = row.querySelectorAll("td")[3];
+    // Grad year · Learner · Type — no Program column (the Type line names the
+    // program; a separate column read "MD | MD").
+    expect([...table().querySelectorAll("thead th")].map((th) => th.textContent?.trim())).not.toContain("Program");
+    const typeCell = row.querySelectorAll("td")[2];
     expect([...typeCell.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
       "MD",
       "PhD thesis advisor",
@@ -316,6 +319,7 @@ describe("MentoredPublicationsTable — view tabs", () => {
     const hidden = () => container.querySelector<HTMLInputElement>('input[name="view"][form="mentored-pubs-filters"]');
     expect(getByTestId("mentored-pubs-summary")).toBeTruthy();
     expect(getByTestId("mentored-pubs-view-summary").getAttribute("aria-current")).toBe("page");
+    expect(getByTestId("mentored-pubs-view-summary").textContent).toBe("Summary");
     expect(getByTestId("mentored-pubs-view-publications").getAttribute("href")).toBe(HREFS.publications);
     expect(hidden()?.value).toBe("summary");
     expect(getByTestId("mentored-pubs-download").getAttribute("href")).toBe(DOWNLOAD);

@@ -20,7 +20,7 @@ import {
 } from "@/lib/edit/mentorship-type";
 
 /**
- * `/edit/reports/7` — the Learners / Publications tables as a client island:
+ * `/edit/reports/7` — the Summary / Publications tables as a client island:
  * a facet rail on the left, a sortable table on the right, the shape
  * `publications-report-table.tsx` (report 3) proves out. The rail's TOP is
  * the page's server-side filter form (`children` — the auto-submit `types` /
@@ -460,7 +460,7 @@ function PublicationsView({
   );
 }
 
-// ---- Learners view --------------------------------------------------------
+// ---- Summary view (one row per learner) --------------------------------------------------------
 
 const num = (key: string, get: (r: MentoredPubsSummaryRow) => number | null): SortCol<MentoredPubsSummaryRow> => ({
   key,
@@ -523,7 +523,11 @@ function LearnersView({
                 <SortHeader col={C.learner} sort={sort} onSort={onSort}>
                   Learner
                 </SortHeader>
-                <th className={TH_CLASS}>Program</th>
+                {/* No Program column: every Type line already names the program
+                    (roster "MD" / "MD-PhD (program office)" / "ECR", "PhD thesis
+                    advisor", "Postdoc · faculty-asserted", "<kind> · likely
+                    mentee…"), so a second column read "MD | MD" (2026-09-20).
+                    The workbook keeps its Program column. */}
                 <th className={TH_CLASS}>Type of mentorship</th>
                 <th className={TH_CLASS}>Mentors</th>
                 {allMode ? (
@@ -575,7 +579,6 @@ function LearnersView({
                       </span>
                     )}
                   </td>
-                  <td className={TD_CLASS}>{r.program}</td>
                   {/* One line per mentor, in the Mentors column's order. */}
                   <td className={TD_CLASS}>
                     <ul className="m-0 list-none p-0">
@@ -674,7 +677,7 @@ export function MentoredPublicationsTable({
     <>
       <input type="hidden" name="view" value={view} form="mentored-pubs-filters" />
       <nav className="border-apollo-border mt-4 flex gap-4 border-b" aria-label="View">
-        {tab("summary", "Learners")}
+        {tab("summary", "Summary")}
         {tab("publications", "Publications")}
       </nav>
       <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">

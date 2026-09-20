@@ -167,7 +167,7 @@ function FilterForm({
         <select
           name="pubs"
           defaultValue={params.pubs}
-          className="border-foreground/40 w-full rounded border px-2 py-1"
+          className="w-full rounded border border-[#c8c6be] bg-white px-2 py-1"
           data-testid="mentored-pubs-set"
         >
           <option value="mentored">Co-authored with a mentor</option>
@@ -179,7 +179,7 @@ function FilterForm({
         <select
           name="tail"
           defaultValue={String(params.tail)}
-          className="border-foreground/40 w-full rounded border px-2 py-1"
+          className="w-full rounded border border-[#c8c6be] bg-white px-2 py-1"
         >
           {Array.from({ length: MAX_TAIL + 1 }, (_, i) => (
             <option key={i} value={i}>
@@ -199,7 +199,7 @@ function FilterForm({
   );
 }
 
-/** Report 7's body: the filter rail + the Learners / Publications island (or
+/** Report 7's body: the filter rail + the Summary / Publications island (or
  *  the no-bridge notice), over the scopes the person gate resolved. */
 export async function renderMentoredPublicationsReport({
   scopes,
