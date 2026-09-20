@@ -299,7 +299,7 @@ export default async function EditReportsMentoredPublicationsPage({
           {allMode
             ? "Every publication of each learner, with the ones co-authored with one of their mentors flagged, "
             : "Every publication a learner co-authored with one of their mentors, "}
-          with Journal Impact Factor and NIH iCite citations. Pairs come from the AOC pairing sheet, the
+          with Journal Impact Factor and NIH iCite citations. Pairs come from the MD program&rsquo;s AOC pairing sheet, the
           MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty
           add on their own profile, and co-authorship inferences (off by default) &mdash; see &ldquo;About
           this report&rdquo; below. &ldquo;In window&rdquo; means entry year &le; publication year &le;

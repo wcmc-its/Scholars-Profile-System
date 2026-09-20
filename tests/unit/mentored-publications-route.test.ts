@@ -129,7 +129,7 @@ describe("response", () => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="Mentored Publications AOC+ECR 2026-2025 - 2026-09-18.xlsx"',
+      'attachment; filename="Mentored Publications MD+ECR 2026-2025 - 2026-09-18.xlsx"',
     );
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(Buffer.from(await res.arrayBuffer()).toString()).toBe("xlsx-bytes");
@@ -160,7 +160,7 @@ describe("response", () => {
       ...MENTORED,
     });
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="Mentored Publications AOC 2024-2025 - 2026-09-18.xlsx"',
+      'attachment; filename="Mentored Publications MD 2024-2025 - 2026-09-18.xlsx"',
     );
     const two = await GET(req("?types=thesis,likely&years=2025"));
     expect(two.headers.get("content-disposition")).toBe(
@@ -205,7 +205,7 @@ describe("response", () => {
       pubs: "all",
     });
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="Mentored Publications AOC 2025 All Pubs - 2026-09-18.xlsx"',
+      'attachment; filename="Mentored Publications MD 2025 All Pubs - 2026-09-18.xlsx"',
     );
   });
 

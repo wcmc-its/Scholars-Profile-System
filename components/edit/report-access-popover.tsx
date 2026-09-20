@@ -114,7 +114,9 @@ function Trigger() {
   );
 }
 
-const CONTENT_CLASS = "w-[28rem] max-w-[calc(100vw-2rem)] text-sm";
+// 34rem: five columns plus Remove fit on one line each (28rem wrapped the
+// "Granted by" header and two-word names, 2026-09-20 staging eyeball).
+const CONTENT_CLASS = "w-[34rem] max-w-[calc(100vw-2rem)] text-sm";
 
 export function ReportAccessPopover(props: ReportAccessPopoverProps) {
   if (props.mode === "unit") {
@@ -189,14 +191,14 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
             No one else yet.
           </p>
         ) : (
-          <table className="mt-2 w-full text-left">
+          <table className="mt-3 w-full text-left">
             <thead>
               <tr className="text-muted-foreground text-xs tracking-wide uppercase">
-                <th className="py-1 pr-3 font-semibold">Name</th>
-                <th className="py-1 pr-3 font-semibold">CWID</th>
-                <th className="py-1 pr-3 font-semibold">Program</th>
-                <th className="py-1 pr-3 font-semibold">Granted by</th>
-                <th className="py-1 pr-3 font-semibold">Date</th>
+                <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Name</th>
+                <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">CWID</th>
+                <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Program</th>
+                <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Granted by</th>
+                <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Date</th>
                 {canManage && <th className="py-1" />}
               </tr>
             </thead>
@@ -207,13 +209,13 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
                   className="border-apollo-border border-t"
                   data-testid={`report-access-row-${r.scopeKey}-${r.cwid}`}
                 >
-                  <td className="py-1.5 pr-3">{r.name}</td>
-                  <td className="py-1.5 pr-3 font-mono text-xs">{r.cwid}</td>
-                  <td className="py-1.5 pr-3">{labelFor.get(r.scopeKey) ?? r.scopeKey}</td>
-                  <td className="py-1.5 pr-3 font-mono text-xs">{r.grantedBy}</td>
-                  <td className="py-1.5 pr-3 whitespace-nowrap">{formatDate(r.grantedAt)}</td>
+                  <td className="py-2 pr-4">{r.name}</td>
+                  <td className="py-2 pr-4 font-mono text-xs">{r.cwid}</td>
+                  <td className="py-2 pr-4">{labelFor.get(r.scopeKey) ?? r.scopeKey}</td>
+                  <td className="py-2 pr-4 font-mono text-xs">{r.grantedBy}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{formatDate(r.grantedAt)}</td>
                   {canManage && (
-                    <td className="py-1.5 text-right">
+                    <td className="py-2 text-right">
                       <Button
                         type="button"
                         variant="outline"
@@ -232,7 +234,7 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
         )}
         {canManage && (
           <form
-            className="border-apollo-border mt-3 flex flex-col gap-2 border-t pt-3"
+            className="border-apollo-border mt-4 flex flex-col gap-2 border-t pt-4"
             data-testid="report-access-add-form"
             onSubmit={(e) => {
               e.preventDefault();
@@ -240,14 +242,18 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
               void post("grant", scope, { cwid: person.cwid, name: person.name });
             }}
           >
-            <DirectoryPeopleTypeahead
-              value={person}
-              onChange={setPerson}
-              placeholder="Add a person…"
-              disabled={busy}
-              idPrefix="report-access"
-            />
-            <div className="flex flex-wrap items-end gap-2">
+            {/* One row: the person picker takes the slack, program + Add sit
+                beside it; wraps only when the popover is at phone width. */}
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[14rem] flex-1">
+                <DirectoryPeopleTypeahead
+                  value={person}
+                  onChange={setPerson}
+                  placeholder="Add a person…"
+                  disabled={busy}
+                  idPrefix="report-access"
+                />
+              </div>
               <label className="flex flex-col gap-1">
                 <span className="text-muted-foreground text-xs">Program</span>
                 <select

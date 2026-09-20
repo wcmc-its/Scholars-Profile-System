@@ -353,7 +353,7 @@ function PublicationsView({ rows, allMode }: { rows: MentoredPubsPublicationRow[
                   Year
                 </SortHeader>
                 <SortHeader col={PUB_COLS.jif} {...th} className="text-right">
-                  JIF
+                  Impact factor
                 </SortHeader>
                 <SortHeader col={PUB_COLS.citations} {...th} className="text-right">
                   Citations
@@ -519,7 +519,7 @@ function LearnersView({
                       First author (in window)
                     </SortHeader>
                     <SortHeader col={C.highImpactInWindow} {...th}>
-                      JIF &ge; {highImpactThreshold} (in window)
+                      Impact factor &ge; {highImpactThreshold} (in window)
                     </SortHeader>
                     <SortHeader col={C.pubsAllTime} {...th}>
                       All-time total
@@ -534,7 +534,7 @@ function LearnersView({
                       All years
                     </SortHeader>
                     <SortHeader col={C.highImpactInWindow} {...th}>
-                      JIF &ge; {highImpactThreshold}
+                      Impact factor &ge; {highImpactThreshold}
                     </SortHeader>
                     <SortHeader col={C.firstAuthorInWindow} {...th}>
                       First author

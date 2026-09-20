@@ -224,10 +224,10 @@ describe("canManageReportAccess / scope keys", () => {
     expect(isMentoredPubsScopeKey(null)).toBe(false);
   });
 
-  it("MENTORED_PUBS_SCOPE_OPTIONS: the wildcard first, then every grantable bucket under its office name (md reads AOC)", () => {
+  it("MENTORED_PUBS_SCOPE_OPTIONS: the wildcard first, then every grantable bucket under its degree name (md reads MD)", () => {
     expect(MENTORED_PUBS_SCOPE_OPTIONS).toEqual([
       [ALL_SCOPES, "All programs"],
-      ["md", "AOC"],
+      ["md", "MD"],
       ["mdphd", "MD-PhD"],
       ["ecr", "ECR"],
     ]);

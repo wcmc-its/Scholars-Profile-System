@@ -68,7 +68,7 @@ export const ALL_SCOPES = "*";
 /** The `[scopeKey, label]` pairs the "Who can run this report" popover's
  *  add form offers for the Mentored publications report — the wildcard
  *  first, then every grantable bucket under its office-facing name
- *  (`PROGRAM_LABEL`: `md` reads "AOC"). ONE definition, handed to the popover
+ *  (`PROGRAM_LABEL`: `md` reads "MD"). ONE definition, handed to the popover
  *  by `/edit/reports/7` AND by the index's program row
  *  (`app/edit/reports/page.tsx`), so the two cannot drift. Plain tuples —
  *  serializable across the server/client boundary as-is. */
