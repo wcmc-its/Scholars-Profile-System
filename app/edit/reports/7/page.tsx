@@ -115,6 +115,12 @@ function pageHref(params: MentoredPubsParams): string {
   return `/edit/reports/7?${mentoredPubsQueryString(params)}`;
 }
 
+/** `RosterFacet`'s heading / option / checkbox vocabulary, so the server
+ *  form reads as one rail with the client facets beneath it. */
+const RAIL_HEADING = "mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+const RAIL_OPTION = "flex items-start gap-2 py-[3px] text-[13px] leading-[1.4]";
+const RAIL_BOX = "mt-[3px] accent-[var(--color-primary-cornell-red)]";
+
 function FilterForm({
   params,
   yearChoices,
@@ -128,20 +134,23 @@ function FilterForm({
   const allYears = params.years !== null && params.years.length === 0;
   const selectedTypes = new Set(params.types ?? []);
   return (
+    // Lives at the top of the table island's facet rail (its `children`), so
+    // it is laid out as a rail section: one column, `RosterFacet`'s heading
+    // style (`components/center/center-roster-facets.tsx`), no box of its own.
     <AutoSubmitForm
       id="mentored-pubs-filters"
       action="/edit/reports/7"
-      className="group border-apollo-border bg-apollo-surface mt-4 flex flex-wrap items-end gap-4 rounded-md border p-3 text-sm"
+      className="group flex flex-col text-sm"
       data-testid="mentored-pubs-filters"
     >
       {/* The current view rides along as a hidden input the island owns
           (`form="mentored-pubs-filters"`), so a filter change keeps it. */}
-      <fieldset className="flex flex-col gap-1">
-        <legend className="text-foreground font-medium">Type of mentorship</legend>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
+      <fieldset className="mb-5">
+        <legend className={RAIL_HEADING}>Type of mentorship</legend>
+        <div className="flex flex-col gap-1">
           {typeChoices.map((k) => (
-            <label key={k} className="inline-flex items-center gap-1">
-              <input type="checkbox" name="types" value={k} defaultChecked={selectedTypes.has(k)} />
+            <label key={k} className={RAIL_OPTION}>
+              <input type="checkbox" name="types" value={k} defaultChecked={selectedTypes.has(k)} className={RAIL_BOX} />
               {/* The hover wraps the TEXT only — never the input, whose click
                   must stay a plain toggle. */}
               <HoverTooltip text={MENTORSHIP_TYPE_DESCRIPTION[k]} wide>
@@ -151,36 +160,46 @@ function FilterForm({
           ))}
         </div>
       </fieldset>
-      <fieldset className="flex flex-col gap-1">
-        <legend className="text-foreground font-medium">Graduation year</legend>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
+      <fieldset className="mb-5">
+        <legend className={RAIL_HEADING}>Graduation year</legend>
+        <div className="flex flex-col gap-1">
           {yearChoices.map((y) => (
-            <label key={y ?? "unknown"} className="inline-flex items-center gap-1">
-              <input type="checkbox" name="years" value={y ?? "unknown"} defaultChecked={selected.has(y)} />
+            <label key={y ?? "unknown"} className={RAIL_OPTION}>
+              <input
+                type="checkbox"
+                name="years"
+                value={y ?? "unknown"}
+                defaultChecked={selected.has(y)}
+                className={RAIL_BOX}
+              />
               {y ?? "Unknown grad year"}
             </label>
           ))}
-          <label className="inline-flex items-center gap-1">
-            <input type="checkbox" name="years" value="all" defaultChecked={allYears} />
+          <label className={RAIL_OPTION}>
+            <input type="checkbox" name="years" value="all" defaultChecked={allYears} className={RAIL_BOX} />
             All years
           </label>
         </div>
       </fieldset>
-      <label className="flex flex-col gap-1">
-        <span className="text-foreground font-medium">Publications</span>
+      <label className="mb-5 flex flex-col">
+        <span className={RAIL_HEADING}>Publications</span>
         <select
           name="pubs"
           defaultValue={params.pubs}
-          className="border-foreground/40 rounded border px-2 py-1"
+          className="border-foreground/40 w-full rounded border px-2 py-1"
           data-testid="mentored-pubs-set"
         >
           <option value="mentored">Co-authored with a mentor</option>
           <option value="all">All learner publications</option>
         </select>
       </label>
-      <label className="flex flex-col gap-1">
-        <span className="text-foreground font-medium">Years after graduation still counted</span>
-        <select name="tail" defaultValue={String(params.tail)} className="border-foreground/40 rounded border px-2 py-1">
+      <label className="mb-5 flex flex-col">
+        <span className={RAIL_HEADING}>Years after graduation still counted</span>
+        <select
+          name="tail"
+          defaultValue={String(params.tail)}
+          className="border-foreground/40 w-full rounded border px-2 py-1"
+        >
           {Array.from({ length: MAX_TAIL + 1 }, (_, i) => (
             <option key={i} value={i}>
               {i}
@@ -191,7 +210,7 @@ function FilterForm({
       {/* No-JS fallback; the island hides it once hydrated. */}
       <button
         type="submit"
-        className="border-foreground/40 hover:bg-apollo-surface-2 rounded border px-3 py-1.5 group-data-[hydrated=true]:hidden"
+        className="border-foreground/40 hover:bg-apollo-surface-2 mb-5 self-start rounded border px-3 py-1.5 group-data-[hydrated=true]:hidden"
       >
         Apply
       </button>
@@ -311,7 +330,14 @@ export default async function EditReportsMentoredPublicationsPage({
             ` ${report.droppedNoCwid.toLocaleString()} faculty-asserted mentees have no CWID and are not shown.`}
         </p>
       </ReportHeader>
-      <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
+      {/* The filter form is the table island's `children` — the top of its
+          rail. Only the no-bridge notice below renders it standalone (the
+          island is skipped, and "Publications" must stay switchable). */}
+      {allPubsMissing && (
+        <div className="border-apollo-rail-border bg-apollo-rail mt-4 rounded-xl border p-3 md:w-64">
+          <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
+        </div>
+      )}
       {allPubsMissing && (
         <p
           className="border-apollo-border bg-apollo-surface-2 mt-4 rounded-md border px-3 py-2 text-sm"
@@ -336,7 +362,9 @@ export default async function EditReportsMentoredPublicationsPage({
           publications={report.publications}
           pubsMode={params.pubs}
           highImpactThreshold={HIGH_IMPACT_THRESHOLD}
-        />
+        >
+          <FilterForm params={params} yearChoices={yearChoices} typeChoices={typeChoices} />
+        </MentoredPublicationsTable>
       )}
     </ConsoleShell>
   );

@@ -22,7 +22,10 @@ import {
 /**
  * `/edit/reports/7` — the Learners / Publications tables as a client island:
  * a facet rail on the left, a sortable table on the right, the shape
- * `publications-report-table.tsx` (report 3) proves out. Every row arrives
+ * `publications-report-table.tsx` (report 3) proves out. The rail's TOP is
+ * the page's server-side filter form (`children` — the auto-submit `types` /
+ * `years` / `pubs` / `tail` form the page renders; one rail, not a strip
+ * above plus a rail below, 2026-09-20), the client facets below it. Every row arrives
  * loaded from the page; filtering and sorting are `useMemo` over them (no
  * fetch, no URL state); the rail is `RosterFacet`, each facet counting the
  * rows that pass every OTHER facet (the cross-facet convention it documents).
@@ -204,14 +207,17 @@ function useRowCap<Row>(rows: readonly Row[]) {
 }
 
 /** Rail left, table right (stacked on narrow), the "Showing X of Y" line
- *  above the table. */
+ *  above the table. `filters` (the page's server-side form) heads the rail;
+ *  the client facets follow. */
 function Layout({
+  filters,
   rail,
   shown,
   total,
   noun,
   children,
 }: {
+  filters: React.ReactNode;
   rail: React.ReactNode;
   shown: number;
   total: number;
@@ -220,7 +226,10 @@ function Layout({
 }) {
   return (
     <div className="mt-4 grid grid-cols-1 items-start gap-5 md:grid-cols-[16rem_minmax(0,1fr)]">
-      <div className="border-apollo-rail-border bg-apollo-rail w-full shrink-0 rounded-xl border p-3 md:w-64">{rail}</div>
+      <div className="border-apollo-rail-border bg-apollo-rail w-full shrink-0 rounded-xl border p-3 md:w-64">
+        {filters}
+        {rail}
+      </div>
       <div className="flex min-w-0 flex-col gap-2">
         <p className="text-muted-foreground text-sm" data-testid="mentored-pubs-shown">
           Showing {shown.toLocaleString()} of {total.toLocaleString()} {noun}
@@ -299,7 +308,15 @@ const PUB_COLS: Record<string, SortCol<MentoredPubsPublicationRow>> = {
   citations: { key: "citations", get: (r) => r.citations, dir: "desc" },
 };
 
-function PublicationsView({ rows, allMode }: { rows: MentoredPubsPublicationRow[]; allMode: boolean }) {
+function PublicationsView({
+  rows,
+  allMode,
+  filters,
+}: {
+  rows: MentoredPubsPublicationRow[];
+  allMode: boolean;
+  filters: React.ReactNode;
+}) {
   const facets = React.useMemo(
     (): Facet<MentoredPubsPublicationRow>[] => [
       {
@@ -335,7 +352,7 @@ function PublicationsView({ rows, allMode }: { rows: MentoredPubsPublicationRow[
 
   if (rows.length === 0) return <Empty noun="publications" />;
   return (
-    <Layout rail={rail} shown={filtered.length} total={rows.length} noun="publications">
+    <Layout filters={filters} rail={rail} shown={filtered.length} total={rows.length} noun="publications">
       {filtered.length === 0 ? (
         <Empty noun="publications" />
       ) : (
@@ -464,10 +481,12 @@ function LearnersView({
   rows,
   allMode,
   highImpactThreshold,
+  filters,
 }: {
   rows: MentoredPubsSummaryRow[];
   allMode: boolean;
   highImpactThreshold: number;
+  filters: React.ReactNode;
 }) {
   const facets = React.useMemo(
     (): Facet<MentoredPubsSummaryRow>[] => [
@@ -490,7 +509,7 @@ function LearnersView({
 
   if (rows.length === 0) return <Empty noun="learners" />;
   return (
-    <Layout rail={rail} shown={filtered.length} total={rows.length} noun="learners">
+    <Layout filters={filters} rail={rail} shown={filtered.length} total={rows.length} noun="learners">
       {filtered.length === 0 ? (
         <Empty noun="learners" />
       ) : (
@@ -612,6 +631,7 @@ export function MentoredPublicationsTable({
   publications,
   pubsMode,
   highImpactThreshold,
+  children,
 }: {
   view: View;
   /** The page URL for each view with every other param kept — the tab's
@@ -623,6 +643,11 @@ export function MentoredPublicationsTable({
   pubsMode: "mentored" | "all";
   /** `HIGH_IMPACT_THRESHOLD` — its module reads `@/lib/db`, so it is a prop. */
   highImpactThreshold: number;
+  /** The page's server-side filter form (`AutoSubmitForm`
+   *  `#mentored-pubs-filters`), seated at the top of the rail. Children, not
+   *  a named prop, so a server component can hand it across the boundary
+   *  without a wrapper. */
+  children?: React.ReactNode;
 }) {
   const [view, setView] = React.useState<View>(initialView);
   const allMode = pubsMode === "all";
@@ -670,9 +695,14 @@ export function MentoredPublicationsTable({
         </a>
       </div>
       {view === "publications" ? (
-        <PublicationsView rows={publications} allMode={allMode} />
+        <PublicationsView rows={publications} allMode={allMode} filters={children} />
       ) : (
-        <LearnersView rows={summary} allMode={allMode} highImpactThreshold={highImpactThreshold} />
+        <LearnersView
+          rows={summary}
+          allMode={allMode}
+          highImpactThreshold={highImpactThreshold}
+          filters={children}
+        />
       )}
     </>
   );

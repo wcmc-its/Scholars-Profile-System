@@ -520,7 +520,14 @@ describe("/edit/reports/7 — wiring", () => {
       publications: [pub],
       pubsMode: "mentored",
       highImpactThreshold: 10,
+      // The server filter form rides in as the island's children — the top
+      // of its rail, never a strip above it.
+      children: expect.objectContaining({ props: expect.objectContaining({ typeChoices: ["aoc", "thesis", "postdoc", "likely", "possible", "faculty"] }) }),
     });
+    // …and it IS the auto-submit form (the element is the page-local FilterForm; walk it).
+    expect(findByType(findByType(summary, h.mockTable)?.props.children, h.mockAutoSubmitForm)?.props.id).toBe(
+      "mentored-pubs-filters",
+    );
     expect(textOf(summary)).toContain(
       "Pairs come from the MD program’s AOC pairing sheet, the MD-PhD program office, Jenzabar thesis-advisor records, ED postdoc appointments, mentees faculty add on their own profile, and co-authorship inferences (off by default) — see “About this report” below.",
     );

@@ -204,6 +204,30 @@ describe("MentoredPublicationsTable — publications", () => {
     expect(ids().slice(0, 2)).toEqual(["2", "1"]);
   });
 
+  it("children (the page's server filter form) head the rail, above the first client facet, in both views", () => {
+    for (const view of ["publications", "summary"] as const) {
+      const { container, unmount } = render(
+        <MentoredPublicationsTable
+          view={view}
+          viewHrefs={HREFS}
+          downloadHref={DOWNLOAD}
+          summary={LEARNERS}
+          publications={PUBS}
+          pubsMode="mentored"
+          highImpactThreshold={10}
+        >
+          <form data-testid="server-filters" />
+        </MentoredPublicationsTable>,
+      );
+      const form = within(container).getByTestId("server-filters");
+      const firstFacet = within(container).getAllByRole("heading", { level: 3 })[0];
+      // Same rail box, and the form comes first.
+      expect(form.parentElement).toBe(firstFacet.closest(".bg-apollo-rail"));
+      expect(form.compareDocumentPosition(firstFacet) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      unmount();
+    }
+  });
+
   it("the rail has no Type facet (Year · Learner author position · In program window · Mentor); ticking a Mentor narrows; Showing X of Y follows", () => {
     const { container, ids, getByTestId } = renderPubs();
     const rail = within(container);
