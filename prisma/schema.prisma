@@ -2418,11 +2418,18 @@ model UnitAdmin {
 /// means nobody but superuser/comms_steward can open the report (fail closed;
 /// there is no env flag).
 model ReportAccess {
-  reportKey String   @map("report_key") @db.VarChar(64)
-  scopeKey  String   @map("scope_key") @db.VarChar(64)
-  cwid      String   @db.VarChar(32)
-  grantedBy String   @map("granted_by") @db.VarChar(32)
-  grantedAt DateTime @default(now()) @map("granted_at")
+  reportKey   String   @map("report_key") @db.VarChar(64)
+  scopeKey    String   @map("scope_key") @db.VarChar(64)
+  cwid        String   @db.VarChar(32)
+  grantedBy   String   @map("granted_by") @db.VarChar(32)
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  // Grantee display name as the people picker returned it AT GRANT TIME
+  // (the `UnitAdmin.granteeName` precedent): the app runtime cannot reach
+  // LDAP (#443), and the grantees this table is for hold no Scholar row, so
+  // a render-time lookup would show the bare CWID. Read back as
+  // `Scholar.preferredName ?? granteeName ?? cwid`. Null on rows granted
+  // before the column existed.
+  granteeName String?  @map("grantee_name") @db.VarChar(255)
 
   @@id([reportKey, scopeKey, cwid])
   @@index([cwid])
