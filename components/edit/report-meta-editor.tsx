@@ -18,7 +18,8 @@ import { Pencil } from "lucide-react";
 
 import { OverviewEditor } from "@/components/edit/overview-editor";
 import { Button } from "@/components/ui/button";
-import { isValidReportSlug, type ReportKey } from "@/lib/edit/report-meta";
+import type { ReportKey } from "@/lib/edit/report-meta";
+import { isValidReportSlug } from "@/lib/edit/report-slug";
 
 export type ReportMetaEditorProps = {
   n: ReportKey;

@@ -41,6 +41,10 @@ import { cache } from "react";
 
 import { db } from "@/lib/db";
 
+// Re-exported for server callers (the route); the client editor imports the
+// db-free module directly — this one drags `@/lib/db` into any bundle.
+export { isValidReportSlug, REPORT_SLUG_MAX } from "@/lib/edit/report-slug";
+
 /** The seven numbered reports, as the `report_key` column spells them. */
 export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7"] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
@@ -52,22 +56,6 @@ export function isReportKey(v: unknown): v is ReportKey {
 
 /** Cap on `name` (the `report_meta.name` column width). */
 export const REPORT_NAME_MAX = 120;
-/** Cap on `slug` (the `report_meta.slug` column width). */
-export const REPORT_SLUG_MAX = 64;
-
-/** Whether `v` is a storable slug: lowercase letters, digits and single
- *  hyphens (`a-b-c`), 1..`REPORT_SLUG_MAX` chars, and NOT all digits — the
- *  digit namespace is the stable key (`/edit/reports/7` redirects to the
- *  slug), so a numeric slug would shadow it. Validation is shared by the
- *  route and the editor; uniqueness is the table's constraint. */
-export function isValidReportSlug(v: unknown): v is string {
-  return (
-    typeof v === "string" &&
-    v.length <= REPORT_SLUG_MAX &&
-    /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v) &&
-    !/^\d+$/.test(v)
-  );
-}
 /** Cap on `summary` (the `report_meta.summary` column width). The description
  *  cap is `OVERVIEW_MAX_LENGTH` (`lib/edit/validators.ts`), shared with the
  *  sanitizer. */
