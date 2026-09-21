@@ -89,6 +89,9 @@ export type EditContextScholar = {
   primaryTitle: string | null;
   postnominal: string | null;
   primaryDepartment: string | null;
+  /** ED primary-organization code (`HMC`, `WCMC`, …); the panel names it via
+   *  `institutionDisplayName`. NULL until the ED ETL has written it. */
+  primaryOrgCode: string | null;
   email: string | null;
   /** Effective email release audience from the Web Directory (`email_visibility`):
    *  'public' | 'institution' | 'none'. NULL until the first ED ETL backfill;
@@ -886,6 +889,7 @@ export async function loadEditContext(
       primaryTitle: true,
       postnominal: true,
       primaryDepartment: true,
+      primaryOrgCode: true,
       email: true,
       emailVisibility: true,
       orcid: true,
@@ -1935,6 +1939,7 @@ export async function loadEditContext(
         primaryTitle: scholar.primaryTitle,
         postnominal: scholar.postnominal,
         primaryDepartment: scholar.primaryDepartment,
+        primaryOrgCode: scholar.primaryOrgCode,
         email: scholar.email,
         emailVisibility: scholar.emailVisibility,
         orcid: scholar.orcid,
@@ -2108,6 +2113,7 @@ export async function loadEditContext(
       primaryTitle: scholar.primaryTitle,
       postnominal: scholar.postnominal,
       primaryDepartment: scholar.primaryDepartment,
+      primaryOrgCode: scholar.primaryOrgCode,
       email: scholar.email,
       emailVisibility: scholar.emailVisibility,
       orcid: scholar.orcid,

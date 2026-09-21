@@ -73,6 +73,8 @@ type Row = {
   surname: string;
   givenName: string;
   primaryDepartment: string;
+  /** Display name of the ED primary organization; "" when unknown. */
+  institution: string;
   totalPapersPostCutoff: number;
   collaborationsWithCenter: number;
   cancerRelatedPapers: number;
@@ -448,11 +450,12 @@ function MeshLogicModal() {
   );
 }
 
-type SortKey = "name" | "department" | "papers" | "collab" | "relevant";
+type SortKey = "name" | "department" | "institution" | "papers" | "collab" | "relevant";
 
 const SORTERS: Record<SortKey, (a: Row, b: Row) => number> = {
   name: (a, b) => `${a.givenName} ${a.surname}`.localeCompare(`${b.givenName} ${b.surname}`),
   department: (a, b) => a.primaryDepartment.localeCompare(b.primaryDepartment),
+  institution: (a, b) => a.institution.localeCompare(b.institution),
   papers: (a, b) => b.totalPapersPostCutoff - a.totalPapersPostCutoff,
   collab: (a, b) => b.collaborationsWithCenter - a.collaborationsWithCenter,
   relevant: (a, b) => b.cancerRelatedPapers - a.cancerRelatedPapers,
@@ -483,7 +486,8 @@ function RowTable({
       ? rows.filter(
           (r) =>
             `${r.givenName} ${r.surname}`.toLowerCase().includes(q) ||
-            r.primaryDepartment.toLowerCase().includes(q),
+            r.primaryDepartment.toLowerCase().includes(q) ||
+            r.institution.toLowerCase().includes(q),
         )
       : rows;
     return [...pool].sort(SORTERS[sort]);
@@ -498,8 +502,8 @@ function RowTable({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by name or department…"
-          aria-label="Filter rows by name or department"
+          placeholder="Filter by name, department or institution…"
+          aria-label="Filter rows by name, department or institution"
           className="h-8 max-w-56 text-xs"
         />
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -512,6 +516,7 @@ function RowTable({
           >
             <option value="name">Name</option>
             <option value="department">Department</option>
+            <option value="institution">Institution</option>
             <option value="papers">Papers</option>
             <option value="collab">Collab.</option>
             <option value="relevant">Cancer-Related</option>
@@ -532,6 +537,7 @@ function RowTable({
                 <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <th className={TH_CLASS}>Name</th>
                   <th className={TH_CLASS}>Department</th>
+                  <th className={TH_CLASS}>Institution</th>
                   <th className={`${TH_CLASS} text-right`}>Papers</th>
                   <th className={`${TH_CLASS} text-right`}>Collab.</th>
                   <th className={`${TH_CLASS} text-right`}>Cancer-Related</th>
@@ -548,6 +554,7 @@ function RowTable({
                       {r.givenName} {r.surname}
                     </td>
                     <td className="py-1.5 pr-2">{r.primaryDepartment}</td>
+                    <td className="py-1.5 pr-2">{r.institution}</td>
                     <td className="py-1.5 pr-2 text-right">{r.totalPapersPostCutoff}</td>
                     <td className="py-1.5 pr-2 text-right">
                       {r.collaborationsWithCenter} ({pct(r.collaborationsWithCenter, r.totalPapersPostCutoff)}%)

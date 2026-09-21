@@ -75,7 +75,7 @@ const COUNTS = { inScope: 0, missingHeadshot: 0, missingOverview: 0, withCoi: 0 
 beforeEach(() => {
   vi.clearAllMocks();
   mockLoadDataQualityRoster.mockResolvedValue({ entries: [], total: 0, counts: COUNTS });
-  mockLoadDataQualityFacets.mockResolvedValue({ roleCategories: [], departments: [], centers: [] });
+  mockLoadDataQualityFacets.mockResolvedValue({ roleCategories: [], departments: [], centers: [], institutions: [] });
   mockEnabled.mockReturnValue(true);
 });
 

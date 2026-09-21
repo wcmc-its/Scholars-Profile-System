@@ -44,6 +44,17 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
     expect(p.units).toEqual([{ kind: "center", code: "MCC" }]);
   });
 
+  it("decodes inst:CODE as an institution filter (ED primary organization)", () => {
+    const p = parseDataQualityParams(new URLSearchParams("unit=inst:HSS&unit=inst:WCMC"));
+    expect(p.units).toEqual([
+      { kind: "institution", code: "HSS" },
+      { kind: "institution", code: "WCMC" },
+    ]);
+    expect(p.unitValues).toEqual(["inst:HSS", "inst:WCMC"]);
+    // The prefix is exact: the long form is not an encoding.
+    expect(parseDataQualityParams(new URLSearchParams("unit=institution:HSS")).units).toEqual([]);
+  });
+
   it("drops malformed unit values from units but keeps them in unitValues", () => {
     const p = parseDataQualityParams(new URLSearchParams("unit=garbage&unit=div:&unit=dept:MED"));
     expect(p.units).toEqual([{ kind: "department", code: "MED" }]);
@@ -95,6 +106,13 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
         return Promise.resolve([
           { deptCode: "MED", _count: { _all: 8 } },
           { deptCode: "PED", _count: { _all: 5 } },
+        ]);
+      if (args.by[0] === "primaryOrgCode")
+        return Promise.resolve([
+          { primaryOrgCode: "WCMC", _count: { _all: 9000 } },
+          { primaryOrgCode: "HSS", _count: { _all: 40 } },
+          { primaryOrgCode: "ZZZ", _count: { _all: 1 } }, // an ED code the map lacks
+          { primaryOrgCode: null, _count: { _all: 22 } },
         ]);
       // divCode
       return Promise.resolve([
@@ -149,6 +167,24 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
 
     // Centers: center:CODE + active-membership count.
     expect(facets.centers).toEqual([{ value: "center:MCC", label: "Meyer Cancer Center", count: 7 }]);
+
+    // Institutions: inst:CODE from the scholar column, labelled for display (the
+    // home code named, an unmapped code left bare), label-sorted, NO null bucket.
+    expect(facets.institutions).toEqual([
+      { value: "inst:HSS", label: "Hospital for Special Surgery", count: 40 },
+      { value: "inst:WCMC", label: "Weill Cornell Medicine", count: 9000 },
+      { value: "inst:ZZZ", label: "ZZZ", count: 1 },
+    ]);
+  });
+
+  it("counts institutions over ACTIVE scholars, like departments", async () => {
+    const { client } = facetClient();
+    await loadDataQualityFacets(client as never);
+    expect(client.scholar.groupBy).toHaveBeenCalledWith({
+      by: ["primaryOrgCode"],
+      where: { deletedAt: null, status: "active" },
+      _count: { _all: true },
+    });
   });
 
   it("date-filters the center count (active memberships only)", async () => {

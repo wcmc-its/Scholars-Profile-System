@@ -25,10 +25,12 @@
  * `DivisionMembership`), NEVER the search index — no browse-facet key is read.
  */
 import { toCsv, type CsvCell } from "@/lib/csv";
+import { institutionDisplayName } from "@/lib/institutions";
 import { exportEmailCell } from "@/lib/profile/email-visibility-flags";
 
 /** The faculty-export columns. Distinct from `ROSTER_CSV_HEADERS` (center).
- *  `email` is appended LAST so a consumer's existing column indices don't shift. */
+ *  `email`, then `institution`, were each appended LAST so a consumer's existing
+ *  column indices don't shift. */
 export const FACULTY_CSV_HEADERS = [
   "cwid",
   "name",
@@ -37,6 +39,7 @@ export const FACULTY_CSV_HEADERS = [
   "division",
   "department",
   "email",
+  "institution",
 ] as const;
 
 /** One exportable faculty member. */
@@ -48,6 +51,8 @@ export type FacultyExportRow = {
   divisionName: string | null;
   departmentName: string | null;
   email: string | null;
+  /** `institutionDisplayName` of the ED primary organization; null when unset. */
+  institution: string | null;
 };
 
 /** The narrow Prisma surface these loaders read — `db.read` satisfies it
@@ -63,6 +68,7 @@ export type FacultyExportClient = {
         department: { name: string } | null;
         division: { name: string } | null;
         email: string | null;
+        primaryOrgCode: string | null;
       }>
     >;
     count(args: unknown): Promise<number>;
@@ -80,6 +86,7 @@ const FACULTY_SELECT = {
   department: { select: { name: true } },
   division: { select: { name: true } },
   email: true,
+  primaryOrgCode: true,
 } as const;
 
 function toRows(
@@ -93,6 +100,7 @@ function toRows(
     divisionName: r.division?.name ?? null,
     departmentName: r.department?.name ?? null,
     email: r.email,
+    institution: r.primaryOrgCode ? institutionDisplayName(r.primaryOrgCode) : null,
   }));
 }
 
@@ -183,6 +191,7 @@ export function buildFacultyCsv(rows: ReadonlyArray<FacultyExportRow>): string {
     r.divisionName,
     r.departmentName,
     exportEmailCell(r),
+    r.institution,
   ]);
   return toCsv(FACULTY_CSV_HEADERS, body);
 }

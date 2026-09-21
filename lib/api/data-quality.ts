@@ -42,6 +42,7 @@ import { scoreProminence } from "@/lib/api/prominence";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
+import { institutionDisplayName } from "@/lib/institutions";
 
 /** The Prisma surface this loader reads — a `db.read` client satisfies it. */
 export type DataQualityClient = Pick<
@@ -59,8 +60,8 @@ export type DataQualityClient = Pick<
   | "orgUnitRoleAssignment"
 >;
 
-/** A single org-unit filter (department / division / center); reused from the
- *  Profiles roster so the encoding stays consistent. */
+/** A single org-unit filter (department / division / center / institution);
+ *  reused from the Profiles roster so the encoding stays consistent. */
 export type { EditRosterUnitFilter };
 
 /** Grant `role` values that count as a principal-investigator role ("times as PI").
@@ -278,15 +279,18 @@ function buildWhere(
     and.push({ OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLES] } }] });
   }
 
-  // Org-unit multi-select (#5): selected departments / divisions / centers OR
-  // together. Centers were pre-resolved to member cwids by the caller.
+  // Org-unit multi-select (#5): selected departments / divisions / centers /
+  // institutions OR together. Centers were pre-resolved to member cwids by the
+  // caller; an institution is a scholar column (ED primary organization).
   const units = opts.units ?? [];
   if (units.length > 0) {
     const deptCodes = units.filter((u) => u.kind === "department").map((u) => u.code);
     const divCodes = units.filter((u) => u.kind === "division").map((u) => u.code);
+    const instCodes = units.filter((u) => u.kind === "institution").map((u) => u.code);
     const unitOr: Prisma.ScholarWhereInput[] = [];
     if (deptCodes.length > 0) unitOr.push({ deptCode: { in: deptCodes } });
     if (divCodes.length > 0) unitOr.push({ divCode: { in: divCodes } });
+    if (instCodes.length > 0) unitOr.push({ primaryOrgCode: { in: instCodes } });
     if (filterCenterCwids.length > 0) unitOr.push({ cwid: { in: [...filterCenterCwids] } });
     // Units selected but nothing resolves (e.g. an empty center) → match nothing
     // rather than silently dropping the filter.
@@ -653,7 +657,7 @@ function parseOverviewAge(v: string | undefined): OverviewAgeFilter {
     : "all";
 }
 
-/** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE`). */
+/** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`). */
 function parseUnitValue(v: string): EditRosterUnitFilter | null {
   const sep = v.indexOf(":");
   if (sep < 0) return null;
@@ -663,6 +667,7 @@ function parseUnitValue(v: string): EditRosterUnitFilter | null {
   if (kind === "dept") return { kind: "department", code };
   if (kind === "div") return { kind: "division", code };
   if (kind === "center") return { kind: "center", code };
+  if (kind === "inst") return { kind: "institution", code };
   return null;
 }
 
@@ -736,6 +741,10 @@ export type DataQualityFacets = {
   departments: Array<DataQualityFacetOption & { divisions: DataQualityFacetOption[] }>;
   /** Research centers (value `center:CODE`), with active-member counts. */
   centers: DataQualityFacetOption[];
+  /** ED primary organizations present on active scholars (value `inst:CODE`,
+   *  label `institutionDisplayName`). No null bucket: a scholar with no
+   *  `primaryOrgCode` (pre-backfill rows) is simply not selectable here. */
+  institutions: DataQualityFacetOption[];
 };
 
 const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
@@ -754,27 +763,33 @@ const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
  */
 export async function loadDataQualityFacets(client: DataQualityClient): Promise<DataQualityFacets> {
   const today = new Date();
-  const [deptRows, divRows, ctrRows, roleAgg, deptAgg, divAgg, ctrAgg] = await Promise.all([
-    client.department.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
-    client.division.findMany({
-      select: { code: true, name: true, deptCode: true },
-      orderBy: { name: "asc" },
-    }),
-    client.center.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
-    client.scholar.groupBy({ by: ["roleCategory"], where: ACTIVE_WHERE, _count: { _all: true } }),
-    client.scholar.groupBy({ by: ["deptCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
-    client.scholar.groupBy({ by: ["divCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
-    client.centerMembership.groupBy({
-      by: ["centerCode"],
-      where: {
-        AND: [
-          { OR: [{ startDate: null }, { startDate: { lte: today } }] },
-          { OR: [{ endDate: null }, { endDate: { gte: today } }] },
-        ],
-      },
-      _count: { _all: true },
-    }),
-  ]);
+  const [deptRows, divRows, ctrRows, roleAgg, deptAgg, divAgg, instAgg, ctrAgg] =
+    await Promise.all([
+      client.department.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
+      client.division.findMany({
+        select: { code: true, name: true, deptCode: true },
+        orderBy: { name: "asc" },
+      }),
+      client.center.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
+      client.scholar.groupBy({ by: ["roleCategory"], where: ACTIVE_WHERE, _count: { _all: true } }),
+      client.scholar.groupBy({ by: ["deptCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
+      client.scholar.groupBy({ by: ["divCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
+      client.scholar.groupBy({
+        by: ["primaryOrgCode"],
+        where: ACTIVE_WHERE,
+        _count: { _all: true },
+      }),
+      client.centerMembership.groupBy({
+        by: ["centerCode"],
+        where: {
+          AND: [
+            { OR: [{ startDate: null }, { startDate: { lte: today } }] },
+            { OR: [{ endDate: null }, { endDate: { gte: today } }] },
+          ],
+        },
+        _count: { _all: true },
+      }),
+    ]);
 
   const roleCount = new Map(
     roleAgg.map((r) => [r.roleCategory ?? "", r._count._all] as const),
@@ -821,5 +836,19 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
     count: ctrCount.get(c.code) ?? 0,
   }));
 
-  return { roleCategories, departments, centers };
+  const institutions: DataQualityFacetOption[] = instAgg
+    .flatMap((r) =>
+      r.primaryOrgCode
+        ? [
+            {
+              value: `inst:${r.primaryOrgCode}`,
+              label: institutionDisplayName(r.primaryOrgCode),
+              count: r._count._all,
+            },
+          ]
+        : [],
+    )
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return { roleCategories, departments, centers, institutions };
 }

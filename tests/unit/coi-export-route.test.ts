@@ -134,7 +134,7 @@ describe("/edit/coi/export gating", () => {
   });
 
   it("threads the multi-value query-param filters into the export loader", async () => {
-    await GET(req("?q=harr&type=postdoc&type=staff&unit=dept:MED&unit=center:MCC&hidden=0"));
+    await GET(req("?q=harr&type=postdoc&type=staff&unit=dept:MED&unit=center:MCC&unit=inst:HSS&hidden=0"));
     expect(mockExport).toHaveBeenCalledWith(
       expect.objectContaining({
         query: "harr",
@@ -142,6 +142,7 @@ describe("/edit/coi/export gating", () => {
         units: [
           { kind: "department", code: "MED" },
           { kind: "center", code: "MCC" },
+          { kind: "institution", code: "HSS" },
         ],
         includeHidden: false,
       }),

@@ -42,6 +42,7 @@ import { toCsv, type CsvCell } from "@/lib/csv";
 import { db } from "@/lib/db";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
 import { editError, resolveEditIdentity } from "@/lib/edit/request";
+import { institutionDisplayName } from "@/lib/institutions";
 
 const PATH = "/api/edit/center/[code]/collab-report/export";
 
@@ -60,6 +61,8 @@ const HEADERS = [
   "impact_score",
   "impact_justification",
   "synopsis",
+  // Appended LAST (YEAR_COL below is index-derived; a consumer's indices never shift).
+  "institution",
 ] as const;
 
 // Derived from HEADERS rather than hand-copied, so a future column reorder
@@ -127,9 +130,12 @@ export async function GET(
 
   const scholars = await db.read.scholar.findMany({
     where: { cwid: { in: cwids } },
-    select: { cwid: true, preferredName: true },
+    select: { cwid: true, preferredName: true, primaryOrgCode: true },
   });
   const nameByCwid = new Map(scholars.map((s) => [s.cwid, splitName(s.preferredName ?? s.cwid)]));
+  const institutionByCwid = new Map(
+    scholars.map((s) => [s.cwid, s.primaryOrgCode ? institutionDisplayName(s.primaryOrgCode) : ""]),
+  );
 
   const authorRows = await db.read.publicationAuthor.findMany({
     where: {
@@ -182,6 +188,7 @@ export async function GET(
         r.publication.impactScore !== null ? Number(r.publication.impactScore) : null,
         r.publication.impactJustification,
         r.publication.synopsis,
+        institutionByCwid.get(r.cwid) ?? "",
       ];
     })
     // Plain ASCII comparison, not `localeCompare` — cwids have no locale to

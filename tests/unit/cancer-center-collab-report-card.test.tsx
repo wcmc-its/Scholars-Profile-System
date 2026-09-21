@@ -14,13 +14,13 @@ import { CancerCenterCollabReportCard } from "@/components/edit/cancer-center-co
 
 const ROWS = [
   // REMOVE: current member, zero collaboration.
-  { cwid: "m1", surname: "Removeperson", givenName: "R", primaryDepartment: "Onc", totalPapersPostCutoff: 10, collaborationsWithCenter: 0, cancerRelatedPapers: 1, isCurrentMember: true, currentProgramCode: "P1" },
+  { cwid: "m1", surname: "Removeperson", givenName: "R", primaryDepartment: "Onc", institution: "Weill Cornell Medicine", totalPapersPostCutoff: 10, collaborationsWithCenter: 0, cancerRelatedPapers: 1, isCurrentMember: true, currentProgramCode: "P1" },
   // ADD collaborator + relevant: clears both (default thresholds: collab count>=2, relevance count>=3).
-  { cwid: "c1", surname: "Collabrelevant", givenName: "C", primaryDepartment: "Med", totalPapersPostCutoff: 10, collaborationsWithCenter: 3, cancerRelatedPapers: 5, isCurrentMember: false, currentProgramCode: null },
+  { cwid: "c1", surname: "Collabrelevant", givenName: "C", primaryDepartment: "Med", institution: "Hospital for Special Surgery", totalPapersPostCutoff: 10, collaborationsWithCenter: 3, cancerRelatedPapers: 5, isCurrentMember: false, currentProgramCode: null },
   // ADD recruit: clears relevance only.
-  { cwid: "c2", surname: "Recruitperson", givenName: "R2", primaryDepartment: "Med", totalPapersPostCutoff: 10, collaborationsWithCenter: 0, cancerRelatedPapers: 4, isCurrentMember: false, currentProgramCode: null },
+  { cwid: "c2", surname: "Recruitperson", givenName: "R2", primaryDepartment: "Med", institution: "", totalPapersPostCutoff: 10, collaborationsWithCenter: 0, cancerRelatedPapers: 4, isCurrentMember: false, currentProgramCode: null },
   // Neither: clears nothing.
-  { cwid: "c3", surname: "Neitherperson", givenName: "N", primaryDepartment: "Med", totalPapersPostCutoff: 10, collaborationsWithCenter: 1, cancerRelatedPapers: 1, isCurrentMember: false, currentProgramCode: null },
+  { cwid: "c3", surname: "Neitherperson", givenName: "N", primaryDepartment: "Med", institution: "Weill Cornell Medicine", totalPapersPostCutoff: 10, collaborationsWithCenter: 1, cancerRelatedPapers: 1, isCurrentMember: false, currentProgramCode: null },
 ];
 
 const TAXONOMY_TOPICS = [
@@ -104,6 +104,13 @@ describe("CancerCenterCollabReportCard", () => {
     });
     expect(within(removeSection).queryByText(/Removeperson/)).toBeNull();
     expect(within(removeSection).getByText(/No rows match/)).toBeTruthy();
+    // The free-text filter also matches the institution cell.
+    fireEvent.change(within(removeSection).getByLabelText(/Filter rows/), {
+      target: { value: "weill cornell" },
+    });
+    expect(within(removeSection).getByText(/Removeperson/)).toBeTruthy();
+    expect(within(removeSection).getByRole("columnheader", { name: "Institution" })).toBeTruthy();
+    expect(within(removeSection).getByText("Weill Cornell Medicine")).toBeTruthy();
 
     // Sorting by Papers (desc) in the collaborator+relevant section: only one
     // row there in this fixture, so just confirm the control doesn't blow up
@@ -111,6 +118,10 @@ describe("CancerCenterCollabReportCard", () => {
     const collabSection = screen.getByText(/collaborator \+ relevant/).closest("section")!;
     fireEvent.change(within(collabSection).getByLabelText(/Sort rows by/), {
       target: { value: "papers" },
+    });
+    expect(within(collabSection).getByText(/Collabrelevant/)).toBeTruthy();
+    fireEvent.change(within(collabSection).getByLabelText(/Sort rows by/), {
+      target: { value: "institution" },
     });
     expect(within(collabSection).getByText(/Collabrelevant/)).toBeTruthy();
   });

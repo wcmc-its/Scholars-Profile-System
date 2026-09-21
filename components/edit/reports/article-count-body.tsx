@@ -1,6 +1,7 @@
 /**
  * Report 8 — "Article counts" body: a filter rail (person type, primary
- * department, article type, minimum JIF, author position, year basis and
+ * department, primary institution, article type, minimum JIF, author
+ * position, year basis and
  * range — plain GET params, `AutoSubmitForm` like report 7) beside the
  * total, the per-year table and the `.xlsx` link
  * (`/api/edit/reports/article-count`, same query string). The loader,
@@ -20,6 +21,7 @@ import {
   POSITION_LABEL,
   type ArticleCountParams,
 } from "@/lib/edit/article-count-report";
+import { institutionDisplayName } from "@/lib/institutions";
 import { roleCategoryLabel } from "@/lib/match-display";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 
@@ -43,7 +45,7 @@ function FilterForm({
 }: {
   basePath: string;
   params: ArticleCountParams;
-  choices: { types: string[]; depts: string[]; atypes: string[] };
+  choices: { types: string[]; depts: string[]; insts: string[]; atypes: string[] };
 }) {
   const years = Array.from({ length: 30 }, (_, i) => new Date().getFullYear() + 1 - i);
   return (
@@ -104,6 +106,17 @@ function FilterForm({
           ))}
         </select>
         <span className="text-muted-foreground mt-1 text-[11px]">None selected = all. Ctrl/Cmd-click for several.</span>
+      </label>
+      <label className="mb-5 flex flex-col">
+        <span className={RAIL_HEADING}>Primary institution</span>
+        <select name="inst" multiple size={4} defaultValue={params.insts} className={SELECT}>
+          {choices.insts.map((i) => (
+            <option key={i} value={i}>
+              {institutionDisplayName(i)}
+            </option>
+          ))}
+        </select>
+        <span className="text-muted-foreground mt-1 text-[11px]">None selected = all.</span>
       </label>
       <label className="mb-5 flex flex-col">
         <span className={RAIL_HEADING}>Article type</span>

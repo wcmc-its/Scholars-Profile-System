@@ -17,7 +17,8 @@
  *
  * Reuses the #972 `RosterFacet` typeahead; the org-unit hierarchy is a
  * "Department / division" facet with divisions indented under their parent, plus a
- * separate "Centers" facet (centers have no parent-dept FK, so they can't nest).
+ * separate "Centers" facet (centers have no parent-dept FK, so they can't nest) and
+ * an "Institution" facet (ED primary organization, `Scholar.primaryOrgCode`).
  */
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -37,7 +38,8 @@ export type ProfilesFiltersProps = {
   facets: DataQualityFacets;
   /** Currently-applied person types (raw roleCategory values). */
   roleCategories: string[];
-  /** Currently-applied unit values (`dept:CODE` / `div:CODE` / `center:CODE`). */
+  /** Currently-applied unit values (`dept:CODE` / `div:CODE` / `center:CODE` /
+   *  `inst:CODE`). */
   units: string[];
   q: string;
   gap: DataQualityGapFilter;
@@ -157,6 +159,7 @@ export function ProfilesFilters({
   }, [facets.departments]);
 
   const centerOptions: FacetOption[] = facets.centers;
+  const institutionOptions: FacetOption[] = facets.institutions;
 
   return (
     <form
@@ -283,6 +286,16 @@ export function ProfilesFilters({
         searchable
         searchPlaceholder="Search centers…"
         noMatchLabel="No centers match"
+      />
+      <RosterFacet
+        title="Institution"
+        options={institutionOptions}
+        selected={selUnits}
+        onToggle={toggleUnit}
+        collapseAfter={10}
+        searchable
+        searchPlaceholder="Search institutions…"
+        noMatchLabel="No institutions match"
       />
     </form>
   );

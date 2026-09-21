@@ -32,6 +32,7 @@ const facets = {
     },
   ],
   centers: [{ value: "center:MCC", label: "Meyer Cancer Center", count: 7 }],
+  institutions: [{ value: "inst:HSS", label: "Hospital for Special Surgery", count: 3 }],
 };
 
 function renderFilters(over: Record<string, unknown> = {}) {
@@ -74,6 +75,14 @@ describe("CoiFilters — auto-apply", () => {
     renderFilters({ units: [] });
     fireEvent.click(screen.getByText("Meyer Cancer Center"));
     expect(lastUrl()).toContain("unit=center%3AMCC");
+  });
+
+  it("renders an Institution facet below Centers and toggles inst:CODE into the shared unit set", () => {
+    renderFilters({ units: [] });
+    const titles = screen.getAllByRole("heading").map((h) => h.textContent);
+    expect(titles.indexOf("Institution")).toBe(titles.indexOf("Centers") + 1);
+    fireEvent.click(screen.getByText("Hospital for Special Surgery"));
+    expect(lastUrl()).toContain("unit=inst%3AHSS");
   });
 
   it("the Gap select offers ONLY Any/Has COI to review — no headshot/overview options", () => {

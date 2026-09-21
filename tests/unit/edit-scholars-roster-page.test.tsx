@@ -122,7 +122,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   mockLoadDataQualityRoster.mockResolvedValue({ entries: [], total: 0, counts: COUNTS });
-  mockLoadDataQualityFacets.mockResolvedValue({ roleCategories: [], departments: [], centers: [] });
+  mockLoadDataQualityFacets.mockResolvedValue({ roleCategories: [], departments: [], centers: [], institutions: [] });
   // Default: the viewer holds no unit grants → empty scope → Forbidden unless
   // they are a superuser / comms_steward.
   mockUnitAdminFindMany.mockResolvedValue([]);
@@ -202,6 +202,7 @@ describe("/edit/scholars — authorization", () => {
         },
       ],
       centers: [{ value: "center:CTR9", label: "Not mine", count: 1 }],
+      institutions: [{ value: "inst:HSS", label: "Hospital for Special Surgery", count: 3 }],
     });
 
     const result = asEl(await EditScholarsPage({ searchParams: sp() }));
@@ -209,6 +210,7 @@ describe("/edit/scholars — authorization", () => {
     const facets = roster.props.facets as {
       departments: Array<{ value: string; divisions: unknown[] }>;
       centers: unknown[];
+      institutions: unknown[];
       roleCategories: unknown[];
     };
     expect(facets.departments).toEqual([
@@ -220,8 +222,30 @@ describe("/edit/scholars — authorization", () => {
       },
     ]);
     expect(facets.centers).toEqual([]);
+    // A department curator holds no institution grant → no institution options.
+    expect(facets.institutions).toEqual([]);
     // Person type is not unit-specific — it stays whole.
     expect(facets.roleCategories).toHaveLength(1);
+  });
+
+  it("narrows the institution facet to the viewer's own institution grants", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockUnitAdminFindMany.mockResolvedValue([{ entityType: "institution", entityId: "HSS" }]);
+    mockLoadDataQualityFacets.mockResolvedValue({
+      roleCategories: [],
+      departments: [],
+      centers: [],
+      institutions: [
+        { value: "inst:HSS", label: "Hospital for Special Surgery", count: 3 },
+        { value: "inst:MSKCC", label: "Memorial Sloan Kettering Cancer Center", count: 5 },
+      ],
+    });
+    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
+    const roster = asEl(result.props.children);
+    const facets = roster.props.facets as { institutions: Array<{ value: string }> };
+    expect(facets.institutions).toEqual([
+      { value: "inst:HSS", label: "Hospital for Special Surgery", count: 3 },
+    ]);
   });
 
   // Real bug this pins (found while writing this suite): the page filters
@@ -248,6 +272,7 @@ describe("/edit/scholars — authorization", () => {
         { value: "dept:DEPT9", label: "Unrelated Dept", count: 1, divisions: [] },
       ],
       centers: [],
+      institutions: [],
     });
 
     const result = asEl(await EditScholarsPage({ searchParams: sp() }));
@@ -417,7 +442,7 @@ describe("ProfilesRoster — row name links to the editor", () => {
         ]}
         total={1}
         counts={{ ...COUNTS, inScope: 1 }}
-        facets={{ roleCategories: [], departments: [], centers: [] }}
+        facets={{ roleCategories: [], departments: [], centers: [], institutions: [] }}
         roleCategories={[]}
         units={[]}
         q=""

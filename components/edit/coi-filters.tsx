@@ -27,7 +27,8 @@ export type CoiFiltersProps = {
   facets: DataQualityFacets;
   /** Currently-applied person types (raw roleCategory values). */
   roleCategories: string[];
-  /** Currently-applied unit values (`dept:CODE` / `div:CODE` / `center:CODE`). */
+  /** Currently-applied unit values (`dept:CODE` / `div:CODE` / `center:CODE` /
+   *  `inst:CODE`). */
   units: string[];
   q: string;
   gap: DataQualityGapFilter;
@@ -131,6 +132,7 @@ export function CoiFilters({ facets, roleCategories, units, q, gap, includeHidde
   }, [facets.departments]);
 
   const centerOptions: FacetOption[] = facets.centers;
+  const institutionOptions: FacetOption[] = facets.institutions;
 
   return (
     <form
@@ -230,6 +232,16 @@ export function CoiFilters({ facets, roleCategories, units, q, gap, includeHidde
         searchable
         searchPlaceholder="Search centers…"
         noMatchLabel="No centers match"
+      />
+      <RosterFacet
+        title="Institution"
+        options={institutionOptions}
+        selected={selUnits}
+        onToggle={toggleUnit}
+        collapseAfter={10}
+        searchable
+        searchPlaceholder="Search institutions…"
+        noMatchLabel="No institutions match"
       />
     </form>
   );

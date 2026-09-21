@@ -21,6 +21,7 @@ import { splitName } from "@/lib/center-collaboration/recommendations-core";
 import { db } from "@/lib/db";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
 import { editError, editOk, resolveEditIdentity } from "@/lib/edit/request";
+import { institutionDisplayName } from "@/lib/institutions";
 
 const PATH = "/api/edit/center/[code]/collab-report";
 
@@ -62,7 +63,7 @@ export async function GET(
 
   const scholars = await db.read.scholar.findMany({
     where: { cwid: { in: candidates.map((c) => c.cwid) } },
-    select: { cwid: true, preferredName: true, primaryDepartment: true },
+    select: { cwid: true, preferredName: true, primaryDepartment: true, primaryOrgCode: true },
   });
   const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
 
@@ -74,6 +75,7 @@ export async function GET(
       surname,
       givenName: given,
       primaryDepartment: s?.primaryDepartment ?? "",
+      institution: s?.primaryOrgCode ? institutionDisplayName(s.primaryOrgCode) : "",
       totalPapersPostCutoff: c.totalPapersPostCutoff,
       collaborationsWithCenter: c.collaborationsWithCenter,
       cancerRelatedPapers: c.cancerRelatedPapers,

@@ -362,7 +362,7 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     });
   });
 
-  it("a unit multi-select ORs departments / divisions / center members together", async () => {
+  it("a unit multi-select ORs departments / divisions / institutions / center members together", async () => {
     const { client, scholarFindMany } = fakeClient({ scholars: [], centerMembers: ["c1", "c2"] });
     await loadDataQualityRoster(
       {
@@ -371,6 +371,7 @@ describe("loadDataQualityRoster — filters + pagination", () => {
           { kind: "department", code: "MED" },
           { kind: "division", code: "CARD" },
           { kind: "center", code: "MCC" },
+          { kind: "institution", code: "HSS" },
         ],
       },
       asClient(client),
@@ -380,13 +381,27 @@ describe("loadDataQualityRoster — filters + pagination", () => {
       (c: { OR?: Array<Record<string, unknown>> }) =>
         Array.isArray(c.OR) && c.OR.some((o) => "deptCode" in o),
     );
+    // An institution is a scholar column — no membership expansion, so the
+    // center-membership read is the only extra query.
     expect(unitClause).toEqual({
       OR: [
         { deptCode: { in: ["MED"] } },
         { divCode: { in: ["CARD"] } },
+        { primaryOrgCode: { in: ["HSS"] } },
         { cwid: { in: ["c1", "c2"] } },
       ],
     });
+  });
+
+  it("an institution-only unit filter is a bare primaryOrgCode IN, with no membership read", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: true }, units: [{ kind: "institution", code: "MSKCC" }] },
+      asClient(client),
+    );
+    expect(client.centerMembership.findMany).not.toHaveBeenCalled();
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND).toContainEqual({ OR: [{ primaryOrgCode: { in: ["MSKCC"] } }] });
   });
 
   it("a center filter excludes pending / expired memberships (active by date only)", async () => {

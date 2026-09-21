@@ -1,7 +1,7 @@
 /**
  * The org-unit filter shape shared by the Profiles roster
- * (`lib/api/data-quality.ts`, `/edit/scholars`) — one department, division, or
- * center.
+ * (`lib/api/data-quality.ts`, `/edit/scholars`) — one department, division,
+ * center, or institution (ED primary organization, `Scholar.primaryOrgCode`).
  *
  * The roster query this type originally belonged to (`loadEditRoster`) was
  * retired when the Profiles page merged with the former Data Quality dashboard
@@ -12,4 +12,5 @@
 export type EditRosterUnitFilter =
   | { kind: "department"; code: string }
   | { kind: "division"; code: string }
-  | { kind: "center"; code: string };
+  | { kind: "center"; code: string }
+  | { kind: "institution"; code: string };
