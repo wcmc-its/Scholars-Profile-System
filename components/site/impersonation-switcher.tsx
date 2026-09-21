@@ -54,7 +54,7 @@ import { mapStartError } from "@/components/edit/view-as-button";
  */
 
 type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward";
-type UnitKind = "department" | "division" | "center" | "core";
+type UnitKind = "department" | "division" | "center" | "core" | "institution";
 
 /** A row from `/api/impersonation/candidates` (§7). */
 type Candidate = {
@@ -73,6 +73,7 @@ const KIND_FILTERS: ReadonlyArray<{ key: "all" | UnitKind | "scholar"; label: st
   { key: "division", label: "Division" },
   { key: "center", label: "Center" },
   { key: "core", label: "Core" },
+  { key: "institution", label: "Institution" },
   { key: "scholar", label: "Scholar" },
 ];
 
@@ -88,6 +89,7 @@ const KIND_SHORT: Record<UnitKind, string> = {
   division: "Div",
   center: "Center",
   core: "Core",
+  institution: "Institution",
 };
 
 /** `Owner · Cardiology (Dept)` for a unit role; plain `Scholar` or

@@ -114,11 +114,12 @@ const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href: strin
 };
 
 /** Compact unit-kind suffix for the banner's subject line. */
-const KIND_SHORT: Record<"department" | "division" | "center" | "core", string> = {
+const KIND_SHORT: Record<"department" | "division" | "center" | "core" | "institution", string> = {
   department: "Dept",
   division: "Div",
   center: "Center",
   core: "Core",
+  institution: "Institution",
 };
 
 /**
@@ -128,7 +129,7 @@ const KIND_SHORT: Record<"department" | "division" | "center" | "core", string> 
  */
 function subjectDescriptor(im: {
   role: SubjectRole;
-  unitKind: "department" | "division" | "center" | "core" | null;
+  unitKind: "department" | "division" | "center" | "core" | "institution" | null;
   unit: string | null;
 }): string {
   // Only owner/curator carry an administered unit — every other role (a plain

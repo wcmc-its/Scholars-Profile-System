@@ -84,6 +84,12 @@ describe("resolveImpersonationDisplay", () => {
     expect(out).toEqual({ role: "scholar", unitKind: null, unit: "Pediatrics" });
   });
 
+  it("an institution-only admin (no Scholar row) reads role/unitKind=institution, named from the catalog with no table read", async () => {
+    const client = stubClient([{ role: "owner", entityType: "institution", entityId: "HMC" }]);
+    const out = await resolveImpersonationDisplay("mam001", client, null);
+    expect(out).toEqual({ role: "owner", unitKind: "institution", unit: "Hamad Medical Corporation" });
+  });
+
   it("a center owner reads role=owner, unitKind=center, the center's name", async () => {
     const out = await resolveImpersonationDisplay(
       "own001",

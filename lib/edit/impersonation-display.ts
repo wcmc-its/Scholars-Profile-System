@@ -37,12 +37,15 @@
  * unit tests can load it without a stub, matching `unit-edit-context.ts`.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { institutionName } from "@/lib/institutions";
 
 /** The role half of the display label — the two `UnitRole`s plus the `scholar` floor. */
 export type ImpersonationDisplayRole = "owner" | "curator" | "scholar";
 
-/** The unit-kind half — the four org-unit `EntityType`s a grant can target. */
-export type ImpersonationUnitKind = "department" | "division" | "center" | "core";
+/** The unit-kind half — the org-unit `EntityType`s a grant can target.
+ *  `institution` (#2695) is an ED primary-organization code with no unit
+ *  table; lib/institutions.ts names it. */
+export type ImpersonationUnitKind = "department" | "division" | "center" | "core" | "institution";
 
 /** What the banner / switcher render per subject (§7 probe + candidates shape). */
 export type ImpersonationDisplay = {
@@ -54,7 +57,7 @@ export type ImpersonationDisplay = {
   unit: string | null;
 };
 
-/** A unit-scoped `unit_admin` grant, narrowed to the four org-unit kinds. */
+/** A unit-scoped `unit_admin` grant, narrowed to the org-unit kinds. */
 export type DisplayGrant = {
   role: "owner" | "curator";
   entityType: ImpersonationUnitKind;
@@ -69,6 +72,7 @@ export type ImpersonationDisplayClient = Pick<
 
 /** Tie-break only: which unit kind wins when a CWID holds equal-role grants. */
 const KIND_RANK: Record<ImpersonationUnitKind, number> = {
+  institution: 5,
   core: 4,
   center: 3,
   division: 2,
@@ -76,7 +80,13 @@ const KIND_RANK: Record<ImpersonationUnitKind, number> = {
 };
 
 function isUnitKind(value: string): value is ImpersonationUnitKind {
-  return value === "department" || value === "division" || value === "center" || value === "core";
+  return (
+    value === "department" ||
+    value === "division" ||
+    value === "center" ||
+    value === "core" ||
+    value === "institution"
+  );
 }
 
 /**
@@ -166,6 +176,8 @@ async function resolveUnitName(
   // client.center | client.core` union is not callable (the Prisma
   // `findUnique` overloads don't unify), so narrow on `kind` first.
   const select = { name: true } as const;
+  // No table for an institution — the static catalog names it.
+  if (kind === "institution") return institutionName(code);
   if (kind === "department") {
     return (await client.department.findUnique({ where: { code }, select }))?.name ?? null;
   }
