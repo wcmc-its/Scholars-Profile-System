@@ -17,7 +17,7 @@ beforeEach(() => {
 
 /** Stub every fetch: the candidates search always returns `rows`; a POST to
  *  `/api/impersonation` returns `postStatus`. */
-function stubFetches(rows: unknown[], postStatus = 204) {
+function stubFetches(rows: unknown[], postStatus = 204, postBody: unknown = null) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url.includes("/api/impersonation/candidates")) {
@@ -26,7 +26,9 @@ function stubFetches(rows: unknown[], postStatus = 204) {
         headers: { "Content-Type": "application/json" },
       });
     }
-    return new Response(null, { status: postStatus });
+    return new Response(postBody === null ? null : JSON.stringify(postBody), {
+      status: postStatus,
+    });
   });
 }
 
@@ -52,6 +54,21 @@ describe("ImpersonationSwitcher exact-CWID fallback", () => {
       expect(call).toBeTruthy();
       expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ targetCwid: "cvg001" });
     });
+  });
+
+  it("surfaces the route's reason when the start POST fails, not the search error", async () => {
+    stubFetches([], 404, { ok: false, error: "target_not_found", field: "targetCwid" });
+    render(<ImpersonationSwitcher />);
+
+    fireEvent.change(screen.getByLabelText("Search people to view as"), {
+      target: { value: "meb2011" },
+    });
+    fireEvent.click(await screen.findByTestId("impersonation-view-as-exact-cwid"));
+    fireEvent.click(await screen.findByTestId("impersonation-confirm"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("nothing to view as");
+    expect(alert.textContent).not.toContain("Couldn’t load people");
   });
 
   it("does NOT offer the fallback for a multi-word query (a name search, never a CWID)", async () => {
