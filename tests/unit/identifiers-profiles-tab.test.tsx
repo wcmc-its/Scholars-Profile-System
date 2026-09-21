@@ -8,10 +8,11 @@
  * tab in order to add it.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { visibleAttrKeys } from "@/components/edit/edit-page";
 import { OrcidCard } from "@/components/edit/orcid-card";
+import { ProfileLinksCard } from "@/components/edit/profile-links-card";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -72,12 +73,13 @@ describe("OrcidCard", () => {
     expect(onFile.querySelector("a")?.getAttribute("href")).toBe(
       "https://orcid.org/0000-0002-1825-0097",
     );
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toBe("On file");
     expect(screen.queryByTestId("orcid-form")).toBeNull();
     fireEvent.click(screen.getByTestId("orcid-change"));
     expect(screen.getByTestId("orcid-form")).toBeTruthy();
   });
 
-  it("suggested → 'Yes, this is mine' POSTs the suggested iD with confirmedSuggestion and refreshes", async () => {
+  it("suggested → 'Confirm this iD' POSTs the suggested iD with confirmedSuggestion; the pill flips to Confirmed", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -99,11 +101,12 @@ describe("OrcidCard", () => {
         }}
       />,
     );
-    const sug = screen.getByTestId("orcid-suggested");
-    expect(sug.textContent).toContain("Is this your ORCID iD?");
+    expect(screen.getByTestId("orcid-suggested-status").textContent).toBe(
+      "High confidence suggestion",
+    );
     const why = screen.getByTestId("orcid-suggested-evidence");
     expect(why.querySelectorAll("li")).toHaveLength(2);
-    expect(why.textContent).toContain("Seen on 1 of your accepted publications in ReCiter");
+    expect(why.textContent).toContain("Matched on 1 of your accepted publications in ReCiter");
     expect(why.textContent).toContain("The ORCID registry record lists your WCM email");
     fireEvent.click(screen.getByTestId("orcid-confirm"));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -115,8 +118,15 @@ describe("OrcidCard", () => {
       orcid: "0000-0002-1825-0097",
       confirmedSuggestion: true,
     });
-    // The card shows the saved iD without waiting for the refresh.
+    // The card shows the saved iD without waiting for the refresh, and the
+    // evidence it was confirmed on stays under it.
     expect(screen.getByTestId("orcid-on-file").textContent).toContain("0000-0002-1825-0097");
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toBe("Confirmed");
+    const lines = [...screen.getByTestId("orcid-on-file-evidence").querySelectorAll("li")].map(
+      (li) => li.textContent,
+    );
+    expect(lines[0]).toBe("Confirmed by you");
+    expect(lines).toHaveLength(3);
   });
 
   it("on file → the evidence persists under the iD; Remove POSTs orcid: null and the card empties", async () => {
@@ -140,7 +150,7 @@ describe("OrcidCard", () => {
     );
     const why = screen.getByTestId("orcid-on-file-evidence");
     expect(why.textContent).toContain("Entered in ReCiter Publication Manager");
-    expect(why.textContent).toContain("Seen on 12 of your accepted publications in ReCiter");
+    expect(why.textContent).toContain("Matched on 12 of your accepted publications in ReCiter");
     fireEvent.click(screen.getByTestId("orcid-remove"));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -153,7 +163,7 @@ describe("OrcidCard", () => {
     expect(screen.getByTestId("orcid-form")).toBeTruthy();
   });
 
-  it("on file + a DIFFERENT strong inference → 'we also found' block with 'Use this iD instead'", async () => {
+  it("on file + a DIFFERENT strong inference → both rows, each labelled; 'Replace with the suggested iD' swaps, 'Keep the iD on file' dismisses for the session", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -173,9 +183,34 @@ describe("OrcidCard", () => {
       />,
     );
     expect(screen.queryByTestId("orcid-suggested")).toBeNull();
+    expect(screen.getByTestId("orcid-on-file").textContent).toContain("0000-0002-1825-0097");
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toBe("On file");
     const also = screen.getByTestId("orcid-also-suggested");
-    expect(also.textContent).toContain("We also found a different iD");
     expect(also.textContent).toContain("0000-0002-9930-2193");
+    expect(screen.getByTestId("orcid-also-suggested-status").textContent).toBe(
+      "High confidence suggestion",
+    );
+    expect(screen.getByTestId("orcid-remove").textContent).toBe("Remove both");
+    // Keep → the competing row and its actions go; plain Change / Remove return.
+    fireEvent.click(screen.getByTestId("orcid-keep-on-file"));
+    expect(screen.queryByTestId("orcid-also-suggested")).toBeNull();
+    expect(screen.getByTestId("orcid-change")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    cleanup();
+    fetchMock.mockClear();
+    render(
+      <OrcidCard
+        cwid="abc1234"
+        mode="self"
+        scholarName="Ada"
+        onFile="0000-0002-1825-0097"
+        suggested={{
+          orcid: "0000-0002-9930-2193",
+          accepted: 4,
+          evidence: [{ source: "rpm_inferred", accepted: 4, rejected: 0 }],
+        }}
+      />,
+    );
     fireEvent.click(screen.getByTestId("orcid-use-suggested"));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -188,7 +223,7 @@ describe("OrcidCard", () => {
     expect(screen.queryByTestId("orcid-also-suggested")).toBeNull();
   });
 
-  it("superuser voice is third person with the name", () => {
+  it("superuser voice names the scholar by first name — second person is the editor", () => {
     render(
       <OrcidCard
         cwid="xyz9876"
@@ -203,11 +238,11 @@ describe("OrcidCard", () => {
       />,
     );
     const sug = screen.getByTestId("orcid-suggested");
-    expect(sug.textContent).toContain("Is this Grace Hopper's ORCID iD?");
     expect(sug.textContent).toContain(
-      "Seen on 91 of their accepted publications in ReCiter, and on 2 they rejected",
+      "Matched on 91 of Grace's accepted publications in ReCiter, and on 2 Grace rejected",
     );
-    expect(screen.getByTestId("orcid-confirm").textContent).toBe("Yes, this is their iD");
+    expect(screen.getByText(/makes Grace's publication matching/)).toBeTruthy();
+    expect(screen.getByTestId("orcid-confirm").textContent).toBe("Confirm this iD");
   });
 
   it("none → the input; a bad check digit is refused client-side without a request", async () => {
@@ -241,5 +276,69 @@ describe("OrcidCard", () => {
     ).toBe("0000-0002-1825-0097");
     expect(screen.queryByTestId("orcid-on-file")).toBeNull();
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProfileLinksCard", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    refresh.mockReset();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("fields show handles (stored URLs reduced), a pasted URL reduces on blur, Save is inert until a field differs and sends each handle with its prefix back on", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        value: JSON.stringify({
+          linkedin: "https://www.linkedin.com/in/oelemento",
+          x: "https://x.com/ada",
+        }),
+      }),
+    });
+    render(
+      <ProfileLinksCard
+        cwid="abc1234"
+        mode="self"
+        scholarName="Ada"
+        initial={{ linkedin: "https://www.linkedin.com/in/oelemento" }}
+        subsection
+      />,
+    );
+    // Host prefix beside the label; the stored canonical URL shows as its handle.
+    expect(screen.getByText("linkedin.com/in/")).toBeTruthy();
+    const linkedin = screen.getByTestId("profile-link-linkedin") as HTMLInputElement;
+    expect(linkedin.getAttribute("placeholder")).toBe("handle");
+    expect(linkedin.value).toBe("oelemento");
+    const save = screen.getByTestId("profile-links-save") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(screen.getByTestId("profile-links-hint").textContent).toBe("No changes yet");
+    // A pasted full URL into the X field reduces to the handle on blur.
+    const x = screen.getByTestId("profile-link-x") as HTMLInputElement;
+    fireEvent.change(x, { target: { value: "https://twitter.com/ada?s=21" } });
+    expect(save.disabled).toBe(false);
+    expect(screen.getByTestId("profile-links-hint").textContent).toBe("Unsaved changes");
+    fireEvent.blur(x);
+    expect(x.value).toBe("ada");
+    // Re-pasting the stored value is not a change.
+    fireEvent.change(linkedin, { target: { value: "linkedin.com/in/oelemento/" } });
+    fireEvent.blur(linkedin);
+    expect(linkedin.value).toBe("oelemento");
+    fireEvent.click(save);
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).value).toEqual({
+      linkedin: "linkedin.com/in/oelemento",
+      x: "x.com/ada",
+      bluesky: "",
+      googleScholar: "",
+      researchGate: "",
+    });
+    expect(x.value).toBe("ada");
+    expect(screen.getByTestId("profile-links-hint").textContent).toBe("Saved just now");
+    expect(save.disabled).toBe(true);
   });
 });

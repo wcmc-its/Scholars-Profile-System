@@ -30,7 +30,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { PUBLICATION_MANAGER_URL, WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
 import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
-import type { OrcidEvidence } from "@/lib/edit/orcid";
+import { firstName, type OrcidEvidence } from "@/lib/edit/orcid";
 import { cn, initials } from "@/lib/utils";
 import { useReciterPendingSuggestions } from "@/components/edit/reciter-pending-card";
 import type { ReciterSuggestion } from "@/lib/reciter/client";
@@ -584,8 +584,9 @@ function OrcidItem({
       {label}
     </RowLink>
   );
-  const whose = isAdmin ? "their" : "your";
-  // One short reason, no names: the NIH requirement first, the matching payoff second.
+  // Second person is the EDITOR: an administrator reads the scholar's first name.
+  const whose = isAdmin ? `${firstName(name)}'s` : "your";
+  // One short reason: the NIH requirement first, the matching payoff second.
   const why = `Needed for NIH SciENcv biosketches; also makes ${whose} publication matching more reliable.`;
   if (state.suggested) {
     const { orcid, accepted } = state.suggested;
@@ -597,7 +598,7 @@ function OrcidItem({
       <ChecklistRow
         testId="home-item-orcid"
         marker="todo"
-        title={isAdmin ? `Is this ${name}'s ORCID iD?` : "Is this your ORCID iD?"}
+        title={isAdmin ? `Is this ${firstName(name)}'s ORCID iD?` : "Is this your ORCID iD?"}
         subtitle={
           <>
             {orcidLink(orcid)} · {evidence}

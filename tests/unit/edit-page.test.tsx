@@ -340,8 +340,10 @@ describe("EditPage router — the Apollo shell + rail", () => {
     };
     render(<EditPage ctx={onFileWithEvidence} mode="self" attr="identifiers-profiles" orcidTabEnabled />);
     expect(screen.getByTestId("orcid-on-file-evidence").textContent).toContain("Entered in ReCiter Publication Manager");
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toBe("On file");
     const also = screen.getByTestId("orcid-also-suggested");
     expect(also.textContent).toContain("0000-0002-9930-2193");
+    expect(screen.getByTestId("orcid-also-suggested-status").textContent).toBe("High confidence suggestion");
     expect(within(also).getByTestId("orcid-also-suggested-evidence").querySelectorAll("li")).toHaveLength(2);
   });
 
@@ -378,18 +380,17 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByText("4 of 5 done")).toBeTruthy();
   });
 
-  it("Home: the ORCID row in superuser voice is third-person", () => {
+  it("Home: the ORCID row in superuser voice names the scholar by first name — second person is the editor", () => {
     const withSuggestion: EditContext = {
       ...ctx,
       orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 0 },
     };
     render(<EditPage ctx={withSuggestion} mode="superuser" />);
     const row = screen.getByTestId("home-item-orcid");
-    expect(row.textContent).toContain(`Is this ${ctx.scholar.preferredName}'s ORCID iD?`);
-    expect(row.textContent).toContain("matches their record in the ORCID registry");
-    expect(row.textContent).toContain("makes their publication matching more reliable");
-    // The name appears once, in the title — never repeated through the body copy.
-    expect(row.textContent.split(ctx.scholar.preferredName).length - 1).toBe(1);
+    expect(row.textContent).toContain("Is this Alex's ORCID iD?");
+    expect(row.textContent).toContain("matches Alex's record in the ORCID registry");
+    expect(row.textContent).toContain("makes Alex's publication matching more reliable");
+    expect(row.textContent).not.toContain("their");
   });
 
   it("Home: a 404 headshot resolves to the 'Add a headshot' to-do", async () => {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { canonicalProfileLink, validateProfileLinks } from "@/lib/edit/profile-links";
+import {
+  canonicalProfileLink,
+  profileLinkHandle,
+  profileLinkInput,
+  validateProfileLinks,
+} from "@/lib/edit/profile-links";
 
 describe("canonicalProfileLink", () => {
   it.each([
@@ -102,5 +107,48 @@ describe("validateProfileLinks", () => {
     for (const input of bad) {
       expect(validateProfileLinks(input)).toEqual({ ok: false, error: "invalid_value" });
     }
+  });
+});
+
+describe("profileLinkHandle — a pasted full URL shows as the handle the label's prefix expects", () => {
+  it.each([
+    ["linkedin", "https://www.linkedin.com/in/oelemento/?originalSubdomain=us", "oelemento"],
+    ["linkedin", "uk.linkedin.com/in/oelemento", "oelemento"],
+    ["x", "https://twitter.com/oelemento?s=21", "oelemento"],
+    ["x", "@oelemento", "oelemento"],
+    ["bluesky", "https://bsky.app/profile/olivier.bsky.social", "olivier.bsky.social"],
+    ["bluesky", "@olivier.bsky.social", "olivier.bsky.social"],
+    [
+      "googleScholar",
+      "https://scholar.google.com/citations?hl=en&user=AbCdEfGhIjKl&view_op=list_works",
+      "AbCdEfGhIjKl",
+    ],
+    ["googleScholar", "AbCdEfGhIjKl", "AbCdEfGhIjKl"],
+    [
+      "researchGate",
+      "https://www.researchgate.net/profile/Olivier-Elemento#publications",
+      "Olivier-Elemento",
+    ],
+    ["researchGate", "Olivier-Elemento", "Olivier-Elemento"],
+  ] as const)("%s: %s → %s", (platform, raw, handle) => {
+    expect(profileLinkHandle(platform, raw)).toBe(handle);
+  });
+
+  it("round-trips: the stored canonical URL shows as a handle, and the handle sent back canonicalizes to the same URL", () => {
+    const canon = {
+      linkedin: "https://www.linkedin.com/in/john.smith",
+      x: "https://x.com/oelemento",
+      bluesky: "https://bsky.app/profile/olivier.bsky.social",
+      googleScholar: "https://scholar.google.com/citations?user=AbCdEfGhIjKl",
+      researchGate: "https://www.researchgate.net/profile/Olivier-Elemento",
+    } as const;
+    for (const [platform, url] of Object.entries(canon) as Array<[keyof typeof canon, string]>) {
+      const handle = profileLinkHandle(platform, url);
+      expect(handle).not.toContain("/");
+      expect(canonicalProfileLink(platform, profileLinkInput(platform, handle))).toBe(url);
+    }
+    // A value that is still a path (legacy LinkedIn /pub/…) is sent as typed.
+    expect(profileLinkInput("linkedin", "pub/john-smith/1/2/3")).toBe("pub/john-smith/1/2/3");
+    expect(profileLinkInput("x", "")).toBe("");
   });
 });

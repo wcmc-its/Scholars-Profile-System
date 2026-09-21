@@ -1410,10 +1410,11 @@ function renderPanel(
       // Every EditMode may reach this panel; each write re-authorizes server-side
       // (`authorizeOverviewWrite`), and the shell makes cv-generator inert. The
       // two cards are independently flagged (the tab shows when either is on);
-      // whichever renders first owns the `panel-heading` id.
+      // whichever renders first owns the `panel-heading` id. They have separate
+      // saves, so a rule (not just a gap) separates them.
       const row = orcidRowState(ctx);
       return (
-        <div className="flex flex-col gap-10">
+        <div className="flex flex-col gap-10 [&>*+*]:border-t [&>*+*]:pt-10">
           {orcidTabEnabled && (
             <OrcidCard
               cwid={cwid}
