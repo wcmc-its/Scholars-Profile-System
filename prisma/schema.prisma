@@ -364,6 +364,16 @@ model PostdocMentorRelationship {
   menteeCwid      String    @map("mentee_cwid") @db.VarChar(32)
   menteeFirstName String?   @map("mentee_first_name") @db.VarChar(64)
   menteeLastName  String?   @map("mentee_last_name") @db.VarChar(64)
+  /// The mentor (the role record's `manager`) as `ou=people` describes them
+  /// at ETL time: name, `weillCornellEduPrimaryDepartment`, and the
+  /// primary-organization CODE (`WCMC`, `NYP`, `CU`; `lib/institutions.ts`).
+  /// Read by the Mentored publications report for a manager who is not a
+  /// Scholar — a lab administrator or a departed PI (#2633) — who otherwise
+  /// shows as a bare CWID with no department or institution.
+  mentorFirstName   String? @map("mentor_first_name") @db.VarChar(64)
+  mentorLastName    String? @map("mentor_last_name") @db.VarChar(64)
+  mentorDepartment  String? @map("mentor_department") @db.VarChar(255)
+  mentorInstitution String? @map("mentor_institution") @db.VarChar(255)
   /// `weillCornellEduStartDate` on the role record (LDAP generalizedTime
   /// parsed to Date). Null when ED omits the attribute.
   startDate       DateTime? @map("start_date") @db.Date

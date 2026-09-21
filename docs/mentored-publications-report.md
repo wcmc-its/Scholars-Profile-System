@@ -130,12 +130,20 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   is a "confirmed elsewhere" annotation.
 - **Scope-derived default.** An `md` holder opens on AOC only; a `*` holder on every confirmed type.
 - **Mentor department and institution** (Summary table + workbook, one line per mentor). Department
-  = `Scholar.primaryDepartment` (ED), else the roster's `mentorDepartment` (null on ~9 in 10 rows).
-  Institution = the roster's `mentorInstitution` folded to WCM / MSKCC / HSS (`mentorInstitution`
-  in the loader; any other institution passes through as typed), else WCM when the mentor has a
-  Scholar row, else "—". Both roster fields ride the bridge (`aoc_mentee.mentor_department` /
-  `mentor_institution`), so they are empty until the bridge is re-exported and re-imported; a mentor
-  known only through Jenzabar / ED / co-authorship / faculty assertion reads from the Scholar row.
+  = `Scholar.primaryDepartment` (ED), else the first pair source that names one: the roster's
+  `mentorDepartment` (null on ~9 in 10 rows), Jenzabar's (`phd_mentor_relationship.mentor_department`,
+  the Grad School department, on nearly every thesis row), the ED postdoc pass's
+  (`postdoc_mentor_relationship.mentor_department`, the manager's `ou=people` primary department).
+  Institution = the first source that names one, same order (roster free text; Jenzabar
+  "Sloan-Kettering" / "Weill Cornell" / "HSS"; the ED primary-organization code), else
+  `Scholar.primaryOrgCode`, every value folded to WCM / MSKCC / HSS (`mentorInstitution` in the
+  loader — codes named through `lib/institutions.ts` first; anything else passes through), else WCM
+  when the mentor has a Scholar row, else "—". Mentor name falls through the same way (Scholar, then
+  roster / Jenzabar / ED postdoc pass, then the bare CWID). The roster fields ride the bridge
+  (`aoc_mentee.mentor_department` / `mentor_institution`, empty until the bridge is re-exported and
+  re-imported); the ED postdoc pass fills its four mentor columns on the nightly ED run. A postdoc
+  "mentor" with no Scholar row is usually the lab administrator HR lists as manager (#2633) — the
+  name and department now make that visible rather than hiding it behind a bare CWID.
 - **Words.** The `md` bucket is labelled "AOC" everywhere in this report (the Program column, the
   Viewers panel, the workbook); the public search facet keeps "MD" for its different audience.
   Per-pair labels read by category ("AOC", "PhD thesis advisor", "Postdoc supervisor",
