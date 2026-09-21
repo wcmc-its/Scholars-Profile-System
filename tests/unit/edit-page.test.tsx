@@ -242,26 +242,29 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(cta.textContent).toContain("Write");
   });
 
-  it("Home: pins 'Two items need you' as a word count, never a percentage or fraction", () => {
+  it("Home: pins the heading as a word count of the open rows, never a percentage or fraction", () => {
     // bio ✓ + 1 pub ✓ + visibility ✓; the headshot probe stays "loading" in
-    // jsdom (no Image load) so it doesn't count, and the fixture has no ORCID → 3 of 5 done, two need you.
+    // jsdom (no Image load) so it is informational, not open; the fixture has
+    // no ORCID → one open row.
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByRole("heading", { level: 2, name: "Two items need you" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
     expect(screen.getByText("Everything else on this profile is either complete or maintained from WCM records.")).toBeTruthy();
     expect(screen.queryByText(/%/)).toBeNull();
     expect(screen.queryByText(/\d of \d/)).toBeNull();
   });
 
-  it("Home: each essential is load-bearing — no bio + no pubs counts only visibility (four need you)", () => {
+  it("Home: the heading counts open rows — no bio + no ORCID are two; an empty publications feed is informational, not open", () => {
     const sparse: EditContext = {
       ...ctx,
       scholar: { ...ctx.scholar, overview: "" },
       publications: [],
     };
     render(<EditPage ctx={sparse} mode="self" />);
-    expect(screen.getByRole("heading", { level: 2, name: "Four items need you" })).toBeTruthy();
-    // Publications-empty row state.
-    expect(screen.getByTestId("home-item-publications").textContent).toContain("None shown yet");
+    expect(screen.getByRole("heading", { level: 2, name: "Two items need you" })).toBeTruthy();
+    // Publications-empty row state sits under the disclosure, not among the open rows.
+    const pubs = screen.getByTestId("home-item-publications");
+    expect(pubs.textContent).toContain("None shown yet");
+    expect(pubs.closest("ul")?.id).toBe("home-completed-items");
   });
 
   it("Home: the headshot item hands off to the Web Directory in a new tab", () => {
@@ -324,7 +327,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByTestId("home-item-orcid-why").textContent).toBe(
       "Needed for NIH SciENcv biosketches; also makes your publication matching more reliable.",
     );
-    expect(screen.getByRole("heading", { level: 2, name: "Two items need you" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
     // The iD in the row links to its orcid.org record; ReCiter links out to Publication Manager.
     expect(within(row).getByRole("link", { name: "ReCiter" }).getAttribute("href")).toBe("https://reciter.weill.cornell.edu/");
     expect(within(row).getByRole("link", { name: "0000-0002-9930-2193" }).getAttribute("href")).toBe(
@@ -372,7 +375,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByRole("link", { name: "Identifiers & Profiles" })).toBeTruthy();
   });
 
-  it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done and counted", () => {
+  it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done, nothing left open", () => {
     const onFile: EditContext = {
       ...ctx,
       orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
@@ -382,7 +385,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(row.textContent).toContain("ORCID iD on file");
     expect(row.textContent).toContain("0000-0002-1825-0097");
     expect(screen.queryByTestId("home-card-orcid")).toBeNull();
-    expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Nothing needs you" })).toBeTruthy();
   });
 
   it("Home: the ORCID row in superuser voice names the scholar by first name — second person is the editor", () => {
@@ -1054,7 +1057,6 @@ describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () =>
       );
       expect(screen.getByTestId("home-item-orcid").textContent).toContain("makes Alex's publication matching");
       expect(document.querySelector('[data-slot="home-panel"]')?.textContent).not.toMatch(/\byour\b/);
-      expect(screen.queryByText("Yours to edit")).toBeNull();
     },
   );
 
@@ -1121,8 +1123,8 @@ describe("EditPage router — superuser mode", () => {
 
   it("Home (superuser): needs-you header, Overview is editable (#844), Publications has a Review CTA, no units section", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="home" />);
-    // Same count semantics as self: bio ✓ + visibility ✓, no pubs / headshot / ORCID.
-    expect(screen.getByRole("heading", { level: 2, name: "Three items need you" })).toBeTruthy();
+    // Same count as self: only the ORCID row is open (no pubs / probing headshot are informational).
+    expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
     // #844 — the Overview is now editable by a superuser → an "Edit" CTA (not the
     // pre-#844 read-only "View") that hangs off the superuser base path.
     const overviewCta = screen.getByTestId("home-card-overview");
@@ -1291,9 +1293,8 @@ describe("EditPage router — superuser mode", () => {
 });
 
 describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", () => {
-  // Scope assertions to the attribute rail's <nav>; HomePanel renders its own
-  // "Yours to edit" / "From WCM systems" section labels, so an unscoped getByText
-  // would collide.
+  // Scope assertions to the attribute rail's <nav> so panel copy never collides
+  // with rail group labels.
   const rail = () => within(screen.getByRole("navigation", { name: "Profile attributes" }));
 
   it("regroups the self rail when the flag is on: floating Home, Tools, Settings, WCM sub-headers", () => {

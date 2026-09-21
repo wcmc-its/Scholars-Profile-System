@@ -1,6 +1,6 @@
 /**
  * Design round 3 (2026-09-21) — the `/edit` shell's identity header: initials
- * avatar, "{name}, {postnominal}", "{title} · {institution}", with the button
+ * avatar, the published name, "{title} · {institution}", with the button
  * row on its right. Edit-for-others only: it never renders in self mode, even
  * when `identity` is supplied.
  *
@@ -29,13 +29,13 @@ const base = {
 };
 
 const identity = {
-  postnominal: "PhD",
+  name: "Jane Doe, PhD",
   title: "Professor of Medicine",
   institution: "Weill Cornell Medicine",
 };
 
 describe("EditShell — identity header (design round 3)", () => {
-  it("renders avatar initials, name + postnominal, and title · institution in superuser mode", () => {
+  it("renders avatar initials, the published name, and title · institution in superuser mode", () => {
     render(
       <EditShell {...base} mode="superuser" identity={identity}>
         <div>panel</div>
@@ -50,12 +50,12 @@ describe("EditShell — identity header (design round 3)", () => {
     expect(screen.getByRole("link", { name: /Preview profile/ })).toBeTruthy();
   });
 
-  it("omits the comma when there is no postnominal and the dot when only one subline part exists", () => {
+  it("renders the name as given and omits the dot when only one subline part exists", () => {
     render(
       <EditShell
         {...base}
         mode="proxy"
-        identity={{ postnominal: null, title: null, institution: "Weill Cornell Medicine" }}
+        identity={{ name: "Jane Doe", title: null, institution: "Weill Cornell Medicine" }}
       >
         <div>panel</div>
       </EditShell>,

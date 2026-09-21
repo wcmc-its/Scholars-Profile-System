@@ -1559,7 +1559,7 @@ export function CenterRosterCard({
             className="text-apollo-slate hover:underline"
             data-testid="center-roster-history-link"
           >
-            View change history
+            Change history
           </Link>
         </p>
       </div>

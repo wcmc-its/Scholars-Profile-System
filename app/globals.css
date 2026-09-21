@@ -164,6 +164,7 @@
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;
   --apollo-notice-text: #274158; /* text + icon on the slate-tint editing notice */
+  --apollo-done: #8f887d; /* grey check on a settled Home row (design round 3) */
   /* Facet-filter redesign (PROFILE_FACET_REDESIGN) — three facet hues, each a
      4-value semantic group (fill / border / text / count-subtext), theme-aware
      (#16). Topic = slate-blue, Method = indigo, Position = warm amber (the
@@ -324,6 +325,7 @@
   --color-apollo-slate-tint: var(--apollo-slate-tint);
   --color-apollo-slate-tint-border: var(--apollo-slate-tint-border);
   --color-apollo-notice-text: var(--apollo-notice-text);
+  --color-apollo-done: var(--apollo-done);
   --color-apollo-green: var(--apollo-green);
   --color-apollo-green-tint: var(--apollo-green-tint);
   --color-apollo-green-tint-border: var(--apollo-green-tint-border);

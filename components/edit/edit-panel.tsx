@@ -110,7 +110,7 @@ export function EditPanel({
               {heading}
             </h3>
           ) : (
-            <h2 id={resolvedHeadingId} className="text-[17px] font-semibold tracking-[-0.015em]">
+            <h2 id={resolvedHeadingId} className="text-[17px] font-[600] tracking-[-0.015em]">
               {heading}
             </h2>
           )}

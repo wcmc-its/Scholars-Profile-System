@@ -4,13 +4,12 @@
  * opens on the actual job — the few things that make a profile feel finished —
  * with live status read from the loaded context.
  *
- * Completeness is a real count over five essentials, never a percentage: the
- * scholar's overview, headshot, and ORCID iD are the three they act on;
- * publications and visibility are configured-for-them states shown as
- * reassurance. The heading says how many still need the editor ("Two items need
- * you"); the open items sit first as boxed rows with an amber marker, and the
- * settled ones fold away under a "<N> completed items" disclosure (collapsed by
- * default) as flat rows with a grey check.
+ * Five essentials — overview, headshot, ORCID iD, publications, visibility. The
+ * heading counts the rows that need the editor ("Two items need you", never a
+ * percentage); those sit first as boxed rows with an amber marker, and the rest
+ * (settled, or informational like a hidden profile or an empty feed) fold away
+ * under a "<N> completed items" disclosure (collapsed by default) as flat rows
+ * with a grey check.
  *
  * Rows fed from WCM systems — the headshot, publications, and the ORCID iD (see
  * `orcidRow`) — carry an inline "WCM records" tag, the same name the rail gives
@@ -97,7 +96,7 @@ export type OrcidRowState = {
 
 type HeadshotState = "loading" | "present" | "missing";
 
-const COUNT_WORDS = ["Nothing", "One", "Two", "Three", "Four", "Five"];
+const NEEDS_YOU = ["Nothing needs you", "One item needs you", "Two items need you", "Three items need you", "Four items need you"];
 
 export function HomePanel({
   mode = "self",
@@ -118,25 +117,14 @@ export function HomePanel({
   const isAdmin = mode === "superuser";
   // Live ReCiter pending suggestions, fetched client-side (zero fetch when the
   // feature is off — the `enabled` gate). Unreviewed suggestions are an
-  // outstanding action on Publications, so they drive both the row's "to-do"
-  // marker and the completeness count below.
+  // outstanding action on Publications, so they flip that row to "to-do".
   const pendingSuggestions = useReciterPendingSuggestions(cwid, reciterPendingEnabled);
-  const hasPendingSuggestions = pendingSuggestions.length > 0;
   const [showCompleted, setShowCompleted] = React.useState(false);
 
-  // A real count over five essentials — not a percentage. An item counts only
-  // when it is genuinely satisfied; while the headshot is still probing it does
-  // not count (so `done` only ever ticks up, never down). Publications
-  // counts only when pubs are shown AND no suggestions are left to review.
-  const total = 5;
-  const done =
-    (hasBio ? 1 : 0) +
-    (headshot === "present" ? 1 : 0) +
-    (totalPublications > 0 && !hasPendingSuggestions ? 1 : 0) +
-    (orcid.onFile ? 1 : 0) +
-    1; // visibility — a choice is always set
-  const needsYou = total - done;
-
+  // ponytail: "N items need you" IS the number of open rows below it — one
+  // source of truth, so the heading can never claim more than the board shows.
+  // (The old "N of 5 done" also counted a still-probing headshot and an empty
+  // publications feed against the scholar; neither is theirs to act on here.)
   const rows = [
     overviewRow({ basePath, hasBio, isAdmin, name: preferredName }),
     orcidRow({ state: orcid, basePath, isAdmin, name: preferredName }),
@@ -151,17 +139,14 @@ export function HomePanel({
   ];
   const open = rows.filter((row) => row.marker === "todo");
   const completed = rows.filter((row) => row.marker !== "todo");
+  const needsYou = open.length;
   const completedLabel = `${completed.length} completed ${completed.length === 1 ? "item" : "items"}`;
 
   return (
     <section data-slot="home-panel" className="flex flex-col gap-5">
       <header>
-        <h2 id={PANEL_HEADING_ID} className="text-[17px] font-semibold tracking-[-0.015em]">
-          {needsYou === 0
-            ? "Nothing needs you"
-            : needsYou === 1
-              ? "One item needs you"
-              : `${COUNT_WORDS[needsYou]} items need you`}
+        <h2 id={PANEL_HEADING_ID} className="text-[17px] font-[600] tracking-[-0.015em]">
+          {NEEDS_YOU[needsYou]}
         </h2>
         <p className="text-muted-foreground mt-1.5 text-[13px]">
           {needsYou === 0
@@ -330,7 +315,7 @@ function ChecklistRow({
     >
       <RowMarker marker={marker} />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 text-[14.5px] font-semibold">
+        <div className="flex flex-wrap items-center gap-x-2 text-[14.5px] font-[600]">
           {title}
           {fromWcm && (
             <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px] font-normal">
@@ -352,7 +337,7 @@ function RowMarker({ marker }: { marker: Marker }) {
     return (
       <span
         aria-hidden
-        className="flex size-[22px] flex-none items-center justify-center rounded-full border border-[#8f887d] text-[#8f887d]"
+        className="flex size-[22px] flex-none items-center justify-center rounded-full border border-apollo-done text-apollo-done"
       >
         <Check className="size-3" strokeWidth={3} />
       </span>
@@ -501,7 +486,7 @@ function orcidRow({
       href={`https://orcid.org/${id}`}
       target="_blank"
       rel="noreferrer"
-      className="font-mono font-semibold hover:underline"
+      className="font-mono font-[600] hover:underline"
     >
       {id}
     </a>

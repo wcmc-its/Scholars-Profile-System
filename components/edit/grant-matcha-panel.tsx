@@ -277,10 +277,10 @@ export function GrantMatchaPanel({
             <header className="flex min-w-0 flex-col gap-1.5">
               <h1 className="text-2xl font-bold tracking-tight">Grant Matcha</h1>
               {/* Brand rule under the title (a sibling span in a flex-col header, not a
-                  border-b, not a ::after), 32x3 per `Browse Redesign.dc.html`. This is
-                  the one /edit surface that still draws a maroon rule: `edit-panel.tsx`
-                  dropped its h2 rule in design round 3 (2026-09-21); this one follows
-                  its own artboard. */}
+                  border-b, not a ::after), 32x3 per `Browse Redesign.dc.html`. The Matcha
+                  surfaces (this, matcha-panel, opportunity-intake-panel) keep their
+                  artboard rule; only `edit-panel.tsx` dropped its h2 rule in design
+                  round 3 (2026-09-21). */}
               <span aria-hidden className="bg-apollo-maroon h-[3px] w-8 rounded-full" />
               <p className="text-muted-foreground text-sm">
                 Choose a funding opportunity to rank Weill Cornell researchers on its text.

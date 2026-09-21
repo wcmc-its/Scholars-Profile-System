@@ -34,11 +34,11 @@ export function UnitAdminBanner({ targetLabel, unitKind, unitName }: UnitAdminBa
       className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-notice-text mb-6 rounded-lg px-[13px] py-[9px]"
       data-slot="unit-admin-banner"
     >
-      <Shield className="size-4" />
+      <Shield className="size-4" aria-hidden />
       <AlertDescription className="text-apollo-notice-text text-[13px]">
         <p>
-          You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator of their{" "}
-          {unitKind}, <strong>{unitName}</strong>. You can edit the overview and hide misattributed
+          You are editing <strong className="font-[600]">{targetLabel}</strong>&apos;s profile as an administrator of their{" "}
+          {unitKind}, <strong className="font-[600]">{unitName}</strong>. You can edit the overview and hide misattributed
           publications; name, title, and contact details come from WCM systems, and the profile URL
           is set by a Scholars administrator.
         </p>

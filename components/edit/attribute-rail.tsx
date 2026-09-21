@@ -294,7 +294,7 @@ function RailLink({
         aria-current={isActive ? "page" : undefined}
         data-testid={`rail-${item.key}`}
         className={cn(
-          "flex min-h-11 items-center justify-between gap-2 rounded-md border-l-2 border-transparent py-2 pr-3 pl-4 text-sm font-semibold transition-colors md:min-h-9",
+          "flex min-h-11 items-center justify-between gap-2 rounded-md border-l-2 border-transparent py-2 pr-3 pl-4 text-sm font-[600] transition-colors md:min-h-9",
           "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
           // Nested child ("From your publications"): indented and quieter, with a
           // down-right arrow (below) standing in for the connector to its parent.

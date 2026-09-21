@@ -48,21 +48,21 @@ export function SuperuserBanner({
       className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-notice-text mb-6 rounded-lg px-[13px] py-[9px]"
       data-slot="superuser-banner"
     >
-      <Shield className="size-4" />
+      <Shield className="size-4" aria-hidden />
       <AlertDescription className="text-apollo-notice-text text-[13px]">
         {/* One <p> so the sentence is a single grid item. AlertDescription is a
-            CSS grid; without this wrapper the leading text, the <strong> name,
+            CSS grid; without this wrapper the leading text, the <strong className="font-[600]"> name,
             and the trailing "'s profile…" each become their own grid row, which
             is what dropped the possessive onto its own line. */}
         <p>
           {readOnly ? (
             <>
-              You are viewing <strong>{targetLabel}</strong>&apos;s profile. This role is
+              You are viewing <strong className="font-[600]">{targetLabel}</strong>&apos;s profile. This role is
               read-only: nothing on this page can be changed.
             </>
           ) : targetKind === "profile" ? (
             <>
-              You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator.
+              You are editing <strong className="font-[600]">{targetLabel}</strong>&apos;s profile as an administrator.
               Changes are logged against your account.
             </>
           ) : (
