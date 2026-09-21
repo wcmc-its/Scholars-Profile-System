@@ -1387,13 +1387,16 @@ export function resolveSearchPeopleClinicalRankFacets(): boolean {
  * MSKCC, NYP, ...) onto the people doc as the `primaryOrgCode` keyword (see
  * `lib/search-index-docs.ts`'s `PEOPLE_INDEX_SELECT`). `searchPeople` and
  * `/api/search` accept the `institution` request param regardless of this
- * flag; while OFF (or before the people index has been rebuilt with the new
- * field) the param is a silent no-op — no clause, no facet aggregation, never
- * a 500 — the same reindex-then-flip posture as
- * `resolveSearchPeopleClinicalRankFacets` above.
+ * flag; while OFF the param is a silent no-op — no clause, no facet
+ * aggregation, never a 500 — the same reindex-then-flip posture as
+ * `resolveSearchPeopleClinicalRankFacets` above. While ON and the field is
+ * still UNMAPPED the agg matches nothing and no group renders; flip only after
+ * the nightly alias rebuild has carried the keyword mapping — an /edit
+ * single-doc reindex (`lib/edit/search-suppression.ts`) into the old index
+ * would dynamically map `primaryOrgCode` as text, and a terms agg on a text
+ * field is an OpenSearch error, not an empty facet.
  *
- * Staging-on / prod-off at merge; the facet renders nothing until the nightly
- * alias rebuild after the ETL image ships carries the field. Flag-parity: wire
+ * Staging-on / prod-off at merge (dark until a cdk deploy). Flag-parity: wire
  * `SEARCH_PEOPLE_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
  */
 export function resolveSearchPeopleInstitutionFacet(): boolean {
