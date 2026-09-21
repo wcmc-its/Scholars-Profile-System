@@ -86,6 +86,7 @@ const ACTION_LABEL: Partial<Record<AuditAction, string>> = {
   proxy_revoke: "Revoked proxy editor",
   impersonation_start: "Started View-as session",
   impersonation_end: "Ended View-as session",
+  orcid_set: "Set ORCID iD",
   disease_assignment_decision: "Reviewed disease assignment",
 };
 
@@ -153,6 +154,8 @@ export function detailForAction(action: string, before: unknown, after: unknown)
       return readStr(after, "proxy_cwid");
     case "proxy_revoke":
       return readStr(before, "proxy_cwid");
+    case "orcid_set":
+      return readStr(after, "orcid");
     case "slug_request":
     case "slug_request_approved":
       return readStr(after, "slug") ?? readStr(after, "requestedSlug");

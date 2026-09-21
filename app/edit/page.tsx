@@ -239,6 +239,9 @@ export default async function EditSelfPage({
     // #2634 — "Mentees › From your publications" is valid when the loader
     // returned any row (active or dismissed), mirroring the rail rule.
     ctx.menteeSuggestions.length > 0,
+    // Identifiers & Profiles rides the ORCID flag (the tab, its write, and the
+    // suggestion share one kill switch).
+    isOrcidSuggestionEnabled(),
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
@@ -386,6 +389,7 @@ export default async function EditSelfPage({
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
       reciterPendingEnabled={reciterPendingEnabled}
+      orcidTabEnabled={isOrcidSuggestionEnabled()}
       grantRecsEnabled={grantRecsEnabled}
       biosketchEnabled={biosketchEnabled}
       cvEnabled={cvEnabled}

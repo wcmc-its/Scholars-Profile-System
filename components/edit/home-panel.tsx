@@ -28,12 +28,7 @@ import { ArrowRight, ArrowUpRight, Check, Plus } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import {
-  ORCID_MANAGE_URL,
-  PUBLICATION_MANAGER_URL,
-  WEB_DIRECTORY_URL,
-  resolveSelfServiceHref,
-} from "@/lib/edit/request-a-change";
+import { PUBLICATION_MANAGER_URL, WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
 import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
 import { cn, initials } from "@/lib/utils";
 import { useReciterPendingSuggestions } from "@/components/edit/reciter-pending-card";
@@ -86,6 +81,9 @@ export type HomePanelProps = {
 export type OrcidRowState = {
   onFile: string | null;
   suggested: { orcid: string; accepted: number } | null;
+  /** Where the CTA goes: the Identifiers & Profiles tab (in-app) or, with the
+   *  flag off, ReCiter Manage Profile (external, campus-only). */
+  editHref?: string;
 };
 
 type HeadshotState = "loading" | "present" | "missing";
@@ -153,7 +151,7 @@ export function HomePanel({
           name={preferredName}
           pending={pendingSuggestions}
         />
-        <OrcidItem state={orcid} cwid={cwid ?? ""} isAdmin={isAdmin} name={preferredName} />
+        <OrcidItem state={orcid} basePath={basePath} isAdmin={isAdmin} name={preferredName} />
       </ChecklistGroup>
 
       {(manageableUnits.length > 0 || isSuperuser) && (
@@ -526,20 +524,19 @@ function VisibilityItem({
 /**
  * The ORCID iD row. On file → done, the iD linked to its orcid.org record. A strong
  * inference (`SELF_EDIT_ORCID_SUGGESTION`) → "Is this your ORCID iD?" with the iD
- * and the accepted-publication count behind it, handing off to ReCiter's Manage
- * Profile page, which lists the same candidate iDs with their PMIDs and writes
- * `admin_orcid` — the one ORCID write path; the nightly `orcid_candidate` mirror
- * then grades it asserted and this row flips to done. Otherwise → not on file with
- * the NIH/eRA reason and the same ReCiter link (parity with `OrcidValue`, #2650).
+ * and the accepted-publication count behind it, linking into the Identifiers &
+ * Profiles tab where "Yes, this is mine" writes it (ReciterDB `admin_orcid`, then
+ * `scholar.orcid`). Otherwise → not on file with the one-line reason and the same
+ * link.
  */
 function OrcidItem({
   state,
-  cwid,
+  basePath,
   isAdmin,
   name,
 }: {
   state: OrcidRowState;
-  cwid: string;
+  basePath: string;
   isAdmin: boolean;
   name: string;
 }) {
@@ -559,17 +556,26 @@ function OrcidItem({
       />
     );
   }
-  const action = (
+  // Into the Identifiers & Profiles tab, where the confirm / enter controls live;
+  // with the flag off, the pre-tab hand-off to ReCiter Manage Profile (external,
+  // campus-only) so the row never dead-ends.
+  const href = state.editHref ?? `${basePath}?attr=identifiers-profiles`;
+  const label = state.suggested ? "Confirm" : "Add";
+  const action = href.startsWith("http") ? (
     <a
-      href={resolveSelfServiceHref(ORCID_MANAGE_URL, cwid)}
+      href={href}
       target="_blank"
       rel="noreferrer"
       data-testid="home-card-orcid"
       className="text-apollo-slate inline-flex items-center gap-1 text-sm font-medium whitespace-nowrap"
     >
-      {state.suggested ? "Confirm in ReCiter" : "Add it in ReCiter"}
+      {label} in ReCiter
       <ArrowUpRight className="size-3.5" aria-hidden />
     </a>
+  ) : (
+    <RowLink href={href} testId="home-card-orcid">
+      {label}
+    </RowLink>
   );
   const whose = isAdmin ? "their" : "your";
   // One short reason, no names: the NIH requirement first, the matching payoff second.

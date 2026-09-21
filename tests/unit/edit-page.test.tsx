@@ -290,8 +290,8 @@ describe("EditPage router — the Apollo shell + rail", () => {
     }
   });
 
-  it("Home: the ORCID row — not on file → to-do with the NIH reason and the ReCiter link", () => {
-    render(<EditPage ctx={ctx} mode="self" />);
+  it("Home: the ORCID row — not on file → to-do with the reason; CTA into the tab when the flag is on", () => {
+    render(<EditPage ctx={ctx} mode="self" orcidTabEnabled />);
     const row = screen.getByTestId("home-item-orcid");
     expect(row.textContent).toContain("ORCID iD not on file");
     expect(row.textContent).toContain(
@@ -299,8 +299,8 @@ describe("EditPage router — the Apollo shell + rail", () => {
     );
     expect(row.textContent).not.toContain("has no ORCID iD on file");
     const cta = screen.getByTestId("home-card-orcid");
-    expect(cta.textContent).toContain("Add it in ReCiter");
-    expect(cta.getAttribute("href")).toBe(`https://reciter.weill.cornell.edu/manageprofile/${ctx.scholar.cwid}`);
+    expect(cta.textContent).toContain("Add");
+    expect(cta.getAttribute("href")).toBe("/edit?attr=identifiers-profiles");
   });
 
   it("Home: the ORCID row — a strong inference asks 'Is this your ORCID iD?' with the evidence and a Confirm link; it does not count as done", () => {
@@ -308,11 +308,12 @@ describe("EditPage router — the Apollo shell + rail", () => {
       ...ctx,
       orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 3 },
     };
-    render(<EditPage ctx={withSuggestion} mode="self" />);
+    render(<EditPage ctx={withSuggestion} mode="self" orcidTabEnabled />);
     const row = screen.getByTestId("home-item-orcid");
     expect(row.textContent).toContain("Is this your ORCID iD?");
     expect(row.textContent).toContain("0000-0002-9930-2193 · on 3 of your accepted publications");
-    expect(screen.getByTestId("home-card-orcid").textContent).toContain("Confirm in ReCiter");
+    expect(screen.getByTestId("home-card-orcid").textContent).toContain("Confirm");
+    expect(screen.getByTestId("home-card-orcid").getAttribute("href")).toBe("/edit?attr=identifiers-profiles");
     expect(screen.getByTestId("home-item-orcid-why").textContent).toBe(
       "Needed for NIH SciENcv biosketches; also makes your publication matching more reliable.",
     );
@@ -321,6 +322,26 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(within(row).getByRole("link", { name: "0000-0002-9930-2193" }).getAttribute("href")).toBe(
       "https://orcid.org/0000-0002-9930-2193",
     );
+  });
+
+  it("Home: with the flag off the ORCID CTA hands off to ReCiter Manage Profile (external), and the tab is not in the rail", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    const cta = screen.getByTestId("home-card-orcid");
+    expect(cta.textContent).toContain("Add in ReCiter");
+    expect(cta.getAttribute("href")).toBe(`https://reciter.weill.cornell.edu/manageprofile/${ctx.scholar.cwid}`);
+    expect(cta.getAttribute("target")).toBe("_blank");
+    expect(screen.queryByRole("link", { name: "Identifiers & Profiles" })).toBeNull();
+  });
+
+  it("?attr=identifiers-profiles renders the ORCID card when the flag is on", () => {
+    const withSuggestion: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 3 },
+    };
+    render(<EditPage ctx={withSuggestion} mode="self" attr="identifiers-profiles" orcidTabEnabled />);
+    expect(document.querySelector('[data-slot="orcid-card"]')).not.toBeNull();
+    expect(screen.getByTestId("orcid-confirm")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Identifiers & Profiles" })).toBeTruthy();
   });
 
   it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done and counted", () => {
