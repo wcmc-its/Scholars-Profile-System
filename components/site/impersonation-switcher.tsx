@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { mapStartError } from "@/components/edit/view-as-button";
 
 /**
  * The "View as" switcher (#637, impersonation-spec.md §8). A panel opened from
@@ -103,7 +104,8 @@ export function ImpersonationSwitcher() {
   const [kindFilter, setKindFilter] = useState<"all" | UnitKind | "scholar">("all");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(false);
-  const [errored, setErrored] = useState(false);
+  // The message for whichever request last failed (search or start); null = none.
+  const [error, setError] = useState<string | null>(null);
   // The target awaiting confirmation; null = no dialog open.
   const [pending, setPending] = useState<Candidate | null>(null);
   const [starting, setStarting] = useState(false);
@@ -115,7 +117,7 @@ export function ImpersonationSwitcher() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    setErrored(false);
+    setError(null);
     const id = window.setTimeout(() => {
       const params = new URLSearchParams();
       if (query.trim()) params.set("q", query.trim());
@@ -133,7 +135,7 @@ export function ImpersonationSwitcher() {
         .catch(() => {
           if (!active) return;
           setCandidates([]);
-          setErrored(true);
+          setError("Couldn’t load people. Try again.");
         })
         .finally(() => {
           if (active) setLoading(false);
@@ -147,6 +149,9 @@ export function ImpersonationSwitcher() {
 
   async function startImpersonation(candidate: Candidate) {
     setStarting(true);
+    // The route's `{ error }` reason (e.g. `target_not_found` on the exact-CWID
+    // fallback) — a bare network failure or empty body maps to the generic message.
+    let code = "";
     try {
       const res = await fetch("/api/impersonation", {
         method: "POST",
@@ -161,12 +166,13 @@ export function ImpersonationSwitcher() {
         window.location.reload();
         return;
       }
+      code = ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "";
     } catch {
       /* fall through to the error state below */
     }
     setStarting(false);
     setPending(null);
-    setErrored(true);
+    setError(mapStartError(code));
   }
 
   const hasRows = candidates.length > 0;
@@ -228,8 +234,8 @@ export function ImpersonationSwitcher() {
       <div className="max-h-72 overflow-y-auto" role="list" aria-label="People to view as">
         {loading && !hasRows ? (
           <p className="px-1 py-2 text-xs text-muted-foreground">Searching…</p>
-        ) : errored ? (
-          <p className="px-1 py-2 text-xs text-destructive">Couldn’t load people. Try again.</p>
+        ) : error ? (
+          <p role="alert" className="px-1 py-2 text-xs text-destructive">{error}</p>
         ) : !hasRows ? (
           <div className="px-1 py-2 text-xs text-muted-foreground">
             <p>No matching people.</p>
