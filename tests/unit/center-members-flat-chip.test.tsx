@@ -56,6 +56,7 @@ function hit(
     roleCategory,
     overview: null,
     professorialRank: null,
+    primaryOrgCode: null,
     pubCount: 0,
     grantCount: 0,
     membershipType: "research",

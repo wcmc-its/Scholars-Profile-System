@@ -8,6 +8,7 @@
  *  - Membership-type facet narrows to research/clinical (and hides when single-type, #1570).
  *  - Department facet narrows to a department.
  *  - Professorial-rank facet narrows to a rank (#1570).
+ *  - Institution facet (primaryOrgCode, #2695) narrows to an institution; hides when single-code.
  *  - Appointment chip composes with the facets and drops emptied sections.
  *  - "Clear" resets the sidebar facets.
  *  - Program facet hides when the center has a single program.
@@ -65,6 +66,7 @@ function hit(
   methodFamilies?: CenterMemberFamily[],
   professorialRank: string | null = null,
   membershipRoleLabel: string | null = null,
+  primaryOrgCode: string | null = null,
 ) {
   return {
     cwid,
@@ -77,6 +79,7 @@ function hit(
     roleCategory,
     overview: null,
     professorialRank,
+    primaryOrgCode,
     pubCount: 0,
     grantCount: 0,
     membershipType,
@@ -265,6 +268,67 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
     // Selecting "Professor" keeps the two Professors, drops the Assistant Professor.
     fireEvent.click(screen.getByRole("button", { name: /^Professor/ }));
     expect(personCwids().sort()).toEqual(["a", "c"]);
+  });
+
+  it("Institution facet renders after Professorial rank + narrows to a code (#2695)", () => {
+    const withInsts: CenterMembersResult = {
+      mode: "grouped",
+      total: 4,
+      groups: [
+        {
+          code: "CB",
+          label: "Cancer Biology",
+          members: [
+            hit("a", FT, "research", "Medicine", undefined, "Professor", null, "WCMC"),
+            hit("b", FT, "research", "Medicine", undefined, "Assistant Professor", null, "HSS"),
+          ],
+        },
+        {
+          code: "CT",
+          label: "Cancer Therapeutics",
+          members: [
+            hit("c", FT, "research", "Pathology", undefined, "Professor", null, "MSKCC"),
+            hit("d", FT, "research", "Pathology", undefined, "Professor", null, "WCMC"),
+          ],
+        },
+      ],
+    };
+    render(<CenterMembersClient result={withInsts} centerSlug="x" />);
+
+    const headings = screen.getAllByRole("heading").map((h) => h.textContent);
+    expect(headings.indexOf("Institution")).toBeGreaterThan(
+      headings.indexOf("Professorial rank"),
+    );
+    // Three options, count-desc, labelled via institutionDisplayName (home → WCM).
+    const wcm = screen.getByRole("button", { name: /^Weill Cornell Medicine/ });
+    expect(wcm.textContent).toContain("2");
+    const hss = screen.getByRole("button", { name: /^Hospital for Special Surgery/ });
+    expect(hss.textContent).toContain("1");
+    expect(
+      screen.getByRole("button", { name: /^Memorial Sloan Kettering/ }).textContent,
+    ).toContain("1");
+
+    fireEvent.click(hss);
+    expect(personCwids()).toEqual(["b"]);
+  });
+
+  it("hides the Institution facet when every member shares one code (#2695)", () => {
+    const sameInst: CenterMembersResult = {
+      mode: "grouped",
+      total: 2,
+      groups: [
+        {
+          code: "CB",
+          label: "Cancer Biology",
+          members: [
+            hit("a", FT, "research", "Medicine", undefined, "Professor", null, "WCMC"),
+            hit("b", FT, "research", "Pathology", undefined, "Assistant Professor", null, "WCMC"),
+          ],
+        },
+      ],
+    };
+    render(<CenterMembersClient result={sameInst} centerSlug="x" />);
+    expect(screen.queryByRole("heading", { name: "Institution" })).toBeNull();
   });
 });
 
