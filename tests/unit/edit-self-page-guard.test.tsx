@@ -191,7 +191,14 @@ beforeEach(() => {
   // Not a proxy → the null-ctx branch ends in notFound(); irrelevant when ctx is set.
   mockScholarsServedByProxy.mockResolvedValue([]);
   // Fan-out reads after the guard — keep them inert so the render branch resolves.
-  mockLoadManageableUnits.mockResolvedValue({ departments: [], divisions: [], centers: [], total: 0 });
+  mockLoadManageableUnits.mockResolvedValue({
+    departments: [],
+    divisions: [],
+    centers: [],
+    cores: [],
+    institutions: [],
+    total: 0,
+  });
   mockListUnitAdminEditors.mockResolvedValue([]);
   mockCountPendingSlugRequests.mockResolvedValue(0);
   mockIsHonorsCurator.mockResolvedValue(false);

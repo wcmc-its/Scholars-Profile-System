@@ -74,6 +74,12 @@ The per-unit predicates live in [`lib/edit/authz.ts`](../lib/edit/authz.ts):
   otherwise). This prevents adding someone to a roster as a backdoor to editing their profile.
 - **Grant provenance:** `unit_admin.grantedBy` records the actor whose role + scope made the
   grant legal; grants are inserted, revokes **hard-delete** the row — both audited in B03.
+- **Institution (flat kind):** `unit_admin(entityType=institution, entityId=<ED primary-organization
+  code>)` — e.g. `HMC`, `WCMC-Q` — proxy-edits every scholar whose `Scholar.primaryOrgCode`
+  (ED `weillCornellEduPrimaryOrganization`, ED-authoritative, not roster-editable) matches.
+  No table and no cascade: the code→name catalog is [`lib/institutions.ts`](../lib/institutions.ts)
+  (`WCMC` itself is deliberately absent — institution-wide editing is `comms_steward`). Granted on
+  `/edit/administrators` like a core; the same bounded proxy surface as a department admin.
 
 ### Field-level rules worth memorizing
 

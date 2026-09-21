@@ -84,7 +84,13 @@
  * so a lapsed or pending add confers nothing. Same bounded/traceable mitigations.
  */
 import type { EditSession } from "@/lib/auth/superuser";
-import { getEffectiveUnitRole, type UnitAdminLookup } from "@/lib/edit/authz";
+import {
+  getEffectiveUnitRole,
+  getFlatUnitRole,
+  type CoreOwnerLookup,
+  type UnitAdminLookup,
+} from "@/lib/edit/authz";
+import { institutionName } from "@/lib/institutions";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isUnitAdminCenterProxyEnabled } from "@/lib/edit/unit-admin-center-proxy";
 
@@ -95,12 +101,18 @@ import { isUnitAdminCenterProxyEnabled } from "@/lib/edit/unit-admin-center-prox
  * (`db.read as unknown as UnitScholarLookup`), mirroring `ProxyLookup` /
  * `UnitAdminLookup`.
  */
-export type UnitScholarLookup = UnitAdminLookup & {
+export type UnitScholarLookup = UnitAdminLookup &
+  CoreOwnerLookup & {
   scholar: {
     findUnique: (args: {
       where: { cwid: string };
-      select: { deptCode: true; divCode: true; deletedAt: true };
-    }) => Promise<{ deptCode: string | null; divCode: string | null; deletedAt: Date | null } | null>;
+      select: { deptCode: true; divCode: true; primaryOrgCode: true; deletedAt: true };
+    }) => Promise<{
+      deptCode: string | null;
+      divCode: string | null;
+      primaryOrgCode: string | null;
+      deletedAt: Date | null;
+    } | null>;
   };
   divisionMembership: {
     findMany: (args: {
@@ -137,7 +149,10 @@ export type UnitScholarLookup = UnitAdminLookup & {
  * resolves the display name). `kind` is `center` only when the flag is on (D1
  * revised by #1104; centers stay excluded while the flag is off).
  */
-export type EditableUnit = { kind: "department" | "division" | "center"; code: string };
+export type EditableUnit = {
+  kind: "department" | "division" | "center" | "institution";
+  code: string;
+};
 
 /**
  * Resolve THE unit through which `adminCwid` may edit `scholarCwid`'s profile —
@@ -171,7 +186,7 @@ export async function resolveEditableUnitViaUnitAdmin(
   // missing or soft-deleted scholar has no editable profile (fail-closed).
   const scholar = await db.scholar.findUnique({
     where: { cwid: scholarCwid },
-    select: { deptCode: true, divCode: true, deletedAt: true },
+    select: { deptCode: true, divCode: true, primaryOrgCode: true, deletedAt: true },
   });
   if (!scholar || scholar.deletedAt !== null) return null;
 
@@ -202,9 +217,16 @@ export async function resolveEditableUnitViaUnitAdmin(
     }
   }
 
-  // Nobody can reach a scholar with no department, no divisions, and no current
-  // center membership via this path.
-  if (!scholar.deptCode && divisionCodes.size === 0 && centerCodes.size === 0) return null;
+  // Nobody can reach a scholar with no department, no divisions, no current
+  // center membership, and no institution via this path.
+  if (
+    !scholar.deptCode &&
+    divisionCodes.size === 0 &&
+    centerCodes.size === 0 &&
+    !scholar.primaryOrgCode
+  ) {
+    return null;
+  }
 
   // Resolve each division's parent department for the cascade. An orphan roster
   // code with no `Division` row stays absent from the map → `parentDeptCode:
@@ -262,6 +284,17 @@ export async function resolveEditableUnitViaUnitAdmin(
     }
   }
 
+  // Institution — the ED primary-organization code on the scholar
+  // (`Scholar.primaryOrgCode`, e.g. `HMC`; lib/institutions.ts). Flat: one
+  // `unit_admin(institution, code)` row, no cascade, ED-authoritative (not
+  // roster-editable, so none of the roster-self-add escalation above).
+  if (scholar.primaryOrgCode) {
+    const role = await getFlatUnitRole(session, "institution", scholar.primaryOrgCode, db);
+    if (role === "owner" || role === "curator") {
+      return { kind: "institution", code: scholar.primaryOrgCode };
+    }
+  }
+
   return null;
 }
 
@@ -307,8 +340,13 @@ export type UnitAdminEditorsLookup = {
   scholar: {
     findUnique: (args: {
       where: { cwid: string };
-      select: { deptCode: true; divCode: true; deletedAt: true };
-    }) => Promise<{ deptCode: string | null; divCode: string | null; deletedAt: Date | null } | null>;
+      select: { deptCode: true; divCode: true; primaryOrgCode: true; deletedAt: true };
+    }) => Promise<{
+      deptCode: string | null;
+      divCode: string | null;
+      primaryOrgCode: string | null;
+      deletedAt: Date | null;
+    } | null>;
   };
   divisionMembership: {
     findMany: (args: {
@@ -346,13 +384,16 @@ export type UnitAdminEditorsLookup = {
   unitAdmin: {
     findMany: (args: {
       where: {
-        OR: Array<{ entityType: "department" | "division" | "center"; entityId: { in: string[] } }>;
+        OR: Array<{
+          entityType: "department" | "division" | "center" | "institution";
+          entityId: { in: string[] };
+        }>;
       };
       select: { cwid: true; entityType: true; entityId: true; role: true };
     }) => Promise<
       Array<{
         cwid: string;
-        entityType: "department" | "division" | "center";
+        entityType: "department" | "division" | "center" | "institution";
         entityId: string;
         role: "owner" | "curator";
       }>
@@ -372,7 +413,7 @@ export type UnitAdminEditorsLookup = {
  */
 export type UnitAdminEditor = {
   adminCwid: string;
-  conferringUnitKind: "department" | "division" | "center";
+  conferringUnitKind: "department" | "division" | "center" | "institution";
   conferringUnitCode: string;
   conferringUnitName: string;
   role: "owner" | "curator";
@@ -408,7 +449,7 @@ export async function listUnitAdminEditorsForScholar(
 
   const scholar = await db.scholar.findUnique({
     where: { cwid: scholarCwid },
-    select: { deptCode: true, divCode: true, deletedAt: true },
+    select: { deptCode: true, divCode: true, primaryOrgCode: true, deletedAt: true },
   });
   if (!scholar || scholar.deletedAt !== null) return [];
 
@@ -438,9 +479,16 @@ export async function listUnitAdminEditorsForScholar(
     }
   }
 
-  // Nobody can reach a scholar with no department, no divisions, and no current
-  // center membership via this path.
-  if (!scholar.deptCode && divisionCodes.size === 0 && centerCodes.size === 0) return [];
+  // Nobody can reach a scholar with no department, no divisions, no current
+  // center membership, and no institution via this path.
+  if (
+    !scholar.deptCode &&
+    divisionCodes.size === 0 &&
+    centerCodes.size === 0 &&
+    !scholar.primaryOrgCode
+  ) {
+    return [];
+  }
 
   // Resolve each division's parent department (for the cascade) and display name
   // in one batched read. An orphan roster code with no `Division` row simply has
@@ -468,7 +516,7 @@ export async function listUnitAdminEditorsForScholar(
   // `divisionCodes`, or `centerCodes` is non-empty here — the no-units case
   // returned above.)
   const orClauses: Array<{
-    entityType: "department" | "division" | "center";
+    entityType: "department" | "division" | "center" | "institution";
     entityId: { in: string[] };
   }> = [];
   if (deptCodes.size > 0) orClauses.push({ entityType: "department", entityId: { in: [...deptCodes] } });
@@ -477,6 +525,8 @@ export async function listUnitAdminEditorsForScholar(
   // #1104 — center clause only when the flag yielded current memberships.
   if (centerCodes.size > 0)
     orClauses.push({ entityType: "center", entityId: { in: [...centerCodes] } });
+  if (scholar.primaryOrgCode)
+    orClauses.push({ entityType: "institution", entityId: { in: [scholar.primaryOrgCode] } });
 
   const rows = await db.unitAdmin.findMany({
     where: { OR: orClauses },
@@ -485,7 +535,7 @@ export async function listUnitAdminEditorsForScholar(
 
   type Attributed = {
     adminCwid: string;
-    kind: "department" | "division" | "center";
+    kind: "department" | "division" | "center" | "institution";
     code: string;
     role: "owner" | "curator";
   };
@@ -521,6 +571,9 @@ export async function listUnitAdminEditorsForScholar(
       // `has` check mirrors the division branch (drop any row outside the set).
       if (!centerCodes.has(r.entityId)) continue;
       consider({ adminCwid: r.cwid, kind: "center", code: r.entityId, role: r.role });
+    } else if (r.entityType === "institution") {
+      if (r.entityId !== scholar.primaryOrgCode) continue;
+      consider({ adminCwid: r.cwid, kind: "institution", code: r.entityId, role: r.role });
     }
   }
 
@@ -561,7 +614,9 @@ export async function listUnitAdminEditorsForScholar(
         ? (deptName.get(a.code) ?? a.code)
         : a.kind === "center"
           ? (centerName.get(a.code) ?? a.code)
-          : (divisionName.get(a.code) ?? a.code),
+          : a.kind === "institution"
+            ? institutionName(a.code)
+            : (divisionName.get(a.code) ?? a.code),
     role: a.role,
   }));
 

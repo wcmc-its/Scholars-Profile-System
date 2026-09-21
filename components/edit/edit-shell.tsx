@@ -174,7 +174,7 @@ export type EditShellProps = {
   backHref?: string;
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, naming the "via {unit} administrator" banner. */
-  unitAdmin?: { unitKind: "department" | "division" | "center"; unitName: string };
+  unitAdmin?: { unitKind: "department" | "division" | "center" | "institution"; unitName: string };
   /**
    * `cv_generator` role (#2482): the superuser banner reads "viewing … this
    * role is read-only" instead of "editing … as an administrator" — true on

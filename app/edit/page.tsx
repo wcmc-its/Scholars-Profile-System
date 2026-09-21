@@ -300,7 +300,12 @@ export default async function EditSelfPage({
     isDeveloper(editCwid).catch(() => false),
   ]);
 
-  const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
+  const manageableUnits = [
+    ...units.departments,
+    ...units.divisions,
+    ...units.centers,
+    ...units.institutions,
+  ];
   const proxyEditors = proxyEditorRows.map((r) => ({
     proxyCwid: r.proxyCwid,
     grantedBy: r.grantedBy,

@@ -56,6 +56,7 @@ function mkUnits(list: ManageableUnit[]): ManageableUnits {
     divisions: list.filter((u) => u.kind === "division"),
     centers: list.filter((u) => u.kind === "center"),
     cores: list.filter((u) => u.kind === "core"),
+    institutions: list.filter((u) => u.kind === "institution"),
     total: list.length,
   };
 }

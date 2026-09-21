@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- description writes target, now that the route writes
   -- `OrgUnitRoleAssignment` rows directly. Appended LAST to preserve existing
   -- ENUM ordinals.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access') NOT NULL,
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -418,9 +418,13 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --   Mentored publications report: + report_access  (a per-report access grant
 --                    row; target_entity_id is the "{reportKey}:{scopeKey}:{cwid}"
 --                    triple). Appended LAST to preserve existing ENUM ordinals.
+--   Institution administrators: + institution  (a unit_admin grant/revoke on
+--                    an ED primary-organization code — lib/institutions.ts;
+--                    target_entity_id is the code). Appended LAST to preserve
+--                    existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for

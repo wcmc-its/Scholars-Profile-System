@@ -125,6 +125,16 @@ export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduPrimaryDepartmentCode",    // primary dept code (legacy 10-digit)
   "weillCornellEduDepartmentCode",           // multi-valued legacy 10-digit code
   "weillCornellEduDepartment",               // multi-valued dept name (per-appointment)
+  // Institution code of the primary appointment (WCMC, WCMC-Q, HMC, SIDRA,
+  // HSS, ...). Feeds `Scholar.primaryOrgCode` → institution administrators
+  // (lib/institutions.ts). Verbose names are NOT in ED — ReCiter's
+  // getVerbosePrimaryOrganization switch is the only mapping. Option-tagged
+  // per SOR on the person entry (probe 2026-09-21: every faculty:active
+  // person carries `;faculty`, some also `;employee` / `;affiliate` /
+  // `;cornell-ithaca`); ldapts surfaces the tagged key, so request it
+  // explicitly like `weillCornellEduReleaseCode;mail`.
+  "weillCornellEduPrimaryOrganization",
+  "weillCornellEduPrimaryOrganization;faculty",
   // Pre-concatenated postnominal degree string (e.g. "MD", "MD, MPH"). Lives
   // on the person entry — also present on the SOR parent (weillCornellEduSORRecord)
   // but NOT on the Role subordinates that fetchActiveFacultyAppointments filters
@@ -214,6 +224,9 @@ export type EdFacultyEntry = {
    *  {@link stripInternalHrAnnotation}. */
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  /** ED `weillCornellEduPrimaryOrganization` — institution code of the primary
+   *  appointment (`WCMC`, `WCMC-Q`, `HMC`, ...). See lib/institutions.ts. */
+  primaryOrgCode: string | null;
   email: string | null;
   /** Effective email release audience derived from the multi-valued
    *  `weillCornellEduReleaseCode;mail` attribute (most-permissive-wins,
@@ -1014,6 +1027,12 @@ export function projectEntries(
         firstString(r["weillCornellEduPrimaryDepartment"]) ??
         firstString(e.weillCornellEduDepartment) ??
         firstString(e.ou) ??
+        null,
+      // The faculty SOR's code first (the appointment this profile is about);
+      // the untagged key is a defensive fallback — no probed entry carried one.
+      primaryOrgCode:
+        firstString(r["weillCornellEduPrimaryOrganization;faculty"]) ??
+        firstString(r["weillCornellEduPrimaryOrganization"]) ??
         null,
       email: firstString(e.mail) ?? null,
       // Multi-valued release-code parsed to the effective audience (fail-closed).

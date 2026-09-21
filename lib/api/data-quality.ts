@@ -301,6 +301,9 @@ function buildWhere(
     }
     const scopeMembershipCwids = [...new Set([...scopeCenterCwids, ...scopeRosterCwids])];
     if (scopeMembershipCwids.length > 0) scopeOr.push({ cwid: { in: scopeMembershipCwids } });
+    // Institution scope is a scholar column (ED primary organization), no expansion.
+    const institutionCodes = opts.scope.institutionCodes ?? [];
+    if (institutionCodes.length > 0) scopeOr.push({ primaryOrgCode: { in: institutionCodes } });
     // Empty scope → match nothing (the route forbids this case before we get here,
     // but be safe rather than returning everyone).
     and.push(scopeOr.length > 0 ? { OR: scopeOr } : { cwid: { in: [] } });

@@ -547,6 +547,17 @@ describe("loadDataQualityRoster — scope", () => {
     expect(where.AND?.[0]).toEqual({ OR: [{ cwid: { in: ["m1", "m2"] } }] });
   });
 
+  it("an institution scope filters on Scholar.primaryOrgCode (no membership expansion)", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: false, unitCodes: [], centerCodes: [], institutionCodes: ["HMC"] } },
+      asClient(client),
+    );
+    expect(client.centerMembership.findMany).not.toHaveBeenCalled();
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND?.[0]).toEqual({ OR: [{ primaryOrgCode: { in: ["HMC"] } }] });
+  });
+
   // Defensive-only: the route already 403s an empty scope via `isEmptyScope`
   // before the query ever runs, but the loader itself must fail CLOSED (match
   // nothing) rather than vacuously matching everyone, should that guard ever

@@ -40,6 +40,7 @@ import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import { institutionName } from "@/lib/institutions";
 
 export const dynamic = "force-dynamic";
 
@@ -84,24 +85,26 @@ export default async function EditScholarPage({
   // #1104 — the unit can now be a center (behind UNIT_ADMIN_CENTER_PROXY),
   // resolved just like a department / division.
   let unitAdminBanner:
-    | { unitKind: "department" | "division" | "center"; unitName: string }
+    | { unitKind: "department" | "division" | "center" | "institution"; unitName: string }
     | null = null;
   if (unit) {
     const named =
-      unit.kind === "department"
-        ? await db.read.department.findUnique({
-            where: { code: unit.code },
-            select: { name: true },
-          })
-        : unit.kind === "center"
-          ? await db.read.center.findUnique({
+      unit.kind === "institution"
+        ? { name: institutionName(unit.code) }
+        : unit.kind === "department"
+          ? await db.read.department.findUnique({
               where: { code: unit.code },
               select: { name: true },
             })
-          : await db.read.division.findUnique({
-              where: { code: unit.code },
-              select: { name: true },
-            });
+          : unit.kind === "center"
+            ? await db.read.center.findUnique({
+                where: { code: unit.code },
+                select: { name: true },
+              })
+            : await db.read.division.findUnique({
+                where: { code: unit.code },
+                select: { name: true },
+              });
     unitAdminBanner = { unitKind: unit.kind, unitName: named?.name ?? unit.code };
   }
 
