@@ -1857,8 +1857,8 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
       });
 
-      it("keeps the ORCID suggestion row armed but OFF in prod (SELF_EDIT_ORCID_SUGGESTION) until the pubsource_orcid_person refresh lands", () => {
-        expect(appContainerEnv().get("SELF_EDIT_ORCID_SUGGESTION")).toBe("off");
+      it("activates the ORCID surface in prod (SELF_EDIT_ORCID_SUGGESTION: suggestion + Identifiers & Profiles tab + write; flipped 2026-09-21)", () => {
+        expect(appContainerEnv().get("SELF_EDIT_ORCID_SUGGESTION")).toBe("on");
       });
 
       it("activates the ReCiter 'Not mine' reject in prod (RECITER_REJECT_SEND, launch batch 2, #746/#506)", () => {
