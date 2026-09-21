@@ -331,6 +331,9 @@ export type PeopleHit = {
   /** FK-resolved department name (preferred) or free-text fallback. */
   deptName: string | null;
   divisionName: string | null;
+  /** `Scholar.primaryOrgCode` (bare ED code; omit-on-empty in the doc). The
+   *  result card prints the non-WCMC institution after the department line. */
+  primaryOrgCode?: string | null;
   roleCategory: string | null;
   pubCount: number;
   /** The scholar's method-INDEXED publication count — the union of the publicly-visible
@@ -3635,6 +3638,7 @@ export async function searchPeople(opts: {
       primaryDepartment: string | null;
       deptName: string | null;
       divisionName: string | null;
+      primaryOrgCode?: string;
       personType: string | null;
       publicationCount: number;
       grantCount: number;
@@ -4542,6 +4546,7 @@ export async function searchPeople(opts: {
         primaryDepartment: h._source.primaryDepartment,
         deptName: h._source.deptName ?? h._source.primaryDepartment,
         divisionName: h._source.divisionName,
+        primaryOrgCode: h._source.primaryOrgCode ?? null,
         roleCategory: h._source.personType,
         pubCount: h._source.publicationCount,
         // The method line's honest denominator. Emitted ONLY when the union was
