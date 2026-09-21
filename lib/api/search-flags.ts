@@ -1382,6 +1382,28 @@ export function resolveSearchPeopleClinicalRankFacets(): boolean {
 }
 
 /**
+ * Gates the `institution` People-search facet — a direct copy of
+ * `Scholar.primaryOrgCode` (ED `weillCornellEduPrimaryOrganization`: WCMC, HSS,
+ * MSKCC, NYP, ...) onto the people doc as the `primaryOrgCode` keyword (see
+ * `lib/search-index-docs.ts`'s `PEOPLE_INDEX_SELECT`). `searchPeople` and
+ * `/api/search` accept the `institution` request param regardless of this
+ * flag; while OFF the param is a silent no-op — no clause, no facet
+ * aggregation, never a 500 — the same reindex-then-flip posture as
+ * `resolveSearchPeopleClinicalRankFacets` above. While ON and the field is
+ * still UNMAPPED the agg matches nothing and no group renders; flip only after
+ * the nightly alias rebuild has carried the keyword mapping — an /edit
+ * single-doc reindex (`lib/edit/search-suppression.ts`) into the old index
+ * would dynamically map `primaryOrgCode` as text, and a terms agg on a text
+ * field is an OpenSearch error, not an empty facet.
+ *
+ * Staging-on / prod-off at merge (dark until a cdk deploy). Flag-parity: wire
+ * `SEARCH_PEOPLE_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPeopleInstitutionFacet(): boolean {
+  return process.env.SEARCH_PEOPLE_INSTITUTION_FACET === "on";
+}
+
+/**
  * #2306 — gates the `earlyStageInvestigator` People-search facet (backed by
  * the index-doc-only `esiEligible` field — see `loadEsiEligibilityByCwid` in
  * `lib/search-index-docs.ts`). Kept as an INDEPENDENT kill switch from

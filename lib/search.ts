@@ -402,6 +402,13 @@ export const peopleIndexMapping = {
       // could derive it for — not omit-on-empty, so the boolean `term` filter
       // behind `SEARCH_PEOPLE_ESI_FACET` gets correct counts on both sides.
       esiEligible: { type: "boolean" },
+      // Institution facet — direct copy of `Scholar.primaryOrgCode` (ED
+      // `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, HMH,
+      // WCMC-Q, ...). `keyword` for an exact multi-select `terms` filter +
+      // terms agg (mirrors `professorialRank`), behind
+      // `SEARCH_PEOPLE_INSTITUTION_FACET`. OMIT-on-empty in `buildPeopleDoc`.
+      // Labels are resolved in the page via `institutionDisplayName`.
+      primaryOrgCode: { type: "keyword" },
     },
   },
 };

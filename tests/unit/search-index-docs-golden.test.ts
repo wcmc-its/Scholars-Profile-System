@@ -270,6 +270,8 @@ describe("buildPeopleDoc — golden snapshots", () => {
       // #2300 — direct-copy scalars (PEOPLE_INDEX_SELECT now selects both).
       hasClinicalProfile: true,
       professorialRank: "Associate Professor",
+      // Institution facet — direct-copy scalar, exercises the populated branch.
+      primaryOrgCode: "WCMC",
       deptCode: "MED",
       divCode: "CARD",
       department: { name: "Medicine" },

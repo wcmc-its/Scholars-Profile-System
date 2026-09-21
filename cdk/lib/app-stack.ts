@@ -2100,6 +2100,15 @@ export class AppStack extends Stack {
         // gets its own lever.
         SEARCH_PEOPLE_CLINICAL_RANK_FACETS: "on",
         SEARCH_PEOPLE_ESI_FACET: "on",
+        // People-search "Institution" facet (direct copy of Scholar.primaryOrgCode,
+        // ED weillCornellEduPrimaryOrganization). Same reindex-then-flip shape as
+        // the pair above: DARK until the first nightly people-alias rebuild after
+        // the ETL image ships carries the new `primaryOrgCode` keyword; while the
+        // field is UNMAPPED the agg matches nothing and no group renders. Flip
+        // (cdk deploy) only AFTER that rebuild: an /edit single-doc reindex in
+        // between dynamically maps the field as text, and a terms agg on text is
+        // a 500. STAGING-FIRST.
+        SEARCH_PEOPLE_INSTITUTION_FACET: env === "staging" ? "on" : "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
