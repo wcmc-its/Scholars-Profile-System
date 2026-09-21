@@ -52,17 +52,17 @@ export function institutionName(code: string): string {
   return INSTITUTIONS[code] ?? code;
 }
 
-/** The home institution's ED code. NOT in `INSTITUTIONS` (module doc comment):
- *  that map doubles as the `unit_admin` institution-grant vocabulary, and an
- *  admin over every WCM scholar is `comms_steward`, not an institution grant. */
+/** ED `weillCornellEduPrimaryOrganization` code for the home institution. */
 export const HOME_INSTITUTION_CODE = "WCMC";
 
-/** DISPLAY-ONLY name for a scholar's `Scholar.primaryOrgCode` — the roster
- *  facet, the Name & Title panel, reports and CSV exports. Unlike
- *  `institutionName`, it names the home institution too, so a facet option
- *  never reads as the bare `WCMC` beside "Hospital for Special Surgery".
- *  Never use it to validate a grant target; `INSTITUTIONS` stays WCMC-free on
- *  purpose. Unmapped codes fall through to the bare code, as `institutionName`. */
+/**
+ * DISPLAY-ONLY name for a `Scholar.primaryOrgCode` (People-search "Institution"
+ * facet rows + chips). `WCMC` is deliberately NOT in `INSTITUTIONS` — that map
+ * doubles as the `unit_admin(institution, <code>)` grant vocabulary and an admin
+ * over every WCM scholar is `comms_steward`, not an institution grant — so the
+ * home institution is special-cased here instead of added to the map. Unmapped
+ * codes fall through to the bare code, same as `institutionName`.
+ */
 export function institutionDisplayName(code: string): string {
   return code === HOME_INSTITUTION_CODE ? "Weill Cornell Medicine" : institutionName(code);
 }
