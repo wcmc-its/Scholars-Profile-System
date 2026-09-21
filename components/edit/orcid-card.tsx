@@ -176,7 +176,7 @@ export function OrcidCard({
             href={`${ORCID_URL_PREFIX}${id}`}
             target="_blank"
             rel="noreferrer"
-            className="text-apollo-slate hover:text-apollo-maroon decoration-apollo-slate/40 hover:decoration-apollo-maroon inline-flex items-center gap-1.5 font-mono text-lg font-semibold underline underline-offset-4"
+            className="text-apollo-slate hover:text-apollo-maroon decoration-apollo-slate/40 hover:decoration-apollo-maroon inline-flex items-center gap-1.5 font-mono text-lg font-bold tracking-[0.01em] underline underline-offset-4"
           >
             {id}
             <ArrowUpRight className="size-3.5 shrink-0" aria-hidden />

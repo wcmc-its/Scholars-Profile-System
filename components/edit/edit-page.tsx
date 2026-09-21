@@ -951,6 +951,19 @@ export function EditPage({
       // route is always `/edit/scholar/[cwid]/history` (self resolves via the
       // gate's isSelf branch), never the bare `/edit`. (#955)
       historyHref={`/edit/scholar/${ctx.scholar.cwid}/history`}
+      // Identity header (design round 3): edit-for-others only — the shell
+      // ignores it in self mode, and this call site doesn't build it either.
+      identity={
+        mode === "self"
+          ? undefined
+          : {
+              postnominal: ctx.scholar.postnominal,
+              title: ctx.scholar.primaryTitle,
+              institution: ctx.scholar.primaryOrgCode
+                ? institutionDisplayName(ctx.scholar.primaryOrgCode)
+                : null,
+            }
+      }
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
       profilesNavVisible={profilesNavVisible}

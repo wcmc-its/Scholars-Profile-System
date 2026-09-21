@@ -1,8 +1,9 @@
 /**
- * #955 — the `/edit` shell surfaces a "View change history" entry link beside
- * the "Preview Profile" link, wired to `/edit/scholar/[cwid]/history`. The link
- * shows in every edit mode (history visibility == edit access) and, being an
- * internal page, opens in the same tab (no `target=_blank`, no external arrow).
+ * #955 — the `/edit` shell surfaces a "Change history" entry (a ghost button)
+ * beside the "Preview profile" outline button, wired to
+ * `/edit/scholar/[cwid]/history`. The link shows in every edit mode (history
+ * visibility == edit access) and, being an internal page, opens in the same tab
+ * (no `target=_blank`, no external arrow).
  *
  * `AccountMenu` is a client component that fires an impersonation-probe fetch on
  * mount, so it's mocked out — this suite only exercises the shell's link row.
@@ -28,7 +29,7 @@ const base = {
 };
 
 describe("EditShell — change-history entry link (#955)", () => {
-  it("renders 'View change history' pointing at the internal history page (same tab)", () => {
+  it("renders 'Change history' as a ghost button pointing at the internal history page (same tab)", () => {
     render(
       <EditShell {...base} historyHref="/edit/scholar/abc1001/history">
         <div>panel</div>
@@ -36,21 +37,23 @@ describe("EditShell — change-history entry link (#955)", () => {
     );
     const link = screen.getByTestId("edit-history-link");
     expect(link.getAttribute("href")).toBe("/edit/scholar/abc1001/history");
-    expect(link.textContent).toContain("View change history");
-    // Internal — no new-tab / external semantics (unlike Preview Profile).
+    expect(link.textContent).toContain("Change history");
+    expect(link.getAttribute("data-variant")).toBe("ghost");
+    // Internal — no new-tab / external semantics (unlike Preview profile).
     expect(link.getAttribute("target")).toBeNull();
     expect(link.getAttribute("rel")).toBeNull();
   });
 
-  it("still renders the Preview link, and omits history when no historyHref", () => {
+  it("still renders the Preview outline button, and omits history when no historyHref", () => {
     render(
       <EditShell {...base} previewHref="https://example.test/jane">
         <div>panel</div>
       </EditShell>,
     );
     expect(screen.queryByTestId("edit-history-link")).toBeNull();
-    const preview = screen.getByRole("link", { name: /Preview Profile/ });
+    const preview = screen.getByRole("link", { name: /Preview profile/ });
     expect(preview.getAttribute("href")).toBe("https://example.test/jane");
     expect(preview.getAttribute("target")).toBe("_blank");
+    expect(preview.getAttribute("data-variant")).toBe("outline");
   });
 });

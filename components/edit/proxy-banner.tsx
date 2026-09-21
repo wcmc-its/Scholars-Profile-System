@@ -3,15 +3,13 @@
  *
  * Server Component (no interactivity): the banner a designated proxy editor sees
  * above the cards on `/edit/scholar/[cwid]` when they are editing on a scholar's
- * behalf. Deliberately VISUALLY DISTINCT from the superuser banner ("editing …
- * as an administrator") and the #637 impersonation banner ("viewing/acting as
- * …") so the three roles never read alike. The label is the scholar being
- * edited — never the proxy's own CWID (the proxy is the signed-in actor).
- *
- * Visual/interaction polish (placement, exact styling) is a UI-SPEC deliverable;
- * this is the functional v1 banner.
+ * behalf. Same slate-tint notice chrome as `SuperuserBanner` (design round 3,
+ * 2026-09-21 — one standard across every /edit tab); the role is told by the
+ * copy ("as their designated proxy editor"), not by colour or icon. The label
+ * is the scholar being edited — never the proxy's own CWID (the proxy is the
+ * signed-in actor).
  */
-import { UserCheck } from "lucide-react";
+import { Shield } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -24,11 +22,11 @@ export function ProxyBanner({ targetLabel }: ProxyBannerProps) {
   return (
     <Alert
       variant="info"
-      className="border-apollo-slate/40 bg-apollo-surface-2 mb-6"
+      className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-notice-text mb-6 rounded-lg px-[13px] py-[9px]"
       data-slot="proxy-banner"
     >
-      <UserCheck className="text-apollo-slate size-4" />
-      <AlertDescription>
+      <Shield className="size-4" />
+      <AlertDescription className="text-apollo-notice-text text-[13px]">
         <p>
           You are editing <strong>{targetLabel}</strong>&apos;s profile as their designated proxy
           editor. You can edit the overview and hide misattributed publications; name, title, and

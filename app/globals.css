@@ -125,9 +125,13 @@
    * near-neutral so colour stays meaningful. Each job has ONE treatment, and
    * they read the same on every surface:
    *
-   *   BRAND    maroon (--apollo-maroon)  — the h2 rule, the active rail item,
-   *                                        and the .apollo-card spine (container
-   *                                        chrome). Brand only; never a provenance cue.
+   *   BRAND    maroon (--apollo-maroon)  — the active rail item and the primary
+   *                                        button. Brand only; never a provenance
+   *                                        cue. (The h2 rule and the .apollo-card
+   *                                        spine were dropped 2026-09-21, design
+   *                                        round 3 — the panel is a plain card.)
+   *   NOTICE   slate tint + --apollo-notice-text + Shield — the admin / proxy /
+   *                                        unit-admin editing notice above the card.
    *   YOURS    green  (--apollo-green*)  + pencil — the "Yours to edit" badge
    *                                        ONLY. "You can change it here."
    *   LOCKED   neutral (--apollo-lock-bg) + lock icon + TEXT — LockedBadge and
@@ -153,11 +157,13 @@
    *
    * Green pulls double duty (YOURS badge + success banner) — disambiguated by
    * icon + context (pencil vs check), never by hue alone, same as LOCKED.
-   * Files: attribute-rail.tsx (rail groups), edit-panel.tsx (h2 rule + badge),
-   * locked-badge.tsx. Introduce a new accent only by editing here first. */
+   * Files: attribute-rail.tsx (rail groups), edit-panel.tsx (badge),
+   * locked-badge.tsx, superuser-banner.tsx (notice). Introduce a new accent only
+   * by editing here first. */
   --apollo-slate: #34506e;
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;
+  --apollo-notice-text: #274158; /* text + icon on the slate-tint editing notice */
   /* Facet-filter redesign (PROFILE_FACET_REDESIGN) — three facet hues, each a
      4-value semantic group (fill / border / text / count-subtext), theme-aware
      (#16). Topic = slate-blue, Method = indigo, Position = warm amber (the
@@ -317,6 +323,7 @@
   --color-apollo-slate: var(--apollo-slate);
   --color-apollo-slate-tint: var(--apollo-slate-tint);
   --color-apollo-slate-tint-border: var(--apollo-slate-tint-border);
+  --color-apollo-notice-text: var(--apollo-notice-text);
   --color-apollo-green: var(--apollo-green);
   --color-apollo-green-tint: var(--apollo-green-tint);
   --color-apollo-green-tint-border: var(--apollo-green-tint-border);
@@ -376,14 +383,11 @@
   background: var(--apollo-surface);
   border: 1px solid var(--apollo-border);
   border-radius: var(--apollo-radius-card);
-  /* Maroon spine (inset shadow, not a border — respects the corner radius and
-     adds no reflow) turns the detail panel from a plain white box into a
-     brand-cued surface. Maroon is brand (the h2 rule + active rail item); the
-     spine is container chrome, not a provenance cue. */
-  box-shadow:
-    inset 3px 0 0 var(--apollo-maroon),
-    var(--apollo-shadow-card);
-  padding: 28px 32px 32px;
+  /* A plain card, per the design-round-3 mockup (2026-09-21). The earlier maroon
+     inset-shadow "spine" was overruled by the user; brand now lives in the
+     active rail item and the primary button only. */
+  box-shadow: var(--apollo-shadow-card);
+  padding: 24px;
 }
 @media (max-width: 640px) {
   .apollo-card {
