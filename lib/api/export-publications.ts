@@ -34,6 +34,7 @@ import {
   loadPublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { htmlToPlainText } from "@/lib/utils";
+import { institutionDisplayName } from "@/lib/institutions";
 
 /** Hardcoded ceiling for Phase 1; spec §7.1 hard cap is 30,000. */
 export const EXPORT_MAX_LIMIT = 5000;
@@ -53,6 +54,7 @@ export type AuthorshipRow = {
   lastName: string;
   firstName: string;
   primaryDepartment: string | null;
+  primaryInstitution: string | null;
   pmid: string;
   title: string;
   year: number | null;
@@ -234,6 +236,7 @@ export async function fetchAuthorshipRows(
               cwid: true,
               preferredName: true,
               primaryDepartment: true,
+              primaryOrgCode: true,
             },
           },
         },
@@ -273,6 +276,10 @@ export async function fetchAuthorshipRows(
         lastName: last,
         firstName: first,
         primaryDepartment: a.scholar.primaryDepartment,
+        // Data export: the display name for every row, WCMC included.
+        primaryInstitution: a.scholar.primaryOrgCode
+          ? institutionDisplayName(a.scholar.primaryOrgCode)
+          : null,
         pmid: pub.pmid,
         title: plainTitleForCsv(pub.title),
         year: pub.year,
@@ -373,6 +380,7 @@ export const AUTHORSHIP_HEADERS: ReadonlyArray<keyof AuthorshipRow> = [
   "lastName",
   "firstName",
   "primaryDepartment",
+  "primaryInstitution",
   "pmid",
   "title",
   "year",
