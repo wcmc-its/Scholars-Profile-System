@@ -116,6 +116,7 @@ import {
   resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
   resolveSearchPeopleEsiFacet,
+  resolveSearchPeopleInstitutionFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
   resolveSearchResultEvidence,
@@ -251,6 +252,14 @@ export type PeopleFilters = {
    * the flag, but a no-op (no clause, no facet) while it's off / pre-reindex.
    */
   earlyStageInvestigator?: boolean;
+  /**
+   * Institution facet — direct copy of `Scholar.primaryOrgCode` (ED
+   * `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, ...).
+   * Multi-select keyword facet, same shape as `professorialRank`. Gated behind
+   * `SEARCH_PEOPLE_INSTITUTION_FACET`: accepted regardless of the flag, but a
+   * no-op (no clause, no facet) while it's off / pre-reindex.
+   */
+  institution?: string[];
   /** Issue #233 — Principal Investigator facet. Absent = "no filter". */
   pi?: PiFilter;
   /** Issue #233 — threshold for `pi=multi`. Clamped to [PI_MIN_FLOOR,
@@ -1160,6 +1169,13 @@ export type PeopleSearchResult = {
      * `SEARCH_PEOPLE_ESI_FACET` is off (or pre-reindex).
      */
     earlyStageInvestigator: { true: number; false: number };
+    /**
+     * Institution facet — `primaryOrgCode` multi-select buckets (bare ED codes;
+     * the page resolves labels via `institutionDisplayName`), same shape as
+     * `professorialRank`. Empty while `SEARCH_PEOPLE_INSTITUTION_FACET` is off
+     * (or pre-reindex) — never omitted.
+     */
+    institutions: SearchFacetBucket[];
   };
 };
 
@@ -2172,6 +2188,7 @@ export async function searchPeople(opts: {
           isClinical: { true: 0, false: 0 },
           professorialRank: [],
           earlyStageInvestigator: { true: 0, false: 0 },
+          institutions: [],
         },
       };
     }
@@ -2545,6 +2562,14 @@ export async function searchPeople(opts: {
     resolveSearchPeopleEsiFacet() && filters.earlyStageInvestigator === true
       ? { term: { esiEligible: true } }
       : null;
+  // Institution clause, gated behind `SEARCH_PEOPLE_INSTITUTION_FACET`. Same
+  // multi-select `terms` shape and accept-but-no-op-while-off posture as
+  // `professorialRankClause`.
+  const institutionFacetOn = resolveSearchPeopleInstitutionFacet();
+  const institutionClause =
+    institutionFacetOn && filters.institution && filters.institution.length > 0
+      ? { terms: { primaryOrgCode: filters.institution } }
+      : null;
   const sparseClause = applySparseFilter ? { term: { isComplete: true } } : null;
   const topicClause = topicCwidFilter && topicCwidFilter.length > 0
     ? { terms: { cwid: topicCwidFilter } }
@@ -2864,6 +2889,7 @@ export async function searchPeople(opts: {
         isClinical: { true: 0, false: 0 },
         professorialRank: [],
         earlyStageInvestigator: { true: 0, false: 0 },
+        institutions: [],
       },
     };
   }
@@ -2876,6 +2902,7 @@ export async function searchPeople(opts: {
   if (isClinicalClause) userAxisFilters.push(isClinicalClause);
   if (professorialRankClause) userAxisFilters.push(professorialRankClause);
   if (earlyStageInvestigatorClause) userAxisFilters.push(earlyStageInvestigatorClause);
+  if (institutionClause) userAxisFilters.push(institutionClause);
 
   // Helper: user-axis filters with one axis omitted, for that axis's
   // excluding-self aggregation. Always-on filters are inherited from the
@@ -2888,7 +2915,8 @@ export async function searchPeople(opts: {
       | "pi"
       | "isClinical"
       | "professorialRank"
-      | "earlyStageInvestigator",
+      | "earlyStageInvestigator"
+      | "institution",
   ) => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "deptDiv" && deptDivClause) out.push(deptDivClause);
@@ -2899,6 +2927,7 @@ export async function searchPeople(opts: {
     if (axis !== "professorialRank" && professorialRankClause) out.push(professorialRankClause);
     if (axis !== "earlyStageInvestigator" && earlyStageInvestigatorClause)
       out.push(earlyStageInvestigatorClause);
+    if (axis !== "institution" && institutionClause) out.push(institutionClause);
     return out;
   };
 
@@ -3045,6 +3074,18 @@ export async function searchPeople(opts: {
                 ],
               },
             },
+          },
+        }
+      : {}),
+    // Institution facet agg, attached ONLY when `SEARCH_PEOPLE_INSTITUTION_FACET`
+    // is on — same absent-key-while-off posture as `professorialRanks` above.
+    ...(institutionFacetOn
+      ? {
+          // Multi-select keyword buckets, same `terms` shape as `personTypes`.
+          // size 50 gives headroom past the ~30 codes in `lib/institutions.ts`.
+          institutions: {
+            filter: { bool: { filter: filtersExcept("institution") } },
+            aggs: { keys: { terms: { field: "primaryOrgCode", size: 50 } } },
           },
         }
       : {}),
@@ -3678,6 +3719,8 @@ export async function searchPeople(opts: {
       // #2306 — present only when SEARCH_PEOPLE_ESI_FACET is on.
       earlyStageInvestigatorTrue?: { doc_count: number };
       earlyStageInvestigatorFalse?: { doc_count: number };
+      // Present only when SEARCH_PEOPLE_INSTITUTION_FACET is on.
+      institutions?: { keys: { buckets: Bucket[] } };
       attributionMatch?: { doc_count: number };
     };
   };
@@ -4614,6 +4657,12 @@ export async function searchPeople(opts: {
         true: r.aggregations?.earlyStageInvestigatorTrue?.doc_count ?? 0,
         false: r.aggregations?.earlyStageInvestigatorFalse?.doc_count ?? 0,
       },
+      // Institution facet — `[]` (never omitted) while
+      // SEARCH_PEOPLE_INSTITUTION_FACET is off / pre-reindex (agg absent).
+      institutions: (r.aggregations?.institutions?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
     },
   };
 }

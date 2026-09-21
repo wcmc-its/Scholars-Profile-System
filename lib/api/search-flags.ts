@@ -1382,6 +1382,25 @@ export function resolveSearchPeopleClinicalRankFacets(): boolean {
 }
 
 /**
+ * Gates the `institution` People-search facet — a direct copy of
+ * `Scholar.primaryOrgCode` (ED `weillCornellEduPrimaryOrganization`: WCMC, HSS,
+ * MSKCC, NYP, ...) onto the people doc as the `primaryOrgCode` keyword (see
+ * `lib/search-index-docs.ts`'s `PEOPLE_INDEX_SELECT`). `searchPeople` and
+ * `/api/search` accept the `institution` request param regardless of this
+ * flag; while OFF (or before the people index has been rebuilt with the new
+ * field) the param is a silent no-op — no clause, no facet aggregation, never
+ * a 500 — the same reindex-then-flip posture as
+ * `resolveSearchPeopleClinicalRankFacets` above.
+ *
+ * Staging-on / prod-off at merge; the facet renders nothing until the nightly
+ * alias rebuild after the ETL image ships carries the field. Flag-parity: wire
+ * `SEARCH_PEOPLE_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPeopleInstitutionFacet(): boolean {
+  return process.env.SEARCH_PEOPLE_INSTITUTION_FACET === "on";
+}
+
+/**
  * #2306 — gates the `earlyStageInvestigator` People-search facet (backed by
  * the index-doc-only `esiEligible` field — see `loadEsiEligibilityByCwid` in
  * `lib/search-index-docs.ts`). Kept as an INDEPENDENT kill switch from

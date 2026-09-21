@@ -97,6 +97,7 @@ import { cachedReasonAgg, badgeCountKey } from "@/lib/api/reason-agg-cache";
 import { prisma } from "@/lib/db";
 import { logSearchDegraded } from "@/lib/analytics/errors";
 import { formatRoleCategory } from "@/lib/role-display";
+import { institutionDisplayName } from "@/lib/institutions";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -342,6 +343,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     (Array.isArray(sp.earlyStageInvestigator)
       ? sp.earlyStageInvestigator[0]
       : sp.earlyStageInvestigator) === "true";
+  // Institution facet — repeated multi-select of `Scholar.primaryOrgCode`
+  // codes, same URL-param shape as `professorialRank`. Accepted regardless of
+  // `SEARCH_PEOPLE_INSTITUTION_FACET` (searchPeople no-ops it while off).
+  const institution = parseList(sp.institution);
 
   // Issue #233 — Principal Investigator facet. Single-select; `none` and
   // unset both mean "no filter" (URL contract). `pi_min` is meaningful only
@@ -490,6 +495,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             isClinical: isClinical ? true : undefined,
             professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
             earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
+            institution: institution.length > 0 ? institution : undefined,
           },
           relevanceMode: peopleRelevanceMode,
           shape: peopleQueryShape,
@@ -667,6 +673,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         isClinical: isClinical ? true : undefined,
         professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
         earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
+        institution: institution.length > 0 ? institution : undefined,
       },
       // PR-5: route the §6.1 shape templates on the SSR path too.
       relevanceMode: peopleRelevanceMode,
@@ -910,6 +917,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 isClinical={isClinical}
                 professorialRank={professorialRank}
                 earlyStageInvestigator={earlyStageInvestigator}
+                institution={institution}
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
@@ -1183,6 +1191,7 @@ async function PeopleResults({
   isClinical,
   professorialRank,
   earlyStageInvestigator,
+  institution,
   scope,
   concept,
   scopeHrefs,
@@ -1212,6 +1221,9 @@ async function PeopleResults({
    *  regardless of `SEARCH_PEOPLE_ESI_FACET`; FacetSidebar hides the checkbox
    *  while the facet is absent from the response. */
   earlyStageInvestigator: boolean;
+  /** Active `institution` multi-select filter (`Scholar.primaryOrgCode` codes),
+   *  same shape as `professorialRank`. */
+  institution: string[];
   scope: Scope;
   concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
@@ -1265,6 +1277,7 @@ async function PeopleResults({
     if (isClinical) sp.set("isClinical", "true");
     for (const v of professorialRank) sp.append("professorialRank", v);
     if (earlyStageInvestigator) sp.set("earlyStageInvestigator", "true");
+    for (const v of institution) sp.append("institution", v);
     if (pi) sp.set("pi", pi);
     // `pi_min` is only meaningful for pi=multi; default value is dropped
     // from the URL to keep saved bookmarks tidy.
@@ -1381,6 +1394,14 @@ async function PeopleResults({
       removeHref: toggleBooleanHref("earlyStageInvestigator", true),
     });
   }
+  // Institution chips — codes resolved to display names (unlike professorialRank,
+  // whose values are already display strings).
+  for (const v of institution) {
+    chips.push({
+      label: institutionDisplayName(v),
+      removeHref: removeHref("institution", v),
+    });
+  }
   if (pi) {
     chips.push({
       label:
@@ -1443,6 +1464,7 @@ async function PeopleResults({
         isClinicalFacet={result.facets.isClinical}
         professorialRanks={result.facets.professorialRank}
         earlyStageInvestigatorFacet={result.facets.earlyStageInvestigator}
+        institutions={result.facets.institutions}
         activeDeptDiv={deptDiv}
         activePersonType={personType}
         activeActivity={activity}
@@ -1451,6 +1473,7 @@ async function PeopleResults({
         activeIsClinical={isClinical}
         activeProfessorialRank={professorialRank}
         activeEarlyStageInvestigator={earlyStageInvestigator}
+        activeInstitution={institution}
         toggleHref={toggleHref}
         toggleBooleanHref={toggleBooleanHref}
         setPiHref={setPiHref}
@@ -2722,6 +2745,7 @@ function FacetSidebar({
   isClinicalFacet,
   professorialRanks,
   earlyStageInvestigatorFacet,
+  institutions,
   activeDeptDiv,
   activePersonType,
   activeActivity,
@@ -2730,6 +2754,7 @@ function FacetSidebar({
   activeIsClinical,
   activeProfessorialRank,
   activeEarlyStageInvestigator,
+  activeInstitution,
   toggleHref,
   toggleBooleanHref,
   setPiHref,
@@ -2753,6 +2778,11 @@ function FacetSidebar({
    *  shape/gating as `isClinicalFacet`, behind the independent
    *  `SEARCH_PEOPLE_ESI_FACET` flag. */
   earlyStageInvestigatorFacet: { true: number; false: number };
+  /** Institution facet — `primaryOrgCode` multi-select buckets (bare ED codes,
+   *  labelled here via `institutionDisplayName`), same shape as
+   *  `professorialRanks`. Empty while `SEARCH_PEOPLE_INSTITUTION_FACET` is
+   *  off / pre-reindex ⇒ the group is not rendered. */
+  institutions: SearchFacetBucket[];
   activeDeptDiv: string[];
   activePersonType: string[];
   activeActivity: ActivityFilter[];
@@ -2761,6 +2791,7 @@ function FacetSidebar({
   activeIsClinical: boolean;
   activeProfessorialRank: string[];
   activeEarlyStageInvestigator: boolean;
+  activeInstitution: string[];
   toggleHref: (axis: string, value: string) => string;
   /** #2300 / #2306 — single-boolean toggle for `isClinical` /
    *  `earlyStageInvestigator` (set-to-true / delete, not the multi-select
@@ -2860,6 +2891,27 @@ function FacetSidebar({
               wrap
             />
           ))}
+        </FacetGroup>
+      ) : null}
+
+      {/* Institution — direct copy of `Scholar.primaryOrgCode`, same multi-select
+          shape as "Professorial rank" above; `wrap` + collapseAfter like the
+          dept/division group because institution names are long. Renders only
+          when the response carries buckets (flag off / pre-reindex ⇒ no group). */}
+      {institutions.length > 0 ? (
+        <FacetGroup label="Institution" collapseAfter={5}>
+          {sortActiveFirst(institutions, (b) => activeInstitution.includes(b.value)).map(
+            (b) => (
+              <FacetCheckbox
+                key={b.value}
+                label={institutionDisplayName(b.value)}
+                count={b.count}
+                isActive={activeInstitution.includes(b.value)}
+                href={toggleHref("institution", b.value)}
+                wrap
+              />
+            ),
+          )}
         </FacetGroup>
       ) : null}
 

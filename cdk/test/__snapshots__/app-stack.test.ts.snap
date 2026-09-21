@@ -747,6 +747,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_INSTITUTION_FACET",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "on",
               },
@@ -5219,6 +5223,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_ESI_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_INSTITUTION_FACET",
                 "Value": "on",
               },
               {

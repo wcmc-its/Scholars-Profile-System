@@ -98,7 +98,7 @@ Under `SEARCH_PUB_FACET_SPLIT` (staging-on since 2026-07-02, #1423), the publica
 
 | Tab | Facets |
 |---|---|
-| People | Department/Division (composite keyword `deptCode--divCode`), Person Type, Activity (`has_grants`, `recent_pub` = last 2 years) |
+| People | Department/Division (composite keyword `deptCode--divCode`), Person Type, Activity (`has_grants`, `recent_pub` = last 2 years), PI (`pi=any\|active\|multi` + `pi_min`, #233), Professorial rank (`professorialRank`, multi-select, `SEARCH_PEOPLE_CLINICAL_RANK_FACETS`), Clinical (`isClinical=true`, same flag), Early Stage Investigator (`earlyStageInvestigator=true`, `SEARCH_PEOPLE_ESI_FACET`), Institution (`institution`, multi-select on `Scholar.primaryOrgCode` ED codes labelled via `institutionDisplayName`; `SEARCH_PEOPLE_INSTITUTION_FACET`, staging-first, dark until the people alias is rebuilt with the field) |
 | Publications | Year range, Publication Type, Journal (top 500 by count + client-side typeahead), WCM Author Position (first / senior / middle), WCM Author (top 500, hydrated server-side with name/slug/avatar; cardinality sub-agg surfaces true distinct count), Mentoring Programs (MD / MD-PhD / ECR via precomputed pmid buckets) |
 | Grants | Funder (prime), Direct Funder (subaward issuer), Program Type, Mechanism (NIH activity code), Status (active / ending soon / recently ended), Department (lead PI's primary appointment), Role (PI / Multi-PI / Co-I), Investigator (top 500, hydrated) |
 

@@ -51,3 +51,18 @@ export const INSTITUTIONS: Readonly<Record<string, string>> = {
 export function institutionName(code: string): string {
   return INSTITUTIONS[code] ?? code;
 }
+
+/** ED `weillCornellEduPrimaryOrganization` code for the home institution. */
+export const HOME_INSTITUTION_CODE = "WCMC";
+
+/**
+ * DISPLAY-ONLY name for a `Scholar.primaryOrgCode` (People-search "Institution"
+ * facet rows + chips). `WCMC` is deliberately NOT in `INSTITUTIONS` — that map
+ * doubles as the `unit_admin(institution, <code>)` grant vocabulary and an admin
+ * over every WCM scholar is `comms_steward`, not an institution grant — so the
+ * home institution is special-cased here instead of added to the map. Unmapped
+ * codes fall through to the bare code, same as `institutionName`.
+ */
+export function institutionDisplayName(code: string): string {
+  return code === HOME_INSTITUTION_CODE ? "Weill Cornell Medicine" : institutionName(code);
+}

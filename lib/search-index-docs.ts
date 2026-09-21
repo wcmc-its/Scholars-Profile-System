@@ -632,6 +632,10 @@ export const PEOPLE_INDEX_SELECT = {
   // facet. Both are direct copies onto the doc in `buildPeopleDoc` below.
   hasClinicalProfile: true,
   professorialRank: true,
+  // Institution facet — `Scholar.primaryOrgCode` (ED
+  // `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, ...).
+  // Plain scalar, direct copy onto the doc in `buildPeopleDoc` below.
+  primaryOrgCode: true,
 } satisfies Prisma.ScholarSelect;
 
 export type ScholarForIndex = Prisma.ScholarGetPayload<{
@@ -1714,6 +1718,11 @@ export async function buildPeopleDoc(
     // `_source` consumers and the `exists` filter distinguish "no rank" from
     // an empty string.
     ...(s.professorialRank ? { professorialRank: s.professorialRank } : {}),
+    // Institution facet — direct copy of `Scholar.primaryOrgCode` (ED
+    // `weillCornellEduPrimaryOrganization`). NULL pre-backfill and on rows ED
+    // carries no faculty-tagged value for — OMIT-on-empty (same as
+    // `professorialRank` above), so a null row simply has no facet bucket.
+    ...(s.primaryOrgCode ? { primaryOrgCode: s.primaryOrgCode } : {}),
     // #2300 — "Early Stage Investigator" in every human-facing surface (facet
     // label / chip / tooltip); `esiEligible` is the pre-existing internal
     // code name (`lib/api/match-researchers.ts`) and is kept as-is here. See

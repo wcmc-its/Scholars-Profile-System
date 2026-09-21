@@ -58,6 +58,7 @@ exports[`buildPeopleDoc — golden snapshots > captures a fully-populated schola
   "piRoleEver": true,
   "preferredName": "Ann M. Researcher, MD",
   "primaryDepartment": "Department of Medicine",
+  "primaryOrgCode": "WCMC",
   "primaryTitle": "Associate Professor",
   "professorialRank": "Associate Professor",
   "publicationAbstracts": "Abstract one. Abstract two.",
