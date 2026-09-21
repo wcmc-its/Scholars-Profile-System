@@ -27,6 +27,7 @@ import type {
   CenterMembershipType,
   CenterMembersResult,
 } from "@/lib/api/centers";
+import { institutionDisplayName } from "@/lib/institutions";
 
 export function CenterMembersClient({
   result,
@@ -114,10 +115,12 @@ type RowWithProgram = CenterMemberHit & { programLabel: string };
 const TYPE_ORDER: CenterMembershipType[] = ["research", "clinical"];
 const NO_DEPT = "—";
 const NO_RANK = "—";
+const NO_INST = "—";
 
 /**
  * Programmed center: a left facet sidebar (Program / Membership type /
- * Methods & tools / Organizational unit) over program-grouped member sections, plus the existing
+ * Methods & tools / Department / Professorial rank / Institution) over
+ * program-grouped member sections, plus the existing
  * Appointment (role) chip row. All active members are on one page (#552 §6.2),
  * so faceting is client-side. Facets multi-select (OR within a facet, AND
  * across facets); counts reflect the other active facets. Empty program
@@ -144,6 +147,8 @@ function GroupedRoster({
   const [selMethods, setSelMethods] = useState<ReadonlySet<string>>(new Set());
   // #1570 — "Professorial rank" facet selection (ASMS rank values).
   const [selRanks, setSelRanks] = useState<ReadonlySet<string>>(new Set());
+  // "Institution" facet selection (`Scholar.primaryOrgCode` values, #2695).
+  const [selInsts, setSelInsts] = useState<ReadonlySet<string>>(new Set());
 
   // Flatten to rows tagged with the program section they belong to; keep the
   // (sorted) program order for both the facet and the section layout.
@@ -161,6 +166,10 @@ function GroupedRoster({
 
   const deptKey = (m: RowWithProgram) => m.departmentName || NO_DEPT;
   const rankKey = (m: RowWithProgram) => m.professorialRank || NO_RANK;
+  // A Cornell (Ithaca) external member (#2519) has no Scholar row, so no
+  // `primaryOrgCode`; bucket it under the map's `Cornell` code instead.
+  const instKey = (m: RowWithProgram) =>
+    m.isExternal ? "Cornell" : m.primaryOrgCode || NO_INST;
   const typeKey = (m: RowWithProgram): string => m.membershipType ?? "";
   // #962 — the family overlay-key values a member belongs to (facet membership).
   const methodValues = (m: RowWithProgram): string[] =>
@@ -176,12 +185,13 @@ function GroupedRoster({
   // counts don't collapse when you select within it).
   const passes = (
     m: RowWithProgram,
-    except: "program" | "type" | "dept" | "method" | "rank" | null,
+    except: "program" | "type" | "dept" | "method" | "rank" | "inst" | null,
   ): boolean =>
     (except === "program" || selPrograms.size === 0 || selPrograms.has(m.programLabel)) &&
     (except === "type" || selTypes.size === 0 || selTypes.has(typeKey(m))) &&
     (except === "dept" || selDepts.size === 0 || selDepts.has(deptKey(m))) &&
     (except === "rank" || selRanks.size === 0 || selRanks.has(rankKey(m))) &&
+    (except === "inst" || selInsts.size === 0 || selInsts.has(instKey(m))) &&
     // #962 — OR within the Methods facet: a member with families {A,B} matches a
     // {A} selection. AND across facets, like the other three.
     (except === "method" ||
@@ -191,7 +201,7 @@ function GroupedRoster({
   const finalRows = useMemo(
     () => base.filter((m) => passes(m, null)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, selPrograms, selTypes, selDepts, selMethods, selRanks],
+    [base, selPrograms, selTypes, selDepts, selMethods, selRanks, selInsts],
   );
 
   const programOptions = useMemo<FacetOption[]>(
@@ -202,7 +212,7 @@ function GroupedRoster({
         count: base.filter((m) => m.programLabel === label && passes(m, "program")).length,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, programOrder, selTypes, selDepts, selMethods, selRanks],
+    [base, programOrder, selTypes, selDepts, selMethods, selRanks, selInsts],
   );
 
   const typeOptions = useMemo<FacetOption[]>(
@@ -213,7 +223,7 @@ function GroupedRoster({
         count: base.filter((m) => typeKey(m) === t && passes(m, "type")).length,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selDepts, selMethods, selRanks],
+    [base, allRows, selPrograms, selDepts, selMethods, selRanks, selInsts],
   );
 
   const deptOptions = useMemo<FacetOption[]>(
@@ -226,7 +236,7 @@ function GroupedRoster({
         }))
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selTypes, selMethods, selRanks],
+    [base, allRows, selPrograms, selTypes, selMethods, selRanks, selInsts],
   );
 
   // #1570 — "Professorial rank" facet, derived exactly like deptOptions: a
@@ -242,7 +252,24 @@ function GroupedRoster({
         }))
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selTypes, selDepts, selMethods],
+    [base, allRows, selPrograms, selTypes, selDepts, selMethods, selInsts],
+  );
+
+  // "Institution" facet, derived exactly like rankOptions: a sentinel bucket for
+  // members without a `primaryOrgCode`, labels via `institutionDisplayName`
+  // (WCMC → "Weill Cornell Medicine"), sorted count-desc. `passes(m,"inst")`
+  // excludes this facet from its own counts (smart-count).
+  const instOptions = useMemo<FacetOption[]>(
+    () =>
+      Array.from(new Set(allRows.map(instKey)))
+        .map((code) => ({
+          value: code,
+          label: code === NO_INST ? "No institution" : institutionDisplayName(code),
+          count: base.filter((m) => instKey(m) === code && passes(m, "inst")).length,
+        }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, allRows, selPrograms, selTypes, selDepts, selMethods, selRanks],
   );
 
   // #962 — "Methods & tools" facet: family-level options (value = stable overlay
@@ -263,7 +290,7 @@ function GroupedRoster({
       }))
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, allRows, selPrograms, selTypes, selDepts, selRanks]);
+  }, [base, allRows, selPrograms, selTypes, selDepts, selRanks, selInsts]);
 
   // Re-group the surviving rows under their program headers (original order).
   const sections = useMemo(
@@ -292,13 +319,20 @@ function GroupedRoster({
   // redundant with the page title, so it's always hidden.
   const hideHeaders = singleProgram || selPrograms.size === 1;
   const anySelected =
-    selPrograms.size + selTypes.size + selDepts.size + selMethods.size + selRanks.size > 0;
+    selPrograms.size +
+      selTypes.size +
+      selDepts.size +
+      selMethods.size +
+      selRanks.size +
+      selInsts.size >
+    0;
   const clearAll = () => {
     setSelPrograms(new Set());
     setSelTypes(new Set());
     setSelDepts(new Set());
     setSelMethods(new Set());
     setSelRanks(new Set());
+    setSelInsts(new Set());
   };
 
   return (
@@ -362,7 +396,7 @@ function GroupedRoster({
             onToggle={makeToggle(selDepts, setSelDepts)}
             collapseAfter={8}
           />
-          {/* #1570 — "Professorial rank" renders LAST. Hidden unless ≥2 distinct
+          {/* #1570 — "Professorial rank" renders after Department. Hidden unless ≥2 distinct
               ranks are present: rankKey always buckets a missing rank under the
               NO_RANK sentinel, so rankOptions is never empty when rows exist, and
               a one-option facet can't filter anything. Mirrors the ≥2 guards above. */}
@@ -372,6 +406,16 @@ function GroupedRoster({
               options={rankOptions}
               selected={selRanks}
               onToggle={makeToggle(selRanks, setSelRanks)}
+            />
+          )}
+          {/* "Institution" (#2695 `primaryOrgCode`) renders after Professorial
+              rank, under the same ≥2-options guard. */}
+          {instOptions.length >= 2 && (
+            <RosterFacet
+              title="Institution"
+              options={instOptions}
+              selected={selInsts}
+              onToggle={makeToggle(selInsts, setSelInsts)}
             />
           )}
         </div>

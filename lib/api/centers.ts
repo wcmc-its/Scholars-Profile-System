@@ -264,6 +264,11 @@ export type CenterMemberHit = DepartmentFacultyHit & {
    *  "Assistant Professor"), or null for members without one. Powers the
    *  "Professorial rank" facet in the roster sidebar. */
   professorialRank: string | null;
+  /** `Scholar.primaryOrgCode` (#2695) — bare ED institution code (`WCMC` home,
+   *  `HSS`, `MSKCC`, …), or null when ED carries none. Powers the "Institution"
+   *  facet in the roster sidebar; a Cornell (Ithaca) external member has no
+   *  Scholar row and is bucketed client-side by `isExternal` instead. */
+  primaryOrgCode: string | null;
   /** #962 — ALL public method families for this member, pmidCount desc. Facet
    *  membership reads this set. Present only when CENTER_METHODS_FACET is on AND
    *  the member has ≥1 public family; undefined otherwise (so the OFF-path payload
@@ -531,11 +536,19 @@ function membershipRoleLabelFor(
   return label ?? null;
 }
 
+/** A hydrated WCM member row before the center-specific classification is
+ *  attached: `DepartmentFacultyHit` plus the #1570 rank and #2695 institution
+ *  the center facets read. */
+type CenterScholarHit = DepartmentFacultyHit & {
+  professorialRank: string | null;
+  primaryOrgCode: string | null;
+};
+
 /** Hydrate scholar rows into `DepartmentFacultyHit`s (plus the #1570 professorial
- *  rank the center facet reads) with pub/grant counts. */
+ *  rank and the institution code the center facets read) with pub/grant counts. */
 async function buildCenterMemberHits(
   rows: CenterScholarRow[],
-): Promise<Array<DepartmentFacultyHit & { professorialRank: string | null }>> {
+): Promise<CenterScholarHit[]> {
   const cwids = rows.map((s) => s.cwid);
   const now = new Date();
   const [pubCounts, grantRows] = cwids.length > 0
@@ -676,6 +689,7 @@ async function getCenterMembersUncached(
           membershipType: null,
           membershipRoleLabel: membershipRoleLabelByCwid.get(m.cuid) ?? null,
           professorialRank: null,
+          primaryOrgCode: null,
         }));
     }
   }
@@ -686,9 +700,7 @@ async function getCenterMembersUncached(
   for (const m of activeMemberships) {
     membershipTypeByCwid.set(m.cwid, m.membershipType);
   }
-  const attachType = (
-    hs: Array<DepartmentFacultyHit & { professorialRank: string | null }>,
-  ): CenterMemberHit[] =>
+  const attachType = (hs: CenterScholarHit[]): CenterMemberHit[] =>
     hs.map((h) => ({
       ...h,
       membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
@@ -995,6 +1007,7 @@ export async function getCenterMembersByType(
           membershipType: null,
           membershipRoleLabel: membershipRoleLabelByCwid.get(m.cuid) ?? null,
           professorialRank: null,
+          primaryOrgCode: null,
         }));
     }
   }
