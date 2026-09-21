@@ -214,6 +214,9 @@ export default async function EditScholarPage({
     // #2634 — "Mentees › From your publications" is valid when the loader
     // returned any row (active or dismissed), mirroring the rail rule.
     ctx.menteeSuggestions.length > 0,
+    // Identifiers & Profiles rides the ORCID flag (the tab, its write, and the
+    // suggestion share one kill switch).
+    isOrcidSuggestionEnabled(),
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
@@ -283,6 +286,7 @@ export default async function EditScholarPage({
       unitAdminBanner={unitAdminBanner}
       profilesNavVisible={consoleTabs?.profiles ?? false}
       reciterPendingEnabled={reciterPendingEnabled}
+      orcidTabEnabled={isOrcidSuggestionEnabled()}
       grantRecsEnabled={isGrantRecsEnabled()}
       biosketchEnabled={isBiosketchGenerateEnabled()}
       cvEnabled={isCvEnabled()}

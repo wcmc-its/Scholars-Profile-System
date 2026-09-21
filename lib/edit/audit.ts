@@ -55,6 +55,11 @@ export type AuditAction =
   | "impersonation_start"
   /** a superuser ended (or expired out of) a "View as" session (#637 R5 — exit) */
   | "impersonation_end"
+  /** Identifiers & Profiles — the scholar (or an authorized editor) set the
+   *  ORCID iD. `targetEntityType='scholar'`, `targetEntityId` is the cwid;
+   *  before/after carry the old and new iD and, when the value came from the
+   *  "Is this your ORCID iD?" suggestion, `confirmed_suggestion: true`. */
+  | "orcid_set"
   /** a scholar rejected a publication as not theirs via /edit → ReCiter gold
    *  standard (#746); `targetEntityId` is the pmid, `afterValues` carries the
    *  suppression + pending-refresh ids and the rejected contributor cwid */

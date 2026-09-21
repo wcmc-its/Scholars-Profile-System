@@ -28,6 +28,8 @@ import { HighlightsCard } from "@/components/edit/highlights-card";
 import { ManualMenteesCard } from "@/components/edit/manual-mentees-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel, type OrcidRowState } from "@/components/edit/home-panel";
+import { ORCID_MANAGE_URL, resolveSelfServiceHref } from "@/lib/edit/request-a-change";
+import { OrcidCard } from "@/components/edit/orcid-card";
 import { OverviewCard } from "@/components/edit/overview-card";
 import {
   ProxyEditorCard,
@@ -90,6 +92,7 @@ type AttrKey =
   | "cv"
   | "appointments"
   | "honors"
+  | "identifiers-profiles"
   | "education"
   | "coi"
   | "coi-gap"
@@ -173,6 +176,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // An honor is its own content type with its own profile section; it is not an
   // appointment, and burying it under Appointments made it undiscoverable.
   { key: "honors", label: "Honors & Distinctions", modes: ["self", "superuser"] },
+  // Identifiers & Profiles — ORCID iD today (confirm the inferred one, or enter it);
+  // eRA Commons, Scopus Author ID, and profile links are later cards on the same
+  // tab. Owned: the scholar asserts these; no WCM feed does.
+  { key: "identifiers-profiles", label: "Identifiers & Profiles", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
   { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
@@ -331,6 +338,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "photo",
   "appointments",
   "honors",
+  "identifiers-profiles",
   "education",
   "publications",
   "funding",
@@ -379,6 +387,7 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   // row is entered by the scholar or a curator on /edit. (Appointments is
   // "sourced" because ED feeds that tab; honors has no such feed.)
   honors: "owned",
+  "identifiers-profiles": "owned",
   education: "sourced",
   mentees: "sourced",
   "mentee-suggestions": "sourced",
@@ -418,6 +427,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "photo",
   "appointments",
   "honors",
+  "identifiers-profiles",
   "education",
   "publications",
   "funding",
@@ -450,6 +460,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   // "Yours to edit", not the WCM group — no feed carries honors; the whole point
   // of the table is the distinctions WCM does not publish.
   honors: { group: "Yours to edit" },
+  "identifiers-profiles": { group: "Yours to edit" },
   education: { group: RAIL_V2_WCM_GROUP },
   publications: { group: RAIL_V2_WCM_GROUP },
   funding: { group: RAIL_V2_WCM_GROUP },
@@ -517,6 +528,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "cv",
   "appointments",
   "honors",
+  "identifiers-profiles",
   "education",
   // Publications — now a superuser surface too (#836 follow-on); the scholar's
   // authorships with hide/show + reject, acted on the scholar's behalf.
@@ -586,6 +598,10 @@ export type EditPageProps = {
    *  self viewer with the flag on; when true the Publications card + Home teaser
    *  lazily client-fetch `/api/edit/reciter-pending`. Off (default) ⇒ no fetch. */
   reciterPendingEnabled?: boolean;
+  /** `SELF_EDIT_ORCID_SUGGESTION`: the Identifiers & Profiles tab is in the rail and
+   *  the home row / Name & Title point into it; off → both hand off to ReCiter
+   *  Manage Profile as before and the tab is absent. */
+  orcidTabEnabled?: boolean;
   /** GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`): whether the "Grants for me"
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like the other feature gates; self + superuser only. */
@@ -629,6 +645,7 @@ export function visibleAttrKeys(
   hasNews = false,
   hasDatasets = false,
   hasMenteeSuggestions = false,
+  orcidTabEnabled = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -686,6 +703,7 @@ export function visibleAttrKeys(
       // returned rows (flag on + self/superuser); `?attr=mentee-suggestions`
       // with none canonicalizes away.
       .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
+      .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled)
       .map((a) => a.key)
   );
 }
@@ -704,6 +722,7 @@ export function EditPage({
   unitAdminEditors = null,
   unitAdminBanner = null,
   reciterPendingEnabled = false,
+  orcidTabEnabled = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
   cvEnabled = false,
@@ -772,6 +791,7 @@ export function EditPage({
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
     .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
+    .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled)
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
@@ -940,6 +960,7 @@ export function EditPage({
         proxyEditors,
         unitAdminEditors,
         reciterPendingEnabled,
+        orcidTabEnabled,
       )}
     </EditShell>
   );
@@ -955,6 +976,14 @@ function orcidRowState(ctx: EditContext): OrcidRowState {
     suggested:
       v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null,
   };
+}
+
+/** Where "Add" / "Confirm" / "Edit" for the ORCID iD goes: the Identifiers &
+ *  Profiles tab when the flag is on, else ReCiter Manage Profile (campus-only). */
+function orcidEditHref(orcidTabEnabled: boolean, detailBase: string, cwid: string): string {
+  return orcidTabEnabled
+    ? `${detailBase}?attr=identifiers-profiles`
+    : resolveSelfServiceHref(ORCID_MANAGE_URL, cwid);
 }
 
 /** #2634 — non-dismissed suggestion rows: the rail badge + Mentees pointer count. */
@@ -979,6 +1008,7 @@ function renderPanel(
   proxyEditors: ProxyRow[] | null,
   unitAdminEditors: UnitAdminEditorRow[] | null,
   reciterPendingEnabled: boolean,
+  orcidTabEnabled: boolean,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -1058,7 +1088,7 @@ function renderPanel(
           // shown only to a genuine self viewer, never a superuser or a proxy.
           manageableUnits={mode === "self" ? manageableUnits : []}
           isSuperuser={mode === "self" ? isSuperuser : false}
-          orcid={orcidRowState(ctx)}
+          orcid={{ ...orcidRowState(ctx), editHref: orcidEditHref(orcidTabEnabled, detailBase, cwid) }}
           // ReCiter pending suggestions are surfaced for the scholar themselves OR
           // a superuser viewing the target (parity with the COI-gap hint). The page
           // computes `reciterPendingEnabled` = flag on AND (self OR superuser); the
@@ -1088,8 +1118,7 @@ function renderPanel(
               value: (
                 <OrcidValue
                   orcid={orcidRowState(ctx).onFile}
-                  suggested={orcidRowState(ctx).suggested}
-                  cwid={cwid}
+                  editHref={orcidEditHref(orcidTabEnabled, detailBase, cwid)}
                 />
               ),
             },
@@ -1331,6 +1360,20 @@ function renderPanel(
           )}
         </div>
       );
+    case "identifiers-profiles": {
+      // Every EditMode may reach this panel; each write re-authorizes server-side
+      // (`authorizeOverviewWrite`), and the shell makes cv-generator inert.
+      const row = orcidRowState(ctx);
+      return (
+        <OrcidCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          onFile={row.onFile}
+          suggested={row.suggested}
+        />
+      );
+    }
     case "education":
       return (
         <EducationCard

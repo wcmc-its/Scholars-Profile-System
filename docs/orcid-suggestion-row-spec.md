@@ -1,6 +1,6 @@
-# ORCID iD row on the self-edit home board, with the suggested iD
+# ORCID iD: the home-board row and the Identifiers & Profiles tab
 
-Flag: `SELF_EDIT_ORCID_SUGGESTION` (staging on, prod off). Companion: `/edit/orcid-coverage` (#2678), whose fold this row reuses.
+Flag: `SELF_EDIT_ORCID_SUGGESTION` (staging on, prod off until the staging soak) — one kill switch for the suggestion, the Identifiers & Profiles tab, and the write route; off, the home row and Name & Title hand off to ReCiter Manage Profile as before. Companion: `/edit/orcid-coverage` (#2678), whose fold this row reuses.
 
 ## What the scholar sees
 
@@ -14,9 +14,20 @@ A fifth row on `/edit` "Complete your profile", under FROM WCM SYSTEMS, after Pu
 
 Superuser mode: the name appears once, in the title; body copy says "their", never the name again. The Name & Title panel's `OrcidValue` shows the same suggestion when the iD is absent: "Not on file. Is `…` yours? Confirm in ReCiter".
 
-## Why the CTA is a link, not a button
+## The Identifiers & Profiles tab
 
-ReCiter Publication Manager's Manage Profile page already lists the candidate iDs with the accepted / pending / rejected PMIDs behind each, lets the scholar pick or type one, and writes `admin_orcid`. The nightly `etl:orcid-candidates` mirror then lands an `rpm_admin` row, which `orcidVerdict` grades as asserted, so the row flips to done without waiting on the Identity ETL. One write path, PM's, already permissioned and audited.
+The home row's CTA and Name & Title's ORCID value both link into `?attr=identifiers-profiles`, an owned tab under *Yours to edit* right after Honors. Its first card is ORCID iD (`components/edit/orcid-card.tsx`): on file (iD linked to orcid.org, Change), suggested (the iD and its evidence, **Yes, this is mine**, or enter a different one), none (the input). Superuser voice is third person. The tab is the home for later identifier cards (eRA Commons ID, Scopus Author ID) and profile links (lab website, Google Scholar).
+
+Originally the CTA handed off to ReCiter Publication Manager's Manage Profile page, which is reachable only on the campus network. The tab replaces that.
+
+## The write: `POST /api/edit/orcid`
+
+Body `{ cwid, orcid, confirmedSuggestion? }`. The iD is normalized and checksummed (`lib/edit/orcid.ts`, ISO 7064 MOD 11-2): a typo is a 400, never a wrong iD on file. Authorization is `authorizeOverviewWrite` keyed on `cwid` (self, superuser, comms_steward, proxy, unit-admin). Then two writes, in this order:
+
+1. ReciterDB `admin_orcid` upsert, the table PM's Manage Profile writes: what the nightly `etl:orcid-candidates` mirror grades as asserted, and the source IC #155 (open) asks the Institutional Client to merge into DynamoDB `Identity.orcid` so ReCiter's `[auid]` retrieval fires. Unreachable → 502 `reciter_unavailable` and nothing has changed.
+2. `scholar.orcid` + the B03 audit row `orcid_set` (`confirmed_suggestion: true` when it came from the suggestion), one transaction, then profile revalidation. This makes the row, the biosketch worksheet, and the dashboard flip immediately. If it fails after (1), the mirror repairs it tonight.
+
+Clearing an iD is not offered; PM's reset endpoint still exists for that.
 
 ## Code
 
@@ -30,7 +41,8 @@ ReCiter Publication Manager's Manage Profile page already lists the candidate iD
 ## Skipped
 
 - "Not mine" dismissal: needs a dismissal store and a way to keep the same iD from returning on the next mirror. The weak tier already withholds ambiguous iDs.
-- Live refresh after confirming: the row goes done after the nightly mirror.
+- Clearing the iD from SPS; and showing the PMIDs behind the suggestion (the count is shown; the PMIDs are one query away in ReciterDB when someone asks).
+- Request a Change's "My ORCID is wrong or missing" still hands off to ReCiter Manage Profile; retarget it to the tab when prod flips on.
 - The console's strong tier stays at `STRONG_MIN_ACCEPTED` (3); the row asks at 1 accepted article (`SUGGEST_MIN_ACCEPTED`), so the row is deliberately more permissive than the console's "strong" count.
 
 ## Upstream

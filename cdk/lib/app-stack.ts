@@ -1641,12 +1641,14 @@ export class AppStack extends Stack {
         // approval-gated Sps-App-prod deploy after the staging soak). The nudge only
         // renders for a genuine (non-impersonating) self viewer with this flag on.
         SELF_EDIT_RECITER_PENDING_HINT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
-        // SELF_EDIT_ORCID_SUGGESTION — the self-edit home board's ORCID row and the
-        // Name & Title ORCID value show the scholar's strong-inferred iD from the
-        // nightly `orcid_candidate` mirror ("Is this your ORCID iD?" → ReCiter
-        // Manage Profile). Off → the row still renders from `scholar.orcid` alone.
-        // ON in staging; OFF in prod until the ReciterDB `pubsource_orcid_person`
-        // refresh has landed (the Feb-2026 snapshot is what the mirror reads today).
+        // SELF_EDIT_ORCID_SUGGESTION — one kill switch for the ORCID surface: the
+        // home board's inferred-iD suggestion from the nightly `orcid_candidate`
+        // mirror, the Identifiers & Profiles tab, and `POST /api/edit/orcid` — the
+        // first SPS write into ReciterDB (`admin_orcid`, the table Publication
+        // Manager writes). Off → the row still renders from `scholar.orcid`, its CTA
+        // hands off to ReCiter Manage Profile (campus-only), the tab is absent, the
+        // route 404s. ON in staging; OFF in prod until the staging soak — the
+        // `pubsource_orcid_person` refresh it waited on landed 2026-09-21.
         SELF_EDIT_ORCID_SUGGESTION: env === "staging" ? "on" : "off",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
