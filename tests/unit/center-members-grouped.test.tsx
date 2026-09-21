@@ -236,7 +236,7 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
     expect(screen.getByRole("heading", { name: "Department" })).toBeTruthy();
   });
 
-  it("Professorial-rank facet renders last and narrows to the selected rank (#1570)", () => {
+  it("Professorial-rank facet renders after Department and narrows to the selected rank (#1570)", () => {
     const withRanks: CenterMembersResult = {
       mode: "grouped",
       total: 3,
