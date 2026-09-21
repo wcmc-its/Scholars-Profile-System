@@ -3,7 +3,9 @@
  * scholars matching the facets (person type, primary department, article
  * type, minimum Journal Impact Factor, author position), by calendar or
  * fiscal year. One `COUNT(DISTINCT pmid)` query, grouped by year; the page
- * and the `.xlsx` route (`/api/edit/reports/article-count`) share it.
+ * and the `.xlsx` route (`/api/edit/reports/article-count`) share it; the
+ * workbook adds an Articles sheet (one row per counted article with its
+ * matching scholars, `loadArticleList`) up to `ARTICLE_LIST_CAP`.
  *
  * Counting rule: an article counts once however many matching authors it
  * has; only ReCiter-confirmed authorships (`is_confirmed`) of active,
@@ -26,6 +28,7 @@ import ExcelJS from "exceljs";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { canViewUsage } from "@/lib/edit/usage-access";
+import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { roleCategoryLabel } from "@/lib/match-display";
 
@@ -120,10 +123,11 @@ export async function loadArticleCountChoices(): Promise<{
 
 export type ArticleCountRow = { year: number; count: number };
 
-/** One row per year in `from..to` (zeros filled), plus the total. */
-export async function loadArticleCounts(
-  p: ArticleCountParams,
-): Promise<{ rows: ArticleCountRow[]; total: number }> {
+/** The FROM/WHERE both queries share: confirmed authorships of active
+ *  scholars, the facets, the position clause, the year window. `j` is a LEFT
+ *  JOIN so the article sheet can show a JIF without a floor; the floor, when
+ *  set, is a WHERE on it (which drops JIF-less journals, as documented). */
+function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Prisma.Sql } {
   const yearExpr =
     p.basis === "fy"
       ? Prisma.sql`YEAR(DATE_ADD(p.date_added_to_entrez, INTERVAL 6 MONTH))`
@@ -136,24 +140,30 @@ export async function loadArticleCounts(
   }[p.pos];
   const inList = (col: Prisma.Sql, xs: string[]) =>
     xs.length > 0 ? Prisma.sql`AND ${col} IN (${Prisma.join(xs)})` : Prisma.empty;
-
-  const raw = await db.read.$queryRaw<{ y: number | null; n: bigint | number }[]>`
-    SELECT ${yearExpr} AS y, COUNT(DISTINCT pa.pmid) AS n
+  const fromWhere = Prisma.sql`
       FROM publication_author pa
       JOIN scholar s ON s.cwid = pa.cwid
       JOIN publication p ON p.pmid = pa.pmid
-      ${
-        p.jif > 0
-          ? Prisma.sql`JOIN journal_impact_factor j ON j.journal_abbrev = p.journal_abbrev AND j.impact_score_1 >= ${p.jif}`
-          : Prisma.empty
-      }
+      LEFT JOIN journal_impact_factor j ON j.journal_abbrev = p.journal_abbrev
      WHERE pa.is_confirmed = 1
        AND s.deleted_at IS NULL AND s.status = 'active'
        ${inList(Prisma.sql`s.role_category`, p.types)}
        ${inList(Prisma.sql`s.primary_department`, p.depts)}
        ${inList(Prisma.sql`p.publication_type`, p.atypes)}
+       ${p.jif > 0 ? Prisma.sql`AND j.impact_score_1 >= ${p.jif}` : Prisma.empty}
        ${posExpr}
-       AND ${yearExpr} BETWEEN ${p.from} AND ${p.to}
+       AND ${yearExpr} BETWEEN ${p.from} AND ${p.to}`;
+  return { yearExpr, fromWhere };
+}
+
+/** One row per year in `from..to` (zeros filled), plus the total. */
+export async function loadArticleCounts(
+  p: ArticleCountParams,
+): Promise<{ rows: ArticleCountRow[]; total: number }> {
+  const { yearExpr, fromWhere } = scopeSql(p);
+  const raw = await db.read.$queryRaw<{ y: number | null; n: bigint | number }[]>`
+    SELECT ${yearExpr} AS y, COUNT(DISTINCT pa.pmid) AS n
+    ${fromWhere}
      GROUP BY y
      ORDER BY y`;
 
@@ -161,6 +171,94 @@ export async function loadArticleCounts(
   const rows: ArticleCountRow[] = [];
   for (let y = p.from; y <= p.to; y++) rows.push({ year: y, count: byYear.get(y) ?? 0 });
   return { rows, total: rows.reduce((s, r) => s + r.count, 0) };
+}
+
+/** The workbook's Articles sheet is built only up to this many articles;
+ *  above it the sheet says so instead (the `DATA_QUALITY_EXPORT_CAP` precedent). */
+export const ARTICLE_LIST_CAP = 5000;
+
+export type ArticleRow = {
+  pmid: string;
+  citation: string;
+  journal: string | null;
+  year: number;
+  articleType: string | null;
+  jif: number | null;
+  dateAdded: string | null;
+  doi: string | null;
+  /** The matching scholars, one entry each: `Name (CWID), person type, department, position`. */
+  scholars: string[];
+};
+
+type RawArticleRow = {
+  pmid: string;
+  y: number | null;
+  title: string;
+  journal: string | null;
+  year: number | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  full_authors_string: string | null;
+  authors_string: string | null;
+  publication_type: string | null;
+  date_added_to_entrez: Date | null;
+  doi: string | null;
+  jif: number | string | null;
+  preferred_name: string;
+  cwid: string;
+  role_category: string | null;
+  primary_department: string | null;
+  is_first: number | boolean;
+  is_last: number | boolean;
+};
+
+/** One row per counted article, with its matching scholars — the same scope
+ *  as {@link loadArticleCounts}, one row per matching authorship folded in
+ *  memory. Only called when the total is within {@link ARTICLE_LIST_CAP}. */
+export async function loadArticleList(p: ArticleCountParams): Promise<ArticleRow[]> {
+  const { yearExpr, fromWhere } = scopeSql(p);
+  const raw = await db.read.$queryRaw<RawArticleRow[]>`
+    SELECT p.pmid, ${yearExpr} AS y, p.title, p.journal, p.year, p.volume, p.issue, p.pages,
+           p.full_authors_string, p.authors_string, p.publication_type, p.date_added_to_entrez, p.doi,
+           j.impact_score_1 AS jif,
+           s.preferred_name, s.cwid, s.role_category, s.primary_department, pa.is_first, pa.is_last
+    ${fromWhere}
+     ORDER BY y, p.pmid, pa.position`;
+
+  const byPmid = new Map<string, ArticleRow>();
+  for (const r of raw) {
+    let row = byPmid.get(r.pmid);
+    if (!row) {
+      // `full_authors_string` is comma-separated `Lastname Initials` tokens;
+      // `authors_string` is the truncated fallback with `((...))` WCM markup.
+      const authors = (r.full_authors_string ?? r.authors_string ?? "")
+        .replace(/\(\(|\)\)/g, "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((lastName, i) => ({ rank: i + 1, lastName, firstName: null, personIdentifier: null }));
+      row = {
+        pmid: r.pmid,
+        citation: mentoredPubCitation({ ...r, authors }),
+        journal: r.journal,
+        year: Number(r.y),
+        articleType: r.publication_type,
+        jif: r.jif === null ? null : Number(r.jif),
+        dateAdded: r.date_added_to_entrez ? r.date_added_to_entrez.toISOString().slice(0, 10) : null,
+        doi: r.doi,
+        scholars: [],
+      };
+      byPmid.set(r.pmid, row);
+    }
+    const position = r.is_first ? "first author" : r.is_last ? "last author" : "middle author";
+    row.scholars.push(
+      [`${r.preferred_name} (${r.cwid})`, roleCategoryLabel(r.role_category), r.primary_department, position]
+        .filter(Boolean)
+        .join(", "),
+    );
+  }
+  return [...byPmid.values()];
 }
 
 /** The filters as `[label, value]` pairs — the Criteria sheet, verbatim. */
@@ -197,6 +295,9 @@ export async function buildArticleCountWorkbook(
   rows: ArticleCountRow[],
   total: number,
   generatedAt: Date,
+  /** The counted articles when `total <= ARTICLE_LIST_CAP`, else null — the
+   *  sheet then says so. */
+  articles: ArticleRow[] | null,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const bold = (ws: ExcelJS.Worksheet, r: number) => (ws.getRow(r).font = { bold: true });
@@ -214,9 +315,54 @@ export async function buildArticleCountWorkbook(
   criteria.addRow(["Criterion", "Value"]);
   bold(criteria, 1);
   for (const [k, v] of describeCriteria(p, generatedAt)) criteria.addRow([k, v]);
+  criteria.addRow([
+    "Articles sheet",
+    articles
+      ? `Lists each of the ${total.toLocaleString()} counted articles with its matching scholars.`
+      : `Omitted: ${total.toLocaleString()} articles exceeds the ${ARTICLE_LIST_CAP.toLocaleString()}-row limit. Narrow the filters to list them.`,
+  ]);
   criteria.getColumn(1).width = 32;
   criteria.getColumn(2).width = 100;
   criteria.getColumn(2).alignment = { wrapText: true, vertical: "top" };
+
+  const list = wb.addWorksheet("Articles");
+  if (!articles) {
+    list.addRow([
+      `${total.toLocaleString()} articles exceeds the ${ARTICLE_LIST_CAP.toLocaleString()}-row limit for this sheet. Narrow the filters to list them.`,
+    ]);
+    list.getColumn(1).width = 100;
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  }
+  const yearHeader = p.basis === "fy" ? "Fiscal year" : "Year";
+  list.addRow([
+    "PMID / ID",
+    "Citation",
+    "Journal",
+    yearHeader,
+    "Article type",
+    "Journal impact factor",
+    "Date added to PubMed",
+    "DOI",
+    "Matching scholars",
+  ]);
+  bold(list, 1);
+  list.views = [{ state: "frozen", ySplit: 1 }];
+  for (const a of articles) {
+    list.addRow([
+      a.pmid,
+      a.citation,
+      a.journal,
+      p.basis === "fy" ? `FY${a.year}` : a.year,
+      a.articleType,
+      a.jif,
+      a.dateAdded,
+      a.doi,
+      a.scholars.join("; "),
+    ]);
+  }
+  for (const [i, w] of [14, 90, 30, 12, 18, 12, 14, 28, 60].entries()) list.getColumn(i + 1).width = w;
+  list.getColumn(2).alignment = { wrapText: true, vertical: "top" };
+  list.getColumn(9).alignment = { wrapText: true, vertical: "top" };
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
