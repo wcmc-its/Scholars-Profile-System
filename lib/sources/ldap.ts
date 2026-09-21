@@ -674,18 +674,56 @@ export async function fetchAllPostdocEmploymentRecords(): Promise<
  *
  *  Privacy: only requests CWID + name attributes. Explicitly does NOT
  *  reuse `ED_FACULTY_ATTRIBUTES` (which pulls title, department, FTE, etc.)
- *  — narrow per-call lists per the repo's LDAP minimal-attribute policy. */
+ *  — narrow per-call lists per the repo's LDAP minimal-attribute policy.
+ *  `{ org: true }` adds the primary department and primary-organization
+ *  code (the postdoc-MENTOR lookup: a manager who is not a Scholar — a lab
+ *  administrator, a departed PI — still gets a department / institution on
+ *  the Mentored publications report). */
 const PERSON_NAME_ATTRS = [
   "weillCornellEduCWID",
   "givenName",
   "sn",
   "displayName",
 ] as const;
+const PERSON_ORG_ATTRS = [
+  "weillCornellEduPrimaryDepartment",
+  // Option-tagged per SOR (see ED_FACULTY_ATTRIBUTES); the untagged request
+  // returns every tagged variant, `primaryOrganizationCode` picks one.
+  "weillCornellEduPrimaryOrganization",
+] as const;
+
+export type PersonLookup = {
+  firstName: string | null;
+  lastName: string | null;
+  /** Only with `{ org: true }`: `weillCornellEduPrimaryDepartment`. */
+  department?: string | null;
+  /** Only with `{ org: true }`: the primary-organization CODE (`WCMC`,
+   *  `NYP`, `CU`, ... — `lib/institutions.ts` names them). */
+  organization?: string | null;
+};
+
+/** The primary-organization code off an `ou=people` entry: the faculty SOR's
+ *  first, then employee, affiliate, then any other tag. */
+export function primaryOrganizationCode(entry: Record<string, unknown>): string | null {
+  const base = "weillCornellEduPrimaryOrganization";
+  for (const tag of ["faculty", "employee", "affiliate"]) {
+    const v = firstString(entry[`${base};${tag}`]);
+    if (v) return v;
+  }
+  for (const key of Object.keys(entry)) {
+    if (key === base || key.startsWith(`${base};`)) {
+      const v = firstString(entry[key]);
+      if (v) return v;
+    }
+  }
+  return null;
+}
 
 export async function fetchPersonNamesByCwid(
   cwids: string[],
-): Promise<Map<string, { firstName: string | null; lastName: string | null }>> {
-  const out = new Map<string, { firstName: string | null; lastName: string | null }>();
+  opts: { org?: boolean } = {},
+): Promise<Map<string, PersonLookup>> {
+  const out = new Map<string, PersonLookup>();
   if (cwids.length === 0) return out;
 
   const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
@@ -701,7 +739,7 @@ export async function fetchPersonNamesByCwid(
       const { searchEntries } = await client.search(searchBase, {
         scope: "sub",
         filter,
-        attributes: [...PERSON_NAME_ATTRS],
+        attributes: opts.org ? [...PERSON_NAME_ATTRS, ...PERSON_ORG_ATTRS] : [...PERSON_NAME_ATTRS],
         paged: { pageSize: 500 },
       });
       for (const e of searchEntries) {
@@ -715,7 +753,17 @@ export async function fetchPersonNamesByCwid(
         // what downstream code reads, so prefer the components.
         const firstName = givenName ?? (displayName ? displayName.split(/\s+/)[0] : null);
         const lastName = sn || (displayName ? displayName.split(/\s+/).slice(-1)[0] : null) || null;
-        out.set(cwid.toLowerCase(), { firstName, lastName });
+        out.set(
+          cwid.toLowerCase(),
+          opts.org
+            ? {
+                firstName,
+                lastName,
+                department: firstString(e.weillCornellEduPrimaryDepartment),
+                organization: primaryOrganizationCode(e as Record<string, unknown>),
+              }
+            : { firstName, lastName },
+        );
       }
     }
   } finally {

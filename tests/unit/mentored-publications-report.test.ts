@@ -193,6 +193,13 @@ describe("mentorInstitution", () => {
     for (const s of ["Hospital for Special Surgery", "HSS"]) expect(mentorInstitution(s)).toBe("HSS");
     expect(mentorInstitution("Rockefeller University")).toBe("Rockefeller University");
     expect(mentorInstitution("NYP, Cornell University")).toBe("NYP, Cornell University");
+    // ED primary-organization codes are named through lib/institutions.ts first.
+    expect(mentorInstitution("WCMC")).toBe("WCM");
+    expect(mentorInstitution("MSKCC")).toBe("MSKCC");
+    expect(mentorInstitution("HSS")).toBe("HSS");
+    expect(mentorInstitution("RU")).toBe("Rockefeller University");
+    expect(mentorInstitution("NYP")).toBe("New York-Presbyterian Hospital");
+    expect(mentorInstitution("WCMC-Q")).toBe("Weill Cornell Medical College in Qatar");
     expect(mentorInstitution("  ")).toBeNull();
     expect(mentorInstitution(null)).toBeNull();
     expect(mentorInstitution(undefined)).toBeNull();
@@ -769,6 +776,33 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     journalAbbrev: null,
     dateAddedToEntrez: null,
     citedByCount: null,
+  });
+
+  it("mentor identity falls through the sources: Jenzabar's department/institution, the ED postdoc pass's name/department/org code, Scholar.primaryOrgCode", async () => {
+    hoisted.mockPhdFindMany.mockResolvedValue([
+      // Thesis advisor with no Scholar row: Jenzabar's department + "Sloan-Kettering".
+      phd({ mentorCwid: "men0010", menteeCwid: "phd0001", mentorDepartment: "Pharmacology", mentorInstitution: "Sloan-Kettering" }),
+    ]);
+    hoisted.mockPostdocFindMany.mockResolvedValue([
+      // A lab administrator listed as the postdoc's manager: no Scholar row, no roster row —
+      // the ED pass's ou=people lookup is the only word on them.
+      postdoc({ mentorCwid: "pak0001", menteeCwid: "pd0001", mentorFirstName: "Pat", mentorLastName: "Admin", mentorDepartment: "Some Lab Research", mentorInstitution: "WCMC" }),
+      // A departed manager the lookup missed: bare cwid, nothing else.
+      postdoc({ mentorCwid: "gone0001", menteeCwid: "pd0002", mentorFirstName: null, mentorLastName: null, mentorDepartment: null, mentorInstitution: null }),
+      // A Scholar mentor: Scholar name/department win; institution from Scholar.primaryOrgCode (HSS).
+      postdoc({ mentorCwid: "men0011", menteeCwid: "pd0003", mentorFirstName: "Ed", mentorLastName: "Name", mentorDepartment: "ED dept", mentorInstitution: null }),
+    ]);
+    hoisted.mockScholarFindMany.mockResolvedValue([
+      { cwid: "men0011", preferredName: "Scholar Name", primaryDepartment: "Orthopaedic Surgery", primaryOrgCode: "HSS" },
+    ]);
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"], types: ["thesis", "postdoc"] });
+    const byCwid = new Map(
+      report.summary.flatMap((s) => s.mentors).map((m) => [m.cwid, [m.name, m.department, m.institution]]),
+    );
+    expect(byCwid.get("men0010")).toEqual(["Jen Zabar", "Pharmacology", "MSKCC"]);
+    expect(byCwid.get("pak0001")).toEqual(["Pat Admin", "Some Lab Research", "WCM"]);
+    expect(byCwid.get("gone0001")).toEqual(["gone0001", null, null]);
+    expect(byCwid.get("men0011")).toEqual(["Scholar Name", "Orthopaedic Surgery", "HSS"]);
   });
 
   it("one learner from each source lands typed, regardless of scope; the suggestion read skips dismissed / unknown-tier rows", async () => {

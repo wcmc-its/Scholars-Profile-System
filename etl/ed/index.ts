@@ -1819,6 +1819,36 @@ async function main() {
           }
         }
 
+        // The MENTOR side, for report 7: a manager who is not a Scholar (a lab
+        // administrator, a departed PI — #2633) otherwise reads as a bare
+        // CWID with no department or institution. One ou=people pass with
+        // name + primary department + primary-organization code, every
+        // mentor CWID (the report prefers the Scholar row when there is one).
+        // Best-effort: a failed lookup leaves the stored values untouched.
+        let mentorInfo: Awaited<ReturnType<typeof fetchPersonNamesByCwid>> | null = null;
+        try {
+          mentorInfo = await fetchPersonNamesByCwid(
+            Array.from(new Set(withMentor.map((r) => r.mentorCwid!))),
+            { org: true },
+          );
+        } catch (err) {
+          console.warn(
+            `Postdoc mentor identity lookup skipped: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+        const mentorFields = (cwid: string) => {
+          if (!mentorInfo) return {}; // lookup failed: leave the columns as they are
+          const m = mentorInfo.get(cwid.toLowerCase());
+          return {
+            mentorFirstName: m?.firstName ?? null,
+            mentorLastName: m?.lastName ?? null,
+            mentorDepartment: m?.department ?? null,
+            mentorInstitution: m?.organization ?? null,
+          };
+        };
+
         // Resolve a (first, last) pair per mentee CWID. Prefer the structured
         // ou=people lookup result; fall back to splitting Scholar.fullName
         // when the LDAP pass missed (e.g. CWID was scrubbed from ou=people).
@@ -1866,6 +1896,7 @@ async function main() {
               status: r.status,
               programType: "POSTDOC",
               source: "ED-EMPLOYEE-SOR",
+              ...mentorFields(r.mentorCwid!),
             },
             update: {
               mentorCwid: r.mentorCwid!,
@@ -1877,6 +1908,7 @@ async function main() {
               title: r.title,
               status: r.status,
               lastRefreshedAt: new Date(),
+              ...mentorFields(r.mentorCwid!),
             },
           });
           upserted += 1;
