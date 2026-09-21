@@ -9,7 +9,7 @@ A fifth row on `/edit` "Complete your profile", under FROM WCM SYSTEMS, after Pu
 | state | marker | title | subtitle | CTA |
 |---|---|---|---|---|
 | on file (`scholar.orcid`, or an `rpm_admin` candidate row when the flag is on) | done | ORCID iD on file | the iD linked to orcid.org | none |
-| strong (exactly one strong-eligible iD per `orcidVerdict`) | to-do | Is this your ORCID iD? | the iD (orcid.org link) · seen on N of your accepted publications, or "matches your record in the ORCID registry" when the strength is registry-only | Confirm in ReCiter → `ORCID_MANAGE_URL` |
+| strong (exactly one strong-eligible iD per `orcidVerdict` at `SUGGEST_MIN_ACCEPTED` = 1) | to-do | Is this your ORCID iD? | the iD (orcid.org link) · seen on N of your accepted publications, or "matches your record in the ORCID registry" when the strength is registry-only | Confirm in ReCiter → `ORCID_MANAGE_URL` |
 | weak / none | to-do | ORCID iD not on file | NIH requires an ORCID iD linked to eRA Commons for SciENcv biosketches. | Add it in ReCiter → `ORCID_MANAGE_URL` |
 
 Superuser mode: third-person copy, same CTA. The Name & Title panel's `OrcidValue` shows the same suggestion when the iD is absent: "Not on file. Is `…` yours? Confirm in ReCiter".
@@ -20,7 +20,7 @@ ReCiter Publication Manager's Manage Profile page already lists the candidate iD
 
 ## Code
 
-- `lib/edit/orcid-coverage.ts` — `orcidVerdict(rows): { tier, orcid, accepted }`, the per-cwid fold extracted from `orcidTiers()` (which now calls it), so the console and this row cannot disagree.
+- `lib/edit/orcid-coverage.ts` — `orcidVerdict(rows, minAccepted)`: `{ tier, orcid, accepted }`, the per-cwid fold extracted from `orcidTiers()` (which now calls it with the console default). One rule, two support bars.
 - `lib/api/edit-context.ts` — `opts.includeOrcidSuggestion` → `client.orcidCandidate.findMany({ where: { cwid } })` → `ctx.orcidVerdict` (null when off).
 - `app/edit/page.tsx`, `app/edit/scholar/[cwid]/page.tsx` — pass `includeOrcidSuggestion: isOrcidSuggestionEnabled()`.
 - `components/edit/edit-page.tsx` — `orcidRowState(ctx)` feeds both `HomePanel` (`orcid` prop) and `OrcidValue` (`suggested` prop).
@@ -31,7 +31,7 @@ ReCiter Publication Manager's Manage Profile page already lists the candidate iD
 
 - "Not mine" dismissal: needs a dismissal store and a way to keep the same iD from returning on the next mirror. The weak tier already withholds ambiguous iDs.
 - Live refresh after confirming: the row goes done after the nightly mirror.
-- The strong threshold stays `STRONG_MIN_ACCEPTED` (3).
+- The console's strong tier stays at `STRONG_MIN_ACCEPTED` (3); the row asks at 1 accepted article (`SUGGEST_MIN_ACCEPTED`), so the row is deliberately more permissive than the console's "strong" count.
 
 ## Upstream
 

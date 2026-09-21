@@ -15,6 +15,7 @@ import {
   orcidTiers,
   orcidVerdict,
   parseOrcidCoverageParams,
+  SUGGEST_MIN_ACCEPTED,
   piNoEra,
   type CandidateRow,
   type ScholarRow,
@@ -360,6 +361,20 @@ describe("orcidVerdict", () => {
       orcid: null,
       accepted: 0,
     });
+  });
+
+  it("at the home row's bar (SUGGEST_MIN_ACCEPTED = 1) one accepted article is enough; a competing iD or a rejection still is not", () => {
+    expect(SUGGEST_MIN_ACCEPTED).toBe(1);
+    expect(orcidVerdict([cand("x", "rpm_inferred", 1, 0, "iD-a")], 1)).toEqual({
+      tier: "strong",
+      orcid: "iD-a",
+      accepted: 1,
+    });
+    expect(orcidVerdict([cand("x", "rpm_inferred", 1, 0, "iD-a")]).tier).toBe("weak"); // console default
+    expect(orcidVerdict([cand("x", "rpm_inferred", 1, 1, "iD-a")], 1).tier).toBe("weak");
+    expect(
+      orcidVerdict([cand("x", "rpm_inferred", 5, 0, "iD-a"), cand("x", "rpm_inferred", 1, 0, "iD-b")], 1).tier,
+    ).toBe("weak");
   });
 
   it("two strong-eligible iDs → weak (no single answer to suggest)", () => {

@@ -49,7 +49,7 @@ import { subjectId as deriveSubjectId } from "@/lib/coi-gap/mention";
 import type { SubjectType } from "@/lib/coi-gap/mention";
 import { relationshipKinds as deriveRelationshipKinds } from "@/lib/coi-gap/pipeline";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import { orcidVerdict, type OrcidVerdict } from "@/lib/edit/orcid-coverage";
+import { orcidVerdict, SUGGEST_MIN_ACCEPTED, type OrcidVerdict } from "@/lib/edit/orcid-coverage";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
@@ -1729,14 +1729,15 @@ export async function loadEditContext(
   // adding a suggestion makes it vanish on the next render. Dismissed rows are
   // kept (the card shows them collapsed, with Restore).
   // ORCID suggestion (`SELF_EDIT_ORCID_SUGGESTION`): the nightly `orcid_candidate`
-  // mirror folded by the same rule the coverage console uses.
+  // mirror folded by the same rule the coverage console uses, at the row's lower
+  // support bar (one accepted article is enough to ask; the console counts 3).
   let orcidVerdictValue: OrcidVerdict | null = null;
   if (opts?.includeOrcidSuggestion === true) {
     const rows = await client.orcidCandidate.findMany({
       where: { cwid },
       select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true },
     });
-    orcidVerdictValue = orcidVerdict(rows);
+    orcidVerdictValue = orcidVerdict(rows, SUGGEST_MIN_ACCEPTED);
   }
 
   const menteeSuggestions: EditContextMenteeSuggestion[] = [];

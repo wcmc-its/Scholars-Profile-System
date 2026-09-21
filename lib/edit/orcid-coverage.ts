@@ -131,6 +131,11 @@ export type CandidateRow = {
  *  ORCID (RPM), or 3+ shared works in the ORCID registry (`orcid_works`), or a
  *  public WCM email on the registry record (`orcid_email` — no count needed). */
 export const STRONG_MIN_ACCEPTED = 3;
+/** The self-edit home board's "Is this your ORCID iD?" row suggests at a lower bar
+ *  than the console's strong tier: one accepted article carrying the iD at the
+ *  scholar's own byline position (and none rejected, and no competing iD) is enough
+ *  to ask, because the scholar is the one confirming. The console keeps 3. */
+export const SUGGEST_MIN_ACCEPTED = 1;
 export type OrcidTier = "asserted" | "strong" | "weak" | "none";
 
 const isRpmSource = (source: string) => source.startsWith("rpm_");
@@ -158,8 +163,13 @@ export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
 
 /** The per-cwid fold behind `orcidTiers`, shared with the self-edit home board so
  *  the console and the "Is this your ORCID iD?" row can never disagree. `rows` are
- *  one scholar's candidate rows; empty → `none`. */
-export function orcidVerdict(rows: CandidateRow[]): OrcidVerdict {
+ *  one scholar's candidate rows; empty → `none`. `minAccepted` is the support a
+ *  sole RPM iD (or an `orcid_works` overlap) needs to be strong-eligible: the console
+ *  passes the default (`STRONG_MIN_ACCEPTED`), the home row `SUGGEST_MIN_ACCEPTED`. */
+export function orcidVerdict(
+  rows: CandidateRow[],
+  minAccepted: number = STRONG_MIN_ACCEPTED,
+): OrcidVerdict {
   const rpmAccepted = (orcid: string) =>
     Math.max(0, ...rows.filter((r) => isRpmSource(r.source) && r.orcid === orcid).map((r) => r.articlesAccepted));
   if (rows.length === 0) return { tier: "none", orcid: null, accepted: 0 };
@@ -183,10 +193,8 @@ export function orcidVerdict(rows: CandidateRow[]): OrcidVerdict {
   );
   const strongEligible = (r: CandidateRow) =>
     r.source === "orcid_email" ||
-    (r.source === "orcid_works" && r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
-    (r === soleInferred &&
-      r.articlesRejected === 0 &&
-      r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
+    (r.source === "orcid_works" && r.articlesAccepted >= minAccepted) ||
+    (r === soleInferred && r.articlesRejected === 0 && r.articlesAccepted >= minAccepted) ||
     // Two independent sources agreeing on one iD outweighs either one's accepted counts.
     (rpmOrcids.has(r.orcid) && registryOrcids.has(r.orcid));
   const strongOrcids = new Set(rows.filter(strongEligible).map((r) => r.orcid));
