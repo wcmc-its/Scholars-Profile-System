@@ -513,6 +513,13 @@ model AocMentee {
   /// bare CWID; a Scholar row's `preferredName` still wins when present.
   mentorFirstName String?  @map("mentor_first_name") @db.VarChar(255)
   mentorLastName  String?  @map("mentor_last_name") @db.VarChar(255)
+  /// The mentor's department and institution as the roster carries them
+  /// (`reporting_students_mentors.mentorDepartment` / `mentorInstitution`:
+  /// free text, mostly null). The Mentored publications report reads the
+  /// department only when the mentor has no Scholar row, and folds the
+  /// institution to WCM / MSKCC / HSS (`mentorInstitution` there).
+  mentorDepartment  String? @map("mentor_department") @db.VarChar(255)
+  mentorInstitution String? @map("mentor_institution") @db.VarChar(255)
   refreshedAt     DateTime @default(now()) @map("refreshed_at")
 
   @@index([mentorCwid], map: "aoc_mentee_mentor_cwid_idx")

@@ -286,6 +286,28 @@ function MentorCell({ mentors }: { mentors: ReadonlyArray<MentorRef & { mentorsh
   );
 }
 
+/** One cell, one line per mentor in the Mentors column's order, "—" where
+ *  the mentor lacks the value (the Department / Institution columns). */
+function MentorLines({
+  mentors,
+  get,
+}: {
+  mentors: ReadonlyArray<MentorRef>;
+  get: (m: MentorRef) => string | null | undefined;
+}) {
+  return (
+    <td className={TD_CLASS}>
+      <ul className="m-0 list-none p-0">
+        {mentors.map((m) => (
+          <li key={m.cwid} className="whitespace-nowrap">
+            {get(m) || <span className="text-muted-foreground">—</span>}
+          </li>
+        ))}
+      </ul>
+    </td>
+  );
+}
+
 // ---- Publications view ----------------------------------------------------
 
 const POSITIONS = ["first", "last", "middle"] as const;
@@ -530,6 +552,9 @@ function LearnersView({
                     The workbook keeps its Program column. */}
                 <th className={TH_CLASS}>Type of mentorship</th>
                 <th className={TH_CLASS}>Mentors</th>
+                {/* One line per mentor, in the Mentors column's order (as Type is). */}
+                <th className={TH_CLASS}>Department</th>
+                <th className={TH_CLASS}>Institution</th>
                 {allMode ? (
                   <>
                     <SortHeader col={C.pubsInWindow} {...th}>
@@ -592,6 +617,8 @@ function LearnersView({
                   <td className={TD_CLASS}>
                     <MentorCell mentors={r.mentors} />
                   </td>
+                  <MentorLines mentors={r.mentors} get={(m) => m.department} />
+                  <MentorLines mentors={r.mentors} get={(m) => m.institution} />
                   {/* "—" = no window to count against (no grad or entry year). */}
                   {allMode ? (
                     <>

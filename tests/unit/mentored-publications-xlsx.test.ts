@@ -27,8 +27,15 @@ import {
 } from "@/lib/edit/mentored-publications-xlsx";
 
 const MD_ROSTER = { program: "md", source: "roster", tier: "confirmed" } as const;
-const ZED = { cwid: "men0001", name: "Zed Mentor", mentorship: MD_ROSTER };
-const YAN = { cwid: "men0002", name: "Yan Other", mentorship: { ...MD_ROSTER, program: "mdphd" } };
+const ZED = { cwid: "men0001", name: "Zed Mentor", department: "Medicine", institution: "WCM", mentorship: MD_ROSTER };
+// No department on the roster or ED for Yan; institution folded from the roster.
+const YAN = {
+  cwid: "men0002",
+  name: "Yan Other",
+  department: null,
+  institution: "MSKCC",
+  mentorship: { ...MD_ROSTER, program: "mdphd" },
+};
 
 const REPORT: MentoredPublicationsReport = {
   generatedAt: new Date("2026-09-18T15:04:05Z"),
@@ -70,6 +77,8 @@ const REPORT: MentoredPublicationsReport = {
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
+      mentorDepartment: "Medicine",
+      mentorInstitution: "WCM",
       mentorship: "MD",
       paperMentors: [ZED],
       withMentor: true,
@@ -93,6 +102,8 @@ const REPORT: MentoredPublicationsReport = {
       learnerLastName: "Learner",
       mentorCwid: "men0001",
       mentorName: "Zed Mentor",
+      mentorDepartment: "Medicine",
+      mentorInstitution: "WCM",
       mentorship: "MD",
       paperMentors: [ZED],
       withMentor: true,
@@ -133,10 +144,11 @@ describe("buildMentoredPublicationsWorkbook", () => {
     const wb = await load(await buildMentoredPublicationsWorkbook(REPORT));
     const ws = wb.getWorksheet(SUMMARY_SHEET)!;
     expect(rowValues(ws, 1)).toEqual([...SUMMARY_HEADERS]);
-    expect(SUMMARY_HEADERS[8]).toBe("Mentorship types");
+    expect(SUMMARY_HEADERS[10]).toBe("Mentorship types");
+    // Department / institution one per mentor in the Mentors column's order, "—" where missing.
     expect(rowValues(ws, 2)).toEqual([
       2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
-      "MD-PhD (program office); MD", 1, 2, 1, 0,
+      "—; Medicine", "MSKCC; WCM", "MD-PhD (program office); MD", 1, 2, 1, 0,
     ]);
     expect(ws.rowCount).toBe(2);
     expect(ws.views[0]).toMatchObject({ state: "frozen", ySplit: 1 });
@@ -149,24 +161,24 @@ describe("buildMentoredPublicationsWorkbook", () => {
     const wb = await load(await buildMentoredPublicationsWorkbook(REPORT));
     const ws = wb.getWorksheet(RAW_SHEET)!;
     expect(rowValues(ws, 1)).toEqual([...RAW_HEADERS]);
-    expect(RAW_HEADERS[8]).toBe("Type of mentorship");
+    expect(RAW_HEADERS[10]).toBe("Type of mentorship");
     const first = rowValues(ws, 2);
-    expect(first.slice(0, 14)).toEqual([
-      2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "MD", "7",
-      "A very long title ".repeat(10), "N Engl J Med", 96.2, 2023,
+    expect(first.slice(0, 16)).toEqual([
+      2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "Medicine", "WCM", "MD",
+      "7", "A very long title ".repeat(10), "N Engl J Med", 96.2, 2023,
     ]);
-    expect((first[14] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
-    expect(first.slice(15)).toEqual([12, 2, 3, "Yes"]);
+    expect((first[16] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
+    expect(first.slice(17)).toEqual([12, 2, 3, "Yes"]);
     const second = rowValues(ws, 3);
-    expect(second[9]).toBe("SCOPUS:105037533819"); // the key string, Scopus-only row
-    expect(second[18]).toBe("No");
+    expect(second[11]).toBe("SCOPUS:105037533819"); // the key string, Scopus-only row
+    expect(second[20]).toBe("No");
     // Nulls are blank cells, not the string "null".
-    expect(ws.getCell("L3").value).toBeNull();
-    expect(ws.getCell("M3").value).toBeNull();
+    expect(ws.getCell("N3").value).toBeNull();
+    expect(ws.getCell("O3").value).toBeNull();
     // Title column: longest content is 180 chars → capped at 60; key column: the Scopus key outgrows the header.
-    expect(ws.getColumn(11).width).toBe(60);
-    expect(RAW_HEADERS[9]).toBe("PMID / Scopus ID");
-    expect(ws.getColumn(10).width).toBe("SCOPUS:105037533819".length + 3);
+    expect(ws.getColumn(13).width).toBe(60);
+    expect(RAW_HEADERS[11]).toBe("PMID / Scopus ID");
+    expect(ws.getColumn(12).width).toBe("SCOPUS:105037533819".length + 3);
   });
 
   it("Query & Assumptions names the window rule, counting rule, JIF and iCite sources", async () => {
@@ -211,11 +223,11 @@ describe("buildMentoredPublicationsWorkbook", () => {
       }),
     );
     const summary = wb.getWorksheet(SUMMARY_SHEET)!;
-    expect(summary.getCell("J2").value).toBeNull();
-    expect(summary.getCell("K2").value).toBe(2);
     expect(summary.getCell("L2").value).toBeNull();
-    expect(summary.getCell("M2").value).toBeNull();
-    expect(wb.getWorksheet(RAW_SHEET)!.getCell("S2").value).toBeNull();
+    expect(summary.getCell("M2").value).toBe(2);
+    expect(summary.getCell("N2").value).toBeNull();
+    expect(summary.getCell("O2").value).toBeNull();
+    expect(wb.getWorksheet(RAW_SHEET)!.getCell("U2").value).toBeNull();
     expect(wb.getWorksheet(ASSUMPTIONS_SHEET)!.getRow(3).getCell(2).value).toBe("2025, Unknown");
   });
 
@@ -245,14 +257,21 @@ describe("buildMentoredPublicationsWorkbook", () => {
   });
 
   describe("pubs: 'all' mode", () => {
+    const NO_PAIR = {
+      mentorCwid: null,
+      mentorName: null,
+      mentorDepartment: null,
+      mentorInstitution: null,
+      mentorship: null,
+    };
     const ALL: MentoredPublicationsReport = {
       ...REPORT,
       filters: { ...REPORT.filters, pubs: "all" },
       allPubsLoaded: true,
       summary: [{ ...REPORT.summary[0], pubsInWindow: 3, withMentorInWindow: 1, firstAuthorInWindow: 2, pubsAllTime: 5 }],
       detail: [
-        { ...REPORT.detail[0], mentorCwid: null, mentorName: null, mentorship: null, paperMentors: [YAN, ZED], withMentor: true },
-        { ...REPORT.detail[1], mentorCwid: null, mentorName: null, mentorship: null, paperMentors: [], withMentor: false },
+        { ...REPORT.detail[0], ...NO_PAIR, paperMentors: [YAN, ZED], withMentor: true },
+        { ...REPORT.detail[1], ...NO_PAIR, paperMentors: [], withMentor: false },
       ],
     };
 
@@ -260,8 +279,8 @@ describe("buildMentoredPublicationsWorkbook", () => {
       const wb = await load(await buildMentoredPublicationsWorkbook(ALL));
       const ws = wb.getWorksheet(SUMMARY_SHEET)!;
       expect(rowValues(ws, 1)).toEqual([...SUMMARY_HEADERS_ALL]);
-      expect(SUMMARY_HEADERS_ALL[8]).toBe("Mentorship types");
-      expect(SUMMARY_HEADERS_ALL.slice(9)).toEqual([
+      expect(SUMMARY_HEADERS_ALL[10]).toBe("Mentorship types");
+      expect(SUMMARY_HEADERS_ALL.slice(11)).toEqual([
         "All publications in program window",
         "Publications with a mentor in window",
         "First-author publications in window",
@@ -270,7 +289,7 @@ describe("buildMentoredPublicationsWorkbook", () => {
       ]);
       expect(rowValues(ws, 2)).toEqual([
         2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
-        "MD-PhD (program office); MD", 3, 1, 2, 1, 5,
+        "—; Medicine", "MSKCC; WCM", "MD-PhD (program office); MD", 3, 1, 2, 1, 5,
       ]);
     });
 

@@ -98,6 +98,11 @@
  * Mentor display name: the mentor's Scholar row (`preferredName`, canonical)
  * when there is one, else the roster's own `mentorFirstName mentorLastName`
  * from the bridge, else the bare CWID. The CWID is always carried alongside.
+ * Mentor department: `Scholar.primaryDepartment` (ED), else the roster's
+ * `mentorDepartment` (free text, null on most rows). Mentor institution: the
+ * roster's `mentorInstitution` folded to WCM / MSKCC / HSS
+ * (`mentorInstitution`), else WCM when the mentor has a Scholar row (a WCM
+ * ED appointment), else null.
  *
  * Citations are the NIH iCite count (`Publication.citedByCount`), NOT the
  * Scopus count the bridge JSON carries (`CoPublicationFull.citationCount` is
@@ -173,8 +178,15 @@ export type MentoredPublicationsFilters = {
   pubs: MentoredPubsSet;
 };
 
-/** A mentor as the report shows them: resolved display name + CWID. */
-export type MentorRef = { cwid: string; name: string };
+/** A mentor as the report shows them: resolved display name + CWID, plus the
+ *  department and institution (module doc). Optional so fixtures elsewhere
+ *  need not carry them; the loader always sets both. */
+export type MentorRef = {
+  cwid: string;
+  name: string;
+  department?: string | null;
+  institution?: string | null;
+};
 /** A learner's mentor with the (learner, mentor) pair's provenance. */
 export type MentorPair = MentorRef & { mentorship: MentorshipType };
 
@@ -220,6 +232,9 @@ export type MentoredPubsDetailRow = {
    *  pair per pub. `"all"` mode: null — rows are per (learner, pub). */
   mentorCwid: string | null;
   mentorName: string | null;
+  /** The pair's mentor's department / institution (`MentorRef`); null in `"all"` mode. */
+  mentorDepartment: string | null;
+  mentorInstitution: string | null;
   /** `mentorshipLabel` of the (learner, mentor) pair; null in `"all"` mode. */
   mentorship: string | null;
   /** Every one of the learner's mentors who is a WCM-identified co-author on
@@ -358,6 +373,8 @@ type AocRow = {
   programType: string | null;
   mentorFirstName: string | null;
   mentorLastName: string | null;
+  mentorDepartment: string | null;
+  mentorInstitution: string | null;
 };
 
 /** One learner, collapsed across their pair rows (a learner repeats per
@@ -549,6 +566,34 @@ function bridgeMentorNames(
   return out;
 }
 
+/** The first non-empty `get(row)` per mentor CWID (a mentor repeats per
+ *  learner and per program). */
+function firstPerMentor<R extends { mentorCwid: string }>(
+  rows: ReadonlyArray<R>,
+  get: (r: R) => string | null,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    const v = get(r)?.trim();
+    if (v && !out.has(r.mentorCwid)) out.set(r.mentorCwid, v);
+  }
+  return out;
+}
+
+/** The roster's free-text `mentorInstitution` folded to the three the office
+ *  tracks ("Weill Cornell Medical College" / "WCM, Cornell University" → WCM;
+ *  "Sloan-Kettering" / "MSKCC" → MSKCC; "Hospital for Special Surgery" / "HSS"
+ *  → HSS); anything else passes through as typed. ponytail: three regexes,
+ *  not an institution dictionary — add a fourth when one is asked for. */
+export function mentorInstitution(raw: string | null | undefined): string | null {
+  const s = raw?.trim();
+  if (!s) return null;
+  if (/weill|\bwcmc?\b/i.test(s)) return "WCM";
+  if (/sloan|\bmsk(cc)?\b/i.test(s)) return "MSKCC";
+  if (/special surgery|\bhss\b/i.test(s)) return "HSS";
+  return s;
+}
+
 function compareMentor(a: MentorRef, b: MentorRef): number {
   return compareName(a.name, b.name) || a.cwid.localeCompare(b.cwid);
 }
@@ -699,6 +744,8 @@ export async function loadMentoredPublicationsReport({
           programType: true,
           mentorFirstName: true,
           mentorLastName: true,
+          mentorDepartment: true,
+          mentorInstitution: true,
         },
       })) as AocRow[])
     : [];
@@ -1104,21 +1151,34 @@ export async function loadMentoredPublicationsReport({
     }
   }
 
-  // Mentor display names: Scholar.preferredName → roster name → cwid.
+  // Mentor display names: Scholar.preferredName → roster name → cwid;
+  // department and institution likewise (module doc).
   const mentorCwids = [...new Set(pairs.map((p) => p.mentorCwid))];
-  const scholarName = new Map<string, string>();
+  const scholarByCwid = new Map<
+    string,
+    { preferredName: string; primaryDepartment: string | null }
+  >();
   for (const batch of chunks(mentorCwids, PMID_BATCH)) {
     const found = await db.read.scholar.findMany({
       where: { cwid: { in: batch } },
-      select: { cwid: true, preferredName: true },
+      select: { cwid: true, preferredName: true, primaryDepartment: true },
     });
-    for (const s of found) scholarName.set(s.cwid, s.preferredName);
+    for (const s of found) scholarByCwid.set(s.cwid, s);
   }
   const rosterName = bridgeMentorNames([...rows, ...phdRows]);
-  const mentorRef = (cwid: string): MentorRef => ({
-    cwid,
-    name: scholarName.get(cwid) ?? rosterName.get(cwid) ?? cwid,
-  });
+  const rosterDept = firstPerMentor(rows, (r) => r.mentorDepartment);
+  const rosterInst = firstPerMentor(rows, (r) => r.mentorInstitution);
+  const mentorRef = (cwid: string): MentorRef => {
+    const scholar = scholarByCwid.get(cwid);
+    return {
+      cwid,
+      name: scholar?.preferredName ?? rosterName.get(cwid) ?? cwid,
+      department: scholar?.primaryDepartment ?? rosterDept.get(cwid) ?? null,
+      // ponytail: a Scholar row is a WCM ED appointment, so an MSK/HSS mentor
+      // who also holds one reads WCM when the roster is silent.
+      institution: mentorInstitution(rosterInst.get(cwid)) ?? (scholar ? "WCM" : null),
+    };
+  };
   const paperMentorsFor = (learnerCwid: string, pmid: string): MentorRef[] =>
     [...(mentorsOnPaper.get(learnerCwid)?.get(pmid) ?? [])].map(mentorRef).sort(compareMentor);
 
@@ -1202,7 +1262,14 @@ export async function loadMentoredPublicationsReport({
         inWindow,
       };
       if (allMode) {
-        detail.push({ ...base, mentorCwid: null, mentorName: null, mentorship: null });
+        detail.push({
+          ...base,
+          mentorCwid: null,
+          mentorName: null,
+          mentorDepartment: null,
+          mentorInstitution: null,
+          mentorship: null,
+        });
       } else {
         // One row per (learner, mentor, pub) — the pair is the bridge's key.
         for (const m of paperMentors) {
@@ -1211,6 +1278,8 @@ export async function loadMentoredPublicationsReport({
             ...base,
             mentorCwid: m.cwid,
             mentorName: m.name,
+            mentorDepartment: m.department ?? null,
+            mentorInstitution: m.institution ?? null,
             mentorship: t ? mentorshipLabel(t) : null,
           });
         }
