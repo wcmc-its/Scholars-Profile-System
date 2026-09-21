@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { getScholarOgData } from "@/lib/api/profile";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { visibleInstitutionName } from "@/lib/institutions";
 
 // Prisma is NOT compatible with Edge Runtime — must use nodejs.
 // (Phase 5 D-23, RESEARCH Pitfall 4)
@@ -29,6 +30,12 @@ export async function GET(
   // Phase 5 D-25 default: branded WCM-wordmark fallback for every scholar
   // until headshot consent is confirmed with Sumanth post-launch.
   // Do NOT fetch identityImageEndpoint here.
+
+  // Non-WCMC primary institution joins the department line (absence-as-
+  // default). The footer brand stays WCM — it's the site, not the scholar.
+  const deptLine = [scholar.primaryDepartment, visibleInstitutionName(scholar.primaryOrgCode)]
+    .filter(Boolean)
+    .join(" · ");
 
   const canvas = (
     <div
@@ -83,7 +90,7 @@ export async function GET(
           {scholar.primaryTitle}
         </div>
       ) : null}
-      {scholar.primaryDepartment ? (
+      {deptLine ? (
         <div
           style={{
             fontSize: 24,
@@ -94,7 +101,7 @@ export async function GET(
             display: "flex",
           }}
         >
-          {scholar.primaryDepartment}
+          {deptLine}
         </div>
       ) : null}
       <div

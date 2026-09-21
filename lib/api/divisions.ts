@@ -404,6 +404,8 @@ export type DivisionFacultyResult = {
     overview: string | null;
     pubCount: number;
     grantCount: number;
+    /** Bare ED primary-organization code — see `DepartmentFacultyHit`. */
+    primaryOrgCode?: string | null;
     /** #974 — top ≤3 PUBLIC method families for the per-row chips. Present only
      *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
      *  has ≥1 public family; undefined otherwise. */
@@ -562,6 +564,7 @@ async function getDivisionFacultyUncached(
     primaryTitle: string | null;
     overview: string | null;
     roleCategory: string | null;
+    primaryOrgCode: string | null;
     department: { name: string } | null;
     division: { name: string } | null;
   };
@@ -624,6 +627,7 @@ async function getDivisionFacultyUncached(
       overview: r.overview ? r.overview.slice(0, 120) : null,
       pubCount: pubByCwid.get(r.cwid) ?? 0,
       grantCount: grantByCwid.get(r.cwid) ?? 0,
+      primaryOrgCode: r.primaryOrgCode ?? null,
     }));
 
     // #974 — attach top-≤3 PUBLIC method families for the per-row chips. The

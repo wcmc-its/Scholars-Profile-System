@@ -8,6 +8,7 @@ import { formatRoleCategory } from "@/lib/role-display";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
 import { Badge } from "@/components/ui/badge";
+import { visibleInstitutionName } from "@/lib/institutions";
 
 /**
  * Per neurology_dept_body_per_spec.html: 11px uppercase role tag with 0.06em
@@ -49,6 +50,10 @@ export function PersonRow({
       ? `${hit.divisionName} · Department of ${hit.departmentName}`
       : `Department of ${hit.departmentName}`;
   const snippet = hit.overview ? htmlToPlainText(hit.overview) : null;
+  // Non-WCMC primary institution only (absence-as-default); same pill as the
+  // #2519 Cornell badge. An external hit has no `primaryOrgCode`, so the two
+  // never stack.
+  const institution = visibleInstitutionName(hit.primaryOrgCode);
 
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
@@ -105,6 +110,11 @@ export function PersonRow({
           {hit.isExternal && (
             <Badge variant="outline" className="rounded-full">
               Cornell University
+            </Badge>
+          )}
+          {institution && (
+            <Badge variant="outline" className="rounded-full">
+              {institution}
             </Badge>
           )}
           {trailingBadge}

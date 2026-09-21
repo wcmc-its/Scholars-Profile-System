@@ -20,6 +20,9 @@ export type PopoverContextHeader = {
   postnominal: string | null;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  /** Bare ED primary-organization code; the card renders it through
+   *  `visibleInstitutionName` (non-WCMC only). */
+  primaryOrgCode: string | null;
   slug: string | null;
   identityImageEndpoint: string;
   totalPubCount: number;
@@ -87,6 +90,7 @@ export async function fetchPopoverHeader(
       postnominal: true,
       primaryTitle: true,
       primaryDepartment: true,
+      primaryOrgCode: true,
       slug: true,
       status: true,
       deletedAt: true,
@@ -137,6 +141,7 @@ export async function fetchPopoverHeader(
     postnominal: scholar.postnominal,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
+    primaryOrgCode: scholar.primaryOrgCode ?? null,
     slug: scholar.status === "active" ? scholar.slug : null,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     totalPubCount: Math.max(0, scholar._count.authorships - hiddenPubs),

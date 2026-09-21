@@ -30,6 +30,7 @@ import {
 } from "@/lib/org-unit-roles";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { visibleInstitutionName } from "@/lib/institutions";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import type {
@@ -88,6 +89,9 @@ export type AZScholar = {
   name: string;
   slug: string;
   department: string;
+  /** `visibleInstitutionName` of the primary org — null for WCMC / unset, so
+   *  only a non-WCMC scholar gets the " · <institution>" suffix. */
+  institution: string | null;
 };
 
 export type AZBucket = {
@@ -123,6 +127,7 @@ type ScholarAZRow = {
   slug: string;
   primaryDepartment: string | null;
   roleCategory: string | null;
+  primaryOrgCode?: string | null;
 };
 
 const TOPIC_CHIP_LIMIT = 2;
@@ -390,6 +395,7 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
       slug: true,
       primaryDepartment: true,
       roleCategory: true,
+      primaryOrgCode: true,
     },
     orderBy: { preferredName: "asc" },
   })) as ScholarAZRow[];
@@ -410,6 +416,7 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
       name: givenName ? `${lastName}, ${givenName}` : lastName,
       slug: s.slug,
       department: s.primaryDepartment ?? "",
+      institution: visibleInstitutionName(s.primaryOrgCode),
     });
   }
 

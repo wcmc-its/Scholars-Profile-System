@@ -52,6 +52,7 @@ import {
 import { isProfileFacetRedesignEnabled } from "@/lib/profile/facet-redesign-flag";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { profilePath } from "@/lib/profile-url";
+import { visibleInstitutionName } from "@/lib/institutions";
 import {
   isProfileLinksEnabled,
   PROFILE_LINK_PLATFORM_KEYS,
@@ -268,6 +269,15 @@ export async function ProfileView({ slug }: { slug: string }) {
                   })()}
                 </div>
               ) : null}
+              {/* Primary institution, non-WCMC only (absence-as-default, same
+                  policy as #242): an HSS / MSKCC / HMC scholar gets one line
+                  under the department; a WCM scholar renders exactly as before. */}
+              {(() => {
+                const inst = visibleInstitutionName(profile.primaryOrgCode);
+                return inst ? (
+                  <div className="text-muted-foreground mt-0.5 text-sm">{inst}</div>
+                ) : null;
+              })()}
               <EditMyProfileButton profileSlug={profile.slug} profileCwid={profile.cwid} />
             </div>
 
