@@ -129,7 +129,10 @@ export async function loadArticleCountChoices(): Promise<{
   return {
     types: strings(roles.map((r) => r.roleCategory)),
     depts: strings(depts.map((r) => r.primaryDepartment)),
-    insts: strings(insts.map((r) => r.primaryOrgCode)),
+    // Codes, but ordered by the name the select shows (the roster facet label-sorts too).
+    insts: strings(insts.map((r) => r.primaryOrgCode)).sort((a, b) =>
+      institutionDisplayName(a).localeCompare(institutionDisplayName(b)),
+    ),
     atypes: strings(atypes.map((r) => r.publicationType)),
   };
 }

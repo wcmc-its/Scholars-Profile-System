@@ -30,6 +30,7 @@ import {
   buildArticleCountWorkbook,
   canViewArticleCountReport,
   describeCriteria,
+  loadArticleCountChoices,
   loadArticleCounts,
   loadArticleList,
   parseArticleCountParams,
@@ -72,6 +73,29 @@ describe("parseArticleCountParams", () => {
     expect(p).toMatchObject({ types: ["postdoc", "fellow"], depts: ["A"], insts: ["HSS"], atypes: ["Review"], jif: 100, pos: "any", basis: "fy", from: 2020, to: 2020 });
     // Round-trips through the query string the page and the download share.
     expect(parseArticleCountParams(new URLSearchParams(articleCountQueryString(p)))).toEqual(p);
+  });
+});
+
+describe("loadArticleCountChoices", () => {
+  it("institution choices are the active scholars' primaryOrgCode values, nulls dropped, ordered by display name", async () => {
+    // One shared groupBy mock serves scholar (role, department, institution) and publication (type).
+    h.groupBy
+      .mockResolvedValueOnce([{ roleCategory: "full_time_faculty" }])
+      .mockResolvedValueOnce([{ primaryDepartment: "Medicine" }])
+      .mockResolvedValueOnce([
+        { primaryOrgCode: "WCMC" },
+        { primaryOrgCode: "HSS" },
+        { primaryOrgCode: null },
+        { primaryOrgCode: "MSKCC" },
+      ])
+      .mockResolvedValueOnce([{ publicationType: "Journal Article" }]);
+    const choices = await loadArticleCountChoices();
+    // Hospital for Special Surgery < Memorial Sloan Kettering… < Weill Cornell Medicine (the WCMC display alias).
+    expect(choices.insts).toEqual(["HSS", "MSKCC", "WCMC"]);
+    expect(h.groupBy).toHaveBeenCalledWith({
+      by: ["primaryOrgCode"],
+      where: { deletedAt: null, status: "active" },
+    });
   });
 });
 

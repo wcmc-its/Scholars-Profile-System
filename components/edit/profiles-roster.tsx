@@ -40,7 +40,7 @@ export type ProfilesRosterProps = {
   facets: DataQualityFacets;
   /** Selected person-type (roleCategory) values. */
   roleCategories: string[];
-  /** Selected unit values (`dept:CODE` / `div:CODE` / `center:CODE`). */
+  /** Selected unit values (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`). */
   units: string[];
   /** Name / CWID search term. */
   q: string;
