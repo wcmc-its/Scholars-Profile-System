@@ -538,6 +538,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SELF_EDIT_ORCID_SUGGESTION",
+                "Value": "off",
+              },
+              {
                 "Name": "MENTORING_COPUB_BRIDGE",
                 "Value": "on",
               },
@@ -5002,6 +5006,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_ORCID_SUGGESTION",
                 "Value": "on",
               },
               {
