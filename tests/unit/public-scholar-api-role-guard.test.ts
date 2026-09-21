@@ -72,6 +72,7 @@ function prodRow(roleCategory: string | null) {
     postnominal: "Doctor of Philosophy",
     primaryTitle: "Graduate Student",
     primaryDepartment: "Test Graduate School",
+    primaryOrgCode: "HSS",
     slug: "test-person",
     status: "active",
     deletedAt: null,
@@ -181,6 +182,23 @@ describe("#2221 getScholarByCwid — same defect on the sibling public endpoint"
 
     findFirst.mockResolvedValue(prodRow(null));
     expect(await getScholarByCwid(CWID)).not.toBeNull();
+  });
+});
+
+describe("primary institution on the public payloads", () => {
+  it("popover header carries the bare code (the card decides visibility)", async () => {
+    findFirst.mockResolvedValue(prodRow("full_time_faculty"));
+    expect((await fetchPopoverHeader(CWID))!.primaryOrgCode).toBe("HSS");
+  });
+
+  it("JSON API emits code + display name as DATA — WCMC included", async () => {
+    findFirst.mockResolvedValue(prodRow("full_time_faculty"));
+    const hss = await getScholarByCwid(CWID);
+    expect(hss!.primaryOrgCode).toBe("HSS");
+    expect(hss!.primaryInstitution).toBe("Hospital for Special Surgery");
+
+    findFirst.mockResolvedValue({ ...prodRow("full_time_faculty"), primaryOrgCode: "WCMC" });
+    expect((await getScholarByCwid(CWID))!.primaryInstitution).toBe("Weill Cornell Medicine");
   });
 });
 

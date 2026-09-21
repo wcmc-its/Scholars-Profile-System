@@ -94,6 +94,7 @@ export function AZDirectory({ buckets }: { buckets: AZBucket[] }) {
                     </a>{" "}
                     <span className="text-sm text-muted-foreground">
                       &middot; {s.department}
+                      {s.institution ? <> &middot; {s.institution}</> : null}
                     </span>
                   </li>
                 ))}

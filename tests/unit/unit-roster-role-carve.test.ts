@@ -32,6 +32,7 @@ type ScholarRow = {
   roleCategory: string | null;
   overview: string | null;
   professorialRank: string | null;
+  primaryOrgCode: string | null;
   deptCode: string | null;
   divCode: string | null;
   deletedAt: Date | null;
@@ -50,6 +51,7 @@ function scholar(cwid: string, roleCategory: string | null): ScholarRow {
     roleCategory,
     overview: null,
     professorialRank: null,
+    primaryOrgCode: cwid === "fac00001" ? "HSS" : "WCMC",
     deptCode: "MED",
     divCode: "CARDIO",
     // The prod shape: NOT soft-deleted, status active. `deletedAt` cannot help.
@@ -415,6 +417,24 @@ describe("center roster (#2202)", () => {
     // manage the members they administer.
     const curator = await countActiveCenterMembersByCode(client, ["MEYER"]);
     expect(curator.get("MEYER")).toBe(5);
+  });
+});
+
+describe("primary institution reaches every roster hit (PersonRow badges non-WCMC)", () => {
+  it("department, division, center and unit-members hits all carry primaryOrgCode", async () => {
+    const dept = await getDepartmentFaculty("MED", {});
+    const div = await getDivisionFaculty("CARDIO", {});
+    const center = await getCenterMembers("MEYER");
+    const members = await getUnitMembersByMethods("department", "MED", ["sc::Fam"], 0);
+    if (center.mode !== "flat") throw new Error("expected flat");
+    for (const hits of [dept.hits, div.hits, center.hits, members.hits]) {
+      expect(hits.find((h) => h.cwid === "fac00001")?.primaryOrgCode).toBe("HSS");
+    }
+    // The center loader uses `select`, so the column must be asked for.
+    const centerSelect = scholarFindMany.mock.calls
+      .map((c) => (c[0] as { select?: Record<string, unknown> }).select)
+      .find((sel) => sel && "professorialRank" in sel);
+    expect(centerSelect).toMatchObject({ primaryOrgCode: true });
   });
 });
 

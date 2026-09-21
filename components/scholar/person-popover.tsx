@@ -52,6 +52,8 @@ type ApiResponse = {
     postnominal: string | null;
     primaryTitle: string | null;
     primaryDepartment: string | null;
+    /** Optional so an edge-cached pre-#2695 payload still types. */
+    primaryOrgCode?: string | null;
     slug: string | null;
     identityImageEndpoint: string;
     totalPubCount: number;
@@ -406,6 +408,7 @@ function PersonPopoverBody({
         preferredName={displayName}
         primaryTitle={header.primaryTitle}
         primaryDepartment={header.primaryDepartment}
+        primaryOrgCode={header.primaryOrgCode}
         identityImageEndpoint={header.identityImageEndpoint}
       />
       {rolePill}

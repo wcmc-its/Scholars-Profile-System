@@ -218,8 +218,8 @@ describe("getAZBuckets", () => {
 
   it("groups scholars by last-name initial (last token of preferredName)", async () => {
     mockScholarFindMany.mockResolvedValue([
-      { preferredName: "David Aaronson", slug: "david-aaronson", primaryDepartment: "Cardiology" },
-      { preferredName: "Fatima Abbas", slug: "fatima-abbas", primaryDepartment: "Oncology" },
+      { preferredName: "David Aaronson", slug: "david-aaronson", primaryDepartment: "Cardiology", primaryOrgCode: "HSS" },
+      { preferredName: "Fatima Abbas", slug: "fatima-abbas", primaryDepartment: "Oncology", primaryOrgCode: "WCMC" },
       { preferredName: "John Brown", slug: "john-brown", primaryDepartment: "Surgery" },
     ]);
     const buckets = await getAZBuckets();
@@ -230,8 +230,13 @@ describe("getAZBuckets", () => {
     expect(a!.scholars).toHaveLength(2);
     expect(a!.scholars[0].name).toBe("Aaronson, David");
     expect(a!.scholars[0].department).toBe("Cardiology");
+    // Non-WCMC primary institution resolved for the " · <institution>" suffix;
+    // WCMC and unset resolve to null (absence-as-default).
+    expect(a!.scholars[0].institution).toBe("Hospital for Special Surgery");
+    expect(a!.scholars[1].institution).toBeNull();
     expect(b).toBeDefined();
     expect(b!.count).toBe(1);
+    expect(b!.scholars[0].institution).toBeNull();
   });
 
   it("caps scholars list at 10 per letter; count reflects full total", async () => {

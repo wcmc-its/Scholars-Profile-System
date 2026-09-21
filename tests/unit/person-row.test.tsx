@@ -158,6 +158,16 @@ describe("PersonRow", () => {
   });
 
   // #2519 — Cornell (Ithaca) external member render.
+  describe("primary institution badge (non-WCMC only)", () => {
+    it("badges an HSS scholar and shows nothing for a WCMC one", () => {
+      const { unmount } = render(<PersonRow hit={{ ...baseHit, primaryOrgCode: "HSS" }} />);
+      expect(screen.getByText("Hospital for Special Surgery")).toBeTruthy();
+      unmount();
+      render(<PersonRow hit={{ ...baseHit, primaryOrgCode: "WCMC" }} />);
+      expect(screen.queryByText(/Weill Cornell Medicine/)).toBeNull();
+    });
+  });
+
   describe("external (Cornell) member", () => {
     const externalHit: DepartmentFacultyHit = {
       ...baseHit,

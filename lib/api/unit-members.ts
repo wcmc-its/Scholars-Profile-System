@@ -255,6 +255,7 @@ async function buildHits(
     roleCategory: string | null;
     overview: string | null;
     primaryDepartment: string | null;
+    primaryOrgCode: string | null;
     department: { name: string } | null;
     division: { name: string } | null;
   }>;
@@ -306,6 +307,7 @@ async function buildHits(
         : null,
       pubCount: pubMap.get(s.cwid) ?? 0,
       grantCount: grantMap.get(s.cwid) ?? 0,
+      primaryOrgCode: s.primaryOrgCode ?? null,
     };
     return fams && fams.length > 0
       ? { ...hit, topMethods: fams.slice(0, ROSTER_ROW_METHODS_CAP) }

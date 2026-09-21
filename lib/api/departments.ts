@@ -377,6 +377,10 @@ export type DepartmentFacultyHit = {
   overview: string | null;
   pubCount: number;
   grantCount: number;
+  /** Bare ED primary-organization code (`HSS`, `WCMC`, …). `PersonRow` badges
+   *  it through `visibleInstitutionName` — non-WCMC only. Optional so hit
+   *  fixtures keep typing; an external (Cornell) hit never carries one. */
+  primaryOrgCode?: string | null;
   /** #974 — top ≤3 PUBLIC method families for the per-row chips. Present only
    *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
    *  has ≥1 public family; undefined otherwise (off-path payload carries nothing). */
@@ -573,6 +577,7 @@ async function getDepartmentFacultyUncached(
     overview: s.overview ? s.overview.slice(0, 120).trimEnd() + (s.overview.length > 120 ? "…" : "") : null,
     pubCount: pubMap.get(s.cwid) ?? 0,
     grantCount: grantMap.get(s.cwid) ?? 0,
+    primaryOrgCode: s.primaryOrgCode ?? null,
   }));
 
   // #974 — attach top-≤3 PUBLIC method families for the per-row chips, keyed on

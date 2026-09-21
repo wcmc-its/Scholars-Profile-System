@@ -506,6 +506,11 @@ export type ProfilePayload = {
    *  `primaryDepartment`. Resolved via lib/org-unit-names.ts:officialUnitName
    *  conceptually, but precomputed here so the view stays presentational. */
   departmentOfficialName: string | null;
+  /** Bare ED `weillCornellEduPrimaryOrganization` code (`HSS`, `MSKCC`, `WCMC`;
+   *  null until the ED ETL writes it). The sidebar renders it through
+   *  `visibleInstitutionName` — absence-as-default, so WCMC and null show
+   *  nothing. */
+  primaryOrgCode: string | null;
   /** Issue #167 — division name when the scholar has a populated divCode
    *  AND the joined division name is not "Administration" (an admin-style
    *  level2 unit that should not be surfaced as a research/clinical
@@ -1688,6 +1693,7 @@ export const getScholarFullProfileBySlug = cache(
       primaryDepartment: scholar.primaryDepartment,
       departmentSlug: scholar.department?.slug ?? null,
       departmentOfficialName: scholar.department?.officialName ?? null,
+      primaryOrgCode: scholar.primaryOrgCode ?? null,
       // Issue #167 — belt-and-suspenders filter for the "Administration"
       // division label. The ED ETL drops Administration at the divCode level
       // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
@@ -2063,6 +2069,7 @@ export async function getScholarOgData(slug: string): Promise<{
   preferredName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  primaryOrgCode: string | null;
   slug: string;
   roleCategory: string | null;
 } | null> {
@@ -2073,6 +2080,7 @@ export async function getScholarOgData(slug: string): Promise<{
       preferredName: true,
       primaryTitle: true,
       primaryDepartment: true,
+      primaryOrgCode: true,
       roleCategory: true,
     },
   });

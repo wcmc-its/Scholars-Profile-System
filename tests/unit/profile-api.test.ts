@@ -184,6 +184,31 @@ describe("profile serializer", () => {
     };
     expect(args.include.publication.select.authors.where).toEqual({ cwid: { not: null } });
   });
+
+  // Primary institution on public labels — absence-as-default. The payload
+  // carries the bare code; the metadata description (and the sidebar, via the
+  // same `visibleInstitutionName`) names it ONLY when it is non-WCMC.
+  it("exposes primaryOrgCode and names a non-WCMC institution in the metadata description", async () => {
+    const { prisma } = (await import("@/lib/db")) as unknown as {
+      prisma: { scholar: { findFirst: Mock } };
+    };
+    const { getScholarFullProfileBySlug } = await import("@/lib/api/profile");
+    const { buildProfileMetadata } = await import("@/lib/profile-metadata");
+    const base = await prisma.scholar.findFirst.getMockImplementation()!();
+
+    prisma.scholar.findFirst.mockResolvedValueOnce({ ...base, primaryOrgCode: "HSS" });
+    expect((await getScholarFullProfileBySlug("hss-fixture"))?.primaryOrgCode).toBe("HSS");
+
+    prisma.scholar.findFirst.mockResolvedValueOnce({ ...base, primaryOrgCode: "HSS" });
+    expect((await buildProfileMetadata("hss-meta-fixture")).description).toBe(
+      "Associate Professor — Medicine — Hospital for Special Surgery",
+    );
+
+    prisma.scholar.findFirst.mockResolvedValueOnce({ ...base, primaryOrgCode: "WCMC" });
+    expect((await buildProfileMetadata("wcmc-meta-fixture")).description).toBe(
+      "Associate Professor — Medicine",
+    );
+  });
 });
 
 // #58 / #2542 contract A — `profile.ts`'s own leadership-title lines

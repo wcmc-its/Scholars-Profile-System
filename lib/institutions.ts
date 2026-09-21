@@ -66,3 +66,15 @@ export const HOME_INSTITUTION_CODE = "WCMC";
 export function institutionDisplayName(code: string): string {
   return code === HOME_INSTITUTION_CODE ? "Weill Cornell Medicine" : institutionName(code);
 }
+
+/**
+ * Institution name for PUBLIC labels (profile header, popover, roster badge,
+ * A–Z, metadata) — absence-as-default: `null` for the home institution and
+ * for an unset/empty code, so a WCM scholar renders exactly as before and only
+ * a non-WCMC primary organization (HSS, MSKCC, HMC, …) gets a line. Same
+ * policy as #242's dropped "Weill Cornell Medicine" affiliation suffix.
+ */
+export function visibleInstitutionName(code: string | null | undefined): string | null {
+  if (!code || code === HOME_INSTITUTION_CODE) return null;
+  return institutionDisplayName(code);
+}

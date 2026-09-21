@@ -516,6 +516,7 @@ type CenterScholarRow = {
   roleCategory: string | null;
   overview: string | null;
   professorialRank: string | null;
+  primaryOrgCode: string | null;
   department: { name: string } | null;
   division: { name: string } | null;
 };
@@ -581,6 +582,7 @@ async function buildCenterMemberHits(
     roleCategoryRaw: s.roleCategory,
     overview: s.overview,
     professorialRank: s.professorialRank,
+    primaryOrgCode: s.primaryOrgCode ?? null,
     pubCount: pubMap.get(s.cwid) ?? 0,
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));
@@ -738,6 +740,7 @@ async function getCenterMembersUncached(
       roleCategory: true,
       overview: true,
       professorialRank: true,
+      primaryOrgCode: true,
       department: { select: { name: true } },
       division: { select: { name: true } },
     },
@@ -1017,6 +1020,7 @@ export async function getCenterMembersByType(
       roleCategory: true,
       overview: true,
       professorialRank: true,
+      primaryOrgCode: true,
       department: { select: { name: true } },
       division: { select: { name: true } },
     },
