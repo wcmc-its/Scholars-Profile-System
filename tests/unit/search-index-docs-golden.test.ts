@@ -110,6 +110,9 @@ describe("buildPublicationDoc — golden snapshots", () => {
             preferredName: "Ann Researcher",
             deletedAt: null,
             status: "active",
+            // Institution facet — exercises the `wcmAuthorInstitutions` union
+            // (WCMC + HSS across the two displayable authors).
+            primaryOrgCode: "WCMC",
           },
         },
         {
@@ -140,6 +143,7 @@ describe("buildPublicationDoc — golden snapshots", () => {
             preferredName: "Bob Senior",
             deletedAt: null,
             status: "active",
+            primaryOrgCode: "HSS",
           },
         },
       ] as unknown as PublicationForIndex["authors"],

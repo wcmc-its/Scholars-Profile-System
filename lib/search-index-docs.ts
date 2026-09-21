@@ -529,6 +529,12 @@ export const PUBLICATION_INDEX_INCLUDE = {
           deptCode: true,
           primaryDepartment: true,
           department: { select: { name: true } },
+          // Institution facet (`wcmAuthorInstitutions`) — `Scholar.primaryOrgCode`
+          // (ED `weillCornellEduPrimaryOrganization`: WCMC, HSS, MSKCC, ...),
+          // unioned across the same displayable-author set as `deptCode`.
+          // Only consumed under `SEARCH_PUB_INSTITUTION_FACET`; emitted
+          // unconditionally (omit-on-empty) so a reindex populates it.
+          primaryOrgCode: true,
         },
       },
     },
@@ -790,6 +796,12 @@ export function buildPublicationDoc(
       if (deptName) wcmAuthorDepartments.add(`name:${deptName}`);
     }
   }
+  // Institution facet — union of the displayable WCM authors' `primaryOrgCode`
+  // (same author set + omit-on-empty contract as `wcmAuthorDepartments`).
+  const wcmAuthorInstitutions = new Set<string>();
+  for (const a of wcmAuthorRows) {
+    if (a.scholar!.primaryOrgCode) wcmAuthorInstitutions.add(a.scholar!.primaryOrgCode);
+  }
 
   const mesh = extractMeshLabels(p.meshTerms);
   const meshUis = extractMeshDescriptorUis(p.meshTerms);
@@ -837,6 +849,11 @@ export function buildPublicationDoc(
     // WCM authors carry no department write nothing for this field.
     ...(wcmAuthorDepartments.size > 0
       ? { wcmAuthorDepartments: Array.from(wcmAuthorDepartments) }
+      : {}),
+    // Institution facet — OMIT-on-empty keyword array of the displayable WCM
+    // authors' `primaryOrgCode`s (`SEARCH_PUB_INSTITUTION_FACET`).
+    ...(wcmAuthorInstitutions.size > 0
+      ? { wcmAuthorInstitutions: Array.from(wcmAuthorInstitutions) }
       : {}),
     // Issue #259 §1.6 — OMIT-on-empty: pubs with zero publication_topic
     // rows write nothing for this field, not an empty array. Lets `_source`

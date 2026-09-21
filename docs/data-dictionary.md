@@ -173,6 +173,13 @@ not in these tables. See [`ADR-005`](./ADR-005-manual-override-layer.md) and
   (`SEARCH_PEOPLE_ESI_FACET`). Derivation logic lives entirely in
   [`deriveGrantSignals`](../lib/api/match-researchers.ts) (~line 180) — see that function for
   the exact rule, not restated here.
+- **`wcmAuthorInstitutions` (publications index) and `institution` (funding index) are
+  index-only** — derived from `Scholar.primaryOrgCode` at OpenSearch build time. The pub field is
+  the union across the displayable WCM authors (same author set as `wcmAuthorDepartments`,
+  `buildPublicationDoc`); the funding field is the lead PI's code (same lead-PI rule as
+  `department`, `lib/funding-projection.ts`). Both back the "Institution" facet on their tab
+  (`SEARCH_PUB_INSTITUTION_FACET` / `SEARCH_FUNDING_INSTITUTION_FACET`), labelled via
+  `institutionDisplayName`.
 - This dictionary covers the **public/runtime model** (Aurora). The B03 audit schema is
   documented separately; upstream source schemas (ReciterDB, InfoEd, etc.) are owned by
   those systems.

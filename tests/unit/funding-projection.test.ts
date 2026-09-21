@@ -15,6 +15,7 @@ const SCHOLAR_B = {
   slug: "bob-baker",
   preferredName: "Bob Baker",
   primaryDepartment: "Surgery",
+  primaryOrgCode: "HSS",
 };
 const SCHOLAR_C = {
   slug: "carol-coe",
@@ -105,6 +106,21 @@ describe("projectFromRows", () => {
       makeRow({ cwid: "carol", role: "Co-I", scholar: SCHOLAR_C }),
     ])!;
     expect(doc.department).toBe("Surgery");
+  });
+
+  it("institution = lead PI's primaryOrgCode (same lead-PI rule as department); null when the lead PI has none", () => {
+    // Bob (HSS) is the contact PI; Alice (no code) is a Co-I and must not win.
+    const doc = projectFromRows([
+      makeRow({ cwid: "alice", role: "Co-I", scholar: SCHOLAR_A }),
+      makeRow({ cwid: "bob", role: "PI", scholar: SCHOLAR_B }),
+    ])!;
+    expect(doc.institution).toBe("HSS");
+    // Lead PI without a code → null (omitted from the facet), never a Co-I's.
+    const noCode = projectFromRows([
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+      makeRow({ cwid: "bob", role: "Co-I", scholar: SCHOLAR_B }),
+    ])!;
+    expect(noCode.institution).toBeNull();
   });
 
   it("prefers the contact PI's department over a Co-PI's", () => {

@@ -2109,6 +2109,14 @@ export class AppStack extends Stack {
         // between dynamically maps the field as text, and a terms agg on text is
         // a 500. STAGING-FIRST.
         SEARCH_PEOPLE_INSTITUTION_FACET: env === "staging" ? "on" : "off",
+        // Publications-tab / Funding-tab "Institution" facets (pub doc
+        // `wcmAuthorInstitutions` = union of the WCM authors' primaryOrgCode;
+        // funding doc `institution` = lead PI's primaryOrgCode). Same
+        // reindex-then-flip trap as the people flag above: DARK until the
+        // nightly alias rebuild carries the keyword mappings; flip only AFTER.
+        // STAGING-FIRST.
+        SEARCH_PUB_INSTITUTION_FACET: env === "staging" ? "on" : "off",
+        SEARCH_FUNDING_INSTITUTION_FACET: env === "staging" ? "on" : "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-

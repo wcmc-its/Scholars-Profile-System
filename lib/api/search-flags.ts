@@ -1404,6 +1404,36 @@ export function resolveSearchPeopleInstitutionFacet(): boolean {
 }
 
 /**
+ * Gates the `institution` Publications-search facet — a `terms` filter + agg
+ * on the pub doc's `wcmAuthorInstitutions` keyword array (union of the
+ * displayable WCM authors' `Scholar.primaryOrgCode`, built beside
+ * `wcmAuthorDepartments` in `buildPublicationDoc`). Same accept-but-no-op-
+ * while-off and reindex-then-flip posture as
+ * `resolveSearchPeopleInstitutionFacet` above: flip only after the nightly
+ * publications alias rebuild has carried the keyword mapping.
+ *
+ * Staging-on / prod-off at merge. Flag-parity: wire
+ * `SEARCH_PUB_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPubInstitutionFacet(): boolean {
+  return process.env.SEARCH_PUB_INSTITUTION_FACET === "on";
+}
+
+/**
+ * Gates the `institution` Funding-search facet — a `terms` filter + agg on the
+ * funding doc's `institution` keyword (the lead PI's `Scholar.primaryOrgCode`,
+ * built beside `department` in `lib/funding-projection.ts`). Same posture as
+ * `resolveSearchPubInstitutionFacet` above: flip only after the nightly funding
+ * alias rebuild has carried the keyword mapping.
+ *
+ * Staging-on / prod-off at merge. Flag-parity: wire
+ * `SEARCH_FUNDING_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchFundingInstitutionFacet(): boolean {
+  return process.env.SEARCH_FUNDING_INSTITUTION_FACET === "on";
+}
+
+/**
  * #2306 — gates the `earlyStageInvestigator` People-search facet (backed by
  * the index-doc-only `esiEligible` field — see `loadEsiEligibilityByCwid` in
  * `lib/search-index-docs.ts`). Kept as an INDEPENDENT kill switch from

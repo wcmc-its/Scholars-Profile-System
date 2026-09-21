@@ -177,6 +177,11 @@ async function fetchExportPmids(req: ExportRequest): Promise<string[]> {
   if (filters.department && filters.department.length > 0) {
     filter.push({ terms: { wcmAuthorDepartments: filters.department } });
   }
+  // Institution facet — same contract: the client only sends `institution`
+  // when SEARCH_PUB_INSTITUTION_FACET is on; mirror the live clause exactly.
+  if (filters.institution && filters.institution.length > 0) {
+    filter.push({ terms: { wcmAuthorInstitutions: filters.institution } });
+  }
   // Issue #1025 — Mentoring-activity facet. Resolve the selected program
   // buckets to a pmid union exactly as `searchPublications` does; an empty
   // union collapses to `match_none` so the export returns zero rows rather

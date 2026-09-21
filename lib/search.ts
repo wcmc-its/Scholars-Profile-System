@@ -518,6 +518,10 @@ export const publicationsIndexMapping = {
       // `SEARCH_PUB_DEPARTMENT_FILTER`; populated on every reindex so the
       // flag flip needs no second reindex.
       wcmAuthorDepartments: { type: "keyword" },
+      // Institution facet — keyword array of the displayable WCM authors'
+      // `Scholar.primaryOrgCode`s (WCMC, HSS, MSKCC, ...), same union /
+      // omit-on-empty shape as `wcmAuthorDepartments`; `SEARCH_PUB_INSTITUTION_FACET`.
+      wcmAuthorInstitutions: { type: "keyword" },
       // Pre-rendered author chips for the WCM-coauthor stack on results.
       wcmAuthors: {
         type: "nested",
@@ -604,6 +608,9 @@ export const fundingIndexMapping = {
       mechanism: { type: "keyword" },
       nihIc: { type: "keyword" },
       department: { type: "keyword" },
+      // Institution facet — lead PI's `Scholar.primaryOrgCode` (WCMC, HSS,
+      // MSKCC, ...), same lead-PI rule as `department`; `SEARCH_FUNDING_INSTITUTION_FACET`.
+      institution: { type: "keyword" },
       // Role keyword array per project — populated with every bucket the
       // project belongs to (PI, Multi-PI, Co-I) so a single `terms` filter
       // matches without post-aggregation logic.
