@@ -21,7 +21,7 @@ describe("OrcidValue", () => {
     const { container } = render(<OrcidValue orcid={null} cwid="abc1234" />);
     const root = container.querySelector('[data-testid="orcid-missing"]') as HTMLElement;
     expect(root.textContent).toContain("Not on file");
-    expect(root.textContent).toContain("NIH requires an ORCID iD linked to eRA Commons");
+    expect(root.textContent).toContain("Needed for NIH SciENcv biosketches");
     const a = root.querySelector("a") as HTMLAnchorElement;
     expect(a.getAttribute("href")).toBe("https://reciter.weill.cornell.edu/manageprofile/abc1234");
     expect(container.querySelector('[data-testid="orcid-link"]')).toBeNull();

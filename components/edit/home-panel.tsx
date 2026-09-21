@@ -571,19 +571,14 @@ function OrcidItem({
       <ArrowUpRight className="size-3.5" aria-hidden />
     </a>
   );
-  const whose = isAdmin ? `${name}'s` : "your";
-  // Why bother: the two concrete payoffs, then the NIH requirement (parity with `OrcidValue`).
-  const why = (lead: string) => (
-    <p className="text-muted-foreground mt-1 text-xs leading-snug" data-testid="home-item-orcid-why">
-      {lead} finding {whose} publications more reliable and fills in {whose} NIH biosketch
-      worksheet. NIH requires an ORCID iD linked to eRA Commons for SciENcv biosketches.
-    </p>
-  );
+  const whose = isAdmin ? "their" : "your";
+  // One short reason, no names: the NIH requirement first, the matching payoff second.
+  const why = `Needed for NIH SciENcv biosketches; also makes ${whose} publication matching more reliable.`;
   if (state.suggested) {
     const { orcid, accepted } = state.suggested;
     const evidence =
       accepted > 0
-        ? `seen on ${accepted} of ${whose} accepted publications`
+        ? `on ${accepted} of ${whose} accepted publications`
         : `matches ${whose} record in the ORCID registry`;
     return (
       <ChecklistRow
@@ -595,20 +590,17 @@ function OrcidItem({
             {orcidLink(orcid)} · {evidence}
           </>
         }
-        teaser={why("Confirming it makes")}
+        teaser={
+          <p className="text-muted-foreground mt-1 text-xs leading-snug" data-testid="home-item-orcid-why">
+            {why}
+          </p>
+        }
         action={action}
       />
     );
   }
   return (
-    <ChecklistRow
-      testId="home-item-orcid"
-      marker="todo"
-      title="ORCID iD not on file"
-      subtitle={isAdmin ? `${name} has no ORCID iD on file.` : "You have no ORCID iD on file."}
-      teaser={why("An ORCID iD makes")}
-      action={action}
-    />
+    <ChecklistRow testId="home-item-orcid" marker="todo" title="ORCID iD not on file" subtitle={why} action={action} />
   );
 }
 
