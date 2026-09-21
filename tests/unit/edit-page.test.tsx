@@ -133,6 +133,7 @@ const ctx: EditContext = {
   // is on for a genuine self/superuser viewer); a describe block below populates it.
   menteeSuggestions: [],
   orcidVerdict: null,
+  orcidCandidates: [],
   // SELF_EDIT_COI_GAP_HINT — empty by default (loader returns [] unless the
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.
@@ -323,6 +324,24 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(within(row).getByRole("link", { name: "0000-0002-9930-2193" }).getAttribute("href")).toBe(
       "https://orcid.org/0000-0002-9930-2193",
     );
+  });
+
+  it("Identifiers & Profiles: the candidate rows reach the card as per-source evidence — under the on-file iD, and as a 'different iD' block when the inferred rows disagree", () => {
+    const onFileWithEvidence: EditContext = {
+      ...ctx,
+      scholar: { ...ctx.scholar, orcid: "0000-0002-1825-0097" },
+      orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+      orcidCandidates: [
+        { orcid: "0000-0002-1825-0097", source: "rpm_admin", accepted: 0, rejected: 0 },
+        { orcid: "0000-0002-9930-2193", source: "rpm_inferred", accepted: 4, rejected: 0 },
+        { orcid: "0000-0002-9930-2193", source: "orcid_email", accepted: 0, rejected: 0 },
+      ],
+    };
+    render(<EditPage ctx={onFileWithEvidence} mode="self" attr="identifiers-profiles" orcidTabEnabled />);
+    expect(screen.getByTestId("orcid-on-file-evidence").textContent).toContain("Entered in ReCiter Publication Manager");
+    const also = screen.getByTestId("orcid-also-suggested");
+    expect(also.textContent).toContain("0000-0002-9930-2193");
+    expect(within(also).getByTestId("orcid-also-suggested-evidence").querySelectorAll("li")).toHaveLength(2);
   });
 
   it("Home: with the flag off the ORCID CTA hands off to ReCiter Manage Profile (external), and the tab is not in the rail", () => {

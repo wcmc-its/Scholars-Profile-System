@@ -2,7 +2,10 @@
  * POST /api/edit/orcid — set a scholar's ORCID iD from the Identifiers & Profiles
  * tab: confirm the inferred suggestion, or enter one.
  *
- * Body: `{ cwid: string, orcid: string, confirmedSuggestion?: boolean }`.
+ * Body: `{ cwid: string, orcid: string | null, confirmedSuggestion?: boolean }`.
+ * `orcid: null` REMOVES the iD: the `admin_orcid` row is deleted, `scholar.orcid`
+ * is nulled, and the local `rpm_admin` mirror row goes with it (else the card
+ * would keep reading the iD as on file until the 07:00 UTC re-mirror).
  *
  * Two writes, in this order, and the order is the point:
  *  1. ReciterDB `admin_orcid` (the table Publication Manager's Manage Profile
@@ -54,9 +57,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- body shape ---
   const { cwid, orcid: rawOrcid, confirmedSuggestion } = body;
   if (typeof cwid !== "string" || !isCwid(cwid)) return editError(400, "invalid_cwid", "cwid");
-  if (typeof rawOrcid !== "string") return editError(400, "invalid_orcid", "orcid");
-  const orcid = normalizeOrcid(rawOrcid);
-  if (!orcid) return editError(400, "invalid_orcid", "orcid");
+  if (rawOrcid !== null && typeof rawOrcid !== "string") {
+    return editError(400, "invalid_orcid", "orcid");
+  }
+  const orcid = rawOrcid === null ? null : normalizeOrcid(rawOrcid);
+  if (rawOrcid !== null && !orcid) return editError(400, "invalid_orcid", "orcid");
 
   // --- target scholar (404) ---
   const scholar = await db.read.scholar.findUnique({
@@ -82,10 +87,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- (1) ReciterDB admin_orcid — fail closed, nothing else has changed ---
   try {
     await withReciterConnection(async (conn) => {
-      await conn.query(
-        "INSERT INTO admin_orcid (personIdentifier, orcid) VALUES (?, ?) ON DUPLICATE KEY UPDATE orcid = VALUES(orcid)",
-        [scholar.cwid, orcid],
-      );
+      if (orcid === null) {
+        await conn.query("DELETE FROM admin_orcid WHERE personIdentifier = ?", [scholar.cwid]);
+      } else {
+        await conn.query(
+          "INSERT INTO admin_orcid (personIdentifier, orcid) VALUES (?, ?) ON DUPLICATE KEY UPDATE orcid = VALUES(orcid)",
+          [scholar.cwid, orcid],
+        );
+      }
     });
   } catch (err) {
     logEditFailure(PATH, err);
@@ -96,6 +105,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     await db.write.$transaction(async (tx) => {
       await tx.scholar.update({ where: { cwid: scholar.cwid }, data: { orcid } });
+      if (orcid === null) {
+        await tx.orcidCandidate.deleteMany({ where: { cwid: scholar.cwid, source: "rpm_admin" } });
+      }
+      // ponytail: a remove audits as `orcid_set` → null rather than a new
+      // action — a new AuditAction needs the TS union AND four SQL ENUM sites.
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,

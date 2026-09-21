@@ -20,3 +20,31 @@ export function normalizeOrcid(input: string): string | null {
   if (digits[15] !== (check === 10 ? "X" : String(check))) return null;
   return digits.replace(/(.{4})(?=.)/g, "$1-");
 }
+
+/** One `orcid_candidate` row for an iD, minus the cwid: what a source knows. */
+export type OrcidEvidence = { source: string; accepted: number; rejected: number };
+
+/**
+ * The "why we think this is yours" line for one candidate source, in the
+ * viewer's voice (`whose` = "your" | "their"). Both the Identifiers & Profiles
+ * card and the home board's ORCID row read from this so they can never disagree.
+ */
+export function orcidEvidenceLine(e: OrcidEvidence, whose: "your" | "their"): string {
+  const pubs = (n: number) => `${n} of ${whose} accepted publication${n === 1 ? "" : "s"}`;
+  switch (e.source) {
+    case "rpm_inferred":
+      return e.rejected > 0
+        ? `Seen on ${pubs(e.accepted)} in ReCiter, and on ${e.rejected} ${whose === "your" ? "you" : "they"} rejected`
+        : `Seen on ${pubs(e.accepted)} in ReCiter`;
+    case "rpm_admin":
+      return "Entered in ReCiter Publication Manager";
+    case "orcid_email":
+      return `The ORCID registry record lists ${whose} WCM email`;
+    case "orcid_works":
+      return `${e.accepted} work${e.accepted === 1 ? "" : "s"} on the ORCID record match ${whose} publications`;
+    case "orcid_name":
+      return `The ORCID registry record matches ${whose} name`;
+    default:
+      return e.source;
+  }
+}

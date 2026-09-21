@@ -19,7 +19,20 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("visibleAttrKeys — Identifiers & Profiles rail item", () => {
-  const ON = [false, false, false, false, false, false, false, false, false, false, false, true] as const;
+  const ON = [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    true,
+  ] as const;
   it("with the flag on: its own rail key, right after Honors, on every writing surface", () => {
     for (const mode of ["self", "superuser", "comms_steward", "proxy", "unit-admin"] as const) {
       const keys = visibleAttrKeys(mode, ...ON);
@@ -46,44 +59,161 @@ describe("OrcidCard", () => {
   });
 
   it("on file → the iD linked to orcid.org; Change reveals the input", () => {
-    render(<OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile="0000-0002-1825-0097" suggested={null} />);
+    render(
+      <OrcidCard
+        cwid="abc1234"
+        mode="self"
+        scholarName="Ada"
+        onFile="0000-0002-1825-0097"
+        suggested={null}
+      />,
+    );
     const onFile = screen.getByTestId("orcid-on-file");
-    expect(onFile.querySelector("a")?.getAttribute("href")).toBe("https://orcid.org/0000-0002-1825-0097");
+    expect(onFile.querySelector("a")?.getAttribute("href")).toBe(
+      "https://orcid.org/0000-0002-1825-0097",
+    );
     expect(screen.queryByTestId("orcid-form")).toBeNull();
     fireEvent.click(screen.getByTestId("orcid-change"));
     expect(screen.getByTestId("orcid-form")).toBeTruthy();
   });
 
   it("suggested → 'Yes, this is mine' POSTs the suggested iD with confirmedSuggestion and refreshes", async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, orcid: "0000-0002-1825-0097" }) });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, orcid: "0000-0002-1825-0097" }),
+    });
     render(
-      <OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile={null} suggested={{ orcid: "0000-0002-1825-0097", accepted: 1 }} />,
+      <OrcidCard
+        cwid="abc1234"
+        mode="self"
+        scholarName="Ada"
+        onFile={null}
+        suggested={{
+          orcid: "0000-0002-1825-0097",
+          accepted: 1,
+          evidence: [
+            { source: "rpm_inferred", accepted: 1, rejected: 0 },
+            { source: "orcid_email", accepted: 0, rejected: 0 },
+          ],
+        }}
+      />,
     );
     const sug = screen.getByTestId("orcid-suggested");
     expect(sug.textContent).toContain("Is this your ORCID iD?");
-    expect(sug.textContent).toContain("On 1 of your accepted publications.");
+    const why = screen.getByTestId("orcid-suggested-evidence");
+    expect(why.querySelectorAll("li")).toHaveLength(2);
+    expect(why.textContent).toContain("Seen on 1 of your accepted publication in ReCiter");
+    expect(why.textContent).toContain("The ORCID registry record lists your WCM email");
     fireEvent.click(screen.getByTestId("orcid-confirm"));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/edit/orcid");
-    expect(JSON.parse(init.body as string)).toEqual({ cwid: "abc1234", orcid: "0000-0002-1825-0097", confirmedSuggestion: true });
+    expect(JSON.parse(init.body as string)).toEqual({
+      cwid: "abc1234",
+      orcid: "0000-0002-1825-0097",
+      confirmedSuggestion: true,
+    });
     // The card shows the saved iD without waiting for the refresh.
     expect(screen.getByTestId("orcid-on-file").textContent).toContain("0000-0002-1825-0097");
   });
 
+  it("on file → the evidence persists under the iD; Remove POSTs orcid: null and the card empties", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, orcid: null }),
+    });
+    render(
+      <OrcidCard
+        cwid="abc1234"
+        mode="self"
+        scholarName="Ada"
+        onFile="0000-0002-1825-0097"
+        onFileEvidence={[
+          { source: "rpm_admin", accepted: 0, rejected: 0 },
+          { source: "rpm_inferred", accepted: 12, rejected: 0 },
+        ]}
+        suggested={null}
+      />,
+    );
+    const why = screen.getByTestId("orcid-on-file-evidence");
+    expect(why.textContent).toContain("Entered in ReCiter Publication Manager");
+    expect(why.textContent).toContain("Seen on 12 of your accepted publications in ReCiter");
+    fireEvent.click(screen.getByTestId("orcid-remove"));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      cwid: "abc1234",
+      orcid: null,
+      confirmedSuggestion: false,
+    });
+    expect(screen.queryByTestId("orcid-on-file")).toBeNull();
+    expect(screen.getByTestId("orcid-form")).toBeTruthy();
+  });
+
+  it("on file + a DIFFERENT strong inference → 'we also found' block with 'Use this iD instead'", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, orcid: "0000-0002-9930-2193" }),
+    });
+    render(
+      <OrcidCard
+        cwid="abc1234"
+        mode="self"
+        scholarName="Ada"
+        onFile="0000-0002-1825-0097"
+        suggested={{
+          orcid: "0000-0002-9930-2193",
+          accepted: 4,
+          evidence: [{ source: "rpm_inferred", accepted: 4, rejected: 0 }],
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("orcid-suggested")).toBeNull();
+    const also = screen.getByTestId("orcid-also-suggested");
+    expect(also.textContent).toContain("Your publications point at a different iD");
+    expect(also.textContent).toContain("0000-0002-9930-2193");
+    fireEvent.click(screen.getByTestId("orcid-use-suggested"));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      cwid: "abc1234",
+      orcid: "0000-0002-9930-2193",
+      confirmedSuggestion: true,
+    });
+    expect(screen.getByTestId("orcid-on-file").textContent).toContain("0000-0002-9930-2193");
+    expect(screen.queryByTestId("orcid-also-suggested")).toBeNull();
+  });
+
   it("superuser voice is third person with the name", () => {
     render(
-      <OrcidCard cwid="xyz9876" mode="superuser" scholarName="Grace Hopper" onFile={null} suggested={{ orcid: "0000-0002-1694-233X", accepted: 91 }} />,
+      <OrcidCard
+        cwid="xyz9876"
+        mode="superuser"
+        scholarName="Grace Hopper"
+        onFile={null}
+        suggested={{
+          orcid: "0000-0002-1694-233X",
+          accepted: 91,
+          evidence: [{ source: "rpm_inferred", accepted: 91, rejected: 2 }],
+        }}
+      />,
     );
     const sug = screen.getByTestId("orcid-suggested");
     expect(sug.textContent).toContain("Is this Grace Hopper's ORCID iD?");
-    expect(sug.textContent).toContain("On 91 of their accepted publications.");
+    expect(sug.textContent).toContain(
+      "Seen on 91 of their accepted publications in ReCiter, and on 2 they rejected",
+    );
     expect(screen.getByTestId("orcid-confirm").textContent).toBe("Yes, this is their iD");
   });
 
   it("none → the input; a bad check digit is refused client-side without a request", async () => {
-    render(<OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile={null} suggested={null} />);
+    render(
+      <OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile={null} suggested={null} />,
+    );
     const input = screen.getByLabelText("ORCID iD");
     fireEvent.change(input, { target: { value: "0000-0002-1825-0098" } });
     fireEvent.click(screen.getByTestId("orcid-save"));
@@ -92,13 +222,23 @@ describe("OrcidCard", () => {
   });
 
   it("none → a typed URL form is normalized and POSTed; a 502 from the route is shown and nothing is marked saved", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 502, json: async () => ({ ok: false, error: "reciter_unavailable" }) });
-    render(<OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile={null} suggested={null} />);
-    fireEvent.change(screen.getByLabelText("ORCID iD"), { target: { value: "https://orcid.org/0000000218250097" } });
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => ({ ok: false, error: "reciter_unavailable" }),
+    });
+    render(
+      <OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile={null} suggested={null} />,
+    );
+    fireEvent.change(screen.getByLabelText("ORCID iD"), {
+      target: { value: "https://orcid.org/0000000218250097" },
+    });
     fireEvent.click(screen.getByTestId("orcid-save"));
     expect(await screen.findByTestId("orcid-error")).toBeTruthy();
     expect(screen.getByTestId("orcid-error").textContent).toContain("ReCiter is unreachable");
-    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string).orcid).toBe("0000-0002-1825-0097");
+    expect(
+      JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string).orcid,
+    ).toBe("0000-0002-1825-0097");
     expect(screen.queryByTestId("orcid-on-file")).toBeNull();
     expect(refresh).not.toHaveBeenCalled();
   });

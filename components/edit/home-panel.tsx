@@ -30,6 +30,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { PUBLICATION_MANAGER_URL, WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
 import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
+import type { OrcidEvidence } from "@/lib/edit/orcid";
 import { cn, initials } from "@/lib/utils";
 import { useReciterPendingSuggestions } from "@/components/edit/reciter-pending-card";
 import type { ReciterSuggestion } from "@/lib/reciter/client";
@@ -80,7 +81,13 @@ export type HomePanelProps = {
 
 export type OrcidRowState = {
   onFile: string | null;
-  suggested: { orcid: string; accepted: number } | null;
+  /** Per-source evidence for the on-file iD — what the mirror knows about it —
+   *  shown under it on the Identifiers & Profiles card so the "why" persists
+   *  after confirming. Empty/absent when nothing in `orcid_candidate` carries it. */
+  onFileEvidence?: OrcidEvidence[];
+  /** The sole strong-inferred iD (if it differs from `onFile`), its RPM accepted
+   *  count, and its per-source evidence. */
+  suggested: { orcid: string; accepted: number; evidence?: OrcidEvidence[] } | null;
   /** Where the CTA goes: the Identifiers & Profiles tab (in-app) or, with the
    *  flag off, ReCiter Manage Profile (external, campus-only). */
   editHref?: string;
