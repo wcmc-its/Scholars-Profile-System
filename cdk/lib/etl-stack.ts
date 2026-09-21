@@ -941,12 +941,13 @@ export class EtlStack extends Stack {
     };
     const sourcesUnit = makeEtlTaskUnit("Sources", "sources", SOURCES_SECRET_IDS);
     const ldapUnit = makeEtlTaskUnit("Ldap", "ldap", LDAP_SECRET_IDS);
-    // reciter-api def: no cadence step runs on it -- the ReCiter admin key
-    // (#746) is used only by the operator-run `etl:reciter-refresh`, which the
-    // operator launches via `run-task --task-definition sps-etl-reciter-api-<env>`
-    // (see OPERATIONS-RUNBOOK). Isolating it here keeps the admin key off every
-    // cadence step. Created for its side effect (the task def + role).
-    makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+    // reciter-api def: the ReCiter ADMIN api-key (#746). Two scripts run on it:
+    // the operator-run `etl:reciter-refresh` (launched via `run-task
+    // --task-definition sps-etl-reciter-api-<env>`, see OPERATIONS-RUNBOOK) and
+    // the nightly `etl:orcid-push` (the OrcidPush step, routed here by
+    // RECITER_API_SCRIPTS below). Isolating the key on its own def keeps it off
+    // every other cadence step and off the web tier.
+    const reciterApiUnit = makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
 
     // ------------------------------------------------------------------
     // scripts/bulk-data-rule/ pipeline — dedicated one-off task def
@@ -1098,6 +1099,10 @@ export class EtlStack extends Stack {
       "etl:data-sharing",
       "etl:journal-impact-factor",
     ]);
+    // The ReCiter ADMIN key: only the scripts that call the engine's HTTP API.
+    // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
+    // it is not listed; listing it would change nothing.
+    const RECITER_API_SCRIPTS = new Set(["etl:orcid-push"]);
     const taskUnitFor = (
       npmScript: string,
     ): { taskDefinition: ecs.FargateTaskDefinition; container: ecs.ContainerDefinition } =>
@@ -1105,7 +1110,9 @@ export class EtlStack extends Stack {
         ? ldapUnit
         : SOURCES_SCRIPTS.has(npmScript)
           ? sourcesUnit
-          : baseUnit;
+          : RECITER_API_SCRIPTS.has(npmScript)
+            ? reciterApiUnit
+            : baseUnit;
 
     // ------------------------------------------------------------------
     // SNS topic. No subscriptions in this PR; B23 wires PagerDuty.
@@ -1465,6 +1472,17 @@ export class EtlStack extends Stack {
       // so there's no SearchIndex ordering dependency. Never NULLs an existing
       // orcid — Identity may lag ED — so re-running nightly only self-heals.
       { id: "Identity", npmScript: "etl:identity", external: true, tier: "continue" },
+      // scholar.orcid → WCM Identity through the ReCiter engine API. Right after
+      // Identity so one night's log reads pull-then-push: whatever Identity gave
+      // us (or an iD confirmed in /edit) is compared against the record and
+      // written only when it differs. On the reciter-api def (RECITER_API_SCRIPTS)
+      // because it needs the ADMIN key, which no other cadence step carries.
+      // Compare-then-write is what makes it safe to run forever: the Institutional
+      // Client's rebuild still nulls Identity.orcid nightly (IC #155), so this
+      // re-heals the wipe each morning until that fix ships, then reads `equal`.
+      // tier:"continue" — a missed night leaves Identity as the IC left it; the
+      // step itself throws on a dead API, so the freshness row stays honest.
+      { id: "OrcidPush", npmScript: "etl:orcid-push", external: true, tier: "continue" },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
       // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task

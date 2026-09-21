@@ -52,6 +52,7 @@
     "etl:reciter-rcr:export": "tsx etl/reciter-rcr/export.ts",
     "etl:reciter-rcr:import": "tsx etl/reciter-rcr/import.ts",
     "etl:reciter-refresh": "tsx etl/reciter-refresh/index.ts",
+    "etl:orcid-push": "tsx etl/orcid-push/index.ts",
     "etl:reciter:coi-statements": "tsx etl/reciter/backfill-coi-statements.ts",
     "etl:reciter:import-coi-statements": "tsx etl/reciter/import-coi-statements.ts",
     "etl:mentoring:export-copubs": "tsx etl/mentoring/export-copubs.ts",

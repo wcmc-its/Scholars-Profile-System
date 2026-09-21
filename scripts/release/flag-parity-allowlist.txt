@@ -103,6 +103,7 @@ NEWS_MAX_PAGES                      # news: feed-page ceiling for a backfill (co
 NEWS_MIN_PUBLISHED                  # news: ignore articles published before this date (code default 2019-01-01; "" walks the 1997 archive)
 ORCID_REGISTRY_DRY_RUN              # orcid-registry: env twin of --dry-run (nothing written, no EtlRun row); local/operator only
 ORCID_REGISTRY_MAX_RECORDS          # orcid-registry: local smoke — truncates the registry union and FORCES a dry run (a partial mirror would let the delete pass wipe the rest)
+ORCID_PUSH_DRY_RUN                  # orcid-push: env twin of --dry-run (GETs only, no POST to ReCiter; prints counts + cwids); local/operator only
 SCHOLARS_VIVO_ORG_CROSSWALK
 SCHOLARS_VIVO_ORG_REDIRECT_OUTPUT
 SCHOLARS_VIVO_PUB_REDIRECT_OUTPUT
