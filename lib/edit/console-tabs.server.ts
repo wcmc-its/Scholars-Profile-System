@@ -157,8 +157,14 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
 
   // Gap 4 (reports half): a reportable unit surfaces the tab everywhere,
   // including `/edit/units` and `/edit/administrators`.
+  // `viewerCanViewUsage` (any UnitAdmin grant) is report 8's gate — an
+  // institution-axis admin with no reportable unit still gets the tab.
   reports: (s, g) =>
-    s.isSuperuser || s.isCommsSteward || g.reportableUnitCount > 0 || g.reportAccessCount > 0,
+    s.isSuperuser ||
+    s.isCommsSteward ||
+    g.reportableUnitCount > 0 ||
+    g.reportAccessCount > 0 ||
+    g.viewerCanViewUsage,
 
   // COI review — superuser-only, no comms_steward/unit-admin escape hatch at
   // all (unlike `profiles`/`units`/`reports`). Split out of the merged

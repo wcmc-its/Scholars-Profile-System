@@ -69,6 +69,7 @@ import {
   type ReportsIndexUnit,
 } from "@/components/edit/reports-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import {
@@ -182,6 +183,10 @@ export default async function EditReportsIndexPage({
   const catalog = buildCatalog(meta);
   const programUnit =
     programScopes.size > 0 ? buildProgramUnit(meta, await loadProgramReportAccess(session)) : null;
+  // Report 8 (Article counts) rides a second pseudo-unit, for every unit
+  // administrator (`canViewArticleCountReport`).
+  const institutionUnit = (await canViewArticleCountReport(session)) ? buildInstitutionUnit(meta) : null;
+  const extraUnits = [programUnit, institutionUnit].filter((u): u is ReportsIndexUnit => u !== null);
 
   const { center, kind: kindParam } = (await searchParams) ?? {};
   const kind = parseKind(kindParam);
@@ -204,7 +209,7 @@ export default async function EditReportsIndexPage({
         code={code}
         kind={kind}
         perReport={await loadSingleUnitPerReport(code, kind, catalog)}
-        programUnit={programUnit}
+        extraUnits={extraUnits}
         catalog={catalog}
         {...shell}
       />
@@ -218,9 +223,9 @@ export default async function EditReportsIndexPage({
   // grants at all — it's an empty roster. Fall through to the bands view below,
   // which renders gracefully on an empty `units` array; everyone else still 404s.
   if (reportableUnits.length === 0 && !session.isSuperuser) {
-    // A `report_access` holder with no unit grant at all still has somewhere
-    // to go: the program row alone, not the 404.
-    if (programUnit === null) notFound();
+    // A `report_access` holder or an administrator with no unit grant at
+    // all still has somewhere to go: the pseudo-unit rows alone, not the 404.
+    if (extraUnits.length === 0) notFound();
     return (
       <ConsoleShell active="reports" reportsTab {...shell}>
         <h1 className="mb-1 text-xl font-bold">Reports</h1>
@@ -228,7 +233,7 @@ export default async function EditReportsIndexPage({
           Advisory only: every report reads precomputed data; nothing here writes to the roster.
         </p>
         <div className="apollo-card mt-5">
-          <ReportsIndex units={[programUnit]} mode="bands" />
+          <ReportsIndex units={extraUnits} mode="bands" />
         </div>
       </ConsoleShell>
     );
@@ -249,7 +254,7 @@ export default async function EditReportsIndexPage({
         code={unit.code}
         kind={unit.kind}
         perReport={await loadSingleUnitPerReport(unit.code, unit.kind, catalog)}
-        programUnit={programUnit}
+        extraUnits={extraUnits}
         catalog={catalog}
         {...shell}
       />
@@ -276,7 +281,7 @@ export default async function EditReportsIndexPage({
       perReport: serializePerReport(l, reports),
     };
   });
-  if (programUnit) units.push(programUnit);
+  units.push(...extraUnits);
   // 2a (table + filter rail) for a superuser/comms_steward at any unit count
   // ≥2 — no size threshold; 1a (every unit banded inline) for everyone else.
   const mode = session.isSuperuser || session.isCommsSteward ? "table" : "bands";
@@ -342,6 +347,24 @@ function buildProgramUnit(
   };
 }
 
+/** Report 8 as a one-report pseudo-unit for every administrator — no grant
+ *  rows to show, so its popover is the static admin rule. */
+function buildInstitutionUnit(meta: Map<ReportKey, ReportMeta>): ReportsIndexUnit {
+  const report = catalogEntry(meta, 8, { mode: "admin" });
+  return {
+    code: "institution",
+    kind: "institution",
+    name: "Institution-wide",
+    centerType: null,
+    editHref: `/edit/reports/${report.slug}`,
+    liveCount: 1,
+    totalCount: 1,
+    lastRefreshedAt: null,
+    reports: [report],
+    perReport: [{ n: 8, live: true, lastRefreshedAt: null }],
+  };
+}
+
 type SerializedPerReport = ReadonlyArray<{
   n: ReportNumber;
   live: boolean;
@@ -387,7 +410,7 @@ function SingleUnitReports({
   code,
   kind,
   perReport,
-  programUnit,
+  extraUnits,
   catalog,
   session,
   pendingSlugRequests,
@@ -397,9 +420,9 @@ function SingleUnitReports({
   code: string;
   kind: ReportableUnitKind;
   perReport: SerializedPerReport;
-  /** The program pseudo-unit, or null when the viewer holds no report grant —
-   *  its one report joins this unit's rows (its href never carries the unit). */
-  programUnit: ReportsIndexUnit | null;
+  /** The pseudo-units this viewer may see (program, institution) — their
+   *  reports join this unit's rows (an href never carries the unit). */
+  extraUnits: ReportsIndexUnit[];
   /** This request's report catalog (`buildCatalog`). */
   catalog: ReportCatalog;
   session: EditSession;
@@ -425,10 +448,8 @@ function SingleUnitReports({
         <SingleUnitReportsTable
           unitCode={code}
           unitKind={kind}
-          perReport={programUnit ? [...perReport, ...programUnit.perReport] : perReport}
-          reports={
-            programUnit ? [...catalog.byKind[kind], ...programUnit.reports] : catalog.byKind[kind]
-          }
+          perReport={[...perReport, ...extraUnits.flatMap((u) => u.perReport)]}
+          reports={[...catalog.byKind[kind], ...extraUnits.flatMap((u) => u.reports)]}
         />
       </div>
     </ConsoleShell>

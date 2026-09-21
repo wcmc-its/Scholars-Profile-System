@@ -4,7 +4,7 @@
  * present either way; only report 7 has a default description — the former
  * "Sources" disclosure); a present row wins ENTIRELY, a stored NULL
  * description included (so a superuser can clear 7's default); `isReportKey`
- * accepts exactly the seven string keys (never the number, never "");
+ * accepts exactly the eight string keys (never the number, never "");
  * `reportLabel` is `"N. Name"`; `reportPageMetadata` is the console `<title>`
  * pattern with noindex. `@/lib/db` is mocked at the module boundary — this
  * suite asserts the merge, not Prisma. The migration stays DDL-only (#584,
@@ -111,7 +111,7 @@ describe("loadReportMeta", () => {
       summary: REPORT_META_DEFAULTS["4"].summary,
       descriptionHtml: null,
     });
-    expect(meta.size).toBe(7);
+    expect(meta.size).toBe(8);
   });
 
   it("a row the catalog doesn't know is ignored, not added", async () => {
@@ -119,7 +119,7 @@ describe("loadReportMeta", () => {
       { reportKey: "99", name: "X", summary: "Y", descriptionHtml: null },
     ]);
     const meta = await loadReportMeta();
-    expect(meta.size).toBe(7);
+    expect(meta.size).toBe(8);
     expect(meta.has("99" as never)).toBe(false);
   });
 
@@ -136,7 +136,7 @@ describe("isReportKey", () => {
   it.each(["1", "2", "3", "4", "5", "6", "7"])("accepts %j", (v) => {
     expect(isReportKey(v)).toBe(true);
   });
-  it.each(["8", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
+  it.each(["9", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
     expect(isReportKey(v)).toBe(false);
   });
 });

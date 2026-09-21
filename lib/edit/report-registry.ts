@@ -40,6 +40,7 @@
  */
 import type * as React from "react";
 
+import { renderArticleCountReport } from "@/components/edit/reports/article-count-body";
 import { renderClinicalTrialsReport } from "@/components/edit/reports/clinical-trials-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -85,6 +86,16 @@ export type PersonReportProps = {
   basePath: string;
 };
 
+/** What an administrator-gated body (report 8) is handed: the gate is
+ *  `canViewArticleCountReport` (any unit administrator), nothing to scope. */
+export type AdminReportProps = {
+  n: ReportKey;
+  session: EditSession;
+  searchParams: ReportSearchParams;
+  /** See `UnitReportProps.basePath`. */
+  basePath: string;
+};
+
 /** What a body returns. `subtitle` becomes `ReportHeader`'s children (the
  *  page's dynamic `<p>` between the h1 and the "About this report"
  *  disclosure — reports 3–7 have one, 1–2 none); `main` renders after the
@@ -107,6 +118,13 @@ export type ReportDef =
       /** The `report_access.report_key` the gate reads (`getReportScopes`). */
       accessKey: string;
       render: (props: PersonReportProps) => Promise<ReportRender>;
+    }
+  | {
+      n: ReportKey;
+      /** Any unit administrator (`canViewArticleCountReport`); a denied actor
+       *  gets `notFound()`, like the person gate. */
+      gate: "admin";
+      render: (props: AdminReportProps) => Promise<ReportRender>;
     };
 
 /** Every report, by `report_meta.report_key`. Reports 1–6 are unit-gated;
@@ -124,6 +142,7 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     accessKey: MENTORED_PUBS_REPORT,
     render: renderMentoredPublicationsReport,
   },
+  "8": { n: "8", gate: "admin", render: renderArticleCountReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page

@@ -20,8 +20,10 @@ const {
   mockGetReportScopes,
   mockListReportAccess,
   mockReportMetaFindMany,
+  mockCanViewArticleCount,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
+  mockCanViewArticleCount: vi.fn(),
   mockNotFound: vi.fn(() => {
     throw new Error("__NOT_FOUND__");
   }),
@@ -75,6 +77,9 @@ vi.mock("@/lib/edit/report-access", () => ({
     ["md", "AOC"],
   ],
 }));
+// Report 8 (Article counts) rides the administrator gate — default: denied,
+// so the pinned unit lists below stay exactly the program-row cases.
+vi.mock("@/lib/edit/article-count-report", () => ({ canViewArticleCountReport: mockCanViewArticleCount }));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.
 vi.mock("@/lib/db", () => ({
@@ -111,6 +116,7 @@ beforeEach(() => {
   mockGetReportScopes.mockResolvedValue(new Set());
   mockListReportAccess.mockResolvedValue([]);
   mockReportMetaFindMany.mockResolvedValue([]);
+  mockCanViewArticleCount.mockResolvedValue(false);
 });
 
 describe("/edit/reports — Gap 5: zero reportable units", () => {
@@ -121,6 +127,19 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     const index = findByType(result, mockReportsIndex);
     expect(index).not.toBeNull();
     expect(index!.props.units).toEqual([]);
+  });
+
+  it("an administrator (canViewArticleCountReport) with zero unit grants → the institution row (report 8) alone, no 404; its href never carries a unit", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockCanViewArticleCount.mockResolvedValue(true);
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    expect(mockNotFound).not.toHaveBeenCalled();
+    const index = findByType(result, mockReportsIndex);
+    const units = index!.props.units as Array<{ kind: string; code: string; reports: Array<{ n: number; slug: string; access: unknown }> }>;
+    expect(units.map((u) => u.kind)).toEqual(["institution"]);
+    expect(units[0].reports.map((r) => r.n)).toEqual([8]);
+    expect(units[0].reports[0].slug).toBe("article-count");
+    expect(units[0].reports[0].access).toEqual({ mode: "admin" });
   });
 
   it("scoped Owner/Curator with zero grants → still 404s", async () => {

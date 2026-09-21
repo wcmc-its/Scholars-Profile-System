@@ -34,9 +34,10 @@ describe("REPORTS", () => {
     }
   });
 
-  it("reports 1–6 are unit-gated; exactly one person-gated def, report 7 on MENTORED_PUBS_REPORT", () => {
+  it("reports 1–6 are unit-gated; exactly one person-gated def, report 7 on MENTORED_PUBS_REPORT; 8 is admin-gated", () => {
     const person = REPORT_KEYS.filter((k) => REPORTS[k].gate === "person");
     expect(person).toEqual(["7"]);
+    expect(REPORTS["8"].gate).toBe("admin");
     const seven = REPORTS["7"];
     expect(seven.gate === "person" && seven.accessKey).toBe(MENTORED_PUBS_REPORT);
     for (const key of ["1", "2", "3", "4", "5", "6"] as const) {
@@ -54,8 +55,9 @@ describe("unitKindsFor", () => {
       "4": ["center"],
       "5": ["center"],
       "6": ["center", "department", "division", "core"],
-      // Report 7 is person-gated; no kind lists it.
+      // Report 7 is person-gated, 8 administrator-gated; no kind lists them.
       "7": [],
+      "8": [],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);
