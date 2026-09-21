@@ -133,7 +133,7 @@ export function ProfileLinksCard({
           </label>
         ))}
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" size="sm" disabled={busy} data-testid="profile-links-save">
+          <Button type="submit" variant="apollo" size="sm" disabled={busy} data-testid="profile-links-save">
             Save
           </Button>
           {saved && !error && (

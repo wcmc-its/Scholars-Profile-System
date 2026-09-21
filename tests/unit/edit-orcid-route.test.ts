@@ -16,6 +16,8 @@ const {
   mockUnitAdminFindMany,
   mockTransaction,
   mockTxScholarUpdate,
+  mockTxCandidateDeleteMany,
+  mockTxCandidateFindFirst,
   mockTxExecuteRaw,
   mockReflectOverviewEdit,
   mockReciterQuery,
@@ -29,6 +31,8 @@ const {
   mockUnitAdminFindMany: vi.fn(),
   mockTransaction: vi.fn(),
   mockTxScholarUpdate: vi.fn(),
+  mockTxCandidateDeleteMany: vi.fn(),
+  mockTxCandidateFindFirst: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
   mockReciterQuery: vi.fn(),
@@ -70,7 +74,11 @@ process.env.SELF_EDIT_ORCID_SUGGESTION = "on";
 const SELF = { cwid: "self01", isSuperuser: false, isCommsSteward: false };
 const OTHER = { cwid: "other9", isSuperuser: false, isCommsSteward: false };
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
-const fakeTx = { scholar: { update: mockTxScholarUpdate }, $executeRaw: mockTxExecuteRaw };
+const fakeTx = {
+  scholar: { update: mockTxScholarUpdate },
+  orcidCandidate: { deleteMany: mockTxCandidateDeleteMany, findFirst: mockTxCandidateFindFirst },
+  $executeRaw: mockTxExecuteRaw,
+};
 const ID = "0000-0002-1825-0097";
 
 function post(body: unknown): NextRequest {
@@ -93,6 +101,7 @@ beforeEach(() => {
   mockUnitAdminFindMany.mockResolvedValue([]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockTxScholarUpdate.mockResolvedValue({});
+  mockTxCandidateFindFirst.mockResolvedValue(null);
   mockTxExecuteRaw.mockResolvedValue(1);
   mockReflectOverviewEdit.mockResolvedValue(undefined);
   mockReciterQuery.mockResolvedValue({ affectedRows: 1 });
@@ -149,6 +158,36 @@ describe("POST /api/edit/orcid", () => {
     expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
     // Order: ReciterDB before the SPS transaction.
     expect(mockWithReciterConnection.mock.invocationCallOrder[0]).toBeLessThan(mockTransaction.mock.invocationCallOrder[0]);
+  });
+
+  it("orcid: null REMOVES: admin_orcid DELETE, scholar.orcid null, the rpm_admin mirror row dropped, one audit row", async () => {
+    // The removed iD is on the rpm_admin mirror row, NOT scholar.orcid (NULL for WCM).
+    mockTxCandidateFindFirst.mockResolvedValue({ orcid: ID });
+    const res = await POST(post({ cwid: "self01", orcid: null }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).orcid).toBeNull();
+    expect(mockReciterQuery).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM admin_orcid"), ["self01"]);
+    expect(mockReciterQuery).not.toHaveBeenCalledWith(expect.stringContaining("INSERT"), expect.anything());
+    expect(mockTxScholarUpdate).toHaveBeenCalledWith({ where: { cwid: "self01" }, data: { orcid: null } });
+    expect(mockTxCandidateDeleteMany).toHaveBeenCalledWith({ where: { cwid: "self01", source: "rpm_admin" } });
+    expect(mockTxExecuteRaw).toHaveBeenCalledTimes(1);
+    // The audit row names the iD that went (before) and marks the remove (after).
+    const args = mockTxExecuteRaw.mock.calls[0] as unknown[];
+    expect(args.some((v) => typeof v === "string" && v.includes(ID))).toBe(true);
+    expect(args.some((v) => typeof v === "string" && v.includes('"removed":true'))).toBe(true);
+    expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
+  });
+
+  it("a set never touches the rpm_admin mirror row", async () => {
+    const res = await POST(post({ cwid: "self01", orcid: ID }));
+    expect(res.status).toBe(200);
+    expect(mockTxCandidateDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("400 on a non-string, non-null orcid; nothing written", async () => {
+    const res = await POST(post({ cwid: "self01", orcid: 123 }));
+    expect(res.status).toBe(400);
+    expect(mockWithReciterConnection).not.toHaveBeenCalled();
   });
 
   it("502 and NO SPS write when ReciterDB is unreachable (fail closed)", async () => {

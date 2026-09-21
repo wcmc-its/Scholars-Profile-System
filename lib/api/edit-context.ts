@@ -52,6 +52,7 @@ import type { SubjectType } from "@/lib/coi-gap/mention";
 import { relationshipKinds as deriveRelationshipKinds } from "@/lib/coi-gap/pipeline";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { orcidVerdict, SUGGEST_MIN_ACCEPTED, type OrcidVerdict } from "@/lib/edit/orcid-coverage";
+import type { OrcidEvidence } from "@/lib/edit/orcid";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
@@ -632,6 +633,9 @@ export type EditContextHistoricalAppointment = {
   showOnProfile: boolean;
 };
 
+/** One `orcid_candidate` row with its iD, for the per-source evidence lines. */
+export type OrcidEvidenceRow = OrcidEvidence & { orcid: string };
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
@@ -704,6 +708,10 @@ export type EditContext = {
    *  `opts.includeOrcidSuggestion === true` (`SELF_EDIT_ORCID_SUGGESTION`); null for
    *  every other caller, in which case the ORCID row falls back to `scholar.orcid`. */
   orcidVerdict: OrcidVerdict | null;
+  /** The raw `orcid_candidate` rows behind `orcidVerdict` (same gate), so the
+   *  Identifiers & Profiles card can say WHY an iD is suggested, per source, and
+   *  keep saying it under the iD once it is on file. `[]` when not loaded. */
+  orcidCandidates: ReadonlyArray<OrcidEvidenceRow>;
   /**
    * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
    * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
@@ -1749,12 +1757,19 @@ export async function loadEditContext(
   // mirror folded by the same rule the coverage console uses, at the row's lower
   // support bar (one accepted article is enough to ask; the console counts 3).
   let orcidVerdictValue: OrcidVerdict | null = null;
+  let orcidCandidateRows: OrcidEvidenceRow[] = [];
   if (opts?.includeOrcidSuggestion === true) {
     const rows = await client.orcidCandidate.findMany({
       where: { cwid },
       select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true },
     });
     orcidVerdictValue = orcidVerdict(rows, SUGGEST_MIN_ACCEPTED);
+    orcidCandidateRows = rows.map((r) => ({
+      orcid: r.orcid,
+      source: r.source,
+      accepted: r.articlesAccepted,
+      rejected: r.articlesRejected,
+    }));
   }
 
   const menteeSuggestions: EditContextMenteeSuggestion[] = [];
@@ -1964,6 +1979,7 @@ export async function loadEditContext(
       manualMenteeUnresolvedCwids,
       menteeSuggestions,
       orcidVerdict: orcidVerdictValue,
+      orcidCandidates: orcidCandidateRows,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
@@ -2137,6 +2153,7 @@ export async function loadEditContext(
     manualMenteeUnresolvedCwids,
     menteeSuggestions,
     orcidVerdict: orcidVerdictValue,
+    orcidCandidates: orcidCandidateRows,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,

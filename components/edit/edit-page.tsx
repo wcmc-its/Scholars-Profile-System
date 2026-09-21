@@ -28,6 +28,7 @@ import { HighlightsCard } from "@/components/edit/highlights-card";
 import { ManualMenteesCard } from "@/components/edit/manual-mentees-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel, type OrcidRowState } from "@/components/edit/home-panel";
+import { orcidVerdict, SUGGEST_MIN_ACCEPTED } from "@/lib/edit/orcid-coverage";
 import { ORCID_MANAGE_URL, resolveSelfServiceHref } from "@/lib/edit/request-a-change";
 import { OrcidCard } from "@/components/edit/orcid-card";
 import { ProfileLinksCard } from "@/components/edit/profile-links-card";
@@ -979,10 +980,39 @@ export function EditPage({
  *  strong-inferred iD becomes the "Is this yours?" suggestion. */
 function orcidRowState(ctx: EditContext): OrcidRowState {
   const v = ctx.orcidVerdict;
+  const onFile = ctx.scholar.orcid ?? (v?.tier === "asserted" ? v.orcid : null);
+  const evidenceFor = (id: string) =>
+    ctx.orcidCandidates
+      .filter((c) => c.orcid === id)
+      .map(({ source, accepted, rejected }) => ({ source, accepted, rejected }));
+  // The verdict folds an `rpm_admin` row to "asserted" and never suggests past
+  // it, and the on-file iD's own rows can out-vote a rival; with an iD on file,
+  // re-fold every row about OTHER iDs so a strong candidate that DISAGREES with
+  // the on-file iD still surfaces ("we also found").
+  let suggested = v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null;
+  if ((!suggested || suggested.orcid === onFile) && onFile && ctx.orcidCandidates.length > 0) {
+    const inferred = orcidVerdict(
+      ctx.orcidCandidates
+        .filter((c) => c.orcid !== onFile)
+        .map((c) => ({
+          cwid: ctx.scholar.cwid,
+          orcid: c.orcid,
+          source: c.source,
+          articlesAccepted: c.accepted,
+          articlesRejected: c.rejected,
+        })),
+      SUGGEST_MIN_ACCEPTED,
+    );
+    suggested =
+      inferred.tier === "strong" && inferred.orcid
+        ? { orcid: inferred.orcid, accepted: inferred.accepted }
+        : null;
+  }
+  if (suggested && suggested.orcid === onFile) suggested = null;
   return {
-    onFile: ctx.scholar.orcid ?? (v?.tier === "asserted" ? v.orcid : null),
-    suggested:
-      v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null,
+    onFile,
+    onFileEvidence: onFile ? evidenceFor(onFile) : [],
+    suggested: suggested ? { ...suggested, evidence: evidenceFor(suggested.orcid) } : null,
   };
 }
 
@@ -1383,6 +1413,7 @@ function renderPanel(
               mode={voiceMode}
               scholarName={scholarName}
               onFile={row.onFile}
+              onFileEvidence={row.onFileEvidence}
               suggested={row.suggested}
             />
           )}
