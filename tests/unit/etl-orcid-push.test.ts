@@ -19,10 +19,18 @@ vi.mock("@/lib/reciter/client", async (importOriginal) => {
 // The module imports `db` for main(); never touched by the pure paths under test.
 vi.mock("../../lib/db", () => ({ db: { write: {} } }));
 
-import { decide, exceedsFailureThreshold, runActions, type PushAction } from "@/etl/orcid-push/index";
+import {
+  buildActions,
+  decide,
+  exceedsFailureThreshold,
+  runActions,
+  type PushAction,
+} from "@/etl/orcid-push/index";
 
+// ORCID's documentation example iD, and a synthetic checksum-valid one (ISO 7064 MOD 11-2
+// check digit 9). Neither is a person; the repo is public.
 const ID = "0000-0002-1825-0097";
-const OTHER = "0000-0001-5109-3700";
+const OTHER = "0000-0001-2345-6789";
 const CONFIG = { baseUrl: "http://reciter.invalid", apiKey: "x" };
 
 /** An Identity record as the engine serves it: top-level orcid, other fields opaque. */
@@ -76,21 +84,65 @@ describe("orcid-push decide (pure)", () => {
   });
 });
 
+describe("orcid-push buildActions (pure)", () => {
+  it("targets first, then dismissals, cwids lowercased", () => {
+    const { actions, contradictions } = buildActions(
+      [{ cwid: "BBB2222", orcid: ID }, { cwid: "aaa1111", orcid: ID }],
+      [{ cwid: "CCC3333", orcid: OTHER }],
+    );
+    expect(actions).toEqual([
+      { kind: "target", cwid: "bbb2222", orcid: ID },
+      { kind: "target", cwid: "aaa1111", orcid: ID },
+      { kind: "dismissal", cwid: "ccc3333", orcid: OTHER },
+    ]);
+    expect(contradictions).toEqual([]);
+  });
+
+  it("a target whose exact (cwid, orcid) is also dismissed is DROPPED and counted; the dismissal stays", () => {
+    // The person said "Not me" to X but scholar.orcid still holds X (a row re-imported before the
+    // identity ETL knew about dismissals). Pushing X and clearing X the same night was the
+    // 2-POSTs-per-night ping-pong; the dismissal is the person's word, so only it survives.
+    const { actions, contradictions } = buildActions(
+      [{ cwid: "abc1234", orcid: ID }],
+      [{ cwid: "ABC1234", orcid: ID }],
+    );
+    expect(actions).toEqual([{ kind: "dismissal", cwid: "abc1234", orcid: ID }]);
+    expect(contradictions).toEqual(["abc1234"]);
+  });
+
+  it("a dismissal of a DIFFERENT iD for the same person does not block the target (confirmed Y, dismissed X)", () => {
+    const { actions, contradictions } = buildActions(
+      [{ cwid: "abc1234", orcid: OTHER }],
+      [{ cwid: "abc1234", orcid: ID }],
+    );
+    // Y is pushed first; the dismissal of X then reads Identity=Y ≠ X → skip. One night, converged.
+    expect(actions).toEqual([
+      { kind: "target", cwid: "abc1234", orcid: OTHER },
+      { kind: "dismissal", cwid: "abc1234", orcid: ID },
+    ]);
+    expect(contradictions).toEqual([]);
+  });
+});
+
 describe("orcid-push failure threshold", () => {
-  it("zero checked always fails — a dead API and an empty set are indistinguishable from here", () => {
-    expect(exceedsFailureThreshold(0, 0)).toBe(true);
-    expect(exceedsFailureThreshold(0, 7)).toBe(true);
+  it("an EMPTY action set is a green 0-row success, never a failure (prod today has no iD on file)", () => {
+    expect(exceedsFailureThreshold(0, 0, 0)).toBe(false);
+  });
+
+  it("work to do and zero checked = a dead API → fails", () => {
+    expect(exceedsFailureThreshold(0, 0, 1)).toBe(true);
+    expect(exceedsFailureThreshold(0, 7, 7)).toBe(true);
   });
 
   it("tolerates up to max(2, 10%) failures and fails past it", () => {
     // Small sets: the floor of 2 applies.
-    expect(exceedsFailureThreshold(5, 2)).toBe(false);
-    expect(exceedsFailureThreshold(5, 3)).toBe(true);
+    expect(exceedsFailureThreshold(5, 2, 7)).toBe(false);
+    expect(exceedsFailureThreshold(5, 3, 8)).toBe(true);
     // Large sets: 10% applies (100 checked → 10 allowed, 11 not).
-    expect(exceedsFailureThreshold(100, 10)).toBe(false);
-    expect(exceedsFailureThreshold(100, 11)).toBe(true);
+    expect(exceedsFailureThreshold(100, 10, 110)).toBe(false);
+    expect(exceedsFailureThreshold(100, 11, 111)).toBe(true);
     // Healthy.
-    expect(exceedsFailureThreshold(1, 0)).toBe(false);
+    expect(exceedsFailureThreshold(1, 0, 1)).toBe(false);
   });
 });
 
@@ -170,7 +222,7 @@ describe("orcid-push runActions (client mocked)", () => {
     getIdentityByUid.mockRejectedValue(new Error("fetch failed"));
     const { counts } = await runActions([target(), dismissal()], CONFIG, { dryRun: true, gapMs: 0 });
     expect(counts).toMatchObject({ checked: 0, failed: 2 });
-    expect(exceedsFailureThreshold(counts.checked, counts.failed)).toBe(true);
+    expect(exceedsFailureThreshold(counts.checked, counts.failed, 2)).toBe(true);
     warn.mockRestore();
   });
 

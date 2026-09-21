@@ -14,10 +14,19 @@
  *   - every active scholar with a non-null `orcid` (whichever writer set it):
  *     GET the Identity record; no record → `no_identity`; same iD → `equal`;
  *     else set `orcid` on the record and POST it back → `pushed`.
+ *     DELIBERATE WIDENING of the spec/handoff's "every scholar with
+ *     `orcid_confirmed_at` set": an Identity-sourced value SPS still holds is
+ *     re-healed after the IC wipe too, and the step stays a pure mirror of
+ *     `scholar.orcid` (one writer of that column in Identity, not two rules).
  *   - every `orcid_dismissal` row ("Not me" / Remove in SPS): GET the record;
  *     if Identity still holds exactly the dismissed iD → set it null and POST
  *     → `cleared`; anything else → `skip` (a different iD there is someone
  *     else's write, not ours to undo).
+ *   - a target whose (cwid, orcid) ALSO has a dismissal row is a contradiction
+ *     (the person said "Not me" to the iD SPS holds): the target is dropped
+ *     (never pushed) and the dismissal kept, so Identity ends up without it.
+ *     Counted as `contradiction` in the log; without this the same night both
+ *     pushed X and cleared X — two POSTs per person, forever.
  * Idempotent by construction, so it can run forever: a night the IC wipes the
  * value is a night this pushes it again, and once the IC preserves it every
  * row reads `equal`. The POST sends the GET result back with only `orcid`
@@ -25,9 +34,11 @@
  *
  * Fails LOUD on a dead API. Any GET/POST failure is counted and the loop
  * continues, but at the end the run throws (a failed EtlRun, non-zero exit,
- * the nightly's continue-tier Catch) when nothing could be checked at all or
- * more than max(2, 10%) of the checks failed. A run that could not reach
- * ReCiter must never grade green on /edit/etl-status.
+ * the nightly's continue-tier Catch) when there was work and none of it could
+ * be checked, or more than max(2, 10%) of the checks failed. A run that could
+ * not reach ReCiter must never grade green on /edit/etl-status. An EMPTY
+ * action set (no iD on file anywhere, no dismissals — prod today) is a green
+ * 0-row success, not an alarm: the API was never needed.
  *
  * Runs ONLY on the `sps-etl-reciter-api-<env>` task family — the one that
  * carries the ReCiter ADMIN key (`scholars/<env>/reciter-api` → RECITER_API_*),
@@ -37,7 +48,9 @@
  * `--dry-run` / `ORCID_PUSH_DRY_RUN=1`: GETs only, no POSTs; prints what would
  * change as counts + cwids (never names, never the iDs).
  *
- * Usage: `npm run etl:orcid-push` (nightly step OrcidPush, right after Identity).
+ * Usage: `npm run etl:orcid-push` (nightly step OrcidPush, right BEFORE Identity —
+ * push-then-pull, so the pull never mistakes our own last push for a foreign
+ * change and reverts a confirmation; see the step comment in cdk/lib/etl-stack.ts).
  */
 import { db } from "../../lib/db";
 import { withEtlRun } from "@/lib/etl-run";
@@ -82,12 +95,45 @@ export function decide(
 }
 
 /**
- * Pure: whether the run must fail. `checked` = actions whose GET returned an
- * answer (a record or a 404); `failed` = GETs/POSTs that threw. Zero checked
- * means either nothing to do or a dead API, and the two are indistinguishable
- * from here — so it fails, and the message says which it was.
+ * Pure: the action list from the two DB reads. Targets first, then dismissals
+ * (so a person with target Y + dismissal X gets Y pushed, then X read as
+ * "different, skip"). A target whose exact (cwid, orcid) pair is also
+ * dismissed is a contradiction and is DROPPED — the dismissal is the person's
+ * word, the target is a stale row (e.g. re-imported before the identity ETL
+ * learned about dismissals) — and counted so the log shows it.
  */
-export function exceedsFailureThreshold(checked: number, failed: number): boolean {
+export function buildActions(
+  targets: ReadonlyArray<{ cwid: string; orcid: string }>,
+  dismissals: ReadonlyArray<{ cwid: string; orcid: string }>,
+): { actions: PushAction[]; contradictions: string[] } {
+  // Identity uids are lowercase cwids; scholar.cwid is too (10,814/10,815), lowercase anyway.
+  const key = (cwid: string, orcid: string) => `${cwid.toLowerCase()}\u0000${orcid}`;
+  const dismissedKeys = new Set(dismissals.map((d) => key(d.cwid, d.orcid)));
+  const contradictions: string[] = [];
+  const actions: PushAction[] = [];
+  for (const t of targets) {
+    const cwid = t.cwid.toLowerCase();
+    if (dismissedKeys.has(key(cwid, t.orcid))) {
+      contradictions.push(cwid);
+      continue;
+    }
+    actions.push({ kind: "target", cwid, orcid: t.orcid });
+  }
+  for (const d of dismissals) {
+    actions.push({ kind: "dismissal", cwid: d.cwid.toLowerCase(), orcid: d.orcid });
+  }
+  return { actions, contradictions };
+}
+
+/**
+ * Pure: whether the run must fail. `checked` = actions whose GET returned an
+ * answer (a record or a 404); `failed` = GETs/POSTs that threw; `actions` =
+ * how many there were to do. Work to do and zero checked = a dead API → fail.
+ * Nothing to do (`actions === 0`) = a green 0-row success — the API was never
+ * needed, and a standing red on an empty set would be a false alarm.
+ */
+export function exceedsFailureThreshold(checked: number, failed: number, actions: number): boolean {
+  if (actions === 0) return false;
   if (checked === 0) return true;
   return failed > Math.max(2, checked * 0.1);
 }
@@ -168,22 +214,18 @@ async function main(): Promise<number> {
     select: { cwid: true, orcid: true },
     orderBy: [{ cwid: "asc" }, { orcid: "asc" }],
   });
-  // Identity uids are lowercase cwids; scholar.cwid is too (10,814/10,815), lowercase anyway.
-  const actions: PushAction[] = [
-    ...targets.map((s) => ({
-      kind: "target" as const,
-      cwid: s.cwid.toLowerCase(),
-      orcid: s.orcid as string,
-    })),
-    ...dismissals.map((d) => ({
-      kind: "dismissal" as const,
-      cwid: d.cwid.toLowerCase(),
-      orcid: d.orcid,
-    })),
-  ];
-  console.log(
-    `orcid-push${dryRun ? " (DRY RUN)" : ""}: ${targets.length} scholar(s) with an iD on file, ${dismissals.length} dismissal(s).`,
+  const { actions, contradictions } = buildActions(
+    targets.map((s) => ({ cwid: s.cwid, orcid: s.orcid as string })),
+    dismissals,
   );
+  console.log(
+    `orcid-push${dryRun ? " (DRY RUN)" : ""}: ${targets.length} scholar(s) with an iD on file, ${dismissals.length} dismissal(s), ` +
+      `${contradictions.length} contradiction(s) (iD on file that the person dismissed — not pushed).`,
+  );
+  if (contradictions.length > 0) {
+    // cwids only, never the iDs; the fix is on the scholar row (clear the dismissed iD).
+    console.warn(`orcid-push: scholar.orcid equals a dismissed iD for: ${contradictions.join(", ")}`);
+  }
 
   const { counts, changed } = await runActions(actions, config, { dryRun });
 
@@ -197,11 +239,10 @@ async function main(): Promise<number> {
     console.log(`orcid-push (DRY RUN) would change: ${changed.join(", ")}`);
   }
 
-  if (exceedsFailureThreshold(counts.checked, counts.failed)) {
+  if (exceedsFailureThreshold(counts.checked, counts.failed, actions.length)) {
     throw new Error(
       counts.checked === 0
-        ? `orcid-push checked 0 identities (${actions.length} action(s), ${counts.failed} failed) — ` +
-          (actions.length === 0 ? "nothing to compare" : "the ReCiter API is unreachable")
+        ? `orcid-push checked 0 identities (${actions.length} action(s), ${counts.failed} failed) — the ReCiter API is unreachable`
         : `orcid-push: ${counts.failed} of ${counts.checked + counts.failed} ReCiter call(s) failed — over the max(2, 10%) threshold`,
     );
   }

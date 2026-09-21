@@ -1466,23 +1466,31 @@ export class EtlStack extends Stack {
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true, tier: "abort" },
+      // scholar.orcid → WCM Identity through the ReCiter engine API. After
+      // Dynamodb (scholar rows exist) and BEFORE Identity, on purpose: the pull
+      // below applies "Identity wins" to any confirmed iD that differs from the
+      // record, and Identity carries no write timestamp, so pull-then-push would
+      // read SPS's OWN previous night's push as a foreign change and revert a
+      // confirmation the person made in /edit that day (Y → X, confirmation
+      // cleared, Y never reaches Identity). Push-then-pull writes Y first, the
+      // pull then reads `unchanged`, and `conflict` fires only when someone
+      // else changed Identity between the two steps — the one case where
+      // "Identity wins" means anything. On the reciter-api def
+      // (RECITER_API_SCRIPTS) because it needs the ADMIN key, which no other
+      // cadence step carries. Compare-then-write is what makes it safe to run
+      // forever: the Institutional Client's rebuild still nulls Identity.orcid
+      // nightly (IC #155), so this re-heals the wipe each morning until that fix
+      // ships, then reads `equal`. tier:"continue" — a missed night leaves
+      // Identity as the IC left it; the step itself throws on a dead API, so the
+      // freshness row stays honest.
+      { id: "OrcidPush", npmScript: "etl:orcid-push", external: true, tier: "continue" },
       // #918 — populate Scholar.orcid from the WCM Identity table (DynamoDB
       // Scan, external:true). After Dynamodb (scholars exist; both are DynamoDB
-      // scans); ORCID feeds the profile JSON-LD `sameAs`, not the search index,
-      // so there's no SearchIndex ordering dependency. Never NULLs an existing
-      // orcid — Identity may lag ED — so re-running nightly only self-heals.
+      // scans) and after OrcidPush (see above); ORCID feeds the profile JSON-LD
+      // `sameAs`, not the search index, so there's no SearchIndex ordering
+      // dependency. Never NULLs an existing orcid — Identity may lag ED — so
+      // re-running nightly only self-heals.
       { id: "Identity", npmScript: "etl:identity", external: true, tier: "continue" },
-      // scholar.orcid → WCM Identity through the ReCiter engine API. Right after
-      // Identity so one night's log reads pull-then-push: whatever Identity gave
-      // us (or an iD confirmed in /edit) is compared against the record and
-      // written only when it differs. On the reciter-api def (RECITER_API_SCRIPTS)
-      // because it needs the ADMIN key, which no other cadence step carries.
-      // Compare-then-write is what makes it safe to run forever: the Institutional
-      // Client's rebuild still nulls Identity.orcid nightly (IC #155), so this
-      // re-heals the wipe each morning until that fix ships, then reads `equal`.
-      // tier:"continue" — a missed night leaves Identity as the IC left it; the
-      // step itself throws on a dead API, so the freshness row stays honest.
-      { id: "OrcidPush", npmScript: "etl:orcid-push", external: true, tier: "continue" },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
       // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task

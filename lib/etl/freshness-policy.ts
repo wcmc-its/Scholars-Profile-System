@@ -146,7 +146,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_name); weekly step.
   "ORCID-registry": { cadence: "weekly" },
   // scholar.orcid → WCM Identity via the ReCiter API (etl/orcid-push), the nightly
-  // OrcidPush step right after Identity in BOTH envs (no env split; the reciter-api
+  // OrcidPush step right BEFORE Identity in BOTH envs (push-then-pull, so the pull
+  // never reads our own last push as a conflict; no env split; the reciter-api
   // secret is seeded in each). Compare-then-write, so a healthy night is mostly
   // `equal`; the step throws on a dead API rather than grade green, which is why
   // its freshness row means something.

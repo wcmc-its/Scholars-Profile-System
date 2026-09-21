@@ -169,8 +169,24 @@ export interface ReciterIdentity {
 }
 
 /**
+ * The body ReCiter's IdentityController.findByUid sends with its 404 when the
+ * uid is simply not in the table: `The uid provided '<uid>' was not found in
+ * the Identity table`. Any OTHER 404 (Spring's generic not-found JSON for a
+ * wrong base path or a renamed route, a 404-ing proxy) is an outage, not "no
+ * record" — without this check a dead API read as N × `no_identity` and the
+ * run graded green.
+ */
+export const IDENTITY_NOT_FOUND_MARKER = "was not found in the Identity table";
+
+/** Is this 404 body ReCiter's own "uid not in the Identity table"? Exported for the unit test. */
+export function isIdentityNotFoundBody(body: string): boolean {
+  return body.includes(IDENTITY_NOT_FOUND_MARKER);
+}
+
+/**
  * Fetch one Identity record by uid (the scholar's cwid, lowercase). `null` on
- * a 404 (no record — a person Identity has never seen). Throws on any other
+ * ReCiter's own not-found 404 (no record — a person Identity has never seen;
+ * see `IDENTITY_NOT_FOUND_MARKER`). Throws on any other 404, any other
  * non-2xx, a timeout, or a 200 whose body is not an Identity (no `uid`), so a
  * caller can count it as a failure rather than mistake it for "no record".
  */
@@ -186,7 +202,14 @@ export async function getIdentityByUid(
     headers: { accept: "application/json", "api-key": config.apiKey },
     signal: AbortSignal.timeout(opts.timeoutMs ?? IDENTITY_API_TIMEOUT_MS),
   });
-  if (res.status === 404) return null;
+  if (res.status === 404) {
+    const text = await res.text().catch(() => "");
+    if (isIdentityNotFoundBody(text)) return null;
+    throw new Error(
+      `ReCiter identity GET for uid ${uid} returned a 404 that is not "not in the Identity table" ` +
+        `(wrong RECITER_API_BASE_URL path or route?): ${bodySnippet(text)}`,
+    );
+  }
   if (!res.ok) {
     throw new Error(
       `ReCiter identity GET failed for uid ${uid}: ${res.status} ${res.statusText}`,
@@ -199,11 +222,22 @@ export async function getIdentityByUid(
   return body as ReciterIdentity;
 }
 
+/** First 200 chars of a response body, whitespace collapsed, for an error message ("" when empty). */
+function bodySnippet(text: string): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 200 ? `${t.slice(0, 200)}…` : t;
+}
+
 /**
  * Replace one Identity record (POST /reciter/identity/ — the single-item save
  * the Institutional Client uses; the engine has no `/reciter/save/identity`).
- * Send the object `getIdentityByUid` returned, modified; the engine validates
- * only that `uid` is present. Throws on a non-2xx or a timeout.
+ * Send the object `getIdentityByUid` returned, modified. The engine runs
+ * validateMandatoryFields (uid, plus firstName/firstInitial/lastName on EVERY
+ * alternateName) and answers 500 with a plain-text message naming the missing
+ * field — a stored record with an incomplete alternate name can never be
+ * round-tripped, and that is a source-data problem, not the push's. The body
+ * is included in the thrown error so the operator can tell the two apart.
+ * Throws on a non-2xx or a timeout.
  */
 export async function saveIdentity(
   config: ReciterApiConfig,
@@ -218,8 +252,10 @@ export async function saveIdentity(
     signal: AbortSignal.timeout(opts.timeoutMs ?? IDENTITY_API_TIMEOUT_MS),
   });
   if (!res.ok) {
+    const text = await res.text().catch(() => "");
     throw new Error(
-      `ReCiter identity POST failed for uid ${identity.uid}: ${res.status} ${res.statusText}`,
+      `ReCiter identity POST failed for uid ${identity.uid}: ${res.status} ${res.statusText}` +
+        (text ? ` — ${bodySnippet(text)}` : ""),
     );
   }
 }

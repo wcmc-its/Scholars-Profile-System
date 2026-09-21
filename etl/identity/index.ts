@@ -40,7 +40,16 @@
  *      change made in Publication Manager lands there) — so the row takes
  *      Identity's value AND `orcidConfirmedAt` is cleared (the confirmation
  *      was of a different iD). Counted as `conflict` in the summary line;
- *      the values themselves are never logged.
+ *      the values themselves are never logged. This only means something
+ *      because the nightly runs `etl/orcid-push` BEFORE this step: SPS's own
+ *      confirmation is already in Identity by the time it is read here, so a
+ *      difference is someone else's write, not our previous night's push.
+ *   5. Dismissal rule: a pair the person said "Not me" to (`orcid_dismissal`)
+ *      is NEVER re-imported, even when Identity still holds it (the push
+ *      clears it there; until it does, Identity is stale, not authoritative).
+ *      Without this the dismissed iD came back onto the public profile the
+ *      next morning and the push then flipped Identity X → null every night.
+ *      Counted as `dismissed`; nothing written.
  *
  * Env:
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (or AWS_REGION)
@@ -100,21 +109,31 @@ export type ScholarOrcidState = {
 /** The per-row outcome, so the rule is testable without a client. `update` is the plain
  *  backfill (SPS had nothing, or an unconfirmed different value); `conflict` is the case the
  *  header's step 4 describes — the person confirmed a DIFFERENT iD in SPS, Identity wins and
- *  the confirmation is cleared. */
+ *  the confirmation is cleared; `dismissed` is step 5 — the person said "Not me" to exactly
+ *  this iD, so it is never written back no matter what SPS currently holds. */
 export type IdentityDecision =
   | { kind: "skip" }
   | { kind: "invalid" }
   | { kind: "no_scholar" }
+  | { kind: "dismissed" }
   | { kind: "unchanged" }
   | { kind: "update"; cwid: string; orcid: string }
   | { kind: "conflict"; cwid: string; orcid: string };
 
+/** The Set key for one (cwid, orcid) dismissal pair; cwid lowercased to match the Map. */
+export function dismissalKey(cwid: string, orcid: string): string {
+  return `${cwid.toLowerCase()}\u0000${orcid}`;
+}
+
 /** Pure: one Identity item against SPS's current state. Never sees a NULL-orcid Identity
  *  row (the scan filter drops those), so it never has an "absent" branch — absence cannot
- *  overwrite anything, confirmed or not. */
+ *  overwrite anything, confirmed or not. `dismissed` = the `orcid_dismissal` pairs, keyed by
+ *  `dismissalKey`; checked before `unchanged` so a contradicted row (SPS somehow holds the
+ *  dismissed iD) still reads `dismissed`, never a write. */
 export function decideIdentityRow(
   row: IdentityRow,
   scholars: ReadonlyMap<string, ScholarOrcidState>,
+  dismissed: ReadonlySet<string> = new Set(),
 ): IdentityDecision {
   const cwid = cwidFromIdentityItem(row);
   const orcid = orcidFromIdentityItem(row);
@@ -122,6 +141,7 @@ export function decideIdentityRow(
   if (!ORCID_PATTERN.test(orcid)) return { kind: "invalid" };
   const current = scholars.get(cwid);
   if (!current) return { kind: "no_scholar" };
+  if (dismissed.has(dismissalKey(cwid, orcid))) return { kind: "dismissed" };
   if (current.orcid === orcid) return { kind: "unchanged" };
   if (current.orcidConfirmedAt !== null) return { kind: "conflict", cwid, orcid };
   return { kind: "update", cwid, orcid };
@@ -169,14 +189,21 @@ async function main() {
       ]),
     );
 
+    // "Not me" pairs (header step 5): never re-imported, whatever Identity says.
+    const dismissalRows = await db.write.orcidDismissal.findMany({
+      select: { cwid: true, orcid: true },
+    });
+    const dismissed = new Set(dismissalRows.map((d) => dismissalKey(d.cwid, d.orcid)));
+
     let updated = 0;
     let unchanged = 0;
     let invalidFormat = 0;
     let noScholar = 0;
     let conflict = 0;
+    let dismissedCount = 0;
 
     for (const row of rows) {
-      const d = decideIdentityRow(row, cwidToCurrent);
+      const d = decideIdentityRow(row, cwidToCurrent, dismissed);
       if (d.kind === "skip") continue;
       if (d.kind === "invalid") {
         invalidFormat += 1;
@@ -184,6 +211,10 @@ async function main() {
       }
       if (d.kind === "no_scholar") {
         noScholar += 1;
+        continue;
+      }
+      if (d.kind === "dismissed") {
+        dismissedCount += 1;
         continue;
       }
       if (d.kind === "unchanged") {
@@ -210,7 +241,7 @@ async function main() {
 
     const took = ((Date.now() - start) / 1000).toFixed(1);
     console.log(
-      `Identity ETL complete in ${took}s: ${updated} updated, ${unchanged} unchanged, ${conflict} conflict (Identity won over an SPS confirmation), ${invalidFormat} invalid, ${noScholar} no-scholar-row.`,
+      `Identity ETL complete in ${took}s: ${updated} updated, ${unchanged} unchanged, ${conflict} conflict (Identity won over an SPS confirmation), ${dismissedCount} dismissed (Not-me pair, not re-imported), ${invalidFormat} invalid, ${noScholar} no-scholar-row.`,
     );
 
     await db.write.etlRun.update({

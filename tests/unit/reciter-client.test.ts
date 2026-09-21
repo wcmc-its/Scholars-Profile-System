@@ -12,11 +12,14 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   fetchSuggestedArticles,
   formatSuggestionAuthors,
+  getIdentityByUid,
+  isIdentityNotFoundBody,
   isReciterRejectEnabled,
   isReciterApiConfigured,
   postGoldStandardReject,
   reciterApiConfig,
   runFeatureGenerator,
+  saveIdentity,
   withRetry,
 } from "@/lib/reciter/client";
 
@@ -113,6 +116,59 @@ describe("runFeatureGenerator", () => {
     expect(url.searchParams.get("useGoldStandard")).toBe("AS_EVIDENCE");
     expect(calledInit().method).toBe("GET");
     expect((calledInit().headers as Record<string, string>)["api-key"]).toBe("admin-secret");
+  });
+});
+
+describe("getIdentityByUid / saveIdentity (etl/orcid-push)", () => {
+  // The exact 404 body IdentityController.findByUid sends for a uid not in the table.
+  const NOT_FOUND_BODY = "The uid provided 'abc1234' was not found in the Identity table";
+  // Spring's generic not-found JSON — what a wrong base path, a renamed route or a proxy returns.
+  const ROUTE_404_BODY = JSON.stringify({ status: 404, error: "Not Found", path: "/reciter/find/identity/by/uid" });
+
+  it("GET: ReCiter's own not-found 404 → null (no record)", async () => {
+    fetchMock.mockResolvedValue(new Response(NOT_FOUND_BODY, { status: 404 }));
+    await expect(getIdentityByUid(CONFIG, "abc1234")).resolves.toBeNull();
+    const url = calledUrl();
+    expect(url.pathname).toBe("/reciter/find/identity/by/uid");
+    expect(url.searchParams.get("uid")).toBe("abc1234");
+    expect((calledInit().headers as Record<string, string>)["api-key"]).toBe("admin-secret");
+  });
+
+  it("GET: any OTHER 404 (wrong path / renamed route / 404-ing proxy) THROWS — it is an outage, not no_identity", async () => {
+    fetchMock.mockResolvedValue(new Response(ROUTE_404_BODY, { status: 404 }));
+    await expect(getIdentityByUid(CONFIG, "abc1234")).rejects.toThrow(/404 that is not "not in the Identity table"/);
+    fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
+    await expect(getIdentityByUid(CONFIG, "abc1234")).rejects.toThrow(/404/);
+  });
+
+  it("isIdentityNotFoundBody is the marker test the GET uses", () => {
+    expect(isIdentityNotFoundBody(NOT_FOUND_BODY)).toBe(true);
+    expect(isIdentityNotFoundBody(ROUTE_404_BODY)).toBe(false);
+    expect(isIdentityNotFoundBody("")).toBe(false);
+  });
+
+  it("GET: a 200 with an Identity body returns it; a 200 without a uid throws", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ uid: "abc1234", orcid: null, primaryName: { lastName: "B" } }), { status: 200 }),
+    );
+    await expect(getIdentityByUid(CONFIG, "abc1234")).resolves.toMatchObject({ uid: "abc1234", orcid: null });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: "ok" }), { status: 200 }));
+    await expect(getIdentityByUid(CONFIG, "abc1234")).rejects.toThrow(/without a uid/);
+  });
+
+  it("POST: a non-2xx throws with the response body in the message (the 500 names the missing mandatory field)", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("Field 'firstInitial' in AuthorName is required but not provided.", {
+        status: 500,
+        statusText: "Internal Server Error",
+      }),
+    );
+    await expect(saveIdentity(CONFIG, { uid: "abc1234", orcid: "0000-0002-1825-0097" })).rejects.toThrow(
+      /500 Internal Server Error — Field 'firstInitial' in AuthorName is required/,
+    );
+    expect(calledUrl().pathname).toBe("/reciter/identity/");
+    expect(calledInit().method).toBe("POST");
+    expect(JSON.parse(String(calledInit().body))).toEqual({ uid: "abc1234", orcid: "0000-0002-1825-0097" });
   });
 });
 

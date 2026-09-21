@@ -10,6 +10,7 @@ import {
   type ScholarOrcidState,
   cwidFromIdentityItem,
   decideIdentityRow,
+  dismissalKey,
   orcidFromIdentityItem,
 } from "@/etl/identity/index";
 
@@ -46,8 +47,10 @@ describe("identity ETL — nested identity.orcid", () => {
 });
 
 describe("identity ETL — per-row decision against SPS", () => {
+  // ORCID's documentation example iD, and a synthetic checksum-valid one (ISO 7064 MOD 11-2
+  // check digit 9). Neither is a person; the repo is public.
   const ID = "0000-0002-1825-0097";
-  const OTHER = "0000-0001-5109-3700";
+  const OTHER = "0000-0001-2345-6789";
   const state = (
     orcid: string | null,
     orcidConfirmedAt: Date | null = null,
@@ -124,5 +127,68 @@ describe("identity ETL — per-row decision against SPS", () => {
     // the summary counter on — a plain `update` here would keep a confirmation of the
     // wrong iD on the row.
     expect(d).toEqual({ kind: "conflict", cwid: "abc1234", orcid: ID });
+  });
+
+  describe("dismissal rule — a Not-me pair is never re-imported", () => {
+    const CONFIRMED = new Date("2026-09-21T12:00:00Z");
+    const dismissed = (...pairs: Array<[string, string]>) =>
+      new Set(pairs.map(([c, o]) => dismissalKey(c, o)));
+
+    it("SPS null + dismissal of the iD Identity still holds → dismissed, not update (the re-import that fed the ping-pong)", () => {
+      expect(
+        decideIdentityRow(
+          { uid: "abc1234", identity: { orcid: ID } },
+          scholars({ abc1234: state(null) }),
+          dismissed(["abc1234", ID]),
+        ),
+      ).toEqual({ kind: "dismissed" });
+    });
+
+    it("confirmed Y + dismissed X, Identity still X → dismissed, NOT conflict (Y must survive)", () => {
+      expect(
+        decideIdentityRow(
+          { uid: "abc1234", identity: { orcid: ID } },
+          scholars({ abc1234: state(OTHER, CONFIRMED) }),
+          dismissed(["abc1234", ID]),
+        ),
+      ).toEqual({ kind: "dismissed" });
+    });
+
+    it("a contradicted row (SPS somehow holds the dismissed iD) still reads dismissed, never a write", () => {
+      expect(
+        decideIdentityRow(
+          { uid: "abc1234", identity: { orcid: ID } },
+          scholars({ abc1234: state(ID) }),
+          dismissed(["abc1234", ID]),
+        ),
+      ).toEqual({ kind: "dismissed" });
+    });
+
+    it("a dismissal of a DIFFERENT iD, or for a different person, does not block the import", () => {
+      expect(
+        decideIdentityRow(
+          { uid: "abc1234", identity: { orcid: ID } },
+          scholars({ abc1234: state(null) }),
+          dismissed(["abc1234", OTHER], ["zzz9999", ID]),
+        ),
+      ).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
+    });
+
+    it("dismissalKey matches case-insensitively on cwid (the DB column is; the Set is not)", () => {
+      expect(dismissalKey("ABC1234", ID)).toBe(dismissalKey("abc1234", ID));
+      expect(
+        decideIdentityRow(
+          { uid: "ABC1234", identity: { orcid: ID } },
+          scholars({ abc1234: state(null) }),
+          dismissed(["Abc1234", ID]),
+        ),
+      ).toEqual({ kind: "dismissed" });
+    });
+
+    it("no dismissal set at all (the default) behaves as before", () => {
+      expect(
+        decideIdentityRow({ uid: "abc1234", identity: { orcid: ID } }, scholars({ abc1234: state(null) })),
+      ).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
+    });
   });
 });
