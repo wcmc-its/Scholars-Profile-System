@@ -19,18 +19,21 @@
  * of scope until asked for.
  */
 
-/** Display order is object order. */
+/** Display order is object order. `hint` is the host prefix shown beside the
+ *  label so the placeholder can be just the identity-bearing part. */
 export const PROFILE_LINK_PLATFORMS = {
-  linkedin: { label: "LinkedIn", placeholder: "https://www.linkedin.com/in/your-name" },
-  x: { label: "X (Twitter)", placeholder: "@handle or https://x.com/handle" },
-  bluesky: { label: "Bluesky", placeholder: "@you.bsky.social" },
+  linkedin: { label: "LinkedIn", hint: "linkedin.com/in/", placeholder: "handle" },
+  x: { label: "X (Twitter)", hint: "x.com/", placeholder: "handle" },
+  bluesky: { label: "Bluesky", hint: "@", placeholder: "you.bsky.social" },
   googleScholar: {
     label: "Google Scholar",
-    placeholder: "https://scholar.google.com/citations?user=…",
+    hint: "scholar.google.com/citations?user=",
+    placeholder: "user ID",
   },
   researchGate: {
     label: "ResearchGate",
-    placeholder: "https://www.researchgate.net/profile/Your-Name",
+    hint: "researchgate.net/profile/",
+    placeholder: "Your-Name",
   },
 } as const;
 

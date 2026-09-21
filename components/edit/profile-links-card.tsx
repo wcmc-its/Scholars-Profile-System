@@ -1,9 +1,11 @@
 /**
  * The External Profiles card on the Identifiers & Profiles tab (#2699): one
- * input per platform, one Save. Every write is `POST /api/edit/field` with
- * `fieldName: "profileLinks"` and the whole object; the server canonicalizes
- * (a pasted `twitter.com/…?s=21` comes back `https://x.com/…`) and names the
- * offending platform on a bad link, which is what the inline error points at.
+ * input per platform in a two-up grid, each labelled with its host prefix so
+ * the field only asks for the handle, one Save that is inert until something
+ * changed. Every write is `POST /api/edit/field` with `fieldName:
+ * "profileLinks"` and the whole object; the server canonicalizes (a pasted
+ * `twitter.com/…?s=21` comes back `https://x.com/…`) and names the offending
+ * platform on a bad link, which is what the inline error points at.
  */
 "use client";
 
@@ -30,6 +32,11 @@ export type ProfileLinksCardProps = {
   subsection?: boolean;
 };
 
+type Values = Record<ProfileLinkPlatform, string>;
+
+const toValues = (links: ProfileLinks): Values =>
+  Object.fromEntries(PROFILE_LINK_PLATFORM_KEYS.map((k) => [k, links[k] ?? ""])) as Values;
+
 export function ProfileLinksCard({
   cwid,
   mode,
@@ -39,17 +46,14 @@ export function ProfileLinksCard({
 }: ProfileLinksCardProps) {
   const router = useRouter();
   const whose = mode === "superuser" ? `${scholarName}'s` : "your";
-  const [values, setValues] = React.useState<Record<ProfileLinkPlatform, string>>(
-    () =>
-      Object.fromEntries(PROFILE_LINK_PLATFORM_KEYS.map((k) => [k, initial[k] ?? ""])) as Record<
-        ProfileLinkPlatform,
-        string
-      >,
-  );
+  const [values, setValues] = React.useState<Values>(() => toValues(initial));
+  // What the server last acknowledged; Save is inert until the inputs differ.
+  const [baseline, setBaseline] = React.useState<Values>(values);
   const [busy, setBusy] = React.useState(false);
   const [badPlatform, setBadPlatform] = React.useState<ProfileLinkPlatform | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [saved, setSaved] = React.useState(false);
+  const dirty = PROFILE_LINK_PLATFORM_KEYS.some((k) => values[k] !== baseline[k]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,13 +97,9 @@ export function ProfileLinksCard({
         return;
       }
       // Reflect the server's canonical form so the inputs show what was stored.
-      const stored = JSON.parse(data.value) as ProfileLinks;
-      setValues(
-        Object.fromEntries(PROFILE_LINK_PLATFORM_KEYS.map((k) => [k, stored[k] ?? ""])) as Record<
-          ProfileLinkPlatform,
-          string
-        >,
-      );
+      const stored = toValues(JSON.parse(data.value) as ProfileLinks);
+      setValues(stored);
+      setBaseline(stored);
       setSaved(true);
       router.refresh();
     } catch {
@@ -113,34 +113,50 @@ export function ProfileLinksCard({
     <EditPanel
       heading="External profiles"
       owned
-      subsection={subsection}
+      // A peer of the ORCID card (same weight), not an eyebrow under it; it just
+      // can't reuse the `panel-heading` id the first card owns.
+      headingId={subsection ? "profile-links-heading" : undefined}
       slot="profile-links-card"
-      description={`Links to ${whose} profiles elsewhere, shown in the Contact card. Paste a URL or a handle; leave a field blank to remove it.`}
+      description={`Shown in the Contact card on ${whose} public profile. Clear a field to remove the link.`}
     >
-      <form onSubmit={submit} className="flex flex-col gap-3" data-testid="profile-links-form">
-        {PROFILE_LINK_PLATFORM_KEYS.map((k) => (
-          <label key={k} className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">{PROFILE_LINK_PLATFORMS[k].label}</span>
-            <Input
-              value={values[k]}
-              onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))}
-              placeholder={PROFILE_LINK_PLATFORMS[k].placeholder}
-              aria-invalid={badPlatform === k || undefined}
-              className="max-w-xl"
-              disabled={busy}
-              data-testid={`profile-link-${k}`}
-            />
-          </label>
-        ))}
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="apollo" size="sm" disabled={busy} data-testid="profile-links-save">
-            Save
+      <form onSubmit={submit} className="flex flex-col gap-4" data-testid="profile-links-form">
+        <div className="grid gap-x-5 gap-y-4 md:grid-cols-2">
+          {PROFILE_LINK_PLATFORM_KEYS.map((k) => (
+            <label key={k} className="flex flex-col gap-1.5 text-sm">
+              <span className="flex items-baseline gap-1.5 font-medium">
+                {PROFILE_LINK_PLATFORMS[k].label}
+                <span className="text-muted-foreground truncate text-xs font-normal">
+                  {PROFILE_LINK_PLATFORMS[k].hint}
+                </span>
+              </span>
+              <Input
+                value={values[k]}
+                onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))}
+                placeholder={PROFILE_LINK_PLATFORMS[k].placeholder}
+                aria-invalid={badPlatform === k || undefined}
+                disabled={busy}
+                data-testid={`profile-link-${k}`}
+              />
+            </label>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 border-t pt-4">
+          <Button
+            type="submit"
+            variant="apollo"
+            size="sm"
+            disabled={busy || !dirty}
+            data-testid="profile-links-save"
+          >
+            Save external profiles
           </Button>
-          {saved && !error && (
-            <span className="text-muted-foreground text-sm" role="status">
-              Saved.
-            </span>
-          )}
+          <span
+            className="text-muted-foreground text-sm"
+            role="status"
+            data-testid="profile-links-hint"
+          >
+            {dirty ? "Unsaved changes" : saved ? "Saved just now" : "No changes yet"}
+          </span>
         </div>
         {error && (
           <p role="alert" className="text-destructive text-sm" data-testid="profile-links-error">

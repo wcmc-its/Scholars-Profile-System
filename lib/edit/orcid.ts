@@ -34,8 +34,8 @@ export function orcidEvidenceLine(e: OrcidEvidence, whose: "your" | "their"): st
   switch (e.source) {
     case "rpm_inferred":
       return e.rejected > 0
-        ? `Seen on ${pubs(e.accepted)} in ReCiter, and on ${e.rejected} ${whose === "your" ? "you" : "they"} rejected`
-        : `Seen on ${pubs(e.accepted)} in ReCiter`;
+        ? `Matched on ${pubs(e.accepted)} in ReCiter, and on ${e.rejected} ${whose === "your" ? "you" : "they"} rejected`
+        : `Matched on ${pubs(e.accepted)} in ReCiter`;
     case "rpm_admin":
       return "Entered in ReCiter Publication Manager";
     case "orcid_email":

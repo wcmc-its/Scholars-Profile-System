@@ -341,7 +341,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByTestId("orcid-on-file-evidence").textContent).toContain("Entered in ReCiter Publication Manager");
     const also = screen.getByTestId("orcid-also-suggested");
     expect(also.textContent).toContain("0000-0002-9930-2193");
-    expect(within(also).getByTestId("orcid-also-suggested-evidence").querySelectorAll("li")).toHaveLength(2);
+    expect(within(also).getByTestId("orcid-also-suggested-row-evidence").querySelectorAll("li")).toHaveLength(2);
   });
 
   it("Home: with the flag off the ORCID CTA hands off to ReCiter Manage Profile (external), and the tab is not in the rail", () => {
