@@ -344,8 +344,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       ? sp.earlyStageInvestigator[0]
       : sp.earlyStageInvestigator) === "true";
   // Institution facet — repeated multi-select of `Scholar.primaryOrgCode`
-  // codes, same URL-param shape as `professorialRank`. Accepted regardless of
-  // `SEARCH_PEOPLE_INSTITUTION_FACET` (searchPeople no-ops it while off).
+  // codes, same URL-param shape as `professorialRank`. Shared by all three tabs
+  // (people `primaryOrgCode` / pubs `wcmAuthorInstitutions` / funding lead-PI
+  // `institution`); accepted regardless of the per-tab
+  // SEARCH_*_INSTITUTION_FACET flags (each search no-ops it while off).
   const institution = parseList(sp.institution);
 
   // Issue #233 — Principal Investigator facet. Single-select; `none` and
@@ -368,6 +370,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       (s): s is FundingStatus => s === "active" || s === "ending_soon" || s === "recently_ended",
     ) as FundingStatus[] as FundingStatus[],
     department: parseList(sp.department).length > 0 ? parseList(sp.department) : undefined,
+    institution: institution.length > 0 ? institution : undefined,
     role: parseList(sp.role).filter(
       (r): r is FundingRoleBucket => r === "PI" || r === "Multi-PI" || r === "Co-I",
     ) as FundingRoleBucket[],
@@ -620,6 +623,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
             wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
             department: pubDepartment.length > 0 ? pubDepartment : undefined,
+            institution: institution.length > 0 ? institution : undefined,
             meshOnly: pubMeshOnly || undefined,
             mentoringPrograms:
               mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -719,6 +723,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: pubDepartment.length > 0 ? pubDepartment : undefined,
+        institution: institution.length > 0 ? institution : undefined,
         meshOnly: pubMeshOnly || undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
@@ -881,6 +886,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 wcmAuthorRole={wcmAuthorRole}
                 wcmAuthor={wcmAuthor}
                 department={pubDepartment}
+                institution={institution}
                 meshOnly={pubMeshOnly}
                 meshOnlyFilterEnabled={meshOnlyFilterEnabled}
                 mentoringProgram={mentoringProgram}
@@ -1563,6 +1569,7 @@ async function PublicationsResults({
   wcmAuthorRole,
   wcmAuthor,
   department,
+  institution,
   meshOnly,
   meshOnlyFilterEnabled,
   mentoringProgram,
@@ -1586,6 +1593,9 @@ async function PublicationsResults({
   /** Issue #837 — active WCM-author department keys (empty when the flag is
    *  off; the page drops the param in that case). */
   department: string[];
+  /** Active `institution` multi-select filter (`Scholar.primaryOrgCode` codes),
+   *  same shape as `department`. */
+  institution: string[];
   /** Issue #396 — "Show only MeSH-tagged matches" active state (true only when
    *  the flag is on AND `?searchMode=mesh-only` is present). */
   meshOnly: boolean;
@@ -1666,6 +1676,7 @@ async function PublicationsResults({
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: department.length > 0 ? department : undefined,
+        institution: institution.length > 0 ? institution : undefined,
         meshOnly: meshOnly || undefined,
         mentoringPrograms:
           mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -1732,6 +1743,7 @@ async function PublicationsResults({
     for (const v of wcmAuthorRole) sp.append("wcmAuthorRole", v);
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
     for (const v of department) sp.append("department", v);
+    for (const v of institution) sp.append("institution", v);
     for (const v of mentoringProgram) sp.append("mentoringProgram", v);
     // Issue #396 — preserve the MeSH-only filter across every facet/sort/page
     // link so toggling another filter doesn't silently drop it. The toggle's
@@ -1842,6 +1854,13 @@ async function PublicationsResults({
       removeHref: removeMulti("department", v),
     });
   }
+  // Institution chips — codes resolved to display names.
+  for (const v of institution) {
+    chips.push({
+      label: institutionDisplayName(v),
+      removeHref: removeMulti("institution", v),
+    });
+  }
   const MENTORING_PROGRAM_LABEL: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", string> = {
     md: "MD mentee",
     mdphd: "MD-PhD mentee",
@@ -1944,6 +1963,8 @@ async function PublicationsResults({
         wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
         activeWcmAuthorRole={wcmAuthorRole}
         departmentItems={departmentItems}
+        institutions={result.facets.institutions}
+        activeInstitution={institution}
         activeMentoringProgram={mentoringProgram}
         mentoringProgramCounts={result.facets.mentoringPrograms}
         toggleHref={toggleHref}
@@ -1998,6 +2019,7 @@ async function PublicationsResults({
                 wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
                 wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
                 department: department.length > 0 ? department : undefined,
+                institution: institution.length > 0 ? institution : undefined,
                 // Issue #396 — keep the export in lockstep with the displayed
                 // count: when MeSH-only is active the export carries it too, so
                 // the exported set equals the "N MeSH-tagged matches" shown.
@@ -2121,6 +2143,7 @@ async function FundingResults({
     for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
     for (const v of filters.status ?? []) sp.append("status", v);
     for (const v of filters.department ?? []) sp.append("department", v);
+    for (const v of filters.institution ?? []) sp.append("institution", v);
     for (const v of filters.role ?? []) sp.append("role", v);
     for (const v of filters.investigator ?? []) sp.append("investigator", v);
     if (scope !== "expanded") sp.set("match", scope);
@@ -2158,6 +2181,7 @@ async function FundingResults({
     filters.mechanism?.length ||
     filters.status?.length ||
     filters.department?.length ||
+    filters.institution?.length ||
     filters.role?.length ||
     filters.investigator?.length
   );
@@ -2202,6 +2226,9 @@ async function FundingResults({
   }
   for (const v of filters.department ?? []) {
     chips.push({ label: v, removeHref: removeHref("department", v) });
+  }
+  for (const v of filters.institution ?? []) {
+    chips.push({ label: institutionDisplayName(v), removeHref: removeHref("institution", v) });
   }
   for (const v of filters.role ?? []) {
     // Label only — `v` is the index/URL token and stays "Multi-PI" in the href.
@@ -2345,6 +2372,7 @@ function FacetSidebarFunding({
   const activeMechanism = active.mechanism ?? [];
   const activeStatus = active.status ?? [];
   const activeDepartment = active.department ?? [];
+  const activeInstitution = active.institution ?? [];
   const activeRole = active.role ?? [];
 
   return (
@@ -2474,6 +2502,26 @@ function FacetSidebarFunding({
         </FacetGroup>
       ) : null}
 
+      {/* Institution — lead PI's `primaryOrgCode`; same shape as the People-tab
+          group. Renders only when the response carries buckets (flag off /
+          pre-reindex ⇒ no group). */}
+      {facets.institutions.length > 0 ? (
+        <FacetGroup label="Institution" collapseAfter={5}>
+          {sortActiveFirst(facets.institutions, (b) => activeInstitution.includes(b.value)).map(
+            (b) => (
+              <FacetCheckbox
+                key={b.value}
+                label={institutionDisplayName(b.value)}
+                count={b.count}
+                isActive={activeInstitution.includes(b.value)}
+                href={toggleHref("institution", b.value)}
+                wrap
+              />
+            ),
+          )}
+        </FacetGroup>
+      ) : null}
+
       <FacetGroup label="Role">
         {sortActiveFirst(roleItems, (r) => activeRole.includes(r.key)).map((r) => (
           <FacetCheckbox
@@ -2519,6 +2567,7 @@ function FundingSortLinks({
     for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
     for (const v of filters.status ?? []) sp.append("status", v);
     for (const v of filters.department ?? []) sp.append("department", v);
+    for (const v of filters.institution ?? []) sp.append("institution", v);
     for (const v of filters.role ?? []) sp.append("role", v);
     for (const v of filters.investigator ?? []) sp.append("investigator", v);
     if (scope !== "expanded") sp.set("match", scope);
@@ -3079,6 +3128,8 @@ function FacetSidebarPubs({
   wcmAuthorRoleCounts,
   activeWcmAuthorRole,
   departmentItems,
+  institutions,
+  activeInstitution,
   activeMentoringProgram,
   mentoringProgramCounts,
   toggleHref,
@@ -3109,6 +3160,11 @@ function FacetSidebarPubs({
     isActive: boolean;
     href: string;
   }>;
+  /** Institution facet — `wcmAuthorInstitutions` buckets (bare ED codes,
+   *  labelled here via `institutionDisplayName`). Empty while
+   *  `SEARCH_PUB_INSTITUTION_FACET` is off / pre-reindex ⇒ no group. */
+  institutions: SearchFacetBucket[];
+  activeInstitution: string[];
   activeMentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   mentoringProgramCounts: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", number>;
   toggleHref: (axis: string, value: string) => string;
@@ -3206,6 +3262,26 @@ function FacetSidebarPubs({
               wrap
             />
           ))}
+        </FacetGroup>
+      ) : null}
+
+      {/* Institution — union of the WCM authors' `primaryOrgCode`; same shape as
+          the People-tab group. Renders only when the response carries buckets
+          (flag off / pre-reindex ⇒ no group). */}
+      {institutions.length > 0 ? (
+        <FacetGroup label="Institution" collapseAfter={5}>
+          {sortActiveFirst(institutions, (b) => activeInstitution.includes(b.value)).map(
+            (b) => (
+              <FacetCheckbox
+                key={b.value}
+                label={institutionDisplayName(b.value)}
+                count={b.count}
+                isActive={activeInstitution.includes(b.value)}
+                href={toggleHref("institution", b.value)}
+                wrap
+              />
+            ),
+          )}
         </FacetGroup>
       ) : null}
 

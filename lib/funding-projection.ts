@@ -41,6 +41,10 @@ export type GrantRowForIndex = {
     slug: string;
     preferredName: string;
     primaryDepartment: string | null;
+    /** `Scholar.primaryOrgCode` (WCMC, HSS, MSKCC, ...) — the lead PI's value
+     *  becomes `FundingDoc.institution`. Optional so fixtures that predate the
+     *  Institution facet need not supply it. */
+    primaryOrgCode?: string | null;
   };
   /** Pub-grant linkages from grant_publication. Optional so test fixtures
    *  and any caller that doesn't need pub counts can omit it. The
@@ -98,6 +102,9 @@ export type FundingDoc = {
   mechanism: string | null;
   nihIc: string | null;
   department: string | null;
+  /** Lead PI's `Scholar.primaryOrgCode` (same lead-PI rule as `department`);
+   *  the Funding-tab Institution facet (`SEARCH_FUNDING_INSTITUTION_FACET`). */
+  institution: string | null;
   roles: string[];
   startDate: string;
   endDate: string;
@@ -240,7 +247,7 @@ export const GRANT_INDEX_SELECT = {
     },
   },
   scholar: {
-    select: { slug: true, preferredName: true, primaryDepartment: true },
+    select: { slug: true, preferredName: true, primaryDepartment: true, primaryOrgCode: true },
   },
 } satisfies Prisma.GrantSelect;
 
@@ -499,6 +506,7 @@ export function projectFromRows(
     rows.find((r) => r.role === "PI" || r.role === "PI-Subaward") ??
     rows.find((r) => r.role === "Co-PI");
   const department = leadPiRow?.scholar.primaryDepartment ?? null;
+  const institution = leadPiRow?.scholar.primaryOrgCode ?? null;
 
   const primeShort = resolveCanonical(head.primeSponsor, head.primeSponsorRaw);
   const directShort = resolveCanonical(
@@ -664,6 +672,7 @@ export function projectFromRows(
     mechanism: head.mechanism,
     nihIc: head.nihIc,
     department,
+    institution,
     roles: Array.from(roles),
     startDate: earliestStart.toISOString(),
     endDate: latestEnd.toISOString(),

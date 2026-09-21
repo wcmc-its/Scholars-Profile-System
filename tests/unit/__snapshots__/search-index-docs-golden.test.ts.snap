@@ -173,6 +173,10 @@ exports[`buildPublicationDoc — golden snapshots > captures a fully-populated p
     "ann1234",
     "bob5678",
   ],
+  "wcmAuthorInstitutions": [
+    "WCMC",
+    "HSS",
+  ],
   "wcmAuthorPositions": [
     "first",
     "senior",

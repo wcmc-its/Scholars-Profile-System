@@ -246,6 +246,13 @@ async function handleSearch(request: NextRequest) {
     secondaryConceptLabel,
   };
 
+  // Institution facet — repeated multi-select of `Scholar.primaryOrgCode` codes
+  // (WCMC, HSS, MSKCC, ...), shared by all three tabs (people: `primaryOrgCode`;
+  // publications: `wcmAuthorInstitutions`; funding: lead-PI `institution`).
+  // Parsed regardless of the per-tab SEARCH_*_INSTITUTION_FACET flags; each
+  // search function no-ops it while its flag is off.
+  const institution = params.getAll("institution");
+
   // Issue #78 — Funding tab. Multi-select facets are repeated params,
   // OR within group, AND across groups. Mirrors the people/publications
   // pattern.
@@ -266,6 +273,7 @@ async function handleSearch(request: NextRequest) {
       mechanism: orUndefined(params.getAll("mechanism")),
       status: status.length > 0 ? status : undefined,
       department: orUndefined(params.getAll("department")),
+      institution: orUndefined(institution),
       role: role.length > 0 ? role : undefined,
     };
     // Issue #295 — forward the MeSH resolution (computed once at the top of
@@ -366,6 +374,7 @@ async function handleSearch(request: NextRequest) {
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         department: department.length > 0 ? department : undefined,
+        institution: institution.length > 0 ? institution : undefined,
         meshOnly: meshOnly || undefined,
       },
       // Issue #259 §5 — pass the MeSH resolution computed at the top of
@@ -425,6 +434,7 @@ async function handleSearch(request: NextRequest) {
           journal: journal.length > 0 ? journal : undefined,
           wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
           department: department.length > 0 ? department : undefined,
+          institution: institution.length > 0 ? institution : undefined,
           meshOnly: meshOnly || undefined,
         },
         // Perf (B4) — this branch reads only `broad.total` (hits are discarded
@@ -464,7 +474,16 @@ async function handleSearch(request: NextRequest) {
         // fallback). Captures the per-request shape without analysts
         // having to know which env mapping was active.
         conceptMode,
-        filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole, department, meshOnly },
+        filters: {
+          yearMin,
+          yearMax,
+          publicationType,
+          journal,
+          wcmAuthorRole,
+          department,
+          institution,
+          meshOnly,
+        },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
         meshSecondaryDescriptorUi,
@@ -560,10 +579,6 @@ async function handleSearch(request: NextRequest) {
   // the bare acronym. Parsed regardless of `SEARCH_PEOPLE_ESI_FACET`, same
   // no-op-while-off posture as `isClinical`.
   const earlyStageInvestigator = params.get("earlyStageInvestigator") === "true";
-  // Institution facet — repeated multi-select of `Scholar.primaryOrgCode` codes
-  // (WCMC, HSS, MSKCC, ...), same shape as `professorialRank`. Parsed regardless
-  // of `SEARCH_PEOPLE_INSTITUTION_FACET`; `searchPeople` no-ops it while off.
-  const institution = params.getAll("institution");
   // URL contract: `?includeIncomplete=false` opts INTO the sparse-profile
   // cull (only scholars with overview + ≥3 pubs + active grant). Any other
   // value — including the param being absent — leaves the filter unset so

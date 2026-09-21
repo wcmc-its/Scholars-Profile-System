@@ -109,6 +109,9 @@ function parseBody(body: unknown): ExportRequest | null {
   // department clause on `SEARCH_PUB_DEPARTMENT_FILTER`, so passing these
   // through is inert when the flag is off.
   if (isStringArray(f.department)) filters.department = f.department;
+  // Institution facet — `searchPublications` gates it on
+  // `SEARCH_PUB_INSTITUTION_FACET`; the export builders mirror the live clause.
+  if (isStringArray(f.institution)) filters.institution = f.institution;
   // Issue #396 — "Show only MeSH-tagged matches". Unlike the department clause,
   // `searchPublications` does NOT gate `meshOnly` internally, so gate the flag
   // HERE (as the route/page do) to keep the off-is-inert contract uniform — a

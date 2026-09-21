@@ -117,6 +117,7 @@ import {
   resolveSearchPeopleConceptHint,
   resolveSearchPeopleEsiFacet,
   resolveSearchPeopleInstitutionFacet,
+  resolveSearchPubInstitutionFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
   resolveSearchResultEvidence,
@@ -293,6 +294,11 @@ export type PublicationsFilters = {
    *  `name:${deptName}` long-tail key for scholars without an FK code.
    *  Only honored when `SEARCH_PUB_DEPARTMENT_FILTER` is on. */
   department?: string[];
+  /** Institution facet — multi-select on `wcmAuthorInstitutions` (union of the
+   *  displayable WCM authors' `Scholar.primaryOrgCode`: WCMC, HSS, MSKCC, ...).
+   *  Accepted regardless of `SEARCH_PUB_INSTITUTION_FACET`; a no-op (no clause,
+   *  no facet) while it's off / pre-reindex. */
+  institution?: string[];
   /** Mentoring activity facet. Multi-select on the mentee's program at time
    *  of mentorship: 'md' (AOC + AOC-2025), 'mdphd' (MD-PhD), 'ecr' (Early
    *  Career Researcher). Selecting one or more buckets restricts results to
@@ -1240,6 +1246,10 @@ export type PublicationsSearchResult = {
      *  `SEARCH_PUB_DEPARTMENT_FILTER` is off. The /search page resolves each
      *  `value` key to a display label via `resolveDeptDivLabels()`. */
     departments: SearchFacetBucket[];
+    /** Institution facet — `wcmAuthorInstitutions` buckets (bare ED codes; the
+     *  page labels them via `institutionDisplayName`). Empty while
+     *  `SEARCH_PUB_INSTITUTION_FACET` is off (or pre-reindex) — never omitted. */
+    institutions: SearchFacetBucket[];
   };
 };
 
@@ -5078,6 +5088,13 @@ export async function searchPublications(opts: {
     useDepartmentFilter && filters.department && filters.department.length > 0
       ? { terms: { wcmAuthorDepartments: filters.department } }
       : null;
+  // Institution facet — same flag-gated, accept-but-no-op-while-off shape as
+  // `departmentClause` (`SEARCH_PUB_INSTITUTION_FACET`).
+  const institutionFacetOn = resolveSearchPubInstitutionFacet();
+  const institutionClause =
+    institutionFacetOn && filters.institution && filters.institution.length > 0
+      ? { terms: { wcmAuthorInstitutions: filters.institution } }
+      : null;
   // Mentoring activity facet — union the precomputed pmid sets for the
   // selected program buckets. Empty union (e.g. all programs empty) becomes
   // a match_none clause so a stale-cache state returns zero rows rather
@@ -5138,6 +5155,7 @@ export async function searchPublications(opts: {
   if (wcmRoleClause) userAxisFilters.push(wcmRoleClause);
   if (wcmAuthorClause) userAxisFilters.push(wcmAuthorClause);
   if (departmentClause) userAxisFilters.push(departmentClause);
+  if (institutionClause) userAxisFilters.push(institutionClause);
   if (mentoringClause) userAxisFilters.push(mentoringClause);
 
   const filtersExcept = (
@@ -5148,6 +5166,7 @@ export async function searchPublications(opts: {
       | "wcmAuthorRole"
       | "wcmAuthor"
       | "department"
+      | "institution"
       | "mentoring",
   ) => {
     const out: Record<string, unknown>[] = [];
@@ -5157,6 +5176,7 @@ export async function searchPublications(opts: {
     if (axis !== "wcmAuthorRole" && wcmRoleClause) out.push(wcmRoleClause);
     if (axis !== "wcmAuthor" && wcmAuthorClause) out.push(wcmAuthorClause);
     if (axis !== "department" && departmentClause) out.push(departmentClause);
+    if (axis !== "institution" && institutionClause) out.push(institutionClause);
     if (axis !== "mentoring" && mentoringClause) out.push(mentoringClause);
     return out;
   };
@@ -5259,6 +5279,7 @@ export async function searchPublications(opts: {
         wcmAuthorsTotal: 0,
         mentoringPrograms: { md: 0, mdphd: 0, phd: 0, postdoc: 0, ecr: 0 },
         departments: [],
+        institutions: [],
       },
     };
   }
@@ -5467,6 +5488,17 @@ export async function searchPublications(opts: {
             },
           }
         : {}),
+      // Institution facet agg, attached ONLY when `SEARCH_PUB_INSTITUTION_FACET`
+      // is on (same absent-key-while-off posture as `departments`). size 50
+      // gives headroom past the ~30 codes in `lib/institutions.ts`.
+      ...(institutionFacetOn
+        ? {
+            institutions: {
+              filter: aggBoolFor(filtersExcept("institution")),
+              aggs: { keys: { terms: { field: "wcmAuthorInstitutions", size: 50 } } },
+            },
+          }
+        : {}),
       // Mentoring activity facet — contextual counts per program bucket.
       // One named filters-of-filters agg with 5 sub-buckets, each scoped to
       // the bucket's pmids + filtersExcept("mentoring") + the q-bound must.
@@ -5546,6 +5578,8 @@ export async function searchPublications(opts: {
     };
     // Issue #837 — present only when SEARCH_PUB_DEPARTMENT_FILTER is on.
     departments?: { keys: { buckets: Bucket[] } };
+    // Present only when SEARCH_PUB_INSTITUTION_FACET is on.
+    institutions?: { keys: { buckets: Bucket[] } };
     mentoringPrograms?: {
       buckets: Record<MentoringProgramKey, { doc_count: number }>;
     };
@@ -5875,6 +5909,11 @@ export async function searchPublications(opts: {
       // Issue #837 — Department buckets (empty when the flag is off, so the
       // page renders no Department group).
       departments: (r.aggregations?.departments?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
+      // Institution facet — `[]` (never omitted) while the flag is off / pre-reindex.
+      institutions: (r.aggregations?.institutions?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
       })),
