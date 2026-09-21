@@ -1,0 +1,53 @@
+/**
+ * Institution administrators — the `institution` unit-admin axis.
+ *
+ * ED's `weillCornellEduPrimaryOrganization` is a bare code (`HMC`); the
+ * directory carries no verbose name, so this map (ported from
+ * ReCiter-Institutional-Client's `getVerbosePrimaryOrganization`) is the only
+ * code → name source. A `unit_admin(institution, <code>)` owner/curator
+ * proxy-edits every scholar whose `Scholar.primaryOrgCode` matches
+ * (lib/edit/unit-scholar-authz.ts) — the same bounded surface a department
+ * owner gets. Superuser-granted on /edit/administrators.
+ *
+ * `WCMC` (the home institution) is deliberately absent: an admin over every
+ * WCM scholar is `comms_steward`, not an institution grant.
+ *
+ * Pure data — safe in the client bundle.
+ */
+export const INSTITUTIONS: Readonly<Record<string, string>> = {
+  "WCMC-Q": "Weill Cornell Medical College in Qatar",
+  HMC: "Hamad Medical Corporation",
+  SIDRA: "SIDRA Medical and Research Center",
+  AspH: "Aspetar Hospital",
+  PHCC: "Primary Health Care Corporation (Qatar)",
+  FMMP: "Feto-Maternal Medical Polyclinic (Qatar)",
+  NYP: "New York-Presbyterian Hospital",
+  NYPQ: "New York Presbyterian - Queens",
+  NYMH: "New York Methodist Hospital",
+  HSS: "Hospital for Special Surgery",
+  MSKCC: "Memorial Sloan Kettering Cancer Center",
+  RU: "Rockefeller University",
+  RI: "Rogosin Institute",
+  HMH: "Houston Methodist Hospital",
+  HMRI: "Houston Methodist Research Institute",
+  WMBMRI: "Winifred Masterson Burke Medical Research Institute",
+  CUCPS: "Columbia University College of Physicians and Surgeons",
+  Cornell: "Cornell University",
+  "CU GHS": "Cornell University Gannette Health Services",
+  CMCIthaca: "Cayuga Medical Center of Ithaca",
+  LMMHC: "Lincoln Medical and Mental Health Center",
+  BHC: "The Brooklyn Hospital Center",
+  JamaicaH: "Jamaica Hospital",
+  FlushHMC: "Flushing Hospital Medical Center",
+  LaGuardH: "La Guardia Hospital",
+  Lenox: "Lenox Hill Hospital",
+  ANH: "Amsterdam Nursing Home",
+  AHP: "American Hospital of Paris",
+  UGMA: "University Group Medical Associates",
+};
+
+/** Display name for a code; the bare code when unmapped (an ED code this map
+ *  has not caught up with — the ETL writes whatever ED says). */
+export function institutionName(code: string): string {
+  return INSTITUTIONS[code] ?? code;
+}

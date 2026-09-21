@@ -36,9 +36,16 @@ import {
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import { compactUnitName, officialUnitName } from "@/lib/org-unit-names";
+import { INSTITUTIONS } from "@/lib/institutions";
 
-/** The four org-unit `EntityType`s a `unit_admin` grant can target. */
-export type ManageableUnitKind = "department" | "division" | "center" | "core";
+/** The org-unit `EntityType`s a `unit_admin` grant can target. `institution`
+ *  is an ED primary-organization code (lib/institutions.ts) with no unit page
+ *  of its own — its entry links to the scope-filtered Profiles roster. */
+export type ManageableUnitKind = "department" | "division" | "center" | "core" | "institution";
+
+/** The kinds that have a unit ROW (and a public/edit page) — everything the
+ *  directory/finder enumerates. Institutions are grant-only and never listed. */
+export type UnitPageKind = Exclude<ManageableUnitKind, "institution">;
 
 /** The two `UnitRole`s a grant carries. */
 export type ManageableUnitRole = "owner" | "curator";
@@ -59,13 +66,14 @@ export type ManageableUnits = {
   divisions: ManageableUnit[];
   centers: ManageableUnit[];
   cores: ManageableUnit[];
-  /** Total across all four groups — drives the "self-hide when zero" gate. */
+  institutions: ManageableUnit[];
+  /** Total across all groups — drives the "self-hide when zero" gate. */
   total: number;
 };
 
 /** One entry in the superuser unit finder — every unit, name-sorted. */
 export type UnitFinderEntry = {
-  kind: ManageableUnitKind;
+  kind: UnitPageKind;
   code: string;
   name: string;
   href: string;
@@ -78,12 +86,21 @@ export type ManageableUnitsClient = Pick<
 >;
 
 function isManageableKind(value: string): value is ManageableUnitKind {
-  return value === "department" || value === "division" || value === "center" || value === "core";
+  return (
+    value === "department" ||
+    value === "division" ||
+    value === "center" ||
+    value === "core" ||
+    value === "institution"
+  );
 }
 
 /** The unit's editor route. `code` is URL-encoded — LDAP N-codes are safe, but
- *  synthetic center codes are minted and should never break the path. */
+ *  synthetic center codes are minted and should never break the path. An
+ *  institution has no page; its admin works from the Profiles roster, which
+ *  `loadDataQualityScope` already filters to their institution. */
 export function unitEditHref(kind: ManageableUnitKind, code: string): string {
+  if (kind === "institution") return "/edit/scholars";
   return `/edit/${kind}/${encodeURIComponent(code)}`;
 }
 
@@ -92,6 +109,7 @@ const KIND_LABEL: Record<ManageableUnitKind, string> = {
   division: "Division",
   center: "Center",
   core: "Core",
+  institution: "Institution",
 };
 
 /** Display label for a unit kind ("Department" | "Division" | "Center"). */
@@ -135,7 +153,7 @@ export async function loadManageableUnits(
     }
   }
   if (best.size === 0) {
-    return { departments: [], divisions: [], centers: [], cores: [], total: 0 };
+    return { departments: [], divisions: [], centers: [], cores: [], institutions: [], total: 0 };
   }
 
   // Collect codes per kind for one batched name lookup each.
@@ -144,6 +162,7 @@ export async function loadManageableUnits(
     division: [],
     center: [],
     core: [],
+    institution: [],
   };
   for (const u of best.values()) codes[u.kind].push(u.code);
 
@@ -179,6 +198,9 @@ export async function loadManageableUnits(
     division: new Map(divRows.map((r) => [r.code, r.name])),
     center: new Map(ctrRows.map((r) => [r.code, r.name])),
     core: new Map(coreRows.map((r) => [r.id, r.name])),
+    // No table — the static catalog names it; an unmapped code is dropped like
+    // a pruned unit row.
+    institution: new Map(Object.entries(INSTITUTIONS)),
   };
 
   const groups: Record<ManageableUnitKind, ManageableUnit[]> = {
@@ -186,6 +208,7 @@ export async function loadManageableUnits(
     division: [],
     center: [],
     core: [],
+    institution: [],
   };
   for (const u of best.values()) {
     const name = names[u.kind].get(u.code);
@@ -202,14 +225,20 @@ export async function loadManageableUnits(
   groups.division.sort(byName);
   groups.center.sort(byName);
   groups.core.sort(byName);
+  groups.institution.sort(byName);
 
   return {
     departments: groups.department,
     divisions: groups.division,
     centers: groups.center,
     cores: groups.core,
+    institutions: groups.institution,
     total:
-      groups.department.length + groups.division.length + groups.center.length + groups.core.length,
+      groups.department.length +
+      groups.division.length +
+      groups.center.length +
+      groups.core.length +
+      groups.institution.length,
   };
 }
 
@@ -260,7 +289,7 @@ export async function loadAllUnitsForFinder(db: ManageableUnitsClient): Promise<
  * into the `AllUnitsDirectory` client component without a server-action wrapper.
  */
 export type UnitDirectoryEntry = {
-  kind: ManageableUnitKind;
+  kind: UnitPageKind;
   code: string;
   /** Canonical `name` — the heading fallback when no official override exists. */
   name: string;
@@ -623,7 +652,7 @@ export async function loadAllUnitsDirectory(
 
   // Kind-then-name order. The component regroups by kind, but a stable overall
   // sort keeps the data predictable for tests and any flat consumer.
-  const KIND_ORDER: Record<ManageableUnitKind, number> = {
+  const KIND_ORDER: Record<UnitPageKind, number> = {
     department: 0,
     division: 1,
     center: 2,

@@ -11,7 +11,7 @@
  * `canGrant`). A Superuser grants any role on any unit; per the 2026-08-26
  * policy widening (decision #3, `comms-steward-profile-editing-spec.md` §11)
  * a comms_steward does too — full access-management parity on every unit
- * kind (department/division/center/core), uniformly, regardless of any
+ * kind (department/division/center/core/institution), uniformly, regardless of any
  * `unit_admin` row the steward personally holds.
  *
  * Revoke uses the same predicate — by SPEC line 218 ("clearing is gated
@@ -37,7 +37,7 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
   canGrant,
-  getCoreOwnerRole,
+  getFlatUnitRole,
   getEffectiveUnitRole,
   logEditDenial,
   type CoreOwnerLookup,
@@ -48,6 +48,7 @@ import {
 } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectUnitChange } from "@/lib/edit/revalidation";
+import { INSTITUTIONS } from "@/lib/institutions";
 import {
   CWID_PATTERN,
   findUnit,
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     entityType !== "department" &&
     entityType !== "division" &&
     entityType !== "center" &&
-    entityType !== "core"
+    entityType !== "core" &&
+    entityType !== "institution"
   ) {
     return editError(400, "invalid_entity_type", "entityType");
   }
@@ -103,21 +105,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // Unit existence — a 400 precedes the 403. For department/division/center,
   // `findUnit` also gives the slug + parent dept slug for post-commit
-  // revalidation (`reflect`, built below). Cores are flat and have no public
-  // owner/curator listing, so they get their own existence check + role
-  // lookup and `reflect` stays null for them (see the post-commit section).
+  // revalidation (`reflect`, built below). Cores and institutions are flat and
+  // have no public owner/curator listing, so they get their own existence
+  // check + role lookup and `reflect` stays null for them (see the post-commit
+  // section). An institution exists iff lib/institutions.ts names it.
   let effective: EffectiveUnitRole;
   let reflect: { unitKind: UnitKind; unitSlug: string; parentDeptSlug?: string } | null = null;
-  if (entityType === "core") {
-    const core = await db.read.core.findUnique({
-      where: { id: entityId },
-      select: { id: true },
-    });
-    if (!core) return editError(400, "unit_not_found", "entityId");
-    // Authz: Owner of the core (Superuser also allowed via `canGrant`
-    // below). Cores are flat — no dept→division cascade to build a
-    // `UnitRef` for.
-    effective = await getCoreOwnerRole(session, entityId, db.read as unknown as CoreOwnerLookup);
+  if (entityType === "core" || entityType === "institution") {
+    const exists =
+      entityType === "core"
+        ? (await db.read.core.findUnique({ where: { id: entityId }, select: { id: true } })) !== null
+        : entityId in INSTITUTIONS;
+    if (!exists) return editError(400, "unit_not_found", "entityId");
+    // Authz: Owner of the flat unit (Superuser also allowed via `canGrant`
+    // below). No dept→division cascade to build a `UnitRef` for.
+    effective = await getFlatUnitRole(
+      session,
+      entityType,
+      entityId,
+      db.read as unknown as CoreOwnerLookup,
+    );
   } else {
     const unit = await findUnit(entityType, entityId, db.read);
     if (!unit.ok) return editError(400, "unit_not_found", "entityId");
@@ -176,10 +183,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // (amended 2026-06-03, was superuser-overridable). The check is on the
   // in-memory loaded row — a brand-new grant (`existing` is null, ED rows are
   // ETL-created only) is never ED-locked. A core row's `source` is always
-  // "manual" (no ED source ever writes a core grant), so this can never fire
-  // for a core in practice — the `entityType !== "core"` guard makes that
-  // explicit rather than relying on it silently never matching.
-  if (entityType !== "core" && existing && existing.source.startsWith("ED:")) {
+  // "manual" (no ED source ever writes a core or institution grant), so this
+  // can never fire for those in practice — the guard makes that explicit
+  // rather than relying on it silently never matching.
+  if (
+    entityType !== "core" &&
+    entityType !== "institution" &&
+    existing &&
+    existing.source.startsWith("ED:")
+  ) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: cwid,
@@ -241,8 +253,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // Post-commit reflection — the access list is rendered on the unit page
   // (Phase 7); a grant changes who sees the edit affordances. No public page
-  // shows a core's owner/curator list, so there's nothing to revalidate —
-  // `reflect` stays null for entityType === "core" (set above).
+  // shows a core's or an institution's owner/curator list, so there's nothing
+  // to revalidate — `reflect` stays null for those kinds (set above).
   if (reflect) {
     await reflectUnitChange(reflect);
   }

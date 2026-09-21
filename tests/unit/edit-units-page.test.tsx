@@ -47,7 +47,14 @@ import EditUnitsPage from "@/app/edit/units/page";
 type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
 
-const EMPTY_UNITS = { departments: [], divisions: [], centers: [], cores: [], total: 0 };
+const EMPTY_UNITS = {
+  departments: [],
+  divisions: [],
+  centers: [],
+  cores: [],
+  institutions: [],
+  total: 0,
+};
 const OWNER = { cwid: "own01", isSuperuser: false, isCommsSteward: false };
 
 beforeEach(() => {

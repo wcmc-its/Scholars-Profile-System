@@ -40,6 +40,7 @@ import { Input } from "@/components/ui/input";
 import type { AdminRosterEntry, AdminRosterGrant } from "@/lib/api/administrators-roster";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
 import { cn } from "@/lib/utils";
+import { INSTITUTIONS } from "@/lib/institutions";
 
 /** Two-letter initials for the roster-card avatar, e.g. "Adela Vargas" → "AV". */
 function initials(name: string): string {
@@ -79,6 +80,7 @@ const KIND_LABEL: Record<AdminRosterGrant["entityType"], string> = {
   division: "Division",
   center: "Center",
   core: "Core",
+  institution: "Institution",
 };
 
 /** Curator/Owner segmented-toggle button (styles a raw `RadioGroupPrimitive.Item`
@@ -798,6 +800,17 @@ function unitOptions(
   allCores: ReadonlyArray<{ id: string; name: string }>,
 ): AddAdminUnit[] {
   const seen = new Map<string, AddAdminUnit>();
+  // Institutions (lib/institutions.ts) are a static catalog, seeded like cores.
+  for (const [code, name] of Object.entries(INSTITUTIONS)) {
+    const value = `institution:${code}`;
+    seen.set(value, {
+      value,
+      entityType: "institution",
+      entityId: code,
+      unitName: name,
+      label: `${name} · Institution`,
+    });
+  }
   for (const c of allCores) {
     const value = `core:${c.id}`;
     seen.set(value, {

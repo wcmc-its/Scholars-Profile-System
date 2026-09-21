@@ -595,4 +595,66 @@ describe("/api/edit/grant", () => {
       expect(mockTxUnitAdminUpsert).toHaveBeenCalledOnce();
     });
   });
+
+  // ── institution administrators — entityType "institution" (flat like a core;
+  // existence = lib/institutions.ts, no table) ────────────────────────────
+
+  describe("entityType: institution", () => {
+    it("Superuser grants owner on a mapped institution code; no reflection", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "institution",
+          entityId: "HMC",
+          cwid: "mam001",
+          role: "owner",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockTxUnitAdminUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            entityType: "institution",
+            entityId: "HMC",
+            cwid: "mam001",
+          }),
+        }),
+      );
+      expect(mockCoreFindUnique).not.toHaveBeenCalled();
+      expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    });
+
+    it("Non-admin on an institution → 403 scope_violation", async () => {
+      mockGetEditSession.mockResolvedValue(NONADMIN);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "institution",
+          entityId: "HMC",
+          cwid: "mam001",
+          role: "curator",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ ok: false, error: "scope_violation" });
+    });
+
+    it("Unmapped institution code → 400 unit_not_found", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      const res = await POST(
+        post({
+          entityType: "institution",
+          entityId: "WCMC",
+          cwid: "mam001",
+          role: "owner",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ ok: false, error: "unit_not_found" });
+    });
+  });
 });

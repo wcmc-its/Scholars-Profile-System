@@ -37,14 +37,21 @@ const DIV_ROSTER = "DIV-ONC"; // a division S is on the roster of (not LDAP-prim
 const DIV_OTHER = "DIV-NEURO"; // a division of DEPT-SURG
 const CENTER = "CTR-CANCER"; // a center S is a current member of (#1104)
 const CENTER_OTHER = "CTR-CARDIO"; // a center S is NOT a member of
+const INST = "HMC"; // S's ED primary organization (Scholar.primaryOrgCode)
+const INST_OTHER = "SIDRA";
 
 type UnitAdminRow = {
-  entityType: "department" | "division" | "center";
+  entityType: "department" | "division" | "center" | "institution";
   entityId: string;
   cwid: string;
   role: "owner" | "curator";
 };
-type ScholarRow = { deptCode: string | null; divCode: string | null; deletedAt?: Date | null };
+type ScholarRow = {
+  deptCode: string | null;
+  divCode: string | null;
+  primaryOrgCode?: string | null;
+  deletedAt?: Date | null;
+};
 /** A center membership the scholar holds, with its dated window. */
 type CenterMemRow = { centerCode: string; startDate: Date | null; endDate: Date | null };
 
@@ -72,7 +79,12 @@ function lookup(opts: {
       findUnique: vi.fn(async ({ where }) => {
         const s = scholars[where.cwid];
         return s
-          ? { deptCode: s.deptCode, divCode: s.divCode, deletedAt: s.deletedAt ?? null }
+          ? {
+              deptCode: s.deptCode,
+              divCode: s.divCode,
+              primaryOrgCode: s.primaryOrgCode ?? null,
+              deletedAt: s.deletedAt ?? null,
+            }
           : null;
       }),
     },
@@ -102,11 +114,49 @@ function lookup(opts: {
                   c.entityType === r.entityType && c.entityId === r.entityId,
               ),
           )
+          .filter(
+            (r): r is UnitAdminRow & { entityType: "department" | "division" | "center" } =>
+              r.entityType !== "institution",
+          )
           .map((r) => ({ entityType: r.entityType, entityId: r.entityId, role: r.role })),
       ),
+      // Flat kinds (institution) — the composite-key read `getFlatUnitRole` does.
+      findUnique: vi.fn(async ({ where }) => {
+        const k = where.entityType_entityId_cwid;
+        const r = rows.find(
+          (x) => x.entityType === k.entityType && x.entityId === k.entityId && x.cwid === k.cwid,
+        );
+        return r ? { role: r.role } : null;
+      }),
     },
   };
 }
+
+describe("canEditScholarViaUnit — institution (Scholar.primaryOrgCode)", () => {
+  it("allows an owner or curator of the scholar's institution; names the institution", async () => {
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null, primaryOrgCode: INST } },
+      unitAdmins: [{ entityType: "institution", entityId: INST, cwid: ADMIN, role: "curator" }],
+    });
+    expect(await resolveEditableUnitViaUnitAdmin(ADMIN, SCHOLAR, db)).toEqual({
+      kind: "institution",
+      code: INST,
+    });
+  });
+
+  it("denies an admin of a different institution, and any admin when the scholar has none", async () => {
+    const other = lookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null, primaryOrgCode: INST } },
+      unitAdmins: [{ entityType: "institution", entityId: INST_OTHER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, other)).toBe(false);
+    const none = lookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null, primaryOrgCode: null } },
+      unitAdmins: [{ entityType: "institution", entityId: INST, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, none)).toBe(false);
+  });
+});
 
 describe("canEditScholarViaUnit — department membership (D1 / D2)", () => {
   it("allows a department OWNER of the scholar's department", async () => {
@@ -425,7 +475,12 @@ function inverseLookup(opts: {
       findUnique: vi.fn(async ({ where }) => {
         const s = scholars[where.cwid];
         return s
-          ? { deptCode: s.deptCode, divCode: s.divCode, deletedAt: s.deletedAt ?? null }
+          ? {
+              deptCode: s.deptCode,
+              divCode: s.divCode,
+              primaryOrgCode: s.primaryOrgCode ?? null,
+              deletedAt: s.deletedAt ?? null,
+            }
           : null;
       }),
     },

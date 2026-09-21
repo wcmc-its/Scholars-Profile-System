@@ -26,6 +26,12 @@ model Scholar {
   postnominal             String?   @db.VarChar(64)
   primaryTitle            String?   @map("primary_title") @db.VarChar(255)
   primaryDepartment       String?   @map("primary_department") @db.VarChar(255)
+  /// ED `weillCornellEduPrimaryOrganization` — institution code of the primary
+  /// appointment (`WCMC`, `WCMC-Q`, `HMC`, `SIDRA`, `HSS`, ...). Drives the
+  /// `institution` unit-admin axis (lib/institutions.ts): an owner/curator of
+  /// `unit_admin(institution, <code>)` proxy-edits every scholar carrying it.
+  /// NULL until the next ED ETL run.
+  primaryOrgCode          String?   @map("primary_org_code") @db.VarChar(32)
   email                   String?   @db.VarChar(255)
   /// Effective email release audience derived from the multi-valued Web Directory
   /// attribute `weillCornellEduReleaseCode;mail` (most-permissive-wins, fail-closed).
@@ -154,6 +160,7 @@ model Scholar {
   @@index([roleCategory])
   @@index([deptCode])
   @@index([divCode])
+  @@index([primaryOrgCode])
   @@index([postdoctoralMentorCwid])
   @@map("scholar")
 }
@@ -2998,6 +3005,12 @@ enum EntityType {
   // researcher's profile shouldn't suppress it for every co-author.
   // Suppression-only, like mentee — never a field_override or unit_admin target.
   dataset_deposit
+  // + institution administrators: an ED primary-organization code
+  // (`Scholar.primaryOrgCode`, e.g. `HMC`). Used ONLY as a `unit_admin` target —
+  // the proxy-edit path in lib/edit/unit-scholar-authz.ts. No unit table: the
+  // code→name map is lib/institutions.ts. Never a field_override or
+  // suppression target.
+  institution
 }
 
 /// Per-unit administrator role (ADR-005 Amendment 1 § A1.2 / #540). One row

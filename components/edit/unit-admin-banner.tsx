@@ -23,8 +23,9 @@ export type UnitAdminBannerProps = {
   /** The scholar whose profile is being edited — their preferred name. */
   targetLabel: string;
   /** The kind of unit through which access is conferred — `center` only when
-   *  UNIT_ADMIN_CENTER_PROXY is on (#1104; D1 originally excluded centers). */
-  unitKind: "department" | "division" | "center";
+   *  UNIT_ADMIN_CENTER_PROXY is on (#1104; D1 originally excluded centers);
+   *  `institution` = the scholar's ED primary organization (lib/institutions.ts). */
+  unitKind: "department" | "division" | "center" | "institution";
   /** The conferring unit's display name (resolved from `Department`/`Division`). */
   unitName: string;
 };

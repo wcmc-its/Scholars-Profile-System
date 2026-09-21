@@ -400,32 +400,47 @@ export type CoreOwnerLookup = {
   unitAdmin: {
     findUnique: (args: {
       where: {
-        entityType_entityId_cwid: { entityType: "core"; entityId: string; cwid: string };
+        entityType_entityId_cwid: { entityType: FlatUnitKind; entityId: string; cwid: string };
       };
       select: { role: true };
     }) => Promise<{ role: "owner" | "curator" } | null>;
   };
 };
 
+/** Unit kinds with no cascade — one composite-key `UnitAdmin` lookup answers
+ *  the role. `core` = a core facility; `institution` = an ED primary-
+ *  organization code (lib/institutions.ts). */
+export type FlatUnitKind = "core" | "institution";
+
+/**
+ * The actor's role on a flat unit: `UnitAdmin(entityType, entityId)` and
+ * nothing else — no dept→division cascade. Superuser is NOT minted here (the
+ * callers handle it) so the audit log records the role the actor actually held.
+ */
+export async function getFlatUnitRole(
+  session: EditSession,
+  entityType: FlatUnitKind,
+  entityId: string,
+  db: CoreOwnerLookup,
+): Promise<EffectiveUnitRole> {
+  const row = await db.unitAdmin.findUnique({
+    where: { entityType_entityId_cwid: { entityType, entityId, cwid: session.cwid } },
+    select: { role: true },
+  });
+  return row?.role ?? "none";
+}
+
 /**
  * The actor's role on a core facility. A core owner is
- * `UnitAdmin(entityType="core", entityId=coreId)`. Cores are flat — there is no
- * dept→division cascade — so this is a single composite-key lookup. Superuser is
- * NOT minted here (it's handled in {@link authorizeCoreClaim}) so the audit log
- * records the role the actor actually held.
+ * `UnitAdmin(entityType="core", entityId=coreId)`. See {@link getFlatUnitRole};
+ * superuser is handled in {@link authorizeCoreClaim}.
  */
 export async function getCoreOwnerRole(
   session: EditSession,
   coreId: string,
   db: CoreOwnerLookup,
 ): Promise<EffectiveUnitRole> {
-  const row = await db.unitAdmin.findUnique({
-    where: {
-      entityType_entityId_cwid: { entityType: "core", entityId: coreId, cwid: session.cwid },
-    },
-    select: { role: true },
-  });
-  return row?.role ?? "none";
+  return getFlatUnitRole(session, "core", coreId, db);
 }
 
 /**
@@ -557,11 +572,10 @@ export function logEditDenial(params: {
   targetCwid: string;
   path: string;
   reason: string;
-  /** `UnitKind` plus `"core"` — cores are a flat, non-cascading unit kind
-   *  (cores-as-org-units P2) that never appears in `UnitRef`/`UnitKind`
-   *  itself (no dept→division-style cascade), but the grant route logs
-   *  denials for core grants too. */
-  targetEntityType?: UnitKind | "core";
+  /** `UnitKind` plus the flat kinds — cores and institutions never appear in
+   *  `UnitRef`/`UnitKind` itself (no dept→division-style cascade), but the
+   *  grant route logs denials for their grants too. */
+  targetEntityType?: UnitKind | FlatUnitKind;
   targetEntityId?: string;
   role?: "owner" | "curator";
 }): void {

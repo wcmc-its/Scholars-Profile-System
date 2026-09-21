@@ -20,6 +20,7 @@
  * loads under vitest with a fake client, matching `edit-roster.ts`.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { institutionName } from "@/lib/institutions";
 
 /** The Prisma surface this loader reads — a client or `db.read` satisfies it. */
 export type AdminRosterClient = Pick<
@@ -29,7 +30,7 @@ export type AdminRosterClient = Pick<
 
 /** One unit-scope grant a person holds. */
 export type AdminRosterGrant = {
-  entityType: "department" | "division" | "center" | "core";
+  entityType: "department" | "division" | "center" | "core" | "institution";
   /** The unit code (`UnitAdmin.entityId`). */
   entityId: string;
   /** The unit display name, falling back to the bare code if the unit row is gone. */
@@ -93,6 +94,8 @@ export async function loadUnitAdministratorRoster(
   }
 
   // Batch-resolve unit names per kind (only the codes we actually saw).
+  // Institutions have no table — lib/institutions.ts names them inline.
+  const unitName = new Map<string, string>();
   const deptCodes = new Set<string>();
   const divCodes = new Set<string>();
   const centerCodes = new Set<string>();
@@ -101,6 +104,8 @@ export async function loadUnitAdministratorRoster(
     if (r.entityType === "department") deptCodes.add(r.entityId);
     else if (r.entityType === "division") divCodes.add(r.entityId);
     else if (r.entityType === "core") coreCodes.add(r.entityId);
+    else if (r.entityType === "institution")
+      unitName.set(`institution:${r.entityId}`, institutionName(r.entityId));
     else centerCodes.add(r.entityId);
   }
 
@@ -131,7 +136,6 @@ export async function loadUnitAdministratorRoster(
       : Promise.resolve([]),
   ]);
 
-  const unitName = new Map<string, string>();
   for (const d of departments) unitName.set(`department:${d.code}`, d.name);
   for (const d of divisions) unitName.set(`division:${d.code}`, d.name);
   for (const c of centers) unitName.set(`center:${c.code}`, c.name);
@@ -166,7 +170,7 @@ export async function loadUnitAdministratorRoster(
       };
       byCwid.set(r.cwid, entry);
     }
-    // A `UnitAdmin` row is always unit-typed (department/division/center/core);
+    // A `UnitAdmin` row is always unit-typed (department/division/center/core/institution);
     // the generated `EntityType` enum is wider, so narrow here for the grant shape.
     const entityType = r.entityType as AdminRosterGrant["entityType"];
     entry.grants.push({

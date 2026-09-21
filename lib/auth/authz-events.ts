@@ -29,7 +29,7 @@ export interface AuthzDenial {
    * cores-as-org-units P2). Optional — scholar/publication denials keep
    * emitting only `target_cwid`.
    */
-  target_entity_type?: "department" | "division" | "center" | "core";
+  target_entity_type?: "department" | "division" | "center" | "core" | "institution";
   /** Unit `code` when `target_entity_type` is set. */
   target_entity_id?: string;
   /**

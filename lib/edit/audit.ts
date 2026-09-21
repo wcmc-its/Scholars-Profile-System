@@ -325,7 +325,12 @@ export type AuditEntityType =
    *  report); `targetEntityId` is the `"{reportKey}:{scopeKey}:{cwid}"`
    *  triple. Requires the `scholars_audit` target_entity_type ENUM be
    *  extended, see `scripts/sql/audit-log.sql`. */
-  | "report_access";
+  | "report_access"
+  /** a `unit_admin` grant/revoke on an institution (an ED primary-organization
+   *  code, lib/institutions.ts); `targetEntityId` is the code. Requires the
+   *  `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "institution";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

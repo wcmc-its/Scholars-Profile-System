@@ -88,7 +88,14 @@ describe("loadManageableUnits", () => {
   it("returns all-empty and skips name lookups when there are no grants", async () => {
     const { client, spies } = makeClient({ grants: [] });
     const result = await loadManageableUnits("cwid1", client);
-    expect(result).toEqual({ departments: [], divisions: [], centers: [], cores: [], total: 0 });
+    expect(result).toEqual({
+      departments: [],
+      divisions: [],
+      centers: [],
+      cores: [],
+      institutions: [],
+      total: 0,
+    });
     expect(spies.dept).not.toHaveBeenCalled();
     expect(spies.div).not.toHaveBeenCalled();
     expect(spies.ctr).not.toHaveBeenCalled();
@@ -186,6 +193,27 @@ describe("loadManageableUnits", () => {
     const r = await loadManageableUnits("cwid1", client);
     expect(r.centers.map((c) => c.code)).toEqual(["man-live"]);
     expect(r.total).toBe(1);
+  });
+
+  it("resolves an institution grant from the static catalog (no table read) and links it to the Profiles roster; drops an unmapped code", async () => {
+    const { client, spies } = makeClient({
+      grants: [
+        { entityType: "institution", entityId: "HMC", role: "owner" },
+        { entityType: "institution", entityId: "NOT-A-CODE", role: "curator" },
+      ],
+    });
+    const r = await loadManageableUnits("cwid1", client);
+    expect(r.institutions).toEqual([
+      {
+        kind: "institution",
+        code: "HMC",
+        name: "Hamad Medical Corporation",
+        role: "owner",
+        href: "/edit/scholars",
+      },
+    ]);
+    expect(r.total).toBe(1);
+    expect(spies.dept).not.toHaveBeenCalled();
   });
 
   it("sorts each group by name", async () => {

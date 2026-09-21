@@ -44,7 +44,15 @@ export function isDataQualityDashboardEnabled(): boolean {
  */
 export type DataQualityScope =
   | { all: true }
-  | { all: false; unitCodes: string[]; centerCodes: string[] };
+  | {
+      all: false;
+      unitCodes: string[];
+      centerCodes: string[];
+      /** ED primary-organization codes the viewer administers (`unit_admin`
+       *  entityType `institution`, lib/institutions.ts) — matched against
+       *  `Scholar.primaryOrgCode`. Optional so older scope literals still type. */
+      institutionCodes?: string[];
+    };
 
 /** The narrow Prisma surface the scope resolver reads. */
 export type DataQualityScopeClient = Pick<PrismaClient, "unitAdmin" | "division">;
@@ -73,6 +81,7 @@ export async function loadDataQualityScope(
 
   const unitCodes = new Set<string>();
   const centerCodes = new Set<string>();
+  const institutionCodes = new Set<string>();
   const deptCodes: string[] = [];
   for (const g of grants) {
     if (g.entityType === "department") {
@@ -82,6 +91,8 @@ export async function loadDataQualityScope(
       unitCodes.add(g.entityId);
     } else if (g.entityType === "center") {
       centerCodes.add(g.entityId);
+    } else if (g.entityType === "institution") {
+      institutionCodes.add(g.entityId);
     }
   }
 
@@ -94,10 +105,20 @@ export async function loadDataQualityScope(
     for (const d of divisions) unitCodes.add(d.code);
   }
 
-  return { all: false, unitCodes: [...unitCodes], centerCodes: [...centerCodes] };
+  return {
+    all: false,
+    unitCodes: [...unitCodes],
+    centerCodes: [...centerCodes],
+    institutionCodes: [...institutionCodes],
+  };
 }
 
 /** True when a non-global viewer's scope is empty — the route renders Forbidden. */
 export function isEmptyScope(scope: DataQualityScope): boolean {
-  return scope.all === false && scope.unitCodes.length === 0 && scope.centerCodes.length === 0;
+  return (
+    scope.all === false &&
+    scope.unitCodes.length === 0 &&
+    scope.centerCodes.length === 0 &&
+    (scope.institutionCodes ?? []).length === 0
+  );
 }

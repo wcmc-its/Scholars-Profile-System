@@ -104,6 +104,19 @@ describe("loadDataQualityScope", () => {
     expect(c.division.findMany).not.toHaveBeenCalled();
   });
 
+  it("an institution grant lands in institutionCodes (a scholar column, no expansion)", async () => {
+    const c = fakeClient([{ entityType: "institution", entityId: "HMC" }]);
+    const scope = await loadDataQualityScope(session(), asClient(c));
+    expect(scope.all).toBe(false);
+    if (scope.all === false) {
+      expect(scope.unitCodes).toEqual([]);
+      expect(scope.centerCodes).toEqual([]);
+      expect(scope.institutionCodes).toEqual(["HMC"]);
+    }
+    expect(isEmptyScope(scope)).toBe(false);
+    expect(c.division.findMany).not.toHaveBeenCalled();
+  });
+
   it("no grants and no global role → empty scope (the route forbids it)", async () => {
     const scope = await loadDataQualityScope(session(), asClient(fakeClient()));
     expect(scope.all).toBe(false);
