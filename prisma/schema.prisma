@@ -98,12 +98,24 @@ model Scholar {
   /// mentor scholar doesn't cascade-delete the postdoc.
   postdoctoralMentorCwid  String?   @map("postdoctoral_mentor_cwid") @db.VarChar(32)
   /// Issue #171 — ORCID iD (https://orcid.org/0000-0002-1825-0097 form,
-  /// stored as the bare 19-char identifier "0000-0002-1825-0097"). Sourced
-  /// from the WCM Identity DynamoDB table (etl/identity), keyed on `uid`
-  /// (= cwid). Null when the scholar has not registered an ORCID. Used by
-  /// `lib/seo/jsonld.ts` to append an `https://orcid.org/<id>` URL to the
-  /// scholar's Person.sameAs for AI/LLM crawler entity resolution.
+  /// stored as the bare 19-char identifier "0000-0002-1825-0097"). SPS's
+  /// belief about the person's iD, from either of two writers: the WCM
+  /// Identity DynamoDB table (etl/identity, keyed on `uid` = cwid) or the
+  /// person confirming it in `/edit` (which also stamps `orcidConfirmedAt`).
+  /// Whichever wrote it, `etl/orcid-push` copies it back into Identity every
+  /// night, so this column is the durable record while the Institutional
+  /// Client's rebuild still wipes `Identity.orcid` (IC #155). Null when no
+  /// iD is on file. Used by `lib/seo/jsonld.ts` to append an
+  /// `https://orcid.org/<id>` URL to the scholar's Person.sameAs for AI/LLM
+  /// crawler entity resolution.
   orcid                   String?   @db.VarChar(19)
+  /// When the PERSON (or their proxy) confirmed `orcid` in SPS via the
+  /// `/edit` confirm route. Null when the value came from Identity
+  /// (etl/identity) — provenance for `/edit/orcid-coverage`'s confirmed
+  /// split and for the identity ETL's conflict rule: when Identity holds a
+  /// DIFFERENT non-null iD than a confirmed one, Identity wins (it is the
+  /// authority) and this is cleared. Cleared with `orcid` on Remove.
+  orcidConfirmedAt        DateTime? @map("orcid_confirmed_at")
   /// Issue #742 v3.1 C3 — ReciterAI FACULTY# rollup metrics (DynamoDB), for the
   /// overview generator's faculty-scale framing. Nullable so the additive
   /// migration applies cleanly; backfilled by etl/dynamodb on next run.
@@ -139,6 +151,7 @@ model Scholar {
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
   orcidCandidates      OrcidCandidate[]
+  orcidDismissals      OrcidDismissal[]
   reporterCandidates   ReporterProfileCandidate[]
   clinicalTrials       PersonClinicalTrial[]
   datasetDeposits      PersonDatasetDeposit[]
@@ -774,6 +787,24 @@ model OrcidCandidate {
   @@id([cwid, orcid, source])
   @@index([source])
   @@map("orcid_candidate")
+}
+
+/// ORCID iDs a person said are NOT theirs: "Not me" on a suggested candidate,
+/// or Remove on the iD that was on file. One row per (cwid, orcid); written by
+/// the `/edit` dismiss route, deleted by the confirm route for the same pair.
+/// Read in two places: the Identifiers & Profiles card and `/edit/orcid-coverage`
+/// exclude a dismissed pair from suggestions (the `orcid_candidate` mirrors keep
+/// re-creating it, so the exclusion has to live here, not in that table), and
+/// `etl/orcid-push` nulls `Identity.orcid` when Identity still holds a dismissed
+/// iD, so a Remove in SPS reaches ReCiter the same way a confirm does.
+model OrcidDismissal {
+  cwid        String   @db.VarChar(32)
+  scholar     Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid       String   @db.VarChar(19)
+  dismissedAt DateTime @default(now()) @map("dismissed_at")
+
+  @@id([cwid, orcid])
+  @@map("orcid_dismissal")
 }
 
 model PersonNihProfile {
