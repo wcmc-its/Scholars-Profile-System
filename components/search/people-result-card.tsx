@@ -15,6 +15,7 @@ import {
 import { EvidenceLine } from "@/components/search/evidence-line";
 import type { EvidenceGrant, ResultEvidence } from "@/lib/api/result-evidence";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
+import { visibleInstitutionName } from "@/lib/institutions";
 
 /**
  * Search-results person row (issue #8 sketch-002-revised).
@@ -216,11 +217,15 @@ export function PeopleResultCard({
     setGrants((prev) => (prev.length ? [] : prev));
   }, [qParam]);
 
-  const deptLine = hit.divisionName
+  const unitLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
     : hit.deptName
       ? `Department of ${hit.deptName}`
       : hit.primaryDepartment ?? null;
+  // Non-WCMC primary institution joins the line (absence-as-default, same as
+  // the profile header / popover): a WCM scholar's card is unchanged.
+  const deptLine =
+    [unitLine, visibleInstitutionName(hit.primaryOrgCode)].filter(Boolean).join(" · ") || null;
 
   const roleLabel = hit.roleCategory ? formatRoleCategory(hit.roleCategory) : null;
 
