@@ -52,6 +52,7 @@ import type { RailItem, RailKind } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
 import type { ManageableUnit } from "@/lib/edit/manageable-units";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { institutionDisplayName } from "@/lib/institutions";
 import { profilePath } from "@/lib/profile-url";
 import {
   isOverviewGenerateEnabled,
@@ -1146,12 +1147,18 @@ function renderPanel(
           cwid={cwid}
           scholarName={scholarName}
           heading="Name & Title"
-          description="Name, title, degrees, department, and ORCID come from the WCM directory and faculty records."
+          description="Name, title, degrees, department, institution, and ORCID come from the WCM directory and faculty records."
           fields={[
             { label: "Name", value: ctx.scholar.fullName },
             { label: "Title", value: ctx.scholar.primaryTitle },
             { label: "Degrees", value: ctx.scholar.postnominal },
             { label: "Department", value: ctx.scholar.primaryDepartment },
+            {
+              label: "Institution",
+              value: ctx.scholar.primaryOrgCode
+                ? institutionDisplayName(ctx.scholar.primaryOrgCode)
+                : null,
+            },
             {
               label: "ORCID",
               value: (

@@ -84,7 +84,7 @@ beforeEach(() => {
   mockCenterFindUnique.mockResolvedValue(CENTER);
   mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: CENTER.code, role: "curator" }]);
   mockCandidateFindMany.mockResolvedValue([{ cwid: "c1" }]);
-  mockScholarFindMany.mockResolvedValue([{ cwid: "c1", preferredName: "Ada Lovelace" }]);
+  mockScholarFindMany.mockResolvedValue([{ cwid: "c1", preferredName: "Ada Lovelace", primaryOrgCode: "HSS" }]);
   mockAuthorFindMany.mockResolvedValue([
     {
       pmid: "111",
@@ -151,12 +151,14 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
     const csv = await res.text();
     const lines = csv.trim().split("\r\n");
     expect(lines[0]).toBe(
-      "cwid,surname,given_name,pmid,article_title,journal_title,publication_type,year,is_cancer_related,matched_terms,matched_topics,impact_score,impact_justification,synopsis",
+      "cwid,surname,given_name,pmid,article_title,journal_title,publication_type,year,is_cancer_related,matched_terms,matched_topics,impact_score,impact_justification,synopsis,institution",
     );
     expect(lines).toContain(
-      "c1,Lovelace,Ada,111,A Study of Breast Neoplasms,J Oncol,Academic Article,2020,yes,Breast Neoplasms,breast,4.2,Cited widely,Found a thing.",
+      "c1,Lovelace,Ada,111,A Study of Breast Neoplasms,J Oncol,Academic Article,2020,yes,Breast Neoplasms,breast,4.2,Cited widely,Found a thing.,Hospital for Special Surgery",
     );
-    expect(lines).toContain("c1,Lovelace,Ada,222,Unrelated Work,J Misc,Academic Article,2021,no,,,,,");
+    expect(lines).toContain(
+      "c1,Lovelace,Ada,222,Unrelated Work,J Misc,Academic Article,2021,no,,,,,,Hospital for Special Surgery",
+    );
   });
 
   it("scopes to one candidate and uses the per-person filename when ?cwid= is given", async () => {

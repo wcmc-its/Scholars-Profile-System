@@ -30,6 +30,7 @@ import {
   buildArticleCountWorkbook,
   canViewArticleCountReport,
   describeCriteria,
+  loadArticleCountChoices,
   loadArticleCounts,
   loadArticleList,
   parseArticleCountParams,
@@ -55,6 +56,7 @@ describe("parseArticleCountParams", () => {
     expect(parseArticleCountParams(new URLSearchParams())).toEqual({
       types: [],
       depts: [],
+      insts: [],
       atypes: [],
       jif: 0,
       pos: "any",
@@ -66,11 +68,34 @@ describe("parseArticleCountParams", () => {
 
   it("reads repeated keys, clamps the JIF, rejects unknown enums, keeps to ≥ from", () => {
     const p = parseArticleCountParams(
-      new URLSearchParams("types=postdoc&types=fellow&dept=A&atype=Review&jif=999&pos=bogus&basis=fy&from=2020&to=2010"),
+      new URLSearchParams("types=postdoc&types=fellow&dept=A&inst=HSS&atype=Review&jif=999&pos=bogus&basis=fy&from=2020&to=2010"),
     );
-    expect(p).toMatchObject({ types: ["postdoc", "fellow"], depts: ["A"], atypes: ["Review"], jif: 100, pos: "any", basis: "fy", from: 2020, to: 2020 });
+    expect(p).toMatchObject({ types: ["postdoc", "fellow"], depts: ["A"], insts: ["HSS"], atypes: ["Review"], jif: 100, pos: "any", basis: "fy", from: 2020, to: 2020 });
     // Round-trips through the query string the page and the download share.
     expect(parseArticleCountParams(new URLSearchParams(articleCountQueryString(p)))).toEqual(p);
+  });
+});
+
+describe("loadArticleCountChoices", () => {
+  it("institution choices are the active scholars' primaryOrgCode values, nulls dropped, ordered by display name", async () => {
+    // One shared groupBy mock serves scholar (role, department, institution) and publication (type).
+    h.groupBy
+      .mockResolvedValueOnce([{ roleCategory: "full_time_faculty" }])
+      .mockResolvedValueOnce([{ primaryDepartment: "Medicine" }])
+      .mockResolvedValueOnce([
+        { primaryOrgCode: "WCMC" },
+        { primaryOrgCode: "HSS" },
+        { primaryOrgCode: null },
+        { primaryOrgCode: "MSKCC" },
+      ])
+      .mockResolvedValueOnce([{ publicationType: "Journal Article" }]);
+    const choices = await loadArticleCountChoices();
+    // Hospital for Special Surgery < Memorial Sloan Kettering… < Weill Cornell Medicine (the WCMC display alias).
+    expect(choices.insts).toEqual(["HSS", "MSKCC", "WCMC"]);
+    expect(h.groupBy).toHaveBeenCalledWith({
+      by: ["primaryOrgCode"],
+      where: { deletedAt: null, status: "active" },
+    });
   });
 });
 
@@ -89,7 +114,7 @@ describe("loadArticleCounts", () => {
   it("fiscal basis shifts the PubMed add date by six months; facets, JIF and position each add their clause", async () => {
     await loadArticleCounts(
       parseArticleCountParams(
-        new URLSearchParams("basis=fy&types=full_time_faculty&dept=Medicine&atype=Review&jif=10&pos=either&from=2025&to=2025"),
+        new URLSearchParams("basis=fy&types=full_time_faculty&dept=Medicine&inst=HSS&inst=MSKCC&atype=Review&jif=10&pos=either&from=2025&to=2025"),
       ),
     );
     const { text, values } = lastSql();
@@ -97,9 +122,11 @@ describe("loadArticleCounts", () => {
     expect(text).toContain("AND j.impact_score_1 >= ?");
     expect(text).toContain("AND s.role_category IN (?)");
     expect(text).toContain("AND s.primary_department IN (?)");
+    // The institution facet binds the ED CODE, never the display name.
+    expect(text).toContain("AND s.primary_org_code IN (?,?)");
     expect(text).toContain("AND p.publication_type IN (?)");
     expect(text).toContain("AND (pa.is_first = 1 OR pa.is_last = 1)");
-    expect(values).toEqual(["full_time_faculty", "Medicine", "Review", 10, 2025, 2025]);
+    expect(values).toEqual(["full_time_faculty", "Medicine", "HSS", "MSKCC", "Review", 10, 2025, 2025]);
   });
 
   it("fills every year in the range, zero where the query returned nothing, and totals (BigInt-safe)", async () => {
@@ -134,6 +161,7 @@ describe("loadArticleList", () => {
     cwid: "jas2001",
     role_category: "full_time_faculty",
     primary_department: "Medicine",
+    primary_org_code: "WCMC",
     is_first: 1,
     is_last: 0,
     ...over,
@@ -142,12 +170,14 @@ describe("loadArticleList", () => {
   it("selects the same scope as the count (one row per matching authorship) and folds authorships per article", async () => {
     h.queryRaw.mockResolvedValue([
       raw({}),
-      raw({ preferred_name: "Bob Jones", cwid: "bxj2002", role_category: "postdoc", primary_department: null, is_first: 0, is_last: 1 }),
+      raw({ preferred_name: "Bob Jones", cwid: "bxj2002", role_category: "postdoc", primary_department: null, primary_org_code: "HSS", is_first: 0, is_last: 1 }),
+      raw({ preferred_name: "Cy Null", cwid: "cyn2003", role_category: "postdoc", primary_department: "Surgery", primary_org_code: null, is_first: 0, is_last: 0 }),
       raw({ pmid: "SCOPUS:200", y: 2025, year: 2025, full_authors_string: null, authors_string: "((Doe J)), Roe R", jif: null, date_added_to_entrez: null, is_first: 0, is_last: 0 }),
     ]);
     const list = await loadArticleList(parseArticleCountParams(new URLSearchParams("basis=fy&jif=5&from=2024&to=2025")));
     const { text } = lastSql();
     expect(text).toContain("SELECT p.pmid, YEAR(DATE_ADD(p.date_added_to_entrez, INTERVAL 6 MONTH)) AS y, p.title");
+    expect(text).toContain("s.primary_department, s.primary_org_code, pa.is_first");
     expect(text).toContain("AND j.impact_score_1 >= ?");
     expect(text).toContain("ORDER BY y, p.pmid, pa.position");
     expect(list).toEqual([
@@ -160,9 +190,12 @@ describe("loadArticleList", () => {
         jif: 12.5,
         dateAdded: "2024-03-05",
         doi: "10.1/x",
+        // Institution sits after department: the home code is named, a
+        // non-WCM code is expanded, a null one is skipped like a null department.
         scholars: [
-          "Jane Smith (jas2001), Full-time faculty, Medicine, first author",
-          "Bob Jones (bxj2002), Postdoc, last author",
+          "Jane Smith (jas2001), Full-time faculty, Medicine, Weill Cornell Medicine, first author",
+          "Bob Jones (bxj2002), Postdoc, Hospital for Special Surgery, last author",
+          "Cy Null (cyn2003), Postdoc, Surgery, middle author",
         ],
       },
       {
@@ -175,7 +208,7 @@ describe("loadArticleList", () => {
         jif: null,
         dateAdded: null,
         doi: "10.1/x",
-        scholars: ["Jane Smith (jas2001), Full-time faculty, Medicine, middle author"],
+        scholars: ["Jane Smith (jas2001), Full-time faculty, Medicine, Weill Cornell Medicine, middle author"],
       },
     ]);
   });
@@ -183,7 +216,7 @@ describe("loadArticleList", () => {
 
 describe("buildArticleCountWorkbook", () => {
   it("writes a Counts sheet (years + total) and a Criteria sheet carrying every filter and the caveat", async () => {
-    const p = parseArticleCountParams(new URLSearchParams("basis=fy&jif=5&pos=first&from=2024&to=2025&types=postdoc"));
+    const p = parseArticleCountParams(new URLSearchParams("basis=fy&jif=5&pos=first&from=2024&to=2025&types=postdoc&inst=WCMC&inst=HSS"));
     const article = {
       pmid: "100",
       citation: "Smith JA. A title. J Test. 2024.",
@@ -214,6 +247,7 @@ describe("buildArticleCountWorkbook", () => {
     criteria.eachRow((row) => cells.set(String(row.getCell(1).value), String(row.getCell(2).value)));
     expect(cells.get("Person type")).toBe("Postdoc");
     expect(cells.get("Primary department")).toBe("All");
+    expect(cells.get("Primary institution")).toBe("Weill Cornell Medicine; Hospital for Special Surgery");
     expect(cells.get("Minimum Journal Impact Factor")).toContain("5 or higher");
     expect(cells.get("Author position")).toBe("First author");
     expect(cells.get("Year basis")).toContain("July 1 – June 30");

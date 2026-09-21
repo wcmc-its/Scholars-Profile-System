@@ -39,6 +39,7 @@
  */
 import { toCsv, type CsvCell } from "@/lib/csv";
 import type { UnitEditContext } from "@/lib/api/unit-edit-context";
+import { institutionDisplayName } from "@/lib/institutions";
 import { exportEmailCell } from "@/lib/profile/email-visibility-flags";
 
 /**
@@ -70,8 +71,10 @@ export function rosterStatusOf(
  *  `email`/`role_category`/`department`/`division` are the faculty block; they
  *  come through EMPTY when the caller supplies no `facultyByCwid`, so the header
  *  row is stable either way (a consumer's column indices never shift under them).
- *  `scholar_state` is last and always populated — it comes off the roster row
- *  itself, not the faculty join, so it is present even with no `facultyByCwid`. */
+ *  `scholar_state` is always populated — it comes off the roster row itself, not
+ *  the faculty join, so it is present even with no `facultyByCwid`. `institution`
+ *  (faculty block, ED primary organization) was appended LAST, after it, so
+ *  existing consumer indices did not shift. */
 export const ROSTER_CSV_HEADERS = [
   "cwid",
   "name",
@@ -88,6 +91,7 @@ export const ROSTER_CSV_HEADERS = [
   "department",
   "division",
   "scholar_state",
+  "institution",
 ] as const;
 
 /** Per-scholar faculty metadata joined onto a roster row by cwid. Loaded in the
@@ -99,6 +103,8 @@ export type RosterFacultyMeta = {
   roleCategory: string | null;
   departmentName: string | null;
   divisionName: string | null;
+  /** `institutionDisplayName` of the ED primary organization; null when unset. */
+  institution: string | null;
 };
 
 export type BuildRosterCsvOptions = {
@@ -160,6 +166,7 @@ export function buildUnitRosterCsv(
       // closed out their membership. That pair is the audit this column exists
       // for, and it is why filtering the CSV on `status` alone misses them.
       m.scholarState,
+      meta?.institution ?? "",
     ]);
   }
   return toCsv(ROSTER_CSV_HEADERS, body);
@@ -177,6 +184,7 @@ export type RosterFacultyClient = {
         roleCategory: string | null;
         department: { name: string } | null;
         division: { name: string } | null;
+        primaryOrgCode: string | null;
       }>
     >;
   };
@@ -203,6 +211,7 @@ export async function loadRosterFacultyMeta(
       roleCategory: true,
       department: { select: { name: true } },
       division: { select: { name: true } },
+      primaryOrgCode: true,
     },
   });
   for (const row of rows) {
@@ -211,6 +220,7 @@ export async function loadRosterFacultyMeta(
       roleCategory: row.roleCategory,
       departmentName: row.department?.name ?? null,
       divisionName: row.division?.name ?? null,
+      institution: row.primaryOrgCode ? institutionDisplayName(row.primaryOrgCode) : null,
     });
   }
   return out;

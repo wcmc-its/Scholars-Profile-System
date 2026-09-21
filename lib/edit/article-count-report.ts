@@ -1,7 +1,8 @@
 /**
  * Report 8 — "Article counts": distinct publications per year for the
- * scholars matching the facets (person type, primary department, article
- * type, minimum Journal Impact Factor, author position), by calendar or
+ * scholars matching the facets (person type, primary department, primary
+ * institution, article type, minimum Journal Impact Factor, author
+ * position), by calendar or
  * fiscal year. One `COUNT(DISTINCT pmid)` query, grouped by year; the page
  * and the `.xlsx` route (`/api/edit/reports/article-count`) share it; the
  * workbook adds an Articles sheet (one row per counted article with its
@@ -30,6 +31,7 @@ import { db } from "@/lib/db";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { institutionDisplayName } from "@/lib/institutions";
 import { roleCategoryLabel } from "@/lib/match-display";
 
 export const ARTICLE_COUNT_CAVEAT =
@@ -54,6 +56,8 @@ export type YearBasis = keyof typeof BASIS_LABEL;
 export type ArticleCountParams = {
   types: string[];
   depts: string[];
+  /** ED primary-organization codes (`Scholar.primaryOrgCode`), not names. */
+  insts: string[];
   atypes: string[];
   jif: number;
   pos: AuthorPosition;
@@ -76,6 +80,7 @@ export function parseArticleCountParams(sp: URLSearchParams): ArticleCountParams
   return {
     types: sp.getAll("types").filter(Boolean),
     depts: sp.getAll("dept").filter(Boolean),
+    insts: sp.getAll("inst").filter(Boolean),
     atypes: sp.getAll("atype").filter(Boolean),
     jif: int("jif", 0, 0, JIF_MAX),
     pos: pick("pos", Object.keys(POSITION_LABEL) as AuthorPosition[], "any"),
@@ -89,6 +94,7 @@ export function articleCountQueryString(p: ArticleCountParams): string {
   const q = new URLSearchParams();
   for (const t of p.types) q.append("types", t);
   for (const d of p.depts) q.append("dept", d);
+  for (const i of p.insts) q.append("inst", i);
   for (const a of p.atypes) q.append("atype", a);
   q.set("jif", String(p.jif));
   q.set("pos", p.pos);
@@ -106,17 +112,27 @@ export async function canViewArticleCountReport(session: EditSession): Promise<b
 export async function loadArticleCountChoices(): Promise<{
   types: string[];
   depts: string[];
+  /** Codes; the rail labels them via `institutionDisplayName`. */
+  insts: string[];
   atypes: string[];
 }> {
-  const [roles, depts, atypes] = await Promise.all([
+  const [roles, depts, insts, atypes] = await Promise.all([
     db.read.scholar.groupBy({ by: ["roleCategory"], where: { deletedAt: null, status: "active" } }),
     db.read.scholar.groupBy({ by: ["primaryDepartment"], where: { deletedAt: null, status: "active" } }),
+    db.read.scholar.groupBy({
+      by: ["primaryOrgCode"],
+      where: { deletedAt: null, status: "active" },
+    }),
     db.read.publication.groupBy({ by: ["publicationType"] }),
   ]);
   const strings = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort();
   return {
     types: strings(roles.map((r) => r.roleCategory)),
     depts: strings(depts.map((r) => r.primaryDepartment)),
+    // Codes, but ordered by the name the select shows (the roster facet label-sorts too).
+    insts: strings(insts.map((r) => r.primaryOrgCode)).sort((a, b) =>
+      institutionDisplayName(a).localeCompare(institutionDisplayName(b)),
+    ),
     atypes: strings(atypes.map((r) => r.publicationType)),
   };
 }
@@ -149,6 +165,7 @@ function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Pri
        AND s.deleted_at IS NULL AND s.status = 'active'
        ${inList(Prisma.sql`s.role_category`, p.types)}
        ${inList(Prisma.sql`s.primary_department`, p.depts)}
+       ${inList(Prisma.sql`s.primary_org_code`, p.insts)}
        ${inList(Prisma.sql`p.publication_type`, p.atypes)}
        ${p.jif > 0 ? Prisma.sql`AND j.impact_score_1 >= ${p.jif}` : Prisma.empty}
        ${posExpr}
@@ -186,7 +203,8 @@ export type ArticleRow = {
   jif: number | null;
   dateAdded: string | null;
   doi: string | null;
-  /** The matching scholars, one entry each: `Name (CWID), person type, department, position`. */
+  /** The matching scholars, one entry each:
+   *  `Name (CWID), person type, department, institution, position`. */
   scholars: string[];
 };
 
@@ -209,6 +227,7 @@ type RawArticleRow = {
   cwid: string;
   role_category: string | null;
   primary_department: string | null;
+  primary_org_code: string | null;
   is_first: number | boolean;
   is_last: number | boolean;
 };
@@ -222,7 +241,8 @@ export async function loadArticleList(p: ArticleCountParams): Promise<ArticleRow
     SELECT p.pmid, ${yearExpr} AS y, p.title, p.journal, p.year, p.volume, p.issue, p.pages,
            p.full_authors_string, p.authors_string, p.publication_type, p.date_added_to_entrez, p.doi,
            j.impact_score_1 AS jif,
-           s.preferred_name, s.cwid, s.role_category, s.primary_department, pa.is_first, pa.is_last
+           s.preferred_name, s.cwid, s.role_category, s.primary_department, s.primary_org_code,
+           pa.is_first, pa.is_last
     ${fromWhere}
      ORDER BY y, p.pmid, pa.position`;
 
@@ -253,7 +273,13 @@ export async function loadArticleList(p: ArticleCountParams): Promise<ArticleRow
     }
     const position = r.is_first ? "first author" : r.is_last ? "last author" : "middle author";
     row.scholars.push(
-      [`${r.preferred_name} (${r.cwid})`, roleCategoryLabel(r.role_category), r.primary_department, position]
+      [
+        `${r.preferred_name} (${r.cwid})`,
+        roleCategoryLabel(r.role_category),
+        r.primary_department,
+        r.primary_org_code ? institutionDisplayName(r.primary_org_code) : null,
+        position,
+      ]
         .filter(Boolean)
         .join(", "),
     );
@@ -269,6 +295,7 @@ export function describeCriteria(p: ArticleCountParams, generatedAt: Date): [str
     ["Generated", generatedAt.toISOString()],
     ["Person type", list(p.types.map(roleCategoryLabel))],
     ["Primary department", list(p.depts)],
+    ["Primary institution", list(p.insts.map(institutionDisplayName))],
     ["Article type", list(p.atypes)],
     [
       "Minimum Journal Impact Factor",
@@ -284,7 +311,7 @@ export function describeCriteria(p: ArticleCountParams, generatedAt: Date): [str
     ["Years", `${p.from}–${p.to}`],
     [
       "Counting rule",
-      "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type and department are the scholar's current values.",
+      "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department and institution are the scholar's current values.",
     ],
     ["Note", ARTICLE_COUNT_CAVEAT],
   ];

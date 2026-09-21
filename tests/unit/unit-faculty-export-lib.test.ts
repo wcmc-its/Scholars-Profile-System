@@ -29,6 +29,7 @@ const SCHOLAR_ROW = {
   department: { name: "Medicine" },
   division: { name: "Cardiology" },
   email: "abc1234@med.cornell.edu",
+  primaryOrgCode: "HSS",
 };
 
 function client(over?: {
@@ -68,6 +69,7 @@ describe("buildFacultyCsv", () => {
     divisionName: null,
     departmentName: "Medicine",
     email: "abc1234@med.cornell.edu",
+    institution: "Weill Cornell Medicine",
     ...over,
   });
 
@@ -76,14 +78,15 @@ describe("buildFacultyCsv", () => {
     const lines = csv.split("\r\n");
     expect(lines[0]).toBe(FACULTY_CSV_HEADERS.join(","));
     expect(csv).toContain('"Smith, Jane"'); // comma quoted
-    // null title + null division → empty cells; email is the trailing column.
+    // null title + null division → empty cells; institution is the trailing column.
     expect(lines[1]).toBe(
-      'abc1234,"Smith, Jane",,full_time_faculty,,Medicine,abc1234@med.cornell.edu',
+      'abc1234,"Smith, Jane",,full_time_faculty,,Medicine,abc1234@med.cornell.edu,Weill Cornell Medicine',
     );
+    expect(buildFacultyCsv([row({ institution: null })]).split("\r\n")[1].endsWith(",")).toBe(true);
   });
 
-  it("appends email LAST so existing column indices do not shift", () => {
-    expect(FACULTY_CSV_HEADERS.indexOf("email")).toBe(FACULTY_CSV_HEADERS.length - 1);
+  it("appends institution LAST (after email) so existing column indices do not shift", () => {
+    expect(FACULTY_CSV_HEADERS.indexOf("institution")).toBe(FACULTY_CSV_HEADERS.length - 1);
     expect(FACULTY_CSV_HEADERS.slice(0, -1)).toEqual([
       "cwid",
       "name",
@@ -91,6 +94,7 @@ describe("buildFacultyCsv", () => {
       "role_category",
       "division",
       "department",
+      "email",
     ]);
   });
 
@@ -146,13 +150,14 @@ describe("loadDepartmentRosterForExport", () => {
         divisionName: "Cardiology",
         departmentName: "Medicine",
         email: "abc1234@med.cornell.edu",
+        institution: "Hospital for Special Surgery",
       },
     ]);
-    // The address must be SELECTED — a loader that drops it silently exports an
-    // all-empty email column that looks like "nobody has an address on file".
+    // The address and the ED code must be SELECTED — a loader that drops either
+    // silently exports an all-empty column that looks like "nothing on file".
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        select: expect.objectContaining({ email: true }),
+        select: expect.objectContaining({ email: true, primaryOrgCode: true }),
       }),
     );
   });

@@ -118,6 +118,9 @@ export default async function EditScholarsPage({
             }))
             .filter((d) => scope.unitCodes.includes(codeOf(d.value)) || d.divisions.length > 0),
           centers: allFacets.centers.filter((c) => scope.centerCodes.includes(codeOf(c.value))),
+          institutions: allFacets.institutions.filter((i) =>
+            (scope.institutionCodes ?? []).includes(codeOf(i.value)),
+          ),
         }
       : allFacets;
 

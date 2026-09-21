@@ -107,13 +107,29 @@ describe("GET /api/edit/center/[code]/collab-report", () => {
         lastRefreshedAt: new Date("2026-08-10T00:00:00Z"), // the later run
       },
     ]);
-    mockScholarFindMany.mockResolvedValue([{ cwid: "c1", preferredName: "Jane Q. Public", primaryDepartment: "Medicine" }]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "c1", preferredName: "Jane Q. Public", primaryDepartment: "Medicine", primaryOrgCode: "HSS" },
+    ]);
     const res = await GET(get(), { params: Promise.resolve({ code: "meyer_cancer_center" }) });
     const body = await res.json();
     expect(body.generatedAt).toBe("2026-08-10T00:00:00.000Z");
     expect(body.rows).toHaveLength(2);
-    expect(body.rows[0]).toMatchObject({ cwid: "c1", surname: "Public", givenName: "Jane Q.", primaryDepartment: "Medicine" });
-    // c2 has no matching Scholar row (excluded from the mocked findMany) — falls back to the cwid, empty department.
-    expect(body.rows[1]).toMatchObject({ cwid: "c2", surname: "c2", givenName: "", primaryDepartment: "" });
+    // Institution is the DISPLAY name of the ED code, resolved server-side.
+    expect(body.rows[0]).toMatchObject({
+      cwid: "c1",
+      surname: "Public",
+      givenName: "Jane Q.",
+      primaryDepartment: "Medicine",
+      institution: "Hospital for Special Surgery",
+    });
+    // c2 has no matching Scholar row (excluded from the mocked findMany) — falls
+    // back to the cwid, empty department and institution.
+    expect(body.rows[1]).toMatchObject({
+      cwid: "c2",
+      surname: "c2",
+      givenName: "",
+      primaryDepartment: "",
+      institution: "",
+    });
   });
 });

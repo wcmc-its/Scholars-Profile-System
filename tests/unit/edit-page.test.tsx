@@ -44,6 +44,7 @@ const ctx: EditContext = {
     primaryTitle: "Professor of Medicine",
     postnominal: "MD, MPH",
     primaryDepartment: "Medicine",
+    primaryOrgCode: "WCMC",
     email: "self01@med.cornell.edu",
     emailVisibility: "public",
     orcid: null,
@@ -481,6 +482,21 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
     // Email moved to its own tab — the Name & Title panel no longer echoes it.
     expect(screen.queryByText("self01@med.cornell.edu")).toBeNull();
+    // Institution row: the home code is named, not echoed bare.
+    expect(screen.getByText("Institution")).toBeTruthy();
+    expect(screen.getByText("Weill Cornell Medicine")).toBeTruthy();
+    expect(screen.queryByText("WCMC")).toBeNull();
+  });
+
+  it("name-title names a non-WCM primary institution and blanks a null one", () => {
+    const hss = { ...ctx, scholar: { ...ctx.scholar, primaryOrgCode: "HSS" } };
+    const { unmount } = render(<EditPage ctx={hss} mode="self" attr="name-title" />);
+    expect(screen.getByText("Hospital for Special Surgery")).toBeTruthy();
+    unmount();
+    const none = { ...ctx, scholar: { ...ctx.scholar, primaryOrgCode: null } };
+    render(<EditPage ctx={none} mode="self" attr="name-title" />);
+    expect(screen.getByText("Institution")).toBeTruthy();
+    expect(screen.queryByText("Weill Cornell Medicine")).toBeNull();
   });
 
   it("?attr=email renders the read-only Email tab: email, visibility label + explainer, Web Directory link", () => {
