@@ -58,11 +58,13 @@ const TH_CLASS =
 /** Mirrors `ReportableUnitKind` (`lib/edit/cancer-center-reports.ts`). Declared
  *  locally rather than imported: this is a client component, and that module
  *  pulls the server-only reports data layer. */
-export type ReportsIndexUnitKind = "center" | "department" | "division" | "core" | "program";
+export type ReportsIndexUnitKind = "center" | "department" | "division" | "core" | "program" | "institution";
+/** The pseudo-units — no org unit behind them; their reports are addressed without `?center=`. */
+const isPseudo = (k: ReportsIndexUnitKind) => k === "program" || k === "institution";
 /** `"program"` is the one pseudo-unit: the person-granted Mentored
  *  publications report (`/edit/reports/7`) rides the same list as a unit with
  *  one report, so it is filterable and sortable like every other row. */
-export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export type ReportsIndexReport = {
   n: ReportN;
@@ -108,6 +110,7 @@ function typeLabel(u: { kind: ReportsIndexUnitKind; centerType: "center" | "inst
   if (u.kind === "division") return "Division";
   if (u.kind === "core") return "Core";
   if (u.kind === "program") return "Program";
+  if (u.kind === "institution") return "Institution";
   return u.centerType === "institute" ? "Institute" : "Center";
 }
 
@@ -132,9 +135,10 @@ function RowAccess({ access }: { access: ReportAccessPopoverProps }) {
  *  (implied `kind=center`) keeps resolving exactly as it always has. For a
  *  core, `<code>` is the core id. The slug (not the number) so the click is
  *  one navigation, not a redirect hop through `/edit/reports/N`. */
-function reportHref(slug: string, n: ReportN, code: string, kind: ReportsIndexUnitKind): string {
-  // Report 7 is granted per person (`report_access`), never unit-scoped.
-  if (n === 7) return `/edit/reports/${slug}`;
+function reportHref(slug: string, code: string, kind: ReportsIndexUnitKind): string {
+  // Report 7 is granted per person (`report_access`), report 8 to every
+  // administrator — neither is unit-scoped.
+  if (isPseudo(kind)) return `/edit/reports/${slug}`;
   const params = new URLSearchParams({ center: code });
   if (kind !== "center") params.set("kind", kind);
   return `/edit/reports/${slug}?${params.toString()}`;
@@ -217,7 +221,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       departments: units.filter((u) => u.kind === "department").length,
       divisions: units.filter((u) => u.kind === "division").length,
       cores: units.filter((u) => u.kind === "core").length,
-      programs: units.filter((u) => u.kind === "program").length,
+      programs: units.filter((u) => isPseudo(u.kind)).length,
       // Row-scoped (per report), not unit-scoped — a unit with 1 of 6 reports
       // live now contributes 1 row to liveOnly and 5 to noneYet, instead of
       // reading as "has a live report" and never surfacing in "In progress".
@@ -235,7 +239,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       if (r.unitKind === "department" && !showDepartments) return false;
       if (r.unitKind === "division" && !showDivisions) return false;
       if (r.unitKind === "core" && !showCores) return false;
-      if (r.unitKind === "program" && !showPrograms) return false;
+      if (isPseudo(r.unitKind) && !showPrograms) return false;
       if (liveOnly && !r.live) return false;
       if (noneYetOnly && r.live) return false;
       if (trimmed.length === 0) return true;
@@ -421,7 +425,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                         <td className="px-3 py-2.5 align-middle">
                           {r.live ? (
                             <Link
-                              href={reportHref(r.reportSlug, r.reportN, r.unitCode, r.unitKind)}
+                              href={reportHref(r.reportSlug, r.unitCode, r.unitKind)}
                               className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
                               data-testid={`reports-index-link-${r.unitCode}-${r.reportN}`}
                             >
@@ -515,7 +519,7 @@ function ReportRows({
           >
             <td className="px-3 py-2.5 align-middle">
               <Link
-                href={reportHref(r.slug, r.n, unitCode, unitKind)}
+                href={reportHref(r.slug, unitCode, unitKind)}
                 className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
                 data-testid={`reports-index-band-link-${unitCode}-${r.n}`}
               >
@@ -574,7 +578,7 @@ function ReportsBands({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                 </span>
               </td>
               <td className="border-apollo-border border-t px-3 py-2 text-right">
-                {u.kind !== "program" && (
+                {!isPseudo(u.kind) && (
                   <Link
                     href={u.editHref}
                     className="text-foreground relative z-10 text-xs hover:underline"

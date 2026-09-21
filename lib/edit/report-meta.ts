@@ -46,7 +46,7 @@ import { db } from "@/lib/db";
 export { isValidReportSlug, REPORT_SLUG_MAX } from "@/lib/edit/report-slug";
 
 /** The seven numbered reports, as the `report_key` column spells them. */
-export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7"] as const;
+export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8"] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
 /** Whether `v` is one of {@link REPORT_KEYS} — a string, never the number. */
@@ -137,6 +137,13 @@ export const REPORT_META_DEFAULTS: Record<
     summary:
       "Every publication a learner co-authored with a mentor — the MD program's AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc appointments, co-authorship inferences — with impact factor and citations. Access is granted per person.",
     descriptionHtml: MENTORED_PUBS_DESCRIPTION_HTML,
+  },
+  "8": {
+    slug: "article-count",
+    name: "Article counts",
+    summary:
+      "Distinct articles per calendar or fiscal year for the scholars matching a person type, primary department, article type, minimum Journal Impact Factor and author position. Open to every unit administrator.",
+    descriptionHtml: null,
   },
 };
 

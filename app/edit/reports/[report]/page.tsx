@@ -54,6 +54,7 @@ import {
 } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { db } from "@/lib/db";
 import {
   loadReportsContext,
@@ -187,6 +188,11 @@ export default async function EditReportPage({
         : `/edit/reports?center=${encodeURIComponent(code)}&kind=${kind}`;
     loadAccess = async () => <ReportAccessPopover mode="unit" />;
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
+  } else if (def.gate === "admin") {
+    if (!(await canViewArticleCountReport(session))) notFound();
+    back = "/edit/reports";
+    loadAccess = async () => <ReportAccessPopover mode="admin" />;
+    render = () => def.render({ n, session, searchParams: sp, basePath });
   } else {
     // Row-based gate: an empty scope set reads as an unbuilt route, the same
     // 404 `/edit/data-sharing` gives a non-viewer.

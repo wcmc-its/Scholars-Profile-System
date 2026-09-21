@@ -76,7 +76,13 @@ export type ReportAccessPopoverPersonProps = {
   canManage: boolean;
 };
 
-export type ReportAccessPopoverProps = ReportAccessPopoverUnitProps | ReportAccessPopoverPersonProps;
+/** Administrator-gated report (report 8): static rule, any unit administrator. */
+export type ReportAccessPopoverAdminProps = { mode: "admin" };
+
+export type ReportAccessPopoverProps =
+  | ReportAccessPopoverUnitProps
+  | ReportAccessPopoverPersonProps
+  | ReportAccessPopoverAdminProps;
 
 const GENERIC_ERROR = "That didn't save. Try again.";
 
@@ -119,14 +125,15 @@ function Trigger() {
 const CONTENT_CLASS = "w-[34rem] max-w-[calc(100vw-2rem)] text-sm";
 
 export function ReportAccessPopover(props: ReportAccessPopoverProps) {
-  if (props.mode === "unit") {
+  if (props.mode === "unit" || props.mode === "admin") {
     return (
       <Popover>
         <Trigger />
         <PopoverContent align="start" className={CONTENT_CLASS} data-testid="report-access-popover">
           <p className="text-muted-foreground">
-            Owners and Curators of the unit this report is opened for can run it, plus superusers
-            and comms stewards.
+            {props.mode === "admin"
+              ? "Every unit administrator — an Owner or Curator of any unit — can run it, plus superusers and comms stewards."
+              : "Owners and Curators of the unit this report is opened for can run it, plus superusers and comms stewards."}
           </p>
           <p className="mt-2">
             <Link href="/edit/administrators" className="text-apollo-maroon underline-offset-2 hover:underline">

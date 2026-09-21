@@ -59,6 +59,8 @@ vi.mock("@/lib/edit/report-access", () => ({
 }));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.
+// Report 8's administrator gate — denied here, so the unit lists stay pinned.
+vi.mock("@/lib/edit/article-count-report", () => ({ canViewArticleCountReport: vi.fn().mockResolvedValue(false) }));
 vi.mock("@/lib/db", () => ({
   db: { read: { reportMeta: { findMany: vi.fn().mockResolvedValue([]) } }, write: {} },
 }));
