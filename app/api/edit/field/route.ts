@@ -67,6 +67,7 @@ import {
   validateUnitFieldValue,
 } from "@/lib/edit/validators";
 import { validateManualMentees } from "@/lib/edit/manual-mentee";
+import { isProfileLinksEnabled, validateProfileLinks } from "@/lib/edit/profile-links";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
@@ -174,12 +175,17 @@ async function handleScholarFieldEdit(params: {
   if (fieldName === "selectedHighlightPmids" && !isManualHighlightsEnabled()) {
     return editError(400, "invalid_field", "fieldName");
   }
+  // #2699 — same dark-when-off shape for the external-profile links.
+  if (fieldName === "profileLinks" && !isProfileLinksEnabled()) {
+    return editError(400, "invalid_field", "fieldName");
+  }
   // `selectedHighlightPmids` (#836) and `manualMentees` (#2011) carry JSON array
-  // values; every other scholar field is a string. The per-field validation
-  // below enforces the precise shape.
+  // values and `profileLinks` (#2699) a JSON object; every other scholar field
+  // is a string. The per-field validation below enforces the precise shape.
   if (
     fieldName !== "selectedHighlightPmids" &&
     fieldName !== "manualMentees" &&
+    fieldName !== "profileLinks" &&
     typeof value !== "string"
   ) {
     return editError(400, "invalid_value", "value");
@@ -195,8 +201,12 @@ async function handleScholarFieldEdit(params: {
   // superuser-only).
   let viaUnitAdminUnit: EditableUnit | null = null;
   let authz: AuthzResult;
-  if (fieldName === "overview" || isSectionVisibilityField(fieldName)) {
-    // Section-visibility toggles ride the SAME "may edit this scholar's profile"
+  if (
+    fieldName === "overview" ||
+    fieldName === "profileLinks" ||
+    isSectionVisibilityField(fieldName)
+  ) {
+    // Section-visibility toggles (and #2699 profile links) ride the SAME "may edit this scholar's profile"
     // authz as the bio (self / superuser / comms_steward / granted proxy /
     // org-unit owner-or-curator) — `authorizeOverviewWrite` is keyed on the
     // scholar (entityId), not the field name, so reusing it is correct. A
@@ -251,6 +261,13 @@ async function handleScholarFieldEdit(params: {
     // path degrades on its own when nothing resolves.
     const result = validateManualMentees(value);
     if (!result.ok) return editError(400, result.error, "value");
+    storedValue = JSON.stringify(result.value);
+  } else if (fieldName === "profileLinks") {
+    // #2699 — host-allowlisted per platform and canonicalized on write; the
+    // offending platform key rides back as the error `field` so the card can
+    // point at the input.
+    const result = validateProfileLinks(value);
+    if (!result.ok) return editError(400, result.error, result.platform ?? "value");
     storedValue = JSON.stringify(result.value);
   } else if (isSectionVisibilityField(fieldName)) {
     // Section-visibility boolean — exactly "true" (hidden) or "false" (shown).
@@ -400,13 +417,14 @@ async function handleScholarFieldEdit(params: {
   }
 
   // A changed `overview`, `selectedHighlightPmids` (#836), `manualMentees`
-  // (#2011), or a section-visibility toggle all alter the public profile page, so
-  // revalidate its canonical path. `slug` changes don't flip the URL until the
-  // next etl/ed run, so they need no revalidation here.
+  // (#2011), `profileLinks` (#2699), or a section-visibility toggle all alter the
+  // public profile page, so revalidate its canonical path. `slug` changes don't
+  // flip the URL until the next etl/ed run, so they need no revalidation here.
   if (
     fieldName === "overview" ||
     fieldName === "selectedHighlightPmids" ||
     fieldName === "manualMentees" ||
+    fieldName === "profileLinks" ||
     isSectionVisibilityField(fieldName)
   ) {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);

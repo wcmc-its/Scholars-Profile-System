@@ -27,6 +27,7 @@
  */
 import { sanitizeOverviewHtml, validateSelectedHighlightPmids } from "@/lib/edit/validators";
 import { type ManualMentee, validateManualMentees } from "@/lib/edit/manual-mentee";
+import { type ProfileLinks, validateProfileLinks } from "@/lib/edit/profile-links";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 
@@ -161,6 +162,35 @@ export async function getManualMentees(
   if (!override) return [];
   const parsed = validateManualMentees(override.value);
   return parsed.ok ? parsed.value : [];
+}
+
+// ---------------------------------------------------------------------------
+// profileLinks — #2699 faculty-entered external profile links
+// ---------------------------------------------------------------------------
+
+/**
+ * The scholar's external profile links (`{ platform: canonical URL }`), or `{}`
+ * when none are on file. Reads `field_override(scholar, cwid, 'profileLinks')`
+ * and re-validates the stored JSON; a malformed row reads as `{}` rather than
+ * throwing, matching the two helpers above.
+ */
+export async function getProfileLinks(
+  cwid: string,
+  client: OverrideReadClient,
+): Promise<ProfileLinks> {
+  const override = await client.fieldOverride.findUnique({
+    where: {
+      entityType_entityId_fieldName: {
+        entityType: "scholar",
+        entityId: cwid,
+        fieldName: "profileLinks",
+      },
+    },
+    select: { value: true },
+  });
+  if (!override) return {};
+  const parsed = validateProfileLinks(override.value);
+  return parsed.ok ? parsed.value : {};
 }
 
 /**

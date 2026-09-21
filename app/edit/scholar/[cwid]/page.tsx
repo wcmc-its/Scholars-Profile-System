@@ -37,6 +37,7 @@ import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
 import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
+import { isProfileLinksEnabled } from "@/lib/edit/profile-links";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
@@ -214,9 +215,10 @@ export default async function EditScholarPage({
     // #2634 — "Mentees › From your publications" is valid when the loader
     // returned any row (active or dismissed), mirroring the rail rule.
     ctx.menteeSuggestions.length > 0,
-    // Identifiers & Profiles rides the ORCID flag (the tab, its write, and the
-    // suggestion share one kill switch).
+    // Identifiers & Profiles is valid when EITHER of its cards is on: the ORCID
+    // flag (tab, write, suggestion share one kill switch) or #2699 profile links.
     isOrcidSuggestionEnabled(),
+    isProfileLinksEnabled(),
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
@@ -287,6 +289,7 @@ export default async function EditScholarPage({
       profilesNavVisible={consoleTabs?.profiles ?? false}
       reciterPendingEnabled={reciterPendingEnabled}
       orcidTabEnabled={isOrcidSuggestionEnabled()}
+      profileLinksEnabled={isProfileLinksEnabled()}
       grantRecsEnabled={isGrantRecsEnabled()}
       biosketchEnabled={isBiosketchGenerateEnabled()}
       cvEnabled={isCvEnabled()}

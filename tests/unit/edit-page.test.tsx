@@ -127,6 +127,7 @@ const ctx: EditContext = {
   // #2011 — no hand-entered mentees in the default fixture; the sourced roster
   // above is what the hide-only panel renders.
   manualMentees: [],
+  profileLinks: {},
   manualMenteeUnresolvedCwids: [],
   // #2634 — empty by default (loader returns [] unless SELF_EDIT_MENTEE_SUGGESTIONS
   // is on for a genuine self/superuser viewer); a describe block below populates it.

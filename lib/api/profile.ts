@@ -16,6 +16,7 @@ import {
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
   getEffectiveOverview,
+  getProfileLinks,
   getSelectedHighlightPmids,
   isAuthorHidden,
   loadContributorSuppressions,
@@ -24,6 +25,7 @@ import {
   pickManualHighlights,
 } from "@/lib/api/manual-layer";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { isProfileLinksEnabled, type ProfileLinks } from "@/lib/edit/profile-links";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
@@ -542,6 +544,10 @@ export type ProfilePayload = {
    *  orcid is null. Sourced by etl/identity. Used by lib/seo/jsonld to
    *  append an https://orcid.org/<id> URL to Person.sameAs. */
   orcid: string | null;
+  /** #2699 — faculty-entered external profile links (`field_override('profileLinks')`),
+   *  `{ platform: canonical https URL }`. Rendered in the Contact card and pushed
+   *  into JSON-LD `sameAs`. `{}` when none or `SELF_EDIT_PROFILE_LINKS` is off. */
+  profileLinks: ProfileLinks;
   overview: string | null;
   appointments: Array<{
     title: string;
@@ -1080,6 +1086,7 @@ export const getScholarFullProfileBySlug = cache(
       leadershipTitles,
       sectionOverrideRows,
       projectSiblingRows,
+      profileLinks,
     ] = await Promise.all([
       // The effective `overview` merges a manual `field_override` over the ETL
       // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
@@ -1379,6 +1386,9 @@ export const getScholarFullProfileBySlug = cache(
       // this round (it needs nothing but the already-fetched grant rows) so it
       // costs no extra round trip. Skipped entirely for a scholar with no grants.
       loadProjectSiblingRows(scholar.grants),
+      // #2699 — external profile links, read only when the flag is on (else `{}`,
+      // keeping the surface fully dark).
+      isProfileLinksEnabled() ? getProfileLinks(scholar.cwid, prisma) : Promise.resolve({}),
     ]);
     const hiddenSections = new Set(sectionOverrideRows.map((r) => r.fieldName));
 
@@ -1714,6 +1724,7 @@ export const getScholarFullProfileBySlug = cache(
       hasClinicalProfile: scholar.hasClinicalProfile,
       clinicalProfileUrl: scholar.clinicalProfileUrl,
       orcid: scholar.orcid,
+      profileLinks,
       overview: effectiveOverview,
       appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
         title: a.title,
@@ -2084,6 +2095,7 @@ export function buildProfileJsonLd(profile: ProfilePayload): Record<string, unkn
     identityImageEndpoint: profile.identityImageEndpoint,
     clinicalProfileUrl: profile.clinicalProfileUrl ?? null,
     orcid: profile.orcid ?? null,
+    externalProfileUrls: Object.values(profile.profileLinks ?? {}),
     keywords: profile.keywords.keywords,
     // #684 — bare (postnominal-free) name drives givenName/familyName +
     // alternateName; the postnominal becomes honorificSuffix.

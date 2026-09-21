@@ -52,6 +52,11 @@ import {
 import { isProfileFacetRedesignEnabled } from "@/lib/profile/facet-redesign-flag";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { profilePath } from "@/lib/profile-url";
+import {
+  isProfileLinksEnabled,
+  PROFILE_LINK_PLATFORM_KEYS,
+  PROFILE_LINK_PLATFORMS,
+} from "@/lib/edit/profile-links";
 import { OVERVIEW_HTML_CLASS } from "@/lib/utils";
 
 /**
@@ -75,6 +80,20 @@ export async function ProfileView({ slug }: { slug: string }) {
   // React `cache()` entry per request instead of computing the payload twice.
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
+
+  // #2699 — the Contact card's identity links: ORCID first, then the
+  // faculty-entered external profiles in platform order. The whole list rides
+  // SELF_EDIT_PROFILE_LINKS (the loader already returns `{}` for the links when
+  // off; the ORCID row is gated here so the public render is dark as one).
+  const externalProfiles: Array<{ label: string; url: string }> = [
+    ...(isProfileLinksEnabled() && profile.orcid
+      ? [{ label: "ORCID", url: `https://orcid.org/${profile.orcid}` }]
+      : []),
+    ...PROFILE_LINK_PLATFORM_KEYS.flatMap((k) => {
+      const url = profile.profileLinks?.[k];
+      return url ? [{ label: PROFILE_LINK_PLATFORMS[k].label, url }] : [];
+    }),
+  ];
 
   // #536 — hidden identity classes (doctoral students) have no public profile
   // page. The route 404s rather than rendering a thin profile or leaving a
@@ -252,7 +271,7 @@ export async function ProfileView({ slug }: { slug: string }) {
               <EditMyProfileButton profileSlug={profile.slug} profileCwid={profile.cwid} />
             </div>
 
-            {profile.email || profile.hasClinicalProfile ? (
+            {profile.email || profile.hasClinicalProfile || externalProfiles.length > 0 ? (
               <SidebarCard title="Contact">
                 <ul className="flex flex-col gap-2">
                   {profile.email ? (
@@ -291,6 +310,20 @@ export async function ProfileView({ slug }: { slug: string }) {
                       </a>
                     </li>
                   ) : null}
+                  {/* #2699 — ORCID (was JSON-LD-only) and the faculty-entered
+                      external profiles. `rel="me"` is the identity-link rel. */}
+                  {externalProfiles.map((p) => (
+                    <li key={p.label}>
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="me noopener noreferrer"
+                        className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                      >
+                        {p.label} →
+                      </a>
+                    </li>
+                  ))}
                 </ul>
               </SidebarCard>
             ) : profile.contactEmailRevealable ? (

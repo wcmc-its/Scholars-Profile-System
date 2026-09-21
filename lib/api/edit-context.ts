@@ -31,10 +31,12 @@
 import {
   getEffectiveOverview,
   getManualMentees,
+  getProfileLinks,
   getSelectedHighlightPmids,
 } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
+import type { ProfileLinks } from "@/lib/edit/profile-links";
 import type { DismissReason, MenteeKind, MenteeTier } from "@/lib/mentee-suggestions/kind";
 import { rankForSelectedHighlights } from "@/lib/ranking";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
@@ -669,6 +671,9 @@ export type EditContext = {
    * card round-trips this array through `POST /api/edit/field`.
    */
   manualMentees: ReadonlyArray<ManualMentee>;
+  /** #2699 — the scholar's external profile links (`field_override('profileLinks')`),
+   *  `{}` when none. The Identifiers & Profiles card round-trips this object. */
+  profileLinks: ProfileLinks;
   /**
    * #2011 follow-up — the subset of `manualMentees[].cwid` that resolves to NO
    * linkable WCM scholar, so the card can say so instead of leaving the mentor
@@ -927,6 +932,7 @@ export async function loadEditContext(
     menteeRows,
     sectionOverrideRows,
     manualMenteeRows,
+    profileLinks,
   ] = await Promise.all([
     // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
     // shows the "no override" state. The self surface does not surface this field
@@ -1104,6 +1110,17 @@ export async function loadEditContext(
         }),
       );
       return [] as ManualMentee[];
+    }),
+    // #2699 — same best-effort posture.
+    getProfileLinks(cwid, client).catch((err) => {
+      console.warn(
+        JSON.stringify({
+          event: "edit_context_profile_links_unavailable",
+          cwid,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return {} as ProfileLinks;
     }),
   ]);
 
@@ -1943,6 +1960,7 @@ export async function loadEditContext(
       datasets,
       mentees,
       manualMentees: manualMenteeRows,
+      profileLinks,
       manualMenteeUnresolvedCwids,
       menteeSuggestions,
       orcidVerdict: orcidVerdictValue,
@@ -2115,6 +2133,7 @@ export async function loadEditContext(
     datasets,
     mentees,
     manualMentees: manualMenteeRows,
+    profileLinks,
     manualMenteeUnresolvedCwids,
     menteeSuggestions,
     orcidVerdict: orcidVerdictValue,

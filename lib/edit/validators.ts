@@ -92,7 +92,9 @@ export function isSectionVisibilityField(value: string): value is SectionVisibil
  * manual Highlights override (a JSON array of PMIDs), gated by the
  * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; `manualMentees` is the #2011
  * mentor-entered mentee list (a JSON array of objects, see
- * `lib/edit/manual-mentee.ts`); the `SECTION_VISIBILITY_FIELDS` are the
+ * `lib/edit/manual-mentee.ts`); `profileLinks` is the #2699 external-profile
+ * links object (a JSON object of canonical URLs, see
+ * `lib/edit/profile-links.ts`); the `SECTION_VISIBILITY_FIELDS` are the
  * section-visibility booleans. The allowlist only narrows the field name;
  * per-field validation + flags govern acceptance.
  */
@@ -101,6 +103,7 @@ export const EDITABLE_FIELDS = [
   "slug",
   "selectedHighlightPmids",
   "manualMentees",
+  "profileLinks",
   ...SECTION_VISIBILITY_FIELDS,
 ] as const;
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
