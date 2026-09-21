@@ -300,7 +300,7 @@ function RailLink({
           // down-right arrow (below) standing in for the connector to its parent.
           item.child && "pl-7 text-xs",
           isActive
-            ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white"
+            ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-[600] focus-visible:ring-white"
             : cn(
                 "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
                 // Parent of the active child: subtle persistent highlight.

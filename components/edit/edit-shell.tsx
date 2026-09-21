@@ -30,6 +30,8 @@ import { ProxyBanner } from "@/components/edit/proxy-banner";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
+import { Button } from "@/components/ui/button";
+import { initials } from "@/lib/utils";
 
 /** A navigable "{label} / {current}" breadcrumb — shared by the "Profiles"
  *  crumb (superuser-on-a-profile, unit-admin-with-a-grant) and the "Org
@@ -93,12 +95,19 @@ export type EditShellProps = {
    *  (forwarded to `AttributeRail`). Omit ⇒ header-only groups (the default for
    *  the unit / sibling-division rails). */
   railGroupMeta?: Record<string, { description?: string }>;
-  /** "Preview Profile" target (the public profile by slug). */
+  /** "Preview profile" target (the public profile by slug). */
   previewHref?: string;
-  /** "View change history" target — the scholar's `/edit/scholar/[cwid]/history`
+  /** "Change history" target — the scholar's `/edit/scholar/[cwid]/history`
    *  audit page (#955). Internal, so it opens in the same tab. Shown for every
    *  edit mode (history visibility == edit access). Omit ⇒ no link. */
   historyHref?: string;
+  /** Edit-for-others only (superuser / proxy / unit-admin — never `self`, where
+   *  the editor already knows who they are): the identity header above the
+   *  notice — 44px initials avatar, the published name (`formatPublishedName`:
+   *  "{scholarName}, {postnominal}", or bare for an enrolled doctoral student),
+   *  and "{title} · {institution}" (design round 3, 2026-09-21). Empty parts are
+   *  omitted. Ignored in self mode even when supplied. */
+  identity?: { name: string; title?: string | null; institution?: string | null };
   /** "View reports" target — a center's Reports console (`/edit/reports`).
    *  Internal, same tab. Center editor only; omit ⇒ no link. Replaces the old
    *  rail-mounted `CenterReportsRailLink` (Reports IA redesign, 2026-08-14). */
@@ -205,6 +214,7 @@ export function EditShell({
   previewHref,
   historyHref,
   reportsHref,
+  identity,
   account: _account,
   canBrowseProfiles = false,
   isProfileEntity = true,
@@ -222,6 +232,8 @@ export function EditShell({
   const isSuperuser = mode === "superuser";
   const isProxy = mode === "proxy";
   const isUnitAdmin = mode === "unit-admin";
+  const showIdentity = identity != null && mode !== "self";
+  const identitySubline = [identity?.title, identity?.institution].filter(Boolean).join(" · ");
   return (
     <div className="bg-apollo-page min-h-screen" data-slot="edit-shell" data-mode={mode}>
       {/* Skip link — first focusable element, jumps past the rail to the editor. */}
@@ -368,46 +380,59 @@ export function EditShell({
             />
           )}
 
-          {/* Secondary links row (mockup parity, slate text — order matches the
-              `1b` mockup: reports, then preview). "View change history"
-              (internal audit page, #955), then, for a center, "View reports"
-              (internal, Reports IA redesign 2026-08-14 — replaces the old
-              rail-mounted link so it survives the roster/Members page, which
-              hides the rail), then "Preview Profile" (the public profile,
-              external ↗). Shown alongside the account menu's "View my
-              profile". */}
-          {(historyHref || reportsHref || previewHref) && (
-            <div className="mb-4 flex items-center justify-end gap-4">
-              {historyHref && (
-                <Link
-                  href={historyHref}
-                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
-                  data-testid="edit-history-link"
-                >
-                  View change history
-                </Link>
+          {/* Header row: the identity block (edit-for-others only) on the left,
+              the button row on the right — or just the right-aligned button row
+              when there is no identity block (self mode, unit editors). Buttons,
+              in order: "Change history" (ghost, internal audit page, #955), for
+              a center "View reports" (ghost, internal, Reports IA redesign
+              2026-08-14 — survives the roster/Members page, which hides the
+              rail), then "Preview profile" (outline, the public profile,
+              external ↗). Design round 3, 2026-09-21. */}
+          {(showIdentity || historyHref || reportsHref || previewHref) && (
+            <div className={`flex flex-wrap items-start gap-4 ${showIdentity ? "mb-6" : "mb-4"}`}>
+              {showIdentity && (
+                <div className="flex min-w-0 items-center gap-4" data-testid="edit-identity-header">
+                  <span
+                    aria-hidden
+                    className="bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground flex size-11 shrink-0 items-center justify-center rounded-full border text-[13px] font-[600]"
+                  >
+                    {initials(scholarName)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[22px] leading-tight font-[600] tracking-[-0.02em]">
+                      {identity.name}
+                    </p>
+                    {identitySubline && (
+                      <p className="text-muted-foreground mt-0.5 text-[13px]">{identitySubline}</p>
+                    )}
+                  </div>
+                </div>
               )}
-              {reportsHref && (
-                <Link
-                  href={reportsHref}
-                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
-                  data-testid="edit-reports-link"
-                >
-                  View reports
-                  <ArrowRight className="size-4" aria-hidden />
-                </Link>
-              )}
-              {previewHref && (
-                <Link
-                  href={previewHref}
-                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Preview Profile
-                  <ArrowUpRight className="size-4" aria-hidden />
-                </Link>
-              )}
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                {historyHref && (
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={historyHref} data-testid="edit-history-link">
+                      Change history
+                    </Link>
+                  </Button>
+                )}
+                {reportsHref && (
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={reportsHref} data-testid="edit-reports-link">
+                      View reports
+                      <ArrowRight className="size-4" aria-hidden />
+                    </Link>
+                  </Button>
+                )}
+                {previewHref && (
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={previewHref} target="_blank" rel="noreferrer">
+                      Preview profile
+                      <ArrowUpRight className="size-4" aria-hidden />
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 

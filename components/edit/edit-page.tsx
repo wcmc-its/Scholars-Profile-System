@@ -53,6 +53,7 @@ import type { EditContext } from "@/lib/api/edit-context";
 import type { ManageableUnit } from "@/lib/edit/manageable-units";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { institutionDisplayName } from "@/lib/institutions";
+import { formatPublishedName } from "@/lib/postnominal";
 import { profilePath } from "@/lib/profile-url";
 import {
   isOverviewGenerateEnabled,
@@ -951,6 +952,15 @@ export function EditPage({
       // route is always `/edit/scholar/[cwid]/history` (self resolves via the
       // gate's isSelf branch), never the bare `/edit`. (#955)
       historyHref={`/edit/scholar/${ctx.scholar.cwid}/history`}
+      // Identity header (design round 3): the shell renders it for edit-for-others
+      // only (self mode ignores it). Same name builder as the public profile h1.
+      identity={{
+        name: formatPublishedName(scholarName, ctx.scholar.postnominal, ctx.scholar.roleCategory),
+        title: ctx.scholar.primaryTitle,
+        institution: ctx.scholar.primaryOrgCode
+          ? institutionDisplayName(ctx.scholar.primaryOrgCode)
+          : null,
+      }}
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
       profilesNavVisible={profilesNavVisible}

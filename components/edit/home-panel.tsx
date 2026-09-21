@@ -1,51 +1,52 @@
 /**
- * The self-edit landing board (vision-round T3.4 / Direction B headline),
- * reframed as a "Complete your profile" checklist. The editor used to open on a
- * nine-item data dictionary; this opens on the actual job — the few things that
- * make a profile feel finished — with live status read from the loaded context.
+ * The /edit landing board: what still needs the editor first, then what is
+ * already settled. The editor used to open on a nine-item data dictionary; this
+ * opens on the actual job — the few things that make a profile feel finished —
+ * with live status read from the loaded context.
  *
- * Completeness is a real count over five essentials, never a percentage: the
- * scholar's overview, headshot, and ORCID iD are the three they act on;
- * publications and visibility are configured-for-them states shown as reassurance. Each item is
- * a checklist row — amber "to-do" when it needs the scholar, green check when
- * done — so a gap reads as a gap, not as just another settled status.
+ * Five essentials — overview, headshot, ORCID iD, publications, visibility. The
+ * heading counts the rows that need the editor ("Two items need you", never a
+ * percentage); those sit first as boxed rows with an amber marker, and the rest
+ * (settled, or informational like a hidden profile or an empty feed) fold away
+ * under a "<N> completed items" disclosure (collapsed by default) as flat rows
+ * with a grey check.
  *
- * Two of the five are owned by the scholar (overview here; visibility here) and
- * sit under "Yours to edit" — matching the rail's owned/sourced split. The other
- * three come "From WCM systems": the ORCID iD row (see `OrcidItem`); the headshot is a live pointer to the WCM Web
- * Directory (a scholar fixes it there and it shows here right away — no sync
- * lag), and publications flow from PubMed/ReCiter.
+ * Rows fed from WCM systems — the headshot, publications, and the ORCID iD (see
+ * `orcidRow`) — carry an inline "WCM records" tag, the same name the rail gives
+ * that group. The headshot is a live pointer to the WCM Web Directory (a scholar
+ * fixes it there and it shows here right away — no sync lag); publications flow
+ * from PubMed/ReCiter. Identity (avatar, name, title) is the shell's, not this
+ * panel's.
  *
  * Client component: the headshot's presence is only knowable by probing the
  * external directory image (the same approach as `HeadshotAvatar`), and the
- * count/avatar/headshot-row all depend on it.
+ * count and headshot row depend on it; the disclosure is local state.
  */
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Check, Plus } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Check, ChevronDown, Lock } from "lucide-react";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { PUBLICATION_MANAGER_URL, WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
 import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
 import { firstName, type OrcidEvidence } from "@/lib/edit/orcid";
-import { cn, initials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { useReciterPendingSuggestions } from "@/components/edit/reciter-pending-card";
 import type { ReciterSuggestion } from "@/lib/reciter/client";
 
 // Must match EditShell's `<main aria-labelledby="panel-heading">` and
 // EditPanel's EDIT_PANEL_HEADING_ID — this panel forgoes EditPanel for the
-// avatar + progress header, so it owns the labelled heading itself.
+// needs-you header, so it owns the labelled heading itself.
 const PANEL_HEADING_ID = "panel-heading";
+const COMPLETED_LIST_ID = "home-completed-items";
 
 export type HomePanelProps = {
   /** Whose board this is. `"self"` (default) is the scholar's own task board;
    *  `"superuser"` reframes it as a completeness overview of another scholar —
-   *  third-person copy, an editable Overview CTA (#844 — admins may now edit any
-   *  bio), and the Publications row's CTA dropped (superusers have no per-scholar
-   *  pubs tab). */
+   *  first-name copy and an editable Overview CTA (#844 — admins may now edit
+   *  any bio). */
   mode?: "self" | "superuser";
   basePath: string;
   /** The target scholar's CWID — threaded to the ReCiter pending teaser so a
@@ -95,6 +96,8 @@ export type OrcidRowState = {
 
 type HeadshotState = "loading" | "present" | "missing";
 
+const NEEDS_YOU = ["Nothing needs you", "One item needs you", "Two items need you", "Three items need you", "Four items need you"];
+
 export function HomePanel({
   mode = "self",
   basePath,
@@ -114,55 +117,82 @@ export function HomePanel({
   const isAdmin = mode === "superuser";
   // Live ReCiter pending suggestions, fetched client-side (zero fetch when the
   // feature is off — the `enabled` gate). Unreviewed suggestions are an
-  // outstanding action on Publications, so they drive both the row's "to-do"
-  // marker and the completeness count below.
+  // outstanding action on Publications, so they flip that row to "to-do".
   const pendingSuggestions = useReciterPendingSuggestions(cwid, reciterPendingEnabled);
-  const hasPendingSuggestions = pendingSuggestions.length > 0;
+  const [showCompleted, setShowCompleted] = React.useState(false);
 
-  // A real count over five essentials — not a percentage. An item counts only
-  // when it is genuinely satisfied; while the headshot is still probing it does
-  // not count (so the number only ever ticks up, never down). Publications
-  // counts only when pubs are shown AND no suggestions are left to review.
-  const total = 5;
-  const done =
-    (hasBio ? 1 : 0) +
-    (headshot === "present" ? 1 : 0) +
-    (totalPublications > 0 && !hasPendingSuggestions ? 1 : 0) +
-    (orcid.onFile ? 1 : 0) +
-    1; // visibility — a choice is always set
+  // ponytail: "N items need you" IS the number of open rows below it — one
+  // source of truth, so the heading can never claim more than the board shows.
+  // (The old "N of 5 done" also counted a still-probing headshot and an empty
+  // publications feed against the scholar; neither is theirs to act on here.)
+  const rows = [
+    overviewRow({ basePath, hasBio, isAdmin, name: preferredName }),
+    orcidRow({ state: orcid, basePath, isAdmin, name: preferredName }),
+    visibilityRow({ basePath, isHidden, isAdmin }),
+    headshotRow({ state: headshot, isAdmin, name: preferredName }),
+    publicationsRow({
+      basePath,
+      total: totalPublications,
+      hidden: hiddenPublications,
+      pending: pendingSuggestions,
+    }),
+  ];
+  const open = rows.filter((row) => row.marker === "todo");
+  const completed = rows.filter((row) => row.marker !== "todo");
+  const needsYou = open.length;
+  const completedLabel = `${completed.length} completed ${completed.length === 1 ? "item" : "items"}`;
 
   return (
     <section data-slot="home-panel" className="flex flex-col gap-5">
-      <header className="flex items-center gap-4">
-        <ProfileAvatar state={headshot} preferredName={preferredName} src={identityImageEndpoint} />
-        <div className="min-w-0 flex-1">
-          <h2 id={PANEL_HEADING_ID} className="text-lg font-semibold">
-            {isAdmin ? "Profile completeness" : "Complete your profile"}
-          </h2>
-          <ProgressMeter done={done} total={total} />
-        </div>
+      <header>
+        <h2 id={PANEL_HEADING_ID} className="text-[17px] font-[600] tracking-[-0.015em]">
+          {NEEDS_YOU[needsYou]}
+        </h2>
+        <p className="text-muted-foreground mt-1.5 text-[13px]">
+          {needsYou === 0
+            ? "Everything on this profile is either complete or maintained from WCM records."
+            : "Everything else on this profile is either complete or maintained from WCM records."}
+        </p>
       </header>
 
-      <ChecklistGroup label={isAdmin ? "Profile content" : "Yours to edit"}>
-        <OverviewItem basePath={basePath} hasBio={hasBio} isAdmin={isAdmin} name={preferredName} />
-        <VisibilityItem basePath={basePath} isHidden={isHidden} isAdmin={isAdmin} />
-      </ChecklistGroup>
+      {open.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {open.map((row) => (
+            <ChecklistRow key={row.testId} boxed {...row} />
+          ))}
+        </ul>
+      )}
 
-      <ChecklistGroup label="From WCM systems">
-        <HeadshotItem state={headshot} isAdmin={isAdmin} name={preferredName} />
-        <PublicationsItem
-          basePath={basePath}
-          total={totalPublications}
-          hidden={hiddenPublications}
-          isAdmin={isAdmin}
-          name={preferredName}
-          pending={pendingSuggestions}
-        />
-        <OrcidItem state={orcid} basePath={basePath} isAdmin={isAdmin} name={preferredName} />
-      </ChecklistGroup>
+      {completed.length > 0 && (
+        <div className="border-apollo-border border-t pt-3.5">
+          <button
+            type="button"
+            aria-expanded={showCompleted}
+            aria-controls={COMPLETED_LIST_ID}
+            onClick={() => setShowCompleted((v) => !v)}
+            data-testid="home-completed-toggle"
+            className="text-muted-foreground inline-flex items-center gap-1.5 text-[13px]"
+          >
+            {showCompleted ? `Hide ${completedLabel}` : completedLabel}
+            <ChevronDown
+              className={cn("size-4 transition-transform", showCompleted && "rotate-180")}
+              aria-hidden
+            />
+          </button>
+          <ul
+            id={COMPLETED_LIST_ID}
+            hidden={!showCompleted}
+            className="divide-apollo-border mt-2 divide-y"
+          >
+            {completed.map((row) => (
+              <ChecklistRow key={row.testId} {...row} />
+            ))}
+          </ul>
+        </div>
+      )}
 
       {(manageableUnits.length > 0 || isSuperuser) && (
-        <ManageableUnitsSection units={manageableUnits} isSuperuser={isSuperuser} />
+        <ManageableUnitsSection units={manageableUnits} />
       )}
     </section>
   );
@@ -178,13 +208,7 @@ export function HomePanel({
  */
 const UNITS_CARD_CAP = 6;
 
-function ManageableUnitsSection({
-  units,
-  isSuperuser,
-}: {
-  units: ManageableUnit[];
-  isSuperuser: boolean;
-}) {
+function ManageableUnitsSection({ units }: { units: ManageableUnit[] }) {
   const shown = units.slice(0, UNITS_CARD_CAP);
   const remaining = units.length - shown.length;
   const hasUnits = units.length > 0;
@@ -194,7 +218,7 @@ function ManageableUnitsSection({
         Org units you manage
       </p>
       {hasUnits ? (
-        <ul className="flex flex-col gap-2">
+        <ul className="divide-apollo-border divide-y">
           {shown.map((unit) => (
             <ChecklistRow
               key={`${unit.kind}:${unit.code}`}
@@ -203,9 +227,9 @@ function ManageableUnitsSection({
               title={unit.name}
               subtitle={unitKindLabel(unit.kind)}
               action={
-                <RowLink href={unit.href} testId={`home-unit-edit-${unit.kind}-${unit.code}`}>
+                <RowButton href={unit.href} testId={`home-unit-edit-${unit.kind}-${unit.code}`}>
                   Edit
-                </RowLink>
+                </RowButton>
               }
             />
           ))}
@@ -252,124 +276,55 @@ function useHeadshotProbe(src: string): HeadshotState {
 }
 
 // ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
-
-function ProfileAvatar({
-  state,
-  preferredName,
-  src,
-}: {
-  state: HeadshotState;
-  preferredName: string;
-  src: string;
-}) {
-  return (
-    <div className="relative size-14 flex-none">
-      <Avatar className={cn("size-14", state === "present" && "border-apollo-green-tint-border border-2")}>
-        {state === "present" && <AvatarImage src={src} alt="" className="object-cover object-top" />}
-        <AvatarFallback
-          className={cn(
-            "bg-apollo-slate-tint text-apollo-slate text-lg font-semibold",
-            state === "missing"
-              ? "border-apollo-border-strong border-2 border-dashed"
-              : "border-apollo-slate-tint-border border",
-          )}
-        >
-          {initials(preferredName)}
-        </AvatarFallback>
-      </Avatar>
-      {state === "missing" && (
-        <AvatarBadge className="bg-apollo-amber">
-          <Plus className="size-3" strokeWidth={2.6} aria-hidden />
-        </AvatarBadge>
-      )}
-      {state === "present" && (
-        <AvatarBadge className="bg-apollo-green">
-          <Check className="size-3" strokeWidth={3} aria-hidden />
-        </AvatarBadge>
-      )}
-    </div>
-  );
-}
-
-function AvatarBadge({ className, children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "border-apollo-surface absolute -right-0.5 -bottom-0.5 flex size-[22px] items-center justify-center rounded-full border-2 text-white",
-        className,
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
-/** A done/total bar (honest fraction, decorative) + the count in words. */
-function ProgressMeter({ done, total }: { done: number; total: number }) {
-  const complete = done >= total;
-  const width = `${Math.round((done / total) * 100)}%`;
-  return (
-    <div className="mt-1.5">
-      <div className="bg-apollo-border h-[7px] overflow-hidden rounded-full" aria-hidden>
-        <div
-          className={cn(
-            "h-full rounded-full transition-[width] duration-500",
-            complete ? "bg-apollo-green" : "bg-apollo-amber",
-          )}
-          style={{ width }}
-        />
-      </div>
-      <p className="text-muted-foreground mt-1.5 text-sm">
-        {done} of {total} done
-      </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Checklist rows
 // ---------------------------------------------------------------------------
 
-function ChecklistGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">{label}</p>
-      <ul className="flex flex-col gap-2">{children}</ul>
-    </div>
-  );
-}
-
 type Marker = "todo" | "done" | "info";
 
-function ChecklistRow({
-  marker,
-  title,
-  subtitle,
-  action,
-  testId,
-  teaser,
-}: {
+type Row = {
   marker: Marker;
   title: string;
+  /** Rows fed from WCM systems carry the inline "WCM records" tag. */
+  fromWcm?: boolean;
   subtitle: React.ReactNode;
   action: React.ReactNode;
   testId: string;
   /** Optional secondary content rendered beneath the subtitle (e.g. the ReCiter
    *  pending-suggestion teaser). */
   teaser?: React.ReactNode;
-}) {
+};
+
+/** One row: boxed (surface-2, strong border) for an open item, flat for a settled one. */
+function ChecklistRow({
+  marker,
+  title,
+  fromWcm,
+  subtitle,
+  action,
+  testId,
+  teaser,
+  boxed = false,
+}: Row & { boxed?: boolean }) {
   return (
     <li
       data-testid={testId}
-      className="border-apollo-border bg-apollo-surface flex items-center gap-3 rounded-xl border px-4 py-3.5"
+      className={cn(
+        "flex items-center gap-3 px-4 py-3.5",
+        boxed && "bg-apollo-surface-2 border-apollo-border-strong rounded-[9px] border",
+      )}
     >
       <RowMarker marker={marker} />
       <div className="min-w-0 flex-1">
-        <div className="text-[15px] font-semibold">{title}</div>
-        <div className="text-muted-foreground text-sm leading-snug">{subtitle}</div>
+        <div className="flex flex-wrap items-center gap-x-2 text-[14.5px] font-[600]">
+          {title}
+          {fromWcm && (
+            <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px] font-normal">
+              <Lock className="size-3" aria-hidden />
+              WCM records
+            </span>
+          )}
+        </div>
+        <div className="text-muted-foreground text-[12.5px] leading-snug">{subtitle}</div>
         {teaser}
       </div>
       <div className="flex-none">{action}</div>
@@ -382,7 +337,7 @@ function RowMarker({ marker }: { marker: Marker }) {
     return (
       <span
         aria-hidden
-        className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green flex size-[22px] flex-none items-center justify-center rounded-full border"
+        className="flex size-[22px] flex-none items-center justify-center rounded-full border border-apollo-done text-apollo-done"
       >
         <Check className="size-3" strokeWidth={3} />
       </span>
@@ -408,28 +363,35 @@ function RowMarker({ marker }: { marker: Marker }) {
   );
 }
 
-/** Quiet slate text link used for the "done" / informational row actions. */
-function RowLink({
+/** Row action button: an in-app Link, or (http href) an external hand-off in a new tab with ↗. */
+function RowButton({
   href,
   testId,
+  variant = "outline",
   children,
 }: {
   href: string;
   testId?: string;
+  variant?: "outline" | "apollo";
   children: React.ReactNode;
 }) {
   return (
-    <Link
-      href={href}
-      data-testid={testId}
-      className="text-apollo-slate text-sm font-medium whitespace-nowrap"
-    >
-      {children}
-    </Link>
+    <Button asChild variant={variant} size="sm">
+      {href.startsWith("http") ? (
+        <a href={href} target="_blank" rel="noreferrer" data-testid={testId}>
+          {children}
+          <ArrowUpRight className="size-3.5" aria-hidden />
+        </a>
+      ) : (
+        <Link href={href} data-testid={testId}>
+          {children}
+        </Link>
+      )}
+    </Button>
   );
 }
 
-function OverviewItem({
+function overviewRow({
   basePath,
   hasBio,
   isAdmin,
@@ -439,66 +401,41 @@ function OverviewItem({
   hasBio: boolean;
   isAdmin: boolean;
   name: string;
-}) {
+}): Row {
   const href = `${basePath}?attr=overview`;
   if (hasBio) {
-    return (
-      <ChecklistRow
-        testId="home-item-overview"
-        marker="done"
-        title="Overview written"
-        subtitle={
-          isAdmin
-            ? `Showing at the top of ${name}'s public profile.`
-            : "Showing at the top of your public profile."
-        }
-        action={
-          // #844 — a superuser can now edit any scholar's overview, so the CTA is
-          // "Edit" for them too (no longer a read-only "View").
-          <RowLink href={href} testId="home-card-overview">
-            Edit
-          </RowLink>
-        }
-      />
-    );
+    return {
+      testId: "home-item-overview",
+      marker: "done",
+      title: "Overview written",
+      subtitle: isAdmin
+        ? `Showing at the top of ${name}'s public profile.`
+        : "Showing at the top of your public profile.",
+      // #844 — a superuser can now edit any scholar's overview, so the CTA is
+      // "Edit" for them too (no longer a read-only "View").
+      action: (
+        <RowButton href={href} testId="home-card-overview">
+          Edit
+        </RowButton>
+      ),
+    };
   }
-  // Admin: the overview gap is a signal (amber to-do); #844 lets a superuser
-  // write it on the scholar's behalf, so the CTA writes it like the self surface.
-  if (isAdmin) {
-    return (
-      <ChecklistRow
-        testId="home-item-overview"
-        marker="todo"
-        title="No overview yet"
-        subtitle={`Write an overview for ${name}'s profile.`}
-        action={
-          <Button asChild variant="apollo" size="sm">
-            <Link href={href} data-testid="home-card-overview">
-              Write
-            </Link>
-          </Button>
-        }
-      />
-    );
-  }
-  return (
-    <ChecklistRow
-      testId="home-item-overview"
-      marker="todo"
-      title="Write your overview"
-      subtitle="The one section only you can write · about 2 min"
-      action={
-        <Button asChild variant="apollo" size="sm">
-          <Link href={href} data-testid="home-card-overview">
-            Write
-          </Link>
-        </Button>
-      }
-    />
-  );
+  // #844 lets a superuser write it on the scholar's behalf, so the CTA writes it
+  // like the self surface; only the voice changes.
+  return {
+    testId: "home-item-overview",
+    marker: "todo",
+    title: "No overview yet",
+    subtitle: `Two or three sentences on ${isAdmin ? `${firstName(name)}'s` : "your"} research focus. Shown at the top of the public profile.`,
+    action: (
+      <RowButton href={href} testId="home-card-overview" variant="apollo">
+        Write
+      </RowButton>
+    ),
+  };
 }
 
-function VisibilityItem({
+function visibilityRow({
   basePath,
   isHidden,
   isAdmin,
@@ -506,37 +443,34 @@ function VisibilityItem({
   basePath: string;
   isHidden: boolean;
   isAdmin: boolean;
-}) {
-  return (
-    <ChecklistRow
-      testId="home-item-visibility"
-      marker={isHidden ? "info" : "done"}
-      title={isHidden ? "Profile hidden" : "Visible in Scholars"}
-      subtitle={
-        isHidden
-          ? isAdmin
-            ? "Hidden from public search and the public profile. Change it anytime."
-            : "Hidden from public search — visible only to you. Change it anytime."
-          : "Listed in public Scholars search."
-      }
-      action={
-        <RowLink href={`${basePath}?attr=visibility`} testId="home-card-visibility">
-          Change
-        </RowLink>
-      }
-    />
-  );
+}): Row {
+  return {
+    testId: "home-item-visibility",
+    // Hidden is a settled choice, not a gap — an info row in the completed group.
+    marker: isHidden ? "info" : "done",
+    title: isHidden ? "Profile hidden" : "Visible in Scholars",
+    subtitle: isHidden
+      ? isAdmin
+        ? "Hidden from public search and the public profile. Change it anytime."
+        : "Hidden from public search — visible only to you. Change it anytime."
+      : "Listed in public Scholars search.",
+    action: (
+      <RowButton href={`${basePath}?attr=visibility`} testId="home-card-visibility">
+        Change
+      </RowButton>
+    ),
+  };
 }
 
 /**
  * The ORCID iD row. On file → done, the iD linked to its orcid.org record. A strong
  * inference (`SELF_EDIT_ORCID_SUGGESTION`) → "Is this your ORCID iD?" with the iD
- * and the accepted-publication count behind it, linking into the Identifiers &
- * Profiles tab where "Yes, this is mine" writes it (ReciterDB `admin_orcid`, then
- * `scholar.orcid`). Otherwise → not on file with the one-line reason and the same
- * link.
+ * and the accepted-publication count behind it, "Review" linking into the
+ * Identifiers & Profiles tab where "Yes, this is mine" writes it (ReciterDB
+ * `admin_orcid`, then `scholar.orcid`). Otherwise → not on file with the one-line
+ * reason and the same link.
  */
-function OrcidItem({
+function orcidRow({
   state,
   basePath,
   isAdmin,
@@ -546,43 +480,39 @@ function OrcidItem({
   basePath: string;
   isAdmin: boolean;
   name: string;
-}) {
+}): Row {
   const orcidLink = (id: string) => (
-    <a href={`https://orcid.org/${id}`} target="_blank" rel="noreferrer" className="hover:underline">
+    <a
+      href={`https://orcid.org/${id}`}
+      target="_blank"
+      rel="noreferrer"
+      className="font-mono font-[600] hover:underline"
+    >
       {id}
     </a>
   );
+  const base = { testId: "home-item-orcid", fromWcm: true } as const;
   if (state.onFile) {
-    return (
-      <ChecklistRow
-        testId="home-item-orcid"
-        marker="done"
-        title="ORCID iD on file"
-        subtitle={orcidLink(state.onFile)}
-        action={null}
-      />
-    );
+    return {
+      ...base,
+      marker: "done",
+      title: "ORCID iD on file",
+      subtitle: orcidLink(state.onFile),
+      action: null,
+    };
   }
   // Into the Identifiers & Profiles tab, where the confirm / enter controls live;
   // with the flag off, the pre-tab hand-off to ReCiter Manage Profile (external,
   // campus-only) so the row never dead-ends.
   const href = state.editHref ?? `${basePath}?attr=identifiers-profiles`;
-  const label = state.suggested ? "Confirm" : "Add";
-  const action = href.startsWith("http") ? (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      data-testid="home-card-orcid"
-      className="text-apollo-slate inline-flex items-center gap-1 text-sm font-medium whitespace-nowrap"
-    >
-      {label} in ReCiter
-      <ArrowUpRight className="size-3.5" aria-hidden />
-    </a>
-  ) : (
-    <RowLink href={href} testId="home-card-orcid">
-      {label}
-    </RowLink>
+  const action = (
+    <RowButton href={href} testId="home-card-orcid">
+      {href.startsWith("http")
+        ? `${state.suggested ? "Confirm" : "Add"} in ReCiter`
+        : state.suggested
+          ? "Review"
+          : "Add"}
+    </RowButton>
   );
   // Second person is the EDITOR: an administrator reads the scholar's first name.
   const whose = isAdmin ? `${firstName(name)}'s` : "your";
@@ -590,35 +520,45 @@ function OrcidItem({
   const why = `Needed for NIH SciENcv biosketches; also makes ${whose} publication matching more reliable.`;
   if (state.suggested) {
     const { orcid, accepted } = state.suggested;
-    const evidence =
-      accepted > 0
-        ? `on ${accepted} of ${whose} accepted publications`
-        : `matches ${whose} record in the ORCID registry`;
-    return (
-      <ChecklistRow
-        testId="home-item-orcid"
-        marker="todo"
-        title={isAdmin ? `Is this ${firstName(name)}'s ORCID iD?` : "Is this your ORCID iD?"}
-        subtitle={
-          <>
-            {orcidLink(orcid)} · {evidence}
-          </>
-        }
-        teaser={
-          <p className="text-muted-foreground mt-1 text-xs leading-snug" data-testid="home-item-orcid-why">
-            {why}
-          </p>
-        }
-        action={action}
-      />
-    );
+    return {
+      ...base,
+      marker: "todo",
+      title: isAdmin ? `Is this ${firstName(name)}'s ORCID iD?` : "Is this your ORCID iD?",
+      subtitle: (
+        <>
+          {orcidLink(orcid)} ·{" "}
+          {accepted > 0 ? (
+            <>
+              on {accepted} of {whose} accepted publications in{" "}
+              <a
+                href={PUBLICATION_MANAGER_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-apollo-slate underline underline-offset-2"
+              >
+                ReCiter
+              </a>
+            </>
+          ) : (
+            `matches ${whose} record in the ORCID registry`
+          )}
+        </>
+      ),
+      teaser: (
+        <p
+          className="text-muted-foreground mt-1 text-xs leading-snug"
+          data-testid="home-item-orcid-why"
+        >
+          {why}
+        </p>
+      ),
+      action,
+    };
   }
-  return (
-    <ChecklistRow testId="home-item-orcid" marker="todo" title="ORCID iD not on file" subtitle={why} action={action} />
-  );
+  return { ...base, marker: "todo", title: "ORCID iD not on file", subtitle: why, action };
 }
 
-function HeadshotItem({
+function headshotRow({
   state,
   isAdmin,
   name,
@@ -626,103 +566,82 @@ function HeadshotItem({
   state: HeadshotState;
   isAdmin: boolean;
   name: string;
-}) {
+}): Row {
+  const base = { testId: "home-item-headshot", fromWcm: true } as const;
   const action = (
-    <a
-      href={WEB_DIRECTORY_URL}
-      target="_blank"
-      rel="noreferrer"
-      data-testid="home-card-headshot"
-      className="text-apollo-slate inline-flex items-center gap-1 text-sm font-medium whitespace-nowrap"
-    >
+    <RowButton href={WEB_DIRECTORY_URL} testId="home-card-headshot">
       {state === "present" ? "Replace" : "Update in Web Directory"}
-      <ArrowUpRight className="size-3.5" aria-hidden />
-    </a>
+    </RowButton>
   );
   if (state === "present") {
-    return (
-      <ChecklistRow
-        testId="home-item-headshot"
-        marker="done"
-        title="Headshot added"
-        subtitle={isAdmin ? `Showing on ${name}'s public profile.` : "Showing on your public profile."}
-        action={action}
-      />
-    );
+    return {
+      ...base,
+      marker: "done",
+      title: "Headshot added",
+      subtitle: isAdmin
+        ? `Showing on ${firstName(name)}'s public profile.`
+        : "Showing on the public profile.",
+      action,
+    };
   }
   if (state === "loading") {
-    return (
-      <ChecklistRow
-        testId="home-item-headshot"
-        marker="info"
-        title="Headshot"
-        subtitle="Checking the Web Directory…"
-        action={action}
-      />
-    );
+    return {
+      ...base,
+      marker: "info",
+      title: "Headshot",
+      subtitle: "Checking the Web Directory…",
+      action,
+    };
   }
-  return (
-    <ChecklistRow
-      testId="home-item-headshot"
-      marker="todo"
-      title="Add a headshot"
-      subtitle="Pulled from the Web Directory — add one there and it appears here right away."
-      action={action}
-    />
-  );
+  return {
+    ...base,
+    marker: "todo",
+    title: "Add a headshot",
+    subtitle: "Pulled from the Web Directory — add one there and it appears here right away.",
+    action,
+  };
 }
 
-function PublicationsItem({
+function publicationsRow({
   basePath,
   total,
   hidden,
-  isAdmin,
-  name,
   pending,
 }: {
   basePath: string;
   total: number;
   hidden: number;
-  isAdmin: boolean;
-  name: string;
   /** Live ReCiter pending suggestions (already fetched by HomePanel; `[]` when
    *  the feature is off or none are pending). */
   pending: ReciterSuggestion[];
-}) {
-  const subtitle =
-    total === 0
-      ? "None shown yet."
-      : hidden > 0
-        ? `${total} shown · ${hidden} hidden`
-        : isAdmin
-          ? `${total} shown on ${name}'s profile`
-          : `${total} shown on your profile`;
-  // Unreviewed suggestions are an outstanding action ⇒ the "to-do" marker (amber
-  // ring), even though publications are already shown. No pending ⇒ done when
-  // pubs exist, else info (nothing shown yet).
+}): Row {
   const hero = pending.length > 0 && pending[0].score >= 70 ? pending[0] : null;
-  const marker = pending.length > 0 ? "todo" : total > 0 ? "done" : "info";
-  return (
-    <ChecklistRow
-      testId="home-item-publications"
-      marker={marker}
-      title="Publications"
-      subtitle={subtitle}
-      teaser={
-        pending.length > 0 ? (
-          <PublicationsSuggestionTeaser hero={hero} count={pending.length} />
-        ) : null
-      }
-      // Both self and superuser now have a per-scholar Publications tab to
-      // deep-link into (a superuser manages pubs on the scholar's behalf), so the
-      // "Review" link shows in both modes.
-      action={
-        <RowLink href={`${basePath}?attr=publications`} testId="home-card-publications">
-          Review
-        </RowLink>
-      }
-    />
-  );
+  return {
+    testId: "home-item-publications",
+    fromWcm: true,
+    // Unreviewed suggestions are an outstanding action ⇒ the "to-do" marker (amber
+    // ring), even though publications are already shown. No pending ⇒ done when
+    // pubs exist, else info (nothing shown yet).
+    marker: pending.length > 0 ? "todo" : total > 0 ? "done" : "info",
+    title: "Publications",
+    subtitle:
+      total === 0
+        ? "None shown yet."
+        : hidden > 0
+          ? `${total} shown · ${hidden} hidden`
+          : `${total} shown on this profile.`,
+    teaser:
+      pending.length > 0 ? (
+        <PublicationsSuggestionTeaser hero={hero} count={pending.length} />
+      ) : null,
+    // Both self and superuser have a per-scholar Publications tab to deep-link
+    // into (a superuser manages pubs on the scholar's behalf).
+    action: (
+      <RowButton href={`${basePath}?attr=publications`} testId="home-card-publications">
+        Review
+      </RowButton>
+    ),
+  };
 }
 
 /**
@@ -740,10 +659,7 @@ function PublicationsSuggestionTeaser({
   count: number;
 }) {
   return (
-    <div
-      data-testid="home-reciter-pending-teaser"
-      className="mt-1.5 flex flex-col gap-1"
-    >
+    <div data-testid="home-reciter-pending-teaser" className="mt-1.5 flex flex-col gap-1">
       {hero ? (
         <p className="flex min-w-0 items-center gap-1.5 text-[0.8rem]">
           <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green inline-flex flex-none items-center rounded-full border px-1.5 py-0.5 text-[0.65rem] font-semibold tabular-nums">

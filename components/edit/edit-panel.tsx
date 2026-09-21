@@ -48,8 +48,8 @@ export type EditPanelProps = {
   owned?: boolean;
   /**
    * Render as a SUBSECTION under a sibling panel's h2 — an eyebrow `<h3>` label
-   * (rhyming with the rail's "FROM WCM RECORDS") instead of the dominant h2 +
-   * brand rule. Gets its own heading id (default `${slot}-heading`) so a tab
+   * (rhyming with the rail's "FROM WCM RECORDS") instead of the dominant h2.
+   * Gets its own heading id (default `${slot}-heading`) so a tab
    * that stacks several panels (Appointments) doesn't emit duplicate
    * `panel-heading` ids. The provenance cue (owned badge / Source line) stays.
    */
@@ -110,22 +110,20 @@ export function EditPanel({
               {heading}
             </h3>
           ) : (
-            <h2 id={resolvedHeadingId} className="text-lg font-medium">
+            <h2 id={resolvedHeadingId} className="text-[17px] font-[600] tracking-[-0.015em]">
               {heading}
             </h2>
           )}
           {headerAction}
         </div>
-        {/* Brand rule under the heading — the dominant panel only. Maroon is
-            brand, so subsection eyebrows don't repeat it; provenance is carried
-            by the badge below, not this rule. */}
-        {!subsection && <span aria-hidden className="bg-apollo-maroon h-1 w-10 rounded-full" />}
+        {/* No rule under the heading: the maroon h2 rule was dropped in design
+            round 3 (2026-09-21); provenance is the badge / Source line below. */}
         {attribute ? (
           <FieldSourceLine attribute={attribute} label={sourceLabel} />
         ) : owned ? (
           <OwnedBadge />
         ) : null}
-        {description && <p className="text-muted-foreground text-sm">{description}</p>}
+        {description && <p className="text-muted-foreground mt-1 text-[13px]">{description}</p>}
       </header>
       {children}
     </section>

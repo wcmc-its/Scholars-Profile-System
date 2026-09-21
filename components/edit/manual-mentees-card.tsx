@@ -133,7 +133,7 @@ export function ManualMenteesCard({
       // NOT a subsection: this is the one part of the Mentees tab the scholar can
       // actually author, and `subsection` renders it as a muted uppercase h3 —
       // visually subordinate to the read-only roster below it, which inverts the
-      // real relationship. Peer h2 + brand rule instead.
+      // real relationship. Peer h2 instead.
       //
       // An explicit headingId is what makes that safe: a non-subsection panel
       // otherwise claims `EDIT_PANEL_HEADING_ID`, and the sourced panel below

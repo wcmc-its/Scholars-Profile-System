@@ -1,11 +1,11 @@
 /**
  * Reports IA redesign (2026-08-14) — the center editor's header surfaces a
- * "View reports" entry link beside "Preview Profile" / "View change history",
+ * "View reports" ghost button beside "Preview profile" / "Change history",
  * wired to `/edit/reports?center=...`. Replaces the earlier rail-mounted
  * `CenterReportsRailLink` so the link survives the roster/Members page
  * (`hideRail`), which the row already does — this only exercises the new
  * `reportsHref` slot itself. Internal page, so same tab (no `target=_blank`,
- * no external arrow) — unlike Preview Profile.
+ * no external arrow) — unlike Preview profile.
  *
  * `AccountMenu` is a client component that fires an impersonation-probe fetch on
  * mount, so it's mocked out — this suite only exercises the shell's link row.
@@ -40,7 +40,8 @@ describe("EditShell — reports entry link (Reports IA redesign)", () => {
     const link = screen.getByTestId("edit-reports-link");
     expect(link.getAttribute("href")).toBe("/edit/reports?center=meyer");
     expect(link.textContent).toContain("View reports");
-    // Internal — no new-tab / external semantics (unlike Preview Profile).
+    expect(link.getAttribute("data-variant")).toBe("ghost");
+    // Internal — no new-tab / external semantics (unlike Preview profile).
     expect(link.getAttribute("target")).toBeNull();
     expect(link.getAttribute("rel")).toBeNull();
   });
@@ -57,7 +58,7 @@ describe("EditShell — reports entry link (Reports IA redesign)", () => {
     );
     expect(screen.queryByTestId("edit-reports-link")).toBeNull();
     expect(screen.getByTestId("edit-history-link")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Preview Profile/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Preview profile/ })).toBeTruthy();
   });
 
   it("renders alongside history and preview when all three are supplied", () => {
@@ -72,7 +73,7 @@ describe("EditShell — reports entry link (Reports IA redesign)", () => {
       </EditShell>,
     );
     expect(screen.getByTestId("edit-history-link")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Preview Profile/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Preview profile/ })).toBeTruthy();
     expect(screen.getByTestId("edit-reports-link")).toBeTruthy();
   });
 });
