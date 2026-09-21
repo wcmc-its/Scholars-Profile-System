@@ -50,7 +50,7 @@ vi.mock("@/lib/api/export-scholars", () => ({ buildScholarExport: vi.fn() }));
 
 /** Common identity columns the builder always emits, in order. */
 const COMMON =
-  "rank,cwid,preferred_name,postnominal,primary_title,primary_department,role_category,profile_url";
+  "rank,cwid,preferred_name,postnominal,primary_title,primary_department,primary_institution,role_category,profile_url";
 /** No-email canonical method-family header. */
 const SAMPLE_HEADER = `${COMMON},pubs_in_family`;
 /** Email-augmented header (email spliced right after profile_url). */
@@ -58,9 +58,18 @@ const SAMPLE_HEADER_EMAIL = `${COMMON},email,pubs_in_family`;
 
 function sampleCsv(rowCount: number): string {
   const body = Array.from({ length: rowCount }, (_, i) =>
-    [i + 1, `cwid${i}`, `Scholar ${i}`, "", "Title", "Dept", "full_time_faculty", `/slug-${i}`, 5].join(
-      ",",
-    ),
+    [
+      i + 1,
+      `cwid${i}`,
+      `Scholar ${i}`,
+      "",
+      "Title",
+      "Dept",
+      "Weill Cornell Medicine",
+      "full_time_faculty",
+      `/slug-${i}`,
+      5,
+    ].join(","),
   );
   return [SAMPLE_HEADER, ...body].join("\r\n") + "\r\n";
 }
@@ -75,6 +84,7 @@ function sampleCsvEmail(rowCount: number): string {
       "",
       "Title",
       "Dept",
+      "Weill Cornell Medicine",
       "full_time_faculty",
       `/slug-${i}`,
       `scholar${i}@med.cornell.edu`,
