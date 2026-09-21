@@ -27,7 +27,7 @@ import { FundingCard } from "@/components/edit/funding-card";
 import { HighlightsCard } from "@/components/edit/highlights-card";
 import { ManualMenteesCard } from "@/components/edit/manual-mentees-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
-import { HomePanel } from "@/components/edit/home-panel";
+import { HomePanel, type OrcidRowState } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
 import {
   ProxyEditorCard,
@@ -942,6 +942,18 @@ export function EditPage({
   );
 }
 
+/** The ORCID row's inputs. `scholar.orcid` (WCM Identity) is on file; with
+ *  `SELF_EDIT_ORCID_SUGGESTION` on, an RPM-admin iD counts as on file too and a sole
+ *  strong-inferred iD becomes the "Is this yours?" suggestion. */
+function orcidRowState(ctx: EditContext): OrcidRowState {
+  const v = ctx.orcidVerdict;
+  return {
+    onFile: ctx.scholar.orcid ?? (v?.tier === "asserted" ? v.orcid : null),
+    suggested:
+      v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null,
+  };
+}
+
 /** #2634 — non-dismissed suggestion rows: the rail badge + Mentees pointer count. */
 function activeMenteeSuggestionCount(ctx: EditContext): number {
   return ctx.menteeSuggestions.filter((s) => s.dismissedAt === null).length;
@@ -1043,6 +1055,7 @@ function renderPanel(
           // shown only to a genuine self viewer, never a superuser or a proxy.
           manageableUnits={mode === "self" ? manageableUnits : []}
           isSuperuser={mode === "self" ? isSuperuser : false}
+          orcid={orcidRowState(ctx)}
           // ReCiter pending suggestions are surfaced for the scholar themselves OR
           // a superuser viewing the target (parity with the COI-gap hint). The page
           // computes `reciterPendingEnabled` = flag on AND (self OR superuser); the
@@ -1067,7 +1080,16 @@ function renderPanel(
             { label: "Title", value: ctx.scholar.primaryTitle },
             { label: "Degrees", value: ctx.scholar.postnominal },
             { label: "Department", value: ctx.scholar.primaryDepartment },
-            { label: "ORCID", value: <OrcidValue orcid={ctx.scholar.orcid} cwid={cwid} /> },
+            {
+              label: "ORCID",
+              value: (
+                <OrcidValue
+                  orcid={orcidRowState(ctx).onFile}
+                  suggested={orcidRowState(ctx).suggested}
+                  cwid={cwid}
+                />
+              ),
+            },
           ]}
         />
       );

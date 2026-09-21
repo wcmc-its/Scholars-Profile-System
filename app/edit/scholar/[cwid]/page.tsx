@@ -36,6 +36,7 @@ import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
+import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
@@ -124,6 +125,7 @@ export default async function EditScholarPage({
   // #2634 — mentee suggestions: same actor rule as COI-gap (self or a genuine
   // superuser; never a steward / proxy / unit-admin).
   const includeMenteeSuggestions = isMenteeSuggestionsEnabled() && (isSelf || session.isSuperuser);
+  const includeOrcidSuggestion = isOrcidSuggestionEnabled() && (isSelf || session.isSuperuser);
   // RePORTER "Is this you?" matches — superuser parity with the COI-gap gate
   // above (self OR a genuine superuser; the confirm/revoke routes re-authorize).
   const includeReporterProfile =
@@ -140,6 +142,7 @@ export default async function EditScholarPage({
     includeCoiGap,
     includeReporterProfile,
     includeMenteeSuggestions,
+    includeOrcidSuggestion,
   });
   if (!ctx) {
     // The scholar row does not exist (or is soft-deleted). A 404 keeps the

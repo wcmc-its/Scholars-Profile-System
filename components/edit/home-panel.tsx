@@ -4,15 +4,15 @@
  * nine-item data dictionary; this opens on the actual job — the few things that
  * make a profile feel finished — with live status read from the loaded context.
  *
- * Completeness is a real count over four essentials, never a percentage: the
- * scholar's overview and headshot are the two they act on; publications and
- * visibility are configured-for-them states shown as reassurance. Each item is
+ * Completeness is a real count over five essentials, never a percentage: the
+ * scholar's overview, headshot, and ORCID iD are the three they act on;
+ * publications and visibility are configured-for-them states shown as reassurance. Each item is
  * a checklist row — amber "to-do" when it needs the scholar, green check when
  * done — so a gap reads as a gap, not as just another settled status.
  *
- * Two of the four are owned by the scholar (overview here; visibility here) and
+ * Two of the five are owned by the scholar (overview here; visibility here) and
  * sit under "Yours to edit" — matching the rail's owned/sourced split. The other
- * two come "From WCM systems": the headshot is a live pointer to the WCM Web
+ * three come "From WCM systems": the ORCID iD row (see `OrcidItem`); the headshot is a live pointer to the WCM Web
  * Directory (a scholar fixes it there and it shows here right away — no sync
  * lag), and publications flow from PubMed/ReCiter.
  *
@@ -28,7 +28,12 @@ import { ArrowRight, ArrowUpRight, Check, Plus } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { PUBLICATION_MANAGER_URL, WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
+import {
+  ORCID_MANAGE_URL,
+  PUBLICATION_MANAGER_URL,
+  WEB_DIRECTORY_URL,
+  resolveSelfServiceHref,
+} from "@/lib/edit/request-a-change";
 import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
 import { cn, initials } from "@/lib/utils";
 import { useReciterPendingSuggestions } from "@/components/edit/reciter-pending-card";
@@ -71,6 +76,16 @@ export type HomePanelProps = {
    *  `/api/edit/reciter-pending` and shows a compact teaser only if a high-confidence
    *  (≥70) hero suggestion comes back. Off (default) ⇒ ZERO fetch, nothing renders. */
   reciterPendingEnabled?: boolean;
+  /** The ORCID row (`SELF_EDIT_ORCID_SUGGESTION`): `onFile` = the asserted iD
+   *  (`scholar.orcid`, or the RPM-admin iD when the flag is on); `suggested` = the
+   *  sole strong-inferred iD from `orcid_candidate` with its accepted-article count,
+   *  null when the flag is off or nothing grades strong. */
+  orcid?: OrcidRowState;
+};
+
+export type OrcidRowState = {
+  onFile: string | null;
+  suggested: { orcid: string; accepted: number } | null;
 };
 
 type HeadshotState = "loading" | "present" | "missing";
@@ -88,6 +103,7 @@ export function HomePanel({
   manageableUnits = [],
   isSuperuser = false,
   reciterPendingEnabled = false,
+  orcid = { onFile: null, suggested: null },
 }: HomePanelProps) {
   const headshot = useHeadshotProbe(identityImageEndpoint);
   const isAdmin = mode === "superuser";
@@ -98,15 +114,16 @@ export function HomePanel({
   const pendingSuggestions = useReciterPendingSuggestions(cwid, reciterPendingEnabled);
   const hasPendingSuggestions = pendingSuggestions.length > 0;
 
-  // A real count over four essentials — not a percentage. An item counts only
+  // A real count over five essentials — not a percentage. An item counts only
   // when it is genuinely satisfied; while the headshot is still probing it does
   // not count (so the number only ever ticks up, never down). Publications
   // counts only when pubs are shown AND no suggestions are left to review.
-  const total = 4;
+  const total = 5;
   const done =
     (hasBio ? 1 : 0) +
     (headshot === "present" ? 1 : 0) +
     (totalPublications > 0 && !hasPendingSuggestions ? 1 : 0) +
+    (orcid.onFile ? 1 : 0) +
     1; // visibility — a choice is always set
 
   return (
@@ -136,6 +153,7 @@ export function HomePanel({
           name={preferredName}
           pending={pendingSuggestions}
         />
+        <OrcidItem state={orcid} cwid={cwid ?? ""} isAdmin={isAdmin} name={preferredName} />
       </ChecklistGroup>
 
       {(manageableUnits.length > 0 || isSuperuser) && (
@@ -331,7 +349,7 @@ function ChecklistRow({
 }: {
   marker: Marker;
   title: string;
-  subtitle: string;
+  subtitle: React.ReactNode;
   action: React.ReactNode;
   testId: string;
   /** Optional secondary content rendered beneath the subtitle (e.g. the ReCiter
@@ -501,6 +519,95 @@ function VisibilityItem({
           Change
         </RowLink>
       }
+    />
+  );
+}
+
+/**
+ * The ORCID iD row. On file → done, the iD linked to its orcid.org record. A strong
+ * inference (`SELF_EDIT_ORCID_SUGGESTION`) → "Is this your ORCID iD?" with the iD
+ * and the accepted-publication count behind it, handing off to ReCiter's Manage
+ * Profile page, which lists the same candidate iDs with their PMIDs and writes
+ * `admin_orcid` — the one ORCID write path; the nightly `orcid_candidate` mirror
+ * then grades it asserted and this row flips to done. Otherwise → not on file with
+ * the NIH/eRA reason and the same ReCiter link (parity with `OrcidValue`, #2650).
+ */
+function OrcidItem({
+  state,
+  cwid,
+  isAdmin,
+  name,
+}: {
+  state: OrcidRowState;
+  cwid: string;
+  isAdmin: boolean;
+  name: string;
+}) {
+  const orcidLink = (id: string) => (
+    <a href={`https://orcid.org/${id}`} target="_blank" rel="noreferrer" className="hover:underline">
+      {id}
+    </a>
+  );
+  if (state.onFile) {
+    return (
+      <ChecklistRow
+        testId="home-item-orcid"
+        marker="done"
+        title="ORCID iD on file"
+        subtitle={orcidLink(state.onFile)}
+        action={null}
+      />
+    );
+  }
+  const action = (
+    <a
+      href={resolveSelfServiceHref(ORCID_MANAGE_URL, cwid)}
+      target="_blank"
+      rel="noreferrer"
+      data-testid="home-card-orcid"
+      className="text-apollo-slate inline-flex items-center gap-1 text-sm font-medium whitespace-nowrap"
+    >
+      {state.suggested ? "Confirm in ReCiter" : "Add it in ReCiter"}
+      <ArrowUpRight className="size-3.5" aria-hidden />
+    </a>
+  );
+  const whose = isAdmin ? `${name}'s` : "your";
+  // Why bother: the two concrete payoffs, then the NIH requirement (parity with `OrcidValue`).
+  const why = (lead: string) => (
+    <p className="text-muted-foreground mt-1 text-xs leading-snug" data-testid="home-item-orcid-why">
+      {lead} finding {whose} publications more reliable and fills in {whose} NIH biosketch
+      worksheet. NIH requires an ORCID iD linked to eRA Commons for SciENcv biosketches.
+    </p>
+  );
+  if (state.suggested) {
+    const { orcid, accepted } = state.suggested;
+    const evidence =
+      accepted > 0
+        ? `seen on ${accepted} of ${whose} accepted publications`
+        : `matches ${whose} record in the ORCID registry`;
+    return (
+      <ChecklistRow
+        testId="home-item-orcid"
+        marker="todo"
+        title={isAdmin ? `Is this ${name}'s ORCID iD?` : "Is this your ORCID iD?"}
+        subtitle={
+          <>
+            {orcidLink(orcid)} · {evidence}
+          </>
+        }
+        teaser={why("Confirming it makes")}
+        action={action}
+      />
+    );
+  }
+  return (
+    <ChecklistRow
+      testId="home-item-orcid"
+      marker="todo"
+      title="ORCID iD not on file"
+      subtitle={isAdmin ? `${name} has no ORCID iD on file.` : "You have no ORCID iD on file."}
+      teaser={why("An ORCID iD makes")}
+      action={action}
     />
   );
 }

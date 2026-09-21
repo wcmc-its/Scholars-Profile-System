@@ -131,6 +131,7 @@ const ctx: EditContext = {
   // #2634 — empty by default (loader returns [] unless SELF_EDIT_MENTEE_SUGGESTIONS
   // is on for a genuine self/superuser viewer); a describe block below populates it.
   menteeSuggestions: [],
+  orcidVerdict: null,
   // SELF_EDIT_COI_GAP_HINT — empty by default (loader returns [] unless the
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.
@@ -239,20 +240,20 @@ describe("EditPage router — the Apollo shell + rail", () => {
 
   it("Home: pins the completeness numerator, never a percentage", () => {
     // bio ✓ + 1 pub ✓ + visibility ✓; the headshot probe stays "loading" in
-    // jsdom (no Image load) so it doesn't count → exactly 3 of 4.
+    // jsdom (no Image load) so it doesn't count, and the fixture has no ORCID → exactly 3 of 5.
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByText("3 of 4 done")).toBeTruthy();
+    expect(screen.getByText("3 of 5 done")).toBeTruthy();
     expect(screen.queryByText(/%/)).toBeNull();
   });
 
-  it("Home: each essential is load-bearing — no bio + no pubs counts only visibility (1 of 4)", () => {
+  it("Home: each essential is load-bearing — no bio + no pubs counts only visibility (1 of 5)", () => {
     const sparse: EditContext = {
       ...ctx,
       scholar: { ...ctx.scholar, overview: "" },
       publications: [],
     };
     render(<EditPage ctx={sparse} mode="self" />);
-    expect(screen.getByText("1 of 4 done")).toBeTruthy();
+    expect(screen.getByText("1 of 5 done")).toBeTruthy();
     // Publications-empty row state.
     expect(screen.getByTestId("home-item-publications").textContent).toContain("None shown yet");
   });
@@ -278,15 +279,73 @@ describe("EditPage router — the Apollo shell + rail", () => {
 
   // The headshot's presence is a client-side image probe (no server signal); the
   // present branch also mounts Radix AvatarImage — stubImage drives both.
-  it("Home: a loadable headshot resolves to 'Headshot added' and completes the profile (4 of 4)", async () => {
+  it("Home: a loadable headshot resolves to 'Headshot added' and completes all but the ORCID row (4 of 5)", async () => {
     stubImage("load");
     try {
       render(<EditPage ctx={ctx} mode="self" />);
       expect(await screen.findByText("Headshot added")).toBeTruthy();
-      expect(screen.getByText("4 of 4 done")).toBeTruthy();
+      expect(screen.getByText("4 of 5 done")).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("Home: the ORCID row — not on file → to-do with the NIH reason and the ReCiter link", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain("ORCID iD not on file");
+    expect(row.textContent).toContain(
+      "An ORCID iD makes finding your publications more reliable and fills in your NIH biosketch worksheet.",
+    );
+    expect(row.textContent).toContain("NIH requires an ORCID iD linked to eRA Commons");
+    const cta = screen.getByTestId("home-card-orcid");
+    expect(cta.textContent).toContain("Add it in ReCiter");
+    expect(cta.getAttribute("href")).toBe(`https://reciter.weill.cornell.edu/manageprofile/${ctx.scholar.cwid}`);
+  });
+
+  it("Home: the ORCID row — a strong inference asks 'Is this your ORCID iD?' with the evidence and a Confirm link; it does not count as done", () => {
+    const withSuggestion: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 3 },
+    };
+    render(<EditPage ctx={withSuggestion} mode="self" />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain("Is this your ORCID iD?");
+    expect(row.textContent).toContain("0000-0002-9930-2193 · seen on 3 of your accepted publications");
+    expect(screen.getByTestId("home-card-orcid").textContent).toContain("Confirm in ReCiter");
+    expect(screen.getByTestId("home-item-orcid-why").textContent).toContain(
+      "Confirming it makes finding your publications more reliable and fills in your NIH biosketch worksheet.",
+    );
+    expect(screen.getByText("3 of 5 done")).toBeTruthy();
+    // The iD in the row links to its orcid.org record.
+    expect(within(row).getByRole("link", { name: "0000-0002-9930-2193" }).getAttribute("href")).toBe(
+      "https://orcid.org/0000-0002-9930-2193",
+    );
+  });
+
+  it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done and counted", () => {
+    const onFile: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+    };
+    render(<EditPage ctx={onFile} mode="self" />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain("ORCID iD on file");
+    expect(row.textContent).toContain("0000-0002-1825-0097");
+    expect(screen.queryByTestId("home-card-orcid")).toBeNull();
+    expect(screen.getByText("4 of 5 done")).toBeTruthy();
+  });
+
+  it("Home: the ORCID row in superuser voice is third-person", () => {
+    const withSuggestion: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 0 },
+    };
+    render(<EditPage ctx={withSuggestion} mode="superuser" />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain(`Is this ${ctx.scholar.preferredName}'s ORCID iD?`);
+    expect(row.textContent).toContain(`matches ${ctx.scholar.preferredName}'s record in the ORCID registry`);
+    expect(row.textContent).toContain(`fills in ${ctx.scholar.preferredName}'s NIH biosketch worksheet`);
   });
 
   it("Home: a 404 headshot resolves to the 'Add a headshot' to-do", async () => {

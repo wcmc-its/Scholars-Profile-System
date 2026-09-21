@@ -1857,6 +1857,10 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
       });
 
+      it("keeps the ORCID suggestion row armed but OFF in prod (SELF_EDIT_ORCID_SUGGESTION) until the pubsource_orcid_person refresh lands", () => {
+        expect(appContainerEnv().get("SELF_EDIT_ORCID_SUGGESTION")).toBe("off");
+      });
+
       it("activates the ReCiter 'Not mine' reject in prod (RECITER_REJECT_SEND, launch batch 2, #746/#506)", () => {
         // Prod flipped 2026-07-05: staging soak complete + the item-3 VPC
         // consolidation gave prod ReCiter connectivity. Best-effort writeback;
@@ -2431,6 +2435,20 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
+    });
+
+    it("ships the ORCID suggestion row ON in staging (SELF_EDIT_ORCID_SUGGESTION)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("SELF_EDIT_ORCID_SUGGESTION")).toBe("on");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {

@@ -49,6 +49,7 @@ import { subjectId as deriveSubjectId } from "@/lib/coi-gap/mention";
 import type { SubjectType } from "@/lib/coi-gap/mention";
 import { relationshipKinds as deriveRelationshipKinds } from "@/lib/coi-gap/pipeline";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { orcidVerdict, SUGGEST_MIN_ACCEPTED, type OrcidVerdict } from "@/lib/edit/orcid-coverage";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
@@ -71,6 +72,7 @@ type EditContextReadClient = Pick<
   | "newsMention"
   | "personDatasetDeposit"
   | "orgUnitRoleAssignment"
+  | "orcidCandidate"
 >;
 
 export type EditContextScholar = {
@@ -692,6 +694,11 @@ export type EditContext = {
    * `opts.includeMenteeSuggestions === true`; empty for every other caller.
    */
   menteeSuggestions: ReadonlyArray<EditContextMenteeSuggestion>;
+  /** The scholar's ORCID candidate fold (`orcidVerdict` over their `orcid_candidate`
+   *  rows) — populated only when `loadEditContext` is called with
+   *  `opts.includeOrcidSuggestion === true` (`SELF_EDIT_ORCID_SUGGESTION`); null for
+   *  every other caller, in which case the ORCID row falls back to `scholar.orcid`. */
+  orcidVerdict: OrcidVerdict | null;
   /**
    * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
    * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
@@ -861,6 +868,7 @@ export async function loadEditContext(
     includeHighlights?: boolean;
     includeReporterProfile?: boolean;
     includeMenteeSuggestions?: boolean;
+    includeOrcidSuggestion?: boolean;
   },
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
@@ -1720,6 +1728,18 @@ export async function loadEditContext(
   // `{mentorCwid}:{menteeCwid}`) or a hand-entered one — is dropped here, so
   // adding a suggestion makes it vanish on the next render. Dismissed rows are
   // kept (the card shows them collapsed, with Restore).
+  // ORCID suggestion (`SELF_EDIT_ORCID_SUGGESTION`): the nightly `orcid_candidate`
+  // mirror folded by the same rule the coverage console uses, at the row's lower
+  // support bar (one accepted article is enough to ask; the console counts 3).
+  let orcidVerdictValue: OrcidVerdict | null = null;
+  if (opts?.includeOrcidSuggestion === true) {
+    const rows = await client.orcidCandidate.findMany({
+      where: { cwid },
+      select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true },
+    });
+    orcidVerdictValue = orcidVerdict(rows, SUGGEST_MIN_ACCEPTED);
+  }
+
   const menteeSuggestions: EditContextMenteeSuggestion[] = [];
   if (opts?.includeMenteeSuggestions === true) {
     const listed = new Set<string>([
@@ -1925,6 +1945,7 @@ export async function loadEditContext(
       manualMentees: manualMenteeRows,
       manualMenteeUnresolvedCwids,
       menteeSuggestions,
+      orcidVerdict: orcidVerdictValue,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
@@ -2096,6 +2117,7 @@ export async function loadEditContext(
     manualMentees: manualMenteeRows,
     manualMenteeUnresolvedCwids,
     menteeSuggestions,
+    orcidVerdict: orcidVerdictValue,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,
