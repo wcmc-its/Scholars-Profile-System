@@ -30,6 +30,7 @@ import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel, type OrcidRowState } from "@/components/edit/home-panel";
 import { ORCID_MANAGE_URL, resolveSelfServiceHref } from "@/lib/edit/request-a-change";
 import { OrcidCard } from "@/components/edit/orcid-card";
+import { ProfileLinksCard } from "@/components/edit/profile-links-card";
 import { OverviewCard } from "@/components/edit/overview-card";
 import {
   ProxyEditorCard,
@@ -602,6 +603,10 @@ export type EditPageProps = {
    *  the home row / Name & Title point into it; off → both hand off to ReCiter
    *  Manage Profile as before and the tab is absent. */
   orcidTabEnabled?: boolean;
+  /** `SELF_EDIT_PROFILE_LINKS` (#2699): the External Profiles card is on the
+   *  Identifiers & Profiles tab, and the tab is in the rail on this flag alone
+   *  (independent of the ORCID kill switch). */
+  profileLinksEnabled?: boolean;
   /** GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`): whether the "Grants for me"
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like the other feature gates; self + superuser only. */
@@ -646,6 +651,7 @@ export function visibleAttrKeys(
   hasDatasets = false,
   hasMenteeSuggestions = false,
   orcidTabEnabled = false,
+  profileLinksEnabled = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -703,7 +709,7 @@ export function visibleAttrKeys(
       // returned rows (flag on + self/superuser); `?attr=mentee-suggestions`
       // with none canonicalizes away.
       .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
-      .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled)
+      .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled || profileLinksEnabled)
       .map((a) => a.key)
   );
 }
@@ -723,6 +729,7 @@ export function EditPage({
   unitAdminBanner = null,
   reciterPendingEnabled = false,
   orcidTabEnabled = false,
+  profileLinksEnabled = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
   cvEnabled = false,
@@ -791,7 +798,7 @@ export function EditPage({
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
     .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
-    .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled)
+    .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled || profileLinksEnabled)
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
@@ -961,6 +968,7 @@ export function EditPage({
         unitAdminEditors,
         reciterPendingEnabled,
         orcidTabEnabled,
+        profileLinksEnabled,
       )}
     </EditShell>
   );
@@ -1009,6 +1017,7 @@ function renderPanel(
   unitAdminEditors: UnitAdminEditorRow[] | null,
   reciterPendingEnabled: boolean,
   orcidTabEnabled: boolean,
+  profileLinksEnabled: boolean,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -1362,16 +1371,31 @@ function renderPanel(
       );
     case "identifiers-profiles": {
       // Every EditMode may reach this panel; each write re-authorizes server-side
-      // (`authorizeOverviewWrite`), and the shell makes cv-generator inert.
+      // (`authorizeOverviewWrite`), and the shell makes cv-generator inert. The
+      // two cards are independently flagged (the tab shows when either is on);
+      // whichever renders first owns the `panel-heading` id.
       const row = orcidRowState(ctx);
       return (
-        <OrcidCard
-          cwid={cwid}
-          mode={voiceMode}
-          scholarName={scholarName}
-          onFile={row.onFile}
-          suggested={row.suggested}
-        />
+        <div className="flex flex-col gap-10">
+          {orcidTabEnabled && (
+            <OrcidCard
+              cwid={cwid}
+              mode={voiceMode}
+              scholarName={scholarName}
+              onFile={row.onFile}
+              suggested={row.suggested}
+            />
+          )}
+          {profileLinksEnabled && (
+            <ProfileLinksCard
+              cwid={cwid}
+              mode={voiceMode}
+              scholarName={scholarName}
+              initial={ctx.profileLinks}
+              subsection={orcidTabEnabled}
+            />
+          )}
+        </div>
       );
     }
     case "education":

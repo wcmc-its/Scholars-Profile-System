@@ -1650,6 +1650,13 @@ export class AppStack extends Stack {
         // route 404s. ON in staging; OFF in prod until the staging soak — the
         // `pubsource_orcid_person` refresh it waited on landed 2026-09-21.
         SELF_EDIT_ORCID_SUGGESTION: env === "staging" ? "on" : "off",
+        // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
+        // (LinkedIn, X, Bluesky, Google Scholar, ResearchGate): the External
+        // Profiles card on the Identifiers & Profiles tab, the `profileLinks`
+        // branch of `POST /api/edit/field`, and the Contact-card + JSON-LD
+        // `sameAs` render. Independent of the ORCID kill switch above (the tab
+        // shows when either is on). ON in staging; OFF in prod until eyeballed.
+        SELF_EDIT_PROFILE_LINKS: env === "staging" ? "on" : "off",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in
