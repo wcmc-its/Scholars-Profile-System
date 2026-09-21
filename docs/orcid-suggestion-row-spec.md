@@ -10,9 +10,9 @@ A fifth row on `/edit` "Complete your profile", under FROM WCM SYSTEMS, after Pu
 |---|---|---|---|---|
 | on file (`scholar.orcid`, or an `rpm_admin` candidate row when the flag is on) | done | ORCID iD on file | the iD linked to orcid.org | none |
 | strong (exactly one strong-eligible iD per `orcidVerdict` at `SUGGEST_MIN_ACCEPTED` = 1) | to-do | Is this your ORCID iD? | the iD (orcid.org link) · seen on N of your accepted publications, or "matches your record in the ORCID registry" when the strength is registry-only | Confirm in ReCiter → `ORCID_MANAGE_URL` |
-| weak / none | to-do | ORCID iD not on file | NIH requires an ORCID iD linked to eRA Commons for SciENcv biosketches. | Add it in ReCiter → `ORCID_MANAGE_URL` |
+| weak / none | to-do | ORCID iD not on file | Needed for NIH SciENcv biosketches; also makes your publication matching more reliable. | Add it in ReCiter → `ORCID_MANAGE_URL` |
 
-Superuser mode: third-person copy, same CTA. The Name & Title panel's `OrcidValue` shows the same suggestion when the iD is absent: "Not on file. Is `…` yours? Confirm in ReCiter".
+Superuser mode: the name appears once, in the title; body copy says "their", never the name again. The Name & Title panel's `OrcidValue` shows the same suggestion when the iD is absent: "Not on file. Is `…` yours? Confirm in ReCiter".
 
 ## Why the CTA is a link, not a button
 

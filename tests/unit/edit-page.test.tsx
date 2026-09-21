@@ -295,9 +295,9 @@ describe("EditPage router — the Apollo shell + rail", () => {
     const row = screen.getByTestId("home-item-orcid");
     expect(row.textContent).toContain("ORCID iD not on file");
     expect(row.textContent).toContain(
-      "An ORCID iD makes finding your publications more reliable and fills in your NIH biosketch worksheet.",
+      "Needed for NIH SciENcv biosketches; also makes your publication matching more reliable.",
     );
-    expect(row.textContent).toContain("NIH requires an ORCID iD linked to eRA Commons");
+    expect(row.textContent).not.toContain("has no ORCID iD on file");
     const cta = screen.getByTestId("home-card-orcid");
     expect(cta.textContent).toContain("Add it in ReCiter");
     expect(cta.getAttribute("href")).toBe(`https://reciter.weill.cornell.edu/manageprofile/${ctx.scholar.cwid}`);
@@ -311,10 +311,10 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={withSuggestion} mode="self" />);
     const row = screen.getByTestId("home-item-orcid");
     expect(row.textContent).toContain("Is this your ORCID iD?");
-    expect(row.textContent).toContain("0000-0002-9930-2193 · seen on 3 of your accepted publications");
+    expect(row.textContent).toContain("0000-0002-9930-2193 · on 3 of your accepted publications");
     expect(screen.getByTestId("home-card-orcid").textContent).toContain("Confirm in ReCiter");
-    expect(screen.getByTestId("home-item-orcid-why").textContent).toContain(
-      "Confirming it makes finding your publications more reliable and fills in your NIH biosketch worksheet.",
+    expect(screen.getByTestId("home-item-orcid-why").textContent).toBe(
+      "Needed for NIH SciENcv biosketches; also makes your publication matching more reliable.",
     );
     expect(screen.getByText("3 of 5 done")).toBeTruthy();
     // The iD in the row links to its orcid.org record.
@@ -344,8 +344,10 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={withSuggestion} mode="superuser" />);
     const row = screen.getByTestId("home-item-orcid");
     expect(row.textContent).toContain(`Is this ${ctx.scholar.preferredName}'s ORCID iD?`);
-    expect(row.textContent).toContain(`matches ${ctx.scholar.preferredName}'s record in the ORCID registry`);
-    expect(row.textContent).toContain(`fills in ${ctx.scholar.preferredName}'s NIH biosketch worksheet`);
+    expect(row.textContent).toContain("matches their record in the ORCID registry");
+    expect(row.textContent).toContain("makes their publication matching more reliable");
+    // The name appears once, in the title — never repeated through the body copy.
+    expect(row.textContent.split(ctx.scholar.preferredName).length - 1).toBe(1);
   });
 
   it("Home: a 404 headshot resolves to the 'Add a headshot' to-do", async () => {

@@ -61,8 +61,7 @@ export function OrcidValue({
         {suggested ? "Confirm in ReCiter" : "Add it in ReCiter"}
       </a>
       <span className="text-muted-foreground block font-normal">
-        It makes finding your publications more reliable and fills in your NIH biosketch
-        worksheet. NIH requires an ORCID iD linked to eRA Commons for SciENcv biosketches.
+        Needed for NIH SciENcv biosketches; also makes your publication matching more reliable.
       </span>
     </span>
   );
