@@ -33,8 +33,8 @@ const MD = { program: "md", source: "roster", tier: "confirmed" } as const;
 const MDPHD = { program: "mdphd", source: "roster", tier: "confirmed" } as const;
 const PHD = { program: "phd", source: "jenzabar", tier: "confirmed" } as const;
 const VOL = { program: "volunteer", source: "coauthor", tier: "presumptive" } as const;
-const CHEN = { cwid: "men0001", name: "Chen, Lin" };
-const OKAFOR = { cwid: "men0002", name: "Okafor, Tunde" };
+const CHEN = { cwid: "men0001", name: "Chen, Lin", department: "Medicine", institution: "WCM" };
+const OKAFOR = { cwid: "men0002", name: "Okafor, Tunde", department: null, institution: "MSKCC" };
 const NKEMELU = { cwid: "men0003", name: "Nkemelu, Obi" };
 
 function pub(o: Partial<MentoredPubsPublicationRow> & Pick<MentoredPubsPublicationRow, "pmid">): MentoredPubsPublicationRow {
@@ -290,6 +290,17 @@ describe("MentoredPublicationsTable — learners", () => {
     expect(typeCell.textContent).not.toMatch(/roster|Jenzabar|presumptive/);
     expect(within(table()).getByRole("columnheader", { name: /Grad year/ }).getAttribute("aria-sort")).toBe("descending");
     expect(within(table()).getByRole("columnheader", { name: /Impact factor ≥ 10/ })).toBeTruthy();
+  });
+
+  it("Department and Institution columns follow Mentors, one line per mentor in its order, — where unknown", () => {
+    const { table } = renderLearners();
+    const headers = [...table().querySelectorAll("thead th")].map((th) => th.textContent?.trim());
+    expect(headers.slice(3, 6)).toEqual(["Mentors", "Department", "Institution"]);
+    const cells = within(table()).getByTestId("mentored-pubs-learner-stu0001").querySelectorAll("td");
+    const lines = (td: Element) => [...td.querySelectorAll("li")].map((li) => li.textContent);
+    expect(lines(cells[3])).toEqual(["Chen, Linmen0001", "Okafor, Tundemen0002"]);
+    expect(lines(cells[4])).toEqual(["Medicine", "—"]);
+    expect(lines(cells[5])).toEqual(["WCM", "MSKCC"]);
   });
 
   it("the Learner header sorts by last, first", () => {

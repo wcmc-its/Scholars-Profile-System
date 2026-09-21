@@ -3,7 +3,8 @@
  * artifact the Areas of Concentration (AOC) office has been assembling by
  * hand:
  *   - "Summary"            one row per learner (counts + mentors + mentor CWIDs
- *                          + each pair's mentorship type);
+ *                          + mentor departments + mentor institutions + each
+ *                          pair's mentorship type);
  *   - "Raw Data"           one row per (learner, mentor, publication) with the
  *                          pair's "Type of mentorship" — or, in the "all
  *                          learner publications" mode, one row per (learner,
@@ -46,6 +47,8 @@ export const SUMMARY_HEADERS = [
   "Last name",
   "Mentors",
   "Mentor CWIDs",
+  "Mentor departments",
+  "Mentor institutions",
   "Mentorship types",
   "Publications in program window",
   "Publications (all years)",
@@ -63,6 +66,8 @@ export const SUMMARY_HEADERS_ALL = [
   "Last name",
   "Mentors",
   "Mentor CWIDs",
+  "Mentor departments",
+  "Mentor institutions",
   "Mentorship types",
   "All publications in program window",
   "Publications with a mentor in window",
@@ -93,6 +98,8 @@ export const RAW_HEADERS = [
   "Learner last name",
   "Mentor CWID",
   "Mentor",
+  "Mentor department",
+  "Mentor institution",
   "Type of mentorship",
   ...RAW_PUB_HEADERS,
 ] as const;
@@ -187,6 +194,15 @@ function mentorCwids(mentors: ReadonlyArray<MentorRef>): string | null {
   return mentors.length > 0 ? mentors.map((m) => m.cwid).join("; ") : null;
 }
 
+/** One `; `-joined field across the mentors, a mentor without it as "—" so
+ *  the positions still line up with the Mentors column. */
+function mentorField(
+  mentors: ReadonlyArray<MentorRef>,
+  get: (m: MentorRef) => string | null | undefined,
+): string | null {
+  return mentors.length > 0 ? mentors.map((m) => get(m) || "—").join("; ") : null;
+}
+
 function mentorshipTypes(mentors: ReadonlyArray<MentorPair>): string | null {
   return mentors.length > 0 ? mentors.map((m) => mentorshipLabel(m.mentorship)).join("; ") : null;
 }
@@ -204,7 +220,13 @@ export async function buildMentoredPublicationsWorkbook(
 
   const summaryRows: CellValue[][] = report.summary.map((r) => {
     const learner = [r.gradYear, r.entryYear, r.program, r.cwid, r.firstName, r.lastName];
-    const mentors = [mentorNames(r.mentors), mentorCwids(r.mentors), mentorshipTypes(r.mentors)];
+    const mentors = [
+      mentorNames(r.mentors),
+      mentorCwids(r.mentors),
+      mentorField(r.mentors, (m) => m.department),
+      mentorField(r.mentors, (m) => m.institution),
+      mentorshipTypes(r.mentors),
+    ];
     return allMode
       ? [
           ...learner,
@@ -239,7 +261,7 @@ export async function buildMentoredPublicationsWorkbook(
     r.learnerLastName,
     ...(allMode
       ? [mentorNames(r.paperMentors), mentorCwids(r.paperMentors)]
-      : [r.mentorCwid, r.mentorName, r.mentorship]),
+      : [r.mentorCwid, r.mentorName, r.mentorDepartment, r.mentorInstitution, r.mentorship]),
     r.pmid,
     r.title,
     r.journal,

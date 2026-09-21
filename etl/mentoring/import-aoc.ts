@@ -24,10 +24,12 @@
  *
  * NDJSON contract: one object per RAW reporting_students_mentors row —
  *   { mentorCwid, menteeCwid, firstName, lastName, graduationYear, entryYear,
- *     programType, mentorFirstName, mentorLastName }
- * (any of name/year/entryYear/programType/mentor name may be null; duplicate
- * pairs allowed; an export predating `entryYear` or the mentor name fields
- * simply reads them as null). Blank lines are skipped; a line missing
+ *     programType, mentorFirstName, mentorLastName, mentorDepartment,
+ *     mentorInstitution }
+ * (any of name/year/entryYear/programType/mentor name/department/institution
+ * may be null; duplicate pairs allowed; an export predating `entryYear`, the
+ * mentor name fields or the mentor department/institution fields simply reads
+ * them as null). Blank lines are skipped; a line missing
  * mentorCwid/menteeCwid is skipped + counted.
  *
  * Env (AWS default credential chain — never hardcode keys):
@@ -70,6 +72,8 @@ type Row = {
   programType: string | null;
   mentorFirstName: string | null;
   mentorLastName: string | null;
+  mentorDepartment: string | null;
+  mentorInstitution: string | null;
 };
 
 function chunks<T>(arr: T[], size: number): T[][] {
@@ -104,6 +108,9 @@ function parseNdjson(text: string): { rows: Row[]; skipped: number } {
       const programType = typeof o.programType === "string" ? o.programType : null;
       const mentorFirstName = typeof o.mentorFirstName === "string" ? o.mentorFirstName : null;
       const mentorLastName = typeof o.mentorLastName === "string" ? o.mentorLastName : null;
+      const mentorDepartment = typeof o.mentorDepartment === "string" ? o.mentorDepartment : null;
+      const mentorInstitution =
+        typeof o.mentorInstitution === "string" ? o.mentorInstitution : null;
       rows.push({
         mentorCwid,
         menteeCwid,
@@ -114,6 +121,8 @@ function parseNdjson(text: string): { rows: Row[]; skipped: number } {
         programType,
         mentorFirstName,
         mentorLastName,
+        mentorDepartment,
+        mentorInstitution,
       });
     } catch {
       skipped++;
@@ -172,6 +181,8 @@ async function main() {
                 programType: r.programType ?? null,
                 mentorFirstName: r.mentorFirstName ?? null,
                 mentorLastName: r.mentorLastName ?? null,
+                mentorDepartment: r.mentorDepartment ?? null,
+                mentorInstitution: r.mentorInstitution ?? null,
                 refreshedAt: importedAt,
               })),
             });

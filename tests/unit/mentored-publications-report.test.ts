@@ -86,6 +86,7 @@ import {
   inProgramWindow,
   loadMentoredGradYears,
   loadMentoredPublicationsReport,
+  mentorInstitution,
 } from "@/lib/edit/mentored-publications-report";
 import { MENTORSHIP_TYPE_KEYS } from "@/lib/edit/mentorship-type";
 
@@ -101,6 +102,8 @@ type Aoc = {
   programType: string | null;
   mentorFirstName: string | null;
   mentorLastName: string | null;
+  mentorDepartment: string | null;
+  mentorInstitution: string | null;
 };
 
 const aoc = (o: Partial<Aoc> & Pick<Aoc, "mentorCwid" | "menteeCwid">): Aoc => ({
@@ -111,6 +114,8 @@ const aoc = (o: Partial<Aoc> & Pick<Aoc, "mentorCwid" | "menteeCwid">): Aoc => (
   programType: "AOC",
   mentorFirstName: null,
   mentorLastName: null,
+  mentorDepartment: null,
+  mentorInstitution: null,
   ...o,
 });
 
@@ -177,6 +182,21 @@ beforeEach(() => {
   hoisted.mockSuggestionFindMany.mockResolvedValue([]);
   hoisted.mockOverrideFindMany.mockResolvedValue([]);
   hoisted.mockAuthorFindMany.mockResolvedValue([]);
+});
+
+describe("mentorInstitution", () => {
+  it("folds the roster's spellings of the three tracked institutions; passes anything else through", () => {
+    for (const s of ["Weill Cornell Medical College", "WCM, Cornell University", "WCM (formerly)", "Weill Cornell", "wcmc"])
+      expect(mentorInstitution(s)).toBe("WCM");
+    for (const s of ["Memorial Sloan Kettering Cancer Center", "Sloan-Kettering", "MSKCC", "MSK"])
+      expect(mentorInstitution(s)).toBe("MSKCC");
+    for (const s of ["Hospital for Special Surgery", "HSS"]) expect(mentorInstitution(s)).toBe("HSS");
+    expect(mentorInstitution("Rockefeller University")).toBe("Rockefeller University");
+    expect(mentorInstitution("NYP, Cornell University")).toBe("NYP, Cornell University");
+    expect(mentorInstitution("  ")).toBeNull();
+    expect(mentorInstitution(null)).toBeNull();
+    expect(mentorInstitution(undefined)).toBeNull();
+  });
 });
 
 describe("window rule", () => {
@@ -517,6 +537,32 @@ describe("loadMentoredPublicationsReport", () => {
     expect(report.detail[0]).toMatchObject({ mentorCwid: "men0003", mentorName: "men0003" });
   });
 
+  it("mentor department: Scholar.primaryDepartment, else the roster's; institution: the roster's folded, else WCM for a Scholar row, else null", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      // Scholar row with a department; roster says something else and names MSK → ED wins, MSKCC.
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", mentorDepartment: "Roster Dept", mentorInstitution: "Sloan-Kettering" }),
+      // Scholar row with no department; roster silent → roster dept, WCM by the Scholar row.
+      aoc({ mentorCwid: "men0002", menteeCwid: "stu0001", mentorDepartment: null, mentorInstitution: " " }),
+      aoc({ mentorCwid: "men0002", menteeCwid: "stu0002", mentorDepartment: "Pediatrics", mentorInstitution: null }),
+      // No Scholar row: roster only; an unlisted institution passes through as typed.
+      aoc({ mentorCwid: "men0003", menteeCwid: "stu0001", mentorDepartment: null, mentorInstitution: "Rockerfeller Univ" }),
+      aoc({ mentorCwid: "men0004", menteeCwid: "stu0001" }),
+    ]);
+    hoisted.mockScholarFindMany.mockResolvedValue([
+      { cwid: "men0001", preferredName: "A", primaryDepartment: "Medicine" },
+      { cwid: "men0002", preferredName: "B", primaryDepartment: null },
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "stu0001", 1, 2023)]);
+    const report = await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"] });
+    const byCwid = new Map(report.summary[0].mentors.map((m) => [m.cwid, [m.department, m.institution]]));
+    expect(byCwid.get("men0001")).toEqual(["Medicine", "MSKCC"]);
+    expect(byCwid.get("men0002")).toEqual(["Pediatrics", "WCM"]);
+    expect(byCwid.get("men0003")).toEqual([null, "Rockerfeller Univ"]);
+    expect(byCwid.get("men0004")).toEqual([null, null]);
+    expect(report.detail[0]).toMatchObject({ mentorCwid: "men0001", mentorDepartment: "Medicine", mentorInstitution: "MSKCC" });
+    expect(report.publications[0].mentors[0]).toMatchObject({ cwid: "men0001", department: "Medicine", institution: "MSKCC" });
+  });
+
   it("Publications view: a pub co-authored by two learners is ONE row listing both, most recently added to PubMed first", async () => {
     hoisted.mockAocFindMany.mockResolvedValue([
       aoc({
@@ -576,7 +622,7 @@ describe("loadMentoredPublicationsReport", () => {
     ]);
     const report = await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"] });
     expect(report.publications).toHaveLength(1);
-    expect(report.publications[0].mentors).toEqual([
+    expect(report.publications[0].mentors).toMatchObject([
       {
         cwid: "men0001",
         name: "men0001",
@@ -842,7 +888,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     hoisted.mockCopubFindMany.mockResolvedValue([copub("men0001", "stu0001", 7, 2023)]);
     const report = await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"] });
     expect(report.summary).toHaveLength(1);
-    expect(report.summary[0].mentors).toEqual([
+    expect(report.summary[0].mentors).toMatchObject([
       { cwid: "men0001", name: "men0001", mentorship: { program: "md", source: "roster", tier: "confirmed" } },
     ]);
     expect(report.publications.map((p) => p.pmid)).toEqual(["7"]);
@@ -1191,7 +1237,7 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
       ["stu0009", "Postdoc", 2024, "Mia Van", "Mentee"],
       ["stu0010", "Other", null, null, "Mononym"],
     ]);
-    expect(report.summary[0].mentors).toEqual([
+    expect(report.summary[0].mentors).toMatchObject([
       {
         cwid: "men0001",
         name: "Zed Mentor",
@@ -1291,7 +1337,7 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
     });
     expect(report.summary).toHaveLength(1);
     expect(report.summary[0].program).toBe("MD");
-    expect(report.summary[0].mentors).toEqual([
+    expect(report.summary[0].mentors).toMatchObject([
       {
         cwid: "men0001",
         name: "men0001",

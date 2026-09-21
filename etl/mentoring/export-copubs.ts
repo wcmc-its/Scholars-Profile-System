@@ -27,8 +27,10 @@
  *      One object per RAW row (duplicate pairs allowed — a student repeats across
  *      programs; NOT deduped):
  *        { mentorCwid, menteeCwid, firstName, lastName, graduationYear, entryYear,
- *          programType, mentorFirstName, mentorLastName }
- *      (any of name / year / entryYear / programType / mentor name may be null).
+ *          programType, mentorFirstName, mentorLastName, mentorDepartment,
+ *          mentorInstitution }
+ *      (any of name / year / entryYear / programType / mentor name / mentor
+ *      department / mentor institution may be null).
  *      `entryYear` is `studentEntryYear` — the program ENTRY year the Mentored
  *      publications report (`/edit/reports/7`) needs for its "in program window"
  *      rule. `mentorFirstName` / `mentorLastName` are the roster's own mentor
@@ -154,6 +156,11 @@ type AocMenteeRow = {
    *  roster's own mentor name, nullable at the source. */
   mentorFirstName: string | null;
   mentorLastName: string | null;
+  /** `reporting_students_mentors.mentorDepartment` / `mentorInstitution` —
+   *  the roster's own free text (department is null on most rows), for the
+   *  Mentored publications report's Department / Institution columns. */
+  mentorDepartment: string | null;
+  mentorInstitution: string | null;
 };
 
 /** One line of learner-pubs.ndjson — every ReCiter-attributed publication of
@@ -277,7 +284,7 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
     (await conn.query(
       `SELECT mentorCWID, studentCWID, studentFirstName, studentLastName,
               studentGraduationYear, studentEntryYear, programType,
-              mentorFirstName, mentorLastName
+              mentorFirstName, mentorLastName, mentorDepartment, mentorInstitution
          FROM reporting_students_mentors
         WHERE mentorCWID IS NOT NULL AND mentorCWID != ''
           AND studentCWID IS NOT NULL AND studentCWID != ''`,
@@ -289,8 +296,10 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
       studentGraduationYear: number | null;
       studentEntryYear: number | null;
       programType: string | null;
-        mentorFirstName: string | null;
-        mentorLastName: string | null;
+      mentorFirstName: string | null;
+      mentorLastName: string | null;
+      mentorDepartment: string | null;
+      mentorInstitution: string | null;
     }[],
   ).catch((err) => {
     console.error(
@@ -309,6 +318,8 @@ async function loadAocMenteeRows(): Promise<AocMenteeRow[]> {
     programType: r.programType ?? null,
     mentorFirstName: r.mentorFirstName?.trim() || null,
     mentorLastName: r.mentorLastName?.trim() || null,
+    mentorDepartment: r.mentorDepartment?.trim() || null,
+    mentorInstitution: r.mentorInstitution?.trim() || null,
   }));
 }
 

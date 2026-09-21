@@ -129,6 +129,13 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   roster-confirmed pair reads as an inference, because the roster was never read. The upgrade path
   is a "confirmed elsewhere" annotation.
 - **Scope-derived default.** An `md` holder opens on AOC only; a `*` holder on every confirmed type.
+- **Mentor department and institution** (Summary table + workbook, one line per mentor). Department
+  = `Scholar.primaryDepartment` (ED), else the roster's `mentorDepartment` (null on ~9 in 10 rows).
+  Institution = the roster's `mentorInstitution` folded to WCM / MSKCC / HSS (`mentorInstitution`
+  in the loader; any other institution passes through as typed), else WCM when the mentor has a
+  Scholar row, else "—". Both roster fields ride the bridge (`aoc_mentee.mentor_department` /
+  `mentor_institution`), so they are empty until the bridge is re-exported and re-imported; a mentor
+  known only through Jenzabar / ED / co-authorship / faculty assertion reads from the Scholar row.
 - **Words.** The `md` bucket is labelled "AOC" everywhere in this report (the Program column, the
   Viewers panel, the workbook); the public search facet keeps "MD" for its different audience.
   Per-pair labels read by category ("AOC", "PhD thesis advisor", "Postdoc supervisor",
