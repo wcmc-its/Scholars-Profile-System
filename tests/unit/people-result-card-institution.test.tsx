@@ -42,9 +42,7 @@ const baseProps = {
 describe("PeopleResultCard — primary institution on the department line", () => {
   it("appends the institution for a non-WCMC scholar", () => {
     render(<PeopleResultCard hit={makeHit({ primaryOrgCode: "HSS" })} {...baseProps} />);
-    expect(
-      screen.getByText("Department of Medicine · Hospital for Special Surgery"),
-    ).toBeTruthy();
+    expect(screen.getByText("Department of Medicine · Hospital for Special Surgery")).toBeTruthy();
   });
 
   it("renders a WCMC scholar (and a hit without the field) unchanged", () => {
