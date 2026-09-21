@@ -52,7 +52,11 @@ import {
 import { isProfileFacetRedesignEnabled } from "@/lib/profile/facet-redesign-flag";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { profilePath } from "@/lib/profile-url";
-import { PROFILE_LINK_PLATFORM_KEYS, PROFILE_LINK_PLATFORMS } from "@/lib/edit/profile-links";
+import {
+  isProfileLinksEnabled,
+  PROFILE_LINK_PLATFORM_KEYS,
+  PROFILE_LINK_PLATFORMS,
+} from "@/lib/edit/profile-links";
 import { OVERVIEW_HTML_CLASS } from "@/lib/utils";
 
 /**
@@ -78,9 +82,13 @@ export async function ProfileView({ slug }: { slug: string }) {
   if (!profile) notFound();
 
   // #2699 — the Contact card's identity links: ORCID first, then the
-  // faculty-entered external profiles in platform order.
+  // faculty-entered external profiles in platform order. The whole list rides
+  // SELF_EDIT_PROFILE_LINKS (the loader already returns `{}` for the links when
+  // off; the ORCID row is gated here so the public render is dark as one).
   const externalProfiles: Array<{ label: string; url: string }> = [
-    ...(profile.orcid ? [{ label: "ORCID", url: `https://orcid.org/${profile.orcid}` }] : []),
+    ...(isProfileLinksEnabled() && profile.orcid
+      ? [{ label: "ORCID", url: `https://orcid.org/${profile.orcid}` }]
+      : []),
     ...PROFILE_LINK_PLATFORM_KEYS.flatMap((k) => {
       const url = profile.profileLinks?.[k];
       return url ? [{ label: PROFILE_LINK_PLATFORMS[k].label, url }] : [];
@@ -263,7 +271,7 @@ export async function ProfileView({ slug }: { slug: string }) {
               <EditMyProfileButton profileSlug={profile.slug} profileCwid={profile.cwid} />
             </div>
 
-            {profile.email || profile.hasClinicalProfile || profile.orcid || externalProfiles.length > 0 ? (
+            {profile.email || profile.hasClinicalProfile || externalProfiles.length > 0 ? (
               <SidebarCard title="Contact">
                 <ul className="flex flex-col gap-2">
                   {profile.email ? (

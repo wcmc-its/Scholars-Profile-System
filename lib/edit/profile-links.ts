@@ -104,14 +104,16 @@ function parse(raw: string, platform: ProfileLinkPlatform): URL | null {
 export function canonicalProfileLink(platform: ProfileLinkPlatform, raw: string): string | null {
   const url = parse(raw, platform);
   if (!url) return null;
-  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const host = url.hostname.toLowerCase().replace(/^(www|m|mobile)\./, "");
   switch (platform) {
     case "linkedin": {
       // `/in/<vanity>` is the norm; `/pub/…` legacy URLs still resolve. Any
       // non-root path on the host is accepted as-is (vanity slugs may be
-      // percent-encoded unicode, which `URL` already normalised).
-      if (host !== "linkedin.com" || url.pathname.length < 2) return null;
-      return `https://www.linkedin.com${url.pathname.replace(/\/+$/, "")}`;
+      // percent-encoded unicode, which `URL` already normalised). Search
+      // engines hand out country hosts (`uk.linkedin.com`); they fold to www.
+      if (!/^([a-z]{2}\.)?linkedin\.com$/.test(host)) return null;
+      const path = url.pathname.replace(/\/+$/, "");
+      return path ? `https://www.linkedin.com${path}` : null;
     }
     case "x": {
       if (host !== "x.com" && host !== "twitter.com") return null;
@@ -126,7 +128,7 @@ export function canonicalProfileLink(platform: ProfileLinkPlatform, raw: string)
     case "googleScholar": {
       // The identity lives in `?user=`; every other param (hl, oi, view_op…) is
       // noise. Regional hosts (scholar.google.co.uk) fold to .com.
-      if (!/^scholar\.google\.[a-z.]{2,}$/.test(host)) return null;
+      if (!/^scholar\.google\.(com|[a-z]{2,3}(\.[a-z]{2})?)$/.test(host)) return null;
       const id = url.searchParams.get("user");
       return id && SCHOLAR_ID.test(id) ? `https://scholar.google.com/citations?user=${id}` : null;
     }

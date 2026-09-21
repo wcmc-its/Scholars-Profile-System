@@ -13,6 +13,12 @@ describe("canonicalProfileLink", () => {
       "https://www.linkedin.com/in/paul-albert-123",
     ],
     ["linkedin", "paul-albert", "https://www.linkedin.com/in/paul-albert"],
+    [
+      "linkedin",
+      "https://uk.linkedin.com/in/paul-albert",
+      "https://www.linkedin.com/in/paul-albert",
+    ],
+    ["x", "https://mobile.twitter.com/paul_albert", "https://x.com/paul_albert"],
     ["bluesky", "@paul.bsky.social", "https://bsky.app/profile/paul.bsky.social"],
     ["bluesky", "paul", "https://bsky.app/profile/paul.bsky.social"],
     [
@@ -46,6 +52,8 @@ describe("canonicalProfileLink", () => {
     ["x", "https://x.com.evil.example/paul"],
     ["x", "https://x.com/"],
     ["linkedin", "https://linkedin.com"],
+    ["linkedin", "https://linkedin.com//"],
+    ["googleScholar", "https://scholar.google.evil.example/citations?user=AbCdEfGhIjKl"],
     ["linkedin", "https://x.com/paul"],
     ["bluesky", "https://bsky.app/paul"],
     ["googleScholar", "https://scholar.google.com/citations?hl=en"],
