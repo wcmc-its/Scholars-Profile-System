@@ -105,11 +105,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     await db.write.$transaction(async (tx) => {
       await tx.scholar.update({ where: { cwid: scholar.cwid }, data: { orcid } });
+      // The iD being removed is usually NOT on `scholar.orcid` (NULL for WCM —
+      // the card reads it from the `rpm_admin` mirror row), so read it before
+      // the row goes, or the audit row would say null → null.
+      let before = scholar.orcid;
       if (orcid === null) {
+        const admin = await tx.orcidCandidate.findFirst({
+          where: { cwid: scholar.cwid, source: "rpm_admin" },
+          select: { orcid: true },
+        });
+        before ??= admin?.orcid ?? null;
         await tx.orcidCandidate.deleteMany({ where: { cwid: scholar.cwid, source: "rpm_admin" } });
       }
-      // ponytail: a remove audits as `orcid_set` → null rather than a new
-      // action — a new AuditAction needs the TS union AND four SQL ENUM sites.
+      // ponytail: a remove audits as `orcid_set` → null (+ `removed: true`)
+      // rather than a new action — a new AuditAction needs the TS union AND
+      // four SQL ENUM sites.
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
@@ -117,9 +127,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         targetEntityId: scholar.cwid,
         action: "orcid_set",
         fieldsChanged: ["orcid"],
-        beforeValues: { orcid: scholar.orcid },
+        beforeValues: { orcid: before },
         afterValues: {
           orcid,
+          ...(orcid === null ? { removed: true } : {}),
           ...(confirmedSuggestion === true ? { confirmed_suggestion: true } : {}),
           ...(authz.viaUnitAdminUnit
             ? {

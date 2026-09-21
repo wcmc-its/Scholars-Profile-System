@@ -986,13 +986,14 @@ function orcidRowState(ctx: EditContext): OrcidRowState {
       .filter((c) => c.orcid === id)
       .map(({ source, accepted, rejected }) => ({ source, accepted, rejected }));
   // The verdict folds an `rpm_admin` row to "asserted" and never suggests past
-  // it; with an iD on file, re-fold the INFERRED rows alone so a strong
-  // candidate that DISAGREES with the on-file iD still surfaces ("we also found").
+  // it, and the on-file iD's own rows can out-vote a rival; with an iD on file,
+  // re-fold every row about OTHER iDs so a strong candidate that DISAGREES with
+  // the on-file iD still surfaces ("we also found").
   let suggested = v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null;
-  if (!suggested && onFile && ctx.orcidCandidates.length > 0) {
+  if ((!suggested || suggested.orcid === onFile) && onFile && ctx.orcidCandidates.length > 0) {
     const inferred = orcidVerdict(
       ctx.orcidCandidates
-        .filter((c) => c.source !== "rpm_admin")
+        .filter((c) => c.orcid !== onFile)
         .map((c) => ({
           cwid: ctx.scholar.cwid,
           orcid: c.orcid,
@@ -1002,9 +1003,10 @@ function orcidRowState(ctx: EditContext): OrcidRowState {
         })),
       SUGGEST_MIN_ACCEPTED,
     );
-    if (inferred.tier === "strong" && inferred.orcid) {
-      suggested = { orcid: inferred.orcid, accepted: inferred.accepted };
-    }
+    suggested =
+      inferred.tier === "strong" && inferred.orcid
+        ? { orcid: inferred.orcid, accepted: inferred.accepted }
+        : null;
   }
   if (suggested && suggested.orcid === onFile) suggested = null;
   return {

@@ -17,6 +17,7 @@ const {
   mockTransaction,
   mockTxScholarUpdate,
   mockTxCandidateDeleteMany,
+  mockTxCandidateFindFirst,
   mockTxExecuteRaw,
   mockReflectOverviewEdit,
   mockReciterQuery,
@@ -31,6 +32,7 @@ const {
   mockTransaction: vi.fn(),
   mockTxScholarUpdate: vi.fn(),
   mockTxCandidateDeleteMany: vi.fn(),
+  mockTxCandidateFindFirst: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
   mockReciterQuery: vi.fn(),
@@ -74,7 +76,7 @@ const OTHER = { cwid: "other9", isSuperuser: false, isCommsSteward: false };
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 const fakeTx = {
   scholar: { update: mockTxScholarUpdate },
-  orcidCandidate: { deleteMany: mockTxCandidateDeleteMany },
+  orcidCandidate: { deleteMany: mockTxCandidateDeleteMany, findFirst: mockTxCandidateFindFirst },
   $executeRaw: mockTxExecuteRaw,
 };
 const ID = "0000-0002-1825-0097";
@@ -99,6 +101,7 @@ beforeEach(() => {
   mockUnitAdminFindMany.mockResolvedValue([]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockTxScholarUpdate.mockResolvedValue({});
+  mockTxCandidateFindFirst.mockResolvedValue(null);
   mockTxExecuteRaw.mockResolvedValue(1);
   mockReflectOverviewEdit.mockResolvedValue(undefined);
   mockReciterQuery.mockResolvedValue({ affectedRows: 1 });
@@ -158,7 +161,8 @@ describe("POST /api/edit/orcid", () => {
   });
 
   it("orcid: null REMOVES: admin_orcid DELETE, scholar.orcid null, the rpm_admin mirror row dropped, one audit row", async () => {
-    mockScholarFindUnique.mockResolvedValue({ cwid: "self01", slug: "self01-slug", orcid: ID });
+    // The removed iD is on the rpm_admin mirror row, NOT scholar.orcid (NULL for WCM).
+    mockTxCandidateFindFirst.mockResolvedValue({ orcid: ID });
     const res = await POST(post({ cwid: "self01", orcid: null }));
     expect(res.status).toBe(200);
     expect((await res.json()).orcid).toBeNull();
@@ -167,6 +171,10 @@ describe("POST /api/edit/orcid", () => {
     expect(mockTxScholarUpdate).toHaveBeenCalledWith({ where: { cwid: "self01" }, data: { orcid: null } });
     expect(mockTxCandidateDeleteMany).toHaveBeenCalledWith({ where: { cwid: "self01", source: "rpm_admin" } });
     expect(mockTxExecuteRaw).toHaveBeenCalledTimes(1);
+    // The audit row names the iD that went (before) and marks the remove (after).
+    const args = mockTxExecuteRaw.mock.calls[0] as unknown[];
+    expect(args.some((v) => typeof v === "string" && v.includes(ID))).toBe(true);
+    expect(args.some((v) => typeof v === "string" && v.includes('"removed":true'))).toBe(true);
     expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
   });
 

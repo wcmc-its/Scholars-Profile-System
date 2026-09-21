@@ -64,7 +64,7 @@ describe("toCandidates", () => {
 });
 
 describe("mergeForScholars", () => {
-  it("drops unknown cwids, dedupes on (cwid, orcid), and lets an admin row beat an inferred one either way round", () => {
+  it("drops unknown cwids, dedupes on (cwid, orcid, source), and keeps an admin row AND an inferred row for the same iD either way round", () => {
     const inf = (cwid: string, orcid: string) => ({
       cwid,
       orcid,
@@ -94,8 +94,10 @@ describe("mergeForScholars", () => {
     );
     expect(noScholar).toBe(1);
     expect(keep.map((r) => [r.cwid, r.orcid, r.source])).toEqual([
+      ["a1", GOOD, "rpm_inferred"],
       ["a1", GOOD, "rpm_admin"],
       ["b2", GOOD_X, "rpm_admin"],
+      ["b2", GOOD_X, "rpm_inferred"],
       ["b2", GOOD, "rpm_inferred"],
     ]);
   });

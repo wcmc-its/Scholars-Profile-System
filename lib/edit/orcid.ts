@@ -30,7 +30,7 @@ export type OrcidEvidence = { source: string; accepted: number; rejected: number
  * card and the home board's ORCID row read from this so they can never disagree.
  */
 export function orcidEvidenceLine(e: OrcidEvidence, whose: "your" | "their"): string {
-  const pubs = (n: number) => `${n} of ${whose} accepted publication${n === 1 ? "" : "s"}`;
+  const pubs = (n: number) => `${n} of ${whose} accepted publications`;
   switch (e.source) {
     case "rpm_inferred":
       return e.rejected > 0
@@ -41,7 +41,9 @@ export function orcidEvidenceLine(e: OrcidEvidence, whose: "your" | "their"): st
     case "orcid_email":
       return `The ORCID registry record lists ${whose} WCM email`;
     case "orcid_works":
-      return `${e.accepted} work${e.accepted === 1 ? "" : "s"} on the ORCID record match ${whose} publications`;
+      return e.accepted === 1
+        ? `1 work on the ORCID record matches ${whose} publications`
+        : `${e.accepted} works on the ORCID record match ${whose} publications`;
     case "orcid_name":
       return `The ORCID registry record matches ${whose} name`;
     default:

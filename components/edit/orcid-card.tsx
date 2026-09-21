@@ -251,8 +251,8 @@ export function OrcidCard({
           <div className="flex flex-col gap-2">
             <p className="text-[15px]">
               {isAdmin
-                ? `${scholarName}'s publications point at a different iD:`
-                : "Your publications point at a different iD:"}{" "}
+                ? `We also found a different iD for ${scholarName}:`
+                : "We also found a different iD:"}{" "}
               {link(alsoSuggested.orcid)}
             </p>
             {evidenceList(alsoSuggested.evidence ?? [], "orcid-also-suggested-evidence")}

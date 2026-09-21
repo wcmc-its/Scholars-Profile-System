@@ -103,7 +103,7 @@ describe("OrcidCard", () => {
     expect(sug.textContent).toContain("Is this your ORCID iD?");
     const why = screen.getByTestId("orcid-suggested-evidence");
     expect(why.querySelectorAll("li")).toHaveLength(2);
-    expect(why.textContent).toContain("Seen on 1 of your accepted publication in ReCiter");
+    expect(why.textContent).toContain("Seen on 1 of your accepted publications in ReCiter");
     expect(why.textContent).toContain("The ORCID registry record lists your WCM email");
     fireEvent.click(screen.getByTestId("orcid-confirm"));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -174,7 +174,7 @@ describe("OrcidCard", () => {
     );
     expect(screen.queryByTestId("orcid-suggested")).toBeNull();
     const also = screen.getByTestId("orcid-also-suggested");
-    expect(also.textContent).toContain("Your publications point at a different iD");
+    expect(also.textContent).toContain("We also found a different iD");
     expect(also.textContent).toContain("0000-0002-9930-2193");
     fireEvent.click(screen.getByTestId("orcid-use-suggested"));
     await waitFor(() => expect(refresh).toHaveBeenCalled());

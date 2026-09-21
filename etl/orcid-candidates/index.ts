@@ -15,9 +15,14 @@
  * candidate. The table key is (cwid, orcid, source), so `etl/orcid-registry`'s
  * `orcid_*` row for the same person and iD sits beside ours — neither mirror
  * ever overwrites the other's row, and the delete pass is scoped to our sources.
- * Within this mirror one row per (cwid, orcid): an admin row beats an inferred
- * one, and a pair that moves between the two leaves the stale row to the delete
- * pass. Only cwids that exist in `scholar` are written (FK); the rest are
+ * Within this mirror one row per (cwid, orcid, source) — an admin row and an
+ * inferred row for the SAME iD both survive, so the "seen on N of your accepted
+ * publications" evidence is still there after the iD is confirmed (the
+ * Identifiers & Profiles card shows it under the on-file iD) and a strong
+ * inference is still there the morning after the admin row is removed. The
+ * verdict (`orcidVerdict`) reads the admin row as asserted regardless. A pair
+ * that disappears from the source leaves its stale row to the delete pass.
+ * Only cwids that exist in `scholar` are written (FK); the rest are
  * counted. `scholar.orcid` (WCM Identity) is untouched — this table is read by
  * `/edit/orcid-coverage` only.
  *
@@ -91,7 +96,8 @@ export function toCandidates(
   return { rows, invalid };
 }
 
-/** Keeps rows for known scholars, one per (cwid, orcid); an admin row beats an inferred one. Pure. */
+/** Keeps rows for known scholars, one per (cwid, orcid, source) — the table's
+ *  key — so an admin row and an inferred row for the same iD coexist. Pure. */
 export function mergeForScholars(
   rows: SourceRow[],
   scholars: Set<string>,
@@ -103,9 +109,8 @@ export function mergeForScholars(
       noScholar++;
       continue;
     }
-    const k = `${r.cwid}|${r.orcid}`;
-    const cur = byKey.get(k);
-    if (!cur || r.source === "rpm_admin") byKey.set(k, r);
+    const k = `${r.cwid}|${r.orcid}|${r.source}`;
+    if (!byKey.has(k)) byKey.set(k, r);
   }
   return { keep: [...byKey.values()], noScholar };
 }

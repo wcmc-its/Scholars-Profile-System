@@ -154,8 +154,13 @@ export function detailForAction(action: string, before: unknown, after: unknown)
       return readStr(after, "proxy_cwid");
     case "proxy_revoke":
       return readStr(before, "proxy_cwid");
-    case "orcid_set":
-      return readStr(after, "orcid");
+    case "orcid_set": {
+      // A remove is the same action with `after.orcid = null`; name what went.
+      const set = readStr(after, "orcid");
+      if (set) return set;
+      const gone = readStr(before, "orcid");
+      return gone ? `Removed ${gone}` : null;
+    }
     case "slug_request":
     case "slug_request_approved":
       return readStr(after, "slug") ?? readStr(after, "requestedSlug");
