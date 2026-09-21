@@ -24,17 +24,28 @@ export function normalizeOrcid(input: string): string | null {
 /** One `orcid_candidate` row for an iD, minus the cwid: what a source knows. */
 export type OrcidEvidence = { source: string; accepted: number; rejected: number };
 
+/** The scholar's first name — what a colleague would call them in a sentence
+ *  ("Is this Olivier's ORCID iD?"). From `scholar.preferredName`. */
+export function firstName(preferredName: string): string {
+  return preferredName.trim().split(/\s+/)[0] || preferredName;
+}
+
 /**
- * The "why we think this is yours" line for one candidate source, in the
- * viewer's voice (`whose` = "your" | "their"). Both the Identifiers & Profiles
- * card and the home board's ORCID row read from this so they can never disagree.
+ * The "why we think this is yours" line for one candidate source. Second
+ * person is the EDITOR: `subject` is null when the scholar is editing their own
+ * profile ("your"), else the scholar's first name ("Olivier's") so an
+ * administrator reads who the evidence is about. The Identifiers & Profiles
+ * card and the home board's ORCID row both read from this so they can never
+ * disagree.
  */
-export function orcidEvidenceLine(e: OrcidEvidence, whose: "your" | "their"): string {
+export function orcidEvidenceLine(e: OrcidEvidence, subject: string | null): string {
+  const whose = subject ? `${subject}'s` : "your";
+  const who = subject ?? "you";
   const pubs = (n: number) => `${n} of ${whose} accepted publications`;
   switch (e.source) {
     case "rpm_inferred":
       return e.rejected > 0
-        ? `Matched on ${pubs(e.accepted)} in ReCiter, and on ${e.rejected} ${whose === "your" ? "you" : "they"} rejected`
+        ? `Matched on ${pubs(e.accepted)} in ReCiter, and on ${e.rejected} ${who} rejected`
         : `Matched on ${pubs(e.accepted)} in ReCiter`;
     case "rpm_admin":
       return "Entered in ReCiter Publication Manager";

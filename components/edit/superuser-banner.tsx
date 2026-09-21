@@ -58,6 +58,7 @@ export function SuperuserBanner({
           ) : targetKind === "profile" ? (
             <>
               You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator.
+              Changes are logged against your account.
             </>
           ) : (
             <>

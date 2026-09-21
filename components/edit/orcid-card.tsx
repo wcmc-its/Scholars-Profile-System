@@ -1,34 +1,38 @@
 /**
- * The ORCID iD card on the Identifiers & Profiles tab. Three states, the same
- * three the home board's ORCID row shows, but with room to act:
+ * The ORCID iD card on the Identifiers & Profiles tab. Four states, the same
+ * ones the home board's ORCID row shows, but with room to act:
  *
- *   on file    → the iD linked to orcid.org in a boxed row with a status pill
- *                ("On file", or "Confirmed" once confirmed this session) and
- *                WHY it is on file (the per-source evidence, which persists
- *                after confirming); Change, Remove. If the inferred rows point
- *                at a DIFFERENT iD, a second row says so ("We also found …")
- *                with "Use this iD instead".
- *   suggested  → the inferred iD in the same boxed row, pill "High confidence
- *                suggestion", its evidence; "Confirm this iD" confirms it in
- *                one click, or enter a different one.
+ *   suggested  → the inferred iD in a boxed row, pill "High confidence
+ *                suggestion", its per-source evidence; "Confirm this iD"
+ *                confirms it in one click, or enter a different one.
+ *   confirmed  → (this session) the same row, pill "Confirmed", "Confirmed by
+ *                you" above the evidence it was confirmed on; Change, Remove.
+ *   on file    → the iD that was already there, pill "On file", WHY it is on
+ *                file (the evidence persists); Change, Remove.
+ *   conflict   → on file AND the inferred rows point at a DIFFERENT iD: both
+ *                rows, each with its pill, and "Replace with the suggested iD"
+ *                / "Keep the iD on file" / "Remove both".
  *   none       → the input.
  *
- * Every write is `POST /api/edit/orcid`, which puts the iD in ReciterDB
- * `admin_orcid` (what ReCiter and the coverage dashboard read) and then on
- * `scholar.orcid`; Remove sends `orcid: null` and clears both. `router.refresh()`
- * reconciles the page. Off-campus friendly: this replaces the "Confirm in
- * ReCiter" hand-off, which only worked on the campus network.
+ * Second person is the EDITOR: an administrator reads the scholar's first name
+ * where the scholar reads "your". Every write is `POST /api/edit/orcid`, which
+ * puts the iD in ReciterDB `admin_orcid` (what ReCiter and the coverage
+ * dashboard read) and then on `scholar.orcid`; Remove sends `orcid: null` and
+ * clears both. `router.refresh()` reconciles the page. Off-campus friendly:
+ * this replaces the "Confirm in ReCiter" hand-off, which only worked on the
+ * campus network.
  */
 "use client";
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowUpRight, Check, Sparkles } from "lucide-react";
+import { ArrowUpRight, Check, Lock, Sparkles } from "lucide-react";
 
-import { EditPanel } from "@/components/edit/edit-panel";
+import { EditPanel, OwnedBadge } from "@/components/edit/edit-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  firstName,
   normalizeOrcid,
   ORCID_URL_PREFIX,
   orcidEvidenceLine,
@@ -37,16 +41,13 @@ import {
 
 export type OrcidCardProps = {
   cwid: string;
-  /** "self" → second person; "superuser" → third person with the scholar's name. */
+  /** "self" → second person; "superuser" → the scholar's first name. */
   mode: "self" | "superuser";
   scholarName: string;
   onFile: string | null;
   onFileEvidence?: OrcidEvidence[];
   suggested: { orcid: string; accepted: number; evidence?: OrcidEvidence[] } | null;
 };
-
-const WHY = (whose: string) =>
-  `Needed for NIH SciENcv biosketches; also makes ${whose} publication matching more reliable.`;
 
 function errorMessage(code: string): string {
   switch (code) {
@@ -72,8 +73,8 @@ const PILL: Record<Status, { label: string; icon: typeof Check; className: strin
   },
   "on-file": {
     label: "On file",
-    icon: Check,
-    className: "bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground",
+    icon: Lock,
+    className: "bg-apollo-lock-bg border-apollo-border-strong text-foreground",
   },
   confirmed: {
     label: "Confirmed",
@@ -91,14 +92,18 @@ export function OrcidCard({
   suggested,
 }: OrcidCardProps) {
   const router = useRouter();
-  const isAdmin = mode === "superuser";
-  const whose = isAdmin ? "their" : "your";
+  const subject = mode === "superuser" ? firstName(scholarName) : null;
+  const whose = subject ? `${subject}'s` : "your";
   const [editing, setEditing] = React.useState(false);
   const [value, setValue] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   // `undefined` = nothing saved this session; `null` = removed this session.
   const [saved, setSaved] = React.useState<string | null | undefined>(undefined);
+  // ponytail: "Keep the iD on file" / "Remove both" dismiss the competing
+  // suggestion for this session only — it comes back on the next load. A
+  // remembered "not me" needs a write path the route doesn't have yet.
+  const [dismissed, setDismissed] = React.useState(false);
 
   const save = async (orcid: string | null, confirmedSuggestion: boolean) => {
     setError(null);
@@ -146,14 +151,24 @@ export function OrcidCard({
       : current === onFile
         ? onFileEvidence
         : [];
-  const alsoSuggested = suggested && suggested.orcid !== current ? suggested : null;
+  // The inference still on offer (session dismissals hide it), and the one that
+  // disagrees with what is on file.
+  const offer = suggested && !dismissed ? suggested : null;
+  const competing = offer && offer.orcid !== current ? offer : null;
+  const status: Status = saved !== undefined ? "confirmed" : "on-file";
 
   /** The boxed iD row: the linked iD, its evidence lines, a status pill. */
-  const idRow = (id: string, evidence: OrcidEvidence[], status: Status, testId: string) => {
-    const pill = PILL[status];
+  const idRow = (
+    id: string,
+    evidence: OrcidEvidence[],
+    rowStatus: Status,
+    testId: string,
+    lead?: string,
+  ) => {
+    const pill = PILL[rowStatus];
     return (
       <div
-        className="bg-apollo-surface-2 border-apollo-border-strong flex flex-wrap items-center gap-4 rounded-lg border px-4 py-3.5"
+        className="bg-apollo-surface-2 border-apollo-border-strong flex flex-wrap items-start gap-4 rounded-lg border px-4 py-3.5"
         data-testid={testId}
       >
         <div className="min-w-0 flex-1">
@@ -166,10 +181,11 @@ export function OrcidCard({
             {id}
             <ArrowUpRight className="size-3.5 shrink-0" aria-hidden />
           </a>
-          {evidence.length > 0 && (
+          {(lead || evidence.length > 0) && (
             <ul className="text-muted-foreground mt-1 text-xs" data-testid={`${testId}-evidence`}>
+              {lead && <li>{lead}</li>}
               {evidence.map((e) => (
-                <li key={e.source}>{orcidEvidenceLine(e, whose)}</li>
+                <li key={e.source}>{orcidEvidenceLine(e, subject)}</li>
               ))}
             </ul>
           )}
@@ -208,7 +224,7 @@ export function OrcidCard({
       >
         Save
       </Button>
-      {(current || suggested) && (
+      {(current || offer) && (
         <Button
           type="button"
           size="sm"
@@ -223,39 +239,69 @@ export function OrcidCard({
   );
 
   return (
-    <EditPanel heading="ORCID iD" owned slot="orcid-card" description={WHY(whose)}>
+    <EditPanel
+      heading="ORCID iD"
+      headerAction={<OwnedBadge />}
+      slot="orcid-card"
+      description={`Needed for NIH SciENcv biosketches; also makes ${whose} publication matching more reliable.`}
+    >
       {current &&
         idRow(
           current,
           currentEvidence,
-          saved !== undefined ? "confirmed" : "on-file",
+          status,
           "orcid-on-file",
+          status === "confirmed" ? "Confirmed by you" : undefined,
         )}
-      {!current &&
-        suggested &&
+      {current &&
+        competing &&
         !editing &&
-        idRow(suggested.orcid, suggested.evidence ?? [], "suggested", "orcid-suggested")}
-      {current && alsoSuggested && !editing && (
-        <div className="flex flex-col gap-3" data-testid="orcid-also-suggested">
-          <p className="text-sm">
-            {isAdmin
-              ? `We also found a different iD for ${scholarName}:`
-              : "We also found a different iD:"}
-          </p>
-          {idRow(
-            alsoSuggested.orcid,
-            alsoSuggested.evidence ?? [],
-            "suggested",
-            "orcid-also-suggested-row",
-          )}
-        </div>
-      )}
-      {/* Footer — the actions for whichever row is showing, or the input; the
-          rule only when there is a row above it to separate from. */}
-      <div
-        className={`flex flex-wrap items-center gap-2 ${current || suggested ? "border-t pt-4" : ""}`}
-      >
-        {current && !editing && (
+        idRow(competing.orcid, competing.evidence ?? [], "suggested", "orcid-also-suggested")}
+      {!current &&
+        offer &&
+        !editing &&
+        idRow(offer.orcid, offer.evidence ?? [], "suggested", "orcid-suggested")}
+      {/* The actions for whichever rows are showing, or the input. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {current && !editing && competing && (
+          <>
+            <Button
+              type="button"
+              variant="apollo"
+              size="sm"
+              onClick={() => void save(competing.orcid, true)}
+              disabled={busy}
+              data-testid="orcid-use-suggested"
+            >
+              Replace with the suggested iD
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDismissed(true)}
+              disabled={busy}
+              data-testid="orcid-keep-on-file"
+            >
+              Keep the iD on file
+            </Button>
+            <span className="flex-1" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setDismissed(true);
+                void save(null, false);
+              }}
+              disabled={busy}
+              data-testid="orcid-remove"
+            >
+              Remove both
+            </Button>
+          </>
+        )}
+        {current && !editing && !competing && (
           <>
             <Button
               type="button"
@@ -276,27 +322,15 @@ export function OrcidCard({
             >
               Remove
             </Button>
-            {alsoSuggested && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void save(alsoSuggested.orcid, true)}
-                disabled={busy}
-                data-testid="orcid-use-suggested"
-              >
-                Use this iD instead
-              </Button>
-            )}
           </>
         )}
-        {!current && suggested && !editing && (
+        {!current && offer && !editing && (
           <>
             <Button
               type="button"
               variant="apollo"
               size="sm"
-              onClick={() => void save(suggested.orcid, true)}
+              onClick={() => void save(offer.orcid, true)}
               disabled={busy}
               data-testid="orcid-confirm"
             >
@@ -314,7 +348,7 @@ export function OrcidCard({
             </Button>
           </>
         )}
-        {(editing || (!current && !suggested)) && form}
+        {(editing || (!current && !offer)) && form}
       </div>
       {error && (
         <p role="alert" className="text-destructive text-sm" data-testid="orcid-error">

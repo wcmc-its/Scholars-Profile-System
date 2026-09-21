@@ -42,6 +42,45 @@ export const PROFILE_LINK_PLATFORM_KEYS = Object.keys(
   PROFILE_LINK_PLATFORMS,
 ) as ProfileLinkPlatform[];
 
+/** The part of a URL the field's host-prefix label already says. */
+const HOST_PREFIX: Record<ProfileLinkPlatform, RegExp> = {
+  linkedin: /^(https?:\/\/)?([a-z]{2}\.|www\.)?linkedin\.com\/in\//i,
+  x: /^(https?:\/\/)?(www\.|mobile\.)?(x|twitter)\.com\/|^@/i,
+  bluesky: /^(https?:\/\/)?(www\.)?bsky\.app\/profile\/|^@/i,
+  googleScholar: /^(https?:\/\/)?scholar\.google\.[a-z.]+\/citations\?user=/i,
+  researchGate: /^(https?:\/\/)?(www\.)?researchgate\.net\/profile\//i,
+};
+
+/**
+ * What the field SHOWS: a pasted full URL (or the stored canonical one) reduced
+ * to the handle the label's host prefix expects, so a paste of
+ * `https://www.linkedin.com/in/oelemento` into a field labelled
+ * `linkedin.com/in/` reads `oelemento`, not a double-prefixed dead link. Scheme,
+ * host, prefix, query and hash go; for Google Scholar the identity IS the
+ * `?user=` value, so that is what survives. Anything unrecognised is left for
+ * the server to reject by name.
+ */
+export function profileLinkHandle(platform: ProfileLinkPlatform, raw: string): string {
+  const v = raw.trim();
+  if (platform === "googleScholar") {
+    const m = v.match(/[?&]user=([^&#]+)/);
+    if (m) return m[1];
+  }
+  return v
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "")
+    .replace(HOST_PREFIX[platform], "");
+}
+
+/** What the card SENDS for a handle: the label's prefix put back, so the server
+ *  sees the same URL a paste would have given it (a dotted LinkedIn vanity or
+ *  a Bluesky domain handle parse as URLs, not bare hosts). A value that still
+ *  has a path or scheme is sent as typed. */
+export function profileLinkInput(platform: ProfileLinkPlatform, handle: string): string {
+  const v = handle.trim();
+  return v === "" || /[/:]/.test(v) ? v : `${PROFILE_LINK_PLATFORMS[platform].hint}${v}`;
+}
+
 /** `{ platform: canonical https URL }`; an absent key is an empty slot. */
 export type ProfileLinks = Partial<Record<ProfileLinkPlatform, string>>;
 

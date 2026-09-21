@@ -64,6 +64,21 @@ export type EditPanelProps = {
   children: React.ReactNode;
 } & Omit<React.ComponentProps<"section">, "children" | "className">;
 
+/** The green "Yours to edit" provenance cue. `EditPanel` puts it under the
+ *  heading for an `owned` panel; a panel can instead carry it in the heading
+ *  row via `headerAction` (Identifiers & Profiles, per its design pass). */
+export function OwnedBadge() {
+  return (
+    <span
+      data-slot="ownership-cue"
+      className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
+    >
+      <Pencil className="size-3" aria-hidden />
+      Yours to edit
+    </span>
+  );
+}
+
 export function EditPanel({
   heading,
   headingId,
@@ -108,13 +123,7 @@ export function EditPanel({
         {attribute ? (
           <FieldSourceLine attribute={attribute} label={sourceLabel} />
         ) : owned ? (
-          <span
-            data-slot="ownership-cue"
-            className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
-          >
-            <Pencil className="size-3" aria-hidden />
-            Yours to edit
-          </span>
+          <OwnedBadge />
         ) : null}
         {description && <p className="text-muted-foreground text-sm">{description}</p>}
       </header>

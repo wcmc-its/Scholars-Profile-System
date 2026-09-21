@@ -1,23 +1,27 @@
 /**
  * The External Profiles card on the Identifiers & Profiles tab (#2699): one
  * input per platform in a two-up grid, each labelled with its host prefix so
- * the field only asks for the handle, one Save that is inert until something
- * changed. Every write is `POST /api/edit/field` with `fieldName:
- * "profileLinks"` and the whole object; the server canonicalizes (a pasted
- * `twitter.com/…?s=21` comes back `https://x.com/…`) and names the offending
- * platform on a bad link, which is what the inline error points at.
+ * the field shows and asks for just the handle — a pasted full URL is reduced
+ * to it on blur, and the stored canonical URL is shown the same way. One Save,
+ * inert until a field differs from what the server last stored. Every write is
+ * `POST /api/edit/field` with `fieldName: "profileLinks"` and the whole object
+ * (each handle sent with its prefix put back, so the server parses what a
+ * paste would have given it); the server canonicalizes and names the
+ * offending platform on a bad link, which is what the inline error points at.
  */
 "use client";
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-import { EditPanel } from "@/components/edit/edit-panel";
+import { EditPanel, OwnedBadge } from "@/components/edit/edit-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   PROFILE_LINK_PLATFORM_KEYS,
   PROFILE_LINK_PLATFORMS,
+  profileLinkHandle,
+  profileLinkInput,
   type ProfileLinkPlatform,
   type ProfileLinks,
 } from "@/lib/edit/profile-links";
@@ -34,8 +38,11 @@ export type ProfileLinksCardProps = {
 
 type Values = Record<ProfileLinkPlatform, string>;
 
+/** Stored canonical URLs → the handles the fields show. */
 const toValues = (links: ProfileLinks): Values =>
-  Object.fromEntries(PROFILE_LINK_PLATFORM_KEYS.map((k) => [k, links[k] ?? ""])) as Values;
+  Object.fromEntries(
+    PROFILE_LINK_PLATFORM_KEYS.map((k) => [k, profileLinkHandle(k, links[k] ?? "")]),
+  ) as Values;
 
 export function ProfileLinksCard({
   cwid,
@@ -46,6 +53,8 @@ export function ProfileLinksCard({
 }: ProfileLinksCardProps) {
   const router = useRouter();
   const whose = mode === "superuser" ? `${scholarName}'s` : "your";
+  const normalize = (k: ProfileLinkPlatform) =>
+    setValues((v) => ({ ...v, [k]: profileLinkHandle(k, v[k]) }));
   const [values, setValues] = React.useState<Values>(() => toValues(initial));
   // What the server last acknowledged; Save is inert until the inputs differ.
   const [baseline, setBaseline] = React.useState<Values>(values);
@@ -69,7 +78,9 @@ export function ProfileLinksCard({
           entityType: "scholar",
           entityId: cwid,
           fieldName: "profileLinks",
-          value: values,
+          value: Object.fromEntries(
+            PROFILE_LINK_PLATFORM_KEYS.map((k) => [k, profileLinkInput(k, values[k])]),
+          ),
         }),
       });
       const data = (await res.json()) as
@@ -112,12 +123,12 @@ export function ProfileLinksCard({
   return (
     <EditPanel
       heading="External profiles"
-      owned
+      headerAction={<OwnedBadge />}
       // A peer of the ORCID card (same weight), not an eyebrow under it; it just
       // can't reuse the `panel-heading` id the first card owns.
       headingId={subsection ? "profile-links-heading" : undefined}
       slot="profile-links-card"
-      description={`Shown in the Contact card on ${whose} public profile. Clear a field to remove the link.`}
+      description={`Shown in the Contact card on ${whose} public profile. Paste a full URL or just the handle; clear a field to remove the link.`}
     >
       <form onSubmit={submit} className="flex flex-col gap-4" data-testid="profile-links-form">
         <div className="grid gap-x-5 gap-y-4 md:grid-cols-2">
@@ -132,6 +143,7 @@ export function ProfileLinksCard({
               <Input
                 value={values[k]}
                 onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))}
+                onBlur={() => normalize(k)}
                 placeholder={PROFILE_LINK_PLATFORMS[k].placeholder}
                 aria-invalid={badPlatform === k || undefined}
                 disabled={busy}
