@@ -41,6 +41,7 @@ import {
 } from "@/lib/edit/impersonation-display";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import { db } from "@/lib/db";
+import { INSTITUTIONS } from "@/lib/institutions";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,7 @@ function parseKind(value: string | null): KindFilter {
     value === "division" ||
     value === "center" ||
     value === "core" ||
+    value === "institution" ||
     value === "scholar"
     ? value
     : "all";
@@ -181,6 +183,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     division: new Set(),
     center: new Set(),
     core: new Set(),
+    institution: new Set(),
   };
   for (const top of topByCwid.values()) {
     if (top) codesByKind[top.entityType].add(top.entityId);
@@ -224,6 +227,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     division: divNames,
     center: centerNames,
     core: coreNames,
+    // No table — the static catalog (lib/institutions.ts) names every code.
+    institution: new Map(Object.entries(INSTITUTIONS)),
   };
 
   // R2 pre-filter — drop any candidate who is themselves a superuser. The check
@@ -370,6 +375,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         division: new Set(),
         center: new Set(),
         core: new Set(),
+        institution: new Set(), // already fully named in `nameMaps` — nothing to fetch
       };
       for (const s of subjects) {
         const top = s.top!; // non-null: filtered above

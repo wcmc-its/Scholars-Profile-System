@@ -104,7 +104,8 @@ export interface ConsoleGrants {
    *  2026-09-06: a core resolves them from its confirmed `publication_core`
    *  usages), so a core-only grant holder gets the tab too. Feeds `reports`. */
   reportableUnitCount: number;
-  /** `canViewUsage(...)` — any `UnitAdmin` grant holder, either role. Already
+  /** `canViewUsage(...)` — any org-unit `UnitAdmin` grant holder (not
+   *  `institution`), either role. Already
    *  ORs in `isSuperuser`. Feeds `usage`. */
   viewerCanViewUsage: boolean;
   /** `report_access` scopes for this cwid on the mentored-publications
@@ -157,7 +158,7 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
 
   // Gap 4 (reports half): a reportable unit surfaces the tab everywhere,
   // including `/edit/units` and `/edit/administrators`.
-  // `viewerCanViewUsage` (any UnitAdmin grant) is report 8's gate — an
+  // `viewerCanViewUsage` (any org-unit UnitAdmin grant) is report 8's gate — an
   // institution-axis admin with no reportable unit still gets the tab.
   reports: (s, g) =>
     s.isSuperuser ||
@@ -178,7 +179,8 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // isn't cited to a spec doc yet, see Part B).
   dataSharing: (s) => isDataSharingDashboardTabVisible(s),
 
-  // Gap 4 (usage half): any UnitAdmin grant, from any page. `canViewUsage`
+  // Gap 4 (usage half): any org-unit UnitAdmin grant (never `institution` —
+  // WCM-wide aggregates stay internal), from any page. `canViewUsage`
   // already ORs in `isSuperuser`.
   usage: (_s, g) => g.viewerCanViewUsage,
   // `/edit/orcid-coverage` — same audience as Usage (org-wide aggregates).
