@@ -31,6 +31,7 @@ import {
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
+import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
@@ -85,6 +86,7 @@ export default async function EditSelfPage({
   // #2634 — mentee suggestions share the COI-gap actor rule on this surface:
   // genuine self only, never under a "View as" overlay.
   const includeMenteeSuggestions = isMenteeSuggestionsEnabled() && genuineSelf;
+  const includeOrcidSuggestion = isOrcidSuggestionEnabled() && genuineSelf;
   // #836 — on THIS (self) surface the manual-Highlights editor loads only for a
   // genuine self viewer with the flag on — never under a "View as" overlay. A
   // superuser curating another scholar's Highlights does so on the superuser
@@ -108,6 +110,7 @@ export default async function EditSelfPage({
     includeHighlights,
     includeReporterProfile,
     includeMenteeSuggestions,
+    includeOrcidSuggestion,
   });
   if (!ctx) {
     // A comms_steward with no Scholar row of their own has no self-profile to

@@ -5,13 +5,23 @@
  * Commons, so a null must read as a gap with a fix, not as a blank field.
  * Present → a link to the orcid.org record (the natural "is this mine" check).
  * Absent → "Not on file" + the same ReCiter self-service link Request a Change
- * already routes to.
+ * already routes to. Absent with a strong-inferred candidate
+ * (`SELF_EDIT_ORCID_SUGGESTION`, same fold as the home board's ORCID row) → the
+ * candidate iD as "Is this yours?" ahead of the same link.
  */
 "use client";
 
 import { ORCID_MANAGE_URL, resolveSelfServiceHref } from "@/lib/edit/request-a-change";
 
-export function OrcidValue({ orcid, cwid }: { orcid: string | null; cwid: string }) {
+export function OrcidValue({
+  orcid,
+  cwid,
+  suggested = null,
+}: {
+  orcid: string | null;
+  cwid: string;
+  suggested?: { orcid: string; accepted: number } | null;
+}) {
   if (orcid) {
     return (
       <a
@@ -28,16 +38,31 @@ export function OrcidValue({ orcid, cwid }: { orcid: string | null; cwid: string
   return (
     <span data-testid="orcid-missing">
       Not on file.{" "}
+      {suggested && (
+        <span data-testid="orcid-suggested">
+          Is{" "}
+          <a
+            href={`https://orcid.org/${suggested.orcid}`}
+            target="_blank"
+            rel="noreferrer"
+            className="hover:underline"
+          >
+            {suggested.orcid}
+          </a>{" "}
+          yours?{" "}
+        </span>
+      )}
       <a
         href={resolveSelfServiceHref(ORCID_MANAGE_URL, cwid)}
         target="_blank"
         rel="noreferrer"
         className="underline"
       >
-        Add it in ReCiter
+        {suggested ? "Confirm in ReCiter" : "Add it in ReCiter"}
       </a>
       <span className="text-muted-foreground block font-normal">
-        NIH requires an ORCID iD linked to eRA Commons for SciENcv biosketches.
+        It makes finding your publications more reliable and fills in your NIH biosketch
+        worksheet. NIH requires an ORCID iD linked to eRA Commons for SciENcv biosketches.
       </span>
     </span>
   );

@@ -17,6 +17,7 @@ import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { SciencvWorksheet } from "@/components/edit/sciencv-worksheet";
 import { loadEditContext } from "@/lib/api/edit-context";
+import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
 import { looksLikeArtifactAppointment, shouldSuppressPreStart } from "@/lib/appointment-artifacts";
 import { db } from "@/lib/db";
@@ -88,7 +89,11 @@ export default async function BiosketchWorksheetPage({
   }
 
   const [ctx, honors, appointmentRows, otherDraft] = await Promise.all([
-    loadEditContext(generation.cwid, db.read),
+    // `includeOrcidSuggestion`: an iD the scholar confirmed in ReCiter (`rpm_admin`)
+    // fills the worksheet before it has propagated to `scholar.orcid`.
+    loadEditContext(generation.cwid, db.read, new Date(), undefined, {
+      includeOrcidSuggestion: isOrcidSuggestionEnabled(),
+    }),
     // Published + profile-visible only: what the public profile shows is what the scholar has
     // chosen to stand behind, and a pending row hasn't been curated yet.
     db.read.honor.findMany({
@@ -166,7 +171,9 @@ export default async function BiosketchWorksheetPage({
           scholar={{
             preferredName: ctx.scholar.preferredName,
             fullName: ctx.scholar.fullName,
-            orcid: ctx.scholar.orcid,
+            orcid:
+              ctx.scholar.orcid ??
+              (ctx.orcidVerdict?.tier === "asserted" ? ctx.orcidVerdict.orcid : null),
             primaryTitle: ctx.scholar.primaryTitle,
           }}
           educations={educations.map((e) => ({

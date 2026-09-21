@@ -13,6 +13,7 @@ import {
   orcidCoverageCsv,
   orcidCoverageQuery,
   orcidTiers,
+  orcidVerdict,
   parseOrcidCoverageParams,
   piNoEra,
   type CandidateRow,
@@ -335,5 +336,61 @@ describe("orcidCoverageCsv", () => {
     expect(lines).toContain("Dept B,3,1,33.3,1,1,1,0,1,2,0,2,1,1,0");
     expect(lines).toHaveLength(1 + r.byDept.length);
     expect(csv).not.toMatch(/f1|p1|0000-0002/);
+  });
+});
+
+/** `orcidVerdict` — the per-cwid fold the home board's ORCID row shares with the console. */
+describe("orcidVerdict", () => {
+  it("empty → none", () => {
+    expect(orcidVerdict([])).toEqual({ tier: "none", orcid: null, accepted: 0 });
+  });
+
+  it("a sole rpm_inferred iD at the threshold → strong, with that iD and its accepted count", () => {
+    expect(orcidVerdict([cand("x", "rpm_inferred", 3, 0, "iD-a")])).toEqual({
+      tier: "strong",
+      orcid: "iD-a",
+      accepted: 3,
+    });
+  });
+
+  it("under the threshold, or with a rejection, → weak with no iD", () => {
+    expect(orcidVerdict([cand("x", "rpm_inferred", 2, 0, "iD-a")]).tier).toBe("weak");
+    expect(orcidVerdict([cand("x", "rpm_inferred", 9, 1, "iD-a")])).toEqual({
+      tier: "weak",
+      orcid: null,
+      accepted: 0,
+    });
+  });
+
+  it("two strong-eligible iDs → weak (no single answer to suggest)", () => {
+    expect(
+      orcidVerdict([cand("x", "orcid_email", 0, 0, "iD-a"), cand("x", "orcid_works", 5, 0, "iD-b")]).orcid,
+    ).toBeNull();
+  });
+
+  it("registry-only strength carries accepted=0; RPM+registry agreement carries the RPM count", () => {
+    expect(orcidVerdict([cand("x", "orcid_email", 0, 0, "iD-a")])).toEqual({
+      tier: "strong",
+      orcid: "iD-a",
+      accepted: 0,
+    });
+    expect(
+      orcidVerdict([cand("x", "rpm_inferred", 1, 0, "iD-a"), cand("x", "orcid_name", 1, 0, "iD-a")]),
+    ).toEqual({ tier: "strong", orcid: "iD-a", accepted: 1 });
+  });
+
+  it("an rpm_admin row → asserted with the admin iD, whatever else is there", () => {
+    expect(
+      orcidVerdict([cand("x", "rpm_inferred", 9, 0, "iD-b"), cand("x", "rpm_admin", 0, 0, "iD-a")]),
+    ).toEqual({ tier: "asserted", orcid: "iD-a", accepted: 0 });
+  });
+
+  it("orcidTiers is exactly the verdict tier per cwid", () => {
+    const rows = [cand("x", "rpm_inferred", 3), cand("y", "rpm_inferred", 1), cand("z", "rpm_admin")];
+    expect([...orcidTiers(rows)]).toEqual([
+      ["x", "strong"],
+      ["y", "weak"],
+      ["z", "asserted"],
+    ]);
   });
 });

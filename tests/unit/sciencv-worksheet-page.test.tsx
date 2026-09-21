@@ -317,7 +317,13 @@ describe("/edit/biosketch/worksheet — authorization", () => {
     const result = asEl(await BiosketchWorksheetPage({ searchParams: sp(GEN_ID) }));
     expect(result.type).toBe("div");
     expect(mockLogDenial).not.toHaveBeenCalled();
-    expect(mockLoadEditContext).toHaveBeenCalledWith(OWNER, expect.anything());
+    expect(mockLoadEditContext).toHaveBeenCalledWith(
+      OWNER,
+      expect.anything(),
+      expect.any(Date),
+      undefined,
+      { includeOrcidSuggestion: expect.any(Boolean) },
+    );
     expect(mockHonorFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { cwid: OWNER, status: "published", showOnProfile: true },
@@ -346,7 +352,13 @@ describe("/edit/biosketch/worksheet — authorization", () => {
     expect(worksheet.type).toBe(mockWorksheet);
     expect(worksheet.props.cwid).toBe(OWNER);
     expect(worksheet.props.backHref).toBe(`/edit/scholar/${OWNER}?attr=biosketch`);
-    expect(mockLoadEditContext).toHaveBeenCalledWith(OWNER, expect.anything());
+    expect(mockLoadEditContext).toHaveBeenCalledWith(
+      OWNER,
+      expect.anything(),
+      expect.any(Date),
+      undefined,
+      { includeOrcidSuggestion: expect.any(Boolean) },
+    );
   });
 
   it("allow but scholar context absent → 404", async () => {

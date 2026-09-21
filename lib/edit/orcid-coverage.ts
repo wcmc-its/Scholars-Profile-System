@@ -136,6 +136,13 @@ export type OrcidTier = "asserted" | "strong" | "weak" | "none";
 const isRpmSource = (source: string) => source.startsWith("rpm_");
 const isRegistrySource = (source: string) => source.startsWith("orcid_");
 
+/** What one scholar's candidate rows add up to. `orcid` is the iD to show: the
+ *  RPM-admin iD when asserted, the sole strong-eligible iD when strong, else null.
+ *  `accepted` is the RPM accepted-article count behind that iD (0 when the strength
+ *  came from the registry alone), for the "seen on N of your accepted publications"
+ *  line on the self-edit home board. `scholar.orcid` is folded in by the caller. */
+export type OrcidVerdict = { tier: OrcidTier; orcid: string | null; accepted: number };
+
 /** One tier per cwid from the candidate rows; `scholar.orcid` is folded in by the caller. */
 export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
   const byCwid = new Map<string, CandidateRow[]>();
@@ -145,40 +152,49 @@ export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
     else byCwid.set(c.cwid, [c]);
   }
   const out = new Map<string, OrcidTier>();
-  for (const [cwid, rows] of byCwid) {
-    if (rows.some((r) => r.source === "rpm_admin")) {
-      out.set(cwid, "asserted");
-      continue;
-    }
-    // The RPM rule is unchanged: only a SOLE rpm_inferred row can be strong on
-    // its own counts. The fold does not trust the ETL's thresholds either — an
-    // orcid_works row under STRONG_MIN_ACCEPTED (which the sweep never writes)
-    // still grades weak here.
-    const inferred = rows.filter((r) => r.source === "rpm_inferred");
-    const soleInferred = inferred.length === 1 ? inferred[0] : null;
-    // Only rejection-free RPM rows take part in the agreement rule: an rpm_inferred
-    // row with rejections means the iD also sat on articles the person REJECTED (a
-    // homonym's iD), and a name-only registry hit on the same iD is that same
-    // homonym, not independent evidence. rpm_admin rows carry 0 rejections anyway.
-    const rpmOrcids = new Set(
-      rows.filter((r) => isRpmSource(r.source) && r.articlesRejected === 0).map((r) => r.orcid),
-    );
-    const registryOrcids = new Set(
-      rows.filter((r) => isRegistrySource(r.source)).map((r) => r.orcid),
-    );
-    const strongEligible = (r: CandidateRow) =>
-      r.source === "orcid_email" ||
-      (r.source === "orcid_works" && r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
-      (r === soleInferred &&
-        r.articlesRejected === 0 &&
-        r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
-      // Two independent sources agreeing on one iD outweighs either one's accepted counts.
-      (rpmOrcids.has(r.orcid) && registryOrcids.has(r.orcid));
-    const strongOrcids = new Set(rows.filter(strongEligible).map((r) => r.orcid));
-    out.set(cwid, strongOrcids.size === 1 ? "strong" : "weak");
-  }
+  for (const [cwid, rows] of byCwid) out.set(cwid, orcidVerdict(rows).tier);
   return out;
 }
+
+/** The per-cwid fold behind `orcidTiers`, shared with the self-edit home board so
+ *  the console and the "Is this your ORCID iD?" row can never disagree. `rows` are
+ *  one scholar's candidate rows; empty → `none`. */
+export function orcidVerdict(rows: CandidateRow[]): OrcidVerdict {
+  const rpmAccepted = (orcid: string) =>
+    Math.max(0, ...rows.filter((r) => isRpmSource(r.source) && r.orcid === orcid).map((r) => r.articlesAccepted));
+  if (rows.length === 0) return { tier: "none", orcid: null, accepted: 0 };
+  const admin = rows.find((r) => r.source === "rpm_admin");
+  if (admin) return { tier: "asserted", orcid: admin.orcid, accepted: rpmAccepted(admin.orcid) };
+  // The RPM rule is unchanged: only a SOLE rpm_inferred row can be strong on
+  // its own counts. The fold does not trust the ETL's thresholds either — an
+  // orcid_works row under STRONG_MIN_ACCEPTED (which the sweep never writes)
+  // still grades weak here.
+  const inferred = rows.filter((r) => r.source === "rpm_inferred");
+  const soleInferred = inferred.length === 1 ? inferred[0] : null;
+  // Only rejection-free RPM rows take part in the agreement rule: an rpm_inferred
+  // row with rejections means the iD also sat on articles the person REJECTED (a
+  // homonym's iD), and a name-only registry hit on the same iD is that same
+  // homonym, not independent evidence. rpm_admin rows carry 0 rejections anyway.
+  const rpmOrcids = new Set(
+    rows.filter((r) => isRpmSource(r.source) && r.articlesRejected === 0).map((r) => r.orcid),
+  );
+  const registryOrcids = new Set(
+    rows.filter((r) => isRegistrySource(r.source)).map((r) => r.orcid),
+  );
+  const strongEligible = (r: CandidateRow) =>
+    r.source === "orcid_email" ||
+    (r.source === "orcid_works" && r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
+    (r === soleInferred &&
+      r.articlesRejected === 0 &&
+      r.articlesAccepted >= STRONG_MIN_ACCEPTED) ||
+    // Two independent sources agreeing on one iD outweighs either one's accepted counts.
+    (rpmOrcids.has(r.orcid) && registryOrcids.has(r.orcid));
+  const strongOrcids = new Set(rows.filter(strongEligible).map((r) => r.orcid));
+  if (strongOrcids.size !== 1) return { tier: "weak", orcid: null, accepted: 0 };
+  const [orcid] = strongOrcids;
+  return { tier: "strong", orcid, accepted: rpmAccepted(orcid) };
+}
+
 /** One row per NIH-funded cwid; `latestEnd` = MAX(grant.end_date) among its NIH
  *  awards, `pi` = holds a `PI_ROLES` role on at least one of them. */
 export type NihRow = { cwid: string; latestEnd: Date | null; pi: boolean };
