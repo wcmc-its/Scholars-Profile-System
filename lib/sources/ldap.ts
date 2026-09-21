@@ -128,8 +128,13 @@ export const ED_FACULTY_ATTRIBUTES = [
   // Institution code of the primary appointment (WCMC, WCMC-Q, HMC, SIDRA,
   // HSS, ...). Feeds `Scholar.primaryOrgCode` → institution administrators
   // (lib/institutions.ts). Verbose names are NOT in ED — ReCiter's
-  // getVerbosePrimaryOrganization switch is the only mapping.
+  // getVerbosePrimaryOrganization switch is the only mapping. Option-tagged
+  // per SOR on the person entry (probe 2026-09-21: every faculty:active
+  // person carries `;faculty`, some also `;employee` / `;affiliate` /
+  // `;cornell-ithaca`); ldapts surfaces the tagged key, so request it
+  // explicitly like `weillCornellEduReleaseCode;mail`.
   "weillCornellEduPrimaryOrganization",
+  "weillCornellEduPrimaryOrganization;faculty",
   // Pre-concatenated postnominal degree string (e.g. "MD", "MD, MPH"). Lives
   // on the person entry — also present on the SOR parent (weillCornellEduSORRecord)
   // but NOT on the Role subordinates that fetchActiveFacultyAppointments filters
@@ -1023,7 +1028,12 @@ export function projectEntries(
         firstString(e.weillCornellEduDepartment) ??
         firstString(e.ou) ??
         null,
-      primaryOrgCode: firstString(r["weillCornellEduPrimaryOrganization"]),
+      // The faculty SOR's code first (the appointment this profile is about);
+      // the untagged key is a defensive fallback — no probed entry carried one.
+      primaryOrgCode:
+        firstString(r["weillCornellEduPrimaryOrganization;faculty"]) ??
+        firstString(r["weillCornellEduPrimaryOrganization"]) ??
+        null,
       email: firstString(e.mail) ?? null,
       // Multi-valued release-code parsed to the effective audience (fail-closed).
       // ldapts surfaces the option-tagged key under its tag suffix.
