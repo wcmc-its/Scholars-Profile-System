@@ -10,6 +10,7 @@ import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { JifSlider } from "@/components/edit/reports/jif-slider";
 import {
   ARTICLE_COUNT_CAVEAT,
+  ARTICLE_LIST_CAP,
   articleCountQueryString,
   BASIS_LABEL,
   JIF_MAX,
@@ -189,7 +190,12 @@ export async function renderArticleCountReport({ searchParams, basePath }: Admin
             >
               Download .xlsx
             </a>
-            <span className="text-muted-foreground text-xs"> &mdash; counts plus a Criteria sheet</span>
+            <span className="text-muted-foreground text-xs">
+              {" "}
+              &mdash; counts, a Criteria sheet, and the article list with matching scholars
+              {total > ARTICLE_LIST_CAP &&
+                ` (omitted above ${ARTICLE_LIST_CAP.toLocaleString()} articles — narrow the filters)`}
+            </span>
           </p>
           <p className="text-muted-foreground mt-4 max-w-prose text-xs" role="note">
             {ARTICLE_COUNT_CAVEAT}
