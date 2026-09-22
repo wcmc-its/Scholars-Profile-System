@@ -14,7 +14,7 @@ import { siteBaseUrl } from "@/lib/site-url";
 
 /** Human label per attribute — drives the email subject + body (mirrors the dialog map). */
 const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
-  "name-title": "Name & Title",
+  "name-title": "Name & title",
   photo: "Photo",
   appointments: "Positions & appointments",
   education: "Education",
@@ -22,7 +22,7 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   "funding-reporter": "Funding",
   publications: "Publications",
   "org-unit": "Org Unit",
-  coi: "Conflicts of Interest",
+  coi: "Conflicts of interest",
   mentees: "Mentees",
   "profile-url": "Profile URL",
 };

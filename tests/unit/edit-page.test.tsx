@@ -361,7 +361,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(cta.textContent).toContain("Add in ReCiter");
     expect(cta.getAttribute("href")).toBe(`https://reciter.weill.cornell.edu/manageprofile/${ctx.scholar.cwid}`);
     expect(cta.getAttribute("target")).toBe("_blank");
-    expect(screen.queryByRole("link", { name: "Identifiers & Profiles" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Identifiers & profiles" })).toBeNull();
   });
 
   it("?attr=identifiers-profiles renders the ORCID card when the flag is on", () => {
@@ -372,7 +372,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={withSuggestion} mode="self" attr="identifiers-profiles" orcidTabEnabled />);
     expect(document.querySelector('[data-slot="orcid-card"]')).not.toBeNull();
     expect(screen.getByTestId("orcid-confirm")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Identifiers & Profiles" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Identifiers & profiles" })).toBeTruthy();
   });
 
   it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done, nothing left open", () => {

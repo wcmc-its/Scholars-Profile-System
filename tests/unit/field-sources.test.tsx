@@ -68,7 +68,7 @@ describe("panel wiring — source line is surfaced in each sourced panel", () =>
         attribute="name-title"
         cwid="self01"
         scholarName="Jane Scholar"
-        heading="Name & Title"
+        heading="Name & title"
         description="Name, title, department, email, and ORCID come from the WCM directory."
       />,
     );

@@ -965,7 +965,7 @@ export function CoiGapCard({
         className="text-apollo-slate -mb-1 inline-flex w-fit items-center gap-1 text-sm font-medium hover:underline"
       >
         <ChevronLeft className="size-4" aria-hidden />
-        Conflicts of Interest
+        Conflicts of interest
       </Link>
 
       <EditPanel
