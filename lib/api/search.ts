@@ -3435,6 +3435,8 @@ export async function searchPeople(opts: {
       "primaryDepartment",
       "deptName",
       "divisionName",
+      // Non-WCMC institution on the result card (#2713) — omit-on-empty in the doc.
+      "primaryOrgCode",
       "personType",
       "publicationCount",
       "grantCount",

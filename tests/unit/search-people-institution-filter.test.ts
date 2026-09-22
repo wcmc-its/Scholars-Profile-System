@@ -77,6 +77,7 @@ vi.mock("@/lib/search", () => ({
                   primaryDepartment: "Medicine",
                   deptName: "Medicine",
                   divisionName: null,
+                  primaryOrgCode: "HSS",
                   personType: "full_time_faculty",
                   publicationCount: 40,
                   grantCount: 2,
@@ -169,6 +170,12 @@ describe("institution facet — searchPeople filter + agg + facets", () => {
     const aggs = capturedBodies[0].aggs as Record<string, unknown>;
     expect(aggs.institutions).toBeDefined();
     expect(result.facets.institutions).toHaveLength(3);
+  });
+
+  it("requests primaryOrgCode in `_source` and surfaces it on the hit (result card label, #2713)", async () => {
+    const result = await searchPeople({ q: "doe", filters: {} });
+    expect(capturedBodies[0]._source).toContain("primaryOrgCode");
+    expect(result.hits[0].primaryOrgCode).toBe("HSS");
   });
 
   it("excluding-self: the `institutions` agg omits its own clause but keeps personType; other aggs keep the institution clause", async () => {
