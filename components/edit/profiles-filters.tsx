@@ -20,10 +20,12 @@
  * separate "Centers" facet (centers have no parent-dept FK, so they can't nest) and
  * an "Institution" facet (ED primary organization, `Scholar.primaryOrgCode`).
  */
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { SlidersHorizontal } from "lucide-react";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type {
   DataQualityFacets,
   DataQualityGapFilter,
@@ -80,6 +82,8 @@ export function ProfilesFilters({
 }: ProfilesFiltersProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  // The phone sheet and the desktop rail can both be mounted — ids must differ.
+  const id = useId();
 
   // Local state is the source of truth for the controls; every change navigates.
   const [selRoles, setSelRoles] = useState<ReadonlySet<string>>(new Set(roleCategories));
@@ -143,22 +147,23 @@ export function ProfilesFilters({
   // Person-type options (counts come from the loader).
   const roleOptions: FacetOption[] = facets.roleCategories;
 
-  // Department + division options as a FLAT list (each department followed by its
-  // divisions, order preserved). Divisions are NOT indented: their label already
-  // carries the parent department ("Cardiology (Medicine)"), and indentation would
-  // wrongly imply nesting under whatever row sits above them under search.
+  // Department + division options as a FLAT list: every department (largest
+  // first) THEN every division (largest first), so the collapsed top-N is all
+  // departments rather than Medicine plus nine of its divisions. Divisions are NOT
+  // indented: their label already carries the parent ("Cardiology (Medicine)").
   const unitOptions = useMemo<FacetOption[]>(() => {
-    const out: FacetOption[] = [];
-    for (const dep of facets.departments) {
-      out.push({ value: dep.value, label: dep.label, count: dep.count });
-      for (const div of dep.divisions) {
-        out.push({ value: div.value, label: div.label, count: div.count });
-      }
-    }
-    return out;
+    const depts = facets.departments.map(({ value, label, count }) => ({ value, label, count }));
+    const divs = facets.departments
+      .flatMap((d) => d.divisions)
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    return [...depts, ...divs];
   }, [facets.departments]);
 
-  const centerOptions: FacetOption[] = facets.centers;
+  // A center with no members can only ever return zero rows — hide it, unless
+  // it's already selected (it must stay visible to be un-ticked).
+  const centerOptions: FacetOption[] = facets.centers.filter(
+    (c) => c.count > 0 || selUnits.has(c.value),
+  );
   const institutionOptions: FacetOption[] = facets.institutions;
 
   return (
@@ -187,11 +192,11 @@ export function ProfilesFilters({
       </div>
 
       <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="pf-q" className="text-muted-foreground text-xs">
+        <label htmlFor={`${id}-q`} className="text-muted-foreground text-xs">
           Search name or CWID
         </label>
         <input
-          id="pf-q"
+          id={`${id}-q`}
           type="search"
           value={qDraft}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -201,11 +206,11 @@ export function ProfilesFilters({
       </div>
 
       <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="pf-gap" className="text-muted-foreground text-xs">
+        <label htmlFor={`${id}-gap`} className="text-muted-foreground text-xs">
           Gap
         </label>
         <select
-          id="pf-gap"
+          id={`${id}-gap`}
           value={gapVal}
           onChange={(e) => {
             const v = e.target.value as DataQualityGapFilter;
@@ -221,11 +226,11 @@ export function ProfilesFilters({
       </div>
 
       <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="pf-overview-age" className="text-muted-foreground text-xs">
+        <label htmlFor={`${id}-overview-age`} className="text-muted-foreground text-xs">
           Overview last updated
         </label>
         <select
-          id="pf-overview-age"
+          id={`${id}-overview-age`}
           value={ageVal}
           onChange={(e) => {
             const v = e.target.value as OverviewAgeFilter;
@@ -243,9 +248,9 @@ export function ProfilesFilters({
         </select>
       </div>
 
-      <label className="mb-5 flex items-center gap-2 text-sm" htmlFor="pf-hidden">
+      <label className="mb-5 flex items-center gap-2 text-sm" htmlFor={`${id}-hidden`}>
         <input
-          id="pf-hidden"
+          id={`${id}-hidden`}
           type="checkbox"
           checked={hide}
           onChange={(e) => {
@@ -298,5 +303,38 @@ export function ProfilesFilters({
         noMatchLabel="No institutions match"
       />
     </form>
+  );
+}
+
+/**
+ * Phones: the rail stacked ABOVE the table pushed every result below several
+ * screens of checkboxes. Below `lg` the same `ProfilesFilters` slides in from the
+ * left instead; the desktop rail (`hidden lg:block` in the roster) is untouched.
+ * Filters still auto-apply, so the sheet stays open for several picks.
+ */
+export function ProfilesFiltersSheet({
+  activeCount,
+  ...props
+}: ProfilesFiltersProps & { activeCount: number }) {
+  return (
+    <Sheet>
+      <SheetTrigger
+        className="border-apollo-border-strong bg-apollo-surface inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm lg:hidden"
+        data-testid="profiles-filters-sheet-trigger"
+      >
+        <SlidersHorizontal className="size-4" aria-hidden />
+        {activeCount ? `Filters (${activeCount})` : "Filters"}
+      </SheetTrigger>
+      {/* ponytail: this instance re-inits from the URL on each open; the hidden
+          desktop rail keeps its own state, which only matters on a resize across lg. */}
+      <SheetContent side="left" className="bg-apollo-page gap-0 overflow-y-auto p-0 lg:hidden">
+        <SheetHeader>
+          <SheetTitle>Filters</SheetTitle>
+        </SheetHeader>
+        <div className="p-3">
+          <ProfilesFilters {...props} />
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

@@ -51,7 +51,10 @@ vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: moc
 // The real ProfilesRoster (rendered directly in the block below) mounts the
 // client filter sidebar, which uses next/navigation's useRouter — stub it out,
 // those tests target row rendering, not the filter island.
-vi.mock("@/components/edit/profiles-filters", () => ({ ProfilesFilters: () => null }));
+vi.mock("@/components/edit/profiles-filters", () => ({
+  ProfilesFilters: () => null,
+  ProfilesFiltersSheet: () => null,
+}));
 // For the component-render test below: render `next/link` as a plain anchor and
 // stub the roster's child components so the real ProfilesRoster renders without
 // pulling client-only machinery.

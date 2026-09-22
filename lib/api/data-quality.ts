@@ -749,6 +749,36 @@ export type DataQualityFacets = {
 
 const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
 
+const byCountDesc = (a: DataQualityFacetOption, b: DataQualityFacetOption) =>
+  b.count - a.count || a.label.localeCompare(b.label);
+
+/** Person types in descending career stage, keyed by display LABEL (both raw
+ *  spellings share one label). Unlisted labels sort last, A–Z. */
+const CAREER_STAGE_ORDER = [
+  "Full-time faculty",
+  "Affiliated faculty",
+  "Voluntary faculty",
+  "Adjunct faculty",
+  "Courtesy faculty",
+  "Instructor",
+  "Lecturer",
+  "Postdoc",
+  "Fellow",
+  "Research staff",
+  "Doctoral student",
+  "MD-PhD student",
+  "MD student",
+  "PhD student",
+  "Faculty emeritus",
+  "Non-faculty academic",
+  "Non-academic",
+  "Affiliate alumni",
+];
+const careerRank = (label: string) => {
+  const i = CAREER_STAGE_ORDER.indexOf(label);
+  return i === -1 ? CAREER_STAGE_ORDER.length : i;
+};
+
 /**
  * Load the filter-bar facets. Counts are STATIC (independent of the other current
  * filters) — meaningful as a baseline and cheap (a handful of grouped aggregates).
@@ -806,7 +836,7 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
       label: formatRoleCategory(value) ?? value,
       count: roleCount.get(value) ?? 0,
     }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a, b) => careerRank(a.label) - careerRank(b.label) || a.label.localeCompare(b.label));
 
   // Show each division's parent department in its label, so every division is
   // self-identifying — division names are unique only within a department (both
@@ -823,18 +853,24 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
     divByDept.set(d.deptCode, arr);
   }
 
-  const departments = deptRows.map((dep) => ({
-    value: `dept:${dep.code}`,
-    label: dep.name,
-    count: deptCount.get(dep.code) ?? 0,
-    divisions: divByDept.get(dep.code) ?? [],
-  }));
+  // Units list largest-first (counts are static, so the order never reshuffles
+  // under a click); the facet's search box covers finding one by name.
+  const departments = deptRows
+    .map((dep) => ({
+      value: `dept:${dep.code}`,
+      label: dep.name,
+      count: deptCount.get(dep.code) ?? 0,
+      divisions: (divByDept.get(dep.code) ?? []).sort(byCountDesc),
+    }))
+    .sort(byCountDesc);
 
-  const centers: DataQualityFacetOption[] = ctrRows.map((c) => ({
-    value: `center:${c.code}`,
-    label: c.name,
-    count: ctrCount.get(c.code) ?? 0,
-  }));
+  const centers: DataQualityFacetOption[] = ctrRows
+    .map((c) => ({
+      value: `center:${c.code}`,
+      label: c.name,
+      count: ctrCount.get(c.code) ?? 0,
+    }))
+    .sort(byCountDesc);
 
   const institutions: DataQualityFacetOption[] = instAgg
     .flatMap((r) =>

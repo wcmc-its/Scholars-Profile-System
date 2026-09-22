@@ -177,6 +177,53 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
     ]);
   });
 
+  it("orders units largest-first and person types by descending career stage", async () => {
+    const { client } = facetClient();
+    // "Anesthesiology" sorts first A–Z but has the fewest people.
+    client.department.findMany.mockResolvedValue([
+      { code: "ANES", name: "Anesthesiology" },
+      { code: "MED", name: "Medicine" },
+      { code: "PED", name: "Pediatrics" },
+    ]);
+    client.scholar.groupBy.mockImplementation((args: { by: string[] }) => {
+      if (args.by[0] === "roleCategory")
+        return Promise.resolve([
+          { roleCategory: "postdoc", _count: { _all: 400 } },
+          { roleCategory: "emeritus", _count: { _all: 100 } },
+          { roleCategory: "full_time_faculty", _count: { _all: 10 } },
+          { roleCategory: "affiliated_faculty", _count: { _all: 5000 } },
+        ]);
+      if (args.by[0] === "deptCode")
+        return Promise.resolve([
+          { deptCode: "ANES", _count: { _all: 1 } },
+          { deptCode: "MED", _count: { _all: 8 } },
+          { deptCode: "PED", _count: { _all: 5 } },
+        ]);
+      if (args.by[0] === "divCode")
+        return Promise.resolve([
+          { divCode: "PCARD", _count: { _all: 2 } },
+          { divCode: "NEO", _count: { _all: 3 } },
+        ]);
+      return Promise.resolve([]);
+    });
+    client.center.findMany.mockResolvedValue([
+      { code: "AAA", name: "Aging Center" },
+      { code: "MCC", name: "Meyer Cancer Center" },
+    ]);
+
+    const facets = await loadDataQualityFacets(client as never);
+
+    expect(facets.departments.map((d) => d.value)).toEqual(["dept:MED", "dept:PED", "dept:ANES"]);
+    expect(facets.departments[1].divisions.map((d) => d.value)).toEqual(["div:NEO", "div:PCARD"]);
+    expect(facets.centers.map((c) => c.value)).toEqual(["center:MCC", "center:AAA"]);
+    expect(facets.roleCategories.map((r) => r.value)).toEqual([
+      "full_time_faculty",
+      "affiliated_faculty",
+      "postdoc",
+      "emeritus",
+    ]);
+  });
+
   it("counts institutions over ACTIVE scholars, like departments", async () => {
     const { client } = facetClient();
     await loadDataQualityFacets(client as never);
