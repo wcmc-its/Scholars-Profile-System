@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 
+import { BAR_TAB_ACTIVE, BAR_TAB_INACTIVE } from "@/components/edit/console-tab-classes";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 
 /** One member link inside a group's hover menu. `count` renders a pending pill. */
@@ -83,11 +84,10 @@ export function AdminGroupMenu({
       <path d="m6 9 6 6 6-6" />
     </svg>
   );
-  // Mirrors `AdminTab`'s active/inactive tab styling (kept in sync by hand, like
-  // MatchaTab) so a group entry sits flush in the bar with the top-level tabs.
+  // Same bar-tab classes as `AdminTab` / `MatchaTab`, so a group entry sits flush.
   const trigger = active ? (
     <span
-      className="border-apollo-maroon inline-flex shrink-0 items-center gap-1 border-b-2 py-3 text-sm font-medium whitespace-nowrap"
+      className={BAR_TAB_ACTIVE}
       aria-current="page"
       data-testid={testId}
       // A bare <span> is not focusable, so the active group alone could not open its
@@ -100,7 +100,7 @@ export function AdminGroupMenu({
   ) : (
     <Link
       href={href}
-      className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1 border-b-2 border-transparent py-3 text-sm whitespace-nowrap"
+      className={BAR_TAB_INACTIVE}
       data-testid={testId}
     >
       {label}

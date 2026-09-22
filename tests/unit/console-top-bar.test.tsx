@@ -53,6 +53,18 @@ describe("ConsoleTopBar — console variant", () => {
     expect(screen.queryByTestId("account-menu-stub")).toBeNull();
   });
 
+  it("renders the nav (children) in the bar and puts the account menu after it", () => {
+    render(
+      <ConsoleTopBar variant="console">
+        <div data-testid="nav-slot" />
+      </ConsoleTopBar>,
+    );
+    const nav = screen.getByTestId("nav-slot");
+    const menu = screen.getByTestId("account-menu-stub");
+    expect(menu.getAttribute("data-context")).toBe("console");
+    expect(nav.compareDocumentPosition(menu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders the console-context account menu when showAccountMenu is set (the two AdminSubnav-less audit pages)", () => {
     render(<ConsoleTopBar variant="console" showAccountMenu />);
     const menu = screen.getByTestId("account-menu-stub");

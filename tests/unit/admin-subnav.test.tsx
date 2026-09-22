@@ -154,15 +154,13 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
   });
 
-  // account-dropdown-nav handoff, Workstream A (its ACCOUNT_CONSOLE_NAV_RESTRUCTURE
-  // flag was retired in #1440) — the account chip/dropdown (context="console")
-  // anchors the right end on every console surface; profile actions live in the
-  // menu, so there is no "My Profile" tab.
-  it("mounts the account menu (console context) at the right end — no My Profile tab", () => {
+  // The nav now renders INSIDE ConsoleTopBar, which owns the account menu —
+  // mounting it here too would render it twice. Profile actions live in that
+  // menu, so there is still no "My Profile" tab.
+  it("does not mount the account menu itself (the top bar does) — no My Profile tab", () => {
     render(<AdminSubnav active="self" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} />);
     expect(screen.queryByTestId("admin-subnav-self-edit")).toBeNull();
-    const stub = screen.getByTestId("account-menu-stub");
-    expect(stub.getAttribute("data-context")).toBe("console");
+    expect(screen.queryByTestId("account-menu-stub")).toBeNull();
     // The console tabs themselves are unaffected.
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
   });
@@ -176,7 +174,6 @@ describe("AdminSubnav", () => {
       const tab = screen.getByTestId(`admin-tab-${id}`);
       expect(tab.getAttribute("aria-current")).toBeNull();
     }
-    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
   it('active="self" for a steward-only viewer shows only Method families', () => {
@@ -190,7 +187,6 @@ describe("AdminSubnav", () => {
     );
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
-    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
   // Reports IA redesign (2026-08-14) — reverses the 2026-08-12 "exclusively via
@@ -698,13 +694,28 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     }
   });
 
+  it("the sub-xl menu names the current tab and lists every tab under its group heading", () => {
+    grouped();
+    render(<AdminSubnav active="usage" {...allOn} />);
+    const trigger = screen.getByTestId("console-nav-sheet-trigger");
+    expect(trigger.textContent).toBe("Usage");
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    for (const h of ["Queues", "Registries", "Insights", "Tools"]) expect(dialog.textContent).toContain(h);
+    const usage = [...dialog.querySelectorAll("a")].find((a) => a.textContent === "Usage")!;
+    expect(usage.getAttribute("href")).toBe("/edit/usage");
+    expect(usage.getAttribute("aria-current")).toBe("page");
+    // Pending count carried onto the URL-requests link.
+    const slug = [...dialog.querySelectorAll("a")].find((a) => a.getAttribute("href") === "/edit/slug-requests")!;
+    expect(slug.textContent).toBe("URL requests2");
+  });
+
   it('active="self" renders tier 1 only — no tier 2 row', () => {
     grouped();
     render(<AdminSubnav active="self" {...allOn} />);
     expect(screen.getByTestId("admin-group-queues")).toBeTruthy();
     for (const g of ["queues", "registries", "insights", "tools"])
       expect(screen.queryByTestId(`admin-subnav-tier2-${g}`)).toBeNull();
-    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
   it("omits a group entirely when all its members are hidden", () => {

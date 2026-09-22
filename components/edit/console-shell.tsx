@@ -33,9 +33,9 @@ import type { EditSession } from "@/lib/auth/superuser";
  * `docs/edit-console-ia-spec.md` Part B3). An OR-only escape hatch can only
  * ADD visibility, so it can't reintroduce a Gap-3/4b-shaped bug (I3).
  *
- * The account menu is NOT here: it lives in the `AdminSubnav` strip
- * (`AccountMenu context="console"`, self-fetching), which is why no actor scholar
- * row threads through the page — unchanged from before.
+ * The nav renders INSIDE the top bar (one dark row, not two), and the bar owns
+ * the self-fetching `AccountMenu context="console"` — so no actor scholar row
+ * threads through the page.
  */
 export async function ConsoleShell({
   active,
@@ -64,32 +64,33 @@ export async function ConsoleShell({
   const tabs = await loadConsoleTabs(session, db.read);
   return (
     <div className="bg-apollo-page min-h-screen">
-      {/* Skip link — first focusable element, jumps past the tab strip to the page. */}
+      {/* Skip link — first focusable element, jumps past the bar's tabs to the page. */}
       <a
         href="#console-main"
         className="bg-apollo-maroon text-apollo-maroon-foreground sr-only z-50 rounded-md px-3 py-2 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2"
       >
         Skip to content
       </a>
-      <ConsoleTopBar variant="console" />
-      <AdminSubnav
-        active={active}
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        superuserSurfaces={session.isSuperuser}
-        profilesTab={tabs.profiles}
-        unitsTab={tabs.units || unitsTab}
-        administratorsTab={tabs.administrators ? 0 : null}
-        methodsTab={tabs.methods ? 0 : null}
-        roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
-        dataSharingTab={tabs.dataSharing ? 0 : null}
-        reportsTab={tabs.reports || reportsTab}
-        newsTab={tabs.news}
-        coresTab={tabs.cores}
-        usageTab={tabs.usage}
-        orcidCoverageTab={tabs.orcidCoverage}
-        viewerIsDeveloper={session.isDeveloper === true}
-      />
+      <ConsoleTopBar variant="console">
+        <AdminSubnav
+          active={active}
+          pendingSlugRequests={pendingSlugRequests}
+          pendingHonors={pendingHonors}
+          superuserSurfaces={session.isSuperuser}
+          profilesTab={tabs.profiles}
+          unitsTab={tabs.units || unitsTab}
+          administratorsTab={tabs.administrators ? 0 : null}
+          methodsTab={tabs.methods ? 0 : null}
+          roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
+          dataSharingTab={tabs.dataSharing ? 0 : null}
+          reportsTab={tabs.reports || reportsTab}
+          newsTab={tabs.news}
+          coresTab={tabs.cores}
+          usageTab={tabs.usage}
+          orcidCoverageTab={tabs.orcidCoverage}
+          viewerIsDeveloper={session.isDeveloper === true}
+        />
+      </ConsoleTopBar>
       <main id="console-main" tabIndex={-1} className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         {children}
       </main>
