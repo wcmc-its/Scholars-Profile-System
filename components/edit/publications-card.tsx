@@ -32,6 +32,7 @@ import { ReciterPendingCardClient } from "@/components/edit/reciter-pending-card
 import { RejectNoticeDialog } from "@/components/edit/reject-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import {
+  BULK_CONFIRM_THRESHOLD,
   SelectionBar,
   SelectionBarSpacer,
   mapChunked,
@@ -201,12 +202,13 @@ export function PublicationsCard({
 
   // The hide path once the first-hide notice is out of the way. ONE confirm
   // for the batch, not one per row, and only when there is something to
-  // confirm: a sole-displayed-author row (UI-SPEC edge case 11), or a
-  // superuser, whose reason /api/edit/suppress requires off the author/proxy
-  // path. A plain self hide writes straight away — ticking a row and pressing
-  // "Hide from profile" is already two deliberate, reversible steps.
+  // confirm: a sole-displayed-author row (UI-SPEC edge case 11), a superuser
+  // (whose reason /api/edit/suppress requires off the author/proxy path), or a
+  // batch past BULK_CONFIRM_THRESHOLD. A small self hide writes straight away —
+  // ticking a row and pressing "Hide from profile" is already two deliberate,
+  // reversible steps.
   function proceedHide(batch: Pub[]) {
-    if (su || batch.some((p) => p.isSoleDisplayedAuthor)) {
+    if (su || batch.length > BULK_CONFIRM_THRESHOLD || batch.some((p) => p.isSoleDisplayedAuthor)) {
       setConfirmBatch(batch);
       return;
     }

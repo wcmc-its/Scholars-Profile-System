@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { EntityPanel, type EntityPanelProps, type EntityRow } from "@/components/edit/entity-panel";
+import { BULK_CONFIRM_THRESHOLD } from "@/components/edit/selection-bar";
 
 type Row = EntityRow & { title: string };
 
@@ -61,10 +62,9 @@ const errJson = () =>
 const row = (id: string) => within(screen.getByTestId(`appointment-row-${id}`));
 const select = (id: string) => fireEvent.click(row(id).getByRole("checkbox"));
 
-/** Hide the selection. A self hide is direct — the only confirm on this panel
- *  is the superuser's required-reason one. */
-const bulkHide = () =>
-  fireEvent.click(screen.getByRole("button", { name: "Hide from profile" }));
+/** Hide the selection. A small self hide is direct; a superuser's required-reason
+ *  confirm and a self batch past BULK_CONFIRM_THRESHOLD open a dialog first. */
+const bulkHide = () => fireEvent.click(screen.getByRole("button", { name: "Hide from profile" }));
 
 const bodies = (fetchMock: ReturnType<typeof vi.fn>) =>
   fetchMock.mock.calls
@@ -92,14 +92,19 @@ describe("EntityPanel — control rendering", () => {
   });
 
   it("self + hidden_by_admin → no control + explanation", () => {
-    renderPanel([{ externalId: "a1", title: "Admin Hid", state: "hidden_by_admin", suppressionId: "s1" }]);
+    renderPanel([
+      { externalId: "a1", title: "Admin Hid", state: "hidden_by_admin", suppressionId: "s1" },
+    ]);
     expect(screen.queryByTestId("appointment-row-a1-show")).toBeNull();
     expect(row("a1").queryByRole("checkbox")).toBeNull();
     expect(screen.getByText("An administrator hid this entry.")).toBeTruthy();
   });
 
   it("superuser + hidden_by_admin → Show is offered", () => {
-    renderPanel([{ externalId: "a1", title: "Admin Hid", state: "hidden_by_admin", suppressionId: "s1" }], "superuser");
+    renderPanel(
+      [{ externalId: "a1", title: "Admin Hid", state: "hidden_by_admin", suppressionId: "s1" }],
+      "superuser",
+    );
     expect(screen.getByTestId("appointment-row-a1-show")).toBeTruthy();
   });
 
@@ -193,6 +198,29 @@ describe("EntityPanel — bulk hide", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("self: a batch past the threshold asks once, in the scholar's own voice", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson({ ok: true, suppressionId: "new-sup" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const many = Array.from({ length: BULK_CONFIRM_THRESHOLD + 1 }, (_, i) =>
+      shown(`a${i}`, `Row ${i}`),
+    );
+    renderPanel(many);
+
+    many.forEach((e) => select(e.externalId));
+    bulkHide();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(`Hide ${many.length} appointments?`)).toBeTruthy();
+    expect(within(dialog).getByText(/hides them from your public profile/)).toBeTruthy();
+    // Self needs no reason — the route defaults it.
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Hide" }));
+    await waitFor(() => expect(bodies(fetchMock)).toHaveLength(many.length));
+    expect(bodies(fetchMock).every((b) => !("reason" in b))).toBe(true);
+  });
+
   it("superuser: the dialog waits for a required reason, which rides every write", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson({ ok: true, suppressionId: "new-sup" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -258,7 +286,9 @@ describe("EntityPanel — show", () => {
   it("Show POSTs to /api/edit/revoke with the suppressionId", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson({ ok: true, suppressionId: "s1" }));
     vi.stubGlobal("fetch", fetchMock);
-    renderPanel([{ externalId: "a1", title: "Hidden", state: "hidden_by_self", suppressionId: "s1" }]);
+    renderPanel([
+      { externalId: "a1", title: "Hidden", state: "hidden_by_self", suppressionId: "s1" },
+    ]);
 
     fireEvent.click(screen.getByTestId("appointment-row-a1-show"));
 
@@ -270,7 +300,9 @@ describe("EntityPanel — show", () => {
 
   it("a failed show reverts the row and shows an inline error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(errJson()));
-    renderPanel([{ externalId: "a1", title: "Hidden", state: "hidden_by_self", suppressionId: "s1" }]);
+    renderPanel([
+      { externalId: "a1", title: "Hidden", state: "hidden_by_self", suppressionId: "s1" },
+    ]);
 
     fireEvent.click(screen.getByTestId("appointment-row-a1-show"));
 

@@ -35,6 +35,7 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import {
+  BULK_CONFIRM_THRESHOLD,
   SelectionBar,
   SelectionBarSpacer,
   mapChunked,
@@ -385,7 +386,11 @@ export function EntityPanel<T extends EntityRow>({
         onExtend={extendable ? selectAlsoOlder : undefined}
         // Self hides straight away; only a superuser stops for the reason the
         // suppress route requires off the self path.
-        onHide={() => (isSuperuser ? setHideOpen(true) : void hideSelected(null))}
+        onHide={() =>
+          isSuperuser || selectedCount > BULK_CONFIRM_THRESHOLD
+            ? setHideOpen(true)
+            : void hideSelected(null)
+        }
         onClear={clear}
         busy={busy}
       />
@@ -399,8 +404,12 @@ export function EntityPanel<T extends EntityRow>({
         open={hideOpen}
         onOpenChange={(o) => !o && setHideOpen(false)}
         title={`Hide ${plural(selectedCount, copy.one, copy.other)}?`}
-        description={`This removes ${them} from ${scholarName}'s public profile.${hideNote}`}
-        reasonMode="required-text"
+        description={
+          isSuperuser
+            ? `This removes ${them} from ${scholarName}'s public profile.${hideNote}`
+            : `This hides ${them} from your public profile. Hiding is not a correction — the records stay as-is in WCM systems and on internal reports. You can show them again any time.${hideNote}`
+        }
+        reasonMode={isSuperuser ? "required-text" : "none"}
         confirmLabel="Hide"
         confirmVariant="destructive"
         onConfirm={async (reason) => {

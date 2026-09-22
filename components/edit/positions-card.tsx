@@ -39,6 +39,7 @@ import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
 import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import {
+  BULK_CONFIRM_THRESHOLD,
   SelectionBar,
   SelectionBarSpacer,
   mapChunked,
@@ -450,7 +451,11 @@ export function PositionsCard({
         nounPlural="appointments"
         extendCount={older.length}
         onExtend={selectAlsoOlder}
-        onHide={() => (isSuperuser ? setHideOpen(true) : void hideSelected(null))}
+        onHide={() =>
+          isSuperuser || selected.size > BULK_CONFIRM_THRESHOLD
+            ? setHideOpen(true)
+            : void hideSelected(null)
+        }
         onClear={clear}
         busy={busy}
       />
@@ -460,8 +465,12 @@ export function PositionsCard({
         open={hideOpen}
         onOpenChange={(o) => !o && setHideOpen(false)}
         title={`Hide ${plural(selected.size, "appointment", "appointments")}?`}
-        description={`This removes ${selected.size === 1 ? "it" : "them"} from ${scholarName}'s public profile.`}
-        reasonMode="required-text"
+        description={
+          isSuperuser
+            ? `This removes ${selected.size === 1 ? "it" : "them"} from ${scholarName}'s public profile.`
+            : `This hides ${selected.size === 1 ? "it" : "them"} from your public profile. The records stay as-is in WCM systems and on internal reports, and you can show them again any time.`
+        }
+        reasonMode={isSuperuser ? "required-text" : "none"}
         confirmLabel="Hide"
         confirmVariant="destructive"
         onConfirm={async (reason) => {

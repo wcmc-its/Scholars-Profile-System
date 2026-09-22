@@ -22,8 +22,12 @@ import { ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /** "1 grant" / "2 grants", from the caller's own authored forms. */
-export const plural = (n: number, one: string, other: string) =>
-  `${n} ${n === 1 ? one : other}`;
+/** Above this many rows, even a self hide asks first: "Also select the N
+ *  older…" can put hundreds of rows behind one click, which is no longer the
+ *  small, obviously-reversible action that ticking a few boxes is. */
+export const BULK_CONFIRM_THRESHOLD = 10;
+
+export const plural = (n: number, one: string, other: string) => `${n} ${n === 1 ? one : other}`;
 
 /** Most writes in flight at once. A selection can be hundreds of rows ("Also
  *  select the N older …" on a 500-publication list) and every row is its own
