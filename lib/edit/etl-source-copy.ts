@@ -116,6 +116,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
       "ORCID iDs from the public ORCID registry matched to scholars by WCM email or by name plus shared publications. Feeds the ORCID coverage dashboard only.",
     origin: "external", // pub.orcid.org public API
   },
+  "ORCID-push": {
+    label: "ORCID iDs pushed to Identity",
+    description:
+      "Copies each scholar's ORCID iD on file in SPS into the WCM Identity record so ReCiter and Publication Manager see it; nightly, compare-then-write.",
+    origin: "external", // ReCiter engine API → WCM Identity (DynamoDB)
+  },
   Tools: {
     label: "Methods & Tools",
     description: "Fills the Methods & tools list of techniques and models on profiles.",

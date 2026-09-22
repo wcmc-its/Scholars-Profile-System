@@ -203,8 +203,8 @@ const LDAP_SECRET_ENV_VARS = [
   "SCHOLARS_LDAP_BIND_DN",
   "SCHOLARS_LDAP_BIND_PASSWORD",
 ] as const;
-// reciter-api def -- the #746 ADMIN api-key, used ONLY by the operator-run
-// etl:reciter-refresh (no cadence step), kept off every other def.
+// reciter-api def -- the #746 ADMIN api-key, carried by the operator-run
+// etl:reciter-refresh and the nightly OrcidPush step, kept off every other def.
 const RECITER_API_SECRET_ENV_VARS = [
   "RECITER_API_BASE_URL",
   "RECITER_API_KEY",

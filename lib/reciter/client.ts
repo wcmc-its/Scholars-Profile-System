@@ -39,6 +39,18 @@
  * the engine HTTP API at all — it reads ReCiter's DynamoDB (GoldStandard +
  * Analysis) and S3 (offloaded AnalysisOutput) directly with a read-only IAM
  * grant and NO api-key. The #746 reject WRITE path above is unchanged.
+ *
+ * Two more engine endpoints, same ADMIN api-key, used ONLY by `etl/orcid-push`
+ * (the nightly that copies `scholar.orcid` into the WCM Identity record — the
+ * same two calls RPM's Manage Profile made in its V1.1 wiring):
+ *   - GET /reciter/find/identity/by/uid?uid=<cwid> — the full Identity JSON
+ *     with a TOP-LEVEL `orcid` (the engine serves the Identity object itself;
+ *     only the raw DynamoDB item nests it under `identity`). 404 = no record.
+ *   - POST /reciter/identity/ — replace that record with the body. The push
+ *     sends the GET result back with only `orcid` changed, so every other
+ *     field round-trips untouched. (There is no `/reciter/save/identity`
+ *     route on the engine — the list form is PUT /reciter/save/identities/;
+ *     this is the single-item route the Institutional Client uses.)
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
@@ -137,6 +149,113 @@ export async function postGoldStandardReject(
   if (!res.ok) {
     throw new Error(
       `ReCiter goldstandard POST failed for uid ${uid} pmid ${pmid}: ${res.status} ${res.statusText}`,
+    );
+  }
+}
+
+/** Identity GET/POST timeout — the ETL can wait longer than the request path. */
+export const IDENTITY_API_TIMEOUT_MS = 15_000;
+
+/**
+ * The Identity record as the ReCiter engine serves it: top-level `uid` and
+ * `orcid` (string, or null/absent when none). Every other field is opaque
+ * here on purpose — `etl/orcid-push` reads one and writes the same object back
+ * with only `orcid` changed, so nothing else is modelled, coerced, or dropped.
+ */
+export interface ReciterIdentity {
+  uid: string;
+  orcid?: string | null;
+  [field: string]: unknown;
+}
+
+/**
+ * The body ReCiter's IdentityController.findByUid sends with its 404 when the
+ * uid is simply not in the table: `The uid provided '<uid>' was not found in
+ * the Identity table`. Any OTHER 404 (Spring's generic not-found JSON for a
+ * wrong base path or a renamed route, a 404-ing proxy) is an outage, not "no
+ * record" — without this check a dead API read as N × `no_identity` and the
+ * run graded green.
+ */
+export const IDENTITY_NOT_FOUND_MARKER = "was not found in the Identity table";
+
+/** Is this 404 body ReCiter's own "uid not in the Identity table"? Exported for the unit test. */
+export function isIdentityNotFoundBody(body: string): boolean {
+  return body.includes(IDENTITY_NOT_FOUND_MARKER);
+}
+
+/**
+ * Fetch one Identity record by uid (the scholar's cwid, lowercase). `null` on
+ * ReCiter's own not-found 404 (no record — a person Identity has never seen;
+ * see `IDENTITY_NOT_FOUND_MARKER`). Throws on any other 404, any other
+ * non-2xx, a timeout, or a 200 whose body is not an Identity (no `uid`), so a
+ * caller can count it as a failure rather than mistake it for "no record".
+ */
+export async function getIdentityByUid(
+  config: ReciterApiConfig,
+  uid: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<ReciterIdentity | null> {
+  const url = new URL("/reciter/find/identity/by/uid", config.baseUrl);
+  url.searchParams.set("uid", uid);
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { accept: "application/json", "api-key": config.apiKey },
+    signal: AbortSignal.timeout(opts.timeoutMs ?? IDENTITY_API_TIMEOUT_MS),
+  });
+  if (res.status === 404) {
+    const text = await res.text().catch(() => "");
+    if (isIdentityNotFoundBody(text)) return null;
+    throw new Error(
+      `ReCiter identity GET for uid ${uid} returned a 404 that is not "not in the Identity table" ` +
+        `(wrong RECITER_API_BASE_URL path or route?): ${bodySnippet(text)}`,
+    );
+  }
+  if (!res.ok) {
+    throw new Error(
+      `ReCiter identity GET failed for uid ${uid}: ${res.status} ${res.statusText}`,
+    );
+  }
+  const body = (await res.json()) as unknown;
+  if (!body || typeof body !== "object" || typeof (body as ReciterIdentity).uid !== "string") {
+    throw new Error(`ReCiter identity GET for uid ${uid} returned a body without a uid`);
+  }
+  return body as ReciterIdentity;
+}
+
+/** First 200 chars of a response body, whitespace collapsed, for an error message ("" when empty). */
+function bodySnippet(text: string): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 200 ? `${t.slice(0, 200)}…` : t;
+}
+
+/**
+ * Replace one Identity record (POST /reciter/identity/ — the single-item save
+ * the Institutional Client uses; the engine has no `/reciter/save/identity`).
+ * Send the object `getIdentityByUid` returned, modified. The engine runs
+ * validateMandatoryFields (uid, plus firstName/firstInitial/lastName on EVERY
+ * alternateName) and answers 500 with a plain-text message naming the missing
+ * field — a stored record with an incomplete alternate name can never be
+ * round-tripped, and that is a source-data problem, not the push's. The body
+ * is included in the thrown error so the operator can tell the two apart.
+ * Throws on a non-2xx or a timeout.
+ */
+export async function saveIdentity(
+  config: ReciterApiConfig,
+  identity: ReciterIdentity,
+  opts: { timeoutMs?: number } = {},
+): Promise<void> {
+  const url = new URL("/reciter/identity/", config.baseUrl);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "api-key": config.apiKey },
+    body: JSON.stringify(identity),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? IDENTITY_API_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `ReCiter identity POST failed for uid ${identity.uid}: ${res.status} ${res.statusText}` +
+        (text ? ` — ${bodySnippet(text)}` : ""),
     );
   }
 }

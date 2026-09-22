@@ -145,6 +145,13 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "RPM-orcid-candidates": { cadence: "nightly" },
   // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_name); weekly step.
   "ORCID-registry": { cadence: "weekly" },
+  // scholar.orcid → WCM Identity via the ReCiter API (etl/orcid-push), the nightly
+  // OrcidPush step right BEFORE Identity in BOTH envs (push-then-pull, so the pull
+  // never reads our own last push as a conflict; no env split; the reciter-api
+  // secret is seeded in each). Compare-then-write, so a healthy night is mostly
+  // `equal`; the step throws on a dead API rather than grade green, which is why
+  // its freshness row means something.
+  "ORCID-push": { cadence: "nightly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
   //
