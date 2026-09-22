@@ -123,10 +123,8 @@ describe("RequestAChangeDialog", () => {
     open();
     pickIssue("orcid-wrong");
     const link = screen.getByTestId("request-a-change-open");
-    expect(link.textContent).toContain("Manage in ReCiter");
-    expect(link.getAttribute("href")).toBe(
-      "https://reciter.weill.cornell.edu/manageprofile/abc1001",
-    );
+    expect(link.textContent).toContain("Open Identifiers & Profiles");
+    expect(link.getAttribute("href")).toBe("/edit/scholar/abc1001?attr=identifiers-profiles");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     expect(screen.queryByLabelText("Add any detail (optional)")).toBeNull();

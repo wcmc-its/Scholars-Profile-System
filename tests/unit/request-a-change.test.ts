@@ -47,7 +47,10 @@ describe("REQUEST_A_CHANGE — structure", () => {
       for (const { label, action } of REQUEST_A_CHANGE[a].issues) {
         expect(label.length).toBeGreaterThan(0);
         if (action.kind === "self-service") {
-          expect(action.href).toMatch(/^https:\/\//);
+          // An external tool (https) or an in-app edit surface (the ORCID item
+          // points at the Identifiers & Profiles tab, since ReCiter Manage
+          // Profile is campus-only).
+          expect(action.href).toMatch(/^(https:\/\/|\/edit\/)/);
           expect(action.tool.length).toBeGreaterThan(0);
           expect(action.instruction.length).toBeGreaterThan(0);
         } else if (action.kind === "route") {

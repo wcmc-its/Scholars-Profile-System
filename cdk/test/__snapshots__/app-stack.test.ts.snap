@@ -539,11 +539,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_ORCID_SUGGESTION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_PROFILE_LINKS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "MENTORING_COPUB_BRIDGE",

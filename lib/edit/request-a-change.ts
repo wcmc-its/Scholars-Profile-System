@@ -51,6 +51,8 @@ export const PUBLICATION_MANAGER_URL = "https://reciter.weill.cornell.edu/";
 /** ORCID self-management; `{cwid}` is substituted by the panel at render. Also the
  *  fix-it link on the Name & Title ORCID row (`orcid-value.tsx`, #2650). */
 export const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
+/** The in-app ORCID surface (Identifiers & Profiles tab), per scholar. */
+export const ORCID_TAB_URL = "/edit/scholar/{cwid}?attr=identifiers-profiles";
 
 const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
 const FACULTY_AFFAIRS_EMAIL = "facultyaffairs@med.cornell.edu"; // degrees + education (ASMS)
@@ -212,11 +214,14 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       {
         id: "orcid-wrong",
         label: "My ORCID is wrong or missing",
+        // In-app since the Identifiers & Profiles tab: ReCiter Manage Profile is
+        // reachable only on the campus network. `{cwid}` keeps it right for a
+        // superuser acting on another scholar (self resolves the same page).
         action: selfService({
-          tool: "ReCiter",
-          href: ORCID_MANAGE_URL,
-          cta: "Manage in ReCiter",
-          instruction: "Manage your ORCID in ReCiter.",
+          tool: "Scholars",
+          href: ORCID_TAB_URL,
+          cta: "Open Identifiers & Profiles",
+          instruction: "Confirm or enter your ORCID iD on the Identifiers & Profiles tab.",
         }),
       },
     ],
