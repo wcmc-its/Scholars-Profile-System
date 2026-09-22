@@ -4,10 +4,11 @@
  * department outreach sort), the params parser, and the CSV. Synthetic cwids
  * and departments only (public repo).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildOrcidCoverage,
+  loadOrcidCoverage,
   neither,
   nihNoOrcid,
   orcidCoverageCsv,
@@ -19,6 +20,7 @@ import {
   piNoEra,
   withoutDismissed,
   type CandidateRow,
+  type OrcidCoverageClient,
   type ScholarRow,
 } from "@/lib/edit/orcid-coverage";
 
@@ -28,11 +30,13 @@ const s = (
   roleCategory: string | null,
   primaryDepartment: string | null,
   orcid = false,
+  confirmed = false,
 ): ScholarRow => ({
   cwid,
   roleCategory,
   primaryDepartment,
   orcid: orcid ? "0000-0002-1825-0097" : null,
+  orcidConfirmedAt: confirmed ? new Date("2026-09-20T00:00:00Z") : null,
 });
 // Insertion order is deliberately ANTI-sorted (null role first, small departments
 // before big ones, Dept B before Dept A) so every sort and tiebreak in the fold is
@@ -44,10 +48,12 @@ const SCHOLARS: ScholarRow[] = [
   s("f4", "full_time_faculty", null),
   s("f3", "full_time_faculty", "Dept B"),
   s("f1", "full_time_faculty", "Dept A", true),
-  s("f2", "full_time_faculty", "Dept A", true),
+  s("f2", "full_time_faculty", "Dept A", true, true),
   s("f5", "full_time_faculty", "Dept C"),
   s("f6", "full_time_faculty", "Dept C"),
 ];
+// f2 is the one CONFIRMED iD (in /edit); p1 + f1 hold theirs from Identity, so a fold that
+// ignored `orcidConfirmedAt` would count 3 confirmed where there is 1.
 // NIH: u1 + f3 expired, f4 ends today, f2 + f5 current. f2 is the one NIH-funded person WITH
 // an ORCID. u1 + f4 are non-PI (Co-I) — NIH-funded but never resolvable from RePORTER.
 const NIH = [
@@ -198,10 +204,12 @@ describe("orcidTiers", () => {
 describe("buildOrcidCoverage", () => {
   it("tiles are the unfiltered population regardless of filters", () => {
     const r = build(parseOrcidCoverageParams({ nih: "none", dept: "Dept B" }));
-    // Asserted: p1/f1/f2 (Identity) + f6 (admin). Strong: f3. Weak: f4, f5, u1. None: p2.
+    // Asserted: p1/f1 (Identity) + f2 (confirmed) + f6 (admin). Strong: f3. Weak: f4, f5, u1.
+    // None: p2.
     const c = {
       people: 9,
       orcid: 4,
+      confirmed: 1,
       strong: 1,
       weak: 3,
       era: 2,
@@ -214,6 +222,7 @@ describe("buildOrcidCoverage", () => {
     };
     expect(r.tiles.overall).toEqual(c);
     expect(r.tiles.fullTime).toEqual({ ...c, people: 6, orcid: 3, weak: 2, nihPeople: 4 });
+    // f2, the confirmed one, is full-time AND NIH-funded, so every tile carries it.
     expect(r.tiles.nihFullTime).toEqual({
       ...c,
       people: 4,
@@ -227,6 +236,22 @@ describe("buildOrcidCoverage", () => {
     expect(nihNoOrcid(r.tiles.nihFullTime)).toBe(3);
     // f2 + f5 are PIs without an eRA row; u1/f4 are Co-Is and do NOT count as a resolver gap.
     expect(piNoEra(r.tiles.overall)).toBe(2);
+  });
+
+  it("dismissed (cwid, iD) pairs count nowhere: not as a candidate row, not as scholar.orcid — and only that exact pair", () => {
+    // Listed f6 → f2 (anti-sorted). f6's admin iD-a is dismissed, but f3's iD-a (another cwid,
+    // same token) must survive; f5 dismissed its SECOND candidate, which leaves the first one
+    // sole and strong; f2 dismissed the iD on its own scholar row (the contradiction
+    // etl:orcid-push also refuses), so it is neither asserted nor confirmed.
+    const dismissals = [
+      { cwid: "f6", orcid: "iD-a" },
+      { cwid: "f5", orcid: "iD-b" },
+      { cwid: "f2", orcid: "0000-0002-1825-0097" },
+    ];
+    const r = buildOrcidCoverage(SCHOLARS, NIH, ERA, ALL, TODAY, CANDIDATES, dismissals);
+    expect(r.tiles.overall).toMatchObject({ people: 9, orcid: 2, confirmed: 0, strong: 2, weak: 2 });
+    // Without the dismissals the same rows are 4 asserted / 1 confirmed / 1 strong / 3 weak.
+    expect(build().tiles.overall).toMatchObject({ orcid: 4, confirmed: 1, strong: 1, weak: 3 });
   });
 
   it("groups by role_category, null → Unclassified, people desc; ignores `role`", () => {
@@ -330,12 +355,13 @@ describe("orcidCoverageCsv", () => {
     const csv = orcidCoverageCsv(r.byDept);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "Department,People,Asserted ORCID,Asserted %,Inferred ORCID (strong),Inferred ORCID (weak),eRA account (inferred),Both,Neither,NIH-funded,NIH-funded with asserted ORCID,NIH-funded without asserted ORCID,NIH-funded without asserted but strong inference,NIH PI,NIH PI without eRA account",
+      "Department,People,Asserted ORCID,Confirmed ORCID,Asserted %,Inferred ORCID (strong),Inferred ORCID (weak),eRA account (inferred),Both,Neither,NIH-funded,NIH-funded with asserted ORCID,NIH-funded without asserted ORCID,NIH-funded without asserted but strong inference,NIH PI,NIH PI without eRA account",
     );
-    expect(lines).toContain("Dept A,3,2,66.7,0,0,1,1,1,1,1,0,0,1,1");
+    // Dept A: f2 confirmed, f1 from Identity → 2 asserted, 1 confirmed.
+    expect(lines).toContain("Dept A,3,2,1,66.7,0,0,1,1,1,1,1,0,0,1,1");
     // Dept B: u1 is a Co-I (not a PI) so its missing eRA row is not a gap; f3 is a PI with one
     // and a strong inference; p1's inference doesn't count — Identity already asserts it.
-    expect(lines).toContain("Dept B,3,1,33.3,1,1,1,0,1,2,0,2,1,1,0");
+    expect(lines).toContain("Dept B,3,1,0,33.3,1,1,1,0,1,2,0,2,1,1,0");
     expect(lines).toHaveLength(1 + r.byDept.length);
     expect(csv).not.toMatch(/f1|p1|0000-0002/);
   });
@@ -427,5 +453,28 @@ describe("withoutDismissed", () => {
       "x1|iD-b|rpm_inferred",
     ]);
     expect(withoutDismissed(rows, [])).toEqual(rows);
+  });
+});
+
+/** `loadOrcidCoverage` — the reads reach the fold: `orcid_confirmed_at` and `orcid_dismissal`. */
+describe("loadOrcidCoverage", () => {
+  it("reads orcidConfirmedAt and the dismissals, and the fold applies both", async () => {
+    const scholarFindMany = vi.fn().mockResolvedValue([
+      s("f2", "full_time_faculty", "Dept A", true, true),
+      s("f1", "full_time_faculty", "Dept A", true),
+      s("f6", "full_time_faculty", "Dept C"),
+    ]);
+    const fake = {
+      scholar: { findMany: scholarFindMany },
+      grant: { groupBy: vi.fn().mockResolvedValue([]) },
+      personNihProfile: { findMany: vi.fn().mockResolvedValue([]) },
+      orcidCandidate: { findMany: vi.fn().mockResolvedValue([cand("f6", "rpm_admin")]) },
+      orcidDismissal: {
+        findMany: vi.fn().mockResolvedValue([{ cwid: "f6", orcid: "iD-a" }]),
+      },
+    };
+    const r = await loadOrcidCoverage(fake as unknown as OrcidCoverageClient, ALL);
+    expect(scholarFindMany.mock.calls[0][0].select).toMatchObject({ orcidConfirmedAt: true });
+    expect(r.tiles.overall).toMatchObject({ people: 3, orcid: 2, confirmed: 1, strong: 0, weak: 0 });
   });
 });

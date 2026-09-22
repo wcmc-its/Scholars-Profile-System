@@ -4,9 +4,15 @@
  * list (`SCHOLAR_EXPORT_CAP` in `lib/api/export-scholars.ts` is policy).
  *
  * Definitions, because the copy on the page repeats them:
- *  - "Asserted ORCID" = `scholar.orcid` is set (WCM Identity, #2675/#2676) OR
- *    an RPM administrator entered one (`orcid_candidate.source = rpm_admin`).
- *    Identity is never NULLed on absence — it may lag ED.
+ *  - "Asserted ORCID" = `scholar.orcid` is set (WCM Identity, #2675/#2676, or
+ *    confirmed in `/edit`) OR an RPM administrator entered one
+ *    (`orcid_candidate.source = rpm_admin`). Identity is never NULLed on
+ *    absence — it may lag ED. "Confirmed" is the subset the person (or someone
+ *    editing for them) confirmed in `/edit`: `scholar.orcid_confirmed_at` set;
+ *    the rest of asserted is Identity / RPM-admin.
+ *  - Dismissed (cwid, iD) pairs (`orcid_dismissal`: Remove in `/edit`) count
+ *    nowhere — not as a candidate row (the mirrors re-create them nightly) and
+ *    not as `scholar.orcid` (a contradiction `etl:orcid-push` also refuses).
  *  - "Inferred" = a candidate ORCID in `orcid_candidate` from either mirror:
  *    the ReCiter Publication Manager saw it on the person's PubMed author
  *    record across articles they accepted (`source = rpm_inferred`, nightly),
@@ -46,7 +52,7 @@
  *    populated only for NIH awards); "current" additionally needs an award
  *    whose `end_date` is today or later.
  *
- * Three flat reads + one pure fold (`buildOrcidCoverage`), so the fold is
+ * Five flat reads + one pure fold (`buildOrcidCoverage`), so the fold is
  * testable on a fixture with no DB. ~11k scholar rows; no cache.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -114,6 +120,8 @@ export type ScholarRow = {
   roleCategory: string | null;
   primaryDepartment: string | null;
   orcid: string | null;
+  /** Set when the person confirmed `orcid` in `/edit`; null for an Identity value. */
+  orcidConfirmedAt: Date | null;
 };
 export type CandidateRow = {
   cwid: string;
@@ -227,8 +235,11 @@ export type NihRow = { cwid: string; latestEnd: Date | null; pi: boolean };
 
 export type CoverageCounts = {
   people: number;
-  /** Asserted ORCID (Identity or RPM admin). */
+  /** Asserted ORCID (confirmed in `/edit`, Identity, or RPM admin). */
   orcid: number;
+  /** …of which confirmed in `/edit` (`orcid_confirmed_at`); `orcid - confirmed` is
+   *  the Identity / RPM-admin remainder. */
+  confirmed: number;
   /** Strong inference (RPM or ORCID registry), no asserted ORCID. */
   strong: number;
   /** Weak inference (RPM or ORCID registry), no asserted ORCID. */
@@ -274,10 +285,19 @@ export function buildOrcidCoverage(
   params: OrcidCoverageParams,
   today: Date,
   candidates: CandidateRow[] = [],
+  dismissals: DismissalRow[] = [],
 ): OrcidCoverage {
-  const tiers = orcidTiers(candidates);
+  const tiers = orcidTiers(withoutDismissed(candidates, dismissals));
+  // `scholar.orcid` counts unless the person dismissed that very iD.
+  const heldOrcid = new Set(
+    withoutDismissed(
+      scholars.flatMap((s) => (s.orcid === null ? [] : [{ cwid: s.cwid, orcid: s.orcid }])),
+      dismissals,
+    ).map((s) => s.cwid),
+  );
   const tierOf = (s: ScholarRow): OrcidTier =>
-    s.orcid !== null ? "asserted" : (tiers.get(s.cwid) ?? "none");
+    heldOrcid.has(s.cwid) ? "asserted" : (tiers.get(s.cwid) ?? "none");
+  const isConfirmed = (s: ScholarRow) => heldOrcid.has(s.cwid) && s.orcidConfirmedAt !== null;
   const nihEnd = new Map(nih.map((r) => [r.cwid, r.latestEnd]));
   const nihPi = new Set(nih.filter((r) => r.pi).map((r) => r.cwid));
   const era = new Set(eraCwids);
@@ -299,6 +319,7 @@ export function buildOrcidCoverage(
     const c = {
       people: 0,
       orcid: 0,
+      confirmed: 0,
       strong: 0,
       weak: 0,
       era: 0,
@@ -314,8 +335,10 @@ export function buildOrcidCoverage(
       const o = t === "asserted";
       const e = era.has(s.cwid);
       c.people++;
-      if (o) c.orcid++;
-      else if (t === "strong") c.strong++;
+      if (o) {
+        c.orcid++;
+        if (isConfirmed(s)) c.confirmed++;
+      } else if (t === "strong") c.strong++;
       else if (t === "weak") c.weak++;
       if (e) c.era++;
       if (o && e) c.both++;
@@ -387,19 +410,25 @@ export function buildOrcidCoverage(
 
 export type OrcidCoverageClient = Pick<
   PrismaClient,
-  "scholar" | "grant" | "personNihProfile" | "orcidCandidate"
+  "scholar" | "grant" | "personNihProfile" | "orcidCandidate" | "orcidDismissal"
 >;
 
 export async function loadOrcidCoverage(
   db: OrcidCoverageClient,
   params: OrcidCoverageParams,
 ): Promise<OrcidCoverage> {
-  const [scholars, nih, era, candidates] = await Promise.all([
+  const [scholars, nih, era, candidates, dismissals] = await Promise.all([
     // Same population the Identity ETL writes to (`etl/identity/index.ts`),
     // narrowed to status=active like every other console aggregate.
     db.scholar.findMany({
       where: { deletedAt: null, status: "active" },
-      select: { cwid: true, roleCategory: true, primaryDepartment: true, orcid: true },
+      select: {
+        cwid: true,
+        roleCategory: true,
+        primaryDepartment: true,
+        orcid: true,
+        orcidConfirmedAt: true,
+      },
     }),
     db.grant.groupBy({
       by: ["cwid", "role"],
@@ -416,6 +445,7 @@ export async function loadOrcidCoverage(
         articlesRejected: true,
       },
     }),
+    db.orcidDismissal.findMany({ select: { cwid: true, orcid: true } }),
   ]);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -435,6 +465,7 @@ export async function loadOrcidCoverage(
     params,
     today,
     candidates,
+    dismissals,
   );
 }
 
@@ -442,6 +473,7 @@ export const CSV_HEADERS = [
   "Department",
   "People",
   "Asserted ORCID",
+  "Confirmed ORCID",
   "Asserted %",
   "Inferred ORCID (strong)",
   "Inferred ORCID (weak)",
@@ -456,7 +488,8 @@ export const CSV_HEADERS = [
   "NIH PI without eRA account",
 ] as const;
 
-/** The department table as CSV — aggregates only, no per-person rows. */
+/** The department table as CSV — aggregates only, no per-person rows. "Confirmed
+ *  ORCID" is the confirmed-in-`/edit` subset of "Asserted ORCID". */
 export function orcidCoverageCsv(rows: CoverageRow[]): string {
   return toCsv(
     CSV_HEADERS,
@@ -464,6 +497,7 @@ export function orcidCoverageCsv(rows: CoverageRow[]): string {
       r.label,
       r.people,
       r.orcid,
+      r.confirmed,
       r.people === 0 ? "" : ((100 * r.orcid) / r.people).toFixed(1),
       r.strong,
       r.weak,

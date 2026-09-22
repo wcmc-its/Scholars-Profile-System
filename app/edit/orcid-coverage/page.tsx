@@ -66,6 +66,10 @@ function Tile({ label, c }: { label: string; c: CoverageCounts }) {
         {c.orcid.toLocaleString()} of {c.people.toLocaleString()} with an asserted ORCID iD
       </div>
       <div className="text-muted-foreground mt-0.5 text-xs tabular-nums">
+        {c.confirmed.toLocaleString()} confirmed here · {(c.orcid - c.confirmed).toLocaleString()}{" "}
+        from Identity or RPM admin
+      </div>
+      <div className="text-muted-foreground mt-0.5 text-xs tabular-nums">
         +{c.strong.toLocaleString()} strong inference ({pct(c.orcid + c.strong, c.people)} incl.)
       </div>
     </div>
@@ -94,6 +98,7 @@ function CoverageTable({
             <th className={thClass}>{firstHeader}</th>
             <th className={thNum}>People</th>
             <th className={thNum}>Asserted ORCID</th>
+            <th className={thNum}>Confirmed</th>
             <th className={thNum}>Asserted %</th>
             <th className={thNum}>Inferred, strong</th>
             <th className={thNum}>Inferred, weak</th>
@@ -110,7 +115,7 @@ function CoverageTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td className={`${tdClass} text-muted-foreground`} colSpan={14}>
+              <td className={`${tdClass} text-muted-foreground`} colSpan={15}>
                 No one matches these filters.
               </td>
             </tr>
@@ -120,6 +125,7 @@ function CoverageTable({
                 <td className={`${tdClass} break-words`}>{r.label}</td>
                 <td className={tdNum}>{r.people.toLocaleString()}</td>
                 <td className={tdNum}>{r.orcid.toLocaleString()}</td>
+                <td className={tdNum}>{r.confirmed.toLocaleString()}</td>
                 <td className={tdNum}>{pct(r.orcid, r.people)}</td>
                 <td className={tdNum}>{r.strong.toLocaleString()}</td>
                 <td className={tdNum}>{r.weak.toLocaleString()}</td>
@@ -208,8 +214,10 @@ function Body({ data }: { data: OrcidCoverage }) {
   return (
     <>
       <p className="text-muted-foreground mt-2 max-w-prose">
-        <strong>Asserted ORCID</strong> = on file in WCM Identity, or entered by a Publication
-        Manager administrator. <strong>Inferred</strong> = the Publication Manager saw an ORCID on
+        <strong>Asserted ORCID</strong> = on file in WCM Identity, entered by a Publication
+        Manager administrator, or confirmed by the person (or someone editing for them) in this
+        console; <strong>confirmed</strong> is that last subset. An iD the person removed counts
+        nowhere. <strong>Inferred</strong> = the Publication Manager saw an ORCID on
         the person&apos;s PubMed author record across articles they accepted, or the public ORCID
         registry lists a WCM-affiliated iD that matches the person: <em>strong</em> when one ORCID
         is carried by {STRONG_MIN_ACCEPTED}+ accepted articles and no rejected one, or shares{" "}

@@ -63,14 +63,22 @@ beforeEach(() => {
             roleCategory: "full_time_faculty",
             primaryDepartment: "Dept A",
             orcid: "0000-0002-1825-0097",
+            orcidConfirmedAt: new Date("2026-09-20T00:00:00Z"),
           },
           {
             cwid: "f2",
             roleCategory: "full_time_faculty",
             primaryDepartment: "Dept A",
             orcid: null,
+            orcidConfirmedAt: null,
           },
-          { cwid: "p1", roleCategory: "postdoc", primaryDepartment: "Dept B", orcid: null },
+          {
+            cwid: "p1",
+            roleCategory: "postdoc",
+            primaryDepartment: "Dept B",
+            orcid: null,
+            orcidConfirmedAt: null,
+          },
         ],
         [{ cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: true }],
         ["f2"],
@@ -116,6 +124,10 @@ describe("/edit/orcid-coverage", () => {
     );
     expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
       "+1 strong inference (66.7% incl.)",
+    );
+    // The asserted split: f1 confirmed its iD here.
+    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
+      "1 confirmed here · 0 from Identity or RPM admin",
     );
     const byRole = within(page.getByTestId("orcid-coverage-by-role"));
     expect(byRole.getByText("Full-time faculty")).toBeTruthy();
