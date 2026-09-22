@@ -2179,7 +2179,7 @@ async function main() {
       }
     }
 
-    // Title resolution (#2720). MUST run here: two of the four tiers
+    // Title resolution (#2719). MUST run here: two of the four tiers
     // (division chief, center head) are the `OrgUnitRoleAssignment` rows the
     // blocks above just finished writing, so resolving any earlier would read
     // last night's leadership. The scholar upsert wrote the ED value as a seed
@@ -2194,6 +2194,11 @@ async function main() {
           `(${Object.entries(titles.byTier)
             .map(([tier, n]) => `${tier}=${n}`)
             .join(", ")})` +
+          // Should be 0. Non-zero means active rows the ED feed did not carry
+          // this run kept their existing title rather than being blanked.
+          (titles.skippedNullResolution > 0
+            ? ` — kept ${titles.skippedNullResolution} title(s) no tier could re-derive`
+            : "") +
           (derived ? "" : " — SCHOLAR_TITLE_RESOLUTION off, ED tiers only"),
       );
     }

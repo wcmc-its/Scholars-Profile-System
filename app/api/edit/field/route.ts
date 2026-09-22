@@ -188,7 +188,7 @@ async function handleScholarFieldEdit(params: {
   if (fieldName === "profileLinks" && !isProfileLinksEnabled()) {
     return editError(400, "invalid_field", "fieldName");
   }
-  // #2720 — the display-title picker. Same dark-when-off shape: with
+  // #2719 — the display-title picker. Same dark-when-off shape: with
   // SCHOLAR_TITLE_RESOLUTION off both field names read as unknown fields, so the
   // whole surface (picker AND request) is dark.
   if (
@@ -639,7 +639,7 @@ async function handleUnitFieldEdit(params: {
 }
 
 /**
- * #2720 — the display-title picker and its request path.
+ * #2719 — the display-title picker and its request path.
  *
  * Split out of `handleScholarFieldEdit` rather than threaded through it: the
  * title fields have their own authz (an operator SETS, a scholar REQUESTS),

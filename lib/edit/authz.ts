@@ -85,7 +85,7 @@ export function authorizeFieldEdit(
       | "primaryTitleRequest";
   },
 ): AuthzResult {
-  // #2720 — SETTING the display title is an operator action. Not self: a
+  // #2719 — SETTING the display title is an operator action. Not self: a
   // scholar picking their own headline title is a governance question (the
   // institution speaks with one voice — the same reasoning behind the single
   // role vocabulary in `lib/org-unit-roles.ts`). Unit admins are included
@@ -99,7 +99,7 @@ export function authorizeFieldEdit(
     return { ok: false, reason: "not_superuser" };
   }
 
-  // #2720 — REQUESTING a title is the scholar's own surface. It has no public
+  // #2719 — REQUESTING a title is the scholar's own surface. It has no public
   // effect until an operator approves, so the self test is the whole gate; a
   // proxy is handled at the route (PE-03), exactly as `overview` is.
   if (target.fieldName === "primaryTitleRequest") {

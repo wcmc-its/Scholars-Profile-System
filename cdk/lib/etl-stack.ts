@@ -834,7 +834,7 @@ export class EtlStack extends Stack {
       // app-stack copy (app-stack.ts, "off") is documentation-only — no app
       // runtime code reads it — and is deliberately left untouched here.
       SELF_EDIT_ED_ADMINS_IMPORT: "on",
-      // SCHOLAR_TITLE_RESOLUTION (#2720) — read by etl/ed/index.ts's
+      // SCHOLAR_TITLE_RESOLUTION (#2719) — read by etl/ed/index.ts's
       // title-resolution post-pass. MUST match the app-stack.ts copy (the app
       // renders the picker this gates); flag parity checks both.
       SCHOLAR_TITLE_RESOLUTION: envConfig.envName === "prod" ? "off" : "on",

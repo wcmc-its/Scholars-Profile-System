@@ -44,6 +44,9 @@ type TitleResolutionClient = Pick<
 export type TitleResolutionResult = {
   scanned: number;
   updated: number;
+  /** Rows left alone because every tier resolved empty — see the guard in
+   *  the loop. Should be 0; non-zero means the ED feed under-delivered. */
+  skippedNullResolution: number;
   /** How many scholars ended on each tier. Diagnostics for the run log — a
    *  sudden collapse in `working` means ED stopped serving the attribute. */
   byTier: Record<string, number>;
@@ -78,6 +81,10 @@ export async function resolveScholarTitles(
 
   const byTier: Record<string, number> = {};
   let updated = 0;
+  // Scholars holding a title that this run could not re-derive. Non-zero is
+  // a signal worth reading in the run log: it means the ED feed is missing
+  // rows the DB still considers active.
+  let skippedNullResolution = 0;
 
   for (const s of scholars) {
     const resolved = resolveScholarTitle({
@@ -91,6 +98,19 @@ export async function resolveScholarTitles(
     const key = resolved.overridden ? "override" : (resolved.tier ?? "none");
     byTier[key] = (byTier[key] ?? 0) + 1;
 
+    // A NULL resolution means we have NO INFORMATION about this scholar's
+    // title this run — every tier came back empty — not that their title
+    // should be cleared. Writing it would turn a degraded read into a wipe:
+    // the scholar upsert only populates `edPrimaryTitle` for cwids present in
+    // THIS ED feed, so any active row the feed missed would have its public
+    // title blanked. A completed run soft-deletes those first, so the window
+    // is narrow; it is guarded anyway because the failure is silent, public,
+    // and one line to prevent. A scholar who genuinely has no title already
+    // holds NULL, so skipping is a no-op for them.
+    if (resolved.value === null) {
+      if (s.primaryTitle !== null) skippedNullResolution++;
+      continue;
+    }
     if (resolved.value !== s.primaryTitle) {
       await client.scholar.update({
         where: { cwid: s.cwid },
@@ -100,7 +120,7 @@ export async function resolveScholarTitles(
     }
   }
 
-  return { scanned: scholars.length, updated, byTier };
+  return { scanned: scholars.length, updated, byTier, skippedNullResolution };
 }
 
 /**

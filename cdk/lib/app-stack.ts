@@ -1659,7 +1659,7 @@ export class AppStack extends Stack {
         // `sameAs` render. Independent of the ORCID kill switch above (the tab
         // shows when either is on). ON in both envs since 2026-09-22.
         SELF_EDIT_PROFILE_LINKS: "on",
-        // SCHOLAR_TITLE_RESOLUTION (#2720) — the display-title picker on the
+        // SCHOLAR_TITLE_RESOLUTION (#2719) — the display-title picker on the
         // /edit Name & title panel, its scholar-facing request path, and the ED
         // ETL's title-resolution post-pass. Read by BOTH the app and the ETL, so
         // it is wired in etl-stack.ts's baseEnvironment too and BOTH MUST AGREE

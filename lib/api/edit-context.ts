@@ -80,7 +80,7 @@ type EditContextReadClient = Pick<
   | "newsMention"
   | "personDatasetDeposit"
   | "orgUnitRoleAssignment"
-  // #2720 — the title picker resolves the chief / center-head tiers.
+  // #2719 — the title picker resolves the chief / center-head tiers.
   | "division"
   | "center"
   | "orcidCandidate"
@@ -649,7 +649,7 @@ export type OrcidEvidenceRow = OrcidEvidence & { orcid: string };
 
 export type EditContext = {
   scholar: EditContextScholar;
-  /** #2720 — the display-title picker's state: every tier's value, the current
+  /** #2719 — the display-title picker's state: every tier's value, the current
    *  pin, and any pending request. Null when `SCHOLAR_TITLE_RESOLUTION` is off
    *  (the Title row stays a plain read-only value) or the scholar vanished. */
   titlePicker: TitlePickerState | null;
@@ -2135,7 +2135,7 @@ export async function loadEditContext(
     ? await buildHighlightsContext(cwid, authorships, publications, client, now)
     : null;
 
-  // #2720 — dark when the flag is off: the Title row falls back to the plain
+  // #2719 — dark when the flag is off: the Title row falls back to the plain
   // read-only value and the write path rejects both field names, so nothing
   // half-renders.
   const titlePicker = isTitleResolutionEnabled()
