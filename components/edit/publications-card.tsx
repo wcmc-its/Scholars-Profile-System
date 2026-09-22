@@ -6,10 +6,12 @@
  * HIDE is a bulk verb, the same one Positions and the Education / Funding /
  * Mentees panels ship: a `shown` row carries a checkbox, any selection raises
  * the shared `SelectionBar`, and "Hide from profile" POSTs /api/edit/suppress
- * once per selected pmid, committing each row as its write lands. Both guards
- * survive the move off the per-row button and now fire ONCE for the whole
- * batch: the first-hide-of-a-session notice (#570), then the
- * sole-displayed-author confirm (UI-SPEC edge case 11).
+ * in bounded chunks — once per selected pmid, committing each row as its write
+ * lands. Both guards survive the move off the per-row button and now fire ONCE
+ * for the whole batch: the first-hide-of-a-session notice (#570), then the
+ * confirm (UI-SPEC edge case 11) — which a superuser ALWAYS gets, because
+ * /api/edit/suppress rejects a reasonless hide of someone else's paper, and
+ * the scholar gets only when the batch holds a sole-displayed-author row.
  *
  * SHOW stays per-row and optimistic (D6.4): `useOptimistic` over a local-state
  * list that commits on a successful POST; on a network/server failure the
@@ -29,8 +31,18 @@ import { FirstHideNoticeDialog } from "@/components/edit/first-hide-notice-dialo
 import { ReciterPendingCardClient } from "@/components/edit/reciter-pending-card";
 import { RejectNoticeDialog } from "@/components/edit/reject-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
-import { SelectionBar, plural } from "@/components/edit/selection-bar";
-import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import {
+  SelectionBar,
+  SelectionBarSpacer,
+  mapChunked,
+  plural,
+  useRowSelection,
+} from "@/components/edit/selection-bar";
+import {
+  PubJournal,
+  PubTitle,
+  pubTitleAccessibleName,
+} from "@/components/publication/pub-html";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,6 +109,15 @@ function acknowledgeFirstHide(): void {
 
 type Pub = EditContextPublication;
 
+/** The affected titles for the sole-displayed-author confirm — the first five,
+ *  then "and N more". `ConfirmDialog.description` is a string, so the list
+ *  rides the sentence rather than a <ul>. */
+function titleList(pubs: Pub[]): string {
+  const head = pubs.slice(0, 5).map((p) => `“${pubTitleAccessibleName(p.title)}”`);
+  const rest = pubs.length - head.length;
+  return rest > 0 ? `${head.join("; ")} and ${rest} more` : head.join("; ");
+}
+
 /** Only SHOW is optimistic: a bulk hide commits row by row as each POST lands,
  *  so there is nothing to revert. */
 function applyOptimisticShow(state: Pub[], pmid: string): Pub[] {
@@ -121,7 +142,6 @@ export function PublicationsCard({
   const [optimistic, addOptimisticShow] = React.useOptimistic(list, applyOptimisticShow);
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
   const [filter, setFilter] = React.useState("");
-  const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
   const [bulkError, setBulkError] = React.useState<string | null>(null);
   // The batch waiting on a gate — the first-hide-of-a-session notice (#570),
@@ -144,6 +164,15 @@ export function PublicationsCard({
   }, [optimistic, filter]);
 
   const grouped = React.useMemo(() => groupByYearDesc(filtered), [filtered]);
+
+  // Visual order is the year groups, newest first, so "older" in the selection
+  // bar means further down that list. The bar counts the SELECTION, not the
+  // visible rows: filtering never drops a selected row from the batch.
+  const ordered = grouped.flatMap((g) => g.items);
+  const { selected, toggle, clear, older, selectAlsoOlder, settle } = useRowSelection(
+    ordered.map((p) => ({ id: p.pmid, selectable: p.state === "shown" })),
+    () => setBulkError(null),
+  );
 
   function setError(pmid: string, msg: string | null) {
     setErrors((prev) => {
@@ -170,21 +199,24 @@ export function PublicationsCard({
     proceedHide(batch);
   }
 
-  // The hide path once the first-hide notice is out of the way: the existing
-  // sole-displayed-author guard — ONE confirm for the batch, not one per row —
-  // then the writes.
+  // The hide path once the first-hide notice is out of the way. ONE confirm
+  // for the batch, not one per row, and only when there is something to
+  // confirm: a sole-displayed-author row (UI-SPEC edge case 11), or a
+  // superuser, whose reason /api/edit/suppress requires off the author/proxy
+  // path. A plain self hide writes straight away — ticking a row and pressing
+  // "Hide from profile" is already two deliberate, reversible steps.
   function proceedHide(batch: Pub[]) {
-    if (batch.some((p) => p.isSoleDisplayedAuthor)) {
+    if (su || batch.some((p) => p.isSoleDisplayedAuthor)) {
       setConfirmBatch(batch);
       return;
     }
-    void hideBatch(batch);
+    void hideBatch(batch, null);
   }
 
   /** One suppress write, committing the row locally on success. No
    *  `router.refresh()`: the committed local list is authoritative for this
    *  panel on a never-cached page (T3.7). */
-  async function hideOne(pmid: string): Promise<boolean> {
+  async function hideOne(pmid: string, reason: string | null): Promise<boolean> {
     try {
       const res = await fetch("/api/edit/suppress", {
         method: "POST",
@@ -193,6 +225,7 @@ export function PublicationsCard({
           entityType: "publication",
           entityId: pmid,
           contributorCwid: cwid,
+          ...(reason ? { reason } : {}),
         }),
       });
       const data = (await res.json()) as
@@ -212,15 +245,19 @@ export function PublicationsCard({
     }
   }
 
-  /** Fan the batch out over `hideOne`; the rows that failed stay selected under
-   *  one inline alert so a retry re-sends exactly those. */
-  async function hideBatch(batch: Pub[]) {
+  /** Fan the batch out over `hideOne`, four writes at a time; the rows that
+   *  failed come back to the selection under one inline alert so a retry
+   *  re-sends exactly those. */
+  async function hideBatch(batch: Pub[], reason: string | null) {
     setBulkError(null);
     setBusy(true);
     try {
-      const results = await Promise.all(batch.map((p) => hideOne(p.pmid)));
+      const results = await mapChunked(batch, (p) => hideOne(p.pmid, reason));
       const failed = batch.filter((_, i) => !results[i]);
-      setSelected(new Set(failed.map((p) => p.pmid)));
+      settle(
+        batch.map((p) => p.pmid),
+        failed.map((p) => p.pmid),
+      );
       if (failed.length > 0) {
         setBulkError(
           `We couldn't hide ${failed.length} of the selected publications. Please try again.`,
@@ -229,15 +266,6 @@ export function PublicationsCard({
     } finally {
       setBusy(false);
     }
-  }
-
-  function toggle(pmid: string, on: boolean) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(pmid);
-      else next.delete(pmid);
-      return next;
-    });
   }
 
   function show(p: Pub) {
@@ -293,23 +321,39 @@ export function PublicationsCard({
       throw new Error("reject_failed");
     }
     commitLocal((state) => state.filter((p) => p.pmid !== pmid));
+    // The row is gone from the list; leaving its pmid in the selection would
+    // leave the bar counting a phantom that "Hide from profile" can never write.
+    toggle(pmid, false);
   }
 
   const rejectingPub =
     rejectPmid !== null ? list.find((p) => p.pmid === rejectPmid) ?? null : null;
 
-  // Visual order is the year groups, newest first, so "older" in the selection
-  // bar means further down that list. The bar counts the SELECTION, not the
-  // visible rows: filtering never drops a selected row from the batch.
-  const ordered = grouped.flatMap((g) => g.items);
-  const firstSelected = ordered.findIndex((p) => selected.has(p.pmid));
-  const older =
-    firstSelected < 0
-      ? []
-      : ordered
-          .slice(firstSelected + 1)
-          .filter((p) => p.state === "shown" && !selected.has(p.pmid));
-  const soleCount = confirmBatch?.filter((p) => p.isSoleDisplayedAuthor).length ?? 0;
+  // Render the confirm from the last non-null batch: `onConfirm` clears
+  // `confirmBatch` immediately, and reading it directly blanked the copy to
+  // "Hide 0 publications?" for the dialog's 200ms close animation.
+  const lastConfirmBatch = React.useRef<Pub[]>([]);
+  if (confirmBatch !== null) lastConfirmBatch.current = confirmBatch;
+  const dialogBatch = confirmBatch ?? lastConfirmBatch.current;
+  const dialogSole = dialogBatch.filter((p) => p.isSoleDisplayedAuthor);
+
+  /** ONE description for the batch. With a sole-displayed-author row it carries
+   *  the site-wide-removal warning and names which papers leave the site;
+   *  without one (superuser only) it is the plain profile-removal line above
+   *  the required reason. */
+  function confirmDescription(): string {
+    if (dialogSole.length === 0)
+      return `This removes ${dialogBatch.length === 1 ? "it" : "them"} from ${scholarName}'s public profile.`;
+    if (dialogBatch.length === 1)
+      return su
+        ? `${scholarName} is the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until it is restored, or another WCM author is added.`
+        : "You are the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until you restore it, or another WCM author is added.";
+    return `${dialogSole.length} of these ${dialogSole.length === 1 ? "lists" : "list"} ${
+      su ? scholarName : "you"
+    } as the only displayed Weill Cornell author — ${titleList(
+      dialogSole,
+    )}. Hiding a publication with no other WCM author removes it from the site entirely until it is restored, or another WCM author is added.`;
+  }
 
   return (
     <EditPanel
@@ -391,6 +435,7 @@ export function PublicationsCard({
                         pub={p}
                         error={errors.get(p.pmid) ?? null}
                         selected={selected.has(p.pmid)}
+                        busy={busy}
                         onSelect={(on) => toggle(p.pmid, on)}
                         onShow={() => show(p)}
                         rejectEnabled={rejectEnabled}
@@ -401,17 +446,20 @@ export function PublicationsCard({
                 </li>
               ))}
             </ul>
+            {/* Inside the bounded viewport — outside it the spacer scrolls with
+                the page and never clears the fixed bar. */}
+            <SelectionBarSpacer count={selected.size} />
           </ScrollArea>
         )}
 
       <SelectionBar
         count={selected.size}
         noun="publication"
+        nounPlural="publications"
         extendCount={older.length}
-        extendLabelNoun="older publication"
-        onExtend={() => setSelected(new Set([...selected, ...older.map((p) => p.pmid)]))}
+        onExtend={selectAlsoOlder}
         onHide={() => startHide(list.filter((p) => selected.has(p.pmid)))}
-        onClear={() => setSelected(new Set())}
+        onClear={clear}
         busy={busy}
       />
 
@@ -446,19 +494,17 @@ export function PublicationsCard({
         onOpenChange={(open) => {
           if (!open) setConfirmBatch(null);
         }}
-        title={`Hide ${plural(confirmBatch?.length ?? 0, "publication")}?`}
-        // One dialog for the batch, quoting how many of it are sole-author —
-        // not one prompt per row.
-        description={`${soleCount} of these ${soleCount === 1 ? "lists" : "list"} ${
-          su ? scholarName : "you"
-        } as the only displayed Weill Cornell author. Hiding a publication with no other WCM author removes it from the site entirely until it is restored, or another WCM author is added.`}
-        reasonMode="none"
-        confirmLabel="Hide anyway"
+        title={`Hide ${plural(dialogBatch.length, "publication", "publications")}?`}
+        description={confirmDescription()}
+        // A superuser is hiding someone else's paper: /api/edit/suppress 400s
+        // without a reason, and it rides every write in the batch.
+        reasonMode={su ? "required-text" : "none"}
+        confirmLabel={dialogSole.length > 0 ? "Hide anyway" : "Hide"}
         confirmVariant="destructive"
-        onConfirm={async () => {
+        onConfirm={async (reason) => {
           const batch = confirmBatch;
           setConfirmBatch(null);
-          if (batch) await hideBatch(batch);
+          if (batch) await hideBatch(batch, reason);
         }}
       />
 
@@ -496,6 +542,7 @@ function PublicationRow({
   pub,
   error,
   selected,
+  busy,
   onSelect,
   onShow,
   rejectEnabled,
@@ -508,6 +555,8 @@ function PublicationRow({
   pub: Pub;
   error: string | null;
   selected: boolean;
+  /** A batch is in flight — a tick made now would be discarded when it settles. */
+  busy: boolean;
   onSelect: (on: boolean) => void;
   onShow: () => void;
   rejectEnabled: boolean;
@@ -522,11 +571,13 @@ function PublicationRow({
             <Checkbox
               className="border-apollo-border-strong size-[18px] border-2"
               checked={selected}
+              disabled={busy}
               onCheckedChange={(c) => onSelect(c === true)}
               // Plain-text title + journal/year, so two rows sharing a title
-              // still read apart (the positions-card scheme). `htmlToPlainText`
-              // keeps PubMed's inline `<i>`/`<sub>` markup out of the label.
-              aria-label={`Select ${htmlToPlainText(pub.title)}, ${htmlToPlainText(
+              // still read apart (the positions-card scheme).
+              // `pubTitleAccessibleName` keeps PubMed's inline `<i>`/`<sub>`
+              // markup out of the label AND is guaranteed non-empty (#2209).
+              aria-label={`Select ${pubTitleAccessibleName(pub.title)}, ${htmlToPlainText(
                 pub.journal ?? "Unknown journal",
               )} · ${pub.year ?? "Year unknown"}`}
             />

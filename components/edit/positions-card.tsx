@@ -38,7 +38,13 @@ import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
 import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
-import { SelectionBar, plural } from "@/components/edit/selection-bar";
+import {
+  SelectionBar,
+  SelectionBarSpacer,
+  mapChunked,
+  plural,
+  useRowSelection,
+} from "@/components/edit/selection-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -144,7 +150,6 @@ export function PositionsCard({
   const [history, setHistory] = React.useState<EditContextHistoricalAppointment[]>([
     ...historicalAppointments,
   ]);
-  const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [hideOpen, setHideOpen] = React.useState(false);
@@ -184,20 +189,7 @@ export function PositionsCard({
   });
   const rows = [...currentRows, ...earlierRows];
 
-  const firstSelected = rows.findIndex((r) => selected.has(r.id));
-  const older =
-    firstSelected < 0
-      ? []
-      : rows.slice(firstSelected + 1).filter((r) => r.selectable && !selected.has(r.id));
-
-  function toggle(id: string, on: boolean) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
+  const { selected, toggle, clear, older, selectAlsoOlder, settle } = useRowSelection(rows);
 
   /** Flip every record of a group; commits the ones that succeeded. */
   async function setVisibility(
@@ -205,18 +197,16 @@ export function PositionsCard({
     showOnProfile: boolean,
     reason: string | null = null,
   ) {
-    const done = await Promise.all(
-      records.map(async (r) =>
-        (
-          await post("/api/edit/appointment-visibility", {
-            appointmentExternalId: r.externalId,
-            showOnProfile,
-            ...(reason ? { reason } : {}),
-          })
-        ).ok
-          ? r.externalId
-          : null,
-      ),
+    const done = await mapChunked(records, async (r) =>
+      (
+        await post("/api/edit/appointment-visibility", {
+          appointmentExternalId: r.externalId,
+          showOnProfile,
+          ...(reason ? { reason } : {}),
+        })
+      ).ok
+        ? r.externalId
+        : null,
     );
     setHistory((prev) =>
       prev.map((r) => (done.includes(r.externalId) ? { ...r, showOnProfile } : r)),
@@ -248,15 +238,16 @@ export function PositionsCard({
     setBusy(true);
     try {
       const targets = rows.filter((r) => selected.has(r.id));
-      const results = await Promise.all(
-        targets.map(async (r) =>
-          r.kind === "current"
-            ? suppress(r.appointment, reason)
-            : setVisibility(r.records, false, reason),
-        ),
+      const results = await mapChunked(targets, async (r) =>
+        r.kind === "current"
+          ? suppress(r.appointment, reason)
+          : setVisibility(r.records, false, reason),
       );
       const failed = targets.filter((_, i) => !results[i]);
-      setSelected(new Set(failed.map((r) => r.id)));
+      settle(
+        targets.map((r) => r.id),
+        failed.map((r) => r.id),
+      );
       if (failed.length > 0) {
         setError(
           `We couldn't hide ${failed.length} of the selected appointments. Please try again.`,
@@ -332,6 +323,7 @@ export function PositionsCard({
           <Checkbox
             className="border-apollo-border-strong size-[18px] border-2"
             checked={selected.has(row.id)}
+            disabled={busy}
             onCheckedChange={(c) => toggle(row.id, c === true)}
             aria-label={`Select ${row.title}, ${row.sub}${row.years ? `, ${row.years}` : ""}`}
           />
@@ -421,7 +413,7 @@ export function PositionsCard({
       <div className="mt-[26px] flex items-baseline justify-between gap-3">
         <h3 className="text-[14px] font-[600] tracking-[-0.01em]">Current</h3>
         <span className="text-muted-foreground text-xs">
-          {plural(currentRows.length, "appointment")}
+          {plural(currentRows.length, "appointment", "appointments")}
         </span>
       </div>
       {currentRows.length === 0 ? (
@@ -439,7 +431,7 @@ export function PositionsCard({
           <div className="mt-[34px] flex items-baseline justify-between gap-3">
             <h3 className="text-[14px] font-[600] tracking-[-0.01em]">Earlier ranks</h3>
             <span className="text-muted-foreground text-xs">
-              {plural(earlierRows.length, "role")} · {yearSpan(history)}
+              {plural(earlierRows.length, "role", "roles")} · {yearSpan(history)}
             </span>
           </div>
           <p className="text-muted-foreground mt-[9px] text-[13px]">
@@ -455,18 +447,19 @@ export function PositionsCard({
       <SelectionBar
         count={selected.size}
         noun="appointment"
+        nounPlural="appointments"
         extendCount={older.length}
-        extendLabelNoun="older appointment"
-        onExtend={() => setSelected(new Set([...selected, ...older.map((r) => r.id)]))}
+        onExtend={selectAlsoOlder}
         onHide={() => (isSuperuser ? setHideOpen(true) : void hideSelected(null))}
-        onClear={() => setSelected(new Set())}
+        onClear={clear}
         busy={busy}
       />
+      <SelectionBarSpacer count={selected.size} />
 
       <ConfirmDialog
         open={hideOpen}
         onOpenChange={(o) => !o && setHideOpen(false)}
-        title={`Hide ${plural(selected.size, "appointment")}?`}
+        title={`Hide ${plural(selected.size, "appointment", "appointments")}?`}
         description={`This removes ${selected.size === 1 ? "it" : "them"} from ${scholarName}'s public profile.`}
         reasonMode="required-text"
         confirmLabel="Hide"

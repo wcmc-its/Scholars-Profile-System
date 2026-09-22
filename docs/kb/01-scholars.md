@@ -46,16 +46,16 @@ The left rail has four groups: **Yours to edit** (fully yours), **From WCM recor
 
 **`/edit` → Publications.** Every paper ReCiter attributes to you, sourced from PubMed/Scopus/OpenAlex.
 
-- **Hide** removes it from your public profile only — it doesn't touch PubMed, ReCiter, or internal reports.
-- **Not mine?** tells ReCiter's attribution model it got this one wrong. Only use this for papers that genuinely aren't yours — marking your own work "not mine" feeds a false signal back into the algorithm. If a paper *is* yours but you'd rather not show it, use Hide instead.
+- **Hide** removes a paper from your public profile only — it doesn't touch PubMed, ReCiter, or internal reports. Hiding works the same way on every `/edit` tab that offers it (Positions, Publications, Education, Funding, Mentees): **tick the rows you want gone, then choose "Hide from profile"** in the bar that appears at the bottom of the screen. On a date-ordered list that bar also offers **"Also select the N older …"** to sweep up everything below your first tick. Hiding is reversible — a hidden row keeps a **Hidden** pill and a **Show** button.
+- **Not mine?** stays a per-row link on Publications, one paper at a time. It tells ReCiter's attribution model it got this one wrong. Only use this for papers that genuinely aren't yours — marking your own work "not mine" feeds a false signal back into the algorithm. If a paper *is* yours but you'd rather not show it, use Hide instead.
 
-![Publications list with Hide and "Not mine?" actions on each row](images/scholar-publications.png)
+![Publications list with a select checkbox on each row, a per-row "Not mine?" link, and the "Hide from profile" bar over the selection](images/scholar-publications.png)
 
 ## Positions, education, and funding: hide a row, or request a source fix
 
 **`/edit` → Positions & appointments / Education / Funding.** Each of these is managed at its source (Positions carries a **Managed at its source** pill), with two independent controls:
 
-- **Hide** — display-only, removes the entry from your public profile without touching the underlying record. On Positions, tick the rows and choose **Hide from profile**; a hidden row shows a **Hidden** pill with a **Show** button to reverse it. A primary appointment or a department chair role can't be hidden.
+- **Hide** — display-only, removes the entry from your public profile without touching the underlying record. Same tick-the-rows-then-**Hide from profile** bar described above. A primary appointment or a department chair role can't be hidden, so those rows carry no checkbox.
 - **Request a change** — routes the correction to the office that owns it (see below).
 
 Earlier ranks (past appointments) are grouped by rank, one row per rank across every department it was held in, and hide/show the same way. Additional positions the directory feed doesn't carry (internal leadership roles, appointments at other institutions) can be added by hand under **Additional positions** — these show only on your public profile, never in center/department rollups or search.

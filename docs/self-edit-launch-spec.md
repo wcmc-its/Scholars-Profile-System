@@ -123,7 +123,7 @@ The attribute set and who sees what:
 
 **Default attribute:** Overview (self) — the most-edited surface. The superuser surface defaults to Visibility (the most common admin action).
 
-**3. Detail panel (right).** A right-aligned "Preview Profile" link above the panel (the attribute name is *not* repeated as a heading — it already appears in the top bar and as the panel's own title; the page `h1` is the console name). Then the panel: for an **editable** attribute, the entity list with per-row hide/show (the [row model](#the-shared-per-entry-row-model)) plus a per-row "Request a change" menu; for a **read-only** attribute, the [Request-a-Change picker](#item-level-feedback--request-a-change-the-three-shape-model). On the superuser surface an **admin banner** sits above the panel and every Hide opens the reason-required dialog.
+**3. Detail panel (right).** A right-aligned "Preview Profile" link above the panel (the attribute name is *not* repeated as a heading — it already appears in the top bar and as the panel's own title; the page `h1` is the console name). Then the panel: for an **editable** attribute, the entity list — a select checkbox on every hideable row, feeding the shared **Hide from profile** bar, and a per-row **Show** to reverse it (the [row model](#the-shared-per-entry-row-model)) — plus a per-row "Request a change" menu; for a **read-only** attribute, the [Request-a-Change picker](#item-level-feedback--request-a-change-the-three-shape-model). On the superuser surface an **admin banner** sits above the panel and the bar's Hide opens the reason-required dialog.
 
 ```
 ┌─ ▉ Scholars Profile Console        [My Profile]          ?  ⛉   (JS) Jane ▾ ┐   ← black bar, maroon active tab
@@ -176,7 +176,7 @@ The Apollo layout surfaces a question every scholar asks on this screen: *"this 
 | **Funding** | wrong / missing / **not-mine (wrongly listed)** → **route** `osra-operations@med.cornell.edu` cc `scholars@weill.cornell.edu`. "Active but expired" → **explain** (NCE grace). |
 | **Publications** | **not mine / missing** → **self-service** (reject / claim in Publication Manager — *never Hide*; the attribution otherwise persists in reports + the FRT). non-PubMed missing → **explain** (PubMed-only). metadata wrong / duplicate → **route** `support@med.cornell.edu`. |
 
-**Where it appears.** A **read-only** attribute (Name & Title, Photo) shows *only* the picker — there is no in-app Hide (email/photo visibility is a Web Directory “Publish to” setting, not a Scholars suppression). An **editable** attribute (Appointments / Education / Funding / Publications) shows **both**: the per-row Hide/Show control *and* a per-row "Request a change" menu.
+**Where it appears.** A **read-only** attribute (Name & Title, Photo) shows *only* the picker — there is no in-app Hide (email/photo visibility is a Web Directory “Publish to” setting, not a Scholars suppression). An **editable** attribute (Appointments / Education / Funding / Publications) shows **both**: the row's select checkbox — hiding is the shared bottom-bar verb, **Hide from profile**, with a per-row **Show** to reverse it — *and* a per-row "Request a change" menu.
 
 **Constraints + deferrals (operator).** No deep-linking to any system (every route is a static self-service URL + instructions, or a prefilled `mailto:`). No ServiceNow business service for Scholars yet — routing is by email, not tickets; the **tracked-queue graduation** (an in-app request/approval queue, [OQ 6](#open-questions)) waits on that service, at which point the three mailboxes map to assignment groups. The **email subject/body format** is deferred (a generic subject ships). No new write path or authorization surface either way.
 
@@ -188,12 +188,12 @@ The **three new attributes** share one four-state model per entry. The publicati
 
 | `state` | Meaning | Self surface control | Superuser surface control |
 |---|---|---|---|
-| `shown` | no active `suppression` row | **Hide** | **Hide** (reason **required**) |
+| `shown` | no active `suppression` row | **select checkbox** → the shared **Hide from profile** bar | the same checkbox + bar, behind a **required**-reason confirm |
 | `hidden_by_self` | active row, `createdBy == ownerCwid` | **Show** (revoke own) | **Show** (revoke any) — labelled *"Hidden by the scholar"* |
 | `hidden_by_admin` | active row, `createdBy != ownerCwid` (a superuser hid it) | **none** + *"Hidden by an administrator."* | **Show** (revoke any) |
 | `locked` | appointment only: `isChairAppointment` is true | **none** + *"This is a department chair appointment and can't be hidden here."* | **none** + same text |
 
-**Control-rendering rule** (one predicate, both surfaces): render the revoke/**Show** control iff `state === 'hidden_by_self'` **or** (`mode === 'superuser'` **and** `state === 'hidden_by_admin'`). Render **Hide** iff `state === 'shown'`. Render nothing actionable for `locked`. This is the same `(ownRow, adminRow)` logic the Visibility surface already applies, lifted to per-row granularity.
+**Control-rendering rule** (one predicate, both surfaces): render the revoke/**Show** control iff `state === 'hidden_by_self'` **or** (`mode === 'superuser'` **and** `state === 'hidden_by_admin'`). Render the **select checkbox** that feeds the shared **Hide from profile** bar iff `state === 'shown'`. Render nothing actionable for `locked`. This is the same `(ownRow, adminRow)` logic the Visibility surface already applies, lifted to per-row granularity.
 
 **Governance note — a superuser revoking a self-applied hide.** On the superuser surface, `hidden_by_self` rows *do* show a **Show** control, because `authorizeRevoke` permits a superuser to lift any suppression. Un-hiding a row the **scholar** hid overrides the scholar's own privacy choice, so the superuser surface must **attribute** the hide (*"Hidden by the scholar"*, not the bare *"Hidden"*) and gate the revoke behind a confirm — a superuser should never silently reverse a faculty member's deliberate hide. Called out in [§ Threat model](#authorization-and-threat-model) and [OQ 3](#open-questions).
 

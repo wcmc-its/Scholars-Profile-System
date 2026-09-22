@@ -34,7 +34,7 @@ export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProp
       entityType="grant"
       entities={grants}
       filterable
-      extendNoun="older grant"
+      extendable
       sourceLabel={hasReporter ? "InfoEd and NIH RePORTER" : undefined}
       getRequestAttribute={(g) => (g.source === "RePORTER" ? "funding-reporter" : "funding")}
       getTitle={(g) => g.title}

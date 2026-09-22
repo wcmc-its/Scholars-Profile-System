@@ -1,8 +1,8 @@
 /**
  * `components/edit/publications-card.tsx` — list / filter / year-group /
- * select-and-bulk-hide behind its two guards (the first-hide-of-session notice
- * and the sole-displayed-author confirm) / optimistic show / admin-removed
- * inline text (#356 Phase 6 C7).
+ * select-and-bulk-hide behind its guards (the first-hide-of-session notice, the
+ * sole-displayed-author confirm, and the superuser's required reason) /
+ * optimistic show / admin-removed inline text (#356 Phase 6 C7).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -308,6 +308,15 @@ describe("PublicationsCard — sole-author confirm dialog (UI-SPEC edge case 11)
     );
     hideRow("a");
     expect(await screen.findByText("Hide 1 publication?")).toBeTruthy();
+    // The one-row path keeps its own sentence — batch copy ("N of these list
+    // you as…") reads wrong for the common case.
+    expect(
+      screen.getByText(
+        "You are the only Weill Cornell author shown on this publication. Hiding it removes the" +
+          " publication from the site entirely until you restore it, or another WCM author is" +
+          " added.",
+      ),
+    ).toBeTruthy();
     expect(f).not.toHaveBeenCalled();
   });
 
@@ -341,15 +350,15 @@ describe("PublicationsCard — sole-author confirm dialog (UI-SPEC edge case 11)
     expect(screen.getByText("1 publication selected")).toBeTruthy();
   });
 
-  it("ONE confirm for the batch, quoting how many of the selection are sole-author", async () => {
+  it("ONE confirm for the batch, counting AND naming the sole-author papers", async () => {
     const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
     render(
       <PublicationsCard
         cwid={CWID}
         publications={[
-          pub({ pmid: "a", state: "shown", isSoleDisplayedAuthor: true }),
-          pub({ pmid: "b", state: "shown", isSoleDisplayedAuthor: false }),
-          pub({ pmid: "c", state: "shown", isSoleDisplayedAuthor: true }),
+          pub({ pmid: "a", title: "Alpha", state: "shown", isSoleDisplayedAuthor: true }),
+          pub({ pmid: "b", title: "Beta", state: "shown", isSoleDisplayedAuthor: false }),
+          pub({ pmid: "c", title: "<i>Gamma</i>", state: "shown", isSoleDisplayedAuthor: true }),
         ]}
       />,
     );
@@ -360,17 +369,127 @@ describe("PublicationsCard — sole-author confirm dialog (UI-SPEC edge case 11)
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Hide 3 publications?")).toBeTruthy();
+    // Which papers leave the site is the whole point of the warning — the bare
+    // count never said. PubMed inline markup is stripped for the sentence.
     expect(
       within(dialog).getByText(
-        "2 of these list you as the only displayed Weill Cornell author. Hiding a publication" +
-          " with no other WCM author removes it from the site entirely until it is restored, or" +
-          " another WCM author is added.",
+        "2 of these list you as the only displayed Weill Cornell author \u2014 \u201cAlpha\u201d;" +
+          " \u201cGamma\u201d. Hiding a publication with no other WCM author removes it from the" +
+          " site entirely until it is restored, or another WCM author is added.",
       ),
     ).toBeTruthy();
     expect(f).not.toHaveBeenCalled();
     // One dialog, not one per sole-author row — confirming writes all three.
     fireEvent.click(within(dialog).getByRole("button", { name: "Hide anyway" }));
     await waitFor(() => expect(f).toHaveBeenCalledTimes(3));
+  });
+
+  it("names at most five, then 'and N more'", async () => {
+    stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    const many = ["a", "b", "c", "d", "e", "f", "g"].map((id) =>
+      pub({ pmid: id, title: id.toUpperCase(), state: "shown", isSoleDisplayedAuthor: true }),
+    );
+    render(<PublicationsCard cwid={CWID} publications={many} />);
+    many.forEach((p) => select(p.pmid));
+    bulkHide();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        /\u201cA\u201d; \u201cB\u201d; \u201cC\u201d; \u201cD\u201d; \u201cE\u201d and 2 more\./,
+      ),
+    ).toBeTruthy();
+  });
+});
+
+describe("PublicationsCard — superuser hide takes a required reason", () => {
+  const renderSu = (pubs: EditContextPublication[]) =>
+    render(
+      <PublicationsCard cwid={CWID} mode="superuser" scholarName="Alex Self" publications={pubs} />,
+    );
+
+  it("EVERY superuser hide stops for a reason, which rides every write", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    renderSu([pub({ pmid: "a" }), pub({ pmid: "b" })]);
+    select("a");
+    select("b");
+    bulkHide();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Hide 2 publications?")).toBeTruthy();
+    expect(
+      within(dialog).getByText("This removes them from Alex Self's public profile."),
+    ).toBeTruthy();
+    // Nothing written until a reason is typed: /api/edit/suppress answers 400
+    // reason_required for a superuser hiding someone else's paper.
+    expect(f).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("button", { name: "Hide" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "Ticket 42" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Hide" }));
+
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(2));
+    expect(bodies(f)).toEqual([
+      { entityType: "publication", entityId: "a", contributorCwid: CWID, reason: "Ticket 42" },
+      { entityType: "publication", entityId: "b", contributorCwid: CWID, reason: "Ticket 42" },
+    ]);
+  });
+
+  it("a superuser sole-author hide carries the site-wide warning AND the reason box", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    renderSu([pub({ pmid: "a", title: "Alpha", isSoleDisplayedAuthor: true })]);
+    hideRow("a");
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        "Alex Self is the only Weill Cornell author shown on this publication. Hiding it removes" +
+          " the publication from the site entirely until it is restored, or another WCM author" +
+          " is added.",
+      ),
+    ).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "Retracted" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Hide anyway" }));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect(bodies(f)[0].reason).toBe("Retracted");
+  });
+
+  it("a SELF hide sends no reason and opens no dialog — the route defaults it", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(<PublicationsCard cwid={CWID} publications={[pub({ pmid: "a" })]} />);
+    hideRow("a");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect(bodies(f)[0]).not.toHaveProperty("reason");
+  });
+});
+
+describe("PublicationsCard — selection integrity", () => {
+  it("checkboxes and the extend link go dead while a batch is in flight", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      await gate;
+      return new Response(JSON.stringify({ ok: true, suppressionId: "s" }), { status: 200 });
+    });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a" }), pub({ pmid: "b" }), pub({ pmid: "c" })]}
+      />,
+    );
+    select("a");
+    bulkHide();
+
+    // A tick made mid-batch would be wiped when the batch settles, so the rows
+    // and the extend link are disabled with the bar's buttons.
+    await waitFor(() => expect(row("b").getByRole("checkbox").hasAttribute("disabled")).toBe(true));
+    expect(screen.getByRole("button", { name: /Also select/ }).hasAttribute("disabled")).toBe(true);
+
+    release();
+    await waitFor(() => expect(screen.getByTestId("pub-show-a")).toBeTruthy());
   });
 });
 
@@ -664,6 +783,28 @@ describe("PublicationsCard — in-app reject (#746)", () => {
     });
   });
 
+  it("rejecting a selected row drops its pmid from the selection too", async () => {
+    stubFetch({ ok: true, suppressionId: "supp-1" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a" }), pub({ pmid: "b" })]}
+        rejectEnabled
+      />,
+    );
+    select("a");
+    select("b");
+    expect(screen.getByText("2 publications selected")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    fireEvent.click(await screen.findByTestId("reject-confirm"));
+
+    // The row is gone from the list; leaving it in the selection would leave
+    // the bar counting a phantom that Hide can never write.
+    await waitFor(() => expect(screen.queryByTestId("pub-row-a")).toBeNull());
+    expect(screen.getByText("1 publication selected")).toBeTruthy();
+  });
+
   it("a failed reject keeps the interstitial open with an inline error (row stays)", async () => {
     stubFetch({ ok: false, error: "write_failed" }, 500);
     render(
@@ -699,5 +840,25 @@ describe("PublicationsCard — in-app reject (#746)", () => {
     // …and the hide write fires (first-hide notice already acknowledged this session).
     await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
     expect((f.mock.calls[0] as [string, RequestInit])[0]).toBe("/api/edit/suppress");
+  });
+
+  it("'Hide it instead' on an UNSELECTED row leaves the rest of the selection alone", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "supp-hide" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a" }), pub({ pmid: "b" })]}
+        rejectEnabled
+      />,
+    );
+    // 'b' is ticked; the rerouted hide is a batch of one that never included it.
+    select("b");
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    fireEvent.click(await screen.findByTestId("reject-hide-instead"));
+
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect(bodies(f)[0].entityId).toBe("a");
+    await waitFor(() => expect(screen.getByText("1 publication selected")).toBeTruthy());
+    expect(row("b").getByRole("checkbox").getAttribute("aria-checked")).toBe("true");
   });
 });

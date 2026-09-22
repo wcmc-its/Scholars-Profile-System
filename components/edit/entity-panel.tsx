@@ -10,17 +10,20 @@
  * its `state` union: publications keeps its own (`removed_by_admin` ≠
  * `hidden_by_admin`).
  *
- * HIDE is a bulk verb, the same one Positions ships (#2716): a `shown` row
- * carries a checkbox, and any selection raises the shared `SelectionBar` whose
- * "Hide from profile" hides every selected row behind ONE confirm, then POSTs
- * /api/edit/suppress once per row.
+ * HIDE is a bulk verb, the same one Positions and Publications ship (#2716): a
+ * `shown` row carries a checkbox, and any selection raises the shared
+ * `SelectionBar` whose "Hide from profile" POSTs /api/edit/suppress once per
+ * selected row.
  *
  * Control-rendering rule (one predicate, both surfaces): render a **checkbox**
  * iff `state === 'shown'`; render **Show** iff `state === 'hidden_by_self'` OR
  * (`mode === 'superuser'` AND `state === 'hidden_by_admin'`); render nothing
- * actionable for `locked`. A superuser bulk hide takes a required reason, the
- * scholar a bare confirm; a superuser **Show** of a row the *scholar* hid opens
- * an "override their choice" confirm (OQ 3); every other revoke is direct.
+ * actionable for `locked`. A superuser bulk hide takes a required reason — the
+ * suppress route rejects a reasonless off-self hide — while the scholar hides
+ * straight away, because ticking a row and pressing "Hide from profile" is
+ * already two deliberate, reversible steps. A superuser **Show** of a row the
+ * *scholar* hid opens an "override their choice" confirm (OQ 3); every other
+ * revoke is direct.
  */
 "use client";
 
@@ -31,7 +34,13 @@ import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
-import { SelectionBar, plural } from "@/components/edit/selection-bar";
+import {
+  SelectionBar,
+  SelectionBarSpacer,
+  mapChunked,
+  plural,
+  useRowSelection,
+} from "@/components/edit/selection-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -67,10 +76,9 @@ export type EntityPanelCopy = {
    *  also names the entity in the hide/show dialogs and errors. */
   one: string;
   other: string;
-  /** Appended to the inline success note after a hide / show (e.g. the
-   *  funding-search latency line). Optional. */
+  /** Appended to the superuser hide confirm's description (e.g. Funding's
+   *  "may take up to a day to clear from funding search" latency line). */
   hideNote?: string;
-  showNote?: string;
   /** The locked-row explanation (appointments' chair lock). */
   lockedNote?: string;
   /** Placeholder for the filter input when `filterable`. */
@@ -91,10 +99,10 @@ export type EntityPanelProps<T extends EntityRow> = {
   renderMeta: (e: T) => React.ReactNode;
   /** Show a title filter + bounded scroll region (Funding). */
   filterable?: boolean;
-  /** Singular noun for the selection bar's "Also select the N older …" link —
-   *  only meaningful on a date-ordered list ("older entry" on Education /
-   *  Funding). Omit it and the link never renders (Mentees is name-ordered). */
-  extendNoun?: string;
+  /** Offer the selection bar's "Also select the N older …" link — only
+   *  meaningful on a date-ordered list (Education / Funding). Off by default,
+   *  so the link never renders on Mentees, which is name-ordered. */
+  extendable?: boolean;
   /** Override the header "Source: <system>" text for a multi-source panel
    *  (Funding mixes InfoEd + "via NIH RePORTER" rows). */
   sourceLabel?: string;
@@ -129,7 +137,7 @@ export function EntityPanel<T extends EntityRow>({
   getTitle,
   renderMeta,
   filterable = false,
-  extendNoun,
+  extendable = false,
   sourceLabel,
   getRequestAttribute,
   aboveList,
@@ -151,7 +159,6 @@ export function EntityPanel<T extends EntityRow>({
   const [optimistic, addOptimisticShow] = React.useOptimistic(list, applyOptimisticShow);
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
   const [filter, setFilter] = React.useState("");
-  const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
   const [bulkError, setBulkError] = React.useState<string | null>(null);
   const [hideOpen, setHideOpen] = React.useState(false);
@@ -167,6 +174,15 @@ export function EntityPanel<T extends EntityRow>({
     if (q === "") return optimistic;
     return optimistic.filter((e) => getTitle(e).toLowerCase().includes(q));
   }, [optimistic, filter, filterable, getTitle]);
+
+  // The bar counts the SELECTION, not the visible rows: filtering never drops a
+  // selected row from the batch, its checkbox just scrolls out of view with it.
+  const rows = filtered;
+  const { selected, toggle, clear, older, selectAlsoOlder, settle } = useRowSelection(
+    rows.map((e) => ({ id: e.externalId, selectable: e.state === "shown" })),
+    () => setBulkError(null),
+  );
+  const selectedCount = selected.size;
 
   function setError(id: string, msg: string | null) {
     setErrors((prev) => {
@@ -211,9 +227,9 @@ export function EntityPanel<T extends EntityRow>({
     setBusy(true);
     try {
       const ids = [...selected];
-      const results = await Promise.all(ids.map((id) => hideOne(id, reason)));
+      const results = await mapChunked(ids, (id) => hideOne(id, reason));
       const failed = ids.filter((_, i) => !results[i]);
-      setSelected(new Set(failed));
+      settle(ids, failed);
       if (failed.length > 0) {
         setBulkError(
           `We couldn't hide ${failed.length} of the selected ${copy.other}. Please try again.`,
@@ -258,28 +274,7 @@ export function EntityPanel<T extends EntityRow>({
     show(e.externalId, e.suppressionId);
   }
 
-  function toggle(externalId: string, on: boolean) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(externalId);
-      else next.delete(externalId);
-      return next;
-    });
-  }
-
-  const rows = filtered;
   const targetById = (id: string | null) => (id === null ? null : list.find((e) => e.externalId === id) ?? null);
-
-  // The bar counts the SELECTION, not the visible rows: filtering never drops a
-  // selected row from the batch, its checkbox just scrolls out of view with it.
-  const selectedCount = selected.size;
-  const firstSelected = rows.findIndex((e) => selected.has(e.externalId));
-  const older =
-    firstSelected < 0
-      ? []
-      : rows
-          .slice(firstSelected + 1)
-          .filter((e) => e.state === "shown" && !selected.has(e.externalId));
 
   const them = selectedCount === 1 ? "it" : "them";
   const hideNote = copy.hideNote ? ` ${copy.hideNote}` : "";
@@ -303,6 +298,7 @@ export function EntityPanel<T extends EntityRow>({
           lockedNote={copy.lockedNote}
           error={errors.get(e.externalId) ?? null}
           selected={selected.has(e.externalId)}
+          busy={busy}
           onSelect={(on) => toggle(e.externalId, on)}
           onShow={() => onShowClick(e)}
           testId={`${entityType}-row-${e.externalId}`}
@@ -370,38 +366,41 @@ export function EntityPanel<T extends EntityRow>({
         // lets the page scroll naturally instead of trapping it (T2.5 / 4.5).
         <ScrollArea className="border-apollo-border-strong border-t md:h-[60vh]">
           {listBody}
+          {/* Inside the bounded viewport — outside it the spacer scrolls with
+              the page and never clears the fixed bar. */}
+          <SelectionBarSpacer count={selectedCount} />
         </ScrollArea>
       ) : (
-        <div className="border-apollo-border-strong border-t">{listBody}</div>
+        <div className="border-apollo-border-strong border-t">
+          {listBody}
+          <SelectionBarSpacer count={selectedCount} />
+        </div>
       )}
 
       <SelectionBar
         count={selectedCount}
         noun={copy.one}
-        extendCount={extendNoun ? older.length : 0}
-        extendLabelNoun={extendNoun}
-        onExtend={() => setSelected(new Set([...selected, ...older.map((e) => e.externalId)]))}
-        onHide={() => setHideOpen(true)}
-        onClear={() => setSelected(new Set())}
+        nounPlural={copy.other}
+        extendCount={extendable ? older.length : 0}
+        onExtend={extendable ? selectAlsoOlder : undefined}
+        // Self hides straight away; only a superuser stops for the reason the
+        // suppress route requires off the self path.
+        onHide={() => (isSuperuser ? setHideOpen(true) : void hideSelected(null))}
+        onClear={clear}
         busy={busy}
       />
 
+      {/* SUPERUSER ONLY, and the batch takes ONE of it. The scholar's own hide
+          is direct: display-only, reversible from the same row, and the
+          console-wide rule is that ticking a row then pressing "Hide from
+          profile" is confirmation enough. A superuser is hiding someone else's
+          record, and /api/edit/suppress rejects that without a reason. */}
       <ConfirmDialog
         open={hideOpen}
         onOpenChange={(o) => !o && setHideOpen(false)}
-        // Both modes confirm before hiding (vision-round T2.6) — self gets a
-        // lightweight no-reason confirm, a superuser a required-reason one, and
-        // the batch takes ONE of them. Parity: the same verb no longer has
-        // three different safety models.
-        title={`Hide ${plural(selectedCount, copy.one)}?`}
-        description={
-          isSuperuser
-            ? `This removes ${them} from ${scholarName}'s public profile.${hideNote}`
-            : `This hides ${them} from your public profile. Hiding is not a correction — ${
-                selectedCount === 1 ? "the record stays" : "the records stay"
-              } as-is in WCM systems and on internal reports. You can show ${them} again any time.${hideNote}`
-        }
-        reasonMode={isSuperuser ? "required-text" : "none"}
+        title={`Hide ${plural(selectedCount, copy.one, copy.other)}?`}
+        description={`This removes ${them} from ${scholarName}'s public profile.${hideNote}`}
+        reasonMode="required-text"
         confirmLabel="Hide"
         confirmVariant="destructive"
         onConfirm={async (reason) => {
@@ -435,6 +434,7 @@ function EntityRowView({
   lockedNote,
   error,
   selected,
+  busy,
   onSelect,
   onShow,
   testId,
@@ -447,6 +447,8 @@ function EntityRowView({
   lockedNote?: string;
   error: string | null;
   selected: boolean;
+  /** A batch is in flight — a tick made now would be discarded when it settles. */
+  busy: boolean;
   onSelect: (on: boolean) => void;
   onShow: () => void;
   testId: string;
@@ -474,6 +476,7 @@ function EntityRowView({
             <Checkbox
               className="border-apollo-border-strong size-[18px] border-2"
               checked={selected}
+              disabled={busy}
               onCheckedChange={(c) => onSelect(c === true)}
               aria-label={metaLabel ? `Select ${title}, ${metaLabel}` : `Select ${title}`}
             />

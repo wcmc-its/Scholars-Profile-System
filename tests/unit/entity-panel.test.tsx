@@ -2,9 +2,9 @@
  * `components/edit/entity-panel.tsx` — the shared hide/show panel for the
  * Education / Funding / Mentees attributes (#160 UI follow-up). Covers the
  * control-rendering rule (checkbox / Show / nothing), the selection bar and its
- * "Also select the N older" extend link, the bulk hide fan-out with its one
- * confirm per batch, optimistic show + revert-on-error, and the chair `locked`
- * row.
+ * "Also select the N older" extend link, the bulk hide fan-out (direct for the
+ * scholar, behind ONE required-reason confirm for a superuser), optimistic show
+ * + revert-on-error, and the chair `locked` row.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -61,16 +61,10 @@ const errJson = () =>
 const row = (id: string) => within(screen.getByTestId(`appointment-row-${id}`));
 const select = (id: string) => fireEvent.click(row(id).getByRole("checkbox"));
 
-/** Open the bulk-hide confirm, type a reason when the superuser dialog asks for
- *  one, and confirm. */
-async function bulkHide(reason?: string) {
+/** Hide the selection. A self hide is direct — the only confirm on this panel
+ *  is the superuser's required-reason one. */
+const bulkHide = () =>
   fireEvent.click(screen.getByRole("button", { name: "Hide from profile" }));
-  const dialog = await screen.findByRole("dialog");
-  if (reason !== undefined) {
-    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: reason } });
-  }
-  fireEvent.click(within(dialog).getByRole("button", { name: "Hide" }));
-}
 
 const bodies = (fetchMock: ReturnType<typeof vi.fn>) =>
   fetchMock.mock.calls
@@ -139,7 +133,7 @@ describe("EntityPanel — selection", () => {
 
   it("offers the rows below the topmost selection — only on a list with extendNoun", () => {
     const rows = [shown("a1", "A"), shown("a2", "B"), shown("a3", "C")];
-    const { unmount } = renderPanel(rows, "self", { extendNoun: "older appointment" });
+    const { unmount } = renderPanel(rows, "self", { extendable: true });
     select("a2");
     // Below the selection: a3 only — a1 sits above it.
     fireEvent.click(screen.getByRole("button", { name: "Also select the 1 older appointment" }));
@@ -147,7 +141,7 @@ describe("EntityPanel — selection", () => {
     expect(screen.queryByRole("button", { name: /Also select/ })).toBeNull();
     unmount();
 
-    // No extendNoun (Mentees) → the link never renders.
+    // Not extendable (Mentees) → the link never renders.
     renderPanel(rows);
     select("a1");
     expect(screen.getByText("1 appointment selected")).toBeTruthy();
@@ -167,7 +161,7 @@ describe("EntityPanel — selection", () => {
     // The bar counts the selection, not the visible rows.
     expect(screen.getByText("1 appointment selected")).toBeTruthy();
 
-    await bulkHide();
+    bulkHide();
     await waitFor(() =>
       expect(bodies(fetchMock)).toEqual([{ entityType: "appointment", entityId: "a1" }]),
     );
@@ -175,14 +169,17 @@ describe("EntityPanel — selection", () => {
 });
 
 describe("EntityPanel — bulk hide", () => {
-  it("self: one confirm, then suppress once per selected row", async () => {
+  it("self: NO confirm — suppress fires once per selected row, reasonless", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson({ ok: true, suppressionId: "new-sup" }));
     vi.stubGlobal("fetch", fetchMock);
     renderPanel([shown("a1", "A"), shown("a2", "B"), shown("a3", "C")]);
 
     select("a1");
     select("a3");
-    await bulkHide();
+    bulkHide();
+    // Ticking a row then pressing the bar's verb is the confirmation; the
+    // route defaults the reason on a self hide, so none is sent.
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     await waitFor(() => expect(screen.queryByText(/selected$/)).toBeNull());
     expect(bodies(fetchMock)).toEqual([
@@ -237,7 +234,7 @@ describe("EntityPanel — bulk hide", () => {
 
     select("a1");
     select("a2");
-    await bulkHide();
+    bulkHide();
 
     expect(
       await screen.findByText("We couldn't hide 1 of the selected appointments. Please try again."),
@@ -245,6 +242,15 @@ describe("EntityPanel — bulk hide", () => {
     expect(screen.getByText("1 appointment selected")).toBeTruthy();
     expect(row("a1").getByRole("checkbox").getAttribute("aria-checked")).toBe("true");
     expect(screen.getByTestId("appointment-row-a2-show")).toBeTruthy();
+
+    // The alert describes the still-selected rows, so emptying the selection
+    // clears it — otherwise it outlives what it is talking about.
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText("We couldn't hide 1 of the selected appointments. Please try again."),
+      ).toBeNull(),
+    );
   });
 });
 
