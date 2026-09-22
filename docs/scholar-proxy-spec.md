@@ -41,7 +41,13 @@ Proxy edit scope is **identically** self-edit scope (D4). The proxy sees the sam
 | Assign / revoke a proxy for the scholar | ✅ self (D1) | ⛔ — **a proxy can never manage the proxy list** (CD-2) | ✅ (D1) |
 | Edit any other scholar's profile | ⛔ | ⛔ — `403` on any non-granted scholar (PE-06) | ✅ |
 
-**The proxy field set is *exactly* `{ overview }` for field edits, and *exactly* per-author publication hide where `contributorCwid === the granted scholarCwid`.** Everything else is a `403` (or `400` for an out-of-allowlist field/entity). This is a **positive allowlist**, not a denylist — a future new self-editable field does not become proxy-reachable unless this SPEC widens the allowlist (PE-03).
+**The proxy field set is *exactly* `{ overview, primaryTitleRequest }` for field edits, and *exactly* a per-subject hide of `{ publication, appointment, education, grant }` where the subject is the granted scholarCwid.** Everything else is a `403` (or `400` for an out-of-allowlist field/entity). This is a **positive allowlist**, not a denylist — a future new self-editable field does not become proxy-reachable unless this SPEC widens the allowlist (PE-03).
+
+> **Amendment, 2026-09-22 (#2720).** PE-03's hide set was originally `publication` alone. That was narrower than the principle D4 states — *"the proxy is acting for the scholar, so they get the scholar's surface, no more"* — because the scholar's own surface **already** includes hiding their own appointment, education and grant rows (`authorizeSuppress`'s whole-entity branch). A proxy or unit admin who tried got a `403` that could never succeed, on a row the scholar could hide unaided. The three whole-entity types are therefore added to the delegated hide, restoring D4's stated intent rather than widening past it.
+>
+> Still excluded, deliberately: `scholar` (a whole-profile suppression), `mentee`, `dataset_deposit`, and any whole-entity publication takedown — all remain superuser-only. The `leadership_appointment_not_suppressible` `409` guard sits **upstream** of the delegated block and is unaffected, so a delegate still cannot hide the appointment that confers a chair role (covered by a regression test in `tests/unit/edit-suppress-route.test.ts`).
+>
+> The same amendment adds `primaryTitleRequest` to the proxy **field** set. It is the mildest possible widening: a title request is a pending row with **no public effect** until an operator approves it, and its value must equal one of at most four precomputed options rather than being free text. Setting the title (`primaryTitle`) is **not** proxy-reachable — that stays with superusers, comms stewards and unit admins.
 
 ---
 
@@ -109,7 +115,7 @@ Enforced at **grant time** (blocking) **and** re-checked **fail-closed at every 
 A proxy edits **exactly** what the scholar could self-edit: `overview`, and hiding the scholar's own misattributed publications. Upstream-authoritative scalars (`primaryTitle`, `primaryDepartment`, `email`, `orcid`, `postnominal`, …) are **not** proxy-editable; `slug` stays **superuser-only**. The mechanism is reused **verbatim** from `self-edit-spec.md` / #540 — no new write mechanism, only a new authorized actor.
 
 - **Rationale.** Self-edit-spec's reasoning that a `field_override` on an upstream scalar permanently masks the system of record is **actor-independent** — it holds whoever is editing. The proxy is acting *for* the scholar, so they get *the scholar's* surface, no more.
-- **Enforcement.** The proxy branch is entered **only** for `entityType='scholar', fieldName='overview'` on `/api/edit/field`, and **only** for `entityType='publication'` with `contributorCwid === scholarCwid` on `/api/edit/suppress` (PE-03). A proxy attempt on `slug`, any other scalar, a whole-profile suppression, a whole-publication takedown, or a publication where `contributorCwid !== scholarCwid` → `403`/`400`.
+- **Enforcement.** The proxy branch is entered **only** for `entityType='scholar'` with `fieldName` in `{ overview, primaryTitleRequest }` on `/api/edit/field`, and **only** for `entityType` in `{ publication, appointment, education, grant }` whose subject is the granted `scholarCwid` on `/api/edit/suppress` (PE-03, as amended 2026-09-22). A proxy attempt on `slug`, `primaryTitle`, any other scalar, a whole-profile suppression, a `mentee` or `dataset_deposit` suppression, a whole-publication takedown, or a publication where `contributorCwid !== scholarCwid` → `403`/`400`.
 - **Rejected alternative — let the scholar delegate a wider scope.** D4 is a **hard architectural constraint**, not a per-grant policy. A proxy can *never* edit via superuser-only paths even if the scholar wished it; there is no grant field that widens scope. (Open question 1 below confirms this is fixed.)
 
 ### D5 — Cardinality: many-to-many
@@ -326,7 +332,7 @@ if (!authz.ok && fieldName === "overview" && impersonatedCwid === null) {
 if (!authz.ok) { /* existing 403 */ }
 ```
 
-**Suppress write** — `app/api/edit/suppress/route.ts`. Add the **scoped** proxy path **only** for `entityType === "publication"` AND `contributorCwid === entityId-target's scholarCwid` — i.e. the proxy may hide **only the granted scholar's own** authorship, never another author's, and never a whole-entity grant/education/appointment/scholar suppression (PE-03, IS-2). The check is `isGrantedProxy(realCwid, contributorCwid, …)` (the contributor IS the granted scholar) + `checkProxyConflictingRole` + the existing `publicationAuthorshipExists(pmid, contributorCwid)` `400` validation.
+**Suppress write** — `app/api/edit/suppress/route.ts`. The **scoped** proxy path runs for `entityType` in `{ publication, appointment, education, grant }`, keyed on the hide's SUBJECT — `contributorCwid` for a per-author publication hide, the resolved `ownerCwid` for a whole-entity appointment/education/grant hide — which must be the granted scholar. The proxy may still never take down a whole publication, nor suppress a `scholar`, `mentee` or `dataset_deposit` (PE-03, IS-2, as amended 2026-09-22). The check is `isGrantedProxy(realCwid, subject, …)` + `checkProxyConflictingRole` + the existing per-type `400` validations (`publicationAuthorshipExists`, `findSuppressibleEntityOwner`).
 
 **Grant/revoke** — `app/api/edit/proxy/route.ts` (new, [below](#api-and-ui)).
 

@@ -157,7 +157,16 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           office: "ITS Support",
           email: SUPPORT_EMAIL,
           sourceSystem: "primary appointment (ASMS / Enterprise Directory)",
-          note: "Your title is the title of your primary appointment, sourced from ASMS / Enterprise Directory.",
+          // #2720 — the displayed title is no longer always the primary
+          // appointment's: an ED "working title", a division-chief role or a
+          // center-head role can outrank it (lib/scholar-title.ts). WHICH of
+          // those shows is now a picker on this panel, so the honest split is:
+          // the wrong CHOICE is fixable here, a wrong SOURCE VALUE is not.
+          note:
+            "Your title comes from ASMS / Enterprise Directory — usually your primary " +
+            "appointment, though a working title or a leadership role can take precedence. " +
+            "If the right title is already listed on this panel, ask for it there instead; " +
+            "write to us when every listed option is wrong at the source.",
         }),
       },
       {

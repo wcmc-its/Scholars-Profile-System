@@ -142,9 +142,21 @@ it). The extension is deliberately minimal and reuses the SHIPPED Amendment 4 pa
 - **Roles (D2 unchanged).** Owner **or** curator of the center, resolved live via
   `getEffectiveUnitRole({kind:'center', code})` (the `UnitAdmin.entityType` enum already includes
   `center`).
-- **Surface (unchanged).** Exactly the existing allowlist — `overview` (bio) edit + own-publication
+- **Surface.** Exactly the existing allowlist — `overview` (bio) edit + own-publication
   hide (`publication` + `contributorCwid === S`). **No** slug / visibility / highlights / COI /
   topics / unit structure.
+
+  **Amended 2026-09-22 (#2720),** tracking the matching PE-03 amendment in
+  [scholar-proxy-spec.md](./scholar-proxy-spec.md): the delegated hide now also covers
+  `appointment`, `education` and `grant` where the resolved `ownerCwid` is `S`. The rationale is
+  the same — the scholar's own surface already includes hiding those rows, so a unit admin having
+  less than it produced a `403` that could never succeed. `scholar`, `mentee`, `dataset_deposit`
+  and whole-publication takedowns stay superuser-only, and the
+  `leadership_appointment_not_suppressible` `409` is upstream and unaffected.
+
+  Unit admins additionally may SET a scholar's display title (`field_override(primaryTitle)`,
+  #2720) — the one field edit beyond `overview` this role reaches. It is not free text: the value
+  must equal one of at most four precomputed options.
 - **Invariants preserved.** Keyed on `realCwid` with the `impersonatedCwid === null` gate (IS-1: a
   #637 "View as" overlay never confers the center path); `scholar.deletedAt` fail-closed; the #536
   hidden-identity (doctoral-student) 404 in `/edit/scholar/[cwid]` still fires for every non-superuser

@@ -1659,6 +1659,28 @@ export class AppStack extends Stack {
         // `sameAs` render. Independent of the ORCID kill switch above (the tab
         // shows when either is on). ON in both envs since 2026-09-22.
         SELF_EDIT_PROFILE_LINKS: "on",
+        // SCHOLAR_TITLE_RESOLUTION (#2720) — the display-title picker on the
+        // /edit Name & title panel, its scholar-facing request path, and the ED
+        // ETL's title-resolution post-pass. Read by BOTH the app and the ETL, so
+        // it is wired in etl-stack.ts's baseEnvironment too and BOTH MUST AGREE
+        // for flag parity (same dual-wiring as SELF_EDIT_ED_ADMINS_IMPORT).
+        //
+        // OFF ⇒ dark: the picker does not render, `POST /api/edit/field` rejects
+        // both `primaryTitle` and `primaryTitleRequest` as unknown fields, and
+        // the ETL resolves from the operator override + ED primary title only —
+        // i.e. today's titles. Because the post-pass recomputes EVERY scholar
+        // rather than only the ones it changed, flipping this back off
+        // self-heals on the next nightly instead of stranding 43 scholars on a
+        // title nobody can reach.
+        //
+        // DATA PREREQ (migrate-then-run-then-flip): the migration adds
+        // `scholar.ed_primary_title` / `scholar.working_title`, which stay NULL
+        // until an ED ETL run populates them. Flip only AFTER a run, or the
+        // picker has nothing to offer.
+        //
+        // STAGING-FIRST: on in staging to soak (43 titles change), off in prod
+        // until the regression watchlist has been screened.
+        SCHOLAR_TITLE_RESOLUTION: envConfig.envName === "prod" ? "off" : "on",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in

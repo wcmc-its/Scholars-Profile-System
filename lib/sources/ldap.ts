@@ -71,6 +71,12 @@ export const DEFAULT_NYP_AFFILIATES_FILTER =
 export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
   "weillCornellEduPrimaryTitle",
+  // Probe 2026-09-22: an HR-curated override for the primary title, carried
+  // on the PEOPLE branch only (the faculty SOR does not return it). Present
+  // on 49 of 8,769 active academic entries, always single-valued, and never
+  // present without a primary title. Outranks the primary title in
+  // `lib/scholar-title.ts`.
+  "weillCornellEduWorkingTitle",
   "weillCornellEduMiddleName",
   // Curated human-readable display name from the directory. Preferred over
   // the constructed `givenName + sn` form so initials, middle names, and
@@ -223,6 +229,10 @@ export type EdFacultyEntry = {
   /** ED title with internal HR annotations removed — see
    *  {@link stripInternalHrAnnotation}. */
   primaryTitle: string | null;
+  /** ED `weillCornellEduWorkingTitle`, same annotation strip as
+   *  `primaryTitle`. Outranks it in `lib/scholar-title.ts`. Null for the ~99%
+   *  of entries that carry no working title. */
+  workingTitle: string | null;
   primaryDepartment: string | null;
   /** ED `weillCornellEduPrimaryOrganization` — institution code of the primary
    *  appointment (`WCMC`, `WCMC-Q`, `HMC`, ...). See lib/institutions.ts. */
@@ -1070,6 +1080,12 @@ export function projectEntries(
       fullName: fullName || preferredName || cwid,
       primaryTitle: stripInternalHrAnnotation(
         firstString(e.weillCornellEduPrimaryTitle) ?? firstString(e.title) ?? null,
+      ),
+      // Same normalization as primaryTitle: an annotation is an annotation
+      // whichever ED attribute carries it, and doing it here keeps every
+      // consumer of a working title on one rule.
+      workingTitle: stripInternalHrAnnotation(
+        firstString(r["weillCornellEduWorkingTitle"]) ?? null,
       ),
       primaryDepartment:
         firstString(r["weillCornellEduPrimaryDepartment"]) ??

@@ -23,6 +23,7 @@ const {
   mockDivisionMembershipFindMany,
   mockDivisionFindMany,
   mockUnitAdminFindMany,
+  mockProxyFindUnique,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -43,12 +44,18 @@ const {
   mockDivisionMembershipFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
+  mockProxyFindUnique: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
 // Drive it from the same `mockGetEditSession` knob (non-impersonating: real ==
 // effective, so `actor_cwid` is this cwid and `impersonatedCwid` stays null).
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/superuser", () => ({
+  getEditSession: mockGetEditSession,
+  // #2720 — `checkProxyConflictingRole` reaches for this. Unused until the
+  // delegated-hide tests below started exercising the proxy path.
+  isSuperuser: vi.fn(async () => false),
+}));
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEditSession,
   impersonationActive: vi.fn().mockReturnValue(false),
@@ -76,7 +83,7 @@ vi.mock("@/lib/db", () => ({
       orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
       // #779 — a per-author publication hide by a non-self actor now probes for
       // a proxy grant before denying; no grant in these tests ⇒ null ⇒ unchanged.
-      scholarProxy: { findUnique: async () => null },
+      scholarProxy: { findUnique: mockProxyFindUnique },
       // Amendment 4 — and then for a unit-admin role over the author's unit.
       // Deny by default (no scholar row ⇒ resolver returns null).
       scholar: { findUnique: mockScholarFindUnique },
@@ -128,6 +135,7 @@ beforeEach(() => {
   mockExecuteRaw.mockResolvedValue(1);
   mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
   // Whole-entity lookups (#160) — default: owned by self01, no chair role.
+  mockProxyFindUnique.mockResolvedValue(null);
   mockGrantFindUnique.mockResolvedValue({ cwid: "self01" });
   mockEducationFindUnique.mockResolvedValue({ cwid: "self01" });
   mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Professor of Medicine" });
@@ -441,6 +449,81 @@ describe("POST /api/edit/suppress — unit-admin branch (Amendment 4)", () => {
     ]);
     const res = await POST(post({ entityType: "publication", entityId: "999", reason: "takedown" }));
     expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/edit/suppress — delegated hide widened past publications (#2720)", () => {
+  const UNIT_ADMIN = { cwid: "uadm01", isSuperuser: false };
+  const IN_UNIT = { deptCode: "DEPT-MED", divCode: null, deletedAt: null };
+  const CURATOR = [{ entityType: "department", entityId: "DEPT-MED", role: "curator" }];
+
+  // The gap this closes: the scholar's OWN surface already includes hiding
+  // their own appointment / education / grant, so a delegate having LESS than
+  // that contradicted scholar-proxy-spec § D4 ("the scholar's surface, no
+  // more"). Before the fix these three were a 403 that could never succeed.
+  for (const entityType of ["appointment", "education", "grant"] as const) {
+    it(`lets a unit admin hide the in-unit scholar's ${entityType} row — 200`, async () => {
+      mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+      mockScholarFindUnique.mockResolvedValue(IN_UNIT);
+      mockUnitAdminFindMany.mockResolvedValue(CURATOR);
+      const res = await POST(post({ entityType, entityId: "row-1", reason: "wrong row" }));
+      expect(res.status).toBe(200);
+      expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it(`denies a unit admin with no role over that scholar's unit — ${entityType} 403`, async () => {
+      mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+      mockScholarFindUnique.mockResolvedValue(IN_UNIT);
+      mockUnitAdminFindMany.mockResolvedValue([]);
+      const res = await POST(post({ entityType, entityId: "row-1", reason: "wrong row" }));
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it(`lets a granted proxy hide the granted scholar's ${entityType} row — 200`, async () => {
+      mockGetEditSession.mockResolvedValue({ cwid: "prox01", isSuperuser: false });
+      mockProxyFindUnique.mockResolvedValue({ scholarCwid: "self01", proxyCwid: "prox01" });
+      const res = await POST(post({ entityType, entityId: "row-1", reason: "wrong row" }));
+      expect(res.status).toBe(200);
+    });
+  }
+
+  // The allowlist is POSITIVE — widening it must not have opened the two
+  // whole-entity types that stay superuser-only.
+  it("still denies a unit admin a whole-profile (scholar) suppression — 403", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    mockScholarFindUnique.mockResolvedValue(IN_UNIT);
+    mockUnitAdminFindMany.mockResolvedValue(CURATOR);
+    const res = await POST(post({ entityType: "scholar", entityId: "self01", reason: "no" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("still denies a unit admin a mentee suppression — 403", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    mockScholarFindUnique.mockResolvedValue(IN_UNIT);
+    mockUnitAdminFindMany.mockResolvedValue(CURATOR);
+    const res = await POST(post({ entityType: "mentee", entityId: "self01:men01", reason: "no" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  // The 409 guard sits UPSTREAM of the delegated block, so widening must not
+  // have let a delegate hide the appointment that confers a chair role.
+  it("still refuses a leadership appointment — 409, not a delegated 200", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    mockScholarFindUnique.mockResolvedValue(IN_UNIT);
+    mockUnitAdminFindMany.mockResolvedValue(CURATOR);
+    mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Chair of Medicine" });
+    // A chair is title + assignment + department NAME — the title string alone
+    // is inert, because the guard runs `isChairTitleFor(title, deptName)`.
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({ entityId: "MED" });
+    mockDepartmentFindUnique.mockResolvedValue({ name: "Medicine" });
+    const res = await POST(
+      post({ entityType: "appointment", entityId: "row-1", reason: "wrong row" }),
+    );
+    expect(res.status).toBe(409);
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

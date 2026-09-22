@@ -23,6 +23,7 @@
 import { db } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
+import { resolveScholarTitles } from "./title-resolution";
 import {
   loadUnitOverridesForETL,
   resolveUnitLeaderForETL,
@@ -31,6 +32,7 @@ import {
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import { DEPARTMENT_NAMES } from "@/lib/department-names";
 import { deriveProfessorialRank } from "@/lib/faculty-rank";
+import { isTitleResolutionEnabled } from "@/lib/edit/title-picker";
 import { formerFacultyRole } from "@/lib/mentee-suggestions/kind";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
@@ -1219,7 +1221,16 @@ async function main() {
             preferredName: f.preferredName,
             fullName: f.fullName,
             postnominal: f.degree?.trim() || null,
+            // `primaryTitle` holds the RESOLVED display title, but the chief /
+            // center-head tiers do not exist until the leader assignments are
+            // written further down this run. So write the ED value here as a SEED
+            // — identical to pre-resolution behaviour — and let
+            // `resolveScholarTitles()` at the tail overwrite it. A run that dies
+            // before the post-pass therefore degrades to today's titles rather
+            // than to a blank subtitle.
             primaryTitle: f.primaryTitle,
+            edPrimaryTitle: f.primaryTitle,
+            workingTitle: f.workingTitle,
             primaryDepartment: primaryDepartmentDisplay,
             primaryOrgCode: f.primaryOrgCode,
             email: f.email,
@@ -1271,7 +1282,16 @@ async function main() {
             preferredName: f.preferredName,
             fullName: f.fullName,
             postnominal: f.degree?.trim() || null,
+            // `primaryTitle` holds the RESOLVED display title, but the chief /
+            // center-head tiers do not exist until the leader assignments are
+            // written further down this run. So write the ED value here as a SEED
+            // — identical to pre-resolution behaviour — and let
+            // `resolveScholarTitles()` at the tail overwrite it. A run that dies
+            // before the post-pass therefore degrades to today's titles rather
+            // than to a blank subtitle.
             primaryTitle: f.primaryTitle,
+            edPrimaryTitle: f.primaryTitle,
+            workingTitle: f.workingTitle,
             primaryDepartment: primaryDepartmentDisplay,
             primaryOrgCode: f.primaryOrgCode,
             email: f.email,
@@ -2157,6 +2177,25 @@ async function main() {
           );
         }
       }
+    }
+
+    // Title resolution (#2720). MUST run here: two of the four tiers
+    // (division chief, center head) are the `OrgUnitRoleAssignment` rows the
+    // blocks above just finished writing, so resolving any earlier would read
+    // last night's leadership. The scholar upsert wrote the ED value as a seed
+    // and the raw tiers alongside it; this recomputes the winner for EVERY
+    // scholar and updates only where it differs, which is what makes a lost
+    // chief role or a cleared override revert without a backfill.
+    {
+      const derived = isTitleResolutionEnabled();
+      const titles = await resolveScholarTitles(db.write, { applyDerivedTiers: derived });
+      console.log(
+        `[ED] title resolution: scanned ${titles.scanned}, updated ${titles.updated} ` +
+          `(${Object.entries(titles.byTier)
+            .map(([tier, n]) => `${tier}=${n}`)
+            .join(", ")})` +
+          (derived ? "" : " — SCHOLAR_TITLE_RESOLUTION off, ED tiers only"),
+      );
     }
 
     // Phase 3 — scholarCount refresh.

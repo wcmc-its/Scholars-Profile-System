@@ -36,6 +36,9 @@ import { EditPage } from "@/components/edit/edit-page";
 import type { EditContext } from "@/lib/api/edit-context";
 
 const ctx: EditContext = {
+  // #2720 — null is the flag-off shape: the Title row stays a plain read-only
+  // value, which is what every assertion in this file expects.
+  titlePicker: null,
   scholar: {
     cwid: "self01",
     slug: "self-slug",
