@@ -531,6 +531,8 @@ describe("PublicationsCard — show (revoke)", () => {
 
 describe("PublicationsCard — first-hide-of-session notice (#570)", () => {
   const NOTICE_TITLE = "You're about to hide this paper.";
+  // The bulk path pluralises the same notice.
+  const NOTICE_TITLE_MANY = (n: number) => `You're about to hide these ${n} papers.`;
 
   beforeEach(() => {
     // Un-acknowledge — this block tests the notice itself (the global beforeEach
@@ -562,11 +564,11 @@ describe("PublicationsCard — first-hide-of-session notice (#570)", () => {
     select("a");
     select("b");
     bulkHide();
-    expect(await screen.findByText(NOTICE_TITLE)).toBeTruthy();
+    expect(await screen.findByText(NOTICE_TITLE_MANY(2))).toBeTruthy();
     expect(f).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId("first-hide-cancel"));
-    await waitFor(() => expect(screen.queryByText(NOTICE_TITLE)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(NOTICE_TITLE_MANY(2))).toBeNull());
     expect(f).not.toHaveBeenCalled();
     expect(screen.getByText("2 publications selected")).toBeTruthy();
 

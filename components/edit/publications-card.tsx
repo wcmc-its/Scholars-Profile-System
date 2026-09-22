@@ -467,6 +467,7 @@ export function PublicationsCard({
 
       <FirstHideNoticeDialog
         open={noticeBatch !== null}
+        count={noticeBatch?.length ?? 1}
         onOpenChange={(open) => {
           // Cancel / Esc / backdrop / X — backed out without deciding. Close
           // but do NOT acknowledge, so the notice can resurface next time; the
