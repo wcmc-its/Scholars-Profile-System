@@ -62,7 +62,7 @@ type CandidatePub = OverviewFacts["representativePublications"][number];
 /** A blended impact score: the ReciterAI impact score (recency-robust) plus a log-scaled
  *  citation bonus (rewards established work without letting raw counts dominate recent,
  *  not-yet-cited work). Either signal absent contributes 0. */
-function blendedImpactScore(p: CandidatePub): number {
+function blendedImpactScore(p: { impact: number | null; citationCount?: number | null }): number {
   const impact = typeof p.impact === "number" ? p.impact : 0;
   const cites = typeof p.citationCount === "number" ? p.citationCount : 0;
   return impact + Math.log10(1 + Math.max(0, cites)) * 5;
@@ -99,49 +99,98 @@ function aimsOverlapScore(p: CandidatePub, aimsTokens: Set<string>): number {
   return n;
 }
 
-/** The distinct statement tokens a publication's text (title + synopsis + topicRationale)
- *  matches. Same token basis as {@link aimsOverlapScore}; that returns the COUNT, this returns
- *  the TERMS — the "why matched" surface for the suggest-pubs mode (#1569). */
-function matchedStatementTerms(p: CandidatePub, statementTokens: Set<string>): string[] {
-  if (statementTokens.size === 0) return [];
-  const pubTokens = new Set([
-    ...tokenize(p.title),
-    ...tokenize(p.synopsis),
-    ...tokenize(p.topicRationale),
-  ]);
-  const out: string[] = [];
-  for (const t of pubTokens) if (statementTokens.has(t)) out.push(t);
-  return out.sort();
+/** What the statement matcher reads per publication. Wider than the facts' candidate pub:
+ *  the suggest-pubs route loads ALL of the scholar's confirmed publications, with abstract and
+ *  MeSH labels, not the ≤25-item overview selection. */
+export type StatementCandidatePub = {
+  pmid: string;
+  title: string;
+  venue: string | null;
+  year: number | null;
+  impact: number | null;
+  citationCount?: number | null;
+  synopsis?: string | null;
+  topicRationale?: string | null;
+  abstract?: string | null;
+  /** MeSH descriptor labels (`extractMeshLabels` of `publication.mesh_terms`). */
+  meshTerms?: string[];
+};
+
+// Longest first; the first suffix whose removal leaves ≥ 4 chars wins (one strip per word).
+// prettier-ignore
+const SUFFIXES = [
+  "ations", "ically", "ation", "ities", "izing", "ical", "isms", "ized", "izes", "ies", "ity",
+  "ism", "ize", "ing", "ic", "al", "es", "ed", "is", "s", "e",
+];
+
+/** Crude suffix stemmer: tumor/tumors, metabolic/metabolism, analysis/analyses, case/cases
+ *  land on one stem. Both sides go through it, so a stem only has to be consistent, not a word.
+ *  ponytail: suffix list, not Porter; misses irregulars (pancreas/pancreatic). Swap in a real
+ *  stemmer if recall complaints name specific word pairs. */
+export function stem(t: string): string {
+  for (const suf of SUFFIXES) {
+    if (suf === "s" && t.endsWith("ss")) continue;
+    if (t.endsWith(suf) && t.length - suf.length >= 4) return t.slice(0, -suf.length);
+  }
+  return t;
+}
+
+/** Statement-matcher tokens as stem → the first surface word seen (for the "matched" line).
+ *  `tokenize()` words, stemmed, plus 2–3-char ALL-CAPS acronyms (EHR, HIV, CAR) that the
+ *  4-char floor would otherwise drop. Acronyms are read from the original casing, so an
+ *  ordinary short word ("of", "new") never becomes a term. */
+function statementTerms(s: string | null | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!s) return out;
+  const clean = s.replace(/<[^>]+>/g, " ");
+  for (const w of tokenize(clean)) if (!out.has(stem(w))) out.set(stem(w), w);
+  for (const a of clean.match(/\b[A-Z][A-Z0-9]{1,2}\b/g) ?? []) {
+    const t = a.toLowerCase();
+    if (!STOPWORDS.has(t) && !out.has(t)) out.set(t, a);
+  }
+  return out;
+}
+
+function pubTerms(p: StatementCandidatePub): Set<string> {
+  const text = [p.title, p.synopsis, p.topicRationale, p.abstract, ...(p.meshTerms ?? [])];
+  return new Set(text.flatMap((t) => [...statementTerms(t).keys()]));
 }
 
 /**
- * Rank a scholar's publications against a user-written free-text statement by token overlap,
- * most-overlapping first, ties broken by blended impact. DETERMINISTIC — reuses `tokenize()` +
- * `aimsOverlapScore()`; there is NO model/LLM call, and every returned pmid is one of the
- * scholar's own indexed publications (nothing invented). Only publications that overlap the
- * statement are returned, capped at `limit` (default 10). Powers the "write your own statement
- * → suggested publications" mode (#1569).
+ * Rank a scholar's publications against a user-written free-text statement, most-overlapping
+ * first, ties broken by blended impact. The overlap is the count of distinct statement terms
+ * (stemmed words + acronyms) found in the publication's title, synopsis, topic rationale,
+ * abstract, or MeSH labels. DETERMINISTIC — no model/LLM call, and every returned pmid is one
+ * of the scholar's own publications (nothing invented). Only overlapping publications are
+ * returned, capped at `limit` (default 10). Powers "Find publications" (#1569).
  */
 export function suggestPubsFromStatement(
-  pubs: CandidatePub[],
+  pubs: StatementCandidatePub[],
   statement: string,
   limit = 10,
 ): SuggestedPub[] {
-  const statementTokens = new Set(tokenize(statement));
-  if (statementTokens.size === 0) return [];
+  const terms = statementTerms(statement);
+  if (terms.size === 0) return [];
   return pubs
-    .map((p) => ({ p, overlap: aimsOverlapScore(p, statementTokens) }))
-    .filter((x) => x.overlap > 0)
-    .sort((a, b) => b.overlap - a.overlap || blendedImpactScore(b.p) - blendedImpactScore(a.p))
+    .map((p) => {
+      const have = pubTerms(p);
+      const matched = [...terms].filter(([t]) => have.has(t)).map(([, surface]) => surface);
+      return { p, matched };
+    })
+    .filter((x) => x.matched.length > 0)
+    .sort(
+      (a, b) =>
+        b.matched.length - a.matched.length || blendedImpactScore(b.p) - blendedImpactScore(a.p),
+    )
     .slice(0, Math.max(0, limit))
-    .map((x) => ({
-      pmid: x.p.pmid,
-      title: x.p.title.replace(/<[^>]+>/g, ""),
-      venue: x.p.venue,
-      year: x.p.year,
-      impact: typeof x.p.impact === "number" ? x.p.impact : null,
-      overlap: x.overlap,
-      matchedTerms: matchedStatementTerms(x.p, statementTokens),
+    .map(({ p, matched }) => ({
+      pmid: p.pmid,
+      title: p.title.replace(/<[^>]+>/g, ""),
+      venue: p.venue,
+      year: p.year,
+      impact: typeof p.impact === "number" ? p.impact : null,
+      overlap: matched.length,
+      matchedTerms: matched.sort(),
     }));
 }
 

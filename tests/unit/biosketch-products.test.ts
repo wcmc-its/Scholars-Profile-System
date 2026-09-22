@@ -6,6 +6,8 @@ import {
   productPmids,
   selectBiosketchProducts,
   suggestPubsFromStatement,
+  stem,
+  type StatementCandidatePub,
   type BiosketchProducts,
 } from "@/lib/edit/biosketch-products";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
@@ -194,6 +196,56 @@ describe("suggestPubsFromStatement (#1569)", () => {
     expect(out[0].overlap).toBe(3);
     expect(out[0].matchedTerms).toEqual(["cancer", "immunotherapy", "resistance"]);
     expect(out[0].title).toBe("Cancer cancer immunotherapy");
+  });
+
+  it("stems both sides: tumors/tumor, metabolism/metabolic, analyses/analysis", () => {
+    const pubs = [pub({ pmid: "s", title: "Metabolic analysis of pancreatic tumors" })];
+    const out = suggestPubsFromStatement(pubs, "tumor metabolism analyses");
+    expect(out[0].overlap).toBe(3);
+    // The matched line shows the user's own words, not stems.
+    expect(out[0].matchedTerms).toEqual(["analyses", "metabolism", "tumor"]);
+  });
+
+  it("keeps short ALL-CAPS acronyms, but not ordinary short words", () => {
+    const pubs = [pub({ pmid: "a", title: "EHR reuse for HIV cohorts" })];
+    expect(suggestPubsFromStatement(pubs, "EHR data")[0].matchedTerms).toEqual(["EHR"]);
+    // Lowercase short words never become terms.
+    expect(suggestPubsFromStatement(pubs, "ehr hiv")).toEqual([]);
+  });
+
+  it("matches the abstract and MeSH labels, not only the title", () => {
+    const pubs: StatementCandidatePub[] = [
+      {
+        pmid: "abs",
+        title: "A cohort",
+        venue: null,
+        year: 2020,
+        impact: null,
+        abstract: "We measured documentation burden in ambulatory clinics.",
+      },
+      {
+        pmid: "mesh",
+        title: "A cohort",
+        venue: null,
+        year: 2020,
+        impact: null,
+        meshTerms: ["Electronic Health Records"],
+      },
+    ];
+    expect(suggestPubsFromStatement(pubs, "documentation burden").map((p) => p.pmid)).toEqual([
+      "abs",
+    ]);
+    expect(suggestPubsFromStatement(pubs, "electronic records").map((p) => p.pmid)).toEqual([
+      "mesh",
+    ]);
+  });
+
+  it("stem() strips one suffix and never below four characters", () => {
+    expect(stem("tumors")).toBe("tumor");
+    expect(stem("process")).toBe("process");
+    expect(stem("processes")).toBe("process");
+    expect(stem("genes")).toBe("gene");
+    expect(stem("gene")).toBe("gene");
   });
 
   it("caps the output at the limit (default 10)", () => {

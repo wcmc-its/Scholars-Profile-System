@@ -62,7 +62,7 @@ describe("BiosketchGenerateControls — role on the application (#2653 v8)", () 
     // DOM order: role precedes the project title
     expect(role!.compareDocumentPosition(title!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(root.querySelector('[data-testid="biosketch-statement-hint"]')!.textContent).toContain(
-      "Your role, a title, and aims are required",
+      "All three are required. The statement argues your fitness for this project in this role.",
     );
   });
 
@@ -72,7 +72,7 @@ describe("BiosketchGenerateControls — role on the application (#2653 v8)", () 
     expect(v7.root.querySelector('[data-testid="biosketch-contribution-line"]')).toBeNull();
     expect(
       v7.root.querySelector('[data-testid="biosketch-statement-hint"]')!.textContent,
-    ).toContain("A title and aims are required");
+    ).toContain("Both are required.");
     const contributions = renderControls({ mode: "contributions", promptVersion: "v8" });
     expect(
       contributions.root.querySelector('[data-testid="biosketch-application-role"]'),

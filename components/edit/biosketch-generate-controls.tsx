@@ -6,25 +6,27 @@
  * owns no params state and triggers no fetch — the parent (`BiosketchTool`)
  * holds the value + the Generate button.
  *
- * Two modes via a {@link SegmentedField} toggle:
+ * The mode (Contributions / Personal Statement) is chosen by the parent's mode
+ * cards; this renders the inputs for the chosen mode:
  *   - Contributions — a `maxContributions` 1..5 segmented stepper (default 5).
- *   - Personal Statement — a REQUIRED `projectTitle` input + a REQUIRED `aims`
- *     textarea (the model needs them to write the "directly relevant experience"
- *     framing; the route 400s without them). Under a v8 prompt (#2653) a REQUIRED
- *     "Your role on this application" select sits above the title, plus an optional
- *     200-char "What you will do on this project" line; v5–v7 hide both.
+ *   - Personal Statement — an "About this application" group of REQUIRED inputs:
+ *     `projectTitle` + `aims` (the route 400s without them), and under a v8 prompt
+ *     (#2653) a REQUIRED role select plus an optional 200-char contribution line.
  *
- * Both modes share an optional `emphasis` input and an optional `instructions`
- * note. Untrusted free text is clamped client-side at the same ceilings the
- * server re-normalizes against (`biosketch-params.ts`).
+ * Then the parent's Generate row (`action`), then a "Steer the draft" disclosure
+ * (label, emphasis, instructions, and for Contributions the optional proposed
+ * project), then a collapsed "Staff controls" block. Untrusted free text is
+ * clamped client-side at the same ceilings the server re-normalizes against
+ * (`biosketch-params.ts`).
  *
- * The per-draft cost line is gated by `canSeeCost` (superuser / comms-steward
- * only), exactly as the overview controls gate `overview-prompt-version-cost`;
- * a faculty owner never sees it.
+ * The prompt version, the per-draft cost (gated by `canSeeCost`, superuser /
+ * comms-steward only), and the parent's debug action live in "Staff controls";
+ * a faculty owner never sees that block.
  */
 "use client";
 
 import * as React from "react";
+import { ChevronRight } from "lucide-react";
 
 import { SegmentedField } from "@/components/edit/segmented-field";
 import { Input } from "@/components/ui/input";
@@ -39,7 +41,6 @@ import {
   BIOSKETCH_MAX_CONTRIBUTIONS,
   BIOSKETCH_PROJECT_TITLE_MAX,
   isBiosketchApplicationRole,
-  type BiosketchMode,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
 import {
@@ -49,11 +50,6 @@ import {
 } from "@/lib/edit/biosketch-prompt-versions";
 import { estimateBiosketchCostUsd } from "@/lib/llm/pricing";
 import { cn } from "@/lib/utils";
-
-const MODE_OPTIONS: { value: BiosketchMode; label: string }[] = [
-  { value: "contributions", label: "Contributions to Science" },
-  { value: "personal_statement", label: "Personal Statement" },
-];
 
 const MAX_CONTRIBUTIONS_OPTIONS: { value: string; label: string }[] = Array.from(
   { length: BIOSKETCH_MAX_CONTRIBUTIONS },
@@ -89,6 +85,10 @@ export type BiosketchGenerateControlsProps = {
   onLabelChange: (next: string) => void;
   /** `biosketch_generation.label VARCHAR(120)`. */
   labelMax: number;
+  /** The Generate row, rendered between the required inputs and the optional disclosures. */
+  action?: React.ReactNode;
+  /** Superuser-only debug control, rendered inside the Staff controls block. */
+  debugAction?: React.ReactNode;
 };
 
 export function BiosketchGenerateControls({
@@ -103,6 +103,8 @@ export function BiosketchGenerateControls({
   label,
   onLabelChange,
   labelMax,
+  action,
+  debugAction,
 }: BiosketchGenerateControlsProps) {
   const isStatement = value.mode === "personal_statement";
   const invalid = React.useMemo(() => new Set(invalidFields), [invalidFields]);
@@ -111,83 +113,14 @@ export function BiosketchGenerateControls({
   const cost = canSeeCost ? estimateBiosketchCostUsd(model, value.mode) : null;
   const showVersionSelector = canSelectVersion && versions.length > 0;
   const selectedVersion = versions.find((v) => v.id === value.promptVersion);
+  const showStaff = showVersionSelector || cost != null || debugAction != null;
 
   return (
-    <div
-      className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4"
-      data-slot="biosketch-generate-controls"
-    >
-      {showVersionSelector && (
-        <fieldset className="flex flex-col gap-2" data-testid="biosketch-prompt-version-field">
-          <legend className="text-foreground mb-1 text-sm font-medium">Prompt version</legend>
-          <span className="text-muted-foreground text-xs">
-            Visible to superusers and curators only.
-          </span>
-          <select
-            value={value.promptVersion}
-            disabled={disabled}
-            onChange={(e) =>
-              onChange({ ...value, promptVersion: e.target.value as BiosketchPromptVersionId })
-            }
-            aria-label="Biosketch prompt version"
-            aria-describedby="biosketch-prompt-version-desc"
-            className={cn(
-              "border-apollo-border-strong bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
-              disabled && "cursor-not-allowed opacity-60",
-            )}
-            data-testid="biosketch-prompt-version"
-          >
-            {versions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
-            ))}
-          </select>
-          {selectedVersion?.description && (
-            <span id="biosketch-prompt-version-desc" className="text-muted-foreground text-xs">
-              {selectedVersion.description}
-            </span>
-          )}
-        </fieldset>
-      )}
-
-      {/* The label names the draft this form will produce, so it belongs inside the form
-          rather than floating between the saved-drafts card and this one, owned by neither. */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="biosketch-label" className="text-foreground text-sm font-medium">
-          Label{" "}
-          <span className="text-muted-foreground text-xs font-normal">
-            (optional — the application this draft is for)
-          </span>
-        </label>
-        <Input
-          id="biosketch-label"
-          value={label}
-          maxLength={labelMax}
-          disabled={disabled}
-          placeholder="e.g. R01 resubmission, Oct 2026"
-          className="max-w-[60ch]"
-          onChange={(e) => onLabelChange(e.target.value)}
-          data-testid="biosketch-label"
-        />
-      </div>
-
-      <SegmentedField
-        // "Artifact" is what the codebase calls the two outputs, but on screen it collides
-        // with the NIH sense of the word and reads as jargon to the faculty member whose
-        // biosketch this is. The control answers one question, so it asks it.
-        legend="What to draft"
-        name="biosketch-mode"
-        options={MODE_OPTIONS}
-        value={value.mode}
-        disabled={disabled}
-        onValueChange={(v) => onChange({ ...value, mode: v as BiosketchMode })}
-      />
-
+    <div className="flex flex-col gap-5" data-slot="biosketch-generate-controls">
       {!isStatement && (
         <div className="flex flex-col gap-1.5">
           <SegmentedField
-            legend="Maximum contributions"
+            legend="How many contributions"
             name="biosketch-max-contributions"
             options={MAX_CONTRIBUTIONS_OPTIONS}
             value={String(value.maxContributions)}
@@ -196,141 +129,81 @@ export function BiosketchGenerateControls({
           />
           <p className="text-muted-foreground text-xs">
             NIH allows up to five. Fewer are drafted when the record does not support five distinct
-            bodies of work — the count is a ceiling, never a target.
+            bodies of work. The count is a ceiling, never a target.
           </p>
         </div>
       )}
 
-      {!isStatement && (
-        <details className="flex flex-col gap-1.5" data-testid="biosketch-project-optional">
-          <summary className="text-foreground w-fit cursor-pointer text-sm font-medium select-none">
-            Proposed project{" "}
-            <span className="text-muted-foreground text-xs font-normal">
-              (optional — tailors the &ldquo;most related&rdquo; products)
+      {/* The required application inputs lead the Personal Statement form, grouped and
+          labelled as required once, ahead of every optional control. */}
+      {isStatement && (
+        <div className="border-apollo-border-strong bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-foreground text-sm font-semibold">About this application</span>
+            <span className="text-muted-foreground text-xs" data-testid="biosketch-statement-hint">
+              {asksRole ? "All three are required" : "Both are required"}. The statement argues your
+              fitness for this project{asksRole ? " in this role" : ""}.
             </span>
-          </summary>
-          <div className="mt-2 flex flex-col gap-3">
-            <Input
-              id="biosketch-related-title"
-              value={value.projectTitle}
-              maxLength={BIOSKETCH_PROJECT_TITLE_MAX}
-              disabled={disabled}
-              placeholder="Proposed project title (optional)"
-              onChange={(e) => onChange({ ...value, projectTitle: e.target.value })}
-              data-testid="biosketch-related-title"
-            />
-            <Textarea
-              id="biosketch-related-aims"
-              value={value.aims}
-              maxLength={BIOSKETCH_AIMS_MAX}
-              disabled={disabled}
-              placeholder="Specific aims (optional) — the Products list will surface the work most related to these."
-              onChange={(e) => onChange({ ...value, aims: e.target.value })}
-              className="max-w-[70ch]"
-              data-testid="biosketch-related-aims"
-            />
-          </div>
-        </details>
-      )}
-
-      {/* What the next three fields are FOR, above them — it used to sit under the aims
-          textarea, i.e. after every field it describes, where it reads as a footnote to
-          work already done rather than as the instruction it is. */}
-      {isStatement && (
-        <p className="text-muted-foreground text-xs" data-testid="biosketch-statement-hint">
-          {asksRole ? "Your role, a title, and aims" : "A title and aims"} are required — the
-          statement is tailored to fitness for this specific project
-          {asksRole ? " in that role" : ""}.
-        </p>
-      )}
-
-      {asksRole && (
-        <>
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="biosketch-application-role"
-              className="text-foreground text-sm font-medium"
-            >
-              Your role on this application{" "}
-              <span className="text-destructive" aria-hidden="true">
-                *
-              </span>
-            </label>
-            <select
-              id="biosketch-application-role"
-              value={value.applicationRole ?? ""}
-              disabled={disabled}
-              required
-              aria-required="true"
-              aria-invalid={invalid.has("applicationRole") || undefined}
-              aria-describedby={
-                invalid.has("applicationRole") ? "biosketch-application-role-error" : undefined
-              }
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  applicationRole: isBiosketchApplicationRole(e.target.value)
-                    ? e.target.value
-                    : null,
-                })
-              }
-              className={cn(
-                "bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
-                invalid.has("applicationRole")
-                  ? "border-destructive"
-                  : "border-apollo-border-strong",
-                disabled && "cursor-not-allowed opacity-60",
-              )}
-              data-testid="biosketch-application-role"
-            >
-              <option value="">Select a role</option>
-              {BIOSKETCH_APPLICATION_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {BIOSKETCH_APPLICATION_ROLE_LABELS[r]}
-                </option>
-              ))}
-            </select>
-            <FieldError
-              id="biosketch-application-role-error"
-              testId="biosketch-application-role-error"
-              show={invalid.has("applicationRole")}
-            >
-              Select your role on this application.
-            </FieldError>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="biosketch-contribution-line"
-              className="text-foreground text-sm font-medium"
-            >
-              What you will do on this project{" "}
-              <span className="text-muted-foreground text-xs font-normal">(optional)</span>
-            </label>
-            <Input
-              id="biosketch-contribution-line"
-              value={value.contributionLine}
-              maxLength={BIOSKETCH_CONTRIBUTION_LINE_MAX}
-              disabled={disabled}
-              placeholder="e.g. lead the single-cell analyses for Aims 1 and 2"
-              onChange={(e) => onChange({ ...value, contributionLine: e.target.value })}
-              data-testid="biosketch-contribution-line"
-            />
-          </div>
-        </>
-      )}
+          {asksRole && (
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="biosketch-application-role"
+                className="text-foreground text-sm font-medium"
+              >
+                Your role on this application
+              </label>
+              <select
+                id="biosketch-application-role"
+                value={value.applicationRole ?? ""}
+                disabled={disabled}
+                required
+                aria-required="true"
+                aria-invalid={invalid.has("applicationRole") || undefined}
+                aria-describedby={
+                  invalid.has("applicationRole") ? "biosketch-application-role-error" : undefined
+                }
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    applicationRole: isBiosketchApplicationRole(e.target.value)
+                      ? e.target.value
+                      : null,
+                  })
+                }
+                className={cn(
+                  "bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
+                  invalid.has("applicationRole")
+                    ? "border-destructive"
+                    : "border-apollo-border-strong",
+                  disabled && "cursor-not-allowed opacity-60",
+                )}
+                data-testid="biosketch-application-role"
+              >
+                <option value="">Select a role</option>
+                {BIOSKETCH_APPLICATION_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {BIOSKETCH_APPLICATION_ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </select>
+              <FieldError
+                id="biosketch-application-role-error"
+                testId="biosketch-application-role-error"
+                show={invalid.has("applicationRole")}
+              >
+                Select your role on this application.
+              </FieldError>
+            </div>
+          )}
 
-      {isStatement && (
-        <>
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="biosketch-project-title"
               className="text-foreground text-sm font-medium"
             >
-              Proposed project title{" "}
-              <span className="text-destructive" aria-hidden="true">
-                *
-              </span>
+              Proposed project title
             </label>
             <Input
               id="biosketch-project-title"
@@ -345,6 +218,7 @@ export function BiosketchGenerateControls({
               }
               placeholder="e.g. Targeting tumor metabolism in pancreatic cancer"
               onChange={(e) => onChange({ ...value, projectTitle: e.target.value })}
+              className="max-w-[62ch]"
               data-testid="biosketch-project-title"
             />
             <FieldError
@@ -358,10 +232,7 @@ export function BiosketchGenerateControls({
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="biosketch-aims" className="text-foreground text-sm font-medium">
-              Specific aims{" "}
-              <span className="text-destructive" aria-hidden="true">
-                *
-              </span>
+              Specific aims
             </label>
             <Textarea
               id="biosketch-aims"
@@ -385,62 +256,227 @@ export function BiosketchGenerateControls({
               Add the specific aims of the proposed project.
             </FieldError>
           </div>
-        </>
+
+          {asksRole && (
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="biosketch-contribution-line"
+                className="text-foreground text-sm font-medium"
+              >
+                What you will do on this project{" "}
+                <span className="text-muted-foreground text-xs font-normal">(optional)</span>
+              </label>
+              <Input
+                id="biosketch-contribution-line"
+                value={value.contributionLine}
+                maxLength={BIOSKETCH_CONTRIBUTION_LINE_MAX}
+                disabled={disabled}
+                placeholder="e.g. lead the single-cell analyses for Aims 1 and 2"
+                onChange={(e) => onChange({ ...value, contributionLine: e.target.value })}
+                className="max-w-[62ch]"
+                data-testid="biosketch-contribution-line"
+              />
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="biosketch-emphasis" className="text-foreground text-sm font-medium">
-          Emphasis <span className="text-muted-foreground text-xs font-normal">(optional)</span>
-        </label>
-        <Input
-          id="biosketch-emphasis"
-          value={value.emphasis}
-          maxLength={BIOSKETCH_EMPHASIS_MAX}
-          disabled={disabled}
-          placeholder="e.g. weight toward clinical work; AAV gene therapy"
-          onChange={(e) => onChange({ ...value, emphasis: e.target.value })}
-          data-testid="biosketch-emphasis"
-        />
-      </div>
+      {action}
 
-      <div className="flex flex-col gap-1.5">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <label htmlFor="biosketch-instructions" className="text-foreground text-sm font-medium">
-            Additional instructions{" "}
-            <span className="text-muted-foreground text-xs font-normal">(optional)</span>
-          </label>
-          {/* The count sits with the label it counts. It used to hang below the textarea,
-              right-aligned and unlabelled, where "0/500" named nothing. */}
-          <span
-            aria-live="polite"
-            className="text-muted-foreground text-xs tabular-nums"
-            data-testid="biosketch-instructions-count"
-          >
-            {value.instructions.length}/{BIOSKETCH_INSTRUCTIONS_MAX}
+      {/* Everything optional sits behind one disclosure, below the action: the form reads
+          required → Generate, and steering is there for whoever wants it. */}
+      <details className="group border-apollo-border border-t pt-3.5" data-testid="biosketch-steer">
+        <summary className="text-foreground flex cursor-pointer list-none items-center gap-2 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
+          <ChevronRight
+            className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+            aria-hidden="true"
+          />
+          Steer the draft{" "}
+          <span className="text-muted-foreground text-xs font-normal">
+            (optional: label, emphasis, instructions{isStatement ? "" : ", proposed project"})
           </span>
-        </div>
-        <Textarea
-          id="biosketch-instructions"
-          value={value.instructions}
-          maxLength={BIOSKETCH_INSTRUCTIONS_MAX}
-          disabled={disabled}
-          placeholder="A steering note — e.g. keep the tone plain; foreground the translational arc."
-          onChange={(e) => onChange({ ...value, instructions: e.target.value })}
-          className="max-w-[70ch]"
-          data-testid="biosketch-instructions"
-        />
-      </div>
+        </summary>
+        <div className="flex flex-col gap-4 pt-4">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="biosketch-label" className="text-foreground text-sm font-medium">
+              Label{" "}
+              <span className="text-muted-foreground text-xs font-normal">
+                (the application this draft is for)
+              </span>
+            </label>
+            <Input
+              id="biosketch-label"
+              value={label}
+              maxLength={labelMax}
+              disabled={disabled}
+              placeholder="e.g. R01 resubmission, Oct 2026"
+              className="max-w-[52ch]"
+              onChange={(e) => onLabelChange(e.target.value)}
+              data-testid="biosketch-label"
+            />
+          </div>
 
-      {canSeeCost && cost != null && (
-        <div className="flex flex-col gap-0.5">
-          <span className="text-muted-foreground text-xs" data-testid="biosketch-cost">
-            ~${cost.toFixed(2)} per draft (estimate)
-          </span>
-          <span className="text-muted-foreground text-xs">
-            Every draft runs a faithfulness pass that fact-checks each line against this
-            scholar&rsquo;s records — about 3× the base estimate above.
-          </span>
+          {!isStatement && (
+            <div
+              className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-2.5 rounded-md border p-3.5"
+              data-testid="biosketch-project-optional"
+            >
+              <div className="flex flex-col gap-0.5">
+                <span className="text-foreground text-sm font-semibold">
+                  Tailor to a proposed project
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  Sets which publications are surfaced as &ldquo;most related&rdquo;.
+                </span>
+              </div>
+              <Input
+                id="biosketch-related-title"
+                value={value.projectTitle}
+                maxLength={BIOSKETCH_PROJECT_TITLE_MAX}
+                disabled={disabled}
+                placeholder="Proposed project title"
+                aria-label="Proposed project title"
+                onChange={(e) => onChange({ ...value, projectTitle: e.target.value })}
+                className="max-w-[62ch]"
+                data-testid="biosketch-related-title"
+              />
+              <Textarea
+                id="biosketch-related-aims"
+                value={value.aims}
+                maxLength={BIOSKETCH_AIMS_MAX}
+                disabled={disabled}
+                placeholder="Specific aims"
+                aria-label="Specific aims"
+                onChange={(e) => onChange({ ...value, aims: e.target.value })}
+                className="max-w-[70ch]"
+                data-testid="biosketch-related-aims"
+              />
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="biosketch-emphasis" className="text-foreground text-sm font-medium">
+              Emphasis
+            </label>
+            <Input
+              id="biosketch-emphasis"
+              value={value.emphasis}
+              maxLength={BIOSKETCH_EMPHASIS_MAX}
+              disabled={disabled}
+              placeholder="e.g. weight toward clinical work; AAV gene therapy"
+              onChange={(e) => onChange({ ...value, emphasis: e.target.value })}
+              className="max-w-[62ch]"
+              data-testid="biosketch-emphasis"
+            />
+          </div>
+
+          <div className="flex max-w-[70ch] flex-col gap-1.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <label
+                htmlFor="biosketch-instructions"
+                className="text-foreground text-sm font-medium"
+              >
+                Additional instructions
+              </label>
+              <span
+                aria-live="polite"
+                className="text-muted-foreground text-xs tabular-nums"
+                data-testid="biosketch-instructions-count"
+              >
+                {value.instructions.length}/{BIOSKETCH_INSTRUCTIONS_MAX}
+              </span>
+            </div>
+            <Textarea
+              id="biosketch-instructions"
+              value={value.instructions}
+              maxLength={BIOSKETCH_INSTRUCTIONS_MAX}
+              disabled={disabled}
+              placeholder="A steering note, e.g. keep the tone plain; foreground the translational arc."
+              onChange={(e) => onChange({ ...value, instructions: e.target.value })}
+              data-testid="biosketch-instructions"
+            />
+          </div>
         </div>
+      </details>
+
+      {/* Prompt version, cost, and the payload debug are staff tooling; a faculty member
+          drafting their own biosketch never sees this block. */}
+      {showStaff && (
+        <details
+          className="group border-apollo-border border-t pt-3.5"
+          data-testid="biosketch-staff"
+        >
+          <summary className="text-foreground flex cursor-pointer list-none items-center gap-2 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+              aria-hidden="true"
+            />
+            Staff controls
+            <span className="border-apollo-border-strong bg-apollo-lock-bg text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-semibold">
+              Superusers &amp; curators
+            </span>
+          </summary>
+          <div className="flex flex-col gap-4 pt-4">
+            {showVersionSelector && (
+              <div className="flex flex-col gap-1.5" data-testid="biosketch-prompt-version-field">
+                <label
+                  htmlFor="biosketch-prompt-version"
+                  className="text-foreground text-sm font-medium"
+                >
+                  Prompt version
+                </label>
+                <select
+                  id="biosketch-prompt-version"
+                  value={value.promptVersion}
+                  disabled={disabled}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      promptVersion: e.target.value as BiosketchPromptVersionId,
+                    })
+                  }
+                  aria-describedby="biosketch-prompt-version-desc"
+                  className={cn(
+                    "border-apollo-border-strong bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
+                    disabled && "cursor-not-allowed opacity-60",
+                  )}
+                  data-testid="biosketch-prompt-version"
+                >
+                  {versions.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+                {selectedVersion?.description && (
+                  <span
+                    id="biosketch-prompt-version-desc"
+                    className="text-muted-foreground max-w-[84ch] text-xs"
+                  >
+                    {selectedVersion.description}
+                  </span>
+                )}
+              </div>
+            )}
+            {cost != null && (
+              <div className="flex flex-wrap items-center gap-3">
+                {/* One total. The faithfulness pass runs on every draft and brings the run to
+                    roughly 3x the drafting call (`estimateBiosketchCostUsd`). */}
+                <span
+                  className="border-apollo-border-strong bg-apollo-lock-bg rounded-md border px-3 py-1.5 text-sm tabular-nums"
+                  data-testid="biosketch-cost"
+                >
+                  Est. <strong>${(cost * 3).toFixed(2)}</strong> per draft
+                </span>
+                <span className="text-muted-foreground max-w-[62ch] text-xs">
+                  Includes the faithfulness pass that fact-checks every line against this
+                  scholar&rsquo;s records. Drafting alone is about ${cost.toFixed(2)}.
+                </span>
+              </div>
+            )}
+            {debugAction}
+          </div>
+        </details>
       )}
     </div>
   );
