@@ -2107,16 +2107,16 @@ export class AppStack extends Stack {
         // field is UNMAPPED the agg matches nothing and no group renders. Flip
         // (cdk deploy) only AFTER that rebuild: an /edit single-doc reindex in
         // between dynamically maps the field as text, and a terms agg on text is
-        // a 500. STAGING-FIRST.
-        SEARCH_PEOPLE_INSTITUTION_FACET: env === "staging" ? "on" : "off",
+        // a 500. Prod ON 2026-09-22 after the prod people-alias rebuild.
+        SEARCH_PEOPLE_INSTITUTION_FACET: "on",
         // Publications-tab / Funding-tab "Institution" facets (pub doc
         // `wcmAuthorInstitutions` = union of the WCM authors' primaryOrgCode;
         // funding doc `institution` = lead PI's primaryOrgCode). Same
         // reindex-then-flip trap as the people flag above: DARK until the
         // nightly alias rebuild carries the keyword mappings; flip only AFTER.
-        // STAGING-FIRST.
-        SEARCH_PUB_INSTITUTION_FACET: env === "staging" ? "on" : "off",
-        SEARCH_FUNDING_INSTITUTION_FACET: env === "staging" ? "on" : "off",
+        // Prod ON 2026-09-22 after the prod pub + funding alias rebuilds.
+        SEARCH_PUB_INSTITUTION_FACET: "on",
+        SEARCH_FUNDING_INSTITUTION_FACET: "on",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
