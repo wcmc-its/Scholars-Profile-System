@@ -384,7 +384,22 @@ describe("PublicationsCard — sole-author confirm dialog (UI-SPEC edge case 11)
     await waitFor(() => expect(f).toHaveBeenCalledTimes(3));
   });
 
-  it("names at most five, then 'and N more'", async () => {
+  it("names them while the list is short enough to read", async () => {
+    stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    const few = ["a", "b", "c"].map((id) =>
+      pub({ pmid: id, title: id.toUpperCase(), state: "shown", isSoleDisplayedAuthor: true }),
+    );
+    render(<PublicationsCard cwid={CWID} publications={few} />);
+    few.forEach((p) => select(p.pmid));
+    bulkHide();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(/\u201cA\u201d; \u201cB\u201d; \u201cC\u201d\./),
+    ).toBeTruthy();
+  });
+
+  it("past five, the count carries it alone — no wall of titles", async () => {
     stubFetch({ ok: true, suppressionId: "sup-fresh" });
     const many = ["a", "b", "c", "d", "e", "f", "g"].map((id) =>
       pub({ pmid: id, title: id.toUpperCase(), state: "shown", isSoleDisplayedAuthor: true }),
@@ -395,10 +410,9 @@ describe("PublicationsCard — sole-author confirm dialog (UI-SPEC edge case 11)
 
     const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByText(
-        /\u201cA\u201d; \u201cB\u201d; \u201cC\u201d; \u201cD\u201d; \u201cE\u201d and 2 more\./,
-      ),
+      within(dialog).getByText(/^7 of these list you as the only displayed Weill Cornell author\./),
     ).toBeTruthy();
+    expect(within(dialog).queryByText(/\u201cA\u201d/)).toBeNull();
   });
 });
 

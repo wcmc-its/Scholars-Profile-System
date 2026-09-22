@@ -113,10 +113,13 @@ type Pub = EditContextPublication;
 /** The affected titles for the sole-displayed-author confirm — the first five,
  *  then "and N more". `ConfirmDialog.description` is a string, so the list
  *  rides the sentence rather than a <ul>. */
+/** Naming the papers helps while the reader can still hold the list; past five
+ *  it is a wall of titles that hides the sentence that matters, so the count
+ *  carries it alone. */
+const TITLE_LIST_CAP = 5;
+
 function titleList(pubs: Pub[]): string {
-  const head = pubs.slice(0, 5).map((p) => `“${pubTitleAccessibleName(p.title)}”`);
-  const rest = pubs.length - head.length;
-  return rest > 0 ? `${head.join("; ")} and ${rest} more` : head.join("; ");
+  return pubs.map((p) => `“${pubTitleAccessibleName(p.title)}”`).join("; ");
 }
 
 /** Only SHOW is optimistic: a bulk hide commits row by row as each POST lands,
@@ -350,11 +353,10 @@ export function PublicationsCard({
       return su
         ? `${scholarName} is the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until it is restored, or another WCM author is added.`
         : "You are the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until you restore it, or another WCM author is added.";
+    const named = dialogSole.length <= TITLE_LIST_CAP ? ` — ${titleList(dialogSole)}` : "";
     return `${dialogSole.length} of these ${dialogSole.length === 1 ? "lists" : "list"} ${
       su ? scholarName : "you"
-    } as the only displayed Weill Cornell author — ${titleList(
-      dialogSole,
-    )}. Hiding a publication with no other WCM author removes it from the site entirely until it is restored, or another WCM author is added.`;
+    } as the only displayed Weill Cornell author${named}. Hiding a publication with no other WCM author removes it from the site entirely until it is restored, or another WCM author is added.`;
   }
 
   return (
