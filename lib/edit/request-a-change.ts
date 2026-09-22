@@ -504,6 +504,18 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           note: "Likely an import error — include the duplicate's details so support can merge it.",
         }),
       },
+      {
+        // Hide is NOT an issue type here (see the header note) — this row only
+        // points at the control that already owns it, so the modal never grows
+        // a second suppress path with its own notice / confirm / reason guards.
+        id: "publication-unwanted",
+        label: "I don't want it on my profile",
+        description: "Hiding is display-only. The paper stays on WCM's records.",
+        action: explain({
+          detail:
+            "You can hide it yourself from the list: tick the publication's checkbox, then choose \"Hide from profile\" in the bar that appears. It comes off the public profile, but it stays attributed to you in ReCiter and in WCM reporting. If the paper isn't yours at all, pick \"Isn't mine / wrongly attributed\" instead — that one corrects the attribution everywhere.",
+        }),
+      },
     ],
   },
   // #728 Phase D § 4.6 — org units are created by Scholars superusers; everyone
