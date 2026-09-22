@@ -16,19 +16,23 @@
  * `missingPersonalStatementInputs`, the same predicate the route enforces), so a
  * request that the route would 400 never leaves the client.
  *
- * #2654 — the tab opens on the scholar's SAVED DRAFTS (the `biosketch_generation` rows, newest
- * first) with New / Clone / label / Delete per row, and a staleness nudge ("N publications added
+ * Layout: one mode chooser (three cards: Contributions, Personal Statement, and the
+ * deterministic "Find publications") replaces the old tablist + "What to draft" pair. The setup
+ * form steps aside while a draft runs or is on screen; the result bar brings it back ("Change
+ * settings") or starts blank ("New draft").
+ *
+ * #2654 — the tool opens on the scholar's SAVED DRAFTS (the `biosketch_generation` rows, newest
+ * first) with View / Clone / label / Delete per row, and a staleness nudge ("N publications added
  * since this draft") whose one click re-runs product suggestion only. The generation row IS the
  * draft — there is no separate draft table or endpoint.
  */
 "use client";
 
 import * as React from "react";
-import { Braces, Copy, Search, Sparkles } from "lucide-react";
+import { Braces, ChevronRight, Copy, Search, Sparkles, TriangleAlert } from "lucide-react";
 
 import { BiosketchGenerateControls } from "@/components/edit/biosketch-generate-controls";
 import {
-  BiosketchAiWarning,
   BiosketchResultCard,
   BiosketchSuggestedPubsCard,
   type BiosketchGenerateResult,
@@ -36,11 +40,6 @@ import {
 import { BiosketchProgress } from "@/components/edit/biosketch-progress";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
-import {
-  SegmentedTabs,
-  tabPanelProps,
-  type SegmentedTabOption,
-} from "@/components/edit/segmented-tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,13 +49,16 @@ import {
   DEFAULT_BIOSKETCH_PARAMS,
   normalizeBiosketchParams,
   missingPersonalStatementInputs,
+  BIOSKETCH_APPLICATION_ROLE_LABELS,
   type BiosketchEntry,
+  type BiosketchMode,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
 import { type BiosketchProducts, type SuggestedPub } from "@/lib/edit/biosketch-products";
 import { type BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 import { type BiosketchPromptVersionMeta } from "@/lib/edit/biosketch-prompt-versions";
 import { humanizeModelId } from "@/lib/edit/overview-prompt-versions";
+import { cn } from "@/lib/utils";
 
 // User-facing copy, kept as named constants (one place, asserted in tests).
 const SPARSE =
@@ -83,20 +85,23 @@ const REQUIRED_FIELD_IDS: Record<string, string> = {
   aims: "biosketch-aims",
 };
 
-/** The tablist's name — ids for the two tabs and their panels derive from it. */
-const TOOL_MODE_TABS = "biosketch-mode";
-const TOOL_MODE_OPTIONS: ReadonlyArray<SegmentedTabOption<"generate" | "suggest">> = [
+/** The mode cards: the two AI drafts, then the deterministic publication finder (#1569). */
+type ModeChoice = BiosketchMode | "suggest";
+const MODE_CARDS: ReadonlyArray<{ value: ModeChoice; label: string; hint: string }> = [
   {
-    value: "generate",
-    label: "Generate a draft",
-    icon: <Sparkles className="size-4" aria-hidden="true" />,
-    testId: "biosketch-mode-generate",
+    value: "contributions",
+    label: "Contributions to Science",
+    hint: "Up to five bodies of work, drafted from your record. No application details needed.",
+  },
+  {
+    value: "personal_statement",
+    label: "Personal Statement",
+    hint: "Tailored to one application. Needs your role, the project title, and its aims.",
   },
   {
     value: "suggest",
-    label: "Suggest publications from your statement",
-    icon: <Search className="size-4" aria-hidden="true" />,
-    testId: "biosketch-mode-suggest",
+    label: "Find publications",
+    hint: "Paste a statement you wrote and match it against your indexed publications.",
   },
 ];
 
@@ -372,6 +377,7 @@ export function BiosketchTool({
    */
   function cloneDraft(gen: BiosketchGenerationItem) {
     if (isGenerating) return;
+    setToolMode("generate");
     setParams(normalizeBiosketchParams(gen.params));
     setLabel(gen.label ? `${gen.label} (copy)` : "");
     setClonedFrom(gen);
@@ -528,12 +534,16 @@ export function BiosketchTool({
     }
   }
 
-  /** One saved-draft row. Shared by both mode sections; the section heading carries the
-   *  mode, so only Contributions repeats its entry count here. */
+  /** One saved-draft row. The list mixes both modes, so a labelled row carries a mode pill
+   *  (an unlabelled row's headline already is the mode noun). */
   function renderGenRow(gen: BiosketchGenerationItem) {
     const added = gen.pubsAddedSince ?? 0;
     return (
-      <li key={gen.id} className="flex flex-col gap-2" data-testid={`biosketch-version-${gen.id}`}>
+      <li
+        key={gen.id}
+        className="flex flex-col gap-2.5 px-4 py-3"
+        data-testid={`biosketch-version-${gen.id}`}
+      >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <span className="text-muted-foreground flex min-w-0 flex-col">
             {/* #2654 — the application-name label is the row's headline; inline-editable. */}
@@ -582,6 +592,11 @@ export function BiosketchTool({
                 >
                   {gen.label ?? genHeadline(gen)}
                 </span>
+                {gen.label && (
+                  <span className="bg-apollo-rail text-muted-foreground rounded-full px-2 text-xs font-semibold">
+                    {genHeadline(gen)}
+                  </span>
+                )}
                 <button
                   type="button"
                   className="text-apollo-maroon text-xs underline-offset-2 hover:underline"
@@ -654,10 +669,10 @@ export function BiosketchTool({
                 re-run of the product ranker. */}
         {added > 0 && (
           <div
-            className="flex flex-wrap items-center gap-2 text-xs"
+            className="border-apollo-amber-tint-border bg-apollo-amber-tint flex flex-wrap items-center gap-2.5 rounded-md border px-3 py-2 text-sm"
             data-testid={`biosketch-version-stale-${gen.id}`}
           >
-            <span className="text-foreground">
+            <span className="text-apollo-amber font-medium">
               {added} {added === 1 ? "publication" : "publications"} added since this draft
             </span>
             <Button
@@ -681,102 +696,113 @@ export function BiosketchTool({
     );
   }
 
-  /** A collapsible mode section ("Personal Statements" / "Contributions to Science"), open
-   *  by default (#2654 — the tab opens on the saved drafts). Rendered only when that mode has
-   *  drafts, so an actor who has used just one mode never sees an empty section for the other. */
-  function renderGenSection(title: string, items: BiosketchGenerationItem[], testId: string) {
-    if (items.length === 0) return null;
-    return (
-      <details className="group" open data-testid={testId}>
-        <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
-          {title} ({items.length})
-        </summary>
-        <ul className="border-apollo-border bg-apollo-surface-2 mt-3 flex flex-col gap-3 rounded-md border p-4">
-          {items.map(renderGenRow)}
-        </ul>
-      </details>
-    );
+  // The one mode chooser: the two AI drafts plus the deterministic publication finder.
+  const choice: ModeChoice = toolMode === "suggest" ? "suggest" : params.mode;
+  function pickMode(next: ModeChoice) {
+    setShowValidation(false);
+    if (next === "suggest") {
+      setToolMode("suggest");
+      return;
+    }
+    setToolMode("generate");
+    setParams((p) => ({ ...p, mode: next }));
   }
 
-  // Split history by mode so the two NIH sections never interleave in one list.
-  const personalStatements = generations.filter((g) => g.mode === "personal_statement");
-  const contributions = generations.filter((g) => g.mode === "contributions");
+  // Output-first: while a draft runs, or one is on screen, the setup form steps aside. The
+  // result bar's buttons bring it back (with the settings intact) or start a blank one.
+  const showSetup = !isGenerating && !result;
+  const isStatement = params.mode === "personal_statement";
 
   return (
     <EditPanel
       slot="biosketch-tool"
       heading="NIH biosketch"
-      description="Draft the narrative sections of an NIH biosketch from your Scholars record — Contributions to Science, or a Personal Statement tailored to one application. Every draft is a starting point you rewrite in your own voice."
+      description="Draft the narrative sections of an NIH biosketch from your Scholars record: Contributions to Science, or a Personal Statement tailored to one application. Every draft is a starting point you rewrite in your own voice."
     >
-      {/* #1569 — switch between the AI generator and the deterministic "suggest pubs from your
-          own statement" mode. A real tablist: these swap which PANEL is on screen, so they are
-          tabs, not the `aria-pressed` toggle buttons they used to be (which read as actions that
-          would generate something on click). The pill look is shared with the SegmentedField
-          radio groups below, so the page has one segmented idiom with the right semantics under
-          each instance. */}
-      <SegmentedTabs
-        label="Biosketch tool mode"
-        name={TOOL_MODE_TABS}
-        options={TOOL_MODE_OPTIONS}
-        value={toolMode}
-        onValueChange={setToolMode}
-      />
+      {/* #2654 — saved drafts lead the tool in every mode: newest first, one list, each row
+          tagged with what it is. */}
+      {generations.length > 0 && (
+        <details
+          open
+          className="group border-apollo-border bg-apollo-surface-2 rounded-md border"
+          data-testid="biosketch-versions-panel"
+        >
+          <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-4 py-3 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+              aria-hidden="true"
+            />
+            Saved drafts
+            <span className="bg-apollo-rail text-muted-foreground rounded-full px-2 text-xs font-semibold">
+              {generations.length}
+            </span>
+            <span className="text-muted-foreground ml-auto text-xs font-normal">
+              Nothing here is saved to your profile
+            </span>
+          </summary>
+          <ul className="border-apollo-border divide-apollo-border flex flex-col divide-y border-t">
+            {generations.map(renderGenRow)}
+          </ul>
+        </details>
+      )}
 
-      {toolMode === "generate" && (
-        <div className="flex flex-col gap-4" {...tabPanelProps(TOOL_MODE_TABS, "generate")}>
-          {/* #2654 — the saved-drafts list leads the tab: newest first, New / Clone / label /
-              Delete per row, staleness nudge where the nightly added publications since. */}
-          {generations.length > 0 && (
-            <div className="flex flex-col gap-3" data-testid="biosketch-versions-panel">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-foreground text-sm font-semibold">Saved drafts</h3>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={newDraft}
-                  disabled={isGenerating}
-                  data-testid="biosketch-new-draft"
-                >
-                  <Sparkles className="size-4" />
-                  New draft
-                </Button>
-              </div>
-              {renderGenSection(
-                "Personal statements",
-                personalStatements,
-                "biosketch-versions-personal-statement",
-              )}
-              {renderGenSection(
-                "Contributions to science",
-                contributions,
-                "biosketch-versions-contributions",
-              )}
-            </div>
-          )}
+      {showSetup && (
+        <fieldset className="flex flex-col gap-2.5" data-testid="biosketch-mode">
+          <legend className="text-foreground mb-2.5 text-sm font-semibold">
+            What do you want to make?
+          </legend>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3">
+            {MODE_CARDS.map((card) => (
+              <label
+                key={card.value}
+                className={cn(
+                  "flex cursor-pointer flex-col gap-1.5 rounded-lg border-[1.5px] px-4 py-3.5",
+                  "has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-2",
+                  choice === card.value
+                    ? "border-apollo-maroon bg-apollo-surface shadow-[0_0_0_1px_var(--apollo-maroon)]"
+                    : "border-apollo-border-strong bg-apollo-surface-2",
+                )}
+                data-testid={`biosketch-mode-${card.value}`}
+              >
+                <input
+                  type="radio"
+                  name="biosketch-mode"
+                  value={card.value}
+                  checked={choice === card.value}
+                  onChange={() => pickMode(card.value)}
+                  className="sr-only"
+                />
+                <span className="text-foreground flex items-center gap-2 text-sm font-semibold">
+                  {card.value === "suggest" ? (
+                    <Search className="text-apollo-slate size-4" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="text-apollo-maroon size-4" aria-hidden="true" />
+                  )}
+                  {card.label}
+                </span>
+                <span className="text-muted-foreground text-xs leading-snug">{card.hint}</span>
+                {card.value === "suggest" && (
+                  <span className="border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate mt-0.5 w-fit rounded-full border px-2 py-0.5 text-xs font-semibold">
+                    No AI · your own words
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
-          {/* What the form below IS. Without this the page showed a list of saved drafts and
-              then, with no break, a form — and nothing said whether that form was a new draft
-              or an edit of whichever row you last touched. (It is always a new draft: a saved
-              draft is never edited in place.) */}
-          <h3
-            className="text-foreground text-sm font-semibold"
-            data-testid="biosketch-form-heading"
-          >
-            {params.mode === "personal_statement"
-              ? "New personal statement"
-              : "New contributions draft"}
-          </h3>
-
+      {showSetup && toolMode === "generate" && (
+        <>
           {clonedFrom && (
             <Alert data-testid="biosketch-cloned-from">
               <AlertDescription>
                 Cloned from the {describeGen(clonedFrom)}
                 {clonedFrom.label ? ` (${clonedFrom.label})` : ""}. Update the project title and
-                aims for the new application, then generate —{" "}
+                aims for the new application, then generate.{" "}
                 {clonedFrom.mode === "personal_statement"
-                  ? "the statement and related products are drafted fresh."
-                  : "the contributions and products are drafted fresh from these settings."}
+                  ? "The statement and related products are drafted fresh."
+                  : "The contributions and products are drafted fresh from these settings."}
               </AlertDescription>
             </Alert>
           )}
@@ -793,74 +819,71 @@ export function BiosketchTool({
             label={label}
             onLabelChange={setLabel}
             labelMax={LABEL_MAX}
+            debugAction={
+              canDebug ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-fit"
+                  onClick={downloadDebugPayload}
+                  disabled={isDebugLoading || isGenerating}
+                  data-testid="biosketch-debug-payload"
+                  title="Download the exact system prompt, user prompt, and FACTS payload these settings would send to the model (superusers only)."
+                >
+                  <Braces className="size-4" />
+                  {isDebugLoading ? "Preparing…" : "View prompt & payload"}
+                </Button>
+              ) : null
+            }
+            action={
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center gap-3.5">
+                  <Button
+                    type="button"
+                    variant="apollo"
+                    onClick={generate}
+                    disabled={isGenerating}
+                    data-testid="biosketch-generate"
+                  >
+                    <Sparkles className="size-4" />
+                    {isStatement ? "Generate personal statement" : "Generate contributions"}
+                  </Button>
+                  {showValidation && missing.length > 0 && (
+                    <span
+                      className="text-destructive text-sm font-medium"
+                      data-testid="biosketch-missing-note"
+                    >
+                      {missing.length === 1
+                        ? "One required field above is empty."
+                        : `${missing.length} required fields above are empty.`}
+                    </span>
+                  )}
+                  <span className="text-muted-foreground text-sm">Takes about a minute.</span>
+                </div>
+                {/* #1990 — the full, destructive NIH caution rides with the draft itself
+                    (`BiosketchResultCard`), where the text leaves the app. Before there is a
+                    draft, one amber line sets the expectation. */}
+                <div
+                  className="border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber flex max-w-[86ch] items-start gap-2 rounded-md border px-3.5 py-2.5 text-sm"
+                  data-testid="biosketch-ai-note"
+                >
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    What comes back is an AI first draft, not your words. You will need to rewrite
+                    it before it goes near a submission. The full caution sits with the draft
+                    itself.
+                  </span>
+                </div>
+              </div>
+            }
           />
-
-          {/* #1569 / #1990 — exactly ONE AI-content warning is on screen at any time. This one
-              carries the caution while no draft exists, so it is read before there is anything to
-              copy; the moment a result lands (a fresh generation OR a history row opened with
-              "View draft") it hands off to the identical warning at the top of the result card,
-              which sits directly above Copy / Download — the point where the text actually leaves
-              the app. Both placements used to render unconditionally, and because they are
-              adjacent siblings the pair was co-visible from the first draft onward, which reads
-              as boilerplate rather than as a caution.
-
-              It sits ABOVE the Generate button, not below it: the caution is about what the user
-              is about to ask for, so it belongs on the path to the action rather than trailing
-              the whole form where it was the last thing on the page, below the fold. */}
-          {!result && <BiosketchAiWarning />}
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="apollo"
-              onClick={generate}
-              disabled={isGenerating}
-              data-testid="biosketch-generate"
-            >
-              <Sparkles className="size-4" />
-              {isGenerating
-                ? "Generating…"
-                : params.mode === "personal_statement"
-                  ? "Generate personal statement"
-                  : "Generate biosketch contributions"}
-            </Button>
-            {canDebug && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={downloadDebugPayload}
-                disabled={isDebugLoading || isGenerating}
-                data-testid="biosketch-debug-payload"
-                title="Download the exact system prompt, user prompt, and FACTS payload these settings would send to the model (superusers only)."
-              >
-                <Braces className="size-4" />
-                {isDebugLoading ? "Preparing…" : "View prompt & payload"}
-              </Button>
-            )}
-            <span className="text-muted-foreground text-sm">
-              Drafted from your Scholars publications, topics, methods, and grants. Review every
-              entry before submitting it.
-            </span>
-          </div>
-
-          {isGenerating && progress && (
-            <BiosketchProgress state={progress} mode={params.mode} elapsedMs={elapsedMs} />
-          )}
-
-          {error && (
-            <Alert variant="destructive" data-testid="biosketch-error">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          {result && <BiosketchResultCard result={result} />}
-        </div>
+        </>
       )}
 
-      {toolMode === "suggest" && (
-        <div className="flex flex-col gap-4" {...tabPanelProps(TOOL_MODE_TABS, "suggest")}>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="biosketch-statement" className="text-foreground text-sm font-medium">
+      {showSetup && toolMode === "suggest" && (
+        <>
+          <div className="flex max-w-[78ch] flex-col gap-1.5">
+            <label htmlFor="biosketch-statement" className="text-foreground text-sm font-semibold">
               Your statement or themes
             </label>
             {/* The instruction is helper text, not a placeholder: a placeholder disappears
@@ -868,8 +891,8 @@ export function BiosketchTool({
                 is not reliably announced. The placeholder keeps only a short example. */}
             <span id="biosketch-statement-help" className="text-muted-foreground text-sm">
               Write or paste the narrative, aims, or themes in your own words. Your publications
-              that overlap it are surfaced — a grounded, deterministic match against your indexed
-              publications, with nothing generated and no text written by AI.
+              that overlap it are surfaced. This is a grounded, deterministic match against your
+              indexed publications, with nothing generated and no text written by AI.
             </span>
             <Textarea
               id="biosketch-statement"
@@ -877,25 +900,23 @@ export function BiosketchTool({
               onChange={(e) => setStatement(e.target.value)}
               disabled={isSuggesting}
               rows={6}
-              className="max-w-[70ch]"
               aria-describedby="biosketch-statement-help"
               placeholder="e.g. My work centers on the metabolic rewiring of pancreatic tumors…"
               data-testid="biosketch-statement"
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="apollo"
-              onClick={suggestPubs}
-              disabled={isSuggesting || statement.trim().length === 0}
-              data-testid="biosketch-suggest"
-            >
-              <Search className="size-4" />
-              {isSuggesting ? "Finding…" : "Suggest publications"}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="apollo"
+            className="w-fit"
+            onClick={suggestPubs}
+            disabled={isSuggesting || statement.trim().length === 0}
+            data-testid="biosketch-suggest"
+          >
+            <Search className="size-4" />
+            {isSuggesting ? "Finding…" : "Find publications"}
+          </Button>
 
           {suggestError && (
             <Alert variant="destructive" data-testid="biosketch-suggest-error">
@@ -909,14 +930,56 @@ export function BiosketchTool({
               page that failed to load rather than one waiting for input. */}
           {!suggestions && !suggestError && !isSuggesting && (
             <p
-              className="border-apollo-border bg-apollo-surface-2 text-muted-foreground rounded-md border border-dashed p-4 text-sm"
+              className="border-apollo-border-strong bg-apollo-surface-2 text-muted-foreground rounded-md border border-dashed p-4 text-sm"
               data-testid="biosketch-suggest-empty"
             >
               Your matching publications will appear here, ranked by overlap with what you wrote,
               each with its PMID so you can copy them straight into a worksheet.
             </p>
           )}
-        </div>
+        </>
+      )}
+
+      {isGenerating && progress && (
+        <BiosketchProgress state={progress} mode={params.mode} elapsedMs={elapsedMs} />
+      )}
+
+      {error && (
+        <Alert variant="destructive" data-testid="biosketch-error">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {result && (
+        <>
+          <div
+            className="border-apollo-border-strong bg-apollo-surface-2 flex flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-2.5"
+            data-testid="biosketch-result-bar"
+          >
+            <span className="text-sm">{resultSummary(result, params, label)}</span>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setResult(null)}
+                data-testid="biosketch-change-settings"
+              >
+                {result.viewing ? "Close draft" : "Change settings"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={newDraft}
+                data-testid="biosketch-new-draft"
+              >
+                New draft
+              </Button>
+            </div>
+          </div>
+          <BiosketchResultCard result={result} />
+        </>
       )}
 
       <ConfirmDialog
@@ -944,6 +1007,29 @@ export function BiosketchTool({
  *  stating it in both places was the row's most obvious redundancy. */
 function genHeadline(gen: BiosketchGenerationItem): string {
   return gen.mode === "personal_statement" ? "Personal statement" : "Contributions draft";
+}
+
+/** The result bar's one line: what the draft is and what it was drafted for. */
+function resultSummary(
+  result: BiosketchGenerateResult,
+  params: BiosketchParams,
+  label: string,
+): string {
+  const noun =
+    result.mode === "personal_statement" ? "Personal Statement" : "Contributions to Science";
+  if (result.viewing) {
+    return [noun, result.viewing.label ?? "", `saved ${result.viewing.generatedOn}`]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  const detail =
+    result.mode === "personal_statement"
+      ? [
+          params.applicationRole ? BIOSKETCH_APPLICATION_ROLE_LABELS[params.applicationRole] : "",
+          params.projectTitle,
+        ]
+      : [`up to ${params.maxContributions}`];
+  return [noun, ...detail, label, params.promptVersion].filter(Boolean).join(" · ");
 }
 
 /** The row's single meta line: prompt version · model · entry count · who ran it · when.

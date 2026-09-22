@@ -142,8 +142,10 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     // meta line below, instead of being stated twice in the same row.
     expect(q(container, "biosketch-version-label-gen-c")?.textContent).toBe("Contributions draft");
     expect(q(container, "biosketch-version-actor-gen-c")?.textContent).toContain("Jul 18, 2026");
-    // Sections open by default — the rows are visible without a click.
-    expect(q(container, "biosketch-versions-personal-statement")?.hasAttribute("open")).toBe(true);
+    // One list, open by default — the rows are visible without a click. A labelled row carries
+    // a mode pill, since the list mixes both modes.
+    expect(panel.hasAttribute("open")).toBe(true);
+    expect(q(container, "biosketch-version-gen-ps")?.textContent).toContain("Personal statement");
   });
 
   it("Add label → inline input → Save PATCHes the row and updates it in place", async () => {
@@ -200,7 +202,7 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     expect(notice).toContain(
       "Cloned from the personal statement generated Jul 20, 2026 (R01 resubmission)",
     );
-    expect(notice).toContain("the statement and related products are drafted fresh.");
+    expect(notice).toContain("The statement and related products are drafted fresh.");
     expect(sent).toHaveLength(0);
   });
 
@@ -210,9 +212,9 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     const notice = (await findQ(container, "biosketch-cloned-from")).textContent ?? "";
     expect(notice).toContain("Cloned from the contributions draft generated Jul 18, 2026.");
     expect(notice).toContain(
-      "the contributions and products are drafted fresh from these settings.",
+      "The contributions and products are drafted fresh from these settings.",
     );
-    expect(notice).not.toContain("the statement and related products");
+    expect(notice).not.toContain("The statement and related products");
     // Unlabeled source → no "(copy)" label is minted.
     expect((q(container, "biosketch-label") as HTMLInputElement).value).toBe("");
   });
@@ -228,8 +230,11 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     expect(q(container, "biosketch-entry-text-0")?.textContent).toContain(
       "We ran the first-in-human study.",
     );
-    // The cloned form itself is untouched — only the notice went.
-    expect((q(container, "biosketch-project-title") as HTMLInputElement).value).toBe(
+    // The form steps aside while a draft is on screen; closing the draft brings it back with
+    // the cloned settings untouched — only the notice went.
+    expect(q(container, "biosketch-project-title")).toBeNull();
+    fireEvent.click(q(container, "biosketch-change-settings") as HTMLElement);
+    expect(((await findQ(container, "biosketch-project-title")) as HTMLInputElement).value).toBe(
       "Targeting CAR-T resistance",
     );
   });
@@ -306,13 +311,15 @@ describe("BiosketchTool — saved drafts list (#2654)", () => {
     await waitFor(() => expect(q(container, "biosketch-project-title-error")).toBeNull());
   });
 
-  it("New draft resets the form, label and clone notice", async () => {
+  it("New draft (on the result bar) closes the draft and resets the form and label", async () => {
     const { container } = renderTool();
     fireEvent.click(await findQ(container, "biosketch-version-clone-gen-ps"));
     await findQ(container, "biosketch-cloned-from");
-    fireEvent.click(q(container, "biosketch-new-draft") as HTMLElement);
+    fireEvent.click(q(container, "biosketch-version-view-gen-c") as HTMLElement);
+    fireEvent.click(await findQ(container, "biosketch-new-draft"));
 
-    await waitFor(() => expect(q(container, "biosketch-cloned-from")).toBeNull());
+    await waitFor(() => expect(q(container, "biosketch-result")).toBeNull());
+    expect(q(container, "biosketch-cloned-from")).toBeNull();
     expect((q(container, "biosketch-label") as HTMLInputElement).value).toBe("");
     // Back to the default Contributions mode — the Personal Statement fields are gone.
     expect(q(container, "biosketch-project-title")).toBeNull();

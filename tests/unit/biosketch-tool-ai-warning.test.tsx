@@ -1,15 +1,12 @@
 /**
- * #1990 — the NIH AI-content warning is rendered in exactly ONE place at a time.
+ * #1990 — the NIH AI-content caution is on screen exactly once at a time, at the weight its
+ * moment calls for.
  *
- * #1569 put the warning in two deliberate spots: at the generate action, so the caution is read
- * before any content exists, and at the top of `BiosketchResultCard`, directly above the
- * Copy / Download actions where the text actually leaves the app. They were never meant to be
- * co-visible — but they are adjacent siblings in the generate column, so the instant a draft
- * landed BOTH were on screen and the doubled alert read as boilerplate.
- *
- * The invariant these tests pin is the handoff, in both directions of the only state that drives
- * it (`result`): no draft ⇒ one warning, at the generate action and outside the result card;
- * draft present ⇒ still one warning, and it is the one INSIDE the result card.
+ * Before a draft exists, a one-line amber note (`biosketch-ai-note`) sits at the Generate action
+ * and sets the expectation. The full destructive warning (`biosketch-ai-warning`) appears only
+ * with a draft, at the top of `BiosketchResultCard`, directly above Copy / Download where the
+ * text leaves the app. The setup form (and its note) steps aside while a draft is on screen, so
+ * the two are never co-visible.
  *
  * The model call is stubbed at `readBiosketchStream` — this is a render-gating test, not a
  * generate-flow test, so the fetch only has to get as far as a 200.
@@ -61,17 +58,16 @@ function renderTool() {
   return render(<BiosketchTool entityId="scholar1" canSeeCost={false} model="model-id" />);
 }
 
-describe("BiosketchTool — AI-content warning placement (#1990)", () => {
-  it("shows exactly one warning, at the generate action, while there is no draft", async () => {
+describe("BiosketchTool — AI-content caution placement (#1990)", () => {
+  it("shows only the amber note at the generate action while there is no draft", async () => {
     renderTool();
 
-    const warnings = await screen.findAllByTestId("biosketch-ai-warning");
-    expect(warnings).toHaveLength(1);
-    // No result card yet, so the one on screen is necessarily the generate-action placement.
+    expect(await screen.findAllByTestId("biosketch-ai-note")).toHaveLength(1);
+    expect(screen.queryByTestId("biosketch-ai-warning")).toBeNull();
     expect(screen.queryByTestId("biosketch-result")).toBeNull();
   });
 
-  it("hands the warning off to the result card once a draft lands — still exactly one", async () => {
+  it("hands off to the destructive warning in the result card once a draft lands", async () => {
     renderTool();
 
     fireEvent.click(await screen.findByTestId("biosketch-generate"));
@@ -80,7 +76,33 @@ describe("BiosketchTool — AI-content warning placement (#1990)", () => {
     await waitFor(() => {
       expect(screen.getAllByTestId("biosketch-ai-warning")).toHaveLength(1);
     });
-    // ...and it is the result-card copy — the one above Copy / Download — not the generate one.
     expect(card.contains(screen.getByTestId("biosketch-ai-warning"))).toBe(true);
+    expect(screen.queryByTestId("biosketch-ai-note")).toBeNull();
+  });
+});
+
+describe("BiosketchTool — mode cards", () => {
+  it("one radio group swaps between the two drafts and the publication finder", async () => {
+    renderTool();
+    const radio = (v: string) =>
+      screen.getByTestId(`biosketch-mode-${v}`).querySelector("input") as HTMLInputElement;
+
+    await screen.findByTestId("biosketch-generate");
+    expect(radio("contributions").checked).toBe(true);
+    expect(screen.queryByTestId("biosketch-project-title")).toBeNull();
+
+    fireEvent.click(radio("personal_statement"));
+    expect(radio("personal_statement").checked).toBe(true);
+    expect(screen.getByTestId("biosketch-project-title")).not.toBeNull();
+
+    fireEvent.click(radio("suggest"));
+    expect(screen.getByTestId("biosketch-statement")).not.toBeNull();
+    expect(screen.queryByTestId("biosketch-generate")).toBeNull();
+
+    // Back to a draft mode: the Personal Statement choice was kept.
+    fireEvent.click(radio("personal_statement"));
+    expect(screen.getByTestId("biosketch-generate").textContent).toContain(
+      "Generate personal statement",
+    );
   });
 });
