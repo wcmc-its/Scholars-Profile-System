@@ -20,7 +20,7 @@
  */
 import Link from "next/link";
 
-import { ProfilesFilters } from "@/components/edit/profiles-filters";
+import { ProfilesFilters, ProfilesFiltersSheet } from "@/components/edit/profiles-filters";
 import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Badge } from "@/components/ui/badge";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -97,10 +97,10 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
-/** The "overview last updated" cell — a date, the imported-seed label, or "—". */
+/** The "overview last updated" cell — a date, the imported-seed label, or "Never". */
 function overviewUpdated(e: DataQualityEntry): string {
   if (e.overviewUpdatedAt) return formatDate(e.overviewUpdatedAt);
-  return e.overviewState === "imported" ? "Imported" : "—";
+  return e.overviewState === "imported" ? "Imported" : "Never";
 }
 
 /** A green ✓ (good) or muted "—" (not checked / n/a). */
@@ -108,7 +108,11 @@ function Yes() {
   return <span className="font-semibold text-apollo-green" aria-label="yes">✓</span>;
 }
 function Gap() {
-  return <span className="text-apollo-maroon font-semibold" aria-label="missing">✗</span>;
+  return (
+    <span className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap">
+      Missing
+    </span>
+  );
 }
 function Unknown() {
   return (
@@ -139,25 +143,28 @@ export function ProfilesRoster({
   const end = Math.min((page + 1) * pageSize, total);
   const hasPrev = page > 0;
   const hasNext = end < total;
+  const filterProps = { facets, roleCategories, units, q, gap, overviewAge, includeHidden };
+  const activeFilters =
+    roleCategories.length +
+    units.length +
+    (q ? 1 : 0) +
+    (gap !== "all" ? 1 : 0) +
+    (overviewAge !== "all" ? 1 : 0) +
+    (includeHidden ? 0 : 1);
 
   return (
     <div data-slot="profiles-roster">
       <h1 className="mb-4 text-xl font-bold">Profiles</h1>
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        <aside className="lg:w-64 lg:shrink-0">
-          <ProfilesFilters
-            facets={facets}
-            roleCategories={roleCategories}
-            units={units}
-            q={q}
-            gap={gap}
-            overviewAge={overviewAge}
-            includeHidden={includeHidden}
-          />
+        <aside className="hidden lg:block lg:w-64 lg:shrink-0">
+          <ProfilesFilters {...filterProps} />
         </aside>
 
         <div className="min-w-0 flex-1">
+          <div className="mb-4 lg:hidden">
+            <ProfilesFiltersSheet {...filterProps} activeCount={activeFilters} />
+          </div>
           {/* Summary chips across the in-scope set (before the gap/age filters). */}
           <div className="text-muted-foreground mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <span>
@@ -194,7 +201,6 @@ export function ProfilesRoster({
             <table className="[&_td]:align-middle w-full text-sm" data-testid="profiles-table">
               <thead className="bg-apollo-surface-2 text-muted-foreground text-left text-xs uppercase">
                 <tr>
-                  <th className="w-12 px-3 py-2">#</th>
                   <th className="px-3 py-2">Scholar</th>
                   <th className="px-3 py-2">Person type</th>
                   <th className="px-3 py-2">Status</th>
@@ -209,19 +215,13 @@ export function ProfilesRoster({
               <tbody>
                 {entries.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-muted-foreground px-3 py-6 text-center">
+                    <td colSpan={7} className="text-muted-foreground px-3 py-6 text-center">
                       No profiles match your search.
                     </td>
                   </tr>
                 ) : (
-                  entries.map((e, i) => (
+                  entries.map((e) => (
                     <tr key={e.cwid} className="border-t" data-testid={`roster-row-${e.cwid}`}>
-                      <td
-                        className="text-muted-foreground px-3 py-2 tabular-nums"
-                        title={`Prominence ${e.prominence.toFixed(1)}`}
-                      >
-                        {page * pageSize + i + 1}
-                      </td>
                       <td className="px-3 py-2">
                         <Link
                           href={e.editHref}

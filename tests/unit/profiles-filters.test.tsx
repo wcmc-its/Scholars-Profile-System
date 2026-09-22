@@ -82,6 +82,18 @@ describe("ProfilesFilters — auto-apply", () => {
     expect(lastUrl()).toContain("unit=center%3AMCC");
   });
 
+  it("hides zero-member centers unless selected", () => {
+    const withEmpty = {
+      ...facets,
+      centers: [...facets.centers, { value: "center:EMPTY", label: "Empty Center", count: 0 }],
+    };
+    const { unmount } = renderFilters({ facets: withEmpty, units: [] });
+    expect(screen.queryByText("Empty Center")).toBeNull();
+    unmount();
+    renderFilters({ facets: withEmpty, units: ["center:EMPTY"] });
+    expect(screen.getByText("Empty Center")).toBeTruthy();
+  });
+
   it("renders an Institution facet below Centers and toggles inst:CODE into the shared unit set", () => {
     renderFilters({ units: [] });
     const titles = screen.getAllByRole("heading").map((h) => h.textContent);
