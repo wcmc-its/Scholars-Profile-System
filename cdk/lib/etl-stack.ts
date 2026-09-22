@@ -952,6 +952,14 @@ export class EtlStack extends Stack {
     // RECITER_API_SCRIPTS below). Isolating the key on its own def keeps it off
     // every other cadence step and off the web tier.
     const reciterApiUnit = makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+    // Both envs' reciter-api secrets point at the SAME ReCiter, so one Identity
+    // table: a live staging OrcidPush would write staging's (test-edited)
+    // scholar.orcid into it, and prod's Identity pull would import it. Staging
+    // runs the step GET-only (still proves reachability); prod alone writes.
+    reciterApiUnit.container.addEnvironment(
+      "ORCID_PUSH_DRY_RUN",
+      envConfig.envName === "prod" ? "0" : "1",
+    );
 
     // ------------------------------------------------------------------
     // scripts/bulk-data-rule/ pipeline — dedicated one-off task def

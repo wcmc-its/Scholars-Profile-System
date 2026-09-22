@@ -2498,6 +2498,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
+              {
+                "Name": "ORCID_PUSH_DRY_RUN",
+                "Value": "0",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -12338,6 +12342,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
+              },
+              {
+                "Name": "ORCID_PUSH_DRY_RUN",
+                "Value": "1",
               },
             ],
             "Essential": true,
