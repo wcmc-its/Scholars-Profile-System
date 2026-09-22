@@ -1,21 +1,27 @@
 /**
  * The My publications card (#356 Phase 6 C7, UI-SPEC § `/edit` Card 3).
  *
- * The filterable, year-grouped list of the scholar's confirmed authorships
- * with optimistic hide/show. A sole-displayed-author hide opens a confirm
- * dialog first (UI-SPEC edge case 11); an admin-removed publication renders
- * an inline explanation and no control (UI-SPEC accessibility — a disabled
- * button would not be keyboard-reachable for its tooltip).
+ * The filterable, year-grouped list of the scholar's confirmed authorships.
  *
- * Optimistic mechanism (D6.4): `useOptimistic` over a local-state list that
- * commits on a successful POST. On a network/server failure the optimistic
- * state reverts when the transition ends and an inline destructive Alert
- * renders above the row.
+ * HIDE is a bulk verb, the same one Positions and the Education / Funding /
+ * Mentees panels ship: a `shown` row carries a checkbox, any selection raises
+ * the shared `SelectionBar`, and "Hide from profile" POSTs /api/edit/suppress
+ * once per selected pmid, committing each row as its write lands. Both guards
+ * survive the move off the per-row button and now fire ONCE for the whole
+ * batch: the first-hide-of-a-session notice (#570), then the
+ * sole-displayed-author confirm (UI-SPEC edge case 11).
+ *
+ * SHOW stays per-row and optimistic (D6.4): `useOptimistic` over a local-state
+ * list that commits on a successful POST; on a network/server failure the
+ * optimistic state reverts when the transition ends and an inline destructive
+ * Alert renders above the row. An admin-removed publication renders an inline
+ * explanation and no control (UI-SPEC accessibility — a disabled button would
+ * not be keyboard-reachable for its tooltip).
  */
 "use client";
 
 import * as React from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
@@ -23,14 +29,16 @@ import { FirstHideNoticeDialog } from "@/components/edit/first-hide-notice-dialo
 import { ReciterPendingCardClient } from "@/components/edit/reciter-pending-card";
 import { RejectNoticeDialog } from "@/components/edit/reject-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
+import { SelectionBar, plural } from "@/components/edit/selection-bar";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
-import { cn } from "@/lib/utils";
+import { cn, htmlToPlainText } from "@/lib/utils";
 import type { EditContextPublication } from "@/lib/api/edit-context";
 
 export type PublicationsCardProps = {
@@ -88,18 +96,11 @@ function acknowledgeFirstHide(): void {
 }
 
 type Pub = EditContextPublication;
-type OptimisticUpdate =
-  | { kind: "hide"; pmid: string }
-  | { kind: "show"; pmid: string };
 
-function applyOptimistic(state: Pub[], update: OptimisticUpdate): Pub[] {
-  return state.map((p) => {
-    if (p.pmid !== update.pmid) return p;
-    if (update.kind === "hide") {
-      return { ...p, state: "hidden_by_self", suppressionId: null };
-    }
-    return { ...p, state: "shown", suppressionId: null };
-  });
+/** Only SHOW is optimistic: a bulk hide commits row by row as each POST lands,
+ *  so there is nothing to revert. */
+function applyOptimisticShow(state: Pub[], pmid: string): Pub[] {
+  return state.map((p) => (p.pmid === pmid ? { ...p, state: "shown", suppressionId: null } : p));
 }
 
 export function PublicationsCard({
@@ -117,14 +118,18 @@ export function PublicationsCard({
   const possessive = su ? `${scholarName}’s` : "your";
   const [list, setList] = React.useState<Pub[]>([...publications]);
   const [, startTransition] = React.useTransition();
-  const [optimistic, addOptimistic] = React.useOptimistic(list, applyOptimistic);
+  const [optimistic, addOptimisticShow] = React.useOptimistic(list, applyOptimisticShow);
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
   const [filter, setFilter] = React.useState("");
-  // The sole-author confirm dialog is keyed by pmid — open is null when closed.
-  const [confirmPmid, setConfirmPmid] = React.useState<string | null>(null);
-  // The first-hide-of-a-session notice (#570), keyed by the pmid that triggered
-  // it — null when closed.
-  const [noticePmid, setNoticePmid] = React.useState<string | null>(null);
+  const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
+  const [busy, setBusy] = React.useState(false);
+  const [bulkError, setBulkError] = React.useState<string | null>(null);
+  // The batch waiting on a gate — the first-hide-of-a-session notice (#570),
+  // then the sole-displayed-author confirm. Null when that dialog is closed.
+  // Both gates take the WHOLE batch, so the single row the reject interstitial
+  // reroutes ("Hide it instead") is simply a batch of one.
+  const [noticeBatch, setNoticeBatch] = React.useState<Pub[] | null>(null);
+  const [confirmBatch, setConfirmBatch] = React.useState<Pub[] | null>(null);
   // The "Not mine" reject interstitial (#746), keyed by the pmid being rejected
   // — null when closed.
   const [rejectPmid, setRejectPmid] = React.useState<string | null>(null);
@@ -153,67 +158,85 @@ export function PublicationsCard({
     setList((prev) => updater(prev));
   }
 
-  function startHide(p: Pub) {
+  function startHide(batch: Pub[]) {
+    if (batch.length === 0) return;
     // First publication-hide of the session shows the educational notice before
     // anything commits (#570). After it's been seen once, hides proceed straight
-    // to the sole-author guard (if any) or the optimistic hide.
+    // to the sole-author guard (if any) or the writes.
     if (!hasAcknowledgedFirstHide()) {
-      setNoticePmid(p.pmid);
+      setNoticeBatch(batch);
       return;
     }
-    proceedHide(p);
+    proceedHide(batch);
   }
 
   // The hide path once the first-hide notice is out of the way: the existing
-  // sole-displayed-author guard, then the optimistic write.
-  function proceedHide(p: Pub) {
-    if (p.isSoleDisplayedAuthor) {
-      setConfirmPmid(p.pmid);
+  // sole-displayed-author guard — ONE confirm for the batch, not one per row —
+  // then the writes.
+  function proceedHide(batch: Pub[]) {
+    if (batch.some((p) => p.isSoleDisplayedAuthor)) {
+      setConfirmBatch(batch);
       return;
     }
-    hide(p.pmid);
+    void hideBatch(batch);
   }
 
-  // Close the notice without recording an acknowledgment — the Cancel / Esc /
-  // backdrop path. The scholar backed out before deciding, so the notice can
-  // resurface on their next hide.
-  function closeNotice() {
-    setNoticePmid(null);
+  /** One suppress write, committing the row locally on success. No
+   *  `router.refresh()`: the committed local list is authoritative for this
+   *  panel on a never-cached page (T3.7). */
+  async function hideOne(pmid: string): Promise<boolean> {
+    try {
+      const res = await fetch("/api/edit/suppress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType: "publication",
+          entityId: pmid,
+          contributorCwid: cwid,
+        }),
+      });
+      const data = (await res.json()) as
+        | { ok: true; suppressionId: string }
+        | { ok: false; error: string };
+      if (!res.ok || data.ok !== true) return false;
+      commitLocal((state) =>
+        state.map((p) =>
+          p.pmid === pmid
+            ? { ...p, state: "hidden_by_self", suppressionId: data.suppressionId }
+            : p,
+        ),
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  function hide(pmid: string) {
-    setError(pmid, null);
-    startTransition(async () => {
-      addOptimistic({ kind: "hide", pmid });
-      try {
-        const res = await fetch("/api/edit/suppress", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            entityType: "publication",
-            entityId: pmid,
-            contributorCwid: cwid,
-          }),
-        });
-        const data = (await res.json()) as
-          | { ok: true; suppressionId: string }
-          | { ok: false; error: string };
-        if (!res.ok || data.ok !== true) {
-          setError(pmid, "We couldn't hide this publication. Please try again.");
-          return; // optimistic reverts when the transition ends
-        }
-        commitLocal((state) =>
-          state.map((p) =>
-            p.pmid === pmid
-              ? { ...p, state: "hidden_by_self", suppressionId: data.suppressionId }
-              : p,
-          ),
+  /** Fan the batch out over `hideOne`; the rows that failed stay selected under
+   *  one inline alert so a retry re-sends exactly those. */
+  async function hideBatch(batch: Pub[]) {
+    setBulkError(null);
+    setBusy(true);
+    try {
+      const results = await Promise.all(batch.map((p) => hideOne(p.pmid)));
+      const failed = batch.filter((_, i) => !results[i]);
+      setSelected(new Set(failed.map((p) => p.pmid)));
+      if (failed.length > 0) {
+        setBulkError(
+          `We couldn't hide ${failed.length} of the selected publications. Please try again.`,
         );
-        // No router.refresh(): the optimistic→committed local list is
-        // authoritative for this panel on a never-cached page (T3.7).
-      } catch {
-        setError(pmid, "We couldn't hide this publication. Please try again.");
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggle(pmid: string, on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(pmid);
+      else next.delete(pmid);
+      return next;
     });
   }
 
@@ -222,7 +245,7 @@ export function PublicationsCard({
     const suppressionId = p.suppressionId;
     setError(p.pmid, null);
     startTransition(async () => {
-      addOptimistic({ kind: "show", pmid: p.pmid });
+      addOptimisticShow(p.pmid);
       try {
         const res = await fetch("/api/edit/revoke", {
           method: "POST",
@@ -272,12 +295,21 @@ export function PublicationsCard({
     commitLocal((state) => state.filter((p) => p.pmid !== pmid));
   }
 
-  const confirmingPub =
-    confirmPmid !== null ? list.find((p) => p.pmid === confirmPmid) ?? null : null;
-  const noticePub =
-    noticePmid !== null ? list.find((p) => p.pmid === noticePmid) ?? null : null;
   const rejectingPub =
     rejectPmid !== null ? list.find((p) => p.pmid === rejectPmid) ?? null : null;
+
+  // Visual order is the year groups, newest first, so "older" in the selection
+  // bar means further down that list. The bar counts the SELECTION, not the
+  // visible rows: filtering never drops a selected row from the batch.
+  const ordered = grouped.flatMap((g) => g.items);
+  const firstSelected = ordered.findIndex((p) => selected.has(p.pmid));
+  const older =
+    firstSelected < 0
+      ? []
+      : ordered
+          .slice(firstSelected + 1)
+          .filter((p) => p.state === "shown" && !selected.has(p.pmid));
+  const soleCount = confirmBatch?.filter((p) => p.isSoleDisplayedAuthor).length ?? 0;
 
   return (
     <EditPanel
@@ -324,6 +356,12 @@ export function PublicationsCard({
           />
         </div>
 
+        {bulkError && (
+          <Alert variant="destructive">
+            <AlertDescription>{bulkError}</AlertDescription>
+          </Alert>
+        )}
+
         {totalCount === 0 ? (
           <p className="text-sm text-muted-foreground">
             No publications are currently associated with {possessive} profile.
@@ -352,7 +390,8 @@ export function PublicationsCard({
                         scholarName={scholarName}
                         pub={p}
                         error={errors.get(p.pmid) ?? null}
-                        onHide={() => startHide(p)}
+                        selected={selected.has(p.pmid)}
+                        onSelect={(on) => toggle(p.pmid, on)}
                         onShow={() => show(p)}
                         rejectEnabled={rejectEnabled}
                         onNotMine={() => setRejectPmid(p.pmid)}
@@ -365,49 +404,61 @@ export function PublicationsCard({
           </ScrollArea>
         )}
 
+      <SelectionBar
+        count={selected.size}
+        noun="publication"
+        extendCount={older.length}
+        extendLabelNoun="older publication"
+        onExtend={() => setSelected(new Set([...selected, ...older.map((p) => p.pmid)]))}
+        onHide={() => startHide(list.filter((p) => selected.has(p.pmid)))}
+        onClear={() => setSelected(new Set())}
+        busy={busy}
+      />
+
       <FirstHideNoticeDialog
-        open={noticePmid !== null}
+        open={noticeBatch !== null}
         onOpenChange={(open) => {
           // Cancel / Esc / backdrop / X — backed out without deciding. Close
-          // but do NOT acknowledge, so the notice can resurface next time.
-          if (!open) closeNotice();
+          // but do NOT acknowledge, so the notice can resurface next time; the
+          // selection survives, so the batch is one click from being re-tried.
+          if (!open) setNoticeBatch(null);
         }}
         onHide={() => {
           // Informed choice — acknowledge for the session, then resume the hide
-          // the scholar initiated, which for a sole-displayed-author paper opens
-          // the site-wide removal confirm rather than hiding straight away (no
-          // double-prompt).
-          const p = noticePub;
+          // the scholar initiated, which for a batch holding a sole-displayed-
+          // author paper opens the site-wide removal confirm rather than hiding
+          // straight away (no double-prompt).
+          const batch = noticeBatch;
           acknowledgeFirstHide();
-          closeNotice();
-          if (p) proceedHide(p);
+          setNoticeBatch(null);
+          if (batch) proceedHide(batch);
         }}
         onNotMine={() => {
           // Informed choice — acknowledge, then let the scholar leave for
           // Publication Manager (the <a> opens it in a new tab). Do NOT hide.
           acknowledgeFirstHide();
-          closeNotice();
+          setNoticeBatch(null);
         }}
       />
 
       <ConfirmDialog
-        open={confirmPmid !== null}
+        open={confirmBatch !== null}
         onOpenChange={(open) => {
-          if (!open) setConfirmPmid(null);
+          if (!open) setConfirmBatch(null);
         }}
-        title="Hide this publication?"
-        description={
-          su
-            ? `${scholarName} is the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until it is restored, or another WCM author is added.`
-            : "You are the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until you restore it, or another WCM author is added."
-        }
+        title={`Hide ${plural(confirmBatch?.length ?? 0, "publication")}?`}
+        // One dialog for the batch, quoting how many of it are sole-author —
+        // not one prompt per row.
+        description={`${soleCount} of these ${soleCount === 1 ? "lists" : "list"} ${
+          su ? scholarName : "you"
+        } as the only displayed Weill Cornell author. Hiding a publication with no other WCM author removes it from the site entirely until it is restored, or another WCM author is added.`}
         reasonMode="none"
-        confirmLabel="Hide it anyway"
+        confirmLabel="Hide anyway"
         confirmVariant="destructive"
         onConfirm={async () => {
-          if (!confirmingPub) return;
-          setConfirmPmid(null);
-          hide(confirmingPub.pmid);
+          const batch = confirmBatch;
+          setConfirmBatch(null);
+          if (batch) await hideBatch(batch);
         }}
       />
 
@@ -431,7 +482,7 @@ export function PublicationsCard({
           // (which itself shows the first-hide notice the once per session).
           const p = rejectingPub;
           setRejectPmid(null);
-          if (p) startHide(p);
+          if (p) startHide([p]);
         }}
       />
     </EditPanel>
@@ -444,7 +495,8 @@ function PublicationRow({
   scholarName,
   pub,
   error,
-  onHide,
+  selected,
+  onSelect,
   onShow,
   rejectEnabled,
   onNotMine,
@@ -455,7 +507,8 @@ function PublicationRow({
   scholarName: string;
   pub: Pub;
   error: string | null;
-  onHide: () => void;
+  selected: boolean;
+  onSelect: (on: boolean) => void;
   onShow: () => void;
   rejectEnabled: boolean;
   /** Open the "Not mine" reject interstitial (#746). */
@@ -464,6 +517,23 @@ function PublicationRow({
   return (
     <li className="flex flex-col gap-2 px-1 py-4" data-testid={`pub-row-${pub.pmid}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
+        {pub.state === "shown" ? (
+          <label className="hover:bg-apollo-surface-2 -mt-1 -ml-1.5 flex size-[30px] shrink-0 items-center justify-center rounded-[7px]">
+            <Checkbox
+              className="border-apollo-border-strong size-[18px] border-2"
+              checked={selected}
+              onCheckedChange={(c) => onSelect(c === true)}
+              // Plain-text title + journal/year, so two rows sharing a title
+              // still read apart (the positions-card scheme). `htmlToPlainText`
+              // keeps PubMed's inline `<i>`/`<sub>` markup out of the label.
+              aria-label={`Select ${htmlToPlainText(pub.title)}, ${htmlToPlainText(
+                pub.journal ?? "Unknown journal",
+              )} · ${pub.year ?? "Year unknown"}`}
+            />
+          </label>
+        ) : (
+          <span className="w-6 shrink-0" aria-hidden />
+        )}
         <div className="min-w-0 flex-1">
           <PubTitle
             as="p"
@@ -503,19 +573,6 @@ function PublicationRow({
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {pub.state === "shown" && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="min-h-11 md:min-h-8"
-              onClick={onHide}
-              data-testid={`pub-hide-${pub.pmid}`}
-            >
-              <EyeOff />
-              Hide
-            </Button>
-          )}
           {pub.state === "hidden_by_self" && (
             <Button
               type="button"
