@@ -29,6 +29,7 @@ const base = {
 };
 
 const identity = {
+  cwid: "abc1001",
   name: "Jane Doe, PhD",
   title: "Professor of Medicine",
   institution: "Weill Cornell Medicine",
@@ -55,7 +56,7 @@ describe("EditShell — identity header (design round 3)", () => {
       <EditShell
         {...base}
         mode="proxy"
-        identity={{ name: "Jane Doe", title: null, institution: "Weill Cornell Medicine" }}
+        identity={{ cwid: "abc1001", name: "Jane Doe", title: null, institution: "Weill Cornell Medicine" }}
       >
         <div>panel</div>
       </EditShell>,

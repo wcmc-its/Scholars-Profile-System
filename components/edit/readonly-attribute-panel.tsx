@@ -20,7 +20,7 @@ export type ReadonlyAttributePanelProps = {
   cwid: string;
   /** The scholar's display name, echoed into the routed change-request email. */
   scholarName: string;
-  /** Panel heading, e.g. "Name & Title" or "Photo". */
+  /** Panel heading, e.g. "Name & title" or "Photo". */
   heading: string;
   /** The explanatory line under the heading. */
   description: string;

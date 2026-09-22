@@ -361,7 +361,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(cta.textContent).toContain("Add in ReCiter");
     expect(cta.getAttribute("href")).toBe(`https://reciter.weill.cornell.edu/manageprofile/${ctx.scholar.cwid}`);
     expect(cta.getAttribute("target")).toBe("_blank");
-    expect(screen.queryByRole("link", { name: "Identifiers & Profiles" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Identifiers & profiles" })).toBeNull();
   });
 
   it("?attr=identifiers-profiles renders the ORCID card when the flag is on", () => {
@@ -372,7 +372,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={withSuggestion} mode="self" attr="identifiers-profiles" orcidTabEnabled />);
     expect(document.querySelector('[data-slot="orcid-card"]')).not.toBeNull();
     expect(screen.getByTestId("orcid-confirm")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Identifiers & Profiles" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Identifiers & profiles" })).toBeTruthy();
   });
 
   it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done, nothing left open", () => {
@@ -476,7 +476,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
   });
 
-  it("?attr=appointments renders the Appointments panel + a row", () => {
+  it("?attr=appointments renders the Positions panel + a row", () => {
     render(<EditPage ctx={ctx} mode="self" attr="appointments" />);
     expect(document.querySelector('[data-slot="appointments-panel"]')).not.toBeNull();
     expect(screen.getByTestId("appointment-row-appt-1")).toBeTruthy();
@@ -484,8 +484,8 @@ describe("EditPage router — the Apollo shell + rail", () => {
   });
 
   // #1557 — self-serve reveal. The scholar themselves (mode="self") sees the
-  // Historical Appointments reveal panel, not just curators/stewards.
-  it("?attr=appointments surfaces the Historical Appointments panel to the SELF scholar (#1557)", () => {
+  // Earlier ranks section, not just curators/stewards.
+  it("?attr=appointments surfaces the Earlier ranks section to the SELF scholar (#1557)", () => {
     const withHistorical: EditContext = {
       ...ctx,
       historicalAppointments: [
@@ -500,9 +500,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
       ],
     };
     render(<EditPage ctx={withHistorical} mode="self" attr="appointments" />);
-    expect(
-      document.querySelector('[data-slot="historical-appointments-panel"]'),
-    ).not.toBeNull();
+    expect(screen.getByText("Earlier ranks")).toBeTruthy();
     expect(screen.getByTestId("historical-appointment-row-hist-1")).toBeTruthy();
   });
 

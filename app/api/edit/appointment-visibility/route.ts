@@ -2,7 +2,9 @@
  * POST /api/edit/appointment-visibility — reveal (or re-hide) one historical
  * appointment on the public profile (#1323).
  *
- * Body: `{ appointmentExternalId: string, showOnProfile: boolean }`.
+ * Body: `{ appointmentExternalId: string, showOnProfile: boolean, reason?: string }`
+ * — `reason` (trimmed, ≤ 500 chars, dropped when blank) is the superuser's
+ * required hide reason from the /edit dialog; it lands in the audit row only.
  *
  * Historical appointments are imported from the WOOFA faculty SOR's
  * `faculty:expired` records with `source = "ED-HISTORICAL"` and
@@ -55,6 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof showOnProfile !== "boolean") {
     return editError(400, "invalid_show_on_profile", "showOnProfile");
   }
+  const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
 
   // --- load the appointment (404 existence gate) — the owning scholar, source,
   //     and title come from the same read. ---
@@ -117,6 +120,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         beforeValues: null,
         afterValues: {
           show_on_profile: showOnProfile,
+          ...(reason ? { reason } : {}),
           // Amendment 4 — record the unit that conferred a unit-admin reveal
           // (absent for a comms_steward / superuser action).
           ...(viaUnitAdminUnit

@@ -404,7 +404,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                           card can legitimately mix dated and undated rows.
                           Every other appointment renderer suppresses the same
                           way (Past Appointments below,
-                          components/edit/appointments-card.tsx,
+                          components/edit/positions-card.tsx,
                           components/edit/profile-appointments-card.tsx) —
                           keep them in step. */}
                       <div className="text-muted-foreground mt-0.5 text-xs">

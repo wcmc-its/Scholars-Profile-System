@@ -58,7 +58,7 @@ export function CoiCard({
     <EditPanel
       slot="coi-panel"
       attribute="coi"
-      heading="Conflicts of Interest"
+      heading="Conflicts of interest"
       description={`External relationships and financial interests ${possessive === "your" ? "you" : scholarName} disclosed in the Weill Research Gateway. These are shown on the public profile and aren't editable here.`}
     >
       <LockedBadge />

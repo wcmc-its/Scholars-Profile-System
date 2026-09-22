@@ -31,7 +31,7 @@ import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { Button } from "@/components/ui/button";
-import { initials } from "@/lib/utils";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 
 /** A navigable "{label} / {current}" breadcrumb — shared by the "Profiles"
  *  crumb (superuser-on-a-profile, unit-admin-with-a-grant) and the "Org
@@ -103,11 +103,11 @@ export type EditShellProps = {
   historyHref?: string;
   /** Edit-for-others only (superuser / proxy / unit-admin — never `self`, where
    *  the editor already knows who they are): the identity header above the
-   *  notice — 44px initials avatar, the published name (`formatPublishedName`:
+   *  notice — 44px headshot (WCM directory, initials fallback), the published name (`formatPublishedName`:
    *  "{scholarName}, {postnominal}", or bare for an enrolled doctoral student),
    *  and "{title} · {institution}" (design round 3, 2026-09-21). Empty parts are
    *  omitted. Ignored in self mode even when supplied. */
-  identity?: { name: string; title?: string | null; institution?: string | null };
+  identity?: { cwid: string; name: string; title?: string | null; institution?: string | null };
   /** "View reports" target — a center's Reports console (`/edit/reports`).
    *  Internal, same tab. Center editor only; omit ⇒ no link. Replaces the old
    *  rail-mounted `CenterReportsRailLink` (Reports IA redesign, 2026-08-14). */
@@ -392,12 +392,12 @@ export function EditShell({
             <div className={`flex flex-wrap items-start gap-4 ${showIdentity ? "mb-6" : "mb-4"}`}>
               {showIdentity && (
                 <div className="flex min-w-0 items-center gap-4" data-testid="edit-identity-header">
-                  <span
-                    aria-hidden
-                    className="bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground flex size-11 shrink-0 items-center justify-center rounded-full border text-[13px] font-[600]"
-                  >
-                    {initials(scholarName)}
-                  </span>
+                  <HeadshotAvatar
+                    cwid={identity.cwid}
+                    preferredName={scholarName}
+                    size="md"
+                    className="border-apollo-border-strong size-11 border"
+                  />
                   <div className="min-w-0">
                     <p className="text-[22px] leading-tight font-[600] tracking-[-0.02em]">
                       {identity.name}

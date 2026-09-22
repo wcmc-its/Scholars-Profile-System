@@ -10,8 +10,7 @@
  */
 import Link from "next/link";
 
-import { AppointmentsCard } from "@/components/edit/appointments-card";
-import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
+import { PositionsCard } from "@/components/edit/positions-card";
 import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
 import { HonorsCard } from "@/components/edit/honors-card";
 import { CoiCard } from "@/components/edit/coi-card";
@@ -118,7 +117,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // Task-first landing (vision-round T3.4). Shared with superusers, where it
   // reads as a read-only profile-completeness overview of the target scholar.
   { key: "home", label: "Home", modes: ["self", "superuser"] },
-  { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
+  { key: "name-title", label: "Name & title", readonly: true, modes: ["self", "superuser"] },
   // Email + its Web Directory release audience — read-only (email-visibility
   // SPEC § C). The release code is owned by the Web Directory SOR; this panel
   // only shows the imported state and links out, so it carries no write control.
@@ -179,11 +178,11 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // Honors & distinctions (#1760) — a sibling of Appointments, NOT a sub-card of it.
   // An honor is its own content type with its own profile section; it is not an
   // appointment, and burying it under Appointments made it undiscoverable.
-  { key: "honors", label: "Honors & Distinctions", modes: ["self", "superuser"] },
+  { key: "honors", label: "Honors & distinctions", modes: ["self", "superuser"] },
   // Identifiers & Profiles — ORCID iD today (confirm the inferred one, or enter it);
   // eRA Commons, Scopus Author ID, and profile links are later cards on the same
   // tab. Owned: the scholar asserts these; no WCM feed does.
-  { key: "identifiers-profiles", label: "Identifiers & Profiles", modes: ["self", "superuser"] },
+  { key: "identifiers-profiles", label: "Identifiers & profiles", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
   { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
@@ -193,7 +192,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // `attrsForMode`). The rail item appears only when the loader returned rows.
   { key: "mentee-suggestions", label: "From your publications", modes: ["self", "superuser"] },
   // Conflicts of interest — read-only; managed in the Weill Research Gateway.
-  { key: "coi", label: "Conflicts of Interest", readonly: true, modes: ["self", "superuser"] },
+  { key: "coi", label: "Conflicts of interest", readonly: true, modes: ["self", "superuser"] },
   // From your publications (#SELF_EDIT_COI_GAP_HINT) — a sensitive advisory:
   // relationships named in the scholar's own PubMed competing-interest statements,
   // never a compliance verdict. Originally self-only; now also visible to a
@@ -955,6 +954,7 @@ export function EditPage({
       // Identity header (design round 3): the shell renders it for edit-for-others
       // only (self mode ignores it). Same name builder as the public profile h1.
       identity={{
+        cwid: ctx.scholar.cwid,
         name: formatPublishedName(scholarName, ctx.scholar.postnominal, ctx.scholar.roleCategory),
         title: ctx.scholar.primaryTitle,
         institution: ctx.scholar.primaryOrgCode
@@ -1156,7 +1156,7 @@ function renderPanel(
           attribute="name-title"
           cwid={cwid}
           scholarName={scholarName}
-          heading="Name & Title"
+          heading="Name & title"
           description="Name, title, degrees, department, institution, and ORCID come from the WCM directory and faculty records."
           fields={[
             { label: "Name", value: ctx.scholar.fullName },
@@ -1358,47 +1358,29 @@ function renderPanel(
           datasets={ctx.datasets}
         />
       );
-    case "appointments":
+    case "appointments": {
+      // #1323 / #1568 — the Earlier ranks section and the self-service
+      // "Additional positions" card show to every editor the write routes
+      // authorize: the scholar themselves (self, self-serve), a superuser /
+      // comms_steward, a granted proxy, or a unit-admin curator — the SAME set
+      // `authorizeOverviewWrite` authorizes, so the surface never drifts from
+      // the write gate. A self-actor only ever sees + toggles their OWN history
+      // (the loader is per-scholar; the routes key authz on the row's owner).
+      const canEditPositions =
+        mode === "self" || isSuperuserLike(mode) || mode === "unit-admin" || mode === "proxy";
       return (
-        <div className="flex flex-col gap-8">
-          <AppointmentsCard
+        <div className="flex flex-col gap-11">
+          <PositionsCard
             cwid={cwid}
             mode={voiceMode}
             scholarName={scholarName}
             appointments={ctx.appointments}
+            historicalAppointments={canEditPositions ? ctx.historicalAppointments : []}
           />
-          {/* #1323 — reveal-to-show historical appointments. Every reveal-capable
-              editor sees the control: the scholar themselves (self, self-serve),
-              a superuser / comms_steward, a granted proxy, or a unit-admin curator
-              — the SAME set `authorizeOverviewWrite` authorizes at the route, so
-              the surface never drifts from the write gate. A self-actor only ever
-              sees + toggles their OWN history (the loader is per-scholar and the
-              route keys authz on the appointment's owner). */}
-          {(mode === "self" ||
-            isSuperuserLike(mode) ||
-            mode === "unit-admin" ||
-            mode === "proxy") &&
-            ctx.historicalAppointments.length > 0 && (
-              <HistoricalAppointmentsCard
-                scholarName={scholarName}
-                appointments={ctx.historicalAppointments}
-              />
-            )}
-          {/* #1568 — self-service editor for self-asserted appointments (internal
-              WCM roles the ED feed omits + prior/other-institution positions).
-              Shown to every actor the write route authorizes (self, superuser /
-              comms_steward, unit-admin, proxy — the SAME set as the historical
-              reveal above); the card fetches its own rows and each write is
-              re-authorized server-side. These render ONLY on the owner's profile,
-              never on a center / department / division / search surface. */}
-          {(mode === "self" ||
-            isSuperuserLike(mode) ||
-            mode === "unit-admin" ||
-            mode === "proxy") && (
-            <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
-          )}
+          {canEditPositions && <ProfileAppointmentsCard cwid={cwid} />}
         </div>
       );
+    }
     case "honors":
       // #1760 — curation editor for honors and distinctions (academy memberships,
       // investigatorships, prizes) that no WCM feed carries. Its OWN attribute,

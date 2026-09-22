@@ -91,7 +91,7 @@ describe("ProfileAppointmentsCard — list render", () => {
         row({ id: "b", title: "Head of Section", showOnProfile: false }),
       ]),
     );
-    render(<ProfileAppointmentsCard cwid="aog2001" mode="self" scholarName="Ann Gable" />);
+    render(<ProfileAppointmentsCard cwid="aog2001" />);
 
     expect(await screen.findByText("Program Director")).toBeTruthy();
     expect(screen.getByText("Head of Section")).toBeTruthy();
@@ -103,13 +103,13 @@ describe("ProfileAppointmentsCard — list render", () => {
 
   it("shows an empty state when the scholar has no self-asserted appointments", async () => {
     vi.stubGlobal("fetch", routedFetch([]));
-    render(<ProfileAppointmentsCard cwid="nobody" mode="self" scholarName="No One" />);
-    expect(await screen.findByText(/No additional appointments added yet/i)).toBeTruthy();
+    render(<ProfileAppointmentsCard cwid="nobody" />);
+    expect(await screen.findByText(/Nothing added yet/i)).toBeTruthy();
   });
 
   it("surfaces a load error when the GET fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({}, false)));
-    render(<ProfileAppointmentsCard cwid="aog2001" mode="self" scholarName="Ann Gable" />);
+    render(<ProfileAppointmentsCard cwid="aog2001" />);
     expect(await screen.findByText(/couldn.t load these appointments/i)).toBeTruthy();
   });
 });
@@ -118,8 +118,8 @@ describe("ProfileAppointmentsCard — mutations", () => {
   it("creates a row: POSTs action=create with the owner cwid, then appends it", async () => {
     const fetchMock = routedFetch([]);
     vi.stubGlobal("fetch", fetchMock);
-    render(<ProfileAppointmentsCard cwid="aog2001" mode="self" scholarName="Ann Gable" />);
-    await screen.findByText(/No additional appointments added yet/i);
+    render(<ProfileAppointmentsCard cwid="aog2001" />);
+    await screen.findByText(/Nothing added yet/i);
 
     fireEvent.click(screen.getByTestId("profile-appointment-add"));
     fireEvent.change(screen.getByTestId("profile-appointment-title-add"), {
@@ -147,8 +147,8 @@ describe("ProfileAppointmentsCard — mutations", () => {
 
   it("blocks submit until title and organization are both filled", async () => {
     vi.stubGlobal("fetch", routedFetch([]));
-    render(<ProfileAppointmentsCard cwid="aog2001" mode="self" scholarName="Ann Gable" />);
-    await screen.findByText(/No additional appointments added yet/i);
+    render(<ProfileAppointmentsCard cwid="aog2001" />);
+    await screen.findByText(/Nothing added yet/i);
 
     fireEvent.click(screen.getByTestId("profile-appointment-add"));
     const submit = screen.getByTestId("profile-appointment-submit-add") as HTMLButtonElement;
@@ -168,7 +168,7 @@ describe("ProfileAppointmentsCard — mutations", () => {
   it("removes a row: POSTs action=delete and prunes the list", async () => {
     const fetchMock = routedFetch([row({ id: "a", title: "Program Director" })]);
     vi.stubGlobal("fetch", fetchMock);
-    render(<ProfileAppointmentsCard cwid="aog2001" mode="self" scholarName="Ann Gable" />);
+    render(<ProfileAppointmentsCard cwid="aog2001" />);
     await screen.findByText("Program Director");
 
     fireEvent.click(screen.getByTestId("profile-appointment-remove-a"));
