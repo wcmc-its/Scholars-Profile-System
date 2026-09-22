@@ -18,7 +18,8 @@ const {
   mockTransaction,
   mockTxScholarUpdate,
   mockTxCandidateDeleteMany,
-  mockTxCandidateFindFirst,
+  mockTxCandidateFindMany,
+  mockTxScholarFindUnique,
   mockTxDismissalUpsert,
   mockTxDismissalDeleteMany,
   mockTxExecuteRaw,
@@ -34,7 +35,8 @@ const {
   mockTransaction: vi.fn(),
   mockTxScholarUpdate: vi.fn(),
   mockTxCandidateDeleteMany: vi.fn(),
-  mockTxCandidateFindFirst: vi.fn(),
+  mockTxCandidateFindMany: vi.fn(),
+  mockTxScholarFindUnique: vi.fn(),
   mockTxDismissalUpsert: vi.fn(),
   mockTxDismissalDeleteMany: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
@@ -79,12 +81,13 @@ const SELF = { cwid: "self01", isSuperuser: false, isCommsSteward: false };
 const OTHER = { cwid: "other9", isSuperuser: false, isCommsSteward: false };
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 const fakeTx = {
-  scholar: { update: mockTxScholarUpdate },
-  orcidCandidate: { deleteMany: mockTxCandidateDeleteMany, findFirst: mockTxCandidateFindFirst },
+  scholar: { update: mockTxScholarUpdate, findUnique: mockTxScholarFindUnique },
+  orcidCandidate: { deleteMany: mockTxCandidateDeleteMany, findMany: mockTxCandidateFindMany },
   orcidDismissal: { upsert: mockTxDismissalUpsert, deleteMany: mockTxDismissalDeleteMany },
   $executeRaw: mockTxExecuteRaw,
 };
 const ID = "0000-0002-1825-0097";
+const OTHER_ID = "0000-0000-0000-001X"; // synthetic, checksum-valid
 
 function post(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/edit/orcid", {
@@ -106,7 +109,8 @@ beforeEach(() => {
   mockUnitAdminFindMany.mockResolvedValue([]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockTxScholarUpdate.mockResolvedValue({});
-  mockTxCandidateFindFirst.mockResolvedValue(null);
+  mockTxCandidateFindMany.mockResolvedValue([]);
+  mockTxScholarFindUnique.mockResolvedValue({ orcid: null });
   mockTxDismissalUpsert.mockResolvedValue({});
   mockTxDismissalDeleteMany.mockResolvedValue({ count: 0 });
   mockTxExecuteRaw.mockResolvedValue(1);
@@ -178,7 +182,7 @@ describe("POST /api/edit/orcid", () => {
 
   it("orcid: null REMOVES: scholar.orcid AND orcid_confirmed_at nulled, the rpm_admin mirror row dropped, the removed iD dismissed, one audit row", async () => {
     // The removed iD is on the rpm_admin mirror row, NOT scholar.orcid (NULL for WCM).
-    mockTxCandidateFindFirst.mockResolvedValue({ orcid: ID });
+    mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
     const res = await POST(post({ cwid: "self01", orcid: null }));
     expect(res.status).toBe(200);
     expect((await res.json()).orcid).toBeNull();
@@ -203,16 +207,80 @@ describe("POST /api/edit/orcid", () => {
     expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
   });
 
-  it("a remove of an iD held on scholar.orcid dismisses THAT iD, even when an rpm_admin row carries another", async () => {
-    const OTHER_ID = "0000-0000-0000-001X"; // synthetic, checksum-valid
-    mockScholarFindUnique.mockResolvedValue({ cwid: "self01", slug: "self01-slug", orcid: OTHER_ID });
-    mockTxCandidateFindFirst.mockResolvedValue({ orcid: ID });
+  it("a remove dismisses EVERY iD that made up on-file: scholar.orcid AND each rpm_admin row's iD (else the re-mirrored one is on file again tomorrow)", async () => {
+    mockTxScholarFindUnique.mockResolvedValue({ orcid: OTHER_ID });
+    mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
     const res = await POST(post({ cwid: "self01", orcid: null }));
     expect(res.status).toBe(200);
+    expect(mockTxDismissalUpsert).toHaveBeenCalledTimes(2);
+    const pairs = mockTxDismissalUpsert.mock.calls.map(
+      (c) => (c[0] as { where: { cwid_orcid: { cwid: string; orcid: string } } }).where.cwid_orcid,
+    );
+    expect(pairs).toEqual(
+      expect.arrayContaining([
+        { cwid: "self01", orcid: OTHER_ID },
+        { cwid: "self01", orcid: ID },
+      ]),
+    );
+    // The audit `before` is the displayed value: scholar.orcid wins over rpm_admin.
+    const args = mockTxExecuteRaw.mock.calls[0] as unknown[];
+    expect(args.some((v) => typeof v === "string" && v.includes(`{"orcid":"${OTHER_ID}"}`))).toBe(true);
+  });
+
+  it("the removed iD is read on the WRITER in the transaction, not from the (possibly lagged) reader", async () => {
+    // Reader lags: it has not seen the confirm a moment ago. The writer has.
+    mockScholarFindUnique.mockResolvedValue({ cwid: "self01", slug: "self01-slug", orcid: null });
+    mockTxScholarFindUnique.mockResolvedValue({ orcid: ID });
+    const res = await POST(post({ cwid: "self01", orcid: null }));
+    expect(res.status).toBe(200);
+    expect(mockTxScholarFindUnique).toHaveBeenCalledWith({
+      where: { cwid: "self01" },
+      select: { orcid: true },
+    });
+    // Read BEFORE the update nulls it.
+    expect(mockTxScholarFindUnique.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTxScholarUpdate.mock.invocationCallOrder[0],
+    );
     expect(mockTxDismissalUpsert).toHaveBeenCalledTimes(1);
     expect(mockTxDismissalUpsert.mock.calls[0][0]).toMatchObject({
-      where: { cwid_orcid: { cwid: "self01", orcid: OTHER_ID } },
+      where: { cwid_orcid: { cwid: "self01", orcid: ID } },
     });
+  });
+
+  it("dismiss: [...] on a remove ('Remove both') also dismisses the rejected suggestion", async () => {
+    mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
+    const res = await POST(post({ cwid: "self01", orcid: null, dismiss: ["0000-0000-0000-001x"] }));
+    expect(res.status).toBe(200);
+    const pairs = mockTxDismissalUpsert.mock.calls.map(
+      (c) => (c[0] as { where: { cwid_orcid: { orcid: string } } }).where.cwid_orcid.orcid,
+    );
+    expect(pairs.sort()).toEqual([OTHER_ID, ID].sort()); // normalized (uppercase X)
+  });
+
+  it("dismiss: [...] on a set ('Keep the iD on file') confirms the kept iD and dismisses the rejected one", async () => {
+    const res = await POST(post({ cwid: "self01", orcid: ID, dismiss: [OTHER_ID] }));
+    expect(res.status).toBe(200);
+    expect(mockTxScholarUpdate.mock.calls[0][0]).toMatchObject({ data: { orcid: ID } });
+    expect(mockTxDismissalDeleteMany).toHaveBeenCalledWith({ where: { cwid: "self01", orcid: ID } });
+    expect(mockTxDismissalUpsert).toHaveBeenCalledTimes(1);
+    expect(mockTxDismissalUpsert).toHaveBeenCalledWith({
+      where: { cwid_orcid: { cwid: "self01", orcid: OTHER_ID } },
+      create: { cwid: "self01", orcid: OTHER_ID },
+      update: {},
+    });
+    expect(mockTxCandidateDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["not an array", "0000-0000-0000-001X"],
+    ["a bad check digit", ["0000-0000-0000-0010"]],
+    ["the iD being set", [ID]],
+    ["a non-string", [42]],
+  ])("400 on a dismiss list that is %s; nothing written", async (_label, dismiss) => {
+    const res = await POST(post({ cwid: "self01", orcid: ID, dismiss }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_orcid", field: "dismiss" });
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   it("a remove with nothing on file writes no dismissal (but still nulls both columns and audits)", async () => {

@@ -2,7 +2,11 @@
  * POST /api/edit/orcid — set a scholar's ORCID iD from the Identifiers & Profiles
  * tab: confirm the inferred suggestion, or enter one.
  *
- * Body: `{ cwid: string, orcid: string | null, confirmedSuggestion?: boolean }`.
+ * Body: `{ cwid: string, orcid: string | null, confirmedSuggestion?: boolean,
+ * dismiss?: string[] }`. `dismiss` names competing iDs the person rejected
+ * alongside this write (the card's "Keep the iD on file" / "Remove both"):
+ * each gets an `orcid_dismissal` row so the suggestion does not come back on
+ * the next load. It may not include the iD being set.
  *
  * SPS is the durable record; one `db.write` transaction, nothing outside SPS.
  * `etl:orcid-push` (nightly, before `etl:identity`) copies the result into WCM
@@ -13,7 +17,8 @@
  *    `orcid_confirmed_at` = now, and any `orcid_dismissal` for exactly this
  *    (cwid, iD) is deleted — the person re-confirming an iD they once removed.
  *  - Remove (`orcid: null`): `scholar.orcid` and `orcid_confirmed_at` are
- *    nulled and the removed iD gets an `orcid_dismissal` row. The dismissal is
+ *    nulled and EVERY iD that made up "on file" (`scholar.orcid` and each
+ *    `rpm_admin` row's iD) gets an `orcid_dismissal` row. The dismissal is
  *    what makes `etl:orcid-push` clear it from Identity, `etl:identity` not
  *    re-import it, and the `orcid_candidate` readers (`withoutDismissed`) drop
  *    the `rpm_admin` row the nightly mirror re-creates from the dead-but-still-
@@ -45,6 +50,8 @@ import { reflectOverviewEdit } from "@/lib/edit/revalidation";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 
 const PATH = "/api/edit/orcid";
+/** The card sends at most one competing iD; the cap only bounds a hand-made body. */
+const MAX_DISMISS = 5;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidSuggestionEnabled()) return editError(404, "not_found");
@@ -60,11 +67,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const orcid = rawOrcid === null ? null : normalizeOrcid(rawOrcid);
   if (rawOrcid !== null && !orcid) return editError(400, "invalid_orcid", "orcid");
+  const rawDismiss: unknown = body.dismiss ?? [];
+  if (!Array.isArray(rawDismiss) || rawDismiss.length > MAX_DISMISS) {
+    return editError(400, "invalid_orcid", "dismiss");
+  }
+  const dismiss: string[] = [];
+  for (const d of rawDismiss) {
+    const n = typeof d === "string" ? normalizeOrcid(d) : null;
+    // A typo, or dismissing the very iD being set, is a 400 — never a guess.
+    if (!n || n === orcid) return editError(400, "invalid_orcid", "dismiss");
+    dismiss.push(n);
+  }
 
   // --- target scholar (404) ---
   const scholar = await db.read.scholar.findUnique({
     where: { cwid },
-    select: { cwid: true, slug: true, orcid: true },
+    select: { cwid: true, slug: true },
   });
   if (!scholar) return editError(404, "scholar_not_found", "cwid");
 
@@ -85,6 +103,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- scholar.orcid + dismissal + the B03 audit row, one transaction ---
   try {
     await db.write.$transaction(async (tx) => {
+      // `before` is re-read on the writer: the `db.read` lookup above can lag
+      // (Aurora reader) behind a confirm made a moment ago, and would dismiss
+      // the wrong iD — or none.
+      const held =
+        (await tx.scholar.findUnique({ where: { cwid: scholar.cwid }, select: { orcid: true } }))
+          ?.orcid ?? null;
       await tx.scholar.update({
         where: { cwid: scholar.cwid },
         data: { orcid, orcidConfirmedAt: orcid === null ? null : new Date() },
@@ -93,23 +117,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // the card reads it from the `rpm_admin` mirror row), so read it before
       // the row goes, or the audit row would say null → null and nothing
       // would be dismissed.
-      let before = scholar.orcid;
+      let before = held;
+      const toDismiss = new Set(dismiss);
       if (orcid === null) {
-        const admin = await tx.orcidCandidate.findFirst({
+        const admins = await tx.orcidCandidate.findMany({
           where: { cwid: scholar.cwid, source: "rpm_admin" },
           select: { orcid: true },
         });
-        before ??= admin?.orcid ?? null;
+        before ??= admins[0]?.orcid ?? null;
+        // Every iD that made up "on file" is dismissed, not just the one shown:
+        // an undismissed `rpm_admin` iD is re-mirrored from `admin_orcid` at
+        // 07:00 UTC and would be "on file" again the next morning.
+        if (held !== null) toDismiss.add(held);
+        for (const a of admins) toDismiss.add(a.orcid);
         await tx.orcidCandidate.deleteMany({ where: { cwid: scholar.cwid, source: "rpm_admin" } });
-        if (before !== null) {
-          await tx.orcidDismissal.upsert({
-            where: { cwid_orcid: { cwid: scholar.cwid, orcid: before } },
-            create: { cwid: scholar.cwid, orcid: before },
-            update: {},
-          });
-        }
       } else {
         await tx.orcidDismissal.deleteMany({ where: { cwid: scholar.cwid, orcid } });
+      }
+      for (const d of toDismiss) {
+        await tx.orcidDismissal.upsert({
+          where: { cwid_orcid: { cwid: scholar.cwid, orcid: d } },
+          create: { cwid: scholar.cwid, orcid: d },
+          update: {},
+        });
       }
       // ponytail: a remove audits as `orcid_set` → null (+ `removed: true`)
       // rather than a new action — a new AuditAction needs the TS union AND
@@ -125,6 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         afterValues: {
           orcid,
           ...(orcid === null ? { removed: true } : {}),
+          ...(toDismiss.size > 0 ? { dismissed: [...toDismiss] } : {}),
           ...(confirmedSuggestion === true ? { confirmed_suggestion: true } : {}),
           ...(authz.viaUnitAdminUnit
             ? {

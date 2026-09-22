@@ -11,7 +11,9 @@
  *                file (the evidence persists); Change, Remove.
  *   conflict   → on file AND the inferred rows point at a DIFFERENT iD: both
  *                rows, each with its pill, and "Replace with the suggested iD"
- *                / "Keep the iD on file" / "Remove both".
+ *                / "Keep the iD on file" / "Remove both". Keep confirms the
+ *                on-file iD and Remove both clears it; both record the
+ *                suggested iD as dismissed so it is not offered again.
  *   none       → the input.
  *
  * Second person is the EDITOR: an administrator reads the scholar's first name
@@ -99,19 +101,27 @@ export function OrcidCard({
   const [error, setError] = React.useState<string | null>(null);
   // `undefined` = nothing saved this session; `null` = removed this session.
   const [saved, setSaved] = React.useState<string | null | undefined>(undefined);
-  // ponytail: "Keep the iD on file" / "Remove both" dismiss the competing
-  // suggestion for this session only — it comes back on the next load. A
-  // remembered "not me" needs a write path the route doesn't have yet.
+  // The competing suggestion hides once a write dismissing it lands; the route
+  // records the dismissal, so it stays gone on the next load too.
   const [dismissed, setDismissed] = React.useState(false);
 
-  const save = async (orcid: string | null, confirmedSuggestion: boolean) => {
+  const save = async (
+    orcid: string | null,
+    confirmedSuggestion: boolean,
+    dismiss: string[] = [],
+  ) => {
     setError(null);
     setBusy(true);
     try {
       const res = await fetch("/api/edit/orcid", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwid, orcid, confirmedSuggestion }),
+        body: JSON.stringify({
+          cwid,
+          orcid,
+          confirmedSuggestion,
+          ...(dismiss.length > 0 ? { dismiss } : {}),
+        }),
       });
       const data = (await res.json()) as
         | { ok: true; orcid: string | null }
@@ -121,6 +131,7 @@ export function OrcidCard({
         return;
       }
       setSaved(data.orcid);
+      if (dismiss.length > 0) setDismissed(true);
       setEditing(false);
       setValue("");
       router.refresh();
@@ -278,7 +289,7 @@ export function OrcidCard({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setDismissed(true)}
+              onClick={() => void save(current, false, [competing.orcid])}
               disabled={busy}
               data-testid="orcid-keep-on-file"
             >
@@ -289,10 +300,7 @@ export function OrcidCard({
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => {
-                setDismissed(true);
-                void save(null, false);
-              }}
+              onClick={() => void save(null, false, [competing.orcid])}
               disabled={busy}
               data-testid="orcid-remove"
             >
