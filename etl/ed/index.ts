@@ -2194,6 +2194,11 @@ async function main() {
           `(${Object.entries(titles.byTier)
             .map(([tier, n]) => `${tier}=${n}`)
             .join(", ")})` +
+          // Should be 0. Non-zero means active rows the ED feed did not carry
+          // this run kept their existing title rather than being blanked.
+          (titles.skippedNullResolution > 0
+            ? ` — kept ${titles.skippedNullResolution} title(s) no tier could re-derive`
+            : "") +
           (derived ? "" : " — SCHOLAR_TITLE_RESOLUTION off, ED tiers only"),
       );
     }

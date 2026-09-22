@@ -251,3 +251,52 @@ describe("resolveScholarTitles — override", () => {
     expect(updates).toEqual([{ cwid: "unpinned", primaryTitle: "Professor of Medicine" }]);
   });
 });
+
+describe("resolveScholarTitles — a null resolution never wipes a title", () => {
+  it("leaves an existing title alone when every tier is empty", async () => {
+    // The shape that matters: an active row the ED feed did not carry this run,
+    // so the upsert never populated `edPrimaryTitle`. Writing the null
+    // resolution would blank a public title on the strength of a missing read.
+    const { client, updates } = fakeClient({
+      scholars: [
+        {
+          cwid: "missed",
+          primaryTitle: "Professor of Medicine",
+          edPrimaryTitle: null,
+          workingTitle: null,
+        },
+      ],
+    });
+    const result = await resolveScholarTitles(client as never, { applyDerivedTiers: true });
+    expect(updates).toEqual([]);
+    expect(result.updated).toBe(0);
+    expect(result.skippedNullResolution).toBe(1);
+  });
+
+  it("does not count a scholar who legitimately has no title", async () => {
+    const { client, updates } = fakeClient({
+      scholars: [
+        { cwid: "titleless", primaryTitle: null, edPrimaryTitle: null, workingTitle: null },
+      ],
+    });
+    const result = await resolveScholarTitles(client as never, { applyDerivedTiers: true });
+    expect(updates).toEqual([]);
+    expect(result.skippedNullResolution).toBe(0);
+  });
+
+  it("still clears a title when a tier resolves to a DIFFERENT value", async () => {
+    // The guard must not freeze titles: a real change still writes.
+    const { client, updates } = fakeClient({
+      scholars: [
+        {
+          cwid: "changed",
+          primaryTitle: "Stale Title",
+          edPrimaryTitle: "Professor of Medicine",
+          workingTitle: null,
+        },
+      ],
+    });
+    await resolveScholarTitles(client as never, { applyDerivedTiers: true });
+    expect(updates).toEqual([{ cwid: "changed", primaryTitle: "Professor of Medicine" }]);
+  });
+});
