@@ -1857,8 +1857,12 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
       });
 
-      it("activates the ORCID surface in prod (SELF_EDIT_ORCID_SUGGESTION: suggestion + Identifiers & Profiles tab + write; flipped 2026-09-21)", () => {
+      it("activates the ORCID surface in prod (SELF_EDIT_ORCID_SUGGESTION: suggestion + Identifiers & Profiles tab + write; flipped 2026-09-22)", () => {
         expect(appContainerEnv().get("SELF_EDIT_ORCID_SUGGESTION")).toBe("on");
+      });
+
+      it("activates external profile links in prod (SELF_EDIT_PROFILE_LINKS: External Profiles card + profileLinks write + sameAs render; flipped 2026-09-22)", () => {
+        expect(appContainerEnv().get("SELF_EDIT_PROFILE_LINKS")).toBe("on");
       });
 
       it("activates the ReCiter 'Not mine' reject in prod (RECITER_REJECT_SEND, launch batch 2, #746/#506)", () => {
