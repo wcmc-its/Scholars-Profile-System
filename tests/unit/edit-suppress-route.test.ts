@@ -52,7 +52,7 @@ const {
 // effective, so `actor_cwid` is this cwid and `impersonatedCwid` stays null).
 vi.mock("@/lib/auth/superuser", () => ({
   getEditSession: mockGetEditSession,
-  // #2720 — `checkProxyConflictingRole` reaches for this. Unused until the
+  // #2719 — `checkProxyConflictingRole` reaches for this. Unused until the
   // delegated-hide tests below started exercising the proxy path.
   isSuperuser: vi.fn(async () => false),
 }));
@@ -453,7 +453,7 @@ describe("POST /api/edit/suppress — unit-admin branch (Amendment 4)", () => {
   });
 });
 
-describe("POST /api/edit/suppress — delegated hide widened past publications (#2720)", () => {
+describe("POST /api/edit/suppress — delegated hide widened past publications (#2719)", () => {
   const UNIT_ADMIN = { cwid: "uadm01", isSuperuser: false };
   const IN_UNIT = { deptCode: "DEPT-MED", divCode: null, deletedAt: null };
   const CURATOR = [{ entityType: "department", entityId: "DEPT-MED", role: "curator" }];

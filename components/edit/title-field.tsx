@@ -1,6 +1,6 @@
 /**
  * TitleField — the display-title control on the `/edit` Name & title panel
- * (#2720). Renders inside the panel's Title row, so the rest of that panel
+ * (#2719). Renders inside the panel's Title row, so the rest of that panel
  * stays the read-only def-list it is today.
  *
  * TWO POSTURES, one component, because they share the option list and the

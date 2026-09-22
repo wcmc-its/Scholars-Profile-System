@@ -157,7 +157,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           office: "ITS Support",
           email: SUPPORT_EMAIL,
           sourceSystem: "primary appointment (ASMS / Enterprise Directory)",
-          // #2720 — the displayed title is no longer always the primary
+          // #2719 — the displayed title is no longer always the primary
           // appointment's: an ED "working title", a division-chief role or a
           // center-head role can outrank it (lib/scholar-title.ts). WHICH of
           // those shows is now a picker on this panel, so the honest split is:

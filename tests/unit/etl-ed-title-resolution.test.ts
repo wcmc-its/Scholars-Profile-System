@@ -1,5 +1,5 @@
 /**
- * #2720 — the ED ETL's title-resolution post-pass.
+ * #2719 — the ED ETL's title-resolution post-pass.
  *
  * The behaviour worth pinning is not "precedence works" (that is
  * `scholar-title.test.ts`, against the pure resolver) but the three things

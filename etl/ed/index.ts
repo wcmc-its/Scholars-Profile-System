@@ -2179,7 +2179,7 @@ async function main() {
       }
     }
 
-    // Title resolution (#2720). MUST run here: two of the four tiers
+    // Title resolution (#2719). MUST run here: two of the four tiers
     // (division chief, center head) are the `OrgUnitRoleAssignment` rows the
     // blocks above just finished writing, so resolving any earlier would read
     // last night's leadership. The scholar upsert wrote the ED value as a seed

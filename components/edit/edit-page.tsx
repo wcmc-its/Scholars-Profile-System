@@ -1163,7 +1163,7 @@ function renderPanel(
             { label: "Name", value: ctx.scholar.fullName },
             {
               label: "Title",
-              // #2720 — the one editable row on an otherwise read-only panel.
+              // #2719 — the one editable row on an otherwise read-only panel.
               // Operators (superuser / comms_steward / unit admin) pick; the
               // scholar and their proxy request. Null picker state = flag off,
               // and the row falls back to the plain sourced value.
