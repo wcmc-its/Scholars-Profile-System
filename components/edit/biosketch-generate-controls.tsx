@@ -286,7 +286,7 @@ export function BiosketchGenerateControls({
       {/* Everything optional sits behind one disclosure, below the action: the form reads
           required → Generate, and steering is there for whoever wants it. */}
       <details className="group border-apollo-border border-t pt-3.5" data-testid="biosketch-steer">
-        <summary className="text-foreground flex w-fit cursor-pointer list-none items-center gap-2 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
+        <summary className="text-foreground flex cursor-pointer list-none items-center gap-2 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
           <ChevronRight
             className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
             aria-hidden="true"
@@ -406,7 +406,7 @@ export function BiosketchGenerateControls({
           className="group border-apollo-border border-t pt-3.5"
           data-testid="biosketch-staff"
         >
-          <summary className="text-foreground flex w-fit cursor-pointer list-none items-center gap-2 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
+          <summary className="text-foreground flex cursor-pointer list-none items-center gap-2 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
             <ChevronRight
               className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
               aria-hidden="true"
