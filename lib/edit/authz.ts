@@ -76,9 +76,39 @@ export function authorizeFieldEdit(
   session: EditSession,
   target: {
     entityId: string;
-    fieldName: "overview" | "slug" | "selectedHighlightPmids" | "manualMentees";
+    fieldName:
+      | "overview"
+      | "slug"
+      | "selectedHighlightPmids"
+      | "manualMentees"
+      | "primaryTitle"
+      | "primaryTitleRequest";
   },
 ): AuthzResult {
+  // #2720 — SETTING the display title is an operator action. Not self: a
+  // scholar picking their own headline title is a governance question (the
+  // institution speaks with one voice — the same reasoning behind the single
+  // role vocabulary in `lib/org-unit-roles.ts`). Unit admins are included
+  // because they already proxy-edit their unit's faculty. A scholar who wants
+  // a different title REQUESTS it — the branch below.
+  if (target.fieldName === "primaryTitle") {
+    if (session.isSuperuser || session.isCommsSteward) return ALLOW;
+    // Unit-admin authority is unit-scoped and resolved against the target, so
+    // it cannot be decided from the session alone; the route runs that check
+    // and only reaches here for the session-level roles.
+    return { ok: false, reason: "not_superuser" };
+  }
+
+  // #2720 — REQUESTING a title is the scholar's own surface. It has no public
+  // effect until an operator approves, so the self test is the whole gate; a
+  // proxy is handled at the route (PE-03), exactly as `overview` is.
+  if (target.fieldName === "primaryTitleRequest") {
+    if (session.cwid === target.entityId || session.isSuperuser || session.isCommsSteward) {
+      return ALLOW;
+    }
+    return { ok: false, reason: "not_self" };
+  }
+
   if (
     target.fieldName === "overview" ||
     target.fieldName === "selectedHighlightPmids" ||

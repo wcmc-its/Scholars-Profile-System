@@ -45,6 +45,7 @@ import { containsProfanity } from "@/lib/edit/profanity";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import {
+  resolveEditableUnitViaUnitAdmin,
   type EditableUnit,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
@@ -69,6 +70,14 @@ import {
 import { validateManualMentees } from "@/lib/edit/manual-mentee";
 import { isProfileLinksEnabled, validateProfileLinks } from "@/lib/edit/profile-links";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import {
+  isSelectableTitle,
+  isTitleResolutionEnabled,
+  loadTitlePickerState,
+  resolveWithOverride,
+  TITLE_OVERRIDE_FIELD,
+  TITLE_REQUEST_FIELD,
+} from "@/lib/edit/title-picker";
 import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/field";
@@ -178,6 +187,27 @@ async function handleScholarFieldEdit(params: {
   // #2699 — same dark-when-off shape for the external-profile links.
   if (fieldName === "profileLinks" && !isProfileLinksEnabled()) {
     return editError(400, "invalid_field", "fieldName");
+  }
+  // #2720 — the display-title picker. Same dark-when-off shape: with
+  // SCHOLAR_TITLE_RESOLUTION off both field names read as unknown fields, so the
+  // whole surface (picker AND request) is dark.
+  if (
+    (fieldName === TITLE_OVERRIDE_FIELD || fieldName === TITLE_REQUEST_FIELD) &&
+    !isTitleResolutionEnabled()
+  ) {
+    return editError(400, "invalid_field", "fieldName");
+  }
+  if (fieldName === TITLE_OVERRIDE_FIELD || fieldName === TITLE_REQUEST_FIELD) {
+    if (typeof value !== "string") return editError(400, "invalid_value", "value");
+    return handleTitleFieldEdit({
+      session,
+      realCwid,
+      impersonatedCwid,
+      entityId,
+      fieldName,
+      value,
+      requestId,
+    });
   }
   // `selectedHighlightPmids` (#836) and `manualMentees` (#2011) carry JSON array
   // values and `profileLinks` (#2699) a JSON object; every other scholar field
@@ -606,4 +636,164 @@ async function handleUnitFieldEdit(params: {
   }
 
   return editOk({ fieldName, op, value: op === "set" ? storedValue : null });
+}
+
+/**
+ * #2720 — the display-title picker and its request path.
+ *
+ * Split out of `handleScholarFieldEdit` rather than threaded through it: the
+ * title fields have their own authz (an operator SETS, a scholar REQUESTS),
+ * their own "must be one of the computed options" validation, and a side
+ * effect no other field has — writing `Scholar.primaryTitle` so a pick shows
+ * immediately instead of at the next nightly.
+ *
+ * `value === ""` DELETES the row. That one convention covers all three
+ * clears — an operator un-pinning their override, an operator dismissing a
+ * request, and a scholar withdrawing their own — so none of them needs
+ * `/api/edit/clear-field` (which is hardcoded to `slug`) or a new endpoint.
+ *
+ * Audit uses `field_override` / `field_override_clear`, both already in the
+ * `scholars_audit` action ENUM, and `field_override.field_name` is a
+ * VARCHAR — so this adds NO new ENUM member and needs no
+ * `scripts/sql/audit-log.sql` change.
+ */
+async function handleTitleFieldEdit(params: {
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
+  realCwid: string;
+  impersonatedCwid: string | null;
+  requestId: string | null;
+  entityId: string;
+  fieldName: typeof TITLE_OVERRIDE_FIELD | typeof TITLE_REQUEST_FIELD;
+  value: string;
+}): Promise<NextResponse> {
+  const { session, realCwid, impersonatedCwid, requestId, entityId, fieldName, value } = params;
+  const isOverride = fieldName === TITLE_OVERRIDE_FIELD;
+
+  // --- authorization (403) ---
+  let viaUnitAdminUnit: EditableUnit | null = null;
+  if (isOverride) {
+    // SETTING the title is an operator action: superuser / comms_steward, or a
+    // unit admin over this scholar. Deliberately NOT self and NOT a proxy — a
+    // scholar who wants a different title files a request (the else-branch),
+    // which an operator then approves.
+    if (session.isSuperuser || session.isCommsSteward) {
+      // allowed
+    } else if (impersonatedCwid !== null) {
+      // Delegated authority never rides an impersonation overlay (IS-1).
+      logEditDenial({ actorCwid: session.cwid, targetCwid: entityId, path: PATH, reason: "not_superuser" });
+      return editError(403, "not_superuser");
+    } else {
+      const unit = await resolveEditableUnitViaUnitAdmin(
+        realCwid,
+        entityId,
+        db.read as unknown as UnitScholarLookup,
+      );
+      if (!unit) {
+        logEditDenial({ actorCwid: session.cwid, targetCwid: entityId, path: PATH, reason: "not_superuser" });
+        return editError(403, "not_superuser");
+      }
+      viaUnitAdminUnit = unit;
+    }
+  } else {
+    // REQUESTING one rides the same "may edit this scholar's profile" predicate
+    // the bio uses — self / superuser / comms_steward / granted proxy /
+    // unit admin. A request has no public effect until approved, so this is the
+    // scholar's own surface and needs no narrower rule.
+    const ov = await authorizeOverviewWrite({
+      session,
+      realCwid,
+      impersonatedCwid,
+      entityId,
+      proxyDb: db.read as unknown as ProxyLookup,
+      unitDb: db.read as unknown as UnitScholarLookup,
+    });
+    if (!ov.ok) {
+      logEditDenial({ actorCwid: session.cwid, targetCwid: entityId, path: PATH, reason: ov.reason });
+      return editError(403, ov.reason);
+    }
+    viaUnitAdminUnit = ov.viaUnitAdminUnit;
+  }
+
+  // --- validation (400) — never free text ---
+  const state = await loadTitlePickerState(db.read, entityId);
+  if (!state) return editError(400, "invalid_target", "entityId");
+  if (!isSelectableTitle(value, state.options)) {
+    return editError(400, "invalid_value", "value");
+  }
+
+  const clearing = value === "";
+  // An operator's pick resolves immediately; the ETL recomputes the same answer
+  // from the same module on the next run.
+  const nextTitle = isOverride ? resolveWithOverride(state, clearing ? null : value) : null;
+
+  try {
+    await db.write.$transaction(async (tx) => {
+      const key = {
+        entityType_entityId_fieldName: {
+          entityType: "scholar" as const,
+          entityId,
+          fieldName,
+        },
+      };
+      const existing = await tx.fieldOverride.findUnique({ where: key, select: { value: true } });
+      if (clearing) {
+        if (existing) await tx.fieldOverride.delete({ where: key });
+      } else {
+        await tx.fieldOverride.upsert({
+          where: key,
+          create: { entityType: "scholar", entityId, fieldName, value, actorCwid: session.cwid },
+          // The unique (entityType, entityId, fieldName) is what gives the
+          // request path supersede-by-newest without a status column.
+          update: { value, actorCwid: session.cwid },
+        });
+      }
+
+      if (isOverride) {
+        await tx.scholar.update({
+          where: { cwid: entityId },
+          data: { primaryTitle: nextTitle },
+        });
+        // Setting the title ANSWERS any pending request, whether or not the
+        // operator picked what was asked for. Leaving it would show a request
+        // that has already been decided.
+        await tx.fieldOverride.deleteMany({
+          where: { entityType: "scholar", entityId, fieldName: TITLE_REQUEST_FIELD },
+        });
+      }
+
+      await appendAuditRow(tx, {
+        actorCwid: realCwid,
+        impersonatedCwid,
+        targetEntityType: "scholar",
+        targetEntityId: entityId,
+        action: clearing ? "field_override_clear" : "field_override",
+        fieldsChanged: [fieldName],
+        beforeValues: { [fieldName]: existing?.value ?? null },
+        afterValues: {
+          [fieldName]: clearing ? null : value,
+          ...(isOverride ? { primary_title: nextTitle } : {}),
+          ...(viaUnitAdminUnit
+            ? {
+                edited_via: "unit_admin",
+                via_unit_type: viaUnitAdminUnit.kind,
+                via_unit_code: viaUnitAdminUnit.code,
+              }
+            : {}),
+        },
+        ts: new Date(),
+        requestId,
+      });
+    });
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "write_failed");
+  }
+
+  // Only an operator's pick changes anything public; a request does not.
+  if (isOverride) {
+    const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
+    if (profile) await reflectOverviewEdit(profile.slug);
+  }
+
+  return editOk({ fieldName, value: clearing ? null : value, primaryTitle: nextTitle });
 }

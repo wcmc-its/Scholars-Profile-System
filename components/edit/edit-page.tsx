@@ -39,6 +39,7 @@ import {
 } from "@/components/edit/proxy-editor-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
+import { TitleField } from "@/components/edit/title-field";
 import { TechnologyEditCard } from "@/components/edit/technology-edit-card";
 import { NewsEditCard } from "@/components/edit/news-edit-card";
 import { DatasetsCard } from "@/components/edit/datasets-card";
@@ -1160,7 +1161,27 @@ function renderPanel(
           description="Name, title, degrees, department, institution, and ORCID come from the WCM directory and faculty records."
           fields={[
             { label: "Name", value: ctx.scholar.fullName },
-            { label: "Title", value: ctx.scholar.primaryTitle },
+            {
+              label: "Title",
+              // #2720 — the one editable row on an otherwise read-only panel.
+              // Operators (superuser / comms_steward / unit admin) pick; the
+              // scholar and their proxy request. Null picker state = flag off,
+              // and the row falls back to the plain sourced value.
+              value: ctx.titlePicker ? (
+                <TitleField
+                  cwid={cwid}
+                  options={ctx.titlePicker.options}
+                  current={ctx.titlePicker.current}
+                  hasOverride={
+                    ctx.titlePicker.override !== null && ctx.titlePicker.override !== ""
+                  }
+                  pending={ctx.titlePicker.pending}
+                  canSet={isSuperuserLike(mode) || mode === "unit-admin"}
+                />
+              ) : (
+                ctx.scholar.primaryTitle
+              ),
+            },
             { label: "Degrees", value: ctx.scholar.postnominal },
             { label: "Department", value: ctx.scholar.primaryDepartment },
             {

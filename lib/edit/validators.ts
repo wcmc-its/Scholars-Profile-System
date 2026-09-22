@@ -104,6 +104,13 @@ export const EDITABLE_FIELDS = [
   "selectedHighlightPmids",
   "manualMentees",
   "profileLinks",
+  // #2720 — the display-title picker. `primaryTitle` is an operator's pick,
+  // `primaryTitleRequest` a scholar's (or proxy's) pending request for one.
+  // Neither is free text: both must equal one of the four options computed in
+  // `lib/edit/title-picker.ts`, which is what keeps a title pick from being
+  // the upstream-scalar masking that made `slug` superuser-only.
+  "primaryTitle",
+  "primaryTitleRequest",
   ...SECTION_VISIBILITY_FIELDS,
 ] as const;
 export type EditableField = (typeof EDITABLE_FIELDS)[number];

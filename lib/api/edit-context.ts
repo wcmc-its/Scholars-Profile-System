@@ -36,6 +36,11 @@ import {
 } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
+import {
+  isTitleResolutionEnabled,
+  loadTitlePickerState,
+  type TitlePickerState,
+} from "@/lib/edit/title-picker";
 import type { ProfileLinks } from "@/lib/edit/profile-links";
 import type { DismissReason, MenteeKind, MenteeTier } from "@/lib/mentee-suggestions/kind";
 import { rankForSelectedHighlights } from "@/lib/ranking";
@@ -75,6 +80,9 @@ type EditContextReadClient = Pick<
   | "newsMention"
   | "personDatasetDeposit"
   | "orgUnitRoleAssignment"
+  // #2720 — the title picker resolves the chief / center-head tiers.
+  | "division"
+  | "center"
   | "orcidCandidate"
 >;
 
@@ -641,6 +649,10 @@ export type OrcidEvidenceRow = OrcidEvidence & { orcid: string };
 
 export type EditContext = {
   scholar: EditContextScholar;
+  /** #2720 — the display-title picker's state: every tier's value, the current
+   *  pin, and any pending request. Null when `SCHOLAR_TITLE_RESOLUTION` is off
+   *  (the Title row stays a plain read-only value) or the scholar vanished. */
+  titlePicker: TitlePickerState | null;
   publications: ReadonlyArray<EditContextPublication>;
   appointments: ReadonlyArray<EditContextAppointment>;
   /** #1323 — historical appointments, reveal-to-show (curator / comms_steward). */
@@ -1946,6 +1958,9 @@ export async function loadEditContext(
   if (pmids.length === 0) {
     const noPubManual = includeHighlights ? await getSelectedHighlightPmids(cwid, client) : null;
     return {
+      titlePicker: isTitleResolutionEnabled()
+        ? await loadTitlePickerState(client, scholar.cwid)
+        : null,
       scholar: {
         cwid: scholar.cwid,
         slug: scholar.slug,
@@ -2120,7 +2135,15 @@ export async function loadEditContext(
     ? await buildHighlightsContext(cwid, authorships, publications, client, now)
     : null;
 
+  // #2720 — dark when the flag is off: the Title row falls back to the plain
+  // read-only value and the write path rejects both field names, so nothing
+  // half-renders.
+  const titlePicker = isTitleResolutionEnabled()
+    ? await loadTitlePickerState(client, scholar.cwid)
+    : null;
+
   return {
+    titlePicker,
     scholar: {
       cwid: scholar.cwid,
       slug: scholar.slug,

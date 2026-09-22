@@ -24,7 +24,22 @@ model Scholar {
   /// postnominal credential at render time. Null for scholars with no SOR
   /// row (postdocs, doctoral students, non-faculty).
   postnominal             String?   @db.VarChar(64)
+  /// The RESOLVED display title — what every render surface reads (search
+  /// hits, `/og` cards, popovers, result cards, the profile sidebar, `/edit`).
+  /// Written by the ED ETL's title-resolution post-pass, NOT by the scholar
+  /// upsert: the chief/center-head inputs do not exist yet at upsert time.
+  /// Precedence and the `field_override(primaryTitle)` escape hatch live in
+  /// `lib/scholar-title.ts`; the raw inputs it resolves from are the two
+  /// columns below.
   primaryTitle            String?   @map("primary_title") @db.VarChar(255)
+  /// ED `weillCornellEduPrimaryTitle`, raw (annotation-stripped only). Kept
+  /// beside the resolved value so the `/edit` picker can offer "Primary title"
+  /// as an option after a higher tier has won, without re-reading LDAP.
+  edPrimaryTitle          String?   @map("ed_primary_title") @db.VarChar(255)
+  /// ED `weillCornellEduWorkingTitle`, raw (annotation-stripped only). Probed
+  /// 2026-09-22: present on 49 of 8,769 active academic entries, single-valued,
+  /// people branch only — the faculty SOR does not carry it.
+  workingTitle            String?   @map("working_title") @db.VarChar(255)
   primaryDepartment       String?   @map("primary_department") @db.VarChar(255)
   /// ED `weillCornellEduPrimaryOrganization` — institution code of the primary
   /// appointment (`WCMC`, `WCMC-Q`, `HMC`, `SIDRA`, `HSS`, ...). Drives the
@@ -1684,7 +1699,7 @@ model Division {
 /// Cross-disciplinary research centers and institutes that span departments.
 /// Faculty appointments roll up to a Department; center affiliations are
 /// layered on top (no FK from Scholar — membership lives in a separate table
-/// when sources land, e.g. reporting_cancer_center for the Meyer Cancer Center).
+/// when sources land, e.g. reporting_cancer_center for the Example Cancer Center).
 /// `code` is a stable slug-like identifier (e.g. "englander_ipm").
 model Center {
   code          String   @id @db.VarChar(64)
@@ -1979,7 +1994,7 @@ model OrgUnitRoleScope {
 }
 
 /// Per-center program taxonomy (#552). Empty for centers that don't use
-/// programs (most). The Meyer Cancer Center seeds five rows (CB, CGE, CPC, CT,
+/// programs (most). The Example Cancer Center seeds five rows (CB, CGE, CPC, CT,
 /// ZY). Other centers may opt in later by inserting their own rows — no schema
 /// change. `membershipType` + `programCode` on a membership are surfaced in the
 /// roster editor ONLY for centers that have ≥1 row here (the Cancer-Center-only
@@ -2309,7 +2324,7 @@ model CancerCenterProgramAllocation {
   @@map("cancer_center_program_allocation")
 }
 
-/// A member's disease-expertise assignment for the Meyer Cancer Center — one
+/// A member's disease-expertise assignment for the Example Cancer Center — one
 /// row per (cwid, diseaseCode) the deterministic generator
 /// (`scripts/cancer-center-disease-assignments.ts`,
 /// `docs/cancer-center-disease-taxonomy-decisions.md`) produced, ranked by
