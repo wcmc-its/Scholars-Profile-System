@@ -835,8 +835,8 @@ export class EtlStack extends Stack {
       // runtime code reads it — and is deliberately left untouched here.
       SELF_EDIT_ED_ADMINS_IMPORT: "on",
       // SCHOLAR_TITLE_RESOLUTION (#2719) — read by etl/ed/index.ts's
-      // title-resolution post-pass. MUST match the app-stack.ts copy (the app
-      // renders the picker this gates); flag parity checks both.
+      // title-resolution post-pass. Prod lags the app-stack.ts copy ON PURPOSE
+      // (app on, ETL off) until the 7 regression pins are in; see app-stack.ts.
       SCHOLAR_TITLE_RESOLUTION: envConfig.envName === "prod" ? "off" : "on",
       // #718 -- publications-index exclusion of pubs with zero displayable WCM
       // authors (isRequireDisplayableAuthorEnabled, lib/search-index-docs.ts),
