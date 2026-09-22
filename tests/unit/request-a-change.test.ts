@@ -122,6 +122,15 @@ describe("operator routing decisions", () => {
     expect(a.kind).toBe("explain");
   });
 
+  it("the 'don't want it on my profile' row POINTS at Hide, never owns a suppress path", () => {
+    const a = issue("publications", "publication-unwanted").action;
+    // An explain, so the modal keeps no write path of its own: the list's own
+    // tick-row + SelectionBar control stays the single place a hide happens.
+    expect(a.kind).toBe("explain");
+    expect(a.kind === "explain" && a.detail).toContain("Hide from profile");
+    expect(a.kind === "explain" && a.fallbackEmail).toBeUndefined();
+  });
+
   it("publication metadata routes to ITS support (operator decision #2)", () => {
     const a = issue("publications", "publication-metadata-wrong").action;
     expect(a.kind === "route" && a.email).toBe("support@med.cornell.edu");

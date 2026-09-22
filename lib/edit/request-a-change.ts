@@ -446,8 +446,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
     issues: [
       {
         id: "publication-not-mine",
-        label: "Isn't mine / wrongly attributed",
-        description: "Wrongly attributed. The paper belongs to someone else.",
+        label: "I didn't author it",
+        description: "Wrongly attributed. Rejecting it at the source clears it everywhere, not just here.",
         action: selfService({
           tool: "Publication Manager",
           href: PUBLICATION_MANAGER_URL,
@@ -502,6 +502,18 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           cta: "Flag duplicate",
           sourceSystem: "ReCiter import",
           note: "Likely an import error — include the duplicate's details so support can merge it.",
+        }),
+      },
+      {
+        // Hide is NOT an issue type here (see the header note) — this row only
+        // points at the control that already owns it, so the modal never grows
+        // a second suppress path with its own notice / confirm / reason guards.
+        id: "publication-unwanted",
+        label: "I authored it, but don't want it on my profile",
+        description: "Hiding is display-only. It stays attributed to you in WCM's records.",
+        action: explain({
+          detail:
+            "You can hide it yourself from the list: tick the publication's checkbox, then choose \"Hide from profile\" in the bar that appears. It comes off the public profile, but it stays attributed to you in ReCiter and in WCM reporting. If you didn't author it, pick \"I didn't author it\" instead — that one corrects the attribution everywhere, not just the profile.",
         }),
       },
     ],
