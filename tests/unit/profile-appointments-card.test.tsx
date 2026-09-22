@@ -104,7 +104,7 @@ describe("ProfileAppointmentsCard — list render", () => {
   it("shows an empty state when the scholar has no self-asserted appointments", async () => {
     vi.stubGlobal("fetch", routedFetch([]));
     render(<ProfileAppointmentsCard cwid="nobody" mode="self" scholarName="No One" />);
-    expect(await screen.findByText(/No additional appointments added yet/i)).toBeTruthy();
+    expect(await screen.findByText(/Nothing added yet/i)).toBeTruthy();
   });
 
   it("surfaces a load error when the GET fails", async () => {
@@ -119,7 +119,7 @@ describe("ProfileAppointmentsCard — mutations", () => {
     const fetchMock = routedFetch([]);
     vi.stubGlobal("fetch", fetchMock);
     render(<ProfileAppointmentsCard cwid="aog2001" mode="self" scholarName="Ann Gable" />);
-    await screen.findByText(/No additional appointments added yet/i);
+    await screen.findByText(/Nothing added yet/i);
 
     fireEvent.click(screen.getByTestId("profile-appointment-add"));
     fireEvent.change(screen.getByTestId("profile-appointment-title-add"), {
@@ -148,7 +148,7 @@ describe("ProfileAppointmentsCard — mutations", () => {
   it("blocks submit until title and organization are both filled", async () => {
     vi.stubGlobal("fetch", routedFetch([]));
     render(<ProfileAppointmentsCard cwid="aog2001" mode="self" scholarName="Ann Gable" />);
-    await screen.findByText(/No additional appointments added yet/i);
+    await screen.findByText(/Nothing added yet/i);
 
     fireEvent.click(screen.getByTestId("profile-appointment-add"));
     const submit = screen.getByTestId("profile-appointment-submit-add") as HTMLButtonElement;

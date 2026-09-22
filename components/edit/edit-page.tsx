@@ -10,8 +10,7 @@
  */
 import Link from "next/link";
 
-import { AppointmentsCard } from "@/components/edit/appointments-card";
-import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
+import { PositionsCard } from "@/components/edit/positions-card";
 import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
 import { HonorsCard } from "@/components/edit/honors-card";
 import { CoiCard } from "@/components/edit/coi-card";
@@ -1359,47 +1358,32 @@ function renderPanel(
           datasets={ctx.datasets}
         />
       );
-    case "appointments":
+    case "appointments": {
+      // #1323 / #1568 — the Earlier ranks section and the self-service
+      // "Additional positions" card show to every editor the write routes
+      // authorize: the scholar themselves (self, self-serve), a superuser /
+      // comms_steward, a granted proxy, or a unit-admin curator — the SAME set
+      // `authorizeOverviewWrite` authorizes, so the surface never drifts from
+      // the write gate. A self-actor only ever sees + toggles their OWN history
+      // (the loader is per-scholar; the routes key authz on the row's owner).
+      const canEditPositions =
+        mode === "self" || isSuperuserLike(mode) || mode === "unit-admin" || mode === "proxy";
       return (
-        <div className="flex flex-col gap-8">
-          <AppointmentsCard
+        <div className="flex flex-col gap-11">
+          <PositionsCard
             cwid={cwid}
             mode={voiceMode}
             scholarName={scholarName}
             appointments={ctx.appointments}
+            historicalAppointments={ctx.historicalAppointments}
+            showHistorical={canEditPositions}
           />
-          {/* #1323 — reveal-to-show historical appointments. Every reveal-capable
-              editor sees the control: the scholar themselves (self, self-serve),
-              a superuser / comms_steward, a granted proxy, or a unit-admin curator
-              — the SAME set `authorizeOverviewWrite` authorizes at the route, so
-              the surface never drifts from the write gate. A self-actor only ever
-              sees + toggles their OWN history (the loader is per-scholar and the
-              route keys authz on the appointment's owner). */}
-          {(mode === "self" ||
-            isSuperuserLike(mode) ||
-            mode === "unit-admin" ||
-            mode === "proxy") &&
-            ctx.historicalAppointments.length > 0 && (
-              <HistoricalAppointmentsCard
-                scholarName={scholarName}
-                appointments={ctx.historicalAppointments}
-              />
-            )}
-          {/* #1568 — self-service editor for self-asserted appointments (internal
-              WCM roles the ED feed omits + prior/other-institution positions).
-              Shown to every actor the write route authorizes (self, superuser /
-              comms_steward, unit-admin, proxy — the SAME set as the historical
-              reveal above); the card fetches its own rows and each write is
-              re-authorized server-side. These render ONLY on the owner's profile,
-              never on a center / department / division / search surface. */}
-          {(mode === "self" ||
-            isSuperuserLike(mode) ||
-            mode === "unit-admin" ||
-            mode === "proxy") && (
+          {canEditPositions && (
             <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
           )}
         </div>
       );
+    }
     case "honors":
       // #1760 — curation editor for honors and distinctions (academy memberships,
       // investigatorships, prizes) that no WCM feed carries. Its OWN attribute,

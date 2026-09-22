@@ -574,7 +574,7 @@ So: **self at B1 → superuser + roster at B2 → org unit admin at B3.** The fi
 | `components/edit/edit-shell.tsx` | *New* — the Apollo master-detail shell: black top bar (chrome), the ATTRIBUTES rail, the detail-panel slot. Replaces the v1 single-column card stack in `edit-page.tsx`. |
 | `components/edit/attribute-rail.tsx` | *New* — the `<nav>` rail of attribute links (active state, locked/read-only items, `aria-current`). |
 | `components/edit/readonly-attribute-panel.tsx` | *New* — the SOR read-only panel ("This section is not editable" + "Request a Change" link). No write path. |
-| `components/edit/appointments-card.tsx` · `education-card.tsx` · `funding-card.tsx` | *New* — the three editable panels (chair lock; filter+scroll+latency on Funding). |
+| `components/edit/appointments-card.tsx` (since replaced by `positions-card.tsx`) · `education-card.tsx` · `funding-card.tsx` | *New* — the three editable panels (chair lock; filter+scroll+latency on Funding). |
 | `components/edit/entity-hide-row.tsx` | *New (optional)* — a shared row for the three new panels, parameterized by `EditEntityState`. Not shared with publications. |
 | `components/edit/edit-page.tsx` | *Modify* — becomes the per-`?attr=` detail router inside `edit-shell`; selects the panel for the active attribute, self vs superuser. |
 | `components/edit/publications-card.tsx` | **Unchanged for this SPEC** — rendered as the "Publications" attribute panel as-is. Shared-vocabulary adoption is an optional fast-follow ([OQ 1](#open-questions)). |
