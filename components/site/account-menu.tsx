@@ -99,14 +99,11 @@ export function AccountMenu({
   const isConsole = context === "console";
   // In-place sub-view of the popover: the menu rows, or the "View as" switcher.
   const [view, setView] = useState<"menu" | "switcher">("menu");
-  const [open, setOpen] = useState(false);
-  // The "View as" row only matters once the menu is open, so the public header
-  // defers the probe until then — a signed-in header render fires no
-  // /api/auth/session request. The console mount probes eagerly: it has no
-  // scholar prop, so it needs the probe's `scholar` to label the chip and build
-  // the View/Edit links (the /edit surfaces are authenticated, so the extra
-  // fetch is cheap).
-  const probe = useImpersonationProbe(open || isConsole);
+  // Probe on mount, not on open: deferring it made the console rows and
+  // "View as…" pop in a beat after the menu opened. The root-layout
+  // ImpersonationBanner already probes /api/auth/session on every page, so
+  // this adds no new kind of request, only a second one for signed-in viewers.
+  const probe = useImpersonationProbe();
   const canImpersonate = probe?.canImpersonate ?? false;
   // The role-aware console destinations the viewer may open (Manage profiles /
   // Method Families / Units you manage), computed server-side. Empty for a plain
@@ -130,7 +127,6 @@ export function AccountMenu({
 
   // Reset to the menu whenever the popover closes so it reopens on the rows.
   function onOpenChange(next: boolean) {
-    setOpen(next);
     if (!next) setView("menu");
   }
 
