@@ -85,6 +85,8 @@ export type RouteAction = {
   note?: string;
   /** On-select footer verb. Defaults to `Email {office}`. */
   cta?: string;
+  /** Example text for the detail box; defaults to a generic prompt. */
+  placeholder?: string;
 };
 
 /** Not an error, or not fixable here — explain in place. */
@@ -103,6 +105,9 @@ export type ChangeIssue = {
   id: string;
   /** The picker option text. */
   label: string;
+  /** One line under the label, on EVERY row — what this option means, so the
+   *  scholar picks without expanding each one in turn (design pass). */
+  description?: string;
   action: ChangeAction;
 };
 
@@ -442,6 +447,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       {
         id: "publication-not-mine",
         label: "Isn't mine / wrongly attributed",
+        description: "Wrongly attributed. The paper belongs to someone else.",
         action: selfService({
           tool: "Publication Manager",
           href: PUBLICATION_MANAGER_URL,
@@ -452,7 +458,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       },
       {
         id: "publication-missing-pubmed",
-        label: "A PubMed publication of mine is missing",
+        label: "A PubMed publication is missing",
+        description: "Add it with its PMID and it appears within a day.",
         action: selfService({
           tool: "Publication Manager",
           href: PUBLICATION_MANAGER_URL,
@@ -463,7 +470,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       },
       {
         id: "publication-missing-nonpubmed",
-        label: "A non-PubMed publication of mine is missing",
+        label: "A non-PubMed publication is missing",
+        description: "Books, chapters, preprints, and journals PubMed doesn't index.",
         action: explain({
           detail:
             "Scholars and ReCiter only index PubMed publications, so this one can't be displayed here. If it's added to PubMed later, ReCiter picks it up automatically — no action needed.",
@@ -472,17 +480,22 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       {
         id: "publication-metadata-wrong",
         label: "Title, journal, year, or authors are wrong",
+        description: "The record itself is wrong, not who it belongs to.",
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
           cta: "Report correction",
-          sourceSystem: "ReCiter / PubMed / publisher",
+          placeholder: "e.g. the year should be 2023, not 2024",
+          // Also the "From PubMed" badge on the expanded row — keep it the name
+          // of the system a scholar can act on, not the import chain.
+          sourceSystem: "PubMed",
           note: "This data comes from PubMed, the authoritative record at NLM. We'll flag it with ITS Support, but the correction flows from the source — it can't be edited in Scholars directly.",
         }),
       },
       {
         id: "publication-duplicate",
         label: "This publication is duplicated",
+        description: "Two records on the profile for the same paper.",
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,

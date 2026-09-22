@@ -701,6 +701,12 @@ function PublicationRow({
                 cwid={cwid}
                 scholarName={scholarName}
                 itemLabel={pub.title}
+                itemMeta={
+                  <>
+                    <PubJournal as="span" value={pub.journal ?? "Unknown journal"} />{" "}
+                    &middot; {pub.year ?? "Year unknown"}
+                  </>
+                }
                 initialIssueId="publication-not-mine"
                 trigger={(open) => (
                   <Button
@@ -721,6 +727,12 @@ function PublicationRow({
             cwid={cwid}
             scholarName={scholarName}
             itemLabel={pub.title}
+            itemMeta={
+              <>
+                <PubJournal as="span" value={pub.journal ?? "Unknown journal"} />{" "}
+                &middot; {pub.year ?? "Year unknown"}
+              </>
+            }
           />
         </div>
       </div>

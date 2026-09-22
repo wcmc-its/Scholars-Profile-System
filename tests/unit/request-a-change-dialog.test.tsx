@@ -1,7 +1,7 @@
 /**
  * components/edit/request-a-change-dialog.tsx — the "Request a change" router
- * modal (#160 UI follow-up + Phase 2 server mailer). Verifies the demoted title
- * + "Regarding" line, the per-issue action verb, the callout under the selected
+ * modal (#160 UI follow-up + Phase 2 server mailer). Verifies the item-as-heading
+ * header, the per-issue action verb + description, the callout under the selected
  * row, the honest dead-end ("Got it", no request filed), switch-reset + discard
  * guard, the Phase-2 server POST (primary) with "Request sent.", and the
  * Phase-1 `mailto:` fallback (cc / structured body / CRLF injection guard)
@@ -19,7 +19,7 @@ function pickIssue(id: string) {
   fireEvent.click(within(screen.getByTestId(`rac-issue-${id}`)).getByRole("radio"));
 }
 function detailBox() {
-  return screen.getByLabelText("Add any detail (optional)") as HTMLTextAreaElement;
+  return screen.getByLabelText("What should change, and to what? (optional)") as HTMLTextAreaElement;
 }
 /** Mock `global.fetch` for the route Submit; default = server send succeeds. */
 function mockFetch(response: { ok: boolean; status?: number }) {
@@ -49,16 +49,16 @@ afterEach(() => {
 });
 
 describe("RequestAChangeDialog", () => {
-  it("opens a named dialog with a demoted title + Regarding line + focal question", () => {
+  it("opens a named dialog whose heading IS the item it was opened from", () => {
     render(
       <RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D., Stanford" />,
     );
     expect(screen.getByTestId("request-a-change-trigger")).toBeTruthy();
     open();
     expect(screen.getByRole("dialog", { name: /request a change/i })).toBeTruthy();
-    expect(screen.getByText("Regarding")).toBeTruthy();
     expect(screen.getByText("Ph.D., Stanford")).toBeTruthy();
-    expect(screen.getByText("What needs to change?")).toBeTruthy();
+    // The generic question is REPLACED by the item, not stacked above it.
+    expect(screen.queryByText("What needs to change?")).toBeNull();
   });
 
   it("honors a custom triggerTestId (read-only panels)", () => {
@@ -72,12 +72,13 @@ describe("RequestAChangeDialog", () => {
     expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
   });
 
-  it("shows the action verb as a per-row hint before selection", () => {
+  it("shows the action verb + the description on every row before selection", () => {
     render(<RequestAChangeDialog attribute="publications" cwid="abc1001" scholarName="Jane Scholar" />);
     open();
-    expect(
-      within(screen.getByTestId("rac-issue-publication-missing-pubmed")).getByText(/Add by PMID/),
-    ).toBeTruthy();
+    const row = within(screen.getByTestId("rac-issue-publication-missing-pubmed"));
+    expect(row.getByText(/Add by PMID/)).toBeTruthy();
+    // The one-liner renders unselected — the scholar picks without expanding each.
+    expect(row.getByText("Add it with its PMID and it appears within a day.")).toBeTruthy();
   });
 
   it("pre-selects initialIssueId on open (per-row 'Not mine?' lands on the not-mine route)", () => {
@@ -167,12 +168,14 @@ describe("RequestAChangeDialog", () => {
     expect(body.noReceipt).toBe(false);
   });
 
-  it("opting out of the receipt sets noReceipt=true in the POST body", async () => {
+  it("unchecking the receipt sets noReceipt=true in the POST body", async () => {
     const fetchMock = mockFetch({ ok: true });
     render(<RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D." />);
     open();
     pickIssue("education-wrong");
-    fireEvent.click(screen.getByRole("checkbox", { name: /don't email me a copy/i }));
+    const receipt = screen.getByRole("checkbox", { name: /email me a copy of this request/i });
+    expect(receipt.getAttribute("data-state")).toBe("checked"); // opt-OUT, so it starts on
+    fireEvent.click(receipt);
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
 
     expect(await screen.findByText("Request sent.")).toBeTruthy();
