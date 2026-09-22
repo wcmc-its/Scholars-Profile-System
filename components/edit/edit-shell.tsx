@@ -246,7 +246,7 @@ export function EditShell({
 
       {/* Top bar (black) — the shared Apollo chrome with a real account/exit menu
           (self-fetching `AccountMenu context="console"`; see `_account` above). */}
-      <ConsoleTopBar />
+      <ConsoleTopBar>{mode === "self" ? consoleNav : null}</ConsoleTopBar>
 
       {/* Sub-nav — maroon underline on the active tab. A superuser editing a
           scholar gets a "Profiles / <name>" breadcrumb back to the roster; a
@@ -258,11 +258,9 @@ export function EditShell({
           proxy editor never gets a navigable crumb, since a proxy grant names
           no roster at all. A superuser on their own /edit gets an "All
           profiles" link across — or, when `consoleNav` is supplied (superuser
-          / comms_steward self-edit), the full shared admin tab strip in its
-          place. */}
-      {mode === "self" && consoleNav ? (
-        consoleNav
-      ) : (
+          / comms_steward self-edit), no row at all: the full shared admin nav
+          sits in the top bar instead. */}
+      {mode === "self" && consoleNav ? null : (
       <div className="border-border border-b">
         <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
           {isSuperuser && isProfileEntity ? (

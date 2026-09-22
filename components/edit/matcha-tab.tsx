@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { BAR_TAB_ACTIVE, BAR_TAB_INACTIVE } from "@/components/edit/console-tab-classes";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 
 /**
@@ -33,7 +34,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 export function MatchaTab({ active }: { active: boolean }) {
   const tab = active ? (
     <span
-      className="border-apollo-maroon inline-block shrink-0 border-b-2 py-3 text-sm font-medium whitespace-nowrap"
+      className={BAR_TAB_ACTIVE}
       aria-current="page"
       data-testid="admin-tab-matcha"
     >
@@ -46,7 +47,7 @@ export function MatchaTab({ active }: { active: boolean }) {
         e.preventDefault();
         e.currentTarget.click();
       }}
-      className="text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap"
+      className={BAR_TAB_INACTIVE}
       data-testid="admin-tab-matcha"
     >
       Matcha

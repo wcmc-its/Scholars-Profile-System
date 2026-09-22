@@ -2,13 +2,15 @@
  * The shared admin sub-nav across ALL `/edit` console surfaces (#497 PR-3c,
  * `slug-personalization-ui-spec.md` § 3.1; unified onto the self-edit surface in
  * `role-aware-navigation-entry-points-spec.md`). The maroon-underlined tab strip
- * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`), the
+ * in the black Apollo bar, linking the Profiles roster (`/edit/scholars`), the
  * Profile-URL request queue (`/edit/slug-requests`), the URL registry,
  * Administrators, Method Families, and the matcher tools
  * (`/edit/matcha`, `/edit/grant-matcha`). A pending-count pill sits on the "URL requests"
- * tab; the account chip/dropdown anchors the right end (account-dropdown-nav
- * handoff, Workstream A — its `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag was
- * retired in #1440).
+ * tab.
+ *
+ * Renders INSIDE the dark `ConsoleTopBar` (pass it as the bar's children), not as
+ * a second row: inline tabs from `xl`, one menu button + sheet below that
+ * (`ConsoleNavSheet`). The account menu is the bar's, not this component's.
  *
  * Originally only the superuser list pages rendered this. It now also renders on
  * the `/edit` self-edit surface for a superuser or comms_steward (via
@@ -22,8 +24,9 @@
  */
 import Link from "next/link";
 
-import { AccountMenu } from "@/components/site/account-menu";
 import { AdminGroupMenu } from "@/components/edit/admin-group-menu";
+import { ConsoleNavSheet, type ConsoleNavSection } from "@/components/edit/console-nav-sheet";
+import { BAR_TAB_ACTIVE, BAR_TAB_INACTIVE } from "@/components/edit/console-tab-classes";
 import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
@@ -438,32 +441,48 @@ export function AdminSubnav({
       ]
     : tabs.map(renderTab);
 
+  // The same tabs for the sub-`xl` sheet, as plain links in tier-1 order: top-level
+  // tabs, then each group under its heading (a single-member group stays unheaded,
+  // mirroring the promotion above).
+  const navItem = (t: TabSpec) => ({
+    id: t.id,
+    href: t.href,
+    label: t.label,
+    count: t.count,
+    active: active === t.id,
+  });
+  const sections: ConsoleNavSection[] = [];
+  const addSection = (label: string | null, items: ConsoleNavSection["items"]) => {
+    const last = sections.at(-1);
+    // Consecutive unheaded runs merge, so a promoted single-member group sits
+    // flush with the top-level tabs rather than in its own gapped block.
+    if (label === null && last && last.label === null) last.items.push(...items);
+    else if (items.length > 0) sections.push({ label, items });
+  };
+  if (grouped) {
+    addSection(null, tabs.filter((t) => TAB_GROUP[t.id] === null).map(navItem));
+    for (const g of groups)
+      addSection(g.members.length === 1 ? null : GROUP_LABEL[g.id], g.members.map(navItem));
+  } else {
+    addSection(null, tabs.map(navItem));
+  }
+  const currentLabel = tabs.find((t) => t.id === active)?.label ?? "Menu";
+
   return (
-    <div className="border-border border-b" data-slot="admin-subnav">
-      <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
-        {/* The role-gated tab set now runs to ~14 items and no longer fits the
-            bar on a laptop. Scroll the tab strip horizontally instead of letting
-            it overflow / shove the account chip off-screen. `min-w-0` lets this
-            flex child shrink below its content width so `overflow-x-auto` can
-            engage. That is only HALF the fix: flex items default to
-            `flex-shrink: 1`, so without `shrink-0 whitespace-nowrap` on each tab
-            (see `AdminTab` below and the hand-mirrored `matcha-tab.tsx`) the tabs
-            squeeze and their labels wrap to two lines instead — the content never
-            exceeds the container, so the scrollbar never appears. That was the
-            #1803 bug. Radix popovers/menus inside a tab portal to the body, so
-            they are NOT clipped by this scroller. Account chip pinned outside. */}
-        <div
-          className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto"
-          data-testid="admin-subnav-tier1"
-        >
-          {tier1}
-        </div>
-        {/* The account chip/dropdown anchors the right end — profile actions live
-            entirely in the menu, which derives its scholar + rows from the
-            `/api/auth/session` probe, so no scholar object needs threading
-            through every console page that renders this strip. */}
-        <AccountMenu context="console" />
-      </div>
+    <div className="flex min-w-0 flex-1 items-center" data-slot="admin-subnav">
+      {/* The role-gated tab set can outgrow the bar (#1803): the strip scrolls
+          horizontally rather than shoving the account menu off-screen. That
+          needs `min-w-0` here AND `shrink-0 whitespace-nowrap` on every tab
+          (`BAR_TAB_*`), or the tabs squeeze and wrap instead. Radix menus inside
+          a tab portal to the body, so they are NOT clipped by this scroller. */}
+      <nav
+        aria-label="Console"
+        className="hidden h-14 min-w-0 flex-1 items-center gap-6 overflow-x-auto xl:flex"
+        data-testid="admin-subnav-tier1"
+      >
+        {tier1}
+      </nav>
+      <ConsoleNavSheet sections={sections} currentLabel={currentLabel} />
     </div>
   );
 }
@@ -502,10 +521,8 @@ function AdminTab({
       )}
     </span>
   );
-  const activeClass =
-    "border-apollo-maroon inline-block shrink-0 border-b-2 py-3 text-sm font-medium whitespace-nowrap";
-  const inactiveClass =
-    "text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap";
+  const activeClass = BAR_TAB_ACTIVE;
+  const inactiveClass = BAR_TAB_INACTIVE;
   const tab =
     active && !activeIsLink ? (
       <span className={activeClass} aria-current="page" data-testid={testId}>

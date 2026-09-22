@@ -23,7 +23,7 @@ import { profilePath } from "@/lib/profile-url";
  * Signed-in account menu rendered in the site header (UI-SPEC § Signing in
  * and reaching `/edit`) and — the unified account-dropdown (account-dropdown-nav
  * handoff, Workstream A; its `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag was retired
- * in #1440) — in the `/edit` `AdminSubnav` strip via `context="console"`. A
+ * in #1440) — in the `/edit` `ConsoleTopBar` via `context="console"`. A
  * `Popover` opened by a context-styled trigger:
  *
  *   - With a scholar row (the common case): View my profile · Edit my profile ·
@@ -83,10 +83,9 @@ export type AccountMenuProps = {
    * Where the menu is mounted (account-dropdown-nav handoff, Workstream A):
    *   - `"public"` (default) — the site header. The context row is the
    *     superuser "Admin console" roster link (rendered as a normal console row).
-   *   - `"console"` — the `/edit` `AdminSubnav` strip. The context row becomes
-   *     "Back to Scholars" (→ `/`), the roster row is dropped (the Profiles tab
-   *     already covers it), and the trigger is styled for the light strip
-   *     rather than the maroon header.
+   *   - `"console"` — the `/edit` `ConsoleTopBar`. The context row becomes
+   *     "Back to Scholars" (→ `/`), and the roster row is dropped (the Profiles
+   *     tab already covers it). Trigger styled for the dark console bar.
    */
   context?: "public" | "console";
 };
@@ -152,7 +151,8 @@ export function AccountMenu({
         data-slot="account-menu-trigger"
         className={
           isConsole
-            ? "text-muted-foreground hover:text-foreground focus:text-foreground ml-auto inline-flex items-center gap-1 py-3 text-sm font-medium transition-colors focus:outline-none"
+            ? // Every console mount now sits in the dark `ConsoleTopBar`.
+              "inline-flex items-center gap-1 py-3 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
             : "inline-flex items-center gap-1 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
         }
         aria-label="Account menu"
