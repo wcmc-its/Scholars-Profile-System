@@ -63,6 +63,15 @@ describe("FirstHideNoticeDialog — copy + structure", () => {
   });
 });
 
+describe("FirstHideNoticeDialog — bulk copy", () => {
+  it("pluralises for a batch and labels the primary button with the count", () => {
+    render(<FirstHideNoticeDialog {...defaults()} count={3} />);
+    expect(screen.getByText("You're about to hide these 3 papers.")).toBeTruthy();
+    expect(screen.getByTestId("first-hide-confirm").textContent).toBe("Hide 3");
+    expect(screen.getByText(/Are some of these not actually yours\?/)).toBeTruthy();
+  });
+});
+
 describe("FirstHideNoticeDialog — actions", () => {
   it("Hide it calls onHide", () => {
     const d = defaults();

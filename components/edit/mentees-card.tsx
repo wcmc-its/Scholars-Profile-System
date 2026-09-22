@@ -47,7 +47,7 @@ export function MenteesCard({ cwid, mode, scholarName, mentees }: MenteesCardPro
             : "You have no recorded mentees.",
         one: "mentee",
         other: "mentees",
-        hideNote: "It clears from your profile right away.",
+        hideNote: "It clears from the profile right away.",
       }}
     />
   );
