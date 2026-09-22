@@ -2031,3 +2031,63 @@ describe("loadEditContext — highlights (#836)", () => {
     expect(ctx!.highlights!.aiPmids).toEqual(["300", "100"]);
   });
 });
+
+describe("loadEditContext — ORCID suggestion (includeOrcidSuggestion)", () => {
+  // Opaque tokens, never real iDs. The nightly RPM mirror re-creates an `rpm_admin` row
+  // from the frozen `admin_orcid` even after the scholar removed that iD, so the loader
+  // must drop every dismissed (cwid, iD) pair before the fold — or the removed iD reads
+  // as "on file" again the next morning.
+  const row = (orcid: string, source: string, articlesAccepted = 0) => ({
+    cwid: SELF,
+    orcid,
+    source,
+    articlesAccepted,
+    articlesRejected: 0,
+  });
+  function orcidClient(
+    candidates: ReturnType<typeof row>[],
+    dismissals: Array<{ cwid: string; orcid: string }>,
+  ) {
+    const c = fakeClient() as FakeClient & {
+      orcidCandidate: { findMany: AnyMock };
+      orcidDismissal: { findMany: AnyMock };
+    };
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.orcidCandidate = { findMany: vi.fn().mockResolvedValue(candidates) };
+    c.orcidDismissal = { findMany: vi.fn().mockResolvedValue(dismissals) };
+    return c;
+  }
+
+  it("a dismissed rpm_admin iD is not on file and not evidence; the surviving strong iD is suggested", async () => {
+    const c = orcidClient(
+      [row("iD-a", "rpm_admin"), row("iD-a", "rpm_inferred", 4), row("iD-b", "rpm_inferred", 2)],
+      [{ cwid: SELF, orcid: "iD-a" }],
+    );
+    const ctx = await loadEditContext(SELF, asClient(c), new Date(), undefined, {
+      includeOrcidSuggestion: true,
+    });
+    expect(c.orcidDismissal.findMany).toHaveBeenCalledWith({
+      where: { cwid: SELF },
+      select: { cwid: true, orcid: true },
+    });
+    expect(ctx!.orcidVerdict).toEqual({ tier: "strong", orcid: "iD-b", accepted: 2 });
+    expect(ctx!.orcidCandidates.map((r) => r.orcid)).toEqual(["iD-b"]);
+  });
+
+  it("without a dismissal the same rows read as asserted (the admin iD on file)", async () => {
+    const c = orcidClient([row("iD-a", "rpm_admin"), row("iD-b", "rpm_inferred", 2)], []);
+    const ctx = await loadEditContext(SELF, asClient(c), new Date(), undefined, {
+      includeOrcidSuggestion: true,
+    });
+    expect(ctx!.orcidVerdict).toEqual({ tier: "asserted", orcid: "iD-a", accepted: 0 });
+    expect(ctx!.orcidCandidates.map((r) => r.orcid)).toEqual(["iD-a", "iD-b"]);
+  });
+
+  it("off → neither table is read", async () => {
+    const c = orcidClient([row("iD-a", "rpm_admin")], []);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(c.orcidCandidate.findMany).not.toHaveBeenCalled();
+    expect(c.orcidDismissal.findMany).not.toHaveBeenCalled();
+    expect(ctx!.orcidVerdict).toBeNull();
+  });
+});

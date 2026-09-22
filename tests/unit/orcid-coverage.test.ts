@@ -17,6 +17,7 @@ import {
   parseOrcidCoverageParams,
   SUGGEST_MIN_ACCEPTED,
   piNoEra,
+  withoutDismissed,
   type CandidateRow,
   type ScholarRow,
 } from "@/lib/edit/orcid-coverage";
@@ -407,5 +408,24 @@ describe("orcidVerdict", () => {
       ["y", "weak"],
       ["z", "asserted"],
     ]);
+  });
+});
+
+/** `withoutDismissed` — the one filter every `orcid_candidate` reader applies. */
+describe("withoutDismissed", () => {
+  it("drops exactly the dismissed (cwid, iD) pairs, every source; another cwid's same iD and another iD survive", () => {
+    const rows = [
+      cand("y1", "rpm_admin", 0, 0, "iD-a"),
+      cand("x1", "orcid_email", 0, 0, "iD-a"),
+      cand("x1", "rpm_inferred", 3, 0, "iD-b"),
+      cand("x1", "rpm_admin", 0, 0, "iD-a"),
+    ];
+    // Upper-case cwid on the dismissal: compared lowercase, like the ETLs.
+    const kept = withoutDismissed(rows, [{ cwid: "X1", orcid: "iD-a" }]);
+    expect(kept.map((r) => `${r.cwid}|${r.orcid}|${r.source}`)).toEqual([
+      "y1|iD-a|rpm_admin",
+      "x1|iD-b|rpm_inferred",
+    ]);
+    expect(withoutDismissed(rows, [])).toEqual(rows);
   });
 });

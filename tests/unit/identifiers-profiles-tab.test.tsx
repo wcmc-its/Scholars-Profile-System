@@ -256,11 +256,11 @@ describe("OrcidCard", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("none → a typed URL form is normalized and POSTed; a 502 from the route is shown and nothing is marked saved", async () => {
+  it("none → a typed URL form is normalized and POSTed; a failed write is shown and nothing is marked saved", async () => {
     fetchMock.mockResolvedValue({
       ok: false,
-      status: 502,
-      json: async () => ({ ok: false, error: "reciter_unavailable" }),
+      status: 500,
+      json: async () => ({ ok: false, error: "write_failed" }),
     });
     render(
       <OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile={null} suggested={null} />,
@@ -270,7 +270,7 @@ describe("OrcidCard", () => {
     });
     fireEvent.click(screen.getByTestId("orcid-save"));
     expect(await screen.findByTestId("orcid-error")).toBeTruthy();
-    expect(screen.getByTestId("orcid-error").textContent).toContain("ReCiter is unreachable");
+    expect(screen.getByTestId("orcid-error").textContent).toContain("Couldn't save the ORCID iD");
     expect(
       JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string).orcid,
     ).toBe("0000-0002-1825-0097");

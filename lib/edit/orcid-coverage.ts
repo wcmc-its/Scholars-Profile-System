@@ -127,6 +127,24 @@ export type CandidateRow = {
   articlesAccepted: number;
   articlesRejected: number;
 };
+/** One `orcid_dismissal` row: the person removed this iD, or said it is not theirs. */
+export type DismissalRow = { cwid: string; orcid: string };
+
+/** Drops every row whose (cwid, iD) pair the person dismissed. THE choke point for
+ *  "a dismissed iD never comes back": the RPM mirror re-creates an `rpm_admin` row
+ *  from `admin_orcid` every morning and the registry sweep re-finds its matches
+ *  weekly, so every `orcid_candidate` reader (the `/edit` loader, this console)
+ *  filters here rather than trusting the mirrors to forget. Pure; cwid compared
+ *  lowercase like the ETLs. */
+export function withoutDismissed<T extends { cwid: string; orcid: string }>(
+  rows: readonly T[],
+  dismissals: readonly DismissalRow[],
+): T[] {
+  if (dismissals.length === 0) return [...rows];
+  const key = (cwid: string, orcid: string) => `${cwid.toLowerCase()}\u0000${orcid}`;
+  const dismissed = new Set(dismissals.map((d) => key(d.cwid, d.orcid)));
+  return rows.filter((r) => !dismissed.has(key(r.cwid, r.orcid)));
+}
 /** Support for an inference to count as strong: 3+ accepted articles carrying the
  *  ORCID (RPM), or 3+ shared works in the ORCID registry (`orcid_works`), or a
  *  public WCM email on the registry record (`orcid_email` — no count needed). */

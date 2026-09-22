@@ -56,7 +56,12 @@ import { subjectId as deriveSubjectId } from "@/lib/coi-gap/mention";
 import type { SubjectType } from "@/lib/coi-gap/mention";
 import { relationshipKinds as deriveRelationshipKinds } from "@/lib/coi-gap/pipeline";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import { orcidVerdict, SUGGEST_MIN_ACCEPTED, type OrcidVerdict } from "@/lib/edit/orcid-coverage";
+import {
+  orcidVerdict,
+  SUGGEST_MIN_ACCEPTED,
+  withoutDismissed,
+  type OrcidVerdict,
+} from "@/lib/edit/orcid-coverage";
 import type { OrcidEvidence } from "@/lib/edit/orcid";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
@@ -84,6 +89,7 @@ type EditContextReadClient = Pick<
   | "division"
   | "center"
   | "orcidCandidate"
+  | "orcidDismissal"
 >;
 
 export type EditContextScholar = {
@@ -719,7 +725,7 @@ export type EditContext = {
    */
   menteeSuggestions: ReadonlyArray<EditContextMenteeSuggestion>;
   /** The scholar's ORCID candidate fold (`orcidVerdict` over their `orcid_candidate`
-   *  rows) — populated only when `loadEditContext` is called with
+   *  rows, minus the pairs they dismissed) — populated only when `loadEditContext` is called with
    *  `opts.includeOrcidSuggestion === true` (`SELF_EDIT_ORCID_SUGGESTION`); null for
    *  every other caller, in which case the ORCID row falls back to `scholar.orcid`. */
   orcidVerdict: OrcidVerdict | null;
@@ -1772,13 +1778,19 @@ export async function loadEditContext(
   // ORCID suggestion (`SELF_EDIT_ORCID_SUGGESTION`): the nightly `orcid_candidate`
   // mirror folded by the same rule the coverage console uses, at the row's lower
   // support bar (one accepted article is enough to ask; the console counts 3).
+  // Pairs the scholar dismissed (Remove on the card) are dropped first — the
+  // mirror re-creates them nightly, so this is what keeps them gone.
   let orcidVerdictValue: OrcidVerdict | null = null;
   let orcidCandidateRows: OrcidEvidenceRow[] = [];
   if (opts?.includeOrcidSuggestion === true) {
-    const rows = await client.orcidCandidate.findMany({
-      where: { cwid },
-      select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true },
-    });
+    const [candidates, dismissals] = await Promise.all([
+      client.orcidCandidate.findMany({
+        where: { cwid },
+        select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true },
+      }),
+      client.orcidDismissal.findMany({ where: { cwid }, select: { cwid: true, orcid: true } }),
+    ]);
+    const rows = withoutDismissed(candidates, dismissals);
     orcidVerdictValue = orcidVerdict(rows, SUGGEST_MIN_ACCEPTED);
     orcidCandidateRows = rows.map((r) => ({
       orcid: r.orcid,

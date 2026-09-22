@@ -8,7 +8,11 @@
  *     `articles_rejected` (how many of the person's accepted / rejected RPM
  *     articles carry that ORCID on their PubMed author record). The NetID rows
  *     (`source_provided`, a Cornell-Ithaca CSV) are not ours and are skipped.
- *   - `admin_orcid` → `source = 'rpm_admin'` (hand-entered by an RPM admin).
+ *   - `admin_orcid` → `source = 'rpm_admin'` (hand-entered by an RPM admin;
+ *     frozen since RPM stopped writing it 2026-04-05, and SPS never writes it).
+ *     A row SPS's Remove deleted comes back here every morning; readers drop
+ *     it via `orcid_dismissal` (`withoutDismissed`), so the mirror stays a
+ *     plain copy of the source.
  *
  * Full mirror each run for its own source values (`rpm_inferred` / `rpm_admin`):
  * rows RPM no longer has are deleted, so the table never accumulates a retracted

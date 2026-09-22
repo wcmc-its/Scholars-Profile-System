@@ -16,9 +16,10 @@
  *
  * Second person is the EDITOR: an administrator reads the scholar's first name
  * where the scholar reads "your". Every write is `POST /api/edit/orcid`, which
- * puts the iD in ReciterDB `admin_orcid` (what ReCiter and the coverage
- * dashboard read) and then on `scholar.orcid`; Remove sends `orcid: null` and
- * clears both. `router.refresh()` reconciles the page. Off-campus friendly:
+ * puts the iD on `scholar.orcid` (stamped confirmed; the nightly
+ * `etl:orcid-push` carries it to WCM Identity); Remove sends `orcid: null`,
+ * clears it, and records the removed iD as dismissed so it does not come back.
+ * `router.refresh()` reconciles the page. Off-campus friendly:
  * this replaces the "Confirm in ReCiter" hand-off, which only worked on the
  * campus network.
  */
@@ -53,8 +54,6 @@ function errorMessage(code: string): string {
   switch (code) {
     case "invalid_orcid":
       return "That doesn't look like a valid ORCID iD — check the digits (the last one is a check digit).";
-    case "reciter_unavailable":
-      return "ReCiter is unreachable right now, so nothing was saved. Try again in a few minutes.";
     case "not_self":
     case "proxy_conflict":
       return "You can't edit this scholar's ORCID iD.";
