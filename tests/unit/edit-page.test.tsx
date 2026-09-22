@@ -631,8 +631,11 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(document.querySelector('[data-slot="mentees-panel"]')).not.toBeNull();
     expect(screen.getByTestId("mentee-row-self01:mentee9")).toBeTruthy();
     expect(screen.getByText("Jordan Mentee")).toBeTruthy();
-    // Suppressible → a Hide control is present (not a read-only panel).
-    expect(screen.getByTestId("mentee-row-self01:mentee9-hide")).toBeTruthy();
+    // Suppressible → the row carries a select checkbox for the bulk hide verb
+    // (not a read-only panel).
+    expect(
+      within(screen.getByTestId("mentee-row-self01:mentee9")).getByRole("checkbox"),
+    ).toBeTruthy();
   });
 
   it("?attr=coi renders the read-only Conflicts of Interest panel, grouped + not editable", () => {

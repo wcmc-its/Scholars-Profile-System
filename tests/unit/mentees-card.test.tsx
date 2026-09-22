@@ -49,8 +49,10 @@ describe("MenteesCard — suppressible mentees", () => {
     expect(document.querySelector('[data-slot="mentees-panel"]')).not.toBeNull();
     expect(screen.getByText("Jordan Mentee")).toBeTruthy();
     expect(screen.getByText(/Immunology \(PhD\)/)).toBeTruthy();
-    // shown → Hide; hidden_by_self → Show
-    expect(screen.getByTestId("mentee-row-self01:m1-hide")).toBeTruthy();
+    // shown → a select checkbox (hiding is the bulk verb); hidden_by_self → Show
+    expect(
+      screen.getByRole("checkbox", { name: "Select Jordan Mentee, Immunology (PhD)" }),
+    ).toBeTruthy();
     expect(screen.getByTestId("mentee-row-self01:m2-show")).toBeTruthy();
   });
 
@@ -76,7 +78,9 @@ describe("MenteesCard — suppressible mentees", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderCard([MENTEES[0]]);
 
-    fireEvent.click(screen.getByTestId("mentee-row-self01:m1-hide"));
+    // Select the row, then hide the selection from the bar.
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Select Jordan Mentee/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide from profile" }));
     // Self hide opens a lightweight confirm dialog; confirm it.
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: /^hide$/i }));

@@ -39,6 +39,7 @@ export function EducationCard({
       scholarName={scholarName}
       entityType="education"
       entities={educations}
+      extendNoun="older entry"
       getTitle={(e) => (e.field ? `${e.degree}, ${e.field}` : e.degree)}
       renderMeta={(e) => (
         <>

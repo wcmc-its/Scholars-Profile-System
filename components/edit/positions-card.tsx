@@ -13,29 +13,32 @@
  *     /api/edit/appointment-visibility once per record. A group is hidden iff
  *     ALL its records are, "partially hidden" when only some are.
  *
- * Checked rows collect into a fixed bottom bar whose "Hide from profile" hides
- * every selected row — directly for the scholar, behind one required-reason
- * `ConfirmDialog` for a superuser. Hiding is display-only: the record stays in
- * WCM systems and on internal reports (a hidden CURRENT appointment also leaves
- * the CV export — `lib/api/profile.ts` filters suppressed rows first).
+ * Checked rows collect into the shared fixed `SelectionBar` whose "Hide from
+ * profile" hides every selected row — directly for the scholar, behind one
+ * required-reason `ConfirmDialog` for a superuser. Hiding is display-only: the
+ * record stays in WCM systems and on internal reports (a hidden CURRENT
+ * appointment also leaves the CV export — `lib/api/profile.ts` filters
+ * suppressed rows first).
  *
  * Local state is authoritative after each write; nothing else on /edit reads
  * these rows, so there is no `router.refresh()`.
  *
  * Replaced the flat `AppointmentsCard` (an `EntityPanel` config) +
  * `HistoricalAppointmentsCard` pair; Education / Funding / Mentees still share
- * `EntityPanel`. The self-service `ProfileAppointmentsCard` sits under this.
+ * `EntityPanel`, which takes the same `SelectionBar`. The self-service
+ * `ProfileAppointmentsCard` sits under this.
  */
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowDown, EyeOff } from "lucide-react";
+import { EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
 import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
+import { SelectionBar, plural } from "@/components/edit/selection-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -91,8 +94,6 @@ function yearSpan(recs: ReadonlyArray<Dated>): string {
   if (!start) return endYear && endYear !== "present" ? endYear : "";
   return `${start.slice(0, 4)}–${endYear}`;
 }
-
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 const NUMBER_WORDS = [
   "zero",
@@ -451,49 +452,16 @@ export function PositionsCard({
         </>
       )}
 
-      {selected.size > 0 && (
-        <div
-          role="region"
-          aria-label="Selected appointments"
-          className="bg-apollo-surface border-apollo-border-strong fixed bottom-[22px] left-1/2 z-20 flex max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center gap-x-4 gap-y-2 rounded-[11px] border px-4 py-[11px] shadow-[0_8px_24px_rgba(34,30,28,.16)]"
-        >
-          <span aria-live="polite" className="text-[13px] font-medium">
-            {plural(selected.size, "appointment")} selected
-          </span>
-          {older.length > 0 && (
-            <button
-              type="button"
-              className="text-apollo-slate inline-flex items-center gap-1 text-[12.5px] underline underline-offset-2"
-              onClick={() => setSelected(new Set([...selected, ...older.map((r) => r.id)]))}
-            >
-              <ArrowDown className="size-3" aria-hidden />
-              Also select the {plural(older.length, "older appointment")}
-            </button>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              type="button"
-              variant="apollo"
-              size="sm"
-              disabled={busy}
-              onClick={() => (isSuperuser ? setHideOpen(true) : void hideSelected(null))}
-            >
-              Hide from profile
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => setSelected(new Set())}
-            >
-              Clear
-            </Button>
-          </div>
-        </div>
-      )}
-      {/* Keeps the last rows scrollable above the fixed bar (56px + 22px offset). */}
-      {selected.size > 0 && <div aria-hidden className="h-20" />}
+      <SelectionBar
+        count={selected.size}
+        noun="appointment"
+        extendCount={older.length}
+        extendLabelNoun="older appointment"
+        onExtend={() => setSelected(new Set([...selected, ...older.map((r) => r.id)]))}
+        onHide={() => (isSuperuser ? setHideOpen(true) : void hideSelected(null))}
+        onClear={() => setSelected(new Set())}
+        busy={busy}
+      />
 
       <ConfirmDialog
         open={hideOpen}
