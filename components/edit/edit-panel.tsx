@@ -50,7 +50,7 @@ export type EditPanelProps = {
    * Render as a SUBSECTION under a sibling panel's h2 — an eyebrow `<h3>` label
    * (rhyming with the rail's "FROM WCM RECORDS") instead of the dominant h2.
    * Gets its own heading id (default `${slot}-heading`) so a tab
-   * that stacks several panels (Appointments) doesn't emit duplicate
+   * that stacks several panels (Honors) doesn't emit duplicate
    * `panel-heading` ids. The provenance cue (owned badge / Source line) stays.
    */
   subsection?: boolean;

@@ -18,8 +18,8 @@
  * ONLY on the owner's public profile — never on a center / department /
  * division / search surface — so scholars have wide input latitude here.
  *
- * Visual design is intentionally minimal (native controls, no bespoke chrome) —
- * it needs a staging design pass.
+ * The heading row, description and empty state follow the 2026-09-21 design
+ * pass; only the add / edit form is still native controls.
  */
 "use client";
 
@@ -90,8 +90,6 @@ const EMPTY_DRAFT: Draft = {
 
 export type ProfileAppointmentsCardProps = {
   cwid: string;
-  mode: "self" | "superuser";
-  scholarName: string;
 };
 
 export function ProfileAppointmentsCard({ cwid }: ProfileAppointmentsCardProps) {

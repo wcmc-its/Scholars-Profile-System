@@ -10,13 +10,17 @@
  *   - **Earlier ranks** (#1323) — the "ED-HISTORICAL" records grouped by rank
  *     title (one row per rank, every department the rank was held in). Hide /
  *     show flips `Appointment.showOnProfile` via POST
- *     /api/edit/appointment-visibility once per record, then one
- *     `router.refresh()`. A group is hidden iff ALL its records are.
+ *     /api/edit/appointment-visibility once per record. A group is hidden iff
+ *     ALL its records are, "partially hidden" when only some are.
  *
  * Checked rows collect into a fixed bottom bar whose "Hide from profile" hides
  * every selected row — directly for the scholar, behind one required-reason
  * `ConfirmDialog` for a superuser. Hiding is display-only: the record stays in
- * WCM systems, on internal reports, and in the CV export.
+ * WCM systems and on internal reports (a hidden CURRENT appointment also leaves
+ * the CV export — `lib/api/profile.ts` filters suppressed rows first).
+ *
+ * Local state is authoritative after each write; nothing else on /edit reads
+ * these rows, so there is no `router.refresh()`.
  *
  * Replaced the flat `AppointmentsCard` (an `EntityPanel` config) +
  * `HistoricalAppointmentsCard` pair; Education / Funding / Mentees still share
@@ -26,11 +30,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowDown, EyeOff, Lock } from "lucide-react";
+import { ArrowDown, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
+import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -47,10 +51,8 @@ export type PositionsCardProps = {
   mode: "self" | "superuser";
   scholarName: string;
   appointments: ReadonlyArray<EditContextAppointment>;
+  /** Empty for a viewer who may not edit positions — `edit-page.tsx` gates it. */
   historicalAppointments: ReadonlyArray<EditContextHistoricalAppointment>;
-  /** Whether to render the Earlier ranks section at all — the same editor
-   *  gate `edit-page.tsx` applies to the self-service card. */
-  showHistorical: boolean;
 };
 
 type Dated = { startDate: string | null; endDate: string | null };
@@ -62,6 +64,8 @@ type Row = {
   sub: string;
   years: string;
   hidden: boolean;
+  /** An earlier-rank group with only SOME records hidden. */
+  partial: boolean;
   /** Gets a checkbox: shown, and neither primary nor locked. */
   selectable: boolean;
 } & (
@@ -131,18 +135,17 @@ export function PositionsCard({
   scholarName,
   appointments,
   historicalAppointments,
-  showHistorical,
 }: PositionsCardProps) {
-  const router = useRouter();
   const isSuperuser = mode === "superuser";
-  // Local copies, committed on each successful write (this page is
-  // force-dynamic; a refresh would just re-fetch what we already know).
+  // Local copies, committed on each successful write — authoritative from then
+  // on; no router.refresh().
   const [current, setCurrent] = React.useState<EditContextAppointment[]>([...appointments]);
   const [history, setHistory] = React.useState<EditContextHistoricalAppointment[]>([
     ...historicalAppointments,
   ]);
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
   const [hideOpen, setHideOpen] = React.useState(false);
   const [overrideTarget, setOverrideTarget] = React.useState<EditContextAppointment | null>(null);
 
@@ -154,15 +157,16 @@ export function PositionsCard({
     sub: a.organization,
     years: yearSpan([a]),
     hidden: a.state === "hidden_by_self" || a.state === "hidden_by_admin",
+    partial: false,
+    // A legacy hidden primary reads as any hidden row (Show), but is never
+    // selectable — it can't be re-hidden here.
     selectable: a.state === "shown" && !a.isPrimary,
   }));
 
   // Group by rank title; records are newest-first, so groups come out newest-first too.
   const groups = new Map<string, EditContextHistoricalAppointment[]>();
-  if (showHistorical) {
-    for (const r of [...history].sort(byStartDesc))
-      groups.set(r.title, [...(groups.get(r.title) ?? []), r]);
-  }
+  for (const r of [...history].sort(byStartDesc))
+    groups.set(r.title, [...(groups.get(r.title) ?? []), r]);
   const earlierRows: Row[] = [...groups.values()].map((records) => {
     const hidden = records.every((r) => !r.showOnProfile);
     return {
@@ -173,6 +177,7 @@ export function PositionsCard({
       sub: [...new Set(records.map((r) => r.organization))].join(" · "),
       years: yearSpan(records),
       hidden,
+      partial: !hidden && records.some((r) => !r.showOnProfile),
       selectable: !hidden,
     };
   });
@@ -197,6 +202,7 @@ export function PositionsCard({
   async function setVisibility(
     records: EditContextHistoricalAppointment[],
     showOnProfile: boolean,
+    reason: string | null = null,
   ) {
     const done = await Promise.all(
       records.map(async (r) =>
@@ -204,6 +210,7 @@ export function PositionsCard({
           await post("/api/edit/appointment-visibility", {
             appointmentExternalId: r.externalId,
             showOnProfile,
+            ...(reason ? { reason } : {}),
           })
         ).ok
           ? r.externalId
@@ -237,40 +244,57 @@ export function PositionsCard({
 
   async function hideSelected(reason: string | null) {
     setError(null);
-    const targets = rows.filter((r) => selected.has(r.id));
-    const results = await Promise.all(
-      targets.map(async (r) =>
-        r.kind === "current" ? suppress(r.appointment, reason) : setVisibility(r.records, false),
-      ),
-    );
-    const failed = targets.filter((_, i) => !results[i]);
-    setSelected(new Set(failed.map((r) => r.id)));
-    if (failed.length > 0) {
-      setError(`We couldn't hide ${failed.length} of the selected appointments. Please try again.`);
+    setBusy(true);
+    try {
+      const targets = rows.filter((r) => selected.has(r.id));
+      const results = await Promise.all(
+        targets.map(async (r) =>
+          r.kind === "current"
+            ? suppress(r.appointment, reason)
+            : setVisibility(r.records, false, reason),
+        ),
+      );
+      const failed = targets.filter((_, i) => !results[i]);
+      setSelected(new Set(failed.map((r) => r.id)));
+      if (failed.length > 0) {
+        setError(
+          `We couldn't hide ${failed.length} of the selected appointments. Please try again.`,
+        );
+      }
+    } finally {
+      setBusy(false);
     }
-    if (targets.some((r) => r.kind === "earlier")) router.refresh();
   }
 
   async function revoke(a: EditContextAppointment) {
     setError(null);
-    const res = await post("/api/edit/revoke", { suppressionId: a.suppressionId });
-    if (!res.ok) {
-      setError("We couldn't show this appointment again. Please try again.");
-      return;
+    setBusy(true);
+    try {
+      const res = await post("/api/edit/revoke", { suppressionId: a.suppressionId });
+      if (!res.ok) {
+        setError("We couldn't show this appointment again. Please try again.");
+        return;
+      }
+      setCurrent((prev) =>
+        prev.map((x) =>
+          x.externalId === a.externalId ? { ...x, state: "shown", suppressionId: null } : x,
+        ),
+      );
+    } finally {
+      setBusy(false);
     }
-    setCurrent((prev) =>
-      prev.map((x) =>
-        x.externalId === a.externalId ? { ...x, state: "shown", suppressionId: null } : x,
-      ),
-    );
   }
 
   async function showGroup(records: EditContextHistoricalAppointment[]) {
     setError(null);
-    if (!(await setVisibility(records, true))) {
-      setError("We couldn't show this appointment again. Please try again.");
+    setBusy(true);
+    try {
+      if (!(await setVisibility(records, true))) {
+        setError("We couldn't show this appointment again. Please try again.");
+      }
+    } finally {
+      setBusy(false);
     }
-    router.refresh();
   }
 
   function onShow(row: Row) {
@@ -282,15 +306,14 @@ export function PositionsCard({
   }
 
   function hiddenLabel(row: Row): string {
-    if (row.kind === "earlier") return "Hidden";
+    if (row.kind === "earlier") return row.partial ? "Partially hidden" : "Hidden";
     if (row.appointment.state === "hidden_by_admin") return "Hidden by an administrator";
     return isSuperuser ? "Hidden by the scholar" : "Hidden";
   }
 
   function canShow(row: Row): boolean {
-    if (!row.hidden) return false;
-    if (row.kind === "earlier") return true;
-    return row.appointment.state === "hidden_by_self" || isSuperuser;
+    if (row.kind === "earlier") return row.hidden || row.partial;
+    return row.hidden && (row.appointment.state === "hidden_by_self" || isSuperuser);
   }
 
   const renderRow = (row: Row) => (
@@ -309,7 +332,7 @@ export function PositionsCard({
             className="border-apollo-border-strong size-[18px] border-2"
             checked={selected.has(row.id)}
             onCheckedChange={(c) => toggle(row.id, c === true)}
-            aria-label={`Select ${row.title}`}
+            aria-label={`Select ${row.title}, ${row.sub}${row.years ? `, ${row.years}` : ""}`}
           />
         </label>
       ) : (
@@ -322,14 +345,15 @@ export function PositionsCard({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[14px] font-[600] tracking-[-0.01em]">{row.title}</span>
           {row.kind === "current" &&
-            (row.appointment.isPrimary || row.appointment.state === "locked") && (
+            (row.appointment.state === "locked" ||
+              (row.appointment.isPrimary && row.appointment.state === "shown")) && (
               <span className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-notice-text rounded-full border px-2 py-0.5 text-[11px] font-[600] tracking-[0.03em] uppercase">
                 {row.appointment.state === "locked"
                   ? "Chair · Always shown"
                   : "Primary · Always shown"}
               </span>
             )}
-          {row.hidden && (
+          {(row.hidden || row.partial) && (
             <span className="bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium">
               <EyeOff className="size-[11px]" aria-hidden />
               {hiddenLabel(row)}
@@ -343,6 +367,7 @@ export function PositionsCard({
           type="button"
           variant="outline"
           size="sm"
+          disabled={busy}
           onClick={() => onShow(row)}
           data-testid={`${row.kind === "current" ? "appointment" : "historical-appointment"}-row-${row.id}-show`}
         >
@@ -365,7 +390,7 @@ export function PositionsCard({
     </li>
   );
 
-  const recordCount = showHistorical ? history.length : 0;
+  const recordCount = history.length;
 
   return (
     <section data-slot="appointments-panel">
@@ -374,10 +399,7 @@ export function PositionsCard({
           <h2 id={EDIT_PANEL_HEADING_ID} className="text-[17px] font-[600] tracking-[-0.015em]">
             Positions &amp; appointments
           </h2>
-          <span className="bg-apollo-lock-bg border-apollo-border-strong inline-flex items-center gap-1.5 rounded-full border px-[9px] py-[3px] text-[11.5px] font-medium text-[#3d3833]">
-            <Lock className="size-[11px]" aria-hidden />
-            Managed at its source
-          </span>
+          <LockedBadge label="Managed at its source" />
         </div>
         <p className="text-muted-foreground mt-[9px] text-[13px] leading-normal">
           From{" "}
@@ -385,8 +407,7 @@ export function PositionsCard({
             {fieldSource("appointments")}
           </Link>
           . Hiding controls what shows on the public profile only — the record itself stays in WCM
-          systems, on internal reports, and in the CV export. A department chair role can&rsquo;t be
-          hidden.
+          systems and on internal reports. A department chair role can&rsquo;t be hidden.
         </p>
       </header>
 
@@ -436,7 +457,7 @@ export function PositionsCard({
           aria-label="Selected appointments"
           className="bg-apollo-surface border-apollo-border-strong fixed bottom-[22px] left-1/2 z-20 flex max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center gap-x-4 gap-y-2 rounded-[11px] border px-4 py-[11px] shadow-[0_8px_24px_rgba(34,30,28,.16)]"
         >
-          <span className="text-[13px] font-medium">
+          <span aria-live="polite" className="text-[13px] font-medium">
             {plural(selected.size, "appointment")} selected
           </span>
           {older.length > 0 && (
@@ -454,16 +475,25 @@ export function PositionsCard({
               type="button"
               variant="apollo"
               size="sm"
+              disabled={busy}
               onClick={() => (isSuperuser ? setHideOpen(true) : void hideSelected(null))}
             >
               Hide from profile
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => setSelected(new Set())}
+            >
               Clear
             </Button>
           </div>
         </div>
       )}
+      {/* Keeps the last rows scrollable above the fixed bar (56px + 22px offset). */}
+      {selected.size > 0 && <div aria-hidden className="h-20" />}
 
       <ConfirmDialog
         open={hideOpen}

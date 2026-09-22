@@ -149,7 +149,8 @@ export type AuditAction =
    *  (`source = "ED-HISTORICAL"`) appointment's public visibility via /edit
    *  (#1323); `targetEntityType='appointment'`, `targetEntityId` is the
    *  appointment `externalId`, `afterValues` carries `show_on_profile` (+ the
-   *  conferring unit on a unit-admin reveal). Requires the `scholars_audit`
+   *  superuser's `reason` on a hide, + the conferring unit on a unit-admin
+   *  reveal). Requires the `scholars_audit`
    *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
   | "appointment_visibility_set"
   /** a scholar (or a curator on their behalf) added / edited / removed a

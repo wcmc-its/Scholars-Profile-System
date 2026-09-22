@@ -53,14 +53,12 @@ The left rail has four groups: **Yours to edit** (fully yours), **From WCM recor
 
 ## Positions, education, and funding: hide a row, or request a source fix
 
-**`/edit` → Positions & appointments / Education / Funding.** Each of these is **Locked — managed at its source**, with two independent controls:
+**`/edit` → Positions & appointments / Education / Funding.** Each of these is managed at its source (Positions carries a **Managed at its source** pill), with two independent controls:
 
-- **Hide** — display-only, removes the entry from your public profile without touching the underlying record.
+- **Hide** — display-only, removes the entry from your public profile without touching the underlying record. On Positions, tick the rows and choose **Hide from profile**; a hidden row shows a **Hidden** pill with a **Show** button to reverse it. A primary appointment or a department chair role can't be hidden.
 - **Request a change** — routes the correction to the office that owns it (see below).
 
-Historical (past) appointments are hidden by default; a **Show on profile** button reveals one. Additional positions the directory feed doesn't carry (internal leadership roles, appointments at other institutions) can be added by hand under **Additional positions** — these show only on your public profile, never in center/department rollups or search.
-
-![Positions & appointments screen: current appointment with Hide + Request a change, a historical appointment with Show on profile, and an Add a position form](images/scholar-appointments.png)
+Earlier ranks (past appointments) are grouped by rank, one row per rank across every department it was held in, and hide/show the same way. Additional positions the directory feed doesn't carry (internal leadership roles, appointments at other institutions) can be added by hand under **Additional positions** — these show only on your public profile, never in center/department rollups or search.
 
 Funding works the same way — hide your row on a grant (it doesn't affect the award's other investigators, and can take up to a day to clear search) or request a change if the record itself is wrong.
 

@@ -6,12 +6,14 @@ import { Lock } from "lucide-react";
  * (Name & Title, Photo, Conflicts of Interest). One component so the lock
  * affordance reads identically on every surface and can't drift — the lock cue
  * lives here, not on the rail (the rail items carry only the sr-only note).
+ * `label` shortens the copy where the pill sits in a heading row (Positions:
+ * "Managed at its source"); the styling never varies.
  */
-export function LockedBadge() {
+export function LockedBadge({ label = "Locked — managed at its source" }: { label?: string }) {
   return (
-    <span className="bg-apollo-lock-bg border-apollo-border text-muted-foreground inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium">
+    <span className="bg-apollo-lock-bg border-apollo-border-strong inline-flex w-fit items-center gap-[5px] rounded-full border px-[9px] py-[3px] text-[11.5px] font-medium text-[#3d3833]">
       <Lock className="size-3" aria-hidden />
-      Locked — managed at its source
+      {label}
     </span>
   );
 }

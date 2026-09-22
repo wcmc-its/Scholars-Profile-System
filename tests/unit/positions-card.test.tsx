@@ -7,11 +7,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-const refresh = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh, push: vi.fn(), replace: vi.fn() }),
-}));
-
 import { PositionsCard, type PositionsCardProps } from "@/components/edit/positions-card";
 import type {
   EditContextAppointment,
@@ -93,7 +88,6 @@ function renderCard(overrides: Partial<PositionsCardProps> = {}) {
       scholarName="Alex Self"
       appointments={current}
       historicalAppointments={historical}
-      showHistorical
       {...overrides}
     />,
   );
@@ -134,7 +128,11 @@ describe("PositionsCard — rendering", () => {
     expect(row("appointment-row-cur-primary").queryByRole("checkbox")).toBeNull();
     expect(row("appointment-row-cur-chair").getByText("Chair · Always shown")).toBeTruthy();
     expect(row("appointment-row-cur-chair").queryByRole("checkbox")).toBeNull();
-    expect(row("appointment-row-cur-sel").getByRole("checkbox")).toBeTruthy();
+    expect(
+      row("appointment-row-cur-sel").getByRole("checkbox", {
+        name: "Select Professor of Genetics, Genetics, 2020–2027",
+      }),
+    ).toBeTruthy();
     expect(row("appointment-row-cur-sel").getByText("2020–2027")).toBeTruthy();
 
     // Hidden: pill + Show, no checkbox.
@@ -174,10 +172,34 @@ describe("PositionsCard — rendering", () => {
     expect(screen.queryByTestId("appointment-row-cur-hidden-show")).toBeNull();
   });
 
-  it("empty states: no current rows → copy; showHistorical=false → no Earlier ranks", () => {
-    renderCard({ appointments: [], showHistorical: false });
+  it("empty states: no current rows → copy; no history → no Earlier ranks", () => {
+    renderCard({ appointments: [], historicalAppointments: [] });
     expect(screen.getByText("You have no academic appointments on file.")).toBeTruthy();
     expect(screen.queryByText("Earlier ranks")).toBeNull();
+  });
+
+  it("a legacy hidden primary reads Hidden + Show (no Always-shown pill), never selectable", () => {
+    renderCard({
+      appointments: [{ ...current[0], state: "hidden_by_self", suppressionId: "sup-p" }],
+      historicalAppointments: [],
+    });
+    const primary = row("appointment-row-cur-primary");
+    expect(primary.queryByText("Primary · Always shown")).toBeNull();
+    expect(primary.getByText("Hidden")).toBeTruthy();
+    expect(screen.getByTestId("appointment-row-cur-primary-show")).toBeTruthy();
+    expect(primary.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("a partially hidden group reads 'Partially hidden' with Show, and stays selectable", () => {
+    renderCard({
+      historicalAppointments: historical.map((h) =>
+        h.externalId === "h-asst-a" ? { ...h, showOnProfile: false } : h,
+      ),
+    });
+    const asst = row("historical-appointment-row-h-asst-b");
+    expect(asst.getByText("Partially hidden")).toBeTruthy();
+    expect(screen.getByTestId("historical-appointment-row-h-asst-b-show")).toBeTruthy();
+    expect(asst.getByRole("checkbox")).toBeTruthy();
   });
 });
 
@@ -207,7 +229,7 @@ describe("PositionsCard — selection", () => {
 });
 
 describe("PositionsCard — bulk hide", () => {
-  it("self: suppress once per current row, appointment-visibility once per record, refresh once", async () => {
+  it("self: suppress once per current row, appointment-visibility once per record", async () => {
     const fetchMock = routedFetch();
     vi.stubGlobal("fetch", fetchMock);
     renderCard();
@@ -227,7 +249,6 @@ describe("PositionsCard — bulk hide", () => {
       ]),
     );
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(refresh).toHaveBeenCalledTimes(1);
 
     // Both rows now read hidden with a Show button.
     expect(row("appointment-row-cur-sel").getByText("Hidden")).toBeTruthy();
@@ -237,18 +258,19 @@ describe("PositionsCard — bulk hide", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("superuser: one required-reason dialog, the reason sent with every suppress", async () => {
+  it("superuser: one required-reason dialog, the reason sent with every suppress and visibility write", async () => {
     const fetchMock = routedFetch();
     vi.stubGlobal("fetch", fetchMock);
-    renderCard({ mode: "superuser", historicalAppointments: [] });
+    renderCard({ mode: "superuser" });
 
     fireEvent.click(row("appointment-row-cur-sel").getByRole("checkbox"));
+    fireEvent.click(row("historical-appointment-row-h-asst-b").getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Hide from profile" }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Hide 1 appointment?")).toBeTruthy();
+    expect(within(dialog).getByText("Hide 2 appointments?")).toBeTruthy();
     expect(
-      within(dialog).getByText("This removes it from Alex Self's public profile."),
+      within(dialog).getByText("This removes them from Alex Self's public profile."),
     ).toBeTruthy();
     fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "Ticket 42" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Hide" }));
@@ -257,8 +279,13 @@ describe("PositionsCard — bulk hide", () => {
     expect(bodies(fetchMock, "/api/edit/suppress")).toEqual([
       { entityType: "appointment", entityId: "cur-sel", reason: "Ticket 42" },
     ]);
+    expect(bodies(fetchMock, "/api/edit/appointment-visibility")).toEqual(
+      expect.arrayContaining([
+        { appointmentExternalId: "h-asst-a", showOnProfile: false, reason: "Ticket 42" },
+        { appointmentExternalId: "h-asst-b", showOnProfile: false, reason: "Ticket 42" },
+      ]),
+    );
     expect(row("appointment-row-cur-sel").getByText("Hidden by an administrator")).toBeTruthy();
-    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("a failed hide leaves that row selected and shows one inline alert", async () => {
@@ -298,14 +325,13 @@ describe("PositionsCard — show", () => {
 
     fireEvent.click(screen.getByTestId("historical-appointment-row-h-asst-b-show"));
 
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(asst.getByRole("checkbox")).toBeTruthy());
     expect(bodies(fetchMock, "/api/edit/appointment-visibility")).toEqual(
       expect.arrayContaining([
         { appointmentExternalId: "h-asst-a", showOnProfile: true },
         { appointmentExternalId: "h-asst-b", showOnProfile: true },
       ]),
     );
-    await waitFor(() => expect(asst.getByRole("checkbox")).toBeTruthy());
   });
 
   it("superuser Show of a scholar-hidden row confirms the override, then revokes", async () => {

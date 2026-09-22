@@ -161,12 +161,17 @@ describe("POST /api/edit/appointment-visibility — self-serve boundary (#1557)"
   it("a scholar MAY re-hide their OWN historical appointment (showOnProfile=false) — 200", async () => {
     mockGetEditSession.mockResolvedValue(SELF);
     mockAppointmentFindUnique.mockResolvedValue(historical("self01"));
-    const res = await POST(post({ appointmentExternalId: "appt1", showOnProfile: false }));
+    const res = await POST(
+      post({ appointmentExternalId: "appt1", showOnProfile: false, reason: "  Ticket 42 " }),
+    );
     expect(res.status).toBe(200);
     expect(mockTxAppointmentUpdate).toHaveBeenCalledWith({
       where: { externalId: "appt1" },
       data: { showOnProfile: false },
     });
+    // A posted reason lands (trimmed) in the audit row's after-values JSON.
+    const args = mockTxExecuteRaw.mock.calls[0] as unknown[];
+    expect(args).toContain(JSON.stringify({ show_on_profile: false, reason: "Ticket 42" }));
   });
 
   it("a scholar may NOT toggle ANOTHER scholar's historical appointment — 403, writes nothing", async () => {

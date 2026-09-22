@@ -1375,12 +1375,9 @@ function renderPanel(
             mode={voiceMode}
             scholarName={scholarName}
             appointments={ctx.appointments}
-            historicalAppointments={ctx.historicalAppointments}
-            showHistorical={canEditPositions}
+            historicalAppointments={canEditPositions ? ctx.historicalAppointments : []}
           />
-          {canEditPositions && (
-            <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
-          )}
+          {canEditPositions && <ProfileAppointmentsCard cwid={cwid} />}
         </div>
       );
     }
