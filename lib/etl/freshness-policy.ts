@@ -147,9 +147,10 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "ORCID-registry": { cadence: "weekly" },
   // scholar.orcid → WCM Identity via the ReCiter API (etl/orcid-push), the nightly
   // OrcidPush step right BEFORE Identity in BOTH envs (push-then-pull, so the pull
-  // never reads our own last push as a conflict; no env split; the reciter-api
-  // secret is seeded in each). Compare-then-write, so a healthy night is mostly
-  // `equal`; the step throws on a dead API rather than grade green, which is why
+  // never reads our own last push as a conflict; the reciter-api secret is seeded
+  // in each). Staging runs it GET-only (ORCID_PUSH_DRY_RUN): both envs share one
+  // ReCiter, so one Identity table, and only prod writes it. Compare-then-write,
+  // so a healthy night is mostly `equal`; the step throws on a dead API rather than grade green, which is why
   // its freshness row means something.
   "ORCID-push": { cadence: "nightly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
