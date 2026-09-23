@@ -6,7 +6,9 @@ import {
   dueUrgency,
   fitTier,
   formatDue,
+  roleCategoryLabel,
 } from "@/lib/match-display";
+import { formatRoleCategory, ROLE_DISPLAY } from "@/lib/role-display";
 
 describe("fitTier", () => {
   it("buckets relative to the strongest match in the set", () => {
@@ -78,5 +80,22 @@ describe("dueUrgency", () => {
     expect(dueUrgency("2026-12-01T00:00:00Z", now)).toBeNull();
     expect(dueUrgency(null, now)).toBeNull();
     expect(dueUrgency("not-a-date", now)).toBeNull();
+  });
+});
+
+describe("roleCategoryLabel — the one person-type vocabulary", () => {
+  it("agrees with formatRoleCategory on every mapped code (both spellings)", () => {
+    for (const code of Object.keys(ROLE_DISPLAY)) {
+      expect(roleCategoryLabel(code)).toBe(formatRoleCategory(code));
+    }
+    expect(roleCategoryLabel("doctoral_student_md")).toBe("MD student");
+    expect(roleCategoryLabel("emeritus")).toBe("Faculty emeritus");
+    expect(roleCategoryLabel("FULL_TIME_FACULTY")).toBe("Full-time faculty");
+  });
+  it("humanizes an unmapped code (formatRoleCategory returns it raw); empty for absent", () => {
+    expect(roleCategoryLabel("some_new_role")).toBe("Some new role");
+    expect(formatRoleCategory("some_new_role")).toBe("some_new_role");
+    expect(roleCategoryLabel(null)).toBe("");
+    expect(roleCategoryLabel("")).toBe("");
   });
 });

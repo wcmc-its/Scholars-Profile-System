@@ -28,7 +28,7 @@
  * rail (year, author position, window, mentor) and sortable headers over
  * the rows this body loads in one shot; the download is server-filtered
  * only (types / years / set / tail), never by the rail.
- * "Type of mentorship" (`types=`, a checkbox group in the filter form) is
+ * "Type of mentorship" (`mtype=`, a checkbox group in the filter form) is
  * SERVER-side on purpose: the loader reads only the sources the selected
  * types need, so an AOC-office holder sees AOC-defined pairs and nothing
  * inferred (`lib/edit/mentorship-type.ts`; the choices offered and the
@@ -131,7 +131,7 @@ function FilterForm({
         <div className="flex flex-col gap-1">
           {typeChoices.map((k) => (
             <label key={k} className={RAIL_OPTION}>
-              <input type="checkbox" name="types" value={k} defaultChecked={selectedTypes.has(k)} className={RAIL_BOX} />
+              <input type="checkbox" name="mtype" value={k} defaultChecked={selectedTypes.has(k)} className={RAIL_BOX} />
               {/* The hover wraps the TEXT only — never the input, whose click
                   must stay a plain toggle. */}
               <HoverTooltip text={MENTORSHIP_TYPE_DESCRIPTION[k]} wide>

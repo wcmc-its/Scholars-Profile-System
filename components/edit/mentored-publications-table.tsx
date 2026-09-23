@@ -23,7 +23,7 @@ import {
  * `/edit/reports/7` — the Summary / Publications tables as a client island:
  * a facet rail on the left, a sortable table on the right, the shape
  * `publications-report-table.tsx` (report 3) proves out. The rail's TOP is
- * the page's server-side filter form (`children` — the auto-submit `types` /
+ * the page's server-side filter form (`children` — the auto-submit `mtype` /
  * `years` / `pubs` / `tail` form the page renders; one rail, not a strip
  * above plus a rail below, 2026-09-20), the client facets below it. Every row arrives
  * loaded from the page; filtering and sorting are `useMemo` over them (no
@@ -33,7 +33,7 @@ import {
  * server-filtered only (types / years / set / tail) — never by the rail.
  *
  * "Type of mentorship" is NOT a rail facet: it is the page's server-side
- * `types=` filter (`lib/edit/mentorship-type.ts`), because a rail facet
+ * `mtype=` filter (`lib/edit/mentorship-type.ts`), because a rail facet
  * filters learner ROWS — a learner passing on one roster pair still listed
  * every co-author pair beside it and counted their papers. The type still
  * shows as a Learners column and under each mentor, each line hovering the

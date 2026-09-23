@@ -1,9 +1,10 @@
 /**
  * GET /edit/orcid-coverage/export — CSV of the `/edit/orcid-coverage`
  * department table (aggregates only — never a per-person list, see
- * `SCHOLAR_EXPORT_CAP`). Same `?role=&nih=` filter the page reads, parsed by
- * the same function; `dept` is accepted and ignored (the table is its own
- * department breakdown). Gate order mirrors `/edit/data-sharing/export`:
+ * `SCHOLAR_EXPORT_CAP`). Same `?type=&unit=&nih=` filter the page reads, parsed
+ * and queried by the same functions (`parseOrcidCoverageParams`,
+ * `loadOrcidCoverage`). The CSV has no criteria header — the link carries the
+ * page's own query string. Gate order mirrors `/edit/data-sharing/export`:
  * no session → 401 · not `canViewUsage` → 404 · else text/csv attachment.
  */
 import { NextResponse } from "next/server";

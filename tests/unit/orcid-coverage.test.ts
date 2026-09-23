@@ -254,7 +254,7 @@ describe("buildOrcidCoverage", () => {
     expect(build().tiles.overall).toMatchObject({ orcid: 4, confirmed: 1, strong: 1, weak: 3 });
   });
 
-  it("groups by role_category, null → Unclassified, people desc; ignores `role`", () => {
+  it("groups by role_category, null → Unclassified, people desc; ignores `type`", () => {
     const r = build(parseOrcidCoverageParams({}));
     expect(r.byRole.map((x) => [x.key, x.label, x.people])).toEqual([
       ["full_time_faculty", "Full-time faculty", 6],
@@ -265,7 +265,7 @@ describe("buildOrcidCoverage", () => {
 
   it("department table defaults to full-time faculty, sorted by NIH-funded-without-ORCID, then people, then label", () => {
     const r = build(parseOrcidCoverageParams({}));
-    expect(r.params.role).toBe("full_time_faculty");
+    expect(r.params.types).toEqual(["full_time_faculty"]);
     expect(r.byDept.map((x) => [x.label, x.people, nihNoOrcid(x)])).toEqual([
       ["Dept C", 2, 1],
       ["Dept B", 1, 1],
@@ -287,65 +287,87 @@ describe("buildOrcidCoverage", () => {
     expect(of("none")).toBe(4);
   });
 
-  it("dept filter narrows the person-type table only; role filter narrows the department table only", () => {
-    const r = build(parseOrcidCoverageParams({ role: "postdoc", dept: "Dept B" }));
+  it("the unit match narrows BOTH tables; `type` narrows the department table only", () => {
+    // The unit selection resolves (in SQL) to u1 / p1 / f3 — the fold only sees the cwid set.
+    const unitMatch = new Set(["u1", "p1", "f3"]);
+    const r = buildOrcidCoverage(
+      SCHOLARS,
+      NIH,
+      ERA,
+      parseOrcidCoverageParams({ type: "postdoc", unit: "dept:B" }),
+      TODAY,
+      CANDIDATES,
+      [],
+      unitMatch,
+    );
     expect(r.byRole.map((x) => [x.key, x.people])).toEqual([
       ["full_time_faculty", 1],
       ["postdoc", 1],
       [null, 1],
     ]);
+    expect(r.byDept.map((x) => [x.label, x.people])).toEqual([["Dept B", 1]]);
+    // Tiles stay the whole population.
+    expect(r.tiles.overall.people).toBe(9);
+  });
+
+  it("several types OR together; a null role_category never matches a type", () => {
+    const r = build(parseOrcidCoverageParams({ type: ["postdoc", "full_time_faculty"] }));
+    expect(r.byDept.reduce((n, x) => n + x.people, 0)).toBe(8); // all but u1 (null type)
+  });
+
+  it("legacy `role=X&dept=NAME` link: role reads as type=X, dept is ignored", () => {
+    const r = build(parseOrcidCoverageParams({ role: "postdoc", dept: "Dept B" }));
+    expect(r.byRole.reduce((n, x) => n + x.people, 0)).toBe(9);
     expect(r.byDept.map((x) => [x.label, x.people])).toEqual([
       ["Dept A", 1],
       ["Dept B", 1],
     ]);
   });
-
-  it("select choices come from the data: roles by headcount (no null), departments A–Z", () => {
-    const r = build();
-    expect(r.roles).toEqual([
-      ["full_time_faculty", "Full-time faculty"],
-      ["postdoc", "Postdoc"],
-    ]);
-    expect(r.depts).toEqual(["Dept A", "Dept B", "Dept C"]);
-  });
 });
 
 describe("parseOrcidCoverageParams / orcidCoverageQuery", () => {
-  it("defaults: role=full_time_faculty, nih=all, dept=null; `all` clears; junk nih falls back", () => {
+  it("a bare visit defaults to full-time faculty; junk nih falls back to all", () => {
     expect(parseOrcidCoverageParams({})).toEqual({
-      role: "full_time_faculty",
+      types: ["full_time_faculty"],
+      units: [],
       nih: "all",
-      dept: null,
     });
-    expect(parseOrcidCoverageParams(new URLSearchParams("role=all&nih=junk&dept=all"))).toEqual({
-      role: null,
+    // `dept` alone is not a filter param any more, so it is still a bare visit.
+    expect(parseOrcidCoverageParams({ dept: "Dept A" }).types).toEqual(["full_time_faculty"]);
+    expect(parseOrcidCoverageParams(new URLSearchParams("nih=junk"))).toEqual({
+      types: [],
+      units: [],
       nih: "all",
-      dept: null,
-    });
-    expect(
-      parseOrcidCoverageParams({ role: ["postdoc", "x"], nih: "current", dept: " Dept A " }),
-    ).toEqual({
-      role: "postdoc",
-      nih: "current",
-      dept: "Dept A",
     });
   });
 
-  it("round-trips through the query string", () => {
-    expect(orcidCoverageQuery({ role: null, nih: "all" })).toBe("?role=all");
-    expect(orcidCoverageQuery({ role: "postdoc", nih: "current", dept: "Dept A" })).toBe(
-      "?role=postdoc&nih=current&dept=Dept+A",
-    );
-    expect(orcidCoverageQuery({})).toBe("");
+  it("repeated type / unit via the shared parser; a submitted form with no type = every type", () => {
     expect(
       parseOrcidCoverageParams(
-        new URLSearchParams(orcidCoverageQuery({ role: null, nih: "none" })),
+        new URLSearchParams("type=postdoc&type=full_time_faculty&unit=dept:AB1&unit=center:C9&nih=current"),
       ),
     ).toEqual({
-      role: null,
-      nih: "none",
-      dept: null,
+      types: ["postdoc", "full_time_faculty"],
+      units: ["dept:AB1", "center:C9"],
+      nih: "current",
     });
+    expect(parseOrcidCoverageParams({ nih: "ever" }).types).toEqual([]);
+    expect(parseOrcidCoverageParams({ unit: "div:X1" }).types).toEqual([]);
+  });
+
+  it("legacy role: `role=X` → type X, `role=all` → every type, `type` wins over `role`", () => {
+    expect(parseOrcidCoverageParams({ role: "postdoc" }).types).toEqual(["postdoc"]);
+    expect(parseOrcidCoverageParams({ role: "all" }).types).toEqual([]);
+    expect(parseOrcidCoverageParams({ role: "postdoc", type: "fellow" }).types).toEqual(["fellow"]);
+  });
+
+  it("round-trips through the query string, including an empty type selection", () => {
+    const p = { types: ["postdoc"], units: ["dept:AB1", "inst:WCM"], nih: "current" as const };
+    expect(orcidCoverageQuery(p)).toBe("?type=postdoc&unit=dept%3AAB1&unit=inst%3AWCM&nih=current");
+    expect(parseOrcidCoverageParams(new URLSearchParams(orcidCoverageQuery(p).slice(1)))).toEqual(p);
+    const all = { types: [], units: [], nih: "all" as const };
+    expect(orcidCoverageQuery(all)).toBe("?nih=all");
+    expect(parseOrcidCoverageParams(new URLSearchParams(orcidCoverageQuery(all).slice(1)))).toEqual(all);
   });
 });
 
@@ -476,5 +498,34 @@ describe("loadOrcidCoverage", () => {
     const r = await loadOrcidCoverage(fake as unknown as OrcidCoverageClient, ALL);
     expect(scholarFindMany.mock.calls[0][0].select).toMatchObject({ orcidConfirmedAt: true });
     expect(r.tiles.overall).toMatchObject({ people: 3, orcid: 2, confirmed: 1, strong: 0, weak: 0 });
+  });
+
+  it("a unit selection is resolved by one raw read through personFilterSql; none → no read", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ cwid: "f1" }]);
+    const fake = {
+      scholar: {
+        findMany: vi.fn().mockResolvedValue([
+          s("f1", "full_time_faculty", "Dept A", true),
+          s("f6", "full_time_faculty", "Dept C"),
+        ]),
+      },
+      grant: { groupBy: vi.fn().mockResolvedValue([]) },
+      personNihProfile: { findMany: vi.fn().mockResolvedValue([]) },
+      orcidCandidate: { findMany: vi.fn().mockResolvedValue([]) },
+      orcidDismissal: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: queryRaw,
+    };
+    const client = fake as unknown as OrcidCoverageClient;
+    await loadOrcidCoverage(client, ALL);
+    expect(queryRaw).not.toHaveBeenCalled();
+
+    const r = await loadOrcidCoverage(client, parseOrcidCoverageParams({ unit: "dept:AB1" }));
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const sqlText = JSON.stringify(queryRaw.mock.calls[0]);
+    expect(sqlText).toContain("dept_code");
+    expect(sqlText).toContain("AB1");
+    expect(r.byDept.map((x) => [x.label, x.people])).toEqual([["Dept A", 1]]);
+    expect(r.byRole.reduce((n, x) => n + x.people, 0)).toBe(1);
+    expect(r.tiles.overall.people).toBe(2);
   });
 });

@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Report 8's person-type and unit facets — the Profiles roster's own
+ * The shared who-filter island (`PersonFilterFacets`; report 8 and
+ * `/edit/orcid-coverage`, `lib/edit/person-filter.ts`) — the Profiles roster's own
  * (`components/edit/profiles-filters.tsx`): `RosterFacet` typeaheads for
  * "Person type", "Department / division", "Centers" and "Institution", over
  * the same `loadDataQualityFacets` options and the same `type` / `unit`
@@ -21,16 +22,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
 
-export function ArticleCountFacets({
+export function PersonFilterFacets({
   facets,
   types,
   units,
+  testId = "article-count-facets",
+  className,
 }: {
   facets: DataQualityFacets;
   /** Applied person types (raw roleCategory). */
   types: string[];
   /** Applied unit values (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`). */
   units: string[];
+  testId?: string;
+  /** Root layout, e.g. a grid when the host form is horizontal. Default: a rail stack. */
+  className?: string;
 }) {
   const [selTypes, setSelTypes] = useState<ReadonlySet<string>>(() => new Set(types));
   const [selUnits, setSelUnits] = useState<ReadonlySet<string>>(() => new Set(units));
@@ -68,7 +74,8 @@ export function ArticleCountFacets({
   return (
     <div
       ref={root}
-      data-testid="article-count-facets"
+      data-testid={testId}
+      className={className}
       onChange={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault();
@@ -123,3 +130,6 @@ export function ArticleCountFacets({
     </div>
   );
 }
+
+/** Report 8's name for the island. */
+export const ArticleCountFacets = PersonFilterFacets;

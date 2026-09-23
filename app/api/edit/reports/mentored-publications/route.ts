@@ -1,7 +1,7 @@
 /**
  * GET /api/edit/reports/mentored-publications — the Mentored publications
  * report (`/edit/reports/7`) as a three-sheet `.xlsx` attachment. Same query
- * string the page renders (`years`, `types`, `tail`, `pubs` — see
+ * string the page renders (`years`, `mtype`, `tail`, `pubs` — see
  * `parseMentoredPubsParams`; `view` is accepted and ignored, it is page-only),
  * same scope gate (`getReportScopes`), same type resolution
  * (`resolveMentorshipTypes`: absent → the caller's default, a roster type

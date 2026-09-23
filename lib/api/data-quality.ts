@@ -31,7 +31,7 @@
  */
 import { toCsv } from "@/lib/csv";
 import { PI_ROLES } from "@/lib/funding-roles";
-import { formatRoleCategory } from "@/lib/role-display";
+import { byCareerStage, formatRoleCategory } from "@/lib/role-display";
 import {
   DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
@@ -42,6 +42,14 @@ import { scoreProminence } from "@/lib/api/prominence";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
+import {
+  isCurrentCenterMembership,
+  parsePersonFilter,
+  parseUnitValue,
+  personFilterWhere,
+  unitCodes,
+  utcToday,
+} from "@/lib/edit/person-filter";
 import { institutionDisplayName } from "@/lib/institutions";
 
 /** The Prisma surface this loader reads — a `db.read` client satisfies it. */
@@ -225,22 +233,6 @@ function nonEmpty(s: string | null | undefined): boolean {
   return typeof s === "string" && s.trim().length > 0;
 }
 
-/** A center membership active by date today (pending / expired excluded). Mirrors
- *  `isCenterMembershipActive` (`lib/api/centers.ts`) — duplicated here so this
- *  module keeps its light, vitest-loadable import graph (no `server-only` /
- *  `lib/db`), exactly as `lib/api/edit-roster.ts` does. */
-function isMembershipActive(
-  startDate: Date | null,
-  endDate: Date | null,
-  today: string,
-): boolean {
-  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
-  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
-  if (start && start > today) return false; // pending
-  if (end && end < today) return false; // expired
-  return true;
-}
-
 /**
  * Build the candidate `where`: in-scope, non-deleted scholars (both visible and
  * suppressed — the Status column shows which), with the optional name/CWID
@@ -269,33 +261,22 @@ function buildWhere(
   const q = opts.query?.trim();
   if (q) and.push(...buildScholarNameClauses(q));
 
-  // Person-type multi-select (#4). An explicit selection governs; the hidden-roles
-  // toggle is then moot (the viewer asked for exactly these types).
-  const roles = (opts.roleCategories ?? []).filter(Boolean);
-  if (roles.length > 0) {
-    where.roleCategory = { in: [...roles] };
+  // Person-type (#4) and org-unit (#5) multi-selects — the shared rule
+  // (`lib/edit/person-filter.ts`). An explicit type selection governs; the
+  // hidden-roles toggle is then moot (the viewer asked for exactly these types).
+  // Units OR together; centers were pre-resolved to current-member cwids by the
+  // caller; selected units that resolve to nothing match nothing.
+  const person = personFilterWhere(
+    { types: [...(opts.roleCategories ?? [])], units: [...(opts.units ?? [])] },
+    filterCenterCwids,
+  );
+  if (person.roleCategory) {
+    where.roleCategory = person.roleCategory;
   } else if (opts.includeHidden === false) {
     // Exclude hidden identity classes but KEEP nulls (fail-open display, #536).
     and.push({ OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLES] } }] });
   }
-
-  // Org-unit multi-select (#5): selected departments / divisions / centers /
-  // institutions OR together. Centers were pre-resolved to member cwids by the
-  // caller; an institution is a scholar column (ED primary organization).
-  const units = opts.units ?? [];
-  if (units.length > 0) {
-    const deptCodes = units.filter((u) => u.kind === "department").map((u) => u.code);
-    const divCodes = units.filter((u) => u.kind === "division").map((u) => u.code);
-    const instCodes = units.filter((u) => u.kind === "institution").map((u) => u.code);
-    const unitOr: Prisma.ScholarWhereInput[] = [];
-    if (deptCodes.length > 0) unitOr.push({ deptCode: { in: deptCodes } });
-    if (divCodes.length > 0) unitOr.push({ divCode: { in: divCodes } });
-    if (instCodes.length > 0) unitOr.push({ primaryOrgCode: { in: instCodes } });
-    if (filterCenterCwids.length > 0) unitOr.push({ cwid: { in: [...filterCenterCwids] } });
-    // Units selected but nothing resolves (e.g. an empty center) → match nothing
-    // rather than silently dropping the filter.
-    and.push(unitOr.length > 0 ? { OR: unitOr } : { cwid: { in: [] } });
-  }
+  if (person.unit) and.push(person.unit);
 
   if (opts.scope.all === false) {
     const scopeOr: Prisma.ScholarWhereInput[] = [];
@@ -350,15 +331,13 @@ async function computeDataQualityEntries(
   // *filter* (#5) — read in one query, partitioned in-app.
   const scopeCenterCodes =
     opts.scope.all === false ? opts.scope.centerCodes : [];
-  const filterCenterCodes = (opts.units ?? [])
-    .filter((u) => u.kind === "center")
-    .map((u) => u.code);
+  const filterCenterCodes = unitCodes(opts.units ?? [], "center");
   const allCenterCodes = [...new Set([...scopeCenterCodes, ...filterCenterCodes])];
 
   let scopeCenterCwids: string[] = [];
   let filterCenterCwids: string[] = [];
   if (allCenterCodes.length > 0) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = utcToday();
     const rows = await client.centerMembership.findMany({
       where: { centerCode: { in: allCenterCodes } },
       select: { cwid: true, centerCode: true, startDate: true, endDate: true },
@@ -371,7 +350,7 @@ async function computeDataQualityEntries(
       // Exclude pending / expired memberships (consistent with every other center
       // surface) — a still-active scholar who rotated off a center must not appear
       // when that center is filtered or scoped.
-      if (!isMembershipActive(r.startDate, r.endDate, today)) continue;
+      if (!isCurrentCenterMembership(r.startDate, r.endDate, today)) continue;
       if (scopeSet.has(r.centerCode)) scope.add(r.cwid);
       if (filterSet.has(r.centerCode)) filter.add(r.cwid);
     }
@@ -657,21 +636,8 @@ function parseOverviewAge(v: string | undefined): OverviewAgeFilter {
     : "all";
 }
 
-/** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`).
- *  Exported for report 8 (`lib/edit/article-count-report.ts`), which takes the same
- *  `unit` vocabulary. */
-export function parseUnitValue(v: string): EditRosterUnitFilter | null {
-  const sep = v.indexOf(":");
-  if (sep < 0) return null;
-  const kind = v.slice(0, sep);
-  const code = v.slice(sep + 1);
-  if (!code) return null;
-  if (kind === "dept") return { kind: "department", code };
-  if (kind === "div") return { kind: "division", code };
-  if (kind === "center") return { kind: "center", code };
-  if (kind === "inst") return { kind: "institution", code };
-  return null;
-}
+/** Moved to `lib/edit/person-filter.ts`; re-exported for existing importers. */
+export { parseUnitValue };
 
 export type ParsedDataQualityParams = {
   q: string;
@@ -704,15 +670,7 @@ export function parseDataQualityParams(
   const first = (key: string): string | undefined => valuesOf(key)[0];
 
   const q = (first("q") ?? "").trim();
-  const roleCategories = valuesOf("type")
-    .map((v) => v.trim())
-    .filter(Boolean);
-  const unitValues = valuesOf("unit")
-    .map((v) => v.trim())
-    .filter(Boolean);
-  const units = unitValues
-    .map(parseUnitValue)
-    .filter((u): u is EditRosterUnitFilter => u !== null);
+  const { types: roleCategories, unitValues, units } = parsePersonFilter(source);
   const hidden = first("hidden");
 
   return {
@@ -754,32 +712,6 @@ const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
 const byCountDesc = (a: DataQualityFacetOption, b: DataQualityFacetOption) =>
   b.count - a.count || a.label.localeCompare(b.label);
 
-/** Person types in descending career stage, keyed by display LABEL (both raw
- *  spellings share one label). Unlisted labels sort last, A–Z. */
-const CAREER_STAGE_ORDER = [
-  "Full-time faculty",
-  "Affiliated faculty",
-  "Voluntary faculty",
-  "Adjunct faculty",
-  "Courtesy faculty",
-  "Instructor",
-  "Lecturer",
-  "Postdoc",
-  "Fellow",
-  "Research staff",
-  "Doctoral student",
-  "MD-PhD student",
-  "MD student",
-  "PhD student",
-  "Faculty emeritus",
-  "Non-faculty academic",
-  "Non-academic",
-  "Affiliate alumni",
-];
-const careerRank = (label: string) => {
-  const i = CAREER_STAGE_ORDER.indexOf(label);
-  return i === -1 ? CAREER_STAGE_ORDER.length : i;
-};
 
 /**
  * Load the filter-bar facets. Counts are STATIC (independent of the other current
@@ -794,7 +726,8 @@ const careerRank = (label: string) => {
  * `groupBy` — a few may point at since-inactivated scholars.
  */
 export async function loadDataQualityFacets(client: DataQualityClient): Promise<DataQualityFacets> {
-  const today = new Date();
+  // Same UTC calendar day as the filter (isCurrentCenterMembership), so option counts match results.
+  const today = new Date(utcToday());
   const [deptRows, divRows, ctrRows, roleAgg, deptAgg, divAgg, instAgg, ctrAgg] =
     await Promise.all([
       client.department.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
@@ -838,7 +771,7 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
       label: formatRoleCategory(value) ?? value,
       count: roleCount.get(value) ?? 0,
     }))
-    .sort((a, b) => careerRank(a.label) - careerRank(b.label) || a.label.localeCompare(b.label));
+    .sort(byCareerStage);
 
   // Show each division's parent department in its label, so every division is
   // self-identifying — division names are unique only within a department (both

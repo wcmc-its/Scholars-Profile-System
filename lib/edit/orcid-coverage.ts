@@ -52,11 +52,20 @@
  *    populated only for NIH awards); "current" additionally needs an award
  *    whose `end_date` is today or later.
  *
+ * Who is counted: the shared person filter (`lib/edit/person-filter.ts`) —
+ * repeated `type` (raw roleCategory) and repeated `unit` (`dept:` / `div:` /
+ * `center:` / `inst:` + CODE), the Profiles roster's vocabulary. `unit`
+ * narrows BOTH tables and is resolved by `personFilterSql` (one extra cwid
+ * read, only when set); `type` narrows the department table only — the
+ * person-type table IS the type breakdown. The department table still groups
+ * by `scholar.primary_department` (the NAME); only the filter changed.
+ *
  * Five flat reads + one pure fold (`buildOrcidCoverage`), so the fold is
  * testable on a fixture with no DB. ~11k scholar rows; no cache.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { toCsv } from "@/lib/csv";
+import { parsePersonFilter, personFilterSql } from "@/lib/edit/person-filter";
 import { PI_ROLES } from "@/lib/funding-roles";
 import { formatRoleCategory } from "@/lib/role-display";
 
@@ -70,49 +79,64 @@ export const NIH_FILTER_LABELS: Record<NihFilter, string> = {
   none: "No NIH award on file",
 };
 
-/** The department table's default population — the outreach list NIH's
- *  ORCID-for-SciENcv rule is about. The person-type table ignores `role`
- *  (it IS the role breakdown). */
+/** The department table's default population on a bare visit — the outreach
+ *  list NIH's ORCID-for-SciENcv rule is about. The person-type table ignores
+ *  `type` (it IS the type breakdown). */
 export const DEFAULT_ROLE = "full_time_faculty";
 
 export type OrcidCoverageParams = {
-  /** `scholar.role_category` key; null = every person type. */
-  role: string | null;
+  /** Raw roleCategory values (`type`); empty = every person type. */
+  types: string[];
+  /** Raw `unit` values (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`);
+   *  empty = everyone. Undecodable-only values match nothing (`personFilterSql`). */
+  units: string[];
   nih: NihFilter;
-  /** `scholar.primary_department`; null = every department. */
-  dept: string | null;
 };
 
-/** Plain `<select>` values straight off the query string; an unknown `nih`
- *  falls back to `all`, an unknown role/dept just matches nothing (they are
- *  JS-side equality filters, never SQL). */
+/** `type` / `unit` via `parsePersonFilter`; an unknown `nih` falls back to `all`.
+ *  A BARE visit (none of `type`, `unit`, `nih`, `role` in the URL) defaults the
+ *  department table to full-time faculty; any form submit carries `nih`, so an
+ *  empty type selection there means every type. Legacy links: a single
+ *  `role=X` reads as `type=X` (`role=all` = every type) when no `type` is
+ *  given; `dept=` (a department NAME) is ignored — use `unit=dept:CODE`. */
 export function parseOrcidCoverageParams(
   raw: Record<string, string | string[] | undefined> | URLSearchParams,
 ): OrcidCoverageParams {
-  const get = (k: string) => {
+  const has = (k: string) => (raw instanceof URLSearchParams ? raw.has(k) : raw[k] !== undefined);
+  const first = (k: string) => {
     const v = raw instanceof URLSearchParams ? raw.get(k) : raw[k];
     const s = Array.isArray(v) ? v[0] : v;
     return s?.trim() || undefined;
   };
-  const role = get("role");
-  const nih = get("nih") ?? "all";
-  const dept = get("dept");
+  const person = parsePersonFilter(raw);
+  const role = first("role");
+  const nih = first("nih") ?? "all";
+  const bare = !["type", "unit", "nih", "role"].some(has);
   return {
-    role: role === undefined ? DEFAULT_ROLE : role === "all" ? null : role,
+    types:
+      person.types.length > 0
+        ? person.types
+        : role !== undefined
+          ? role === "all"
+            ? []
+            : [role]
+          : bare
+            ? [DEFAULT_ROLE]
+            : [],
+    units: person.unitValues,
     nih: (NIH_FILTERS as readonly string[]).includes(nih) ? (nih as NihFilter) : "all",
-    dept: dept === undefined || dept === "all" ? null : dept,
   };
 }
 
-/** `""` or `?role=…&nih=…&dept=…` — the page and its CSV route share it. A
- *  `role` of null spells `role=all` (absent means the default). */
-export function orcidCoverageQuery(params: Partial<OrcidCoverageParams>): string {
+/** `?type=…&unit=…&nih=…` — the page and its CSV route share it. Always carries
+ *  `nih`, so an empty type selection round-trips as "every type" rather than
+ *  falling back to the bare-visit default. */
+export function orcidCoverageQuery(params: OrcidCoverageParams): string {
   const q = new URLSearchParams();
-  if (params.role !== undefined) q.set("role", params.role ?? "all");
-  if (params.nih !== undefined && params.nih !== "all") q.set("nih", params.nih);
-  if (params.dept) q.set("dept", params.dept);
-  const s = q.toString();
-  return s ? `?${s}` : "";
+  for (const t of params.types) q.append("type", t);
+  for (const u of params.units) q.append("unit", u);
+  q.set("nih", params.nih);
+  return `?${q.toString()}`;
 }
 
 export type ScholarRow = {
@@ -262,13 +286,10 @@ export type OrcidCoverage = {
   params: OrcidCoverageParams;
   /** Always the unfiltered population — the three numbers anyone asks for. */
   tiles: { overall: CoverageCounts; fullTime: CoverageCounts; nihFullTime: CoverageCounts };
-  /** Filtered by `nih` + `dept`; every person type; people desc. */
+  /** Filtered by `unit` + `nih`; every person type; people desc. */
   byRole: CoverageRow[];
-  /** Filtered by `role` + `nih`; NIH-funded-without-ORCID desc (the action list). */
+  /** Filtered by `type` + `unit` + `nih`; NIH-funded-without-ORCID desc (the action list). */
   byDept: CoverageRow[];
-  /** Select choices from the data: [key, label] by headcount desc; departments A–Z. */
-  roles: Array<[string, string]>;
-  depts: string[];
 };
 
 export const neither = (c: CoverageCounts) => c.people - c.orcid - c.era + c.both;
@@ -286,6 +307,8 @@ export function buildOrcidCoverage(
   today: Date,
   candidates: CandidateRow[] = [],
   dismissals: DismissalRow[] = [],
+  /** cwids the `unit` selection matches (`personFilterSql`); null = no unit filter. */
+  unitMatch: ReadonlySet<string> | null = null,
 ): OrcidCoverage {
   const tiers = orcidTiers(withoutDismissed(candidates, dismissals));
   // `scholar.orcid` counts unless the person dismissed that very iD.
@@ -370,29 +393,24 @@ export function buildOrcidCoverage(
   };
 
   const fullTime = scholars.filter((s) => s.roleCategory === DEFAULT_ROLE);
-  const nihFiltered = scholars.filter(nihOk);
+  const nihFiltered = scholars.filter(
+    (s) => nihOk(s) && (unitMatch === null || unitMatch.has(s.cwid)),
+  );
+  const types = new Set(params.types);
 
   const byRole = group(
-    nihFiltered.filter((s) => params.dept === null || s.primaryDepartment === params.dept),
+    nihFiltered,
     (s) => s.roleCategory,
     roleLabel,
   ).sort((a, b) => b.people - a.people || a.label.localeCompare(b.label));
   const byDept = group(
-    nihFiltered.filter((s) => params.role === null || s.roleCategory === params.role),
+    nihFiltered.filter((s) => types.size === 0 || (s.roleCategory !== null && types.has(s.roleCategory))),
     (s) => s.primaryDepartment,
     (k) => k ?? "No department",
   ).sort(
     (a, b) =>
       nihNoOrcid(b) - nihNoOrcid(a) || b.people - a.people || a.label.localeCompare(b.label),
   );
-
-  const roles = group(scholars, (s) => s.roleCategory, roleLabel)
-    .sort((a, b) => b.people - a.people || a.label.localeCompare(b.label))
-    .filter((r): r is CoverageRow & { key: string } => r.key !== null)
-    .map((r) => [r.key, r.label] as [string, string]);
-  const depts = [...new Set(scholars.map((s) => s.primaryDepartment))]
-    .filter((d): d is string => d !== null)
-    .sort((a, b) => a.localeCompare(b));
 
   return {
     params,
@@ -403,21 +421,19 @@ export function buildOrcidCoverage(
     },
     byRole,
     byDept,
-    roles,
-    depts,
   };
 }
 
 export type OrcidCoverageClient = Pick<
   PrismaClient,
-  "scholar" | "grant" | "personNihProfile" | "orcidCandidate" | "orcidDismissal"
+  "scholar" | "grant" | "personNihProfile" | "orcidCandidate" | "orcidDismissal" | "$queryRaw"
 >;
 
 export async function loadOrcidCoverage(
   db: OrcidCoverageClient,
   params: OrcidCoverageParams,
 ): Promise<OrcidCoverage> {
-  const [scholars, nih, era, candidates, dismissals] = await Promise.all([
+  const [scholars, nih, era, candidates, dismissals, unitRows] = await Promise.all([
     // Same population the Identity ETL writes to (`etl/identity/index.ts`),
     // narrowed to status=active like every other console aggregate.
     db.scholar.findMany({
@@ -446,6 +462,15 @@ export async function loadOrcidCoverage(
       },
     }),
     db.orcidDismissal.findMany({ select: { cwid: true, orcid: true } }),
+    // The unit selection, resolved by the shared rule; the type filter is a
+    // plain role_category IN, applied in the fold (the person-type table
+    // must not see it).
+    params.units.length > 0
+      ? db.$queryRaw<{ cwid: string }[]>`
+          SELECT s.cwid FROM scholar s
+           WHERE s.deleted_at IS NULL AND s.status = 'active'
+           ${personFilterSql({ types: [], unitValues: params.units }, { scholar: "s", centerMembership: "cm" })}`
+      : Promise.resolve(null),
   ]);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -466,6 +491,7 @@ export async function loadOrcidCoverage(
     today,
     candidates,
     dismissals,
+    unitRows === null ? null : new Set(unitRows.map((r) => r.cwid)),
   );
 }
 
