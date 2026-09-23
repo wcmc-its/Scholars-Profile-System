@@ -705,9 +705,27 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     const usage = [...dialog.querySelectorAll("a")].find((a) => a.textContent === "Usage")!;
     expect(usage.getAttribute("href")).toBe("/edit/usage");
     expect(usage.getAttribute("aria-current")).toBe("page");
+    // Only the current page's group starts open; Queues shows its item count.
+    expect([...dialog.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/edit/slug-requests")).toBe(false);
+    const queues = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Queues"))!;
+    expect(queues.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(queues);
     // Pending count carried onto the URL-requests link.
     const slug = [...dialog.querySelectorAll("a")].find((a) => a.getAttribute("href") === "/edit/slug-requests")!;
     expect(slug.textContent).toBe("URL requests2");
+  });
+
+  it("the sub-xl menu's Jump to filters every item into one list, tagged with its group", () => {
+    grouped();
+    render(<AdminSubnav active="usage" {...allOn} />);
+    fireEvent.click(screen.getByTestId("console-nav-sheet-trigger"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(screen.getByLabelText("Jump to"), { target: { value: "url" } });
+    const hrefs = [...dialog.querySelectorAll("nav a")].map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("/edit/slug-requests");
+    expect(hrefs).not.toContain("/edit/usage");
+    fireEvent.change(screen.getByLabelText("Jump to"), { target: { value: "zzz" } });
+    expect(dialog.textContent).toContain("No pages match “zzz”");
   });
 
   it('active="self" renders tier 1 only — no tier 2 row', () => {
