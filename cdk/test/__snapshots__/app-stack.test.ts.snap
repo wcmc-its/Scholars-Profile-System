@@ -499,7 +499,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "MEDIA_HIGHLIGHTS_SECTION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CONSOLE_SUBNAV_GROUPED",

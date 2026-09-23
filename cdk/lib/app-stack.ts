@@ -1540,10 +1540,11 @@ export class AppStack extends Stack {
         NEWS_APPROVAL_QUEUE: "on",
         // MEDIA_HIGHLIGHTS_SECTION — the profile "Media Highlights" section: press
         // clips parsed from the External Affairs "WCM in the News" digest by
-        // etl:news-clips, published only after /edit/news-queue review. STAGING-ON
-        // for the eyeball; prod stays dark until SES delivery is live and comms has
-        // reviewed a first batch. Clip rows never reach the News section either way.
-        MEDIA_HIGHLIGHTS_SECTION: env === "prod" ? "off" : "on",
+        // etl:news-clips, published only after /edit/media-highlights-queue review.
+        // ON in both envs (prod 2026-09-24): an unreviewed clip never renders, so the
+        // section stays empty until clips are approved. Clip rows never reach the
+        // News section either way.
+        MEDIA_HIGHLIGHTS_SECTION: "on",
         // CONSOLE_SUBNAV_GROUPED — collapses the /edit console sub-nav's 14
         // role-gated tabs into two tiers: Profiles · Org units · Queues ·
         // Registries · Insights · Tools, with the active group's members on a
