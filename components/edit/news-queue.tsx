@@ -4,7 +4,9 @@
  * candidate (plain Approve / Reject) or a CONTESTED set where one detected name
  * resolved to several scholars: there the reviewer picks the right person with
  * "This is the one" (which the decision route publishes and rejects the siblings
- * atomically), or "None of these" to reject the whole group.
+ * atomically), or "None of these" to reject the whole group. Every pending row
+ * also offers "Approve but hide" (`approve_hidden`): the same approval, written
+ * with `showOnProfile` false, so it lands in Approved as Hidden.
  *
  * Each decision POSTs /api/edit/news-mention/decision and refreshes the page (the
  * queue is force-dynamic), so the row moves to its new tab without local
@@ -282,7 +284,7 @@ export function NewsQueue({
   const [sort, setSort] = useState<NewsQueueSort>("certainty");
   const [nameQuery, setNameQuery] = useState("");
 
-  async function decide(id: string, decision: "approve" | "reject") {
+  async function decide(id: string, decision: "approve" | "approve_hidden" | "reject") {
     setError(null);
     setBusyId(id);
     try {
@@ -608,6 +610,23 @@ export function NewsQueue({
                             onClick={() => decide(row.id, "approve")}
                           >
                             {g.contested ? "This is the one" : "Approve"}
+                          </Button>
+                          {/* Approve + hide in ONE write: the row is confirmed as
+                              this scholar (leaves the queue, rejects contested
+                              siblings) but lands in Approved as "Hidden" and never
+                              renders on the profile. Un-hide from the Approved tab. */}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy(row.id)}
+                            aria-label={
+                              `Approve “${row.articleTitle}” for ${row.scholarName} ` +
+                              `but hide it from their profile`
+                            }
+                            data-testid={`news-queue-approve-hidden-${row.id}`}
+                            onClick={() => decide(row.id, "approve_hidden")}
+                          >
+                            Approve but hide
                           </Button>
                           {!g.contested ? (
                             <Button
