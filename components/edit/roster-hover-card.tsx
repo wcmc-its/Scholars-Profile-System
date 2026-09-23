@@ -133,6 +133,9 @@ export function RosterScholarCell(p: RosterScholarCellProps) {
       <HoverCardContent
         side="right"
         align="center"
+        // Overlap the trigger a little: a wrapped subtitle makes the trigger as
+        // wide as the cell, which left a gap between the text and the card.
+        sideOffset={-40}
         className="text-apollo-ink w-[22rem] overflow-hidden p-0"
         data-testid={`roster-card-${p.cwid}`}
       >

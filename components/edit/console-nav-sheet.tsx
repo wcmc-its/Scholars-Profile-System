@@ -30,7 +30,7 @@ export function ConsoleNavSheet({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
-        className="inline-flex h-8 max-w-full min-w-0 items-center gap-2 rounded-md border border-white/25 px-3 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none lg:hidden"
+        className="inline-flex h-8 max-w-full min-w-0 items-center gap-2 rounded-md border border-white/25 px-3 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none min-[960px]:hidden"
         data-testid="console-nav-sheet-trigger"
       >
         <Menu className="size-4 shrink-0" aria-hidden />
@@ -39,39 +39,50 @@ export function ConsoleNavSheet({
       <SheetContent
         side="left"
         aria-describedby={undefined}
-        className="bg-apollo-page gap-0 overflow-y-auto p-0 lg:hidden"
+        className="bg-apollo-page gap-0 overflow-y-auto p-0 min-[960px]:hidden"
       >
         <SheetHeader className="border-apollo-border border-b">
           <SheetTitle>Console</SheetTitle>
         </SheetHeader>
         {/* Every item is a <Link>: a tap navigates and closes the sheet. */}
-        <nav aria-label="Console" className="flex flex-col gap-4 p-3" onClick={() => setOpen(false)}>
+        {/* Hierarchy: top-level destinations are full-size; a labelled group gets
+            a heading and its items sit indented behind a hairline guide, one
+            size down, with a rule between groups. */}
+        <nav
+          aria-label="Console"
+          className="divide-apollo-border flex flex-col divide-y px-3"
+          onClick={() => setOpen(false)}
+        >
           {sections.map((s) => (
-            <div key={s.label ?? `top-${s.items[0].id}`} className="flex flex-col">
+            <div key={s.label ?? `top-${s.items[0].id}`} className="flex flex-col py-3">
               {s.label && (
-                <p className="text-apollo-slate px-3 pb-1 text-[10px] font-bold tracking-[.1em] uppercase">
+                <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-[.08em] text-[#5c574d] uppercase">
                   {s.label}
                 </p>
               )}
-              {s.items.map((it) => (
-                <Link
-                  key={it.id}
-                  href={it.href}
-                  aria-current={it.active ? "page" : undefined}
-                  className={`flex min-h-11 items-center justify-between gap-2 rounded-md px-3 text-[15px] ${
-                    it.active
-                      ? "bg-apollo-surface-2 font-semibold shadow-[inset_3px_0_0_var(--apollo-maroon)]"
-                      : "hover:bg-apollo-surface-2"
-                  }`}
-                >
-                  {it.label}
-                  {it.count !== undefined && it.count > 0 && (
-                    <span className="bg-apollo-maroon inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold text-white">
-                      {it.count}
-                    </span>
-                  )}
-                </Link>
-              ))}
+              <div className={s.label ? "border-apollo-border ml-3 flex flex-col border-l pl-2" : "flex flex-col"}>
+                {s.items.map((it) => (
+                  <Link
+                    key={it.id}
+                    href={it.href}
+                    aria-current={it.active ? "page" : undefined}
+                    className={`flex items-center justify-between gap-2 rounded-md px-3 text-[#1f1b19] ${
+                      s.label ? "min-h-10 text-sm" : "min-h-11 text-[15px] font-medium"
+                    } ${
+                      it.active
+                        ? "bg-apollo-surface-2 font-semibold shadow-[inset_3px_0_0_var(--apollo-maroon)]"
+                        : "hover:bg-apollo-surface-2"
+                    }`}
+                  >
+                    {it.label}
+                    {it.count !== undefined && it.count > 0 && (
+                      <span className="bg-apollo-maroon inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold text-white">
+                        {it.count}
+                      </span>
+                    )}
+                  </Link>
+                ))}
+              </div>
             </div>
           ))}
         </nav>
