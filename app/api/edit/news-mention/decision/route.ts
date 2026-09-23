@@ -48,6 +48,17 @@
  * re-check still lives INSIDE the transaction: nothing in the DB constrains these
  * transitions (bare ENUM, no CHECK), and it is also the race guard for two
  * reviewers hitting one row.
+ *
+ * APPROVE BUT HIDE (`decision: "approve_hidden"`). The same correctness judgement
+ * as `approve` — the row becomes `published`, leaves the queue, and rejects its
+ * pending siblings — plus the editorial one in the SAME write: `showOnProfile`
+ * false, so it never renders on the public profile, not even for the window a
+ * separate approve-then-hide would leave open. It is the existing hide, not a new
+ * state: the row lands in the Approved tab as "Hidden" and is un-hidden there (or
+ * on the scholar's /edit news card) via POST /api/edit/news-mention `show`.
+ * Everything else — decidability, the already-decided refusal, sibling sweep,
+ * reflection — is identical to `approve`, and the audit row stays
+ * `news_mention_update` with `fieldsChanged: ["status", "showOnProfile"]`.
  */
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -66,6 +77,7 @@ type StoredRow = {
   title: string;
   detectedName: string | null;
   sourceRef: string | null;
+  showOnProfile: boolean;
 };
 
 function snapshot(row: StoredRow) {
@@ -75,6 +87,7 @@ function snapshot(row: StoredRow) {
     status: row.status,
     title: row.title,
     detectedName: row.detectedName,
+    showOnProfile: row.showOnProfile,
   };
 }
 
@@ -93,9 +106,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const mentionId = typeof body.id === "string" ? body.id : null;
   const decision =
-    body.decision === "approve" || body.decision === "reject" ? body.decision : null;
+    body.decision === "approve" ||
+    body.decision === "approve_hidden" ||
+    body.decision === "reject"
+      ? body.decision
+      : null;
   if (!mentionId) return editError(400, "invalid_body", "id");
   if (!decision) return editError(400, "invalid_body", "decision");
+
+  // `approve_hidden` is `approve` in every respect but the visibility write.
+  const approving = decision !== "reject";
+  const hide = decision === "approve_hidden";
 
   // One timestamp for every audit row this decision writes.
   const ts = new Date();
@@ -109,7 +130,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // path: a REJECTED row may still be APPROVED (#2578 follow-up). `reject`
       // stays pending-only and `published` stays undecidable — see TERMINALITY.
       const decidable =
-        row.status === "pending" || (row.status === "rejected" && decision === "approve");
+        row.status === "pending" || (row.status === "rejected" && approving);
       if (!decidable) return { kind: "not_pending" as const };
 
       // A detected name can only resolve to ONE scholar. If a sibling is already
@@ -117,7 +138,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // This is also the WHOLE of un-reject case 3: approving a rejected row whose
       // sibling won would mean un-publishing that second scholar, which must be a
       // separate deliberate decision — so refuse here rather than cascade.
-      if (decision === "approve" && row.sourceRef) {
+      if (approving && row.sourceRef) {
         const taken = await tx.newsMention.findFirst({
           where: { sourceRef: row.sourceRef, status: "published", id: { not: row.id } },
           select: { id: true },
@@ -125,10 +146,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (taken) return { kind: "already_decided" as const };
       }
 
-      const nextStatus = decision === "approve" ? "published" : "rejected";
+      const nextStatus = approving ? "published" : "rejected";
       const updated = (await tx.newsMention.update({
         where: { id: mentionId },
-        data: { status: nextStatus, enteredByCwid: realCwid },
+        data: hide
+          ? { status: nextStatus, showOnProfile: false, enteredByCwid: realCwid }
+          : { status: nextStatus, enteredByCwid: realCwid },
       })) as StoredRow;
 
       await appendAuditRow(tx, {
@@ -138,7 +161,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         requestId,
         targetEntityId: row.id,
         action: "news_mention_update",
-        fieldsChanged: ["status"],
+        fieldsChanged: hide ? ["status", "showOnProfile"] : ["status"],
         beforeValues: snapshot(row),
         afterValues: snapshot(updated),
         ts,
@@ -150,7 +173,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // terminal row would emit an audit row that says nothing.
       let siblingsRejected = 0;
       const affectedCwids = new Set<string>([row.cwid]);
-      if (decision === "approve" && row.sourceRef) {
+      if (approving && row.sourceRef) {
         const siblings = (await tx.newsMention.findMany({
           where: { sourceRef: row.sourceRef, status: "pending", id: { not: row.id } },
         })) as StoredRow[];
@@ -175,7 +198,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           siblingsRejected++;
         }
       }
-      return { kind: "ok" as const, status: nextStatus, siblingsRejected, affectedCwids: [...affectedCwids] };
+      return {
+        kind: "ok" as const,
+        status: nextStatus,
+        showOnProfile: updated.showOnProfile,
+        siblingsRejected,
+        affectedCwids: [...affectedCwids],
+      };
     });
 
     if (result.kind === "not_found") return editError(404, "not_found", "id");
@@ -200,7 +229,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ),
     );
 
-    return editOk({ status: result.status, siblingsRejected: result.siblingsRejected });
+    return editOk({
+      status: result.status,
+      showOnProfile: result.showOnProfile,
+      siblingsRejected: result.siblingsRejected,
+    });
   } catch {
     return editError(500, "write_failed");
   }
