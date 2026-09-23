@@ -89,7 +89,7 @@ describe("PUT /api/edit/report-meta/[n] — gating", () => {
 
   it("403 not_superuser for a plain user, before the params or body are read, and no db call", async () => {
     asGenuine(PLAIN);
-    const res = await put("9", { name: 42 });
+    const res = await put("10", { name: 42 });
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ ok: false, error: "not_superuser" });
     expect(h.mockLogEditDenial).toHaveBeenCalledWith(
@@ -110,8 +110,8 @@ describe("PUT /api/edit/report-meta/[n] — gating", () => {
     expect(h.mockUpsert).not.toHaveBeenCalled();
   });
 
-  it("404 unknown_report for a superuser on a key outside 1..7", async () => {
-    const res = await put("9", VALID);
+  it("404 unknown_report for a superuser on a key outside 1..9", async () => {
+    const res = await put("10", VALID);
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ ok: false, error: "unknown_report" });
     expect(h.mockUpsert).not.toHaveBeenCalled();

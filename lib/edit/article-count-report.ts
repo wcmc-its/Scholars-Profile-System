@@ -26,13 +26,15 @@
  *
  * Gate: every unit administrator — a superuser, a comms steward, or the
  * holder of any `UnitAdmin` grant (`canViewUsage`, the Usage dashboard's
- * audience). Server-only (`@/lib/db`).
+ * audience) — plus anyone with an `article-count` `report_access` row.
+ * Server-only (`@/lib/db`).
  */
 import ExcelJS from "exceljs";
 
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
+import { ARTICLE_COUNT_REPORT, loadReportScopesForCwid } from "@/lib/edit/report-access";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { Prisma } from "@/lib/generated/prisma/client";
@@ -134,8 +136,11 @@ export function articleCountQueryString(p: ArticleCountParams): string {
   return q.toString();
 }
 
+/** Any unit administrator (+ comms steward), or a person granted the report
+ *  by row (`report_access`, for staff who administer no unit). */
 export async function canViewArticleCountReport(session: EditSession): Promise<boolean> {
-  return session.isCommsSteward || canViewUsage(session, db.read);
+  if (session.isCommsSteward || (await canViewUsage(session, db.read))) return true;
+  return (await loadReportScopesForCwid(session.cwid, ARTICLE_COUNT_REPORT)).size > 0;
 }
 
 /** The rail's facets: person type and the four unit groups are the Profiles
@@ -167,7 +172,11 @@ export type ArticleCountRow = { year: number; count: number };
  *  scholars, the facets, the position clause, the year window. `j` is a LEFT
  *  JOIN so the article sheet can show a JIF without a floor; the floor, when
  *  set, is a WHERE on it (which drops JIF-less journals, as documented). */
-function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Prisma.Sql } {
+export function scopeSql(
+  p: ArticleCountParams,
+  /** An extra `AND …` clause (report 9's journal filter). */
+  extra: Prisma.Sql = Prisma.empty,
+): { yearExpr: Prisma.Sql; fromWhere: Prisma.Sql } {
   const yearExpr =
     p.basis === "fy"
       ? Prisma.sql`YEAR(DATE_ADD(p.date_added_to_entrez, INTERVAL 6 MONTH))`
@@ -191,6 +200,7 @@ function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Pri
        ${inList(Prisma.sql`p.publication_type`, p.atypes)}
        ${p.jif > 0 ? Prisma.sql`AND j.impact_score_1 >= ${p.jif}` : Prisma.empty}
        ${posExpr}
+       ${extra}
        AND ${yearExpr} BETWEEN ${p.from} AND ${p.to}`;
   return { yearExpr, fromWhere };
 }

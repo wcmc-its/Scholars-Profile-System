@@ -7,7 +7,7 @@ const BRAND_LINK_CLASS =
   "flex items-center gap-3 rounded-sm transition-opacity hover:opacity-85 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60";
 
 /**
- * The black Apollo console top bar — WCM badge + "Scholars Profile Console"
+ * The black Apollo console top bar — WCM badge + "Scholars Console"
  * title (both a `Link` back to `/edit`) + an account menu. Extracted from
  * `EditShell` so the editor and the (soon) `ConsoleShell` render ONE bar
  * instead of ~14 hand-rolled copies that had already diverged on badge size,
@@ -72,7 +72,7 @@ export function ConsoleTopBar({
               >
                 WCM
               </span>
-              <span className="sr-only sm:not-sr-only">Scholars Profile Console</span>
+              <span className="sr-only sm:not-sr-only">Scholars Console</span>
             </Link>
           </span>
         ) : (
@@ -84,7 +84,7 @@ export function ConsoleTopBar({
               >
                 WCM
               </span>
-              <span className="sr-only sm:not-sr-only">Scholars Profile Console</span>
+              <span className="sr-only sm:not-sr-only">Scholars Console</span>
             </Link>
           </h1>
         )}

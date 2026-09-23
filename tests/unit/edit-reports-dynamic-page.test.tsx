@@ -351,19 +351,19 @@ describe("/edit/reports/[report] — generateMetadata", () => {
     const meta = (segment: string) =>
       generateMetadata({ params: Promise.resolve({ report: segment }) });
     expect(await meta("papers")).toEqual({
-      title: "Papers — Scholars Profile Console",
+      title: "Papers — Scholars Console",
       robots: { index: false, follow: false },
     });
     expect(await meta("3")).toEqual({
-      title: "Papers — Scholars Profile Console",
+      title: "Papers — Scholars Console",
       robots: { index: false, follow: false },
     });
     expect(await meta("mentored-publications")).toEqual({
-      title: "Mentored publications — Scholars Profile Console",
+      title: "Mentored publications — Scholars Console",
       robots: { index: false, follow: false },
     });
     expect(await meta("publications")).toEqual({
-      title: "Reports — Scholars Profile Console",
+      title: "Reports — Scholars Console",
       robots: { index: false, follow: false },
     });
   });

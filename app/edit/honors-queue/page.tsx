@@ -33,7 +33,7 @@ import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-requ
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Honors approval — Scholars Profile Console",
+  title: "Honors approval — Scholars Console",
   robots: { index: false, follow: false },
 };
 

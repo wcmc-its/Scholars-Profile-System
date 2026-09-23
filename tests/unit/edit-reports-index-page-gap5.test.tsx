@@ -18,6 +18,7 @@ const {
   mockLoadReportableUnits,
   mockReportsIndex,
   mockGetReportScopes,
+  mockGetHighImpactScopes,
   mockListReportAccess,
   mockReportMetaFindMany,
   mockCanViewArticleCount,
@@ -33,6 +34,7 @@ const {
   mockLoadReportableUnits: vi.fn(),
   mockReportsIndex: vi.fn(() => null),
   mockGetReportScopes: vi.fn(),
+  mockGetHighImpactScopes: vi.fn(),
   mockListReportAccess: vi.fn(),
   mockReportMetaFindMany: vi.fn(),
 }));
@@ -66,17 +68,30 @@ vi.mock("@/lib/edit/manageable-units", () => ({ unitEditHref: () => "/edit/cente
 // Program reports (report 7) ride a `report_access` row — default: none held.
 // `listReportAccess` / `canManageReportAccess` / the scope options feed the
 // program row's "Who can run this report" popover props.
-vi.mock("@/lib/edit/report-access", () => ({
-  getReportScopes: mockGetReportScopes,
-  listReportAccess: mockListReportAccess,
-  canManageReportAccess: (s: { isSuperuser: boolean; isCommsSteward: boolean }) =>
-    s.isSuperuser || s.isCommsSteward,
-  MENTORED_PUBS_REPORT: "mentored-publications",
-  MENTORED_PUBS_SCOPE_OPTIONS: [
-    ["*", "All programs"],
-    ["md", "AOC"],
-  ],
-}));
+vi.mock("@/lib/edit/report-access", () => {
+  const whole = [["*", "Whole report"]];
+  return {
+    // Report 9's grant rides its own mock so the report 7 cases stay pinned.
+    getReportScopes: (s: unknown, key: string) =>
+      key === "high-impact-publications" ? mockGetHighImpactScopes(s, key) : mockGetReportScopes(s, key),
+    listReportAccess: mockListReportAccess,
+    canManageReportAccess: (s: { isSuperuser: boolean; isCommsSteward: boolean }) =>
+      s.isSuperuser || s.isCommsSteward,
+    MENTORED_PUBS_REPORT: "mentored-publications",
+    ARTICLE_COUNT_REPORT: "article-count",
+    HIGH_IMPACT_PUBS_REPORT: "high-impact-publications",
+    ARTICLE_COUNT_ACCESS_NOTE: "admins note",
+    WHOLE_REPORT_SCOPE_OPTIONS: whole,
+    REPORT_ACCESS_SCOPE_OPTIONS: {
+      "mentored-publications": [
+        ["*", "All programs"],
+        ["md", "AOC"],
+      ],
+      "article-count": whole,
+      "high-impact-publications": whole,
+    },
+  };
+});
 // Report 8 (Article counts) rides the administrator gate — default: denied,
 // so the pinned unit lists below stay exactly the program-row cases.
 vi.mock("@/lib/edit/article-count-report", () => ({ canViewArticleCountReport: mockCanViewArticleCount }));
@@ -114,6 +129,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLoadReportableUnits.mockResolvedValue([]);
   mockGetReportScopes.mockResolvedValue(new Set());
+  mockGetHighImpactScopes.mockResolvedValue(new Set());
   mockListReportAccess.mockResolvedValue([]);
   mockReportMetaFindMany.mockResolvedValue([]);
   mockCanViewArticleCount.mockResolvedValue(false);
@@ -139,7 +155,27 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(units.map((u) => u.kind)).toEqual(["institution"]);
     expect(units[0].reports.map((r) => r.n)).toEqual([8]);
     expect(units[0].reports[0].slug).toBe("article-count");
-    expect(units[0].reports[0].access).toEqual({ mode: "admin" });
+    expect(units[0].reports[0].access).toEqual(
+      expect.objectContaining({ mode: "person", reportKey: "article-count", note: "admins note" }),
+    );
+  });
+
+  it("a report 9 grant holder with zero unit grants → the institution row with report 9 alone", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockGetHighImpactScopes.mockResolvedValue(new Set(["*"]));
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    expect(mockNotFound).not.toHaveBeenCalled();
+    const units = findByType(result, mockReportsIndex)!.props.units as Array<{
+      kind: string;
+      editHref: string;
+      reports: Array<{ n: number; access: unknown }>;
+    }>;
+    expect(units.map((u) => u.kind)).toEqual(["institution"]);
+    expect(units[0].reports.map((r) => r.n)).toEqual([9]);
+    expect(units[0].editHref).toBe("/edit/reports/high-impact-publications");
+    expect(units[0].reports[0].access).toEqual(
+      expect.objectContaining({ mode: "person", reportKey: "high-impact-publications", canManage: false }),
+    );
   });
 
   it("scoped Owner/Curator with zero grants → still 404s", async () => {

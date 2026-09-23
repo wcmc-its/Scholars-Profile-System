@@ -93,10 +93,10 @@ describe("ConsoleShell", () => {
     // The console-variant top bar: the console name is a NON-heading span (now
     // wrapping a brand Link to /edit — dwd2001 nav fix), so the page's own
     // <h1> is the ONLY h1 — no double-heading.
-    const brandLink = screen.getByRole("link", { name: /Scholars Profile Console/ });
+    const brandLink = screen.getByRole("link", { name: /Scholars Console/ });
     expect(brandLink.getAttribute("href")).toBe("/edit");
     expect(brandLink.closest("span")?.tagName).toBe("SPAN");
-    expect(screen.queryByRole("heading", { name: /^Scholars Profile Console$/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /^Scholars Console$/ })).toBeNull();
     const h1s = container.querySelectorAll("h1");
     expect(h1s.length).toBe(1);
     expect(h1s[0].textContent).toBe("Edit activity");

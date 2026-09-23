@@ -127,6 +127,9 @@ describe("POST /api/edit/report-access — validation", () => {
   it.each([
     [{ ...VALID, op: "delete" }, "invalid_op"],
     [{ ...VALID, reportKey: "other-report" }, "invalid_report_key"],
+    [{ ...VALID, reportKey: "toString" }, "invalid_report_key"],
+    [{ ...VALID, reportKey: "article-count", scopeKey: "md" }, "invalid_scope_key"],
+    [{ ...VALID, reportKey: "high-impact-publications", scopeKey: "md" }, "invalid_scope_key"],
     [{ ...VALID, scopeKey: "phd" }, "invalid_scope_key"],
     [{ ...VALID, cwid: "1abc" }, "invalid_cwid"],
     [{ ...VALID, cwid: "a" }, "invalid_cwid"],
@@ -218,6 +221,15 @@ describe("POST /api/edit/report-access — writes", () => {
     expect(h.mockGrant).not.toHaveBeenCalled();
     expect(h.mockList).not.toHaveBeenCalled();
   });
+
+  it.each(["article-count", "high-impact-publications"])(
+    "grant: %s takes a whole-report (wildcard) grant",
+    async (reportKey) => {
+      const res = await POST(post({ ...VALID, reportKey, scopeKey: "*" }));
+      expect(res.status).toBe(200);
+      expect(h.mockGrant).toHaveBeenCalledWith(expect.objectContaining({ reportKey, scopeKey: "*" }));
+    },
+  );
 
   it("500 write_failed when the grant throws", async () => {
     h.mockGrant.mockRejectedValue(new Error("boom"));

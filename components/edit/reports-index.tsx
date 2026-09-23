@@ -64,7 +64,7 @@ const isPseudo = (k: ReportsIndexUnitKind) => k === "program" || k === "institut
 /** `"program"` is the one pseudo-unit: the person-granted Mentored
  *  publications report (`/edit/reports/7`) rides the same list as a unit with
  *  one report, so it is filterable and sortable like every other row. */
-export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export type ReportsIndexReport = {
   n: ReportN;

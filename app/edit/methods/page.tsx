@@ -37,7 +37,7 @@ import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Method families — Scholars Profile Console",
+  title: "Method families — Scholars Console",
   robots: { index: false, follow: false },
 };
 

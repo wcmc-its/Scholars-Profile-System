@@ -42,7 +42,7 @@ import {
   loadLatestSlugRequest,
 } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
-import { loadReportScopesForCwid, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import { hasAnyReportAccess } from "@/lib/edit/report-access";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
@@ -162,15 +162,12 @@ export default async function EditSelfPage({
         return <ProxyLanding scholars={scholars} />;
       }
     }
-    // A `report_access` holder (Mentored publications, `/edit/reports/7`) —
-    // Medical Education staff with no Scholar row, no ED-group role and no
-    // proxy grant. Their one console entry point is the report itself; send
-    // them there rather than 404ing (`lib/edit/report-access.ts`). A row-
-    // based grant, so this is a cheap indexed read, not a directory call.
-    const reportScopes = await loadReportScopesForCwid(editCwid, MENTORED_PUBS_REPORT);
-    if (reportScopes.size > 0) {
-      // The NUMBER on purpose: it is the permanent link, and `/edit/reports/[report]` 307s it to the current slug.
-      redirect("/edit/reports/7");
+    // A `report_access` holder (reports 7–9) — staff with no Scholar row, no
+    // ED-group role and no proxy grant. Their console entry point is the
+    // reports index, which lists exactly the reports they were granted
+    // (`lib/edit/report-access.ts`). An indexed row read, not a directory call.
+    if (await hasAnyReportAccess(editCwid)) {
+      redirect("/edit/reports");
     }
     notFound();
   }

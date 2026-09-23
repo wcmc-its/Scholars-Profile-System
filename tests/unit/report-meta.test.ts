@@ -111,7 +111,7 @@ describe("loadReportMeta", () => {
       summary: REPORT_META_DEFAULTS["4"].summary,
       descriptionHtml: null,
     });
-    expect(meta.size).toBe(8);
+    expect(meta.size).toBe(9);
   });
 
   it("a row the catalog doesn't know is ignored, not added", async () => {
@@ -119,7 +119,7 @@ describe("loadReportMeta", () => {
       { reportKey: "99", name: "X", summary: "Y", descriptionHtml: null },
     ]);
     const meta = await loadReportMeta();
-    expect(meta.size).toBe(8);
+    expect(meta.size).toBe(9);
     expect(meta.has("99" as never)).toBe(false);
   });
 
@@ -136,7 +136,7 @@ describe("isReportKey", () => {
   it.each(["1", "2", "3", "4", "5", "6", "7"])("accepts %j", (v) => {
     expect(isReportKey(v)).toBe(true);
   });
-  it.each(["9", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
+  it.each(["10", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
     expect(isReportKey(v)).toBe(false);
   });
 });
@@ -181,11 +181,11 @@ describe("reportLabel / reportPageMetadata", () => {
       { reportKey: "2", name: "Table 2A", summary: "S", descriptionHtml: null },
     ]);
     expect(await reportPageMetadata("2")).toEqual({
-      title: "Table 2A — Scholars Profile Console",
+      title: "Table 2A — Scholars Console",
       robots: { index: false, follow: false },
     });
     expect(await reportPageMetadata("5")).toEqual({
-      title: "Clinical Trials — Scholars Profile Console",
+      title: "Clinical Trials — Scholars Console",
       robots: { index: false, follow: false },
     });
   });

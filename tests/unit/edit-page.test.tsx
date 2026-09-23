@@ -214,7 +214,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     // fix), so match by accessible name — not raw textContent, which also
     // includes the aria-hidden "WCM" badge glyph — for the console name.
     expect(
-      screen.getByRole("heading", { level: 1, name: "Scholars Profile Console" }),
+      screen.getByRole("heading", { level: 1, name: "Scholars Console" }),
     ).toBeTruthy();
   });
 

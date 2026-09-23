@@ -25,7 +25,7 @@ import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-qu
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Data sharing — Scholars Profile Console",
+  title: "Data sharing — Scholars Console",
   robots: { index: false, follow: false },
 };
 

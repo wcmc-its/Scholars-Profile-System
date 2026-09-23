@@ -33,7 +33,7 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Grant Matcha — Scholars Profile Console",
+  title: "Grant Matcha — Scholars Console",
   robots: { index: false, follow: false },
 };
 

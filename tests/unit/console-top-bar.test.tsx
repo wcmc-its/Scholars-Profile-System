@@ -41,7 +41,7 @@ describe("ConsoleTopBar — editor variant (default)", () => {
   it("renders the brand as a Link to /edit nested inside the <h1>", () => {
     render(<ConsoleTopBar />);
     const heading = screen.getByRole("heading", { level: 1 });
-    const link = screen.getByRole("link", { name: /Scholars Profile Console/ });
+    const link = screen.getByRole("link", { name: /Scholars Console/ });
     expect(heading.contains(link)).toBe(true);
     expect(link.getAttribute("href")).toBe("/edit");
   });
@@ -74,8 +74,8 @@ describe("ConsoleTopBar — console variant", () => {
   it("renders the brand as a Link to /edit nested inside a non-heading <span> — no <h1>", () => {
     render(<ConsoleTopBar variant="console" />);
     expect(screen.queryByRole("heading")).toBeNull();
-    const link = screen.getByRole("link", { name: /Scholars Profile Console/ });
+    const link = screen.getByRole("link", { name: /Scholars Console/ });
     expect(link.getAttribute("href")).toBe("/edit");
-    expect(link.closest("span")?.textContent).toContain("Scholars Profile Console");
+    expect(link.closest("span")?.textContent).toContain("Scholars Console");
   });
 });

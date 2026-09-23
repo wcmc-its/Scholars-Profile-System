@@ -59,7 +59,7 @@ import { canViewUsage } from "@/lib/edit/usage-access";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "ORCID coverage — Scholars Profile Console",
+  title: "ORCID coverage — Scholars Console",
   robots: { index: false, follow: false },
 };
 

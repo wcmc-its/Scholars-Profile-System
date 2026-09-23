@@ -30,7 +30,10 @@
  *     ignored, so `?kind=core` on report 4 falls back to a center exactly as
  *     before) → `loadReportsContext`; null → the visible 403
  *     (`ForbiddenEditPage`). The popover states the unit rule.
- *   - `"person"` (report 7): `getReportScopes(session, accessKey)`; an empty
+ *   - `"admin"` (report 8): `canViewArticleCountReport` — any unit
+ *     administrator, or an `article-count` grant row; the popover lists the
+ *     grant rows like the person gate's.
+ *   - `"person"` (reports 7, 9): `getReportScopes(session, accessKey)`; an empty
  *     set → `notFound()` BEFORE any data read (the route reads as unbuilt to
  *     someone it was never granted to, like `/edit/data-sharing`). The
  *     popover lists the grant rows for EVERY viewer — who else can open this
@@ -48,10 +51,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import {
-  ReportAccessPopover,
-  type ReportAccessPopoverRow,
-} from "@/components/edit/report-access-popover";
+import { ReportAccessPopover } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
@@ -63,11 +63,11 @@ import {
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
-  canManageReportAccess,
+  ARTICLE_COUNT_ACCESS_NOTE,
+  ARTICLE_COUNT_REPORT,
   getReportScopes,
-  listReportAccess,
-  MENTORED_PUBS_SCOPE_OPTIONS,
 } from "@/lib/edit/report-access";
+import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
 import {
   isReportKey,
   loadReportMeta,
@@ -114,7 +114,7 @@ export async function generateMetadata({ params }: { params: Promise<{ report: s
   const { report: segment } = await params;
   const meta = await resolveSegment(segment);
   if (meta === null) {
-    return { title: "Reports — Scholars Profile Console", robots: { index: false, follow: false } };
+    return { title: "Reports — Scholars Console", robots: { index: false, follow: false } };
   }
   return reportPageMetadata(meta.key);
 }
@@ -191,7 +191,11 @@ export default async function EditReportPage({
   } else if (def.gate === "admin") {
     if (!(await canViewArticleCountReport(session))) notFound();
     back = "/edit/reports";
-    loadAccess = async () => <ReportAccessPopover mode="admin" />;
+    loadAccess = async () => (
+      <ReportAccessPopover
+        {...await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)}
+      />
+    );
     render = () => def.render({ n, session, searchParams: sp, basePath });
   } else {
     // Row-based gate: an empty scope set reads as an unbuilt route, the same
@@ -203,25 +207,11 @@ export default async function EditReportPage({
 
     // The grant list is read for EVERY viewer — the popover shows who else
     // can run the report to anyone who can; only Add / Remove ride
-    // `canManage`. The scope options are report 7's (the one person-gated
-    // report today); a second one would carry its own on the registry entry.
+    // `canManage`.
     back = "/edit/reports";
-    loadAccess = async () => {
-      const accessRows = await listReportAccess(def.accessKey);
-      const initialRows: ReportAccessPopoverRow[] = accessRows.map((r) => ({
-        ...r,
-        grantedAt: r.grantedAt.toISOString(),
-      }));
-      return (
-        <ReportAccessPopover
-          mode="person"
-          reportKey={def.accessKey}
-          initialRows={initialRows}
-          scopeOptions={MENTORED_PUBS_SCOPE_OPTIONS}
-          canManage={canManageReportAccess(session)}
-        />
-      );
-    };
+    loadAccess = async () => (
+      <ReportAccessPopover {...await loadReportAccessPopoverProps(def.accessKey, session)} />
+    );
     render = () => def.render({ n, scopes, session, searchParams: sp, basePath });
   }
 

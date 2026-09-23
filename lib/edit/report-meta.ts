@@ -46,7 +46,7 @@ import { db } from "@/lib/db";
 export { isValidReportSlug, REPORT_SLUG_MAX } from "@/lib/edit/report-slug";
 
 /** The seven numbered reports, as the `report_key` column spells them. */
-export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8"] as const;
+export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
 /** Whether `v` is one of {@link REPORT_KEYS} — a string, never the number. */
@@ -145,6 +145,13 @@ export const REPORT_META_DEFAULTS: Record<
       "Distinct articles per calendar or fiscal year for the scholars matching a person type, primary department, article type, minimum Journal Impact Factor and author position. Open to every unit administrator.",
     descriptionHtml: null,
   },
+  "9": {
+    slug: "high-impact-publications",
+    name: "High-impact publications",
+    summary:
+      "Articles in top-tier journals (JAMA, Lancet, NEJM, JCO, Sci Transl Med, Nature, Blood, Circulation, Science, Cell) with impact factor, WCM first/last authors, Entrez date and NIH citations. Access is granted per person.",
+    descriptionHtml: null,
+  },
 };
 
 /** One report's editable metadata as the pages consume it. `descriptionHtml`
@@ -206,7 +213,7 @@ export async function reportPageMetadata(
 ): Promise<{ title: string; robots: { index: false; follow: false } }> {
   const meta = await reportMetaFor(key);
   return {
-    title: `${meta.name} — Scholars Profile Console`,
+    title: `${meta.name} — Scholars Console`,
     robots: { index: false, follow: false },
   };
 }

@@ -43,7 +43,7 @@ import {
 import { isNewsQueueTabVisible } from "@/lib/edit/news-queue";
 import { isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashboard";
-import { MENTORED_PUBS_REPORT, loadReportScopesForCwid } from "@/lib/edit/report-access";
+import { hasAnyReportAccess } from "@/lib/edit/report-access";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
@@ -108,8 +108,8 @@ export interface ConsoleGrants {
    *  `institution`), either role. Already
    *  ORs in `isSuperuser`. Feeds `usage`. */
   viewerCanViewUsage: boolean;
-  /** `report_access` scopes for this cwid on the mentored-publications
-   *  report — the non-unit report grants behind `/edit/reports/7`. A holder with a Scholar
+  /** 1 when this cwid holds any `report_access` row (reports 7–9), else 0
+   *  — the non-unit report grants. A holder with a Scholar
    *  row lands on their own profile editor, so without this the Reports tab
    *  is their only way in. Feeds `reports`. */
   reportAccessCount: number;
@@ -226,14 +226,14 @@ export const loadConsoleGrants = cache(
       loadManageableUnits(session.cwid, db),
       loadReportableUnitsForActor(session, db, REPORTABLE_KINDS),
       canViewUsage(session, db),
-      loadReportScopesForCwid(session.cwid, MENTORED_PUBS_REPORT),
+      hasAnyReportAccess(session.cwid),
     ]);
     return {
       ownerUnitCount: ownerScope.length,
       manageableUnitCount: units.total,
       reportableUnitCount: reportable.length,
       viewerCanViewUsage: usage,
-      reportAccessCount: reportAccess.size,
+      reportAccessCount: reportAccess ? 1 : 0,
     };
   },
 );

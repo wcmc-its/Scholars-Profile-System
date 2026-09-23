@@ -67,7 +67,7 @@
   --color-primary-cornell-red: #B31B1B;
   --color-accent-slate: #2c4f6e;
   /* Apollo Management Console chrome — #160 self-edit launch, refreshed to the
-     Scholars Profile Console mockup (warm-neutral palette). Editor-only
+     Scholars Console mockup (warm-neutral palette). Editor-only
      (/edit/*); the public site keeps --color-primary-cornell-red. The warm
      maroon is the intentional WCM editor accent — swap here only.
      --apollo-ring is the keyboard-focus indicator for rail items on the pale
