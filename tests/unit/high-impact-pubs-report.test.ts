@@ -1,41 +1,15 @@
-/** Report 9: journal-family matching and the awards defaults. */
+/** Report 9: the awards defaults and the people summary. */
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 
 import {
   highImpactQueryString,
-  journalFamilyOf,
   JOURNAL_FAMILIES,
   parseHighImpactParams,
+  summarizePeople,
+  type HighImpactRow,
 } from "@/lib/edit/high-impact-pubs-report";
-
-describe("journalFamilyOf", () => {
-  it.each([
-    ["JAMA", "jama"],
-    ["JAMA Netw Open", "jama"],
-    ["Lancet", "lancet"],
-    ["N Engl J Med", "nejm"],
-    ["NEJM Evid", "nejm"],
-    ["J Clin Oncol", "jco"],
-    ["Sci Transl Med", "stm"],
-    ["Nature", "nature"],
-    ["Nat Med", "nature"],
-    ["Blood", "blood"],
-    ["Circulation", "circulation"],
-    ["Science", "science"],
-    ["Cell", "cell"],
-  ])("%s → %s", (abbrev, key) => {
-    expect(journalFamilyOf(abbrev)?.key).toBe(key);
-  });
-
-  it.each(["Lancet Oncol", "Sci Adv", "Cell Rep", "Circ Res", "Nat Prod Rep", "Nat Sci Sleep", "JAMAx", null])(
-    "%s → no family",
-    (abbrev) => {
-      expect(journalFamilyOf(abbrev)).toBeNull();
-    },
-  );
-});
 
 describe("parseHighImpactParams", () => {
   const year = new Date().getFullYear();
@@ -72,5 +46,33 @@ describe("parseHighImpactParams", () => {
       ...p,
       view: "publications",
     });
+  });
+});
+
+describe("summarizePeople", () => {
+  const person = (cwid: string, position: "first" | "last" | "middle") => ({
+    cwid,
+    name: cwid.toUpperCase(),
+    department: "Medicine",
+    personType: "Full-time faculty",
+    position,
+  });
+  const article = (pmid: string, journal: string, citations: number | null, people: ReturnType<typeof person>[]) =>
+    ({ pmid, journal, citations, people }) as unknown as HighImpactRow;
+
+  it("one row per person: articles, first/last counts, citations, journals by frequency; most articles first", () => {
+    const rows = summarizePeople([
+      article("1", "Nature", 10, [person("aaa", "first"), person("bbb", "last")]),
+      article("2", "JAMA", null, [person("bbb", "first")]),
+      article("3", "JAMA", 5, [person("bbb", "last")]),
+    ]);
+    expect(rows.map((r) => r.cwid)).toEqual(["bbb", "aaa"]);
+    expect(rows[0]).toMatchObject({ articles: 3, firstAuthor: 1, lastAuthor: 2, citations: 15, journals: ["JAMA", "Nature"] });
+    expect(rows[1]).toMatchObject({ articles: 1, firstAuthor: 1, lastAuthor: 0, citations: 10, journals: ["Nature"] });
+  });
+
+  it("a person listed twice on one article counts that article once", () => {
+    const [row] = summarizePeople([article("1", "Cell", 2, [person("aaa", "first"), person("aaa", "last")])]);
+    expect(row).toMatchObject({ articles: 1, firstAuthor: 1, lastAuthor: 1, citations: 2 });
   });
 });

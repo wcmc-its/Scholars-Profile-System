@@ -28,6 +28,7 @@
 "use client";
 
 import * as React from "react";
+import { Download } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -287,7 +288,8 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
           peer-review — review before this leaves the building.
         </p>
         {state?.awards.length ? (
-          <Button size="sm" variant="outline" onClick={() => downloadCsv(state.cycle!, state.awards)}>
+          <Button size="sm" variant="apollo" onClick={() => downloadCsv(state.cycle!, state.awards)}>
+            <Download className="size-4" aria-hidden />
             Download CSV
           </Button>
         ) : undefined}

@@ -2,15 +2,20 @@
  * Report 9 — "High-impact publications" body: a filter rail (years, journal
  * families, the Profiles roster's person-type / unit facets, article type,
  * author position; plain GET params, `AutoSubmitForm` like reports 7 and 8)
- * beside Summary / Publications tabs and the `.xlsx` link
+ * beside Summary (one row per person, `summarizePeople`) / Publications
+ * tabs with the `.xlsx` button at the right of the tab row
  * (`/api/edit/reports/high-impact-publications`, same query string). Loaders,
  * journal families and defaults live in `lib/edit/high-impact-pubs-report.ts`.
  */
+import { Download } from "lucide-react";
+
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import { Button } from "@/components/ui/button";
 import { PersonFilterFacets } from "@/components/edit/reports/article-count-facets";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import {
   ARTICLE_COUNT_CAVEAT,
   articleCountActiveFilters,
@@ -22,11 +27,12 @@ import {
   highImpactQueryString,
   JOURNAL_FAMILIES,
   loadHighImpactList,
-  loadJournalCounts,
+  loadHighImpactTotal,
   parseHighImpactParams,
+  summarizePeople,
   type HighImpactParams,
   type HighImpactRow,
-  type JournalCount,
+  type PersonSummaryRow,
 } from "@/lib/edit/high-impact-pubs-report";
 import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
 
@@ -143,33 +149,47 @@ function Rail({ basePath, params, choices, idSuffix = "" }: RailProps) {
   );
 }
 
-function SummaryTable({ counts, total }: { counts: JournalCount[]; total: number }) {
+function SummaryTable({ people }: { people: PersonSummaryRow[] }) {
   return (
-    <table className="w-full max-w-2xl text-sm" data-testid="high-impact-summary">
-      <thead>
-        <tr className="text-left">
-          <th className={TH}>Journal family</th>
-          <th className={TH}>Journal</th>
-          <th className={`${TH} text-right`}>Articles</th>
-        </tr>
-      </thead>
-      <tbody>
-        {counts.map((c) => (
-          <tr key={c.journal}>
-            <td className={TD}>{c.family}</td>
-            <td className={TD}>
-              <PubJournal as="span" value={c.journal} />
-            </td>
-            <td className={NUM}>{c.count.toLocaleString()}</td>
+    <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
+      <table className="w-full border-collapse text-left text-sm" data-testid="high-impact-summary">
+        <thead>
+          <tr>
+            <th className={TH}>Name</th>
+            <th className={TH}>Department</th>
+            <th className={`${TH} text-right`}>Articles</th>
+            <th className={`${TH} text-right`}>First author</th>
+            <th className={`${TH} text-right`}>Last author</th>
+            <th className={`${TH} text-right`}>NIH citations</th>
+            <th className={TH}>Journals</th>
           </tr>
-        ))}
-        <tr className="font-semibold">
-          <td className={TD}>Total</td>
-          <td className={TD} />
-          <td className={NUM}>{total.toLocaleString()}</td>
-        </tr>
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {people.map((r) => (
+            <tr key={r.cwid}>
+              <td className={TD}>
+                {r.name}
+                <span className="text-muted-foreground ml-2 font-mono text-xs">{r.cwid}</span>
+                <span className="text-muted-foreground block text-xs">{r.personType}</span>
+              </td>
+              <td className={TD}>{r.department ?? "—"}</td>
+              <td className={NUM}>{r.articles}</td>
+              <td className={NUM}>{r.firstAuthor}</td>
+              <td className={NUM}>{r.lastAuthor}</td>
+              <td className={NUM}>{r.citations.toLocaleString()}</td>
+              <td className={TD}>
+                {r.journals.map((j, i) => (
+                  <span key={j}>
+                    {i > 0 && "; "}
+                    <PubJournal as="span" value={j} />
+                  </span>
+                ))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -220,10 +240,10 @@ export async function renderHighImpactPublicationsReport({
   basePath,
 }: PersonReportProps): Promise<ReportRender> {
   const params = parseHighImpactParams(toSearchParams(searchParams));
-  const [choices, counts] = await Promise.all([loadArticleCountChoices(), loadJournalCounts(params)]);
-  const total = counts.reduce((s, c) => s + c.count, 0);
-  const list =
-    params.view === "publications" && total <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;
+  const [choices, total] = await Promise.all([loadArticleCountChoices(), loadHighImpactTotal(params)]);
+  // Both views read the list: the Summary is its per-person roll-up.
+  const list = total <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;
+  const people = list ? summarizePeople(list) : [];
   const tab = (view: HighImpactParams["view"], label: string) => (
     <a
       href={`${basePath}?${highImpactQueryString(params, view)}`}
@@ -237,8 +257,9 @@ export async function renderHighImpactPublicationsReport({
   return {
     subtitle: (
       <p className="text-muted-foreground text-sm">
-        Articles in top-tier journals by the scholars matching the filters. Opens on original research by
-        full-time faculty as first or last author this year.
+        Who published in top-tier journals: each matching scholar with their article count, author positions,
+        citations and journals. Opens on original research by full-time faculty as first or last author this
+        year.
       </p>
     ),
     main: (
@@ -255,36 +276,36 @@ export async function renderHighImpactPublicationsReport({
               <Rail basePath={basePath} params={params} choices={choices} idSuffix="-sheet" />
             </FiltersSheet>
           </div>
-          <nav className="border-apollo-border mb-4 flex gap-6 border-b" aria-label="Report views">
-            {tab("summary", "Summary")}
-            {tab("publications", `Publications (${total.toLocaleString()})`)}
-          </nav>
-          {params.view === "summary" ? (
-            <SummaryTable counts={counts} total={total} />
-          ) : list ? (
-            <PublicationsTable rows={list} />
+          <div className="border-apollo-border mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-b">
+            <nav className="flex gap-6" aria-label="Report views">
+              {tab("summary", `Summary (${people.length.toLocaleString()} people)`)}
+              {tab("publications", `Publications (${total.toLocaleString()})`)}
+            </nav>
+            <Button asChild variant="apollo" size="sm" className="mb-1.5 sm:ml-auto">
+              <a
+                href={`/api/edit/reports/high-impact-publications?${highImpactQueryString(params)}`}
+                data-testid="high-impact-download"
+              >
+                <Download className="size-4" aria-hidden />
+                Download .xlsx
+              </a>
+            </Button>
+          </div>
+          {list ? (
+            params.view === "summary" ? (
+              <SummaryTable people={people} />
+            ) : (
+              <PublicationsTable rows={list} />
+            )
           ) : (
             <p className="text-muted-foreground text-sm">
               {total.toLocaleString()} articles is more than {HIGH_IMPACT_LIST_CAP.toLocaleString()}. Narrow the
               filters to list them.
             </p>
           )}
-          <p className="mt-4">
-            <a
-              href={`/api/edit/reports/high-impact-publications?${highImpactQueryString(params)}`}
-              className="text-apollo-maroon text-sm underline-offset-2 hover:underline"
-              data-testid="high-impact-download"
-            >
-              Download .xlsx
-            </a>
-            <span className="text-muted-foreground text-xs">
-              {" "}
-              &mdash; publications (title, journal, impact factor, WCM first/last authors, Entrez date, NIH
-              citations), a summary and the criteria
-            </span>
-          </p>
           <p className="text-muted-foreground mt-4 max-w-prose text-xs" role="note">
-            {ARTICLE_COUNT_CAVEAT} Only ReCiter-confirmed authorships of active scholars count.
+            {ARTICLE_COUNT_CAVEAT} Only ReCiter-confirmed authorships of active scholars count. The download&rsquo;s
+            People sheet is included for {SCHOLAR_EXPORT_CAP} or fewer people.
           </p>
         </div>
       </div>

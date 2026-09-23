@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { Download } from "lucide-react";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
+import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { citationIdentifier } from "@/lib/citation";
 import type {
@@ -716,13 +718,12 @@ export function MentoredPublicationsTable({
           <strong>{publications.length.toLocaleString()}</strong> distinct{" "}
           {publications.length === 1 ? "publication" : "publications"}
         </p>
-        <a
-          href={downloadHref}
-          className="bg-apollo-maroon text-apollo-maroon-foreground hover:bg-apollo-maroon/90 inline-flex h-8 items-center rounded-md px-3 text-sm font-medium"
-          data-testid="mentored-pubs-download"
-        >
-          Download .xlsx
-        </a>
+        <Button asChild variant="apollo" size="sm">
+          <a href={downloadHref} data-testid="mentored-pubs-download">
+            <Download className="size-4" aria-hidden />
+            Download .xlsx
+          </a>
+        </Button>
       </div>
       {view === "publications" ? (
         <PublicationsView rows={publications} allMode={allMode} filters={children} />
