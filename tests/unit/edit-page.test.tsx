@@ -546,10 +546,18 @@ describe("EditPage router — the Apollo shell + rail", () => {
     }
   });
 
-  it("?attr=name-title renders the read-only panel with Request a Change", () => {
+  it("?attr=name-title renders the read-only panel with a Request a change link per row", () => {
     render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
     expect(screen.getByText("This section is not editable.")).toBeTruthy();
-    expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
+    // One link per row replaces the panel-level trigger.
+    expect(screen.queryByTestId("request-a-change-toggle")).toBeNull();
+    for (const row of ["name", "title", "degrees", "department", "institution"]) {
+      expect(screen.getByTestId(`request-a-change-row-${row}`)).toBeTruthy();
+    }
+    // A row's link opens the router with that row's issue already selected.
+    fireEvent.click(screen.getByTestId("request-a-change-row-degrees"));
+    const radio = within(screen.getByTestId("rac-issue-degrees-wrong")).getByRole("radio");
+    expect(radio.getAttribute("aria-checked")).toBe("true");
     // Email moved to its own tab — the Name & Title panel no longer echoes it.
     expect(screen.queryByText("self01@med.cornell.edu")).toBeNull();
     // Institution row: the home code is named, not echoed bare.

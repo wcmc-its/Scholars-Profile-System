@@ -1159,9 +1159,10 @@ function renderPanel(
           heading="Name & title"
           description="Name, title, degrees, department, and institution come from the WCM directory and faculty records."
           fields={[
-            { label: "Name", value: ctx.scholar.fullName },
+            { label: "Name", value: ctx.scholar.fullName, issueId: "name-wrong" },
             {
               label: "Title",
+              issueId: "title-wrong",
               // #2719 — the one editable row on an otherwise read-only panel.
               // Operators (superuser / comms_steward / unit admin) pick; the
               // scholar and their proxy request. Null picker state = flag off,
@@ -1181,8 +1182,8 @@ function renderPanel(
                 ctx.scholar.primaryTitle
               ),
             },
-            { label: "Degrees", value: ctx.scholar.postnominal },
-            { label: "Department", value: ctx.scholar.primaryDepartment },
+            { label: "Degrees", value: ctx.scholar.postnominal, issueId: "degrees-wrong" },
+            { label: "Department", value: ctx.scholar.primaryDepartment, issueId: "department-wrong" },
             {
               label: "Institution",
               value: ctx.scholar.primaryOrgCode
