@@ -68,11 +68,11 @@ describe("TitleField — radio list", () => {
     expect(screen.getAllByTestId("working-title-help")).toHaveLength(1);
   });
 
-  it("marks the saved row Current and starts clean (Save disabled, no Cancel)", () => {
+  it("marks the saved row Displayed and starts clean (no Save, no Cancel)", () => {
     renderField();
-    expect(within(screen.getByTestId("title-option-working")).getByText("Current")).toBeTruthy();
-    expect(screen.getAllByText("Current")).toHaveLength(1);
-    expect(save().hasAttribute("disabled")).toBe(true);
+    expect(within(screen.getByTestId("title-option-working")).getByText("Displayed")).toBeTruthy();
+    expect(screen.getAllByText("Displayed")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
@@ -84,17 +84,21 @@ describe("TitleField — radio list", () => {
     expect(screen.getByText("Unsaved change")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId("title-option-working").getAttribute("aria-checked")).toBe("true");
-    expect(save().hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
-  it("Save posts the chosen title, moves Current, says Saved and refreshes the header", async () => {
+  it("Save posts the chosen title, moves Displayed, says Saved and refreshes the header", async () => {
     renderField();
     fireEvent.click(screen.getByTestId("title-option-primary"));
     fireEvent.click(save());
-    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(
+        "Saved. The profile header now shows this title.",
+      ),
+    );
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
     expect(body).toMatchObject({ fieldName: "primaryTitle", value: "Professor of Medicine" });
-    expect(within(screen.getByTestId("title-option-primary")).getByText("Current")).toBeTruthy();
+    expect(within(screen.getByTestId("title-option-primary")).getByText("Displayed")).toBeTruthy();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
