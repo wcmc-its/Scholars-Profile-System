@@ -236,21 +236,23 @@ export type DataQualityResult = {
 };
 
 /** Rank facet values, highest first. */
-export const RANK_FILTERS = ["professor", "associate", "assistant", "instructor", "lecturer"] as const;
+export const RANK_FILTERS = ["professor", "associate", "assistant", "instructor"] as const;
 export type RankFilter = (typeof RANK_FILTERS)[number];
 const RANK_LABELS: Record<RankFilter, string> = {
   professor: "Professor",
   associate: "Associate Professor",
   assistant: "Assistant Professor",
-  instructor: "Instructor",
-  lecturer: "Lecturer",
+  instructor: "Instructor / Lecturer",
 };
 /** Person types the Rank facet supersedes (hidden from the Person type facet). */
 const RANK_SUBSUMED_TYPES = ["instructor", "lecturer"] as const;
 
-const titleContains = (word: string): Prisma.ScholarWhereInput => ({
+const titleContainsAny = (words: readonly string[]): Prisma.ScholarWhereInput => ({
   professorialRank: null,
-  OR: [{ primaryTitle: { contains: word } }, { edPrimaryTitle: { contains: word } }],
+  OR: words.flatMap((w) => [
+    { primaryTitle: { contains: w } },
+    { edPrimaryTitle: { contains: w } },
+  ]),
 });
 
 /**
@@ -265,8 +267,8 @@ const RANK_WHERE: Record<RankFilter, Prisma.ScholarWhereInput> = {
   professor: { professorialRank: "Professor" },
   associate: { professorialRank: "Associate Professor" },
   assistant: { professorialRank: "Assistant Professor" },
-  instructor: titleContains("Instructor"),
-  lecturer: titleContains("Lecturer"),
+  // One rank: both are non-professorial teaching titles (27 Lecturers in prod).
+  instructor: titleContainsAny(["Instructor", "Lecturer"]),
 };
 
 const DEFAULT_LIMIT = 50;
