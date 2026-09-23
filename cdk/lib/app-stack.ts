@@ -1679,11 +1679,9 @@ export class AppStack extends Stack {
         // until an ED ETL run populates them. Flip only AFTER a run, or the
         // picker has nothing to offer.
         //
-        // PROD IS SPLIT ON PURPOSE: app ON, ETL still OFF. With the ETL copy off,
-        // the post-pass resolves override ?? ED primary title, so no public title
-        // changes. The picker, though, lets operators pin the ED primary for the
-        // 7 working titles that are worse than today's BEFORE the ETL copy flips.
-        // Flip etl-stack.ts's prod value only after those pins are in.
+        // Prod rolled out as a split flip: app first, so operators could pin the
+        // ED primary for the 8 derived titles that read worse than today's
+        // (2026-09-23), then the ETL copy. Both on in both envs since then.
         SCHOLAR_TITLE_RESOLUTION: "on",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
