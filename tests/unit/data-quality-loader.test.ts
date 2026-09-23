@@ -361,6 +361,7 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     expect(clause.OR[0]).toEqual({ professorialRank: "Professor" });
     expect(clause.OR[1].professorialRank).toBeNull();
     expect(JSON.stringify(clause.OR[1].OR)).toContain('"contains":"Instructor"');
+    expect(JSON.stringify(clause.OR[1].OR)).toContain('"contains":"Lecturer"');
   });
 
   it("builds a tag-stripped overview excerpt, override winning", async () => {
@@ -495,6 +496,10 @@ describe("classifyLeadership — title heuristic (#1)", () => {
     ["Provost", 1, "Provost"],
     ["President, Cornell University", 1, "President"],
     ["EVP for Health", 1, "EVP"],
+    // A bare /president/ used to tag every VP "President".
+    ["Vice President and Chief Global Information Officer", 1, "Vice President"],
+    ["Senior Vice President for External Affairs", 1, "Senior Vice President"],
+    ["Executive Vice President for Health", 1, "EVP"],
     // The load-bearing demotion: Emeritus wins over the Provost/Dean branches.
     ["Provost for Medical Affairs and Dean Emeritus", 3, null], // amg2004
     ["Dean Emeritus", 3, null], // dalonso
