@@ -35,8 +35,10 @@ import { NEWS_ORIGIN, type ScrapedArticle } from "./seed";
  *  deliveries show which of those survive the list server. */
 const CLIPS_FROM_RE = /@med\.cornell\.edu>?\s*$/i;
 const SUBJECT_RE = /\bin the news\b/i;
-/** Replies and forwards of the digest also land in the bucket via the list. */
-const REPLY_RE = /^\s*(re|fw|fwd)\s*:/i;
+/** Replies to the digest also land in the bucket via the list, usually without
+ *  the digest body. Forwards are kept: a forwarded digest carries the whole
+ *  digest (that is how the 2026 backlog arrives), and it parses the same. */
+const REPLY_RE = /^\s*re\s*:/i;
 /** A zero-clip digest fails the run only while it is this fresh, so one stray
  *  email reds at most a night or two, while real format drift (every new
  *  digest) keeps the step red. */
