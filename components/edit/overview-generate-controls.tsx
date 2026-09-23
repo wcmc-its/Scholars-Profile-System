@@ -1,22 +1,20 @@
 /**
- * OverviewGenerateControls — the steering panel for the overview-statement
- * generator (#742 Phase A, `docs/overview-statement-generator-spec.md` §
- * Generation options). Renders voice / tone / length as compact segmented
- * pills, an "include & emphasize" wrapped row of coral checkbox chips, and a
- * free-text instructions note; the chosen {@link OverviewParams} ride along on
- * the next Generate request.
+ * OverviewGenerateControls — the steering sections of the overview "Draft with
+ * AI" rail (#742 Phase A, `docs/overview-statement-generator-spec.md` §
+ * Generation options; two-column layout per the 2026-09-23 "Overview editor,
+ * two-column" canvas). Renders, as rail sections separated by hairlines:
  *
- * #875 re-skin — radios become segmented pills and the checkbox grid becomes a
- * single wrapped chip row (coral fill when selected). The a11y semantics are
- * UNCHANGED: pills still wrap a real `RadioGroupItem` (so it carries the
- * `disabled` attribute + `aria-checked` + the testid), and chips still wrap a
- * real `Checkbox`. Only the visual treatment changed.
+ *   1. Voice + Length as soft segmented bars, and a single "Tone & audience"
+ *      select that sets BOTH `tone` and `audience` (see {@link TONE_AUDIENCE});
+ *   2. "Emphasize" — a wrapped row of ✓ chips, with `emphasisNote` (the
+ *      awards-won't-be-mentioned / sparse-sources hints) under it;
+ *   3. `sources` — the parent's Sources summary row;
+ *   4. Additional instructions.
  *
- * This is a pure controlled input surface: it owns no params state and triggers
- * no fetch. The parent (`overview-card.tsx`) holds the params and the Generate
- * button — keeping the network/seed logic in one place and this component a
- * dumb, fully-testable editor of the value. Untrusted instructions are clamped
- * client-side at {@link OVERVIEW_INSTRUCTIONS_MAX} (the server re-normalizes).
+ * The a11y semantics are unchanged from the #875 skin: segments wrap a real
+ * `RadioGroupItem`, chips wrap a real `Checkbox`. A pure controlled surface —
+ * the parent (`overview-card.tsx`) owns params, the Generate button and the
+ * superuser-only Advanced block (prompt version / model / payload).
  */
 "use client";
 
@@ -26,7 +24,6 @@ import { SegmentedField } from "@/components/edit/segmented-field";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  OVERVIEW_AUDIENCES,
   OVERVIEW_ELEMENTS,
   OVERVIEW_INSTRUCTIONS_MAX,
   type OverviewAudience,
@@ -36,65 +33,54 @@ import {
   type OverviewTone,
   type OverviewVoice,
 } from "@/lib/edit/overview-params";
-import {
-  humanizeModelId,
-  promptVersionElementLabel,
-  type OverviewPromptVersionId,
-  type OverviewPromptVersionMeta,
-} from "@/lib/edit/overview-prompt-versions";
-import { estimateDraftCostUsd } from "@/lib/llm/pricing";
+import { promptVersionElementLabel } from "@/lib/edit/overview-prompt-versions";
 import { cn } from "@/lib/utils";
 
 type OverviewGenerateControlsProps = {
   value: OverviewParams;
   onChange: (next: OverviewParams) => void;
   disabled?: boolean;
-  /**
-   * The selectable prompt versions (#742), each carrying its RESOLVED effective
-   * model (the server fills `model`). Only superuser / curator surfaces pass these
-   * with {@link canSelectPromptVersion} true; a faculty owner never sees the
-   * selector and always generates on the live default.
-   */
-  promptVersions?: OverviewPromptVersionMeta[];
-  /** Whether to render the version selector (superuser / curator only). */
-  canSelectPromptVersion?: boolean;
+  /** Rendered under the Emphasize chips (the §6 pre-generation hints). */
+  emphasisNote?: React.ReactNode;
+  /** The Sources row, rendered between Emphasize and Additional instructions. */
+  sources?: React.ReactNode;
 };
 
 const VOICE_OPTIONS: { value: OverviewVoice; label: string }[] = [
   { value: "third", label: "Third person" },
   { value: "first", label: "First person" },
 ];
-const TONE_OPTIONS: { value: OverviewTone; label: string }[] = [
-  { value: "formal", label: "Formal" },
-  { value: "neutral", label: "Neutral" },
-  { value: "conversational", label: "Conversational" },
-];
 const LENGTH_OPTIONS: { value: OverviewLength; label: string }[] = [
   { value: "short", label: "Short" },
   { value: "standard", label: "Standard" },
   { value: "extended", label: "Extended" },
 ];
-// Audience tiers (least → most technical), derived from the canonical list so the
-// control and the prompt directive can never drift. The short `label` rides the button;
-// the full `hint` becomes a hover/focus tooltip (`title`) on each segment.
-const AUDIENCE_OPTIONS: { value: OverviewAudience; label: string; title: string }[] =
-  OVERVIEW_AUDIENCES.map((a) => ({ value: a.key, label: a.label, title: a.hint }));
 
-// The compact uppercase section-label style shared by the panel's non-segmented labels
-// (version selector, emphasize, instructions) so they match the SegmentedField legends.
-const COMPACT_LABEL =
-  "text-muted-foreground mb-1 block text-[11px] font-semibold tracking-wide uppercase";
+/**
+ * The combined "Tone & audience" select. Keyed by audience tier; picking one
+ * sets both params. `neutral`/`conversational` tone are no longer offered
+ * separately (the normalizer still accepts them, so old history rows load).
+ */
+export const TONE_AUDIENCE: {
+  audience: OverviewAudience;
+  tone: OverviewTone;
+  label: string;
+}[] = [
+  { audience: "accessible", tone: "neutral", label: "Plain · general public" },
+  { audience: "informed", tone: "formal", label: "Formal · informed readers" },
+  { audience: "technical", tone: "formal", label: "Technical · specialists" },
+];
+
+const RAIL_LABEL = "text-muted-foreground text-xs font-semibold";
+const RAIL_SECTION = "border-apollo-rail-border flex flex-col border-b px-4 py-3.5";
 
 export function OverviewGenerateControls({
   value,
   onChange,
   disabled = false,
-  promptVersions = [],
-  canSelectPromptVersion = false,
+  emphasisNote,
+  sources,
 }: OverviewGenerateControlsProps) {
-  const showVersionSelector = canSelectPromptVersion && promptVersions.length > 0;
-  const selectedVersion = promptVersions.find((v) => v.id === value.promptVersion);
-
   function toggleElement(key: OverviewElement, checked: boolean) {
     const present = value.elements.includes(key);
     if (checked === present) return;
@@ -105,66 +91,9 @@ export function OverviewGenerateControls({
     onChange({ ...value, elements });
   }
 
-  const instructionsLen = value.instructions.length;
-
   return (
-    <div className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4">
-      {showVersionSelector && (
-        <fieldset className="flex flex-col gap-2" data-testid="overview-prompt-version-field">
-          <legend className={COMPACT_LABEL}>Prompt version</legend>
-          <span className="text-muted-foreground text-xs">
-            Visible to superusers and curators only.
-          </span>
-          <select
-            value={value.promptVersion}
-            disabled={disabled}
-            onChange={(e) =>
-              onChange({ ...value, promptVersion: e.target.value as OverviewPromptVersionId })
-            }
-            aria-label="Prompt version"
-            aria-describedby="overview-prompt-version-desc"
-            className={cn(
-              "border-apollo-border-strong bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
-              disabled && "cursor-not-allowed opacity-60",
-            )}
-            data-testid="overview-prompt-version"
-          >
-            {promptVersions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
-            ))}
-          </select>
-          {selectedVersion?.description && (
-            <span id="overview-prompt-version-desc" className="text-muted-foreground text-xs">
-              {selectedVersion.description}
-            </span>
-          )}
-          {selectedVersion?.model && (
-            <span
-              className="text-muted-foreground text-xs"
-              data-testid="overview-prompt-version-model"
-            >
-              Model: {humanizeModelId(selectedVersion.model)}
-            </span>
-          )}
-          {selectedVersion?.model && estimateDraftCostUsd(selectedVersion.model) != null && (
-            <span
-              className="text-muted-foreground text-xs"
-              data-testid="overview-prompt-version-cost"
-            >
-              ~${estimateDraftCostUsd(selectedVersion.model)!.toFixed(2)} per draft (estimate)
-            </span>
-          )}
-        </fieldset>
-      )}
-      {/* Compact 2x2 grid: Voice | Tone, then Length | Audience. Collapses to one
-          column on a narrow panel. Each control is the full-width connected `compact`
-          segmented bar; the audience tiers carry their full description as a tooltip. */}
-      <div
-        className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2"
-        data-testid="overview-generate-grid"
-      >
+    <>
+      <div className={cn(RAIL_SECTION, "gap-3.5")} data-testid="overview-generate-grid">
         <SegmentedField
           legend="Voice"
           name="overview-voice"
@@ -172,16 +101,8 @@ export function OverviewGenerateControls({
           value={value.voice}
           disabled={disabled}
           compact
+          soft
           onValueChange={(v) => onChange({ ...value, voice: v as OverviewVoice })}
-        />
-        <SegmentedField
-          legend="Tone"
-          name="overview-tone"
-          options={TONE_OPTIONS}
-          value={value.tone}
-          disabled={disabled}
-          compact
-          onValueChange={(v) => onChange({ ...value, tone: v as OverviewTone })}
         />
         <SegmentedField
           legend="Length"
@@ -190,22 +111,38 @@ export function OverviewGenerateControls({
           value={value.length}
           disabled={disabled}
           compact
+          soft
           onValueChange={(v) => onChange({ ...value, length: v as OverviewLength })}
         />
-        <SegmentedField
-          legend="Audience"
-          name="overview-audience"
-          options={AUDIENCE_OPTIONS}
-          value={value.audience}
-          disabled={disabled}
-          compact
-          onValueChange={(v) => onChange({ ...value, audience: v as OverviewAudience })}
-        />
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="overview-tone-audience" className={RAIL_LABEL}>
+            Tone &amp; audience
+          </label>
+          <select
+            id="overview-tone-audience"
+            value={value.audience}
+            disabled={disabled}
+            onChange={(e) => {
+              const pick = TONE_AUDIENCE.find((t) => t.audience === e.target.value);
+              if (pick) onChange({ ...value, audience: pick.audience, tone: pick.tone });
+            }}
+            className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-md border px-2.5 text-[13px] disabled:opacity-60"
+            data-testid="overview-tone-audience"
+          >
+            {TONE_AUDIENCE.map((t) => (
+              <option key={t.audience} value={t.audience}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className={COMPACT_LABEL}>Include &amp; emphasize</legend>
-        <div className="flex flex-wrap gap-2">
+      <div role="group" aria-labelledby="overview-emphasize-label" className={cn(RAIL_SECTION, "gap-2")}>
+        <span id="overview-emphasize-label" className={RAIL_LABEL}>
+          Emphasize
+        </span>
+        <div className="flex flex-wrap gap-1.5">
           {OVERVIEW_ELEMENTS.map(({ key, label }) => {
             const id = `overview-element-${key}`;
             const checked = value.elements.includes(key);
@@ -217,10 +154,10 @@ export function OverviewGenerateControls({
                 key={key}
                 htmlFor={id}
                 className={cn(
-                  "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors select-none",
+                  "inline-flex h-7 cursor-pointer items-center rounded-full border px-2.5 text-[13px] transition-colors select-none",
                   checked
-                    ? "border-apollo-coral-tint-border bg-apollo-coral-tint text-apollo-coral-foreground"
-                    : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
+                    ? "bg-apollo-surface text-foreground border-[#8a847c] font-medium"
+                    : "border-apollo-border-strong text-muted-foreground hover:text-foreground bg-transparent",
                   disabled && "cursor-not-allowed opacity-60",
                 )}
               >
@@ -232,15 +169,19 @@ export function OverviewGenerateControls({
                   onCheckedChange={(c) => toggleElement(key, c === true)}
                   data-testid={`overview-element-${key}`}
                 />
+                {checked && <span aria-hidden="true">✓&nbsp;</span>}
                 {displayLabel}
               </label>
             );
           })}
         </div>
-      </fieldset>
+        {emphasisNote}
+      </div>
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="overview-instructions" className={COMPACT_LABEL}>
+      {sources}
+
+      <div className={cn(RAIL_SECTION, "gap-1.5")}>
+        <label htmlFor="overview-instructions" className={RAIL_LABEL}>
           Additional instructions
         </label>
         <Textarea
@@ -249,18 +190,21 @@ export function OverviewGenerateControls({
           maxLength={OVERVIEW_INSTRUCTIONS_MAX}
           disabled={disabled}
           rows={2}
-          placeholder="e.g. mention my work on pediatric trials; keep it accessible to a general audience."
+          placeholder="e.g. mention the RECOVER long COVID work"
+          className="bg-apollo-surface text-[13px]"
           onChange={(e) => onChange({ ...value, instructions: e.target.value })}
           data-testid="overview-instructions"
         />
-        <span
-          aria-live="polite"
-          className="text-muted-foreground self-end text-xs tabular-nums"
-          data-testid="overview-instructions-count"
-        >
-          {instructionsLen}/{OVERVIEW_INSTRUCTIONS_MAX}
-        </span>
+        {value.instructions.length > 0 && (
+          <span
+            aria-live="polite"
+            className="text-muted-foreground self-end text-xs tabular-nums"
+            data-testid="overview-instructions-count"
+          >
+            {value.instructions.length}/{OVERVIEW_INSTRUCTIONS_MAX}
+          </span>
+        )}
       </div>
-    </div>
+    </>
   );
 }

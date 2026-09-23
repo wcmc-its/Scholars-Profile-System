@@ -1,14 +1,16 @@
 /**
- * `components/edit/overview-source-drawer.tsx` (#742 §2 / Phase 2). The Sources
- * trigger summarizes what the committed deltas RESOLVE to; clicking it opens the
- * drawer over a BUFFERED local copy of the deltas. The header status line counts
- * divergences ("Using your recommended set · N pinned · M hidden"). Done commits
- * the buffer; Close / Escape discard; Reset to recommended clears the buffer.
+ * `components/edit/overview-source-drawer.tsx` (#742 §2 / Phase 2). The rail's
+ * Sources row summarizes what the committed deltas RESOLVE to; the inline panel
+ * edits a BUFFERED local copy and hands it back on close (Done or "‹ Overview").
+ * The status line counts divergences ("Using your recommended set · N hidden").
  */
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import { OverviewSourceDrawer } from "@/components/edit/overview-source-drawer";
+import {
+  OverviewSourcePanel,
+  OverviewSourcesRow,
+} from "@/components/edit/overview-source-drawer";
 import type { OverviewSourceOptions } from "@/lib/edit/overview-facts";
 import {
   DEFAULT_OVERVIEW_SELECTION_DELTAS,
@@ -30,98 +32,94 @@ function deltas(over: Partial<OverviewSelectionDeltas> = {}): OverviewSelectionD
   return { ...DEFAULT_OVERVIEW_SELECTION_DELTAS, ...over };
 }
 
-describe("OverviewSourceDrawer — trigger row", () => {
-  it("shows a loading state and disables the trigger until options arrive", () => {
-    render(<OverviewSourceDrawer options={null} deltas={deltas()} onCommit={() => {}} />);
-    expect(screen.getByText("Loading your sources…")).toBeTruthy();
+describe("OverviewSourcesRow", () => {
+  it("shows a loading state and disables Edit until options arrive", () => {
+    render(<OverviewSourcesRow options={null} deltas={deltas()} open={false} onToggle={() => {}} />);
+    expect(screen.getByText("Loading sources…")).toBeTruthy();
     expect(screen.getByTestId("overview-sources-trigger").hasAttribute("disabled")).toBe(true);
   });
 
   it("summarizes what the deltas resolve to against the auto-set", () => {
-    // Empty deltas → just the default-selected pub 11 + grant g1.
     const { rerender } = render(
-      <OverviewSourceDrawer options={OPTIONS} deltas={deltas()} onCommit={() => {}} />,
+      <OverviewSourcesRow options={OPTIONS} deltas={deltas()} open={false} onToggle={() => {}} />,
     );
     expect(screen.getByText("1 publication · 1 award")).toBeTruthy();
-    // Pinning the non-default pub 33 lifts the resolved count to two.
     rerender(
-      <OverviewSourceDrawer
+      <OverviewSourcesRow
         options={OPTIONS}
         deltas={deltas({ pinned: { publication: ["33"] } })}
-        onCommit={() => {}}
+        open={false}
+        onToggle={() => {}}
       />,
     );
     expect(screen.getByText("2 publications · 1 award")).toBeTruthy();
   });
 
-  it("adds a methods band to the summary when tools are selected", () => {
+  it("adds a methods band when the scholar has tools", () => {
     const withTools: OverviewSourceOptions = {
       ...OPTIONS,
       tools: [{ toolName: "AAV", category: "vector", pmidCount: 12, maxConfidence: 0.9, defaultSelected: true }],
     };
-    render(<OverviewSourceDrawer options={withTools} deltas={deltas()} onCommit={() => {}} />);
+    render(<OverviewSourcesRow options={withTools} deltas={deltas()} open={false} onToggle={() => {}} />);
     expect(screen.getByText("1 publication · 1 award · 1 method")).toBeTruthy();
+  });
+
+  it("reads Edit when closed and Close when open", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <OverviewSourcesRow options={OPTIONS} deltas={deltas()} open={false} onToggle={onToggle} />,
+    );
+    fireEvent.click(screen.getByTestId("overview-sources-trigger"));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("overview-sources-trigger").textContent).toBe("Edit");
+    rerender(<OverviewSourcesRow options={OPTIONS} deltas={deltas()} open onToggle={onToggle} />);
+    expect(screen.getByTestId("overview-sources-trigger").textContent).toBe("Close");
   });
 });
 
-describe("OverviewSourceDrawer — open / status line", () => {
-  it("opens the drawer with the picker and the recommended-set status line", () => {
-    render(<OverviewSourceDrawer options={OPTIONS} deltas={deltas()} onCommit={() => {}} />);
-    expect(screen.queryByTestId("overview-include-picker")).toBeNull();
-    fireEvent.click(screen.getByTestId("overview-sources-trigger"));
+describe("OverviewSourcePanel — buffered edits", () => {
+  it("shows the picker and reflects buffered divergences in the status line", () => {
+    render(<OverviewSourcePanel options={OPTIONS} deltas={deltas()} onClose={() => {}} />);
     expect(screen.getByTestId("overview-include-picker")).toBeTruthy();
     expect(screen.getByTestId("overview-sources-statusline").textContent).toBe(
       "Using your recommended set",
     );
-  });
-
-  it("reflects buffered divergences in the status line", () => {
-    render(<OverviewSourceDrawer options={OPTIONS} deltas={deltas()} onCommit={() => {}} />);
-    fireEvent.click(screen.getByTestId("overview-sources-trigger"));
     fireEvent.click(screen.getByTestId("overview-source-exclude-publication-11"));
     expect(screen.getByTestId("overview-sources-statusline").textContent).toBe(
       "Using your recommended set · 1 hidden",
     );
   });
-});
 
-describe("OverviewSourceDrawer — buffered Done / discard contract (#875 §5)", () => {
-  it("Done commits the edited deltas to the parent", () => {
-    const onCommit = vi.fn();
-    render(<OverviewSourceDrawer options={OPTIONS} deltas={deltas()} onCommit={onCommit} />);
-    fireEvent.click(screen.getByTestId("overview-sources-trigger"));
-    fireEvent.click(screen.getByTestId("overview-source-exclude-publication-11"));
-    expect(onCommit).not.toHaveBeenCalled();
+  it.each(["overview-sources-done", "overview-sources-back"])(
+    "%s hands the edited deltas back",
+    (testId) => {
+      const onClose = vi.fn();
+      render(<OverviewSourcePanel options={OPTIONS} deltas={deltas()} onClose={onClose} />);
+      fireEvent.click(screen.getByTestId("overview-source-exclude-publication-11"));
+      expect(onClose).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByTestId(testId));
+      expect(onClose).toHaveBeenCalledWith(
+        expect.objectContaining({ excluded: expect.objectContaining({ publication: ["11"] }) }),
+      );
+    },
+  );
+
+  it("closing untouched hands back the SAME deltas object (no write)", () => {
+    const onClose = vi.fn();
+    const d = deltas();
+    render(<OverviewSourcePanel options={OPTIONS} deltas={d} onClose={onClose} />);
     fireEvent.click(screen.getByTestId("overview-sources-done"));
-    expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ excluded: expect.objectContaining({ publication: ["11"] }) }),
-    );
-  });
-
-  it("Close discards the buffer — the parent is untouched and the buffer re-seeds", () => {
-    const onCommit = vi.fn();
-    render(<OverviewSourceDrawer options={OPTIONS} deltas={deltas()} onCommit={onCommit} />);
-    fireEvent.click(screen.getByTestId("overview-sources-trigger"));
-    fireEvent.click(screen.getByTestId("overview-source-exclude-publication-11"));
-    fireEvent.click(screen.getByRole("button", { name: /close/i }));
-    expect(onCommit).not.toHaveBeenCalled();
-    // Re-open: the abandoned veto is gone (status line back to recommended).
-    fireEvent.click(screen.getByTestId("overview-sources-trigger"));
-    expect(screen.getByTestId("overview-sources-statusline").textContent).toBe(
-      "Using your recommended set",
-    );
+    expect(onClose.mock.calls[0][0]).toBe(d);
   });
 
   it("Reset to recommended clears the buffered deltas", () => {
     render(
-      <OverviewSourceDrawer
+      <OverviewSourcePanel
         options={OPTIONS}
         deltas={deltas({ excluded: { publication: ["11"] } })}
-        onCommit={() => {}}
+        onClose={() => {}}
       />,
     );
-    fireEvent.click(screen.getByTestId("overview-sources-trigger"));
     expect(screen.getByTestId("overview-sources-statusline").textContent).toBe(
       "Using your recommended set · 1 hidden",
     );
@@ -129,5 +127,12 @@ describe("OverviewSourceDrawer — buffered Done / discard contract (#875 §5)",
     expect(screen.getByTestId("overview-sources-statusline").textContent).toBe(
       "Using your recommended set",
     );
+  });
+
+  it("warns the reviewed draft is stale only once sources actually change", () => {
+    render(<OverviewSourcePanel options={OPTIONS} deltas={deltas()} onClose={() => {}} staleDraft />);
+    expect(screen.queryByText(/Regenerate to update the draft/)).toBeNull();
+    fireEvent.click(screen.getByTestId("overview-source-exclude-publication-11"));
+    expect(screen.getByText(/Regenerate to update the draft/)).toBeTruthy();
   });
 });

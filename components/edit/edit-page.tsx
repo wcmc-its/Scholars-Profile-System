@@ -1282,6 +1282,7 @@ function renderPanel(
           // Stream the generate response (progress bar + CDN idle-timeout protection) only
           // where the sub-flag is on (staging-first); off ⇒ the buffered path, unchanged.
           streamEnabled={isOverviewGenerateStreamEnabled()}
+          scholarName={mode === "self" ? undefined : scholarName}
         />
       );
     case "highlights":
