@@ -22,17 +22,22 @@ Originally the CTA handed off to ReCiter Publication Manager's Manage Profile pa
 
 ## The write: `POST /api/edit/orcid`
 
-Body `{ cwid, orcid, confirmedSuggestion? }`. The iD is normalized and checksummed (`lib/edit/orcid.ts`, ISO 7064 MOD 11-2): a typo is a 400, never a wrong iD on file. Authorization is `authorizeOverviewWrite` keyed on `cwid` (self, superuser, comms_steward, proxy, unit-admin). Then two writes, in this order:
+Body `{ cwid, orcid, confirmedSuggestion?, dismiss? }`. Every iD, `dismiss` entries included, is normalized and checksummed (`lib/edit/orcid.ts`, ISO 7064 MOD 11-2): a typo is a 400, never a wrong iD on file. Authorization is `authorizeOverviewWrite` keyed on `cwid` (self, superuser, comms_steward, proxy, unit-admin).
 
-1. ReciterDB `admin_orcid` upsert, the table PM's Manage Profile writes: what the nightly `etl:orcid-candidates` mirror grades as asserted, and the source IC #155 (open) asks the Institutional Client to merge into DynamoDB `Identity.orcid` so ReCiter's `[auid]` retrieval fires. Unreachable → 502 `reciter_unavailable` and nothing has changed.
-2. `scholar.orcid` + the B03 audit row `orcid_set` (`confirmed_suggestion: true` when it came from the suggestion), one transaction, then profile revalidation. This makes the row, the biosketch worksheet, and the dashboard flip immediately. If it fails after (1), the mirror repairs it tonight.
+SPS is the durable record. The route runs one `db.write` transaction and calls nothing outside SPS; ReciterDB `admin_orcid` is not written (RPM stopped writing it 2026-04-05, and nothing reads it back into Identity). Inside the transaction:
 
-Clearing an iD is not offered; PM's reset endpoint still exists for that.
+- The iD on file is re-read from `scholar.orcid` on the writer, not the reader, so a lagged replica cannot hide a confirm made a moment earlier.
+- Set / confirm (`orcid` non-null): `scholar.orcid` = the iD, `orcid_confirmed_at` = now, and any `orcid_dismissal` row for exactly this (cwid, iD) is deleted, since the person is re-confirming an iD they once removed.
+- Remove (`orcid: null`): `scholar.orcid` and `orcid_confirmed_at` are nulled. Every iD that made up "on file" gets an `orcid_dismissal` row: `scholar.orcid` and the iD on each `rpm_admin` candidate row. The local `rpm_admin` rows are deleted so the card flips now instead of after the 07:00 UTC re-mirror. The dismissal is what keeps a removed iD gone: the mirror re-creates `rpm_admin` rows from the still-populated `admin_orcid` every night, and every `orcid_candidate` reader drops dismissed pairs (`withoutDismissed`).
+- `dismiss`: competing iDs the person rejected in the same action each get an `orcid_dismissal` row. The card's conflict state sends the suggested iD with "Keep the iD on file" (which confirms the on-file iD) and with "Remove both". `dismiss` may not include the iD being set.
+- The B03 audit row `orcid_set`. `before` is the displayed iD (`scholar.orcid`, else the `rpm_admin` iD). `after` carries `removed: true` on a remove, `dismissed: [...]` when any dismissal was written, and `confirmed_suggestion: true` when the iD came from the suggestion.
+
+Then profile revalidation, so the row, the biosketch worksheet and the dashboard flip immediately. The nightly `etl:orcid-push` (before `etl:identity`) carries `scholar.orcid` into WCM Identity and clears a dismissed iD Identity still holds.
 
 ## Code
 
 - `lib/edit/orcid-coverage.ts` — `orcidVerdict(rows, minAccepted)`: `{ tier, orcid, accepted }`, the per-cwid fold extracted from `orcidTiers()` (which now calls it with the console default). One rule, two support bars.
-- `lib/api/edit-context.ts` — `opts.includeOrcidSuggestion` → `client.orcidCandidate.findMany({ where: { cwid } })` → `ctx.orcidVerdict` (null when off).
+- `lib/api/edit-context.ts` — `opts.includeOrcidSuggestion` → `client.orcidCandidate.findMany` and `client.orcidDismissal.findMany` for the cwid → `withoutDismissed` → `ctx.orcidVerdict` (null when off).
 - `app/edit/page.tsx`, `app/edit/scholar/[cwid]/page.tsx` — pass `includeOrcidSuggestion: isOrcidSuggestionEnabled()`.
 - `components/edit/edit-page.tsx` — `orcidRowState(ctx)` feeds both `HomePanel` (`orcid` prop) and `OrcidValue` (`suggested` prop).
 - `components/edit/home-panel.tsx` — `OrcidItem`; `total` 4 → 5.
@@ -40,8 +45,8 @@ Clearing an iD is not offered; PM's reset endpoint still exists for that.
 
 ## Skipped
 
-- "Not mine" dismissal: needs a dismissal store and a way to keep the same iD from returning on the next mirror. The weak tier already withholds ambiguous iDs.
-- Clearing the iD from SPS; and showing the PMIDs behind the suggestion (the count is shown; the PMIDs are one query away in ReciterDB when someone asks).
+- A "Not mine" button on a suggestion-only card (nothing on file). The route can already record it (`orcid: null, dismiss: [iD]`); the card offers dismissal only in the conflict state and through Remove. The weak tier already withholds ambiguous iDs.
+- Showing the PMIDs behind the suggestion (the count is shown; the PMIDs are one query away in ReciterDB when someone asks).
 - Request a Change's "My ORCID is wrong or missing" still hands off to ReCiter Manage Profile; retarget it to the tab when prod flips on.
 - The console's strong tier stays at `STRONG_MIN_ACCEPTED` (3); the row asks at 1 accepted article (`SUGGEST_MIN_ACCEPTED`), so the row is deliberately more permissive than the console's "strong" count.
 

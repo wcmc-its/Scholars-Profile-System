@@ -63,16 +63,36 @@ beforeEach(() => {
             roleCategory: "full_time_faculty",
             primaryDepartment: "Dept A",
             orcid: "0000-0002-1825-0097",
+            orcidConfirmedAt: new Date("2026-09-20T00:00:00Z"),
           },
           {
             cwid: "f2",
             roleCategory: "full_time_faculty",
             primaryDepartment: "Dept A",
             orcid: null,
+            orcidConfirmedAt: null,
           },
-          { cwid: "p1", roleCategory: "postdoc", primaryDepartment: "Dept B", orcid: null },
+          {
+            // An iD from Identity / RPM admin: asserted, NOT confirmed here.
+            cwid: "f3",
+            roleCategory: "full_time_faculty",
+            primaryDepartment: "Dept A",
+            orcid: "0000-0000-0000-001X",
+            orcidConfirmedAt: null,
+          },
+          {
+            cwid: "p1",
+            roleCategory: "postdoc",
+            primaryDepartment: "Dept B",
+            orcid: null,
+            orcidConfirmedAt: null,
+          },
         ],
-        [{ cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: true }],
+        [
+          { cwid: "f1", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: false },
+          { cwid: "f2", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: true },
+          { cwid: "f3", latestEnd: new Date("2027-01-01T00:00:00Z"), pi: false },
+        ],
         ["f2"],
         params,
         TODAY,
@@ -112,16 +132,31 @@ describe("/edit/orcid-coverage", () => {
     const page = within(getByTestId("orcid-coverage-page"));
     expect(h.mockLoad).toHaveBeenCalledWith({}, { role: null, nih: "ever", dept: null });
     expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
-      "1 of 3 with an asserted ORCID iD",
+      "2 of 4 with an asserted ORCID iD",
     );
     expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
-      "+1 strong inference (66.7% incl.)",
+      "+1 strong inference (75.0% incl.)",
+    );
+    // The asserted split: f1 confirmed its iD here, f3's came from Identity.
+    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
+      "1 confirmed here · 1 from Identity or RPM admin",
     );
     const byRole = within(page.getByTestId("orcid-coverage-by-role"));
     expect(byRole.getByText("Full-time faculty")).toBeTruthy();
     expect(byRole.queryByText("Postdoc")).toBeNull(); // nih=ever drops p1
     const byDept = within(page.getByTestId("orcid-coverage-by-dept"));
-    expect(byDept.getByText("Dept A")).toBeTruthy();
+    // Dept A under nih=ever: f1 (confirmed), f2 (none), f3 (Identity) → People 3,
+    // Asserted 2, Confirmed 1, strong 0 — every column distinct, so a swapped cell shows.
+    const deptA = byDept.getByText("Dept A").closest("tr")!;
+    const cells = [...deptA.querySelectorAll("td")].map((td) => td.textContent);
+    const headers = [
+      ...page.getByTestId("orcid-coverage-by-dept").querySelectorAll("thead th"),
+    ].map((th) => th.textContent);
+    const cell = (h: string) => cells[headers.indexOf(h)];
+    expect(cell("People")).toBe("3");
+    expect(cell("Asserted ORCID")).toBe("2");
+    expect(cell("Confirmed")).toBe("1");
+    expect(cell("Inferred, strong")).toBe("0");
     expect(page.getByTestId("orcid-coverage-download").getAttribute("href")).toBe(
       "/edit/orcid-coverage/export?role=all&nih=ever",
     );

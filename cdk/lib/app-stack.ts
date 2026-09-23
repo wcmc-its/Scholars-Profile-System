@@ -1643,14 +1643,15 @@ export class AppStack extends Stack {
         SELF_EDIT_RECITER_PENDING_HINT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // SELF_EDIT_ORCID_SUGGESTION — one kill switch for the ORCID surface: the
         // home board's inferred-iD suggestion from the nightly `orcid_candidate`
-        // mirror, the Identifiers & Profiles tab, and `POST /api/edit/orcid` — the
-        // first SPS write into ReciterDB (`admin_orcid`, the table Publication
-        // Manager writes). Off → the row still renders from `scholar.orcid`, its CTA
-        // hands off to ReCiter Manage Profile (campus-only), the tab is absent, the
-        // route 404s. ON in both envs since 2026-09-22 (staging soak, then the
-        // prod flip; the `pubsource_orcid_person` refresh it waited on landed
-        // 2026-09-21). Kept as a flag: it is the kill switch for the SPS →
-        // ReciterDB write.
+        // mirror, the Identifiers & Profiles tab, and `POST /api/edit/orcid`, which
+        // writes SPS tables only (`scholar.orcid` + `orcid_confirmed_at`, and
+        // `orcid_dismissal` on Remove / a rejected suggestion); the nightly
+        // `etl:orcid-push` carries the result to WCM Identity. Off → the row still
+        // renders from `scholar.orcid`, its CTA hands off to ReCiter Manage Profile
+        // (campus-only), the tab is absent, the route 404s. ON in both envs since
+        // 2026-09-22 (staging soak, then the prod flip; the `pubsource_orcid_person`
+        // refresh it waited on landed 2026-09-21). Kept as a flag: it is the single
+        // kill switch for the ORCID tab, its write and the suggestion.
         SELF_EDIT_ORCID_SUGGESTION: "on",
         // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
         // (LinkedIn, X, Bluesky, Google Scholar, ResearchGate): the External

@@ -163,7 +163,7 @@ describe("OrcidCard", () => {
     expect(screen.getByTestId("orcid-form")).toBeTruthy();
   });
 
-  it("on file + a DIFFERENT strong inference → both rows, each labelled; 'Replace with the suggested iD' swaps, 'Keep the iD on file' dismisses for the session", async () => {
+  it("on file + a DIFFERENT strong inference → both rows, each labelled; 'Replace with the suggested iD' swaps, 'Keep the iD on file' confirms it and dismisses the suggestion; 'Remove both' dismisses both", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -191,11 +191,53 @@ describe("OrcidCard", () => {
       "High confidence suggestion",
     );
     expect(screen.getByTestId("orcid-remove").textContent).toBe("Remove both");
-    // Keep → the competing row and its actions go; plain Change / Remove return.
+    // Keep → confirms the on-file iD and records the suggestion as dismissed (it
+    // must not come back on the next load); the competing row goes, plain
+    // Change / Remove return.
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, orcid: "0000-0002-1825-0097" }),
+    });
     fireEvent.click(screen.getByTestId("orcid-keep-on-file"));
-    expect(screen.queryByTestId("orcid-also-suggested")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("orcid-also-suggested")).toBeNull());
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({
+      cwid: "abc1234",
+      orcid: "0000-0002-1825-0097",
+      confirmedSuggestion: false,
+      dismiss: ["0000-0002-9930-2193"],
+    });
     expect(screen.getByTestId("orcid-change")).toBeTruthy();
-    expect(fetchMock).not.toHaveBeenCalled();
+    cleanup();
+    fetchMock.mockClear();
+    // Remove both → orcid: null plus the suggestion in `dismiss`.
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, orcid: null }),
+    });
+    render(
+      <OrcidCard
+        cwid="abc1234"
+        mode="self"
+        scholarName="Ada"
+        onFile="0000-0002-1825-0097"
+        suggested={{
+          orcid: "0000-0002-9930-2193",
+          accepted: 4,
+          evidence: [{ source: "rpm_inferred", accepted: 4, rejected: 0 }],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("orcid-remove"));
+    await waitFor(() => expect(screen.queryByTestId("orcid-on-file")).toBeNull());
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({
+      cwid: "abc1234",
+      orcid: null,
+      confirmedSuggestion: false,
+      dismiss: ["0000-0002-9930-2193"],
+    });
+    expect(screen.queryByTestId("orcid-suggested")).toBeNull();
     cleanup();
     fetchMock.mockClear();
     render(
@@ -256,11 +298,11 @@ describe("OrcidCard", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("none → a typed URL form is normalized and POSTed; a 502 from the route is shown and nothing is marked saved", async () => {
+  it("none → a typed URL form is normalized and POSTed; a failed write is shown and nothing is marked saved", async () => {
     fetchMock.mockResolvedValue({
       ok: false,
-      status: 502,
-      json: async () => ({ ok: false, error: "reciter_unavailable" }),
+      status: 500,
+      json: async () => ({ ok: false, error: "write_failed" }),
     });
     render(
       <OrcidCard cwid="abc1234" mode="self" scholarName="Ada" onFile={null} suggested={null} />,
@@ -270,7 +312,7 @@ describe("OrcidCard", () => {
     });
     fireEvent.click(screen.getByTestId("orcid-save"));
     expect(await screen.findByTestId("orcid-error")).toBeTruthy();
-    expect(screen.getByTestId("orcid-error").textContent).toContain("ReCiter is unreachable");
+    expect(screen.getByTestId("orcid-error").textContent).toContain("Couldn't save the ORCID iD");
     expect(
       JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string).orcid,
     ).toBe("0000-0002-1825-0097");

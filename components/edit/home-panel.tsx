@@ -466,8 +466,8 @@ function visibilityRow({
  * The ORCID iD row. On file → done, the iD linked to its orcid.org record. A strong
  * inference (`SELF_EDIT_ORCID_SUGGESTION`) → "Is this your ORCID iD?" with the iD
  * and the accepted-publication count behind it, "Review" linking into the
- * Identifiers & Profiles tab where "Yes, this is mine" writes it (ReciterDB
- * `admin_orcid`, then `scholar.orcid`). Otherwise → not on file with the one-line
+ * Identifiers & Profiles tab where "Yes, this is mine" writes it (`scholar.orcid`,
+ * stamped confirmed). Otherwise → not on file with the one-line
  * reason and the same link.
  */
 function orcidRow({
