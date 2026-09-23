@@ -25,6 +25,7 @@ function row(over: Partial<NewsQueueRow>): NewsQueueRow {
     articleTitle: "Invented Institute names a new imaging lead",
     articleUrl: "https://news.example.org/imaging-lead",
     publishedAt: null,
+    outlet: null,
     detectedName: "Invented Person",
     likelihood: "HIGH",
     matchBasis: "BODY",
