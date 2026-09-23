@@ -17,6 +17,7 @@ import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
+import { CLIPS_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
 
 /** Props for {@link EtlStack}. */
 export interface EtlStackProps extends StackProps {
@@ -544,6 +545,29 @@ export class EtlStack extends Stack {
       ],
     });
 
+    // Media Highlights — etl:news-clips lists + reads the raw "WCM in the News"
+    // digests SES drops into the account-wide inbound-mail bucket
+    // (cdk/lib/inbound-mail-stack.ts, prod-app singleton). Its own policy, not
+    // the ReciterAI one: listing is needed here, and that policy is pinned
+    // Scan/GetObject-only. Both statements are prefix-scoped.
+    new iam.Policy(this, "EtlTaskRoleInboundMailPolicy", {
+      policyName: `sps-etl-task-${env}-inbound-mail`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:GetObject"],
+          resources: [`arn:aws:s3:::${inboundMailBucketName(this.account)}/${CLIPS_PREFIX}*`],
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:ListBucket"],
+          resources: [`arn:aws:s3:::${inboundMailBucketName(this.account)}`],
+          conditions: { StringLike: { "s3:prefix": [`${CLIPS_PREFIX}*`] } },
+        }),
+      ],
+    });
+
     // ------------------------------------------------------------------
     // Bedrock grant for the NCI Table 2A cancer-relevance judgment calls
     // (scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts, via
@@ -760,6 +784,9 @@ export class EtlStack extends Stack {
       SCHOLARS_IDENTITY_TABLE: "Identity",
       ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
       ARTIFACT_PREFIX: "spotlight",
+      // Media Highlights — etl:news-clips (ClipsNightly) reads SES-delivered mail.
+      CLIPS_BUCKET: inboundMailBucketName(this.account),
+      CLIPS_PREFIX,
       HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
       // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
       // artifacts bucket as spotlight, under the tools/ prefix.
@@ -1591,6 +1618,12 @@ export class EtlStack extends Stack {
         external: false,
         tier: "continue",
       },
+      // Media Highlights — parses the External Affairs "WCM in the News" digests
+      // SES delivered to S3 (etl/news/clips.ts) into PENDING news_mention rows
+      // for /edit/news-queue. external:false (S3 + SPS DB, no WCM secret);
+      // continue-tier so a bad digest alarms this step, never the chain. Before
+      // Sps-InboundMail is deployed (or any mail arrives) the run is a 0-row success.
+      { id: "ClipsNightly", npmScript: "etl:news-clips", external: false, tier: "continue" },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Reliability-audit PR-5 — terminal volume gate. Reads etl_run

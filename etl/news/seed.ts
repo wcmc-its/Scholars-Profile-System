@@ -47,6 +47,12 @@ export type ScrapedArticle = {
    * merging it in would silently promote a caption-only name to the prose tier.
    */
   captionText: string;
+  /**
+   * Press outlet — set only by etl/news/clips.ts (Media Highlights), whose urls
+   * are off-site and never pass through validateArticles. Absent for newsroom
+   * stories, which is what keeps them in the News section.
+   */
+  outlet?: string;
 };
 
 /** Shared with the scraper so a cwid it emits can never fail validation here. */

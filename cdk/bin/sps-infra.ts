@@ -7,6 +7,7 @@ import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
 import { EdgeStack } from "../lib/edge-stack";
 import { EtlStack } from "../lib/etl-stack";
+import { InboundMailStack } from "../lib/inbound-mail-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { SpsObservabilityStack } from "../lib/observability-stack";
 import { SecretsStack } from "../lib/secrets-stack";
@@ -98,6 +99,17 @@ const etlStack = new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   bulkDataRuleEcrRepository: appStack.bulkDataRuleEcrRepository,
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
+
+// InboundMailStack — SES receive-only mail for Media Highlights clips. An
+// ACCOUNT-wide singleton (one active SES receipt rule set per account+region,
+// and staging/prod share the account), so only the prod app declares it; both
+// envs' ETL read its bucket by name.
+if (envConfig.envName === "prod") {
+  new InboundMailStack(app, "Sps-InboundMail", {
+    env,
+    description: "SPS inbound mail — SES receipt for clips@scholars-mail.weill.cornell.edu to S3 (Media Highlights).",
+  });
+}
 
 // ObservabilityStack — SLO alarms, SNS topic, the reliability dashboard, and
 // (prod only) the account cost guardrails (B22). Receives the AppStack +

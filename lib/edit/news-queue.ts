@@ -61,6 +61,9 @@ export type NewsQueueRow = {
   articleTitle: string;
   articleUrl: string;
   publishedAt: string | null;
+  /** Press outlet when this is a Media Highlights clip (etl/news/clips.ts);
+   *  null for a newsroom story. Tells the reviewer which section it lands in. */
+  outlet: string | null;
   /** The prose name string the ETL matched — "the name being matched against". */
   detectedName: string | null;
   likelihood: string | null;
@@ -303,6 +306,7 @@ export async function loadNewsQueue(
       likelihood: true,
       matchBasis: true,
       contextSnippet: true,
+      outlet: true,
       showOnProfile: true,
       enteredByCwid: true,
       source: true,
@@ -385,6 +389,7 @@ export async function loadNewsQueue(
           articleTitle: r.title,
           articleUrl: r.url,
           publishedAt: r.publishedAt ? r.publishedAt.toISOString().slice(0, 10) : null,
+          outlet: r.outlet,
           detectedName: r.detectedName,
           likelihood: r.likelihood,
           matchBasis: r.matchBasis,

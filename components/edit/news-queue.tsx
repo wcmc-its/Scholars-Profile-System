@@ -547,6 +547,9 @@ export function NewsQueue({
                   {g.rows[0].articleTitle}
                 </a>
                 <p className="text-muted-foreground text-xs">
+                  {g.rows[0].outlet !== null
+                    ? `Media Highlights${g.rows[0].outlet ? ` · ${g.rows[0].outlet}` : ""} · `
+                    : ""}
                   {formatDate(g.rows[0].publishedAt)}
                   {g.detectedName ? ` · detected name: “${g.detectedName}”` : ""}
                   {g.contested ? " · more than one scholar matches — pick one" : ""}

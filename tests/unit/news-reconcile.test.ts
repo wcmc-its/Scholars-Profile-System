@@ -30,6 +30,7 @@ const existing = (over: Partial<ExistingMention>): ExistingMention => ({
   matchBasis: "TAG",
   sourceRef: `${URL}|jane roe`,
   contextSnippet: null,
+  outlet: null,
   ...over,
 });
 
@@ -47,6 +48,7 @@ const incomingName = {
   matchBasis: "TAG",
   sourceRef: `${URL}|jane roe`,
   contextSnippet: null,
+  outlet: null as string | null,
 };
 
 /** The VIVO shape of the same row: the whole NAME provenance set is null. */

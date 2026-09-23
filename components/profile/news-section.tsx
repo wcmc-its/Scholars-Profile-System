@@ -1,6 +1,7 @@
 import type { ProfilePayload } from "@/lib/api/profile";
 
-type NewsMention = ProfilePayload["news"][number];
+/** A Media Highlights clip adds its press outlet; a newsroom story has none. */
+type NewsMention = ProfilePayload["news"][number] & { outlet?: string };
 
 /** Most scholars have a handful of mentions; the rest collapse into a <details>. */
 const ROW_CAP = 5;
@@ -18,7 +19,7 @@ function formatDate(iso: string | null): string | null {
 
 /** One news row: title (opens the article), date, excerpt. Zero client JS. */
 function NewsRow({ item }: { item: NewsMention }) {
-  const date = formatDate(item.publishedAt);
+  const byline = [item.outlet, formatDate(item.publishedAt)].filter(Boolean).join(" · ");
   return (
     <li className="border-border border-t first:border-t-0">
       <div className="py-3">
@@ -30,7 +31,7 @@ function NewsRow({ item }: { item: NewsMention }) {
         >
           {item.title}
         </a>
-        {date ? <div className="text-muted-foreground mt-0.5 text-xs">{date}</div> : null}
+        {byline ? <div className="text-muted-foreground mt-0.5 text-xs">{byline}</div> : null}
         {item.excerpt ? <p className="text-muted-foreground mt-1 text-sm">{item.excerpt}</p> : null}
       </div>
     </li>
