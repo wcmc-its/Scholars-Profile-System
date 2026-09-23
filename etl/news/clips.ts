@@ -14,11 +14,12 @@
  * sections). Upsert and review-state discipline are shared with etl:news.
  *
  * Usage:
- *   npm run etl:news-clips                     read CLIPS_BUCKET/CLIPS_PREFIX
+ *   npm run etl:news-clips                     read INBOUND_MAIL_BUCKET/CLIPS_PREFIX
  *   npm run etl:news-clips -- a.eml b.eml      load hand-forwarded emails
  *
  * Env:
- *   CLIPS_BUCKET         SES receipt bucket (required unless files are given).
+ *   INBOUND_MAIL_BUCKET  SES receipt bucket (required unless files are given);
+ *                        shared with etl/opportunities/funding-digest.ts.
  *   CLIPS_PREFIX         key prefix SES writes under (default "clips/").
  *   CLIPS_LOOKBACK_DAYS  re-read window (default 30). The upsert is idempotent,
  *                        so re-reading a message is harmless.
@@ -33,12 +34,12 @@ import { NEWS_ORIGIN, type ScrapedArticle } from "./seed";
 /** Bucket mail must come from WCM. The list address itself is kept out of this
  *  public repo; tighten to it (or to an SES DKIM/SPF verdict) once real list
  *  deliveries show which of those survive the list server. */
-const CLIPS_FROM_RE = /@med\.cornell\.edu>?\s*$/i;
+export const WCM_FROM_RE = /@med\.cornell\.edu>?\s*$/i;
 const SUBJECT_RE = /\bin the news\b/i;
 /** Replies to the digest also land in the bucket via the list, usually without
  *  the digest body. Forwards are kept: a forwarded digest carries the whole
  *  digest (that is how the 2026 backlog arrives), and it parses the same. */
-const REPLY_RE = /^\s*re\s*:/i;
+export const REPLY_RE = /^\s*re\s*:/i;
 /** A zero-clip digest fails the run only while it is this fresh, so one stray
  *  email reds at most a night or two, while real format drift (every new
  *  digest) keeps the step red. */
@@ -97,6 +98,8 @@ function decodeBody(p: Part): string {
 export function readEmail(raw: string): {
   from: string;
   subject: string;
+  /** The Date header, raw; null when absent. */
+  date: string | null;
   virusVerdict: string | null;
   spamVerdict: string | null;
   /** SPF/DKIM verdicts SES stamps; logged so the first real deliveries show
@@ -128,6 +131,7 @@ export function readEmail(raw: string): {
   return {
     from: top.headers.get("from") ?? "",
     subject: top.headers.get("subject") ?? "",
+    date: top.headers.get("date") ?? null,
     virusVerdict: top.headers.get("x-ses-virus-verdict") ?? null,
     spamVerdict: top.headers.get("x-ses-spam-verdict") ?? null,
     authVerdict: `spf=${top.headers.get("x-ses-spf-verdict") ?? "none"} dkim=${top.headers.get("x-ses-dkim-verdict") ?? "none"}`,
@@ -316,12 +320,12 @@ export function clipMentionRows(
 
 // ---------------------------------------------------------------------------
 
-type RawEmail = { raw: string; receivedAt: number };
+export type RawEmail = { raw: string; receivedAt: number };
 
-async function readBucketEmails(): Promise<RawEmail[]> {
-  const bucket = process.env.CLIPS_BUCKET;
-  if (!bucket) throw new Error("[NewsClips] CLIPS_BUCKET is unset and no .eml files were given");
-  const prefix = process.env.CLIPS_PREFIX ?? "clips/";
+/** Raw messages SES stored under `prefix` in the last CLIPS_LOOKBACK_DAYS. */
+export async function readBucketEmails(prefix: string): Promise<RawEmail[]> {
+  const bucket = process.env.INBOUND_MAIL_BUCKET;
+  if (!bucket) throw new Error("[inbound-mail] INBOUND_MAIL_BUCKET is unset and no .eml files were given");
   const since = Date.now() - (Number(process.env.CLIPS_LOOKBACK_DAYS) || 30) * 86_400_000;
   const s3 = new S3Client({});
   const keys: { Key: string; at: number }[] = [];
@@ -334,7 +338,7 @@ async function readBucketEmails(): Promise<RawEmail[]> {
       // Sps-InboundMail is a manual, prod-app deploy; until it exists there is
       // simply no mail yet. Anything else (AccessDenied) still fails the run.
       if ((err as { name?: string }).name === "NoSuchBucket") {
-        console.warn(`[NewsClips] bucket ${bucket} does not exist yet (Sps-InboundMail not deployed); nothing to read`);
+        console.warn(`[inbound-mail] bucket ${bucket} does not exist yet (Sps-InboundMail not deployed); nothing to read`);
         return [];
       }
       throw err;
@@ -357,7 +361,7 @@ async function main(): Promise<number> {
   const files = process.argv.slice(2);
   const fromBucket = files.length === 0;
   const raws: RawEmail[] = fromBucket
-    ? await readBucketEmails()
+    ? await readBucketEmails(process.env.CLIPS_PREFIX ?? "clips/")
     : files.map((f) => ({ raw: readFileSync(f).toString("latin1"), receivedAt: Date.now() }));
 
   const articles: ScrapedArticle[] = [];
@@ -374,7 +378,7 @@ async function main(): Promise<number> {
       SUBJECT_RE.test(e.subject) &&
       (!fromBucket ||
         (!REPLY_RE.test(e.subject) &&
-          CLIPS_FROM_RE.test(e.from) &&
+          WCM_FROM_RE.test(e.from) &&
           e.virusVerdict !== "FAIL" &&
           e.spamVerdict !== "FAIL"));
     if (!trusted) {

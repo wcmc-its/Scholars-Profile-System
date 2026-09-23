@@ -163,6 +163,8 @@ This is the **only** invalidation the design needs — after it, the 60 s clamp 
 
 Stopgap before step 4: load a forwarded `.eml` by hand on the ETL task family with `npm run etl:news-clips -- <file.eml>`. The profile section is behind `MEDIA_HIGHLIGHTS_SECTION` (staging on, prod off).
 
+The same stack receives the Research Dean's weekly funding digest at `funding@scholars-mail.weill.cornell.edu` (prefix `funding/`), read by the weekly `FundingDigestWeekly` step (`etl/opportunities/funding-digest.ts`). Adding a receipt rule is a redeploy of `Sps-InboundMail`; the rule set stays active. Ask the Research Dean's office to subscribe the address to their funding-announcements list, not ALLPROTOCOLS. The step submits new digest links to ReciterAI's `SUBMISSION` queue in **prod only**, because that table is shared with staging; staging logs a dry run. ReciterAI's daily `reciterai-grants-daily` drain then scores them. To preview a digest by hand, run `npm run etl:funding-digest -- <file.eml>` without `SCHOLARS_ENV=prod`.
+
 ## Bootstrap two-step (first deploy of an env)
 
 On the first deploy of `Sps-App-${env}`, ECR is empty and the ECS service can't pull an image. The first workflow run will fail at step "Build image" or "Push image" if the repo doesn't exist yet, or at step "Wait for service to stabilize" if ECR is empty. This is one-time setup per env, manual:
