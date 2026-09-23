@@ -36,7 +36,12 @@ import { db } from "@/lib/db";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { parsePersonFilter, personFilterSql, unitLabels } from "@/lib/edit/person-filter";
+import {
+  parsePersonFilter,
+  personFilterCriteria,
+  personFilterSql,
+  unitLabels,
+} from "@/lib/edit/person-filter";
 import { institutionDisplayName } from "@/lib/institutions";
 import { formatRoleCategory } from "@/lib/role-display";
 
@@ -98,6 +103,22 @@ export function parseArticleCountParams(sp: URLSearchParams): ArticleCountParams
     from,
     to: Math.max(from, int("to", thisYear, 1900, 2100)),
   };
+}
+
+/** The phone sheet trigger's "Filters (n)": one per who-filter selection and
+ *  article type, plus one each for a non-default year basis, year range,
+ *  minimum JIF and author position. */
+export function articleCountActiveFilters(p: ArticleCountParams): number {
+  const d = parseArticleCountParams(new URLSearchParams());
+  return (
+    p.types.length +
+    p.units.length +
+    p.atypes.length +
+    (p.basis !== d.basis ? 1 : 0) +
+    (p.from !== d.from || p.to !== d.to ? 1 : 0) +
+    (p.jif !== d.jif ? 1 : 0) +
+    (p.pos !== d.pos ? 1 : 0)
+  );
 }
 
 export function articleCountQueryString(p: ArticleCountParams): string {
@@ -300,13 +321,7 @@ export function describeCriteria(
   return [
     ["Report", "8. Article counts"],
     ["Generated", generatedAt.toISOString()],
-    ["Person type", list(p.types.map(roleCategoryLabel))],
-    [
-      "Department / division / center / institution",
-      p.units.length > 1
-        ? `Any of: ${list(p.units.map((u) => labels.get(u) ?? u))}`
-        : list(p.units.map((u) => labels.get(u) ?? u)),
-    ],
+    ...personFilterCriteria({ types: p.types, unitValues: p.units }, labels, roleCategoryLabel),
     ["Article type", list(p.atypes)],
     [
       "Minimum Journal Impact Factor",

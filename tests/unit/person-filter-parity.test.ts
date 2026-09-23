@@ -15,6 +15,7 @@ import {
   currentCenterMembershipSql,
   isCurrentCenterMembership,
   parsePersonFilter,
+  personFilterCriteria,
   personFilterSql,
   personFilterWhere,
   unitCodes,
@@ -122,6 +123,11 @@ const CASES: { name: string; qs: string; expected: Normalized }[] = [
     qs: "unit=bogus&unit=div:&unit=div:CARD",
     expected: { types: [], units: { division: ["CARD"] }, matchNothing: false },
   },
+  {
+    name: "units given but none decode: match nothing",
+    qs: "type=postdoc&unit=bogus&unit=dept:",
+    expected: { types: ["postdoc"], units: {}, matchNothing: true },
+  },
 ];
 
 describe("person filter — SQL and Prisma builders agree", () => {
@@ -147,17 +153,58 @@ describe("person filter — SQL and Prisma builders agree", () => {
     expect(prismaDateOps()).toEqual(["start_date <=", "end_date >="]);
   });
 
-  // Deliberate, per-caller divergence (not a parity break): report 8 keys on the
-  // RAW `unit` values, Profiles on the DECODED ones — preserved as they were.
-  it("units that don't decode: report 8 matches nothing, Profiles applies no unit filter", () => {
-    const qs = "unit=bogus&unit=dept:";
-    expect(fromSql(qs)).toMatchObject({ units: {}, matchNothing: true });
-    expect(fromPrisma(qs)).toEqual({ types: [], units: {}, matchNothing: false });
+  // ONE rule, every consumer: `unit` given but none decode → match NOTHING
+  // (never "no unit filter" → everyone).
+  it("units that don't decode: both builders match nothing", () => {
+    const qs = "unit=bogus&unit=dept:&unit=nope:X";
+    const f = parsePersonFilter(new URLSearchParams(qs));
+    expect(f.units).toEqual([]);
+    expect(personFilterSql(f, { scholar: "s" }, TODAY).sql.trim()).toBe("AND 1 = 0");
+    expect(personFilterWhere(f, CENTER_MEMBERS)).toEqual({ unit: { cwid: { in: [] } } });
+  });
+
+  // The center clause must EMBED the shared date fragment verbatim — both
+  // "IS NULL OR" branches — so an inlined date rule that drops open-ended
+  // (null start / null end) memberships fails here, not in prod.
+  it("personFilterSql's center clause contains currentCenterMembershipSql exactly", () => {
+    const norm = (t: string) => t.replace(/\s+/g, " ");
+    const fragment = currentCenterMembershipSql("cm", TODAY);
+    const sql = personFilterSql(
+      parsePersonFilter(new URLSearchParams("unit=center:CC")),
+      { scholar: "s", centerMembership: "cm" },
+      TODAY,
+    );
+    const text = norm(sql.sql);
+    expect(text).toContain(norm(fragment.sql));
+    expect(text).toContain("cm.start_date IS NULL OR cm.start_date <= ?");
+    expect(text).toContain("cm.end_date IS NULL OR cm.end_date >= ?");
+    expect(sql.values.slice(-fragment.values.length)).toEqual(fragment.values);
   });
 
   it("decoded units that resolve to nothing (an empty center) match nothing on the Prisma side", () => {
     expect(personFilterWhere(parsePersonFilter(new URLSearchParams("unit=center:CC")), [])).toEqual({
       unit: { cwid: { in: [] } },
     });
+  });
+});
+
+describe("personFilterCriteria — the shared criteria rows", () => {
+  const labels = new Map([["dept:MED", "Medicine"]]);
+  const role = (t: string) => t.toUpperCase();
+  it("All when unset", () => {
+    expect(personFilterCriteria({ types: [], unitValues: [] }, labels, role)).toEqual([
+      ["Person type", "All"],
+      ["Department / division / center / institution", "All"],
+    ]);
+  });
+  it("labels types and units; several units read 'Any of'; an unknown unit prints raw", () => {
+    expect(personFilterCriteria({ types: ["a", "b"], unitValues: ["dept:MED"] }, labels, role)).toEqual([
+      ["Person type", "A; B"],
+      ["Department / division / center / institution", "Medicine"],
+    ]);
+    expect(personFilterCriteria({ types: [], unitValues: ["dept:MED", "bogus"] }, labels, role)[1]).toEqual([
+      "Department / division / center / institution",
+      "Any of: Medicine; bogus",
+    ]);
   });
 });

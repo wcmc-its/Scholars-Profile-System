@@ -43,6 +43,7 @@ import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import {
+  decodeUnitValues,
   isCurrentCenterMembership,
   parsePersonFilter,
   parseUnitValue,
@@ -190,8 +191,9 @@ export type DataQualityOptions = {
   query?: string;
   /** Person-type (roleCategory) multi-select (#4); raw DB values. Empty = no filter. */
   roleCategories?: readonly string[];
-  /** Org-unit multi-select (#5): departments / divisions / centers, OR'd together. */
-  units?: readonly EditRosterUnitFilter[];
+  /** Org-unit multi-select (#5): the RAW `unit` values (`dept:CODE` …), OR'd
+   *  together. Given but none decode → match nothing (`personFilterWhere`). */
+  unitValues?: readonly string[];
   /** Gap-type filter; defaults to "all". Each caller sanitizes this to the
    *  subset of `DataQualityGapFilter` that applies to it (module doc comment)
    *  — an unsanitized value would filter the row set by a dimension that
@@ -267,7 +269,7 @@ function buildWhere(
   // Units OR together; centers were pre-resolved to current-member cwids by the
   // caller; selected units that resolve to nothing match nothing.
   const person = personFilterWhere(
-    { types: [...(opts.roleCategories ?? [])], units: [...(opts.units ?? [])] },
+    { types: [...(opts.roleCategories ?? [])], unitValues: [...(opts.unitValues ?? [])] },
     filterCenterCwids,
   );
   if (person.roleCategory) {
@@ -331,7 +333,7 @@ async function computeDataQualityEntries(
   // *filter* (#5) — read in one query, partitioned in-app.
   const scopeCenterCodes =
     opts.scope.all === false ? opts.scope.centerCodes : [];
-  const filterCenterCodes = unitCodes(opts.units ?? [], "center");
+  const filterCenterCodes = unitCodes(decodeUnitValues(opts.unitValues ?? []), "center");
   const allCenterCodes = [...new Set([...scopeCenterCodes, ...filterCenterCodes])];
 
   let scopeCenterCwids: string[] = [];

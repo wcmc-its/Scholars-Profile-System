@@ -11,7 +11,11 @@ import {
   loadOrcidCoverage,
   neither,
   nihNoOrcid,
+  orcidCoverageCriteria,
   orcidCoverageCsv,
+  orcidCoverageExportCsv,
+  orcidCoverageFilename,
+  orcidCoverageActiveFilters,
   orcidCoverageQuery,
   orcidTiers,
   orcidVerdict,
@@ -331,6 +335,7 @@ describe("parseOrcidCoverageParams / orcidCoverageQuery", () => {
       types: ["full_time_faculty"],
       units: [],
       nih: "all",
+      ignoredLegacyDept: false,
     });
     // `dept` alone is not a filter param any more, so it is still a bare visit.
     expect(parseOrcidCoverageParams({ dept: "Dept A" }).types).toEqual(["full_time_faculty"]);
@@ -338,6 +343,7 @@ describe("parseOrcidCoverageParams / orcidCoverageQuery", () => {
       types: [],
       units: [],
       nih: "all",
+      ignoredLegacyDept: false,
     });
   });
 
@@ -350,9 +356,35 @@ describe("parseOrcidCoverageParams / orcidCoverageQuery", () => {
       types: ["postdoc", "full_time_faculty"],
       units: ["dept:AB1", "center:C9"],
       nih: "current",
+      ignoredLegacyDept: false,
     });
     expect(parseOrcidCoverageParams({ nih: "ever" }).types).toEqual([]);
     expect(parseOrcidCoverageParams({ unit: "div:X1" }).types).toEqual([]);
+  });
+
+  it("legacy dept=: ignored as a filter, but flagged for the page's notice", () => {
+    const p = parseOrcidCoverageParams({ dept: "Dept A", nih: "ever" });
+    expect(p.ignoredLegacyDept).toBe(true);
+    expect(p.units).toEqual([]);
+    expect(parseOrcidCoverageParams(new URLSearchParams("dept=Dept+A")).ignoredLegacyDept).toBe(
+      true,
+    );
+    // The old form's empty "All departments" was never a filter.
+    expect(parseOrcidCoverageParams({ dept: "" }).ignoredLegacyDept).toBe(false);
+    expect(parseOrcidCoverageParams({ unit: "dept:AB1" }).ignoredLegacyDept).toBe(false);
+  });
+
+  it("active filter count: one per type / unit, one for a non-all nih", () => {
+    expect(orcidCoverageActiveFilters({ types: [], units: [], nih: "all" })).toBe(0);
+    expect(
+      orcidCoverageActiveFilters({
+        types: ["postdoc"],
+        units: ["dept:AB1", "center:C9"],
+        nih: "ever",
+      }),
+    ).toBe(4);
+    // The bare-visit default (full-time faculty) is a real filter, so it counts.
+    expect(orcidCoverageActiveFilters(parseOrcidCoverageParams({}))).toBe(1);
   });
 
   it("legacy role: `role=X` → type X, `role=all` → every type, `type` wins over `role`", () => {
@@ -364,10 +396,15 @@ describe("parseOrcidCoverageParams / orcidCoverageQuery", () => {
   it("round-trips through the query string, including an empty type selection", () => {
     const p = { types: ["postdoc"], units: ["dept:AB1", "inst:WCM"], nih: "current" as const };
     expect(orcidCoverageQuery(p)).toBe("?type=postdoc&unit=dept%3AAB1&unit=inst%3AWCM&nih=current");
-    expect(parseOrcidCoverageParams(new URLSearchParams(orcidCoverageQuery(p).slice(1)))).toEqual(p);
+    expect(parseOrcidCoverageParams(new URLSearchParams(orcidCoverageQuery(p).slice(1)))).toEqual({
+      ...p,
+      ignoredLegacyDept: false,
+    });
     const all = { types: [], units: [], nih: "all" as const };
     expect(orcidCoverageQuery(all)).toBe("?nih=all");
-    expect(parseOrcidCoverageParams(new URLSearchParams(orcidCoverageQuery(all).slice(1)))).toEqual(all);
+    expect(parseOrcidCoverageParams(new URLSearchParams(orcidCoverageQuery(all).slice(1)))).toEqual(
+      { ...all, ignoredLegacyDept: false },
+    );
   });
 });
 
@@ -386,6 +423,61 @@ describe("orcidCoverageCsv", () => {
     expect(lines).toContain("Dept B,3,1,0,33.3,1,1,1,0,1,2,0,2,1,1,0");
     expect(lines).toHaveLength(1 + r.byDept.length);
     expect(csv).not.toMatch(/f1|p1|0000-0002/);
+  });
+});
+
+describe("orcid coverage export — criteria block + filename", () => {
+  const at = new Date("2026-09-22T12:00:00Z");
+  const labels = new Map([
+    ["dept:AB1", "Medicine"],
+    ["center:C9", "Cancer Center"],
+  ]);
+
+  it("criteria: report, generated-at, the shared who-filter rows, NIH — All when unset", () => {
+    expect(orcidCoverageCriteria({ types: [], units: [], nih: "all" }, at)).toEqual([
+      ["Report", "ORCID coverage by department"],
+      ["Generated", "2026-09-22T12:00:00.000Z"],
+      ["Person type", "All"],
+      ["Department / division / center / institution", "All"],
+      ["NIH funding", "Everyone"],
+    ]);
+    const c = orcidCoverageCriteria(
+      { types: ["full_time_faculty"], units: ["dept:AB1", "center:C9", "inst:ZZ"], nih: "current" },
+      at,
+      labels,
+    );
+    expect(c).toContainEqual(["Department / division / center / institution", "Any of: Medicine; Cancer Center; inst:ZZ"]);
+    expect(c).toContainEqual(["NIH funding", "NIH-funded (award ending today or later)"]);
+    expect(c.find(([k]) => k === "Person type")?.[1]).not.toBe("All");
+  });
+
+  it("the CSV: Filter,Value block, ONE blank line, then the table byte-identical to orcidCoverageCsv", () => {
+    const rows = build().byDept;
+    const criteria = orcidCoverageCriteria({ types: [], units: ["dept:AB1"], nih: "ever" }, at, labels);
+    const csv = orcidCoverageExportCsv(rows, criteria);
+    const [head, table, ...rest] = csv.split("\r\n\r\n");
+    expect(rest).toEqual([]);
+    expect(`${table}`).toBe(orcidCoverageCsv(rows));
+    const headLines = head.split("\r\n");
+    expect(headLines[0]).toBe("Filter,Value");
+    expect(headLines).toContain("Department / division / center / institution,Medicine");
+    expect(headLines).toHaveLength(1 + criteria.length);
+  });
+
+  it("filename: a sanitized, bounded filter summary; 'all' when nothing is filtered", () => {
+    expect(orcidCoverageFilename({ types: [], units: [], nih: "all" }, at)).toBe(
+      "orcid-coverage-by-department-all-2026-09-22.csv",
+    );
+    expect(orcidCoverageFilename({ types: [], units: ["dept:AB1"], nih: "none" }, at, labels)).toBe(
+      "orcid-coverage-by-department-medicine-no-nih-2026-09-22.csv",
+    );
+    const long = orcidCoverageFilename(
+      { types: [], units: ['dept:"X";\r\nY', ...Array.from({ length: 20 }, (_, i) => `dept:LONGCODE${i}`)], nih: "current" },
+      at,
+    );
+    const summary = long.slice("orcid-coverage-by-department-".length, -"-2026-09-22.csv".length);
+    expect(summary).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    expect(summary.length).toBeLessThanOrEqual(60);
   });
 });
 

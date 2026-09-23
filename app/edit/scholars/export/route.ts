@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       scope,
       query: params.q,
       roleCategories: params.roleCategories,
-      units: params.units,
+      unitValues: params.unitValues,
       gap,
       overviewAge: params.overviewAge,
       includeHidden: params.includeHidden,
