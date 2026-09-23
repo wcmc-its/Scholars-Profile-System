@@ -41,7 +41,6 @@ function row(over: Partial<NewsQueueRow>): NewsQueueRow {
     prominence: 0,
     leadershipTier: 3,
     decidedByName: null,
-    outlet: null,
     ...over,
   };
 }
