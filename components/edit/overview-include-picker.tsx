@@ -681,20 +681,21 @@ function RecordRow({
           )}
         >
           {record.title}
+        </div>
+        <div className="text-muted-foreground mt-0.5 flex min-w-0 items-center gap-1.5 text-xs">
+          <span className="truncate">{record.meta.join(" · ")}</span>
+          {/* In the meta line so a 2-line-clamped title can never hide it. */}
           {record.externalHref && (
             <a
               href={record.externalHref}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="View on PubMed"
-              className="ml-1.5 inline-block align-[-2px] text-[#185FA5]"
+              className="shrink-0 text-[#185FA5]"
             >
               <ExternalLinkIcon />
             </a>
           )}
-        </div>
-        <div className="text-muted-foreground mt-0.5 flex min-w-0 items-center gap-1.5 text-xs">
-          <span className="truncate">{record.meta.join(" · ")}</span>
           {whyLabel && reveal && (
             <button
               type="button"
