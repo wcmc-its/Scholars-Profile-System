@@ -143,7 +143,13 @@ describe("loadNewsQueue — history shows every source", () => {
   it("queries without a source filter", async () => {
     const { client: c, calls } = client([vivo({ id: "v1", cwid: "aaa1001" })]);
     await loadNewsQueue(c, "published");
-    expect(calls[0].where).toEqual({ status: "published" });
+    expect(calls[0].where).toEqual({ status: "published", outlet: null });
+  });
+
+  it("splits newsroom mentions from Media Highlights clips on outlet", async () => {
+    const { client: c, calls } = client([]);
+    await loadNewsQueue(c, "pending", "clips");
+    expect(calls[0].where).toEqual({ status: "pending", outlet: { not: null } });
   });
 
   it("caps history and takes the most recent, but never caps pending", async () => {
