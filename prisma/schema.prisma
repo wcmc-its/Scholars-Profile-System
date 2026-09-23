@@ -173,6 +173,7 @@ model Scholar {
   overviewGenerations  OverviewGeneration[]
   biosketchGenerations BiosketchGeneration[]
   overviewProvenance   OverviewProvenance?
+  overviewVersions     OverviewVersion[]
   overviewSelection    OverviewSourceSelection?
   scholarTools         ScholarTool[]
   scholarFamilies      ScholarFamily[]
@@ -3283,6 +3284,10 @@ model OverviewGeneration {
   // delegated draft is attributed to the human who actually ran it (audit parity).
   impersonatedCwid String?  @map("impersonated_cwid") @db.VarChar(32)
   createdAt        DateTime @default(now()) @map("created_at")
+  // History-panel label ("AI draft N" when NULL) and soft delete. A hidden draft
+  // drops out of the panel but the row stays for the audit trail.
+  name             String?   @db.VarChar(40)
+  hiddenAt         DateTime? @map("hidden_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
@@ -3366,6 +3371,26 @@ model OverviewProvenance {
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@map("overview_provenance")
+}
+
+/// One saved overview (the History panel's "Saved version" rows). Appended by
+/// `/api/edit/field` in the same transaction as the override + provenance
+/// upsert, so every publish is recoverable. `hiddenAt` soft-deletes a row from
+/// the panel; the newest row is the live text and cannot be hidden.
+model OverviewVersion {
+  id                 String    @id @default(uuid()) @db.VarChar(64)
+  cwid               String    @db.VarChar(32)
+  html               String    @db.Text
+  origin             String    @db.VarChar(24) // 'authored' | 'generated' | 'generated_edited'
+  sourceGenerationId String?   @map("source_generation_id") @db.VarChar(64)
+  savedByCwid        String    @map("saved_by_cwid") @db.VarChar(32)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  hiddenAt           DateTime? @map("hidden_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@index([cwid, createdAt(sort: Desc)])
+  @@map("overview_version")
 }
 
 /// The scholar's DURABLE source-selection deltas for the overview generator

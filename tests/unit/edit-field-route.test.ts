@@ -17,6 +17,7 @@ const {
   mockTxSlugHistoryUpsert,
   mockTxGenerationFindUnique,
   mockTxProvenanceUpsert,
+  mockTxVersionCreate,
   // Amendment 4 — the unit-admin resolver (resolveEditableUnitViaUnitAdmin)
   // reads these on the non-self overview path before denying.
   mockScholarFindUnique,
@@ -39,6 +40,7 @@ const {
   mockTxSlugHistoryUpsert: vi.fn(),
   mockTxGenerationFindUnique: vi.fn(),
   mockTxProvenanceUpsert: vi.fn(),
+  mockTxVersionCreate: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockDivisionMembershipFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
@@ -94,6 +96,7 @@ const fakeTx = {
   // #742 Phase B — provenance is upserted in the same tx on an overview save.
   overviewGeneration: { findUnique: mockTxGenerationFindUnique },
   overviewProvenance: { upsert: mockTxProvenanceUpsert },
+  overviewVersion: { create: mockTxVersionCreate },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -126,6 +129,7 @@ beforeEach(() => {
   // #742 Phase B — no source generation by default; provenance upsert resolves.
   mockTxGenerationFindUnique.mockResolvedValue(null);
   mockTxProvenanceUpsert.mockResolvedValue({});
+  mockTxVersionCreate.mockResolvedValue({});
   // Amendment 4 — default: no unit-admin access (the resolver short-circuits on
   // a missing scholar row, so a non-self overview edit still denies with 403).
   mockScholarFindUnique.mockResolvedValue(null);
@@ -308,6 +312,16 @@ describe("POST /api/edit/field", () => {
         }),
       }),
     );
+    // The same save appends a History-panel version row.
+    expect(mockTxVersionCreate).toHaveBeenCalledWith({
+      data: {
+        cwid: "self01",
+        html: "<p>Verbatim draft.</p>",
+        origin: "generated",
+        sourceGenerationId: "gen1",
+        savedByCwid: "self01",
+      },
+    });
   });
 
   it("overview save WITH a matching sourceGenerationId but edited text -> origin 'generated_edited'", async () => {

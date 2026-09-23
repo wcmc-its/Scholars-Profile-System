@@ -42,7 +42,17 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Check, ChevronLeft, ChevronRight, Globe, History, Settings2, Sparkles } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Globe,
+  History,
+  Pencil,
+  Settings2,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { OverviewEditor } from "@/components/edit/overview-editor";
@@ -113,6 +123,7 @@ const GENERATE_DEBUG_FAILED = "Couldn't prepare the prompt payload. Please try a
 
 // #875 §6 — the two pre-generation conditional hints (verbatim from the spec).
 const HINT_SPARSE_SOURCES = "Limited sources may produce a generic draft.";
+const HISTORY_FAILED = "Couldn't update the history just now. Please try again.";
 
 /** A fresh, all-empty source selection (before the source-options load). */
 const EMPTY_SELECTION: OverviewSelection = { pmids: [], grantIds: [], toolNames: [] };
@@ -149,6 +160,18 @@ type OverviewProvenanceLine = {
 type OverviewGenerationsResponse = {
   generations: OverviewGenerationItem[];
   provenance: OverviewProvenanceLine | null;
+  versions?: OverviewSavedVersion[];
+  importedHtml?: string | null;
+};
+
+/** One saved overview from the History log, newest first (the newest is live). */
+type OverviewSavedVersion = {
+  id: string;
+  html: string;
+  origin: OverviewOrigin;
+  createdAt: string;
+  /** Who saved it, when they have a scholar row. */
+  by: string | null;
 };
 
 export type OverviewCardProps = {
@@ -223,6 +246,10 @@ export type OverviewGenerationItem = {
   params: OverviewParams & { selection?: OverviewSelection };
   createdAt: string;
   text: string;
+  /** History-panel label; null ⇒ "AI draft N". */
+  name?: string | null;
+  /** Who generated it, when they have a scholar row. */
+  by?: string | null;
 };
 
 /** One draft the review bar can page through: a session draft (just generated)
@@ -236,6 +263,8 @@ type OverviewReviewDraft = {
   createdAt: string;
   /** The settings it was generated with (history rows carry the selection too). */
   params?: OverviewGenerationItem["params"];
+  name?: string | null;
+  by?: string | null;
 };
 
 /** A draft's stable key — its generation id, else its timestamp. */
@@ -362,6 +391,9 @@ function OverviewEditorCard({
   // of the *currently saved* bio.
   const [generations, setGenerations] = React.useState<OverviewGenerationItem[]>([]);
   const [provenance, setProvenance] = React.useState<OverviewProvenanceLine | null>(null);
+  // The History panel's saved-version log + the imported (previous system) text.
+  const [versions, setVersions] = React.useState<OverviewSavedVersion[]>([]);
+  const [importedHtml, setImportedHtml] = React.useState<string | null>(null);
   // #1077 — has the provenance read resolved? Gates the imported-bio fallback in
   // the note so it never flashes before the fetch lands.
   const [provenanceLoaded, setProvenanceLoaded] = React.useState(false);
@@ -382,6 +414,8 @@ function OverviewEditorCard({
       const data = (await res.json()) as OverviewGenerationsResponse;
       setGenerations(Array.isArray(data.generations) ? data.generations : []);
       setProvenance(data.provenance ?? null);
+      setVersions(Array.isArray(data.versions) ? data.versions : []);
+      setImportedHtml(typeof data.importedHtml === "string" ? data.importedHtml : null);
     } catch {
       // Swallow — the history panel is non-essential and must never disrupt the editor.
     } finally {
@@ -432,6 +466,8 @@ function OverviewEditorCard({
         mode={mode}
         scholarName={scholarName}
         generations={generations}
+        versions={versions}
+        importedHtml={importedHtml}
         refreshGenerations={refreshGenerations}
         previewHref={previewHref}
         canSelectPromptVersion={canSelectPromptVersion}
@@ -629,6 +665,8 @@ function OverviewGeneratorArm({
   mode,
   scholarName,
   generations,
+  versions,
+  importedHtml,
   refreshGenerations,
   previewHref,
   canSelectPromptVersion = false,
@@ -639,6 +677,8 @@ function OverviewGeneratorArm({
 }: {
   cwid: string;
   editor: UseOverviewEditor;
+  versions: OverviewSavedVersion[];
+  importedHtml: string | null;
   savedHtml: string;
   provenance: OverviewProvenanceLine | null;
   provenanceLoaded: boolean;
@@ -776,18 +816,23 @@ function OverviewGeneratorArm({
   );
 
   // Every draft, newest first: this session's, then the persisted history
-  // (de-duped by key — a session draft and its history row are the same draft).
+  // (de-duped by key — a session draft and its history row are the same draft;
+  // the history row wins, since it carries the name and author).
   const drafts = React.useMemo<OverviewReviewDraft[]>(() => {
+    const persisted = generations.map((g) => ({
+      text: g.text,
+      generationId: g.id,
+      createdAt: g.createdAt,
+      params: g.params,
+      name: g.name ?? null,
+      by: g.by ?? null,
+    }));
+    const byId = new Map(persisted.map((d) => [d.generationId, d]));
     const seen = new Set<string>();
     const out: OverviewReviewDraft[] = [];
     for (const d of [
-      ...sessionDrafts,
-      ...generations.map((g) => ({
-        text: g.text,
-        generationId: g.id,
-        createdAt: g.createdAt,
-        params: g.params,
-      })),
+      ...sessionDrafts.map((d) => (d.generationId && byId.get(d.generationId)) || d),
+      ...persisted,
     ]) {
       const k = draftKey(d);
       if (seen.has(k)) continue;
@@ -958,6 +1003,49 @@ function OverviewGeneratorArm({
     setPrevious(null);
   }
 
+  // Put an older saved version (or the imported text) back in the editor —
+  // Restore previous text still undoes it, and nothing publishes until Save.
+  function restoreText(html: string) {
+    setPrevious({ html: editor.currentHtml, generationId: currentGenerationId });
+    editor.reseed(html);
+    setCurrentGenerationId(null);
+    setReviewKey(null);
+    setHistoryOpen(false);
+  }
+
+  const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+  const historyUrl = `/api/edit/overview/history?cwid=${encodeURIComponent(cwid)}`;
+
+  async function renameDraft(id: string, name: string) {
+    try {
+      const res = await fetch(historyUrl, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "draft", id, name }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      await refreshGenerations();
+    } catch {
+      setGenerateError(HISTORY_FAILED);
+    }
+  }
+
+  async function deleteRow(kind: "draft" | "version", id: string, sessionKey: string | null) {
+    setConfirmDelete(null);
+    try {
+      const res = await fetch(historyUrl, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, id }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      if (sessionKey) setSessionDrafts((prev) => prev.filter((d) => draftKey(d) !== sessionKey));
+      await refreshGenerations();
+    } catch {
+      setGenerateError(HISTORY_FAILED);
+    }
+  }
+
   function review(d: OverviewReviewDraft) {
     if (busy) return;
     setReviewKey(draftKey(d));
@@ -998,7 +1086,85 @@ function OverviewGeneratorArm({
           ? { label: "Imported · not edited here", amber: false }
           : null;
 
-  const historyCount = drafts.length + (hasSaved ? 1 : 0);
+  // The History panel rows: drafts (newest first), saved versions, then the
+  // imported text. A save made before the version log existed has no version
+  // row — fall back to one synthetic "Published version" line for it.
+  const historyRows: HistoryRow[] = [
+    ...drafts.map((d, i): HistoryRow => {
+      const key = draftKey(d);
+      const inEditor = d.generationId != null && d.generationId === currentGenerationId;
+      const reviewing = reviewKey === key;
+      return {
+        key: `d:${key}`,
+        testKey: d.generationId ?? d.createdAt,
+        title: d.name || `AI draft ${draftNumber(i)}`,
+        renameId: d.generationId,
+        when: formatWhen(d.createdAt),
+        detail: [draftSettings(d.params), d.by ? `by ${d.by}` : null].filter(Boolean).join(" · "),
+        tag: reviewing ? "Reviewing" : inEditor ? "In editor" : null,
+        actions: [
+          ...(d.params ? [{ label: "Use settings", testid: "use-settings", run: () => applySettings(d) }] : []),
+          { label: "Review", testid: "load", run: () => review(d) },
+        ],
+        // Keep a draft that is in the editor or under review; the rest can go.
+        onDelete:
+          d.generationId && !inEditor && !reviewing
+            ? () => deleteRow("draft", d.generationId!, key)
+            : null,
+      };
+    }),
+    ...versions.map((v, i): HistoryRow => {
+      const live = i === 0;
+      return {
+        key: `v:${v.id}`,
+        testKey: v.id,
+        title: live ? "Published version" : "Saved version",
+        renameId: null,
+        when: formatWhen(v.createdAt),
+        detail: [ORIGIN_LABEL[v.origin], v.by ? `by ${v.by}` : null].filter(Boolean).join(" · "),
+        tag: live ? "Published" : editor.currentHtml === v.html ? "In editor" : null,
+        actions:
+          live || editor.currentHtml === v.html
+            ? []
+            : [{ label: "Restore", testid: "restore", run: () => restoreText(v.html) }],
+        onDelete: live ? null : () => deleteRow("version", v.id, null),
+      };
+    }),
+    ...(versions.length === 0 && provenance && hasSaved
+      ? [
+          {
+            key: "published",
+            testKey: "published",
+            title: "Published version",
+            renameId: null,
+            when: formatWhen(provenance.updatedAt),
+            detail: "What the public profile shows now",
+            tag: "Published",
+            actions: [],
+            onDelete: null,
+          } satisfies HistoryRow,
+        ]
+      : []),
+    ...(importedHtml
+      ? [
+          {
+            key: "imported",
+            testKey: "imported",
+            title: "Imported text",
+            renameId: null,
+            when: "Previous profile system",
+            detail: "Original overview before any edits here",
+            tag: editor.currentHtml === importedHtml ? "In editor" : null,
+            actions:
+              editor.currentHtml === importedHtml
+                ? []
+                : [{ label: "Restore", testid: "restore", run: () => restoreText(importedHtml) }],
+            onDelete: null,
+          } satisfies HistoryRow,
+        ]
+      : []),
+  ];
+  const historyCount = historyRows.length;
   const selectedVersion = promptVersions.find((v) => v.id === params.promptVersion);
   const showVersionSelector = canSelectPromptVersion && promptVersions.length > 0;
   const cost = selectedVersion?.model ? estimateDraftCostUsd(selectedVersion.model) : null;
@@ -1056,84 +1222,13 @@ function OverviewGeneratorArm({
       )}
 
       {historyOpen && (
-        <div
-          className="border-apollo-border-strong overflow-hidden rounded-lg border"
-          data-testid="overview-versions-panel"
-        >
-          <div className="border-apollo-border bg-apollo-surface-2 text-muted-foreground border-b px-3.5 py-2.5 text-xs font-semibold tracking-[0.06em] uppercase">
-            Drafts &amp; versions
-          </div>
-          <ul>
-            {drafts.map((d, i) => {
-              const tag =
-                reviewKey === draftKey(d)
-                  ? "Reviewing"
-                  : d.generationId && d.generationId === currentGenerationId
-                    ? "In editor"
-                    : null;
-              return (
-                <li
-                  key={draftKey(d)}
-                  className="border-apollo-border flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-3.5 py-2.5 first:border-t-0"
-                  data-testid={`overview-version-${d.generationId ?? d.createdAt}`}
-                >
-                  <span className="flex w-[150px] flex-col">
-                    <span className="text-sm font-medium">AI draft {draftNumber(i)}</span>
-                    <span className="text-muted-foreground text-xs">{formatWhen(d.createdAt)}</span>
-                  </span>
-                  <span className="text-muted-foreground min-w-0 flex-1 text-[13px]">
-                    {draftSettings(d.params)}
-                  </span>
-                  {tag && (
-                    <span className="bg-apollo-surface-2 text-muted-foreground rounded-full px-2 py-px text-xs">
-                      {tag}
-                    </span>
-                  )}
-                  {d.params && (
-                    <button
-                      type="button"
-                      onClick={() => applySettings(d)}
-                      disabled={busy}
-                      className="text-muted-foreground text-[13px] underline underline-offset-2"
-                      data-testid={`overview-version-use-settings-${d.generationId ?? d.createdAt}`}
-                    >
-                      Use settings
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => review(d)}
-                    disabled={busy}
-                    className="text-foreground text-[13px] underline underline-offset-2"
-                    data-testid={`overview-version-load-${d.generationId ?? d.createdAt}`}
-                  >
-                    Review
-                  </button>
-                </li>
-              );
-            })}
-            {hasSaved && (
-              <li className="border-apollo-border flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-3.5 py-2.5 first:border-t-0">
-                <span className="flex w-[150px] flex-col">
-                  <span className="text-sm font-medium">
-                    {provenance ? "Published version" : "Imported text"}
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    {provenance ? formatWhen(provenance.updatedAt) : "Previous profile system"}
-                  </span>
-                </span>
-                <span className="text-muted-foreground min-w-0 flex-1 text-[13px]">
-                  {provenance
-                    ? "What the public profile shows now"
-                    : "Original overview before any edits here"}
-                </span>
-                <span className="bg-apollo-surface-2 text-muted-foreground rounded-full px-2 py-px text-xs">
-                  Published
-                </span>
-              </li>
-            )}
-          </ul>
-        </div>
+        <OverviewHistoryPanel
+          rows={historyRows}
+          busy={busy}
+          confirmKey={confirmDelete}
+          onAskDelete={setConfirmDelete}
+          onRename={renameDraft}
+        />
       )}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -1159,7 +1254,9 @@ function OverviewGeneratorArm({
                   <Sparkles className="size-4 shrink-0" aria-hidden="true" />
                   <div className="flex min-w-[200px] flex-1 flex-col gap-px">
                     <span className="text-sm font-semibold">
-                      AI draft {draftNumber(reviewIndex)} of {drafts.length}
+                      {reviewDraft.name
+                        ? `${reviewDraft.name} · draft ${draftNumber(reviewIndex)} of ${drafts.length}`
+                        : `AI draft ${draftNumber(reviewIndex)} of ${drafts.length}`}
                     </span>
                     <span className="text-muted-foreground text-xs">
                       {[formatWhen(reviewDraft.createdAt), draftSettings(reviewDraft.params)]
@@ -1457,6 +1554,158 @@ function OverviewGeneratorArm({
         </aside>
       </div>
     </EditPanel>
+  );
+}
+
+const ORIGIN_LABEL: Record<OverviewOrigin, string> = {
+  authored: "Written by hand",
+  generated: "AI draft, saved as is",
+  generated_edited: "AI draft, edited",
+};
+
+type HistoryRow = {
+  key: string;
+  /** The id suffix the row's testids carry. */
+  testKey: string;
+  title: string;
+  /** Set on a persisted draft — shows the rename pencil. */
+  renameId: string | null;
+  when: string;
+  detail: string;
+  tag: string | null;
+  actions: { label: string; testid: string; run: () => void }[];
+  onDelete: (() => void) | null;
+};
+
+/** "Drafts & versions" — every draft, the saved-version log and the imported
+ *  text, with rename (drafts), Review / Restore, and a confirm-to-delete. */
+function OverviewHistoryPanel({
+  rows,
+  busy,
+  confirmKey,
+  onAskDelete,
+  onRename,
+}: {
+  rows: HistoryRow[];
+  busy: boolean;
+  confirmKey: string | null;
+  onAskDelete: (key: string | null) => void;
+  onRename: (id: string, name: string) => void;
+}) {
+  const [renaming, setRenaming] = React.useState<{ id: string; value: string } | null>(null);
+
+  function commitRename(row: HistoryRow) {
+    if (!renaming) return;
+    const next = renaming.value.trim();
+    setRenaming(null);
+    if (next !== row.title) onRename(renaming.id, next);
+  }
+
+  return (
+    <div
+      className="border-apollo-border-strong overflow-hidden rounded-lg border"
+      data-testid="overview-versions-panel"
+    >
+      <div className="border-apollo-border bg-apollo-surface-2 text-muted-foreground border-b px-3.5 py-2.5 text-xs font-semibold tracking-[0.06em] uppercase">
+        Drafts &amp; versions
+      </div>
+      <ul>
+        {rows.map((row) => (
+          <li
+            key={row.key}
+            className="border-apollo-border flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-3.5 py-2.5 first:border-t-0"
+            data-testid={`overview-version-${row.testKey}`}
+          >
+            <span className="flex w-[170px] min-w-0 flex-col">
+              {renaming && renaming.id === row.renameId ? (
+                <input
+                  autoFocus
+                  value={renaming.value}
+                  maxLength={40}
+                  aria-label="Draft name"
+                  onChange={(e) => setRenaming({ id: renaming.id, value: e.target.value })}
+                  onBlur={() => commitRename(row)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                    if (e.key === "Escape") setRenaming(null);
+                  }}
+                  className="text-foreground h-[26px] rounded border border-[#8a847c] bg-white px-1.5 text-sm font-medium"
+                  data-testid={`overview-version-name-${row.testKey}`}
+                />
+              ) : (
+                <span className="flex min-w-0 items-center gap-1">
+                  <span className="truncate text-sm font-medium">{row.title}</span>
+                  {row.renameId && (
+                    <button
+                      type="button"
+                      onClick={() => setRenaming({ id: row.renameId!, value: row.title })}
+                      disabled={busy}
+                      aria-label="Rename draft"
+                      title="Rename"
+                      className="text-muted-foreground hover:bg-apollo-surface-2 hover:text-foreground flex size-[22px] shrink-0 items-center justify-center rounded"
+                      data-testid={`overview-version-rename-${row.testKey}`}
+                    >
+                      <Pencil className="size-3" aria-hidden="true" />
+                    </button>
+                  )}
+                </span>
+              )}
+              <span className="text-muted-foreground text-xs whitespace-nowrap">{row.when}</span>
+            </span>
+            <span className="text-muted-foreground min-w-0 flex-1 text-[13px]">{row.detail}</span>
+            {row.tag && (
+              <span className="bg-apollo-surface-2 text-muted-foreground rounded-full px-2 py-px text-xs whitespace-nowrap">
+                {row.tag}
+              </span>
+            )}
+            {row.actions.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                onClick={a.run}
+                disabled={busy}
+                className="text-foreground text-[13px] underline underline-offset-2 disabled:opacity-50"
+                data-testid={`overview-version-${a.testid}-${row.testKey}`}
+              >
+                {a.label}
+              </button>
+            ))}
+            {row.onDelete &&
+              (confirmKey === row.key ? (
+                <span className="inline-flex items-center gap-2.5 text-[13px] whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={row.onDelete}
+                    className="text-destructive font-semibold"
+                    data-testid={`overview-version-confirm-delete-${row.testKey}`}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onAskDelete(null)}
+                    className="text-muted-foreground"
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onAskDelete(row.key)}
+                  disabled={busy}
+                  aria-label="Delete"
+                  title="Delete"
+                  className="text-muted-foreground hover:bg-apollo-surface-2 hover:text-destructive flex size-[26px] items-center justify-center rounded-md"
+                  data-testid={`overview-version-delete-${row.testKey}`}
+                >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                </button>
+              ))}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

@@ -31,7 +31,7 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, Pin, Plus, TriangleAlert, Undo2, X } from "lucide-react";
+import { ChevronDown, Info, Pin, TriangleAlert } from "lucide-react";
 
 import { PubTitle } from "@/components/publication/pub-html";
 import { fundingRoleLabel } from "@/lib/funding-roles";
@@ -314,15 +314,112 @@ export function OverviewIncludePicker({
     onChange({ ...deltas, [key]: mode });
   }
 
+  const specs: SectionSpec[] = [
+    {
+      type: "publication",
+      heading: "Publications",
+      subtitle: "First- and last-author work, weighted toward recent and high-impact papers.",
+      records: publications,
+      pinnable: true,
+      whyLabel: "Why this source",
+      toggle: {
+        mode: deltas.publicationPositions,
+        onMode: (m) => setPositionMode("publicationPositions", m),
+        ledLabel: "Led",
+        allLabel: "All positions",
+      },
+      moreCopy: (n) => `Show ${n} more`,
+    },
+    {
+      type: "funding",
+      heading: "Funding",
+      subtitle: "Grants you lead, active and recently completed.",
+      records: funding,
+      pinnable: true,
+      whyLabel: "Why this source",
+      toggle: {
+        mode: deltas.fundingRoles,
+        onMode: (m) => setPositionMode("fundingRoles", m),
+        ledLabel: "Led",
+        allLabel: "All roles",
+      },
+      moreCopy: (n) => `Show ${n} more`,
+      emptyLed: 'No grants you lead are active. Switch to "All roles" to include co-investigator grants.',
+    },
+    ...(showTools
+      ? [
+          {
+            type: "method",
+            heading: "Methods & tools",
+            subtitle: "Methods named across your papers, with how often they appear.",
+            records: methods,
+            pinnable: true,
+            whyLabel: "Show evidence",
+            toggle: null,
+            moreCopy: (n: number, ex: string[]) =>
+              `Show ${n} single-paper ${n === 1 ? "method" : "methods"}${
+                ex.length ? ` (${ex.join(", ")}…)` : ""
+              }, usually too thin to feature`,
+          } satisfies SectionSpec,
+        ]
+      : []),
+    ...(hasPrimaryTitle || titles.length > 0
+      ? [
+          {
+            type: "title",
+            heading: "Titles",
+            subtitle: "Leadership and named roles beyond the primary appointment.",
+            scaffold:
+              hasPrimaryTitle && scaffoldText ? (
+                <>
+                  <span className="text-foreground">Always shown:</span> {scaffoldText}
+                </>
+              ) : undefined,
+            records: titles,
+            // Titles are stable run-to-run, so featured rows are exclude-only (no
+            // pin-to-protect); the Available tail still offers add-and-pin.
+            pinnable: false,
+            whyLabel: "Why this source",
+            toggle: null,
+            moreCopy: (n: number) => `Show ${n} more`,
+          } satisfies SectionSpec,
+        ]
+      : []),
+    ...(education.length > 0
+      ? [
+          {
+            type: "education",
+            heading: "Education",
+            subtitle: "Terminal and professional degrees.",
+            records: education,
+            pinnable: false,
+            whyLabel: "Why this source",
+            toggle: null,
+            moreCopy: (n: number) => `Show ${n} more`,
+          } satisfies SectionSpec,
+        ]
+      : []),
+  ];
+
+  const [tab, setTab] = React.useState<OverviewRecordType>("publication");
+  const active = specs.find((sp) => sp.type === tab) ?? specs[0];
+  // A tab's count is what grounds the draft: featured or pinned, not hidden.
+  const includedCount = (sp: SectionSpec) =>
+    sp.records.filter(
+      (r) =>
+        !bagHas(deltas.excluded, sp.type, r.id) &&
+        (bagHas(deltas.pinned, sp.type, r.id) || r.bucket === "featured"),
+    ).length;
+
   return (
-    <div className="flex flex-col gap-1" data-testid="overview-include-picker">
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        Hiding a record affects only this overview — it stays in your profile. Pins and hides survive
-        every regenerate.
+    <div className="flex flex-col" data-testid="overview-include-picker">
+      <p className="bg-apollo-surface-2 border-apollo-border text-muted-foreground border-b px-3.5 py-2.5 text-[13px] text-pretty">
+        Unchecking a source only affects the AI draft; it stays on the profile. Pinned sources are
+        always used, and pins and exclusions carry over to every new draft.
       </p>
       {visiblePubs < MIN_PUBLICATIONS && (
         <p
-          className="text-apollo-amber mt-1 flex items-center gap-1.5 text-xs"
+          className="text-apollo-amber flex items-center gap-1.5 px-3.5 pt-2 text-xs"
           data-testid="overview-source-minwarn"
         >
           <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
@@ -334,7 +431,7 @@ export function OverviewIncludePicker({
         // selection is still capped: warn when the chosen papers alone exceed the
         // budget, since the lowest-ranked won't reach the overview.
         <p
-          className="text-apollo-amber mt-1 flex items-center gap-1.5 text-xs"
+          className="text-apollo-amber flex items-center gap-1.5 px-3.5 pt-2 text-xs"
           data-testid="overview-source-maxwarn"
         >
           <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
@@ -343,117 +440,45 @@ export function OverviewIncludePicker({
         </p>
       )}
 
+      <div
+        role="tablist"
+        aria-label="Source types"
+        className="border-apollo-border flex flex-wrap items-end gap-1 overflow-x-auto border-b px-2.5 pt-2"
+      >
+        {specs.map((sp) => {
+          const selected = sp.type === active.type;
+          return (
+            <button
+              key={sp.type}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setTab(sp.type)}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2.5 text-sm whitespace-nowrap",
+                selected
+                  ? "text-foreground font-semibold shadow-[inset_0_-2px_0_var(--apollo-bar)]"
+                  : "text-muted-foreground",
+              )}
+              data-testid={`overview-source-tab-${sp.type}`}
+            >
+              {sp.heading}
+              <span className="bg-apollo-surface-2 text-muted-foreground rounded-lg px-1.5 text-[11px] font-semibold">
+                {includedCount(sp)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <Section
-        spec={{
-          type: "publication",
-          heading: "Publications",
-          subtitle: "Senior- and first-author work, weighted toward recent and landmark.",
-          records: publications,
-          pinnable: true,
-          whyLabel: "why this?",
-          toggle: {
-            mode: deltas.publicationPositions,
-            onMode: (m) => setPositionMode("publicationPositions", m),
-            ledLabel: "Led",
-            allLabel: "All positions",
-          },
-          moreCopy: (n) => `+ ${n} more featured ${n === 1 ? "paper" : "papers"} — `,
-        }}
+        key={active.type}
+        spec={active}
         deltas={deltas}
         onChange={onChange}
         disabled={disabled}
-        sortState={{ value: pubSort, set: setPubSort }}
+        sortState={active.type === "publication" ? { value: pubSort, set: setPubSort } : undefined}
       />
-
-      <Section
-        spec={{
-          type: "funding",
-          heading: "Funding",
-          subtitle: "Grants you lead, active and recently completed.",
-          records: funding,
-          pinnable: true,
-          whyLabel: "why this?",
-          toggle: {
-            mode: deltas.fundingRoles,
-            onMode: (m) => setPositionMode("fundingRoles", m),
-            ledLabel: "Led",
-            allLabel: "All roles",
-          },
-          moreCopy: (n) => `+ ${n} more — `,
-          emptyLed: 'No grants you lead are active. Switch to "all roles" to include co-investigator grants.',
-        }}
-        deltas={deltas}
-        onChange={onChange}
-        disabled={disabled}
-      />
-
-      {showTools && (
-        <Section
-          spec={{
-            type: "method",
-            heading: "Methods & tools",
-            subtitle: "Methods named across your papers, shown with how you used them.",
-            records: methods,
-            pinnable: true,
-            whyLabel: "show evidence",
-            toggle: null,
-            moreCopy: (n, ex) =>
-              `+ ${n} single-paper ${n === 1 ? "method" : "methods"}${
-                ex.length ? ` (${ex.join(", ")}…)` : ""
-              } — usually too thin to feature. `,
-          }}
-          deltas={deltas}
-          onChange={onChange}
-          disabled={disabled}
-        />
-      )}
-      {(hasPrimaryTitle || titles.length > 0) && (
-        <Section
-          spec={{
-            type: "title",
-            heading: "Titles & positions",
-            subtitle:
-              titles.length > 0
-                ? "Leadership and named roles beyond your primary appointment. Hiding one keeps it out of this overview only."
-                : "Leadership and named roles beyond your primary appointment.",
-            scaffold:
-              hasPrimaryTitle && scaffoldText ? (
-                <>
-                  <span className="text-foreground">Always shown:</span> {scaffoldText}
-                </>
-              ) : undefined,
-            records: titles,
-            // Titles are stable run-to-run, so featured rows are exclude-only (no
-            // pin-to-protect); the Available tail still offers add-and-pin.
-            pinnable: false,
-            whyLabel: "why this?",
-            toggle: null,
-            moreCopy: (n) => `+ ${n} more ${n === 1 ? "title" : "titles"} — `,
-          }}
-          deltas={deltas}
-          onChange={onChange}
-          disabled={disabled}
-        />
-      )}
-
-      {education.length > 0 && (
-        <Section
-          spec={{
-            type: "education",
-            heading: "Education",
-            subtitle:
-              "Terminal and professional degrees. Hiding one keeps it out of this overview only.",
-            records: education,
-            pinnable: false,
-            whyLabel: "why this?",
-            toggle: null,
-            moreCopy: (n) => `+ ${n} more — `,
-          }}
-          deltas={deltas}
-          onChange={onChange}
-          disabled={disabled}
-        />
-      )}
     </div>
   );
 }
@@ -516,9 +541,11 @@ function Section({
     .map((r) => r.title as string);
 
   return (
-    <section className="mt-4" data-testid={`overview-source-section-${type}`}>
-      <div className="flex flex-wrap items-center gap-2.5">
-        <span className="text-foreground text-sm font-medium">{spec.heading}</span>
+    <section role="tabpanel" data-testid={`overview-source-section-${type}`}>
+      <div className="flex flex-wrap items-center gap-2 px-3.5 pt-2 pb-1">
+        {spec.subtitle && (
+          <span className="text-muted-foreground min-w-0 flex-1 text-xs">{spec.subtitle}</span>
+        )}
         {toggle && (
           <SegmentedToggle
             mode={toggle.mode}
@@ -530,24 +557,23 @@ function Section({
           />
         )}
       </div>
-      {spec.subtitle && (
-        <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{spec.subtitle}</div>
-      )}
       {spec.scaffold && (
         <p
-          className="text-muted-foreground border-apollo-border mt-1 border-t pt-2.5 text-[13px]"
+          className="text-muted-foreground px-3.5 py-1.5 text-[13px]"
           data-testid={`overview-source-scaffold-${type}`}
         >
           {spec.scaffold}
         </p>
       )}
       {sortState && (
-        <PublicationSort sort={sortState.value} onSort={sortState.set} disabled={disabled} />
+        <div className="px-3.5 pb-1">
+          <PublicationSort sort={sortState.value} onSort={sortState.set} disabled={disabled} />
+        </div>
       )}
 
       {showEmptyLed && (
         <p
-          className="text-muted-foreground border-apollo-border mt-1 border-t pt-2.5 text-[13px]"
+          className="text-muted-foreground border-apollo-border border-t px-3.5 py-2.5 text-[13px]"
           data-testid="overview-source-empty-led"
         >
           {spec.emptyLed}
@@ -573,18 +599,15 @@ function Section({
       </ul>
 
       {hiddenMore > 0 && (
-        <p className="text-muted-foreground border-apollo-border border-t pt-2.5 text-[13px]">
+        <button
+          type="button"
+          onClick={() => setShowMore(true)}
+          disabled={disabled}
+          className="border-apollo-border text-muted-foreground hover:text-foreground w-full border-t px-3.5 py-2.5 text-left text-[13px]"
+          data-testid={`overview-source-more-${type}`}
+        >
           {spec.moreCopy(hiddenMore, moreExamples)}
-          <button
-            type="button"
-            onClick={() => setShowMore(true)}
-            disabled={disabled}
-            className="text-apollo-maroon hover:underline"
-            data-testid={`overview-source-more-${type}`}
-          >
-            show
-          </button>
-        </p>
+        </button>
       )}
     </section>
   );
@@ -616,177 +639,106 @@ function RecordRow({
   onUndo: () => void;
 }) {
   const [whyOpen, setWhyOpen] = React.useState(false);
-  // "Included" rows (featured or pinned) get the pin/exclude controls; Available
-  // rows get a single "add and pin". Titles & education never pin a featured row.
-  const included = pinned || record.bucket === "featured";
+  // Included = featured or pinned (and not vetoed). The checkbox performs the one
+  // action that fits the row's state — hide it, undo the hide, or add-and-pin an
+  // Available row — and carries that action's testid.
+  const included = !excluded && (pinned || record.bucket === "featured");
   const reveal = record.reason ?? record.evidence;
+  const check = excluded
+    ? { onClick: onUndo, testid: `overview-source-undo-${type}-${record.id}`, label: "Include" }
+    : included
+      ? { onClick: onExclude, testid: `overview-source-exclude-${type}-${record.id}`, label: "Exclude" }
+      : { onClick: onPin, testid: `overview-source-add-${type}-${record.id}`, label: "Include and pin" };
+  // Pin pill: included rows of pinnable types, plus a row ADDED from the Available
+  // tail in an exclude-only section (so un-adding is Unpin, not a spurious hide).
+  const showPin = !excluded && (pinned || (included && pinnable));
 
   return (
     <li
       className={cn(
-        "border-apollo-border flex items-start gap-2.5 border-t py-2.5",
-        excluded && "[&_.recmain]:opacity-40",
+        "border-apollo-border flex items-start gap-3 border-t px-3.5 py-3",
+        excluded || !included ? "bg-[#fcfbfa]" : "bg-apollo-surface",
       )}
       data-testid={`overview-source-row-${type}-${record.id}`}
       data-state={excluded ? "excluded" : pinned ? "pinned" : "default"}
     >
-      {/* Leading control */}
-      {excluded ? (
-        <span className="w-[21px] shrink-0" aria-hidden="true" />
-      ) : included ? (
-        pinnable ? (
-          <IconButton
-            label={pinned ? "Unpin" : "Pin"}
-            active={pinned}
-            disabled={disabled}
-            onClick={onPin}
-            testid={`overview-source-pin-${type}-${record.id}`}
-          >
-            <Pin className="size-[17px]" />
-          </IconButton>
-        ) : pinned && record.bucket !== "featured" ? (
-          // A row ADDED from the Available tail in an exclude-only (non-pinnable)
-          // section: offer an Unpin so removing it returns to the default tier, rather
-          // than forcing the trailing X — which would mint a spurious exclude and
-          // inflate the "N hidden" count for a row the scholar only meant to un-add.
-          <IconButton
-            label="Unpin"
-            active
-            disabled={disabled}
-            onClick={onPin}
-            testid={`overview-source-pin-${type}-${record.id}`}
-          >
-            <Pin className="size-[17px]" />
-          </IconButton>
-        ) : (
-          <span className="w-[21px] shrink-0" aria-hidden="true" />
-        )
-      ) : (
-        <IconButton
-          label="Add and pin"
-          active
-          disabled={disabled}
-          onClick={onPin}
-          testid={`overview-source-add-${type}-${record.id}`}
-        >
-          <Plus className="size-[17px]" />
-        </IconButton>
-      )}
+      <input
+        type="checkbox"
+        checked={included}
+        onChange={check.onClick}
+        disabled={disabled}
+        aria-label={`${check.label}: ${typeof record.title === "string" ? record.title : "source"}`}
+        className="accent-foreground mt-0.5 size-[18px] shrink-0 cursor-pointer"
+        data-testid={check.testid}
+      />
 
-      <div className="recmain min-w-0 flex-1">
-        <div className={cn("text-[13.5px] leading-snug", excluded && "line-through")}>
-          {record.externalHref ? (
-            <span className="flex items-center gap-1.5">
-              {record.title}
-              <a
-                href={record.externalHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="View on PubMed"
-                className="text-[#185FA5]"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ExternalLinkIcon />
-              </a>
-            </span>
-          ) : (
-            record.title
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "line-clamp-2 text-sm leading-snug font-medium",
+            !included && "text-muted-foreground",
+            excluded && "line-through",
+          )}
+        >
+          {record.title}
+          {record.externalHref && (
+            <a
+              href={record.externalHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="View on PubMed"
+              className="ml-1.5 inline-block align-[-2px] text-[#185FA5]"
+            >
+              <ExternalLinkIcon />
+            </a>
           )}
         </div>
-        {(record.meta.length > 0 || pinned) && (
-          <div className="text-muted-foreground mt-0.5 text-xs">
-            {record.meta.join(" · ")}
-            {pinned && (
-              <>
-                {record.meta.length > 0 ? " · " : ""}
-                <span className="text-apollo-maroon">pinned</span>
-              </>
-            )}
-          </div>
-        )}
-        {!excluded && whyLabel && reveal && (
-          <>
+        <div className="text-muted-foreground mt-0.5 flex min-w-0 items-center gap-1.5 text-xs">
+          <span className="truncate">{record.meta.join(" · ")}</span>
+          {whyLabel && reveal && (
             <button
               type="button"
               onClick={() => setWhyOpen((v) => !v)}
-              className="text-muted-foreground mt-1.5 inline-flex items-center gap-1 text-xs hover:underline"
+              aria-label={whyLabel}
               aria-expanded={whyOpen}
+              title={whyLabel}
+              className="hover:text-foreground shrink-0"
               data-testid={`overview-source-why-${type}-${record.id}`}
             >
-              {whyLabel}
-              <ChevronDown
-                className={cn("size-3 transition-transform", whyOpen && "rotate-180")}
-                aria-hidden="true"
-              />
+              <Info className="size-[13px]" aria-hidden="true" />
             </button>
-            {whyOpen && (
-              <div className="bg-apollo-surface-2 text-muted-foreground mt-1.5 rounded-md px-2.5 py-2 text-xs leading-relaxed">
-                {record.evidence ? (
-                  <span className="text-foreground italic">{record.evidence}</span>
-                ) : (
-                  reveal
-                )}
-              </div>
+          )}
+        </div>
+        {whyOpen && reveal && (
+          <div className="bg-apollo-surface-2 text-muted-foreground mt-1.5 rounded-md px-2.5 py-2 text-xs leading-relaxed">
+            {record.evidence ? (
+              <span className="text-foreground italic">{record.evidence}</span>
+            ) : (
+              reveal
             )}
-          </>
+          </div>
         )}
       </div>
 
-      {/* Trailing control */}
-      {excluded ? (
+      {showPin && (
         <button
           type="button"
-          onClick={onUndo}
+          onClick={onPin}
           disabled={disabled}
-          className="text-apollo-maroon inline-flex shrink-0 items-center gap-1 text-[12.5px]"
-          data-testid={`overview-source-undo-${type}-${record.id}`}
+          aria-pressed={pinned}
+          className={cn(
+            "inline-flex h-[26px] shrink-0 items-center gap-1 rounded-full border px-2.5 text-xs disabled:opacity-50",
+            pinned
+              ? "bg-apollo-surface-2 text-foreground border-[#8a847c] font-medium"
+              : "border-apollo-border-strong bg-apollo-surface text-muted-foreground",
+          )}
+          data-testid={`overview-source-pin-${type}-${record.id}`}
         >
-          <Undo2 className="size-3.5" aria-hidden="true" /> Undo
+          <Pin className={cn("size-3", pinned && "fill-current")} aria-hidden="true" />
+          {pinned ? "Pinned" : "Pin"}
         </button>
-      ) : included ? (
-        <IconButton
-          label="Hide"
-          disabled={disabled}
-          onClick={onExclude}
-          testid={`overview-source-exclude-${type}-${record.id}`}
-        >
-          <X className="size-[17px]" />
-        </IconButton>
-      ) : null}
-    </li>
-  );
-}
-
-function IconButton({
-  label,
-  active = false,
-  disabled,
-  onClick,
-  testid,
-  children,
-}: {
-  label: string;
-  active?: boolean;
-  disabled: boolean;
-  onClick: () => void;
-  testid: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "shrink-0 p-0.5 leading-none transition-colors disabled:opacity-40",
-        active ? "text-apollo-maroon" : "text-muted-foreground hover:text-foreground",
       )}
-      data-testid={testid}
-    >
-      {children}
-    </button>
+    </li>
   );
 }
 
@@ -831,7 +783,7 @@ function SegmentedToggle({
 }) {
   return (
     <span
-      className="border-apollo-border-strong ml-auto inline-flex overflow-hidden rounded-full border"
+      className="border-apollo-border bg-apollo-surface-2 ml-auto inline-flex gap-0.5 rounded-[7px] border p-0.5"
       data-testid={`overview-source-toggle-${section}`}
     >
       {(
@@ -847,8 +799,10 @@ function SegmentedToggle({
           onClick={() => onMode(value)}
           aria-pressed={mode === value}
           className={cn(
-            "px-3 py-1 text-xs transition-colors disabled:opacity-50",
-            mode === value ? "bg-apollo-maroon text-white" : "text-muted-foreground",
+            "rounded-[5px] px-2.5 py-0.5 text-xs transition-colors disabled:opacity-50",
+            mode === value
+              ? "text-foreground bg-white font-semibold shadow-[0_1px_2px_rgba(34,30,28,0.12),0_0_0_1px_var(--apollo-border-strong)]"
+              : "text-muted-foreground",
           )}
           data-testid={`overview-source-toggle-${section}-${value}`}
         >

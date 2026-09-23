@@ -131,7 +131,7 @@ export function OverviewSourcePanel({
         </span>
       </div>
 
-      <div className="max-h-[460px] overflow-y-auto p-3.5">
+      <div className="max-h-[520px] overflow-y-auto">
         <OverviewIncludePicker
           options={options}
           deltas={draft}

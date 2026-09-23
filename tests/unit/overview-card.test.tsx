@@ -1205,3 +1205,150 @@ describe("OverviewCard — read-only preview mark styling (#2579)", () => {
     expect(previewClass()).not.toMatch(/\bprose\b/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// History panel — named drafts, the saved-version log, Restore, rename, delete
+// ---------------------------------------------------------------------------
+
+describe("OverviewCard — History panel actions", () => {
+  const HISTORY_BODY = {
+    generations: [
+      {
+        id: "gen-1",
+        model: "openai/gpt",
+        params: { voice: "third", tone: "formal", length: "short", audience: "informed", elements: [], instructions: "" },
+        createdAt: "2026-06-01T12:00:00.000Z",
+        text: "<p>Draft text.</p>",
+        name: "Short take",
+        by: "Pat Self",
+      },
+    ],
+    provenance: { origin: "authored", model: null, updatedAt: "2026-06-03T12:00:00.000Z" },
+    versions: [
+      { id: "v-live", html: "<p>Live.</p>", origin: "authored", createdAt: "2026-06-03T12:00:00.000Z", by: "Pat Self" },
+      { id: "v-old", html: "<p>Older.</p>", origin: "generated", createdAt: "2026-06-02T12:00:00.000Z", by: null },
+    ],
+    importedHtml: "<p>Imported.</p>",
+  };
+
+  function stubHistory() {
+    return vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.startsWith("/api/edit/overview/generations")) return jsonResponse(HISTORY_BODY);
+        if (url.startsWith("/api/edit/overview/source-options")) {
+          return jsonResponse({ ok: true, publications: [], funding: [], tools: [] });
+        }
+        if (url.startsWith("/api/edit/overview/selection")) {
+          return jsonResponse({ ok: true, deltas: EMPTY_DELTAS });
+        }
+        if (url.startsWith("/api/edit/overview/history")) return jsonResponse({ ok: true, method: init?.method });
+        return jsonResponse({ ok: true });
+      });
+  }
+
+  function historyCalls(f: ReturnType<typeof stubHistory>) {
+    return f.mock.calls
+      .filter((c) => String(c[0]).startsWith("/api/edit/overview/history"))
+      .map((c) => ({
+        url: String(c[0]),
+        method: (c[1] as RequestInit).method,
+        body: JSON.parse((c[1] as RequestInit).body as string) as unknown,
+      }));
+  }
+
+  it("lists the named draft, the saved versions (newest = Published) and the imported text", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    const draft = await screen.findByTestId("overview-version-gen-1");
+    expect(draft.textContent).toContain("Short take");
+    expect(draft.textContent).toContain("by Pat Self");
+    const live = screen.getByTestId("overview-version-v-live");
+    expect(live.textContent).toContain("Published");
+    // The live version can be neither restored nor deleted.
+    expect(screen.queryByTestId("overview-version-delete-v-live")).toBeNull();
+    expect(screen.queryByTestId("overview-version-restore-v-live")).toBeNull();
+    expect(screen.getByTestId("overview-version-delete-v-old")).toBeTruthy();
+    expect(screen.getByTestId("overview-version-imported").textContent).toContain("Imported text");
+    expect(screen.getByTestId("overview-history-toggle").textContent).toContain("4");
+  });
+
+  it("Restore puts an older version in the editor; Restore previous text undoes it", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-restore-v-old"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>Older.</p>"),
+    );
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByTestId("overview-restore-previous"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>Live.</p>"),
+    );
+  });
+
+  it("Restore on the imported text reseeds the editor with it", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-restore-imported"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>Imported.</p>"),
+    );
+  });
+
+  it("renaming a draft PATCHes the trimmed name for the edited scholar", async () => {
+    const f = stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-rename-gen-1"));
+    const input = screen.getByTestId("overview-version-name-gen-1");
+    fireEvent.change(input, { target: { value: "  For the grant  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    await waitFor(() => expect(historyCalls(f)).toHaveLength(1));
+    expect(historyCalls(f)[0]).toEqual({
+      url: `/api/edit/overview/history?cwid=${CWID}`,
+      method: "PATCH",
+      body: { kind: "draft", id: "gen-1", name: "For the grant" },
+    });
+  });
+
+  it("Escape cancels a rename without a request", async () => {
+    const f = stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-rename-gen-1"));
+    fireEvent.keyDown(screen.getByTestId("overview-version-name-gen-1"), { key: "Escape" });
+    expect(screen.queryByTestId("overview-version-name-gen-1")).toBeNull();
+    expect(historyCalls(f)).toHaveLength(0);
+  });
+
+  it("delete asks to confirm, then DELETEs the row", async () => {
+    const f = stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-delete-v-old"));
+    expect(historyCalls(f)).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("overview-version-confirm-delete-v-old"));
+    await waitFor(() => expect(historyCalls(f)).toHaveLength(1));
+    expect(historyCalls(f)[0]).toMatchObject({
+      method: "DELETE",
+      body: { kind: "version", id: "v-old" },
+    });
+  });
+
+  it("a draft under review cannot be deleted", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    expect(await screen.findByTestId("overview-version-delete-gen-1")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("overview-version-load-gen-1"));
+    expect(await screen.findByText("Short take · draft 1 of 1")).toBeTruthy();
+    await openHistory();
+    expect(screen.queryByTestId("overview-version-delete-gen-1")).toBeNull();
+  });
+});
