@@ -47,6 +47,11 @@ export const FUNDING_PREFIX = "funding/";
 const SUBJECT_RE = /\bmajor funding digest\b/i;
 /** Same stray-email tolerance as the clips step (see etl/news/clips.ts). */
 const UNPARSED_FAIL_MS = 36 * 3_600_000;
+/** A real digest lists ~60 items. An email carrying more than this is forged
+ *  or malformed: its items are dropped and the run fails, since nothing
+ *  reviews a submission before ReciterAI fetches it. Per email, so the first
+ *  run's 30-day backlog of several real digests never trips it. */
+const MAX_ITEMS_PER_EMAIL = 150;
 /** The panel caps a note at 500 chars; so does the digest. */
 const NOTE_MAX = 500;
 
@@ -69,7 +74,7 @@ const STOP_RE = /^(webinars\b|look out for our correspondence)/i;
 const SECTION_RE = /(opportunities|programs)$/i;
 const LINK_RE = /<([^\s<>]+)>/g;
 /** Link text that points at a list, a booking page or a mailbox, not an opportunity. */
-const NOISE_TEXT_RE = /\b(here|book now|click|rsvp)\b/i;
+const NOISE_TEXT_RE = /\b(here|book now|click|rsvp|learn more|read more|more info(rmation)?|register)\b/i;
 const NOISE_HOST_RE = /(^|\.)sharepoint\.com$/i;
 const FIELD_RE = /^(?:(external|internal)\s+)?(deadline|nomination limit|loi deadline)\s*:\s*(.+)$/i;
 const BULLET_RE = /^[•·▪*-]\s*/;
@@ -77,7 +82,14 @@ const BULLET_RE = /^[•·▪*-]\s*/;
 function opportunityLink(line: string): string | null {
   for (const m of line.matchAll(LINK_RE)) {
     const url = unwrapLink(m[1]);
-    if (url && !NOISE_HOST_RE.test(new URL(url).hostname)) return url;
+    if (!url) continue;
+    const u = new URL(url);
+    // A route in the fragment ("portal/#competitionDetail/1", InfoReady-style)
+    // is an SPA page: normalizeOpportunityUrl strips the fragment, so every such
+    // item would collapse onto the portal root, which is SSO-gated and
+    // unfetchable by the drain anyway.
+    if (NOISE_HOST_RE.test(u.hostname) || /^#\/?[a-z]/i.test(u.hash)) continue;
+    return url;
   }
   return null;
 }
@@ -208,6 +220,7 @@ async function main(): Promise<number> {
 
   const found: { item: DigestItem; date: string }[] = [];
   const unparsed: string[] = [];
+  const oversized: string[] = [];
   let skipped = 0;
   for (const { raw, receivedAt } of raws) {
     const e = readEmail(raw);
@@ -218,13 +231,25 @@ async function main(): Promise<number> {
       (!fromBucket ||
         (!REPLY_RE.test(e.subject) &&
           WCM_FROM_RE.test(e.from) &&
+          /\b(spf|dkim)=PASS\b/.test(e.authVerdict) &&
           e.virusVerdict !== "FAIL" &&
           e.spamVerdict !== "FAIL"));
     if (!trusted) {
+      // Unlike clips, submissions go to ReciterAI's fetcher with no human in
+      // between, so bucket mail must also pass SPF or DKIM (the From header is
+      // forgeable). Logged, so a real digest the list server fails auth on is
+      // visible rather than silently lost.
+      if (fromBucket && SUBJECT_RE.test(e.subject)) {
+        console.warn(`[FundingDigest] skipped "${e.subject}" from ${e.from} (${e.authVerdict})`);
+      }
       skipped++;
       continue;
     }
     const items = parseFundingDigest(raw);
+    if (items.length > MAX_ITEMS_PER_EMAIL) {
+      oversized.push(`${e.subject} (${items.length} items)`);
+      continue;
+    }
     if (items.length === 0 && Date.now() - receivedAt <= UNPARSED_FAIL_MS) unparsed.push(e.subject);
     const date = isoDate(e.date, receivedAt);
     for (const item of items) found.push({ item, date });
@@ -257,6 +282,9 @@ async function main(): Promise<number> {
     `[FundingDigest] ${JSON.stringify({ event: "funding_digest_complete", dryRun: !submit, emails: raws.length, skipped, items: found.length, new: fresh.length, submitted })}`,
   );
   if (!submit) for (const it of fresh) console.log(`[FundingDigest] would submit ${it.url} — ${it.title}`);
+  if (oversized.length) {
+    throw new Error(`[FundingDigest] dropped email(s) over the ${MAX_ITEMS_PER_EMAIL}-item cap: ${oversized.join(" | ")}`);
+  }
   if (unparsed.length) {
     throw new Error(`[FundingDigest] ${unparsed.length} digest(s) parsed to zero items: ${unparsed.join(" | ")}`);
   }

@@ -41,6 +41,9 @@ const PLAIN = [
   `Discovery <${safe("https://pharma.example.com/rfp?utm_source=digest")}> Research<${safe("https://pharma.example.com/rfp")}> Grants<${safe("https://pharma.example.com/rfp")}>`,
   "Deadline: August 26, 2026",
   `Duplicate Link Again<${safe("https://pharma.example.com/rfp")}>`,
+  `Learn more<${safe("https://pharma.example.com/about")}>`,
+  `Portal Competition A<${safe("https://portal.example.org/#competitionDetail/1")}>`,
+  `Portal Competition B<${safe("https://portal.example.org/#competitionDetail/2")}>`,
   "Webinars, Courses, & Events",
   `Webinar: Tips for Applying<${safe("https://events.example.org/webinar")}>`,
 ].join("\r\n");
@@ -56,7 +59,7 @@ function eml(body: string, type = "text/plain"): string {
 describe("parseDigestLines", () => {
   const items = parseDigestLines(PLAIN);
 
-  it("keeps opportunities only: skips policy news, list/SharePoint/mailto links, http links and events", () => {
+  it("keeps opportunities only: skips policy news, list/SharePoint/mailto/'learn more' links, http links, fragment-routed portal pages and events", () => {
     expect(items.map((i) => i.normalizedUrl)).toEqual([
       "https://fellowships.example.org/apply",
       "https://grants.example.gov/pa-27-000",
