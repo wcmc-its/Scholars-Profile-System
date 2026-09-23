@@ -5,7 +5,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { clipToArticle, doctorNames, parseClipsEmail, unwrapLink } from "@/etl/news/clips";
+import {
+  clipMentionRows,
+  clipToArticle,
+  doctorNames,
+  htmlToLines,
+  parseClipsEmail,
+  unwrapLink,
+} from "@/etl/news/clips";
 
 const safe = (u: string) =>
   `https://nam12.safelinks.protection.outlook.com/?url=${encodeURIComponent(u)}&data=05%7Cx&reserved=0`;
@@ -115,4 +122,30 @@ describe("helpers", () => {
     expect(a.tags).toEqual(["Jane Roe"]);
     expect(a.cwids).toEqual([]);
   });
+});
+
+describe("clipMentionRows", () => {
+  const scholars = [
+    { cwid: "jro1", fullName: "Jane Roe", preferredName: "Jane Roe", primaryTitle: null, primaryDepartment: null },
+  ];
+
+  it("creates one row per (cwid, url) when the same clip recurs in two digests", () => {
+    // Same url, different digest dates: articlesToMentions keys on title+date,
+    // so without the url dedupe this is two creates on one unique key.
+    const a = clipToArticle(EXPECTED[0]);
+    const b = clipToArticle({ ...EXPECTED[0], title: "Roe Elected Board Chair", publishedAt: "2026-09-25" });
+    const rows = clipMentionRows([a, b], scholars);
+    expect(rows.map((r) => [r.cwid, r.url])).toEqual([["jro1", EXPECTED[0].url]]);
+    expect(rows[0].status).toBe("pending");
+    expect(rows[0].outlet).toBe("The Example Bazaar");
+  });
+
+  it("drops a clip that links a WCM Newsroom story (etl:news owns that url)", () => {
+    const a = clipToArticle({ ...EXPECTED[0], url: "https://news.weill.cornell.edu/news/2026/09/roe-chair" });
+    expect(clipMentionRows([a], scholars)).toEqual([]);
+  });
+});
+
+it("htmlToLines keeps a single-quoted href", () => {
+  expect(htmlToLines("<a href='https://example.org/x'>Story</a>")).toBe("Story<https://example.org/x>");
 });

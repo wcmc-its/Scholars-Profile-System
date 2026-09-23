@@ -28,13 +28,19 @@ import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/clien
 import { db } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
 import { articlesToMentions, upsertMentions } from "./index";
-import type { ScrapedArticle } from "./seed";
+import { NEWS_ORIGIN, type ScrapedArticle } from "./seed";
 
 /** Bucket mail must come from WCM. The list address itself is kept out of this
  *  public repo; tighten to it (or to an SES DKIM/SPF verdict) once real list
  *  deliveries show which of those survive the list server. */
 const CLIPS_FROM_RE = /@med\.cornell\.edu>?\s*$/i;
 const SUBJECT_RE = /\bin the news\b/i;
+/** Replies and forwards of the digest also land in the bucket via the list. */
+const REPLY_RE = /^\s*(re|fw|fwd)\s*:/i;
+/** A zero-clip digest fails the run only while it is this fresh, so one stray
+ *  email reds at most a night or two, while real format drift (every new
+ *  digest) keeps the step red. */
+const UNPARSED_FAIL_MS = 36 * 3_600_000;
 
 // ---------------------------------------------------------------------------
 // Minimal MIME reader. The input is a raw RFC 822 message as a latin1 string
@@ -90,6 +96,10 @@ export function readEmail(raw: string): {
   from: string;
   subject: string;
   virusVerdict: string | null;
+  spamVerdict: string | null;
+  /** SPF/DKIM verdicts SES stamps; logged so the first real deliveries show
+   *  which survive the list server before the sender check is tightened. */
+  authVerdict: string;
   plain: string | null;
   html: string | null;
 } {
@@ -117,6 +127,8 @@ export function readEmail(raw: string): {
     from: top.headers.get("from") ?? "",
     subject: top.headers.get("subject") ?? "",
     virusVerdict: top.headers.get("x-ses-virus-verdict") ?? null,
+    spamVerdict: top.headers.get("x-ses-spam-verdict") ?? null,
+    authVerdict: `spf=${top.headers.get("x-ses-spf-verdict") ?? "none"} dkim=${top.headers.get("x-ses-dkim-verdict") ?? "none"}`,
     plain,
     html,
   };
@@ -148,10 +160,10 @@ export function htmlToLines(html: string): string {
     html
       .replace(/<(head|style|script)\b[\s\S]*?<\/\1>/gi, "")
       .replace(/\s+/g, " ")
-      .replace(/<a\b[^>]*?\bhref\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, inner: string) =>
+      .replace(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi, (_, dq: string | undefined, sq: string | undefined, inner: string) =>
         // Sentinels, not "<>", so the tag strip below cannot eat the link —
         // including a non-http one, which must still end the previous item.
-        `${inner.replace(/<[^>]+>/g, "")}\u0001${href.replace(/&amp;/g, "&")}\u0002`,
+        `${inner.replace(/<[^>]+>/g, "")}\u0001${(dq ?? sq ?? "").replace(/&amp;/g, "&")}\u0002`,
       )
       .replace(/<(br|\/p|\/div|\/h\d|\/li|\/tr|\/td)\b[^>]*>/gi, "\n")
       .replace(/<[^>]+>/g, ""),
@@ -273,27 +285,68 @@ export function clipToArticle(c: Clip): ScrapedArticle {
   };
 }
 
+const NEWSROOM_HOST = new URL(NEWS_ORIGIN).hostname;
+
+/**
+ * Mention rows for a batch of clips. Two things the shared newsroom path does
+ * not need:
+ *  - A clip linking a WCM Newsroom story is dropped: etl:news owns that url,
+ *    and a clip row on the same (cwid, url) would move the story into Media
+ *    Highlights (reconcile refreshes `outlet`) without review.
+ *  - Rows are deduped on (cwid, url). articlesToMentions keys on the story
+ *    (title + DATE), so one url in two digests — a repeat or a weekend recap —
+ *    would otherwise be created twice and trip @@unique([cwid, url]), rolling
+ *    back the whole run.
+ */
+export function clipMentionRows(
+  articles: ScrapedArticle[],
+  scholars: Parameters<typeof articlesToMentions>[1],
+): ReturnType<typeof articlesToMentions> {
+  const offsite = articles.filter((a) => new URL(a.url).hostname !== NEWSROOM_HOST);
+  const seen = new Set<string>();
+  return articlesToMentions(offsite, scholars).filter((r) => {
+    const k = `${r.cwid} ${r.url}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 // ---------------------------------------------------------------------------
 
-async function readBucketEmails(): Promise<string[]> {
+type RawEmail = { raw: string; receivedAt: number };
+
+async function readBucketEmails(): Promise<RawEmail[]> {
   const bucket = process.env.CLIPS_BUCKET;
   if (!bucket) throw new Error("[NewsClips] CLIPS_BUCKET is unset and no .eml files were given");
   const prefix = process.env.CLIPS_PREFIX ?? "clips/";
   const since = Date.now() - (Number(process.env.CLIPS_LOOKBACK_DAYS) || 30) * 86_400_000;
   const s3 = new S3Client({});
-  const keys: string[] = [];
+  const keys: { Key: string; at: number }[] = [];
   let token: string | undefined;
   do {
-    const page = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+    let page;
+    try {
+      page = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+    } catch (err) {
+      // Sps-InboundMail is a manual, prod-app deploy; until it exists there is
+      // simply no mail yet. Anything else (AccessDenied) still fails the run.
+      if ((err as { name?: string }).name === "NoSuchBucket") {
+        console.warn(`[NewsClips] bucket ${bucket} does not exist yet (Sps-InboundMail not deployed); nothing to read`);
+        return [];
+      }
+      throw err;
+    }
     for (const o of page.Contents ?? []) {
-      if (o.Key && o.LastModified && o.LastModified.getTime() >= since) keys.push(o.Key);
+      const at = o.LastModified?.getTime();
+      if (o.Key && at !== undefined && at >= since) keys.push({ Key: o.Key, at });
     }
     token = page.NextContinuationToken;
   } while (token);
-  const out: string[] = [];
-  for (const Key of keys) {
+  const out: RawEmail[] = [];
+  for (const { Key, at } of keys) {
     const obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key }));
-    out.push(Buffer.from(await obj.Body!.transformToByteArray()).toString("latin1"));
+    out.push({ raw: Buffer.from(await obj.Body!.transformToByteArray()).toString("latin1"), receivedAt: at });
   }
   return out;
 }
@@ -301,27 +354,34 @@ async function readBucketEmails(): Promise<string[]> {
 async function main(): Promise<number> {
   const files = process.argv.slice(2);
   const fromBucket = files.length === 0;
-  const raws = fromBucket
+  const raws: RawEmail[] = fromBucket
     ? await readBucketEmails()
-    : files.map((f) => readFileSync(f).toString("latin1"));
+    : files.map((f) => ({ raw: readFileSync(f).toString("latin1"), receivedAt: Date.now() }));
 
   const articles: ScrapedArticle[] = [];
   const unparsed: string[] = [];
   let skipped = 0;
-  for (const raw of raws) {
+  const auth: Record<string, number> = {};
+  for (const { raw, receivedAt } of raws) {
     const e = readEmail(raw);
-    // Bucket mail is from anyone who knows the address. Only the list's own
-    // digest is read; every row it yields is still pending review regardless.
-    // A hand-given file is an operator's forward, so only the subject is checked.
+    // Bucket mail is from anyone who knows the address, and the From header is
+    // forgeable, so this is a noise filter, not the trust boundary: every row
+    // is pending until comms approves it. A hand-given file is an operator's
+    // forward, so only the subject is checked.
     const trusted =
       SUBJECT_RE.test(e.subject) &&
-      (!fromBucket || (CLIPS_FROM_RE.test(e.from) && e.virusVerdict !== "FAIL"));
+      (!fromBucket ||
+        (!REPLY_RE.test(e.subject) &&
+          CLIPS_FROM_RE.test(e.from) &&
+          e.virusVerdict !== "FAIL" &&
+          e.spamVerdict !== "FAIL"));
     if (!trusted) {
       skipped++;
       continue;
     }
+    auth[e.authVerdict] = (auth[e.authVerdict] ?? 0) + 1;
     const clips = parseClipsEmail(raw);
-    if (clips.length === 0) unparsed.push(e.subject);
+    if (clips.length === 0 && Date.now() - receivedAt <= UNPARSED_FAIL_MS) unparsed.push(e.subject);
     articles.push(...clips.map(clipToArticle));
   }
 
@@ -330,10 +390,10 @@ async function main(): Promise<number> {
     select: { cwid: true, fullName: true, preferredName: true, primaryTitle: true, primaryDepartment: true },
   });
   // Clips carry no VIVO cwids, so every row is a NAME match: `pending`.
-  const rows = articlesToMentions(articles, scholars);
+  const rows = clipMentionRows(articles, scholars);
   const { inserted, updated, preserved, deduped } = await upsertMentions(rows);
   console.log(
-    `[NewsClips] ${JSON.stringify({ event: "news_clips_complete", emails: raws.length, skipped, clips: articles.length, mentions: rows.length, inserted, updated, preserved, deduped })}`,
+    `[NewsClips] ${JSON.stringify({ event: "news_clips_complete", emails: raws.length, skipped, auth, clips: articles.length, mentions: rows.length, inserted, updated, preserved, deduped })}`,
   );
   // A digest that yields no clips means the email format moved under us. Fail
   // AFTER upserting the rest so one odd email does not hold back the others.

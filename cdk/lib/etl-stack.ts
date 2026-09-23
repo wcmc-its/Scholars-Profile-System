@@ -1622,7 +1622,7 @@ export class EtlStack extends Stack {
       // SES delivered to S3 (etl/news/clips.ts) into PENDING news_mention rows
       // for /edit/news-queue. external:false (S3 + SPS DB, no WCM secret);
       // continue-tier so a bad digest alarms this step, never the chain. Before
-      // SES is live the bucket is empty and the run is a 0-row success.
+      // Sps-InboundMail is deployed (or any mail arrives) the run is a 0-row success.
       { id: "ClipsNightly", npmScript: "etl:news-clips", external: false, tier: "continue" },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },

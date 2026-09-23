@@ -157,7 +157,7 @@ This is the **only** invalidation the design needs — after it, the 60 s clamp 
 
 1. Deploy from `origin/master`: `cd cdk && npx cdk deploy -c env=prod Sps-InboundMail`.
 2. Send ITS the `NameServers` stack output and ask them to delegate `scholars-mail.weill.cornell.edu` to those four NS records (same arrangement as `cviche.weill.cornell.edu`). Confirm with `dig +short NS scholars-mail.weill.cornell.edu`.
-3. Activate the rule set. CloudFormation cannot do this: `aws ses set-active-receipt-rule-set --rule-set-name sps-inbound-mail`.
+3. Activate the rule set. CloudFormation cannot do this. Only one rule set can be active per account, so first confirm nothing else is active (`aws ses describe-active-receipt-rule-set` should print nothing). Then run `aws ses set-active-receipt-rule-set --rule-set-name sps-inbound-mail`.
 4. Once SES shows the domain as verified, ask External Affairs to add the address to their clips list.
 5. After the first digest arrives (`aws s3 ls s3://sps-inbound-mail-<account>/clips/`), run `ClipsNightly` or wait for the nightly. Then check `/edit/news-queue` for the pending clips.
 
