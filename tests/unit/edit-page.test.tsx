@@ -548,7 +548,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
 
   it("?attr=name-title renders the read-only panel with a Request a change link per row", () => {
     render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
-    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    expect(screen.queryByText("This section is not editable.")).toBeNull();
     // One link per row replaces the panel-level trigger.
     expect(screen.queryByTestId("request-a-change-toggle")).toBeNull();
     for (const row of ["name", "title", "degrees", "department", "institution"]) {
@@ -564,6 +564,41 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByText("Institution")).toBeTruthy();
     expect(screen.getByText("Weill Cornell Medicine")).toBeTruthy();
     expect(screen.queryByText("WCMC")).toBeNull();
+  });
+
+  it("name-title: an empty row reads None on record; the Photo tab is one row with its own link", () => {
+    const noDeg = { ...ctx, scholar: { ...ctx.scholar, postnominal: null } };
+    const { unmount } = render(<EditPage ctx={noDeg} mode="self" attr="name-title" />);
+    expect(screen.getByText("None on record")).toBeTruthy();
+    unmount();
+    render(<EditPage ctx={ctx} mode="self" attr="photo" />);
+    expect(screen.getByTestId("request-a-change-row-photo")).toBeTruthy();
+    expect(screen.queryByTestId("request-a-change-toggle")).toBeNull();
+    expect(screen.queryByText("This section is not editable.")).toBeNull();
+  });
+
+  it("name-title says choose to an operator and request to the scholar, only when there is a choice", () => {
+    const picker = {
+      options: [
+        { tier: "working", label: "Working title", value: "Associate Dean" },
+        { tier: "chief", label: "Division chief", value: null },
+        { tier: "centerHead", label: "Center head", value: null },
+        { tier: "primary", label: "Primary title", value: "Professor of Medicine" },
+      ],
+      current: "Associate Dean",
+      override: null,
+      pending: null,
+    };
+    const withPicker = { ...ctx, titlePicker: picker } as typeof ctx;
+    const { unmount } = render(<EditPage ctx={withPicker} mode="self" attr="name-title" />);
+    expect(screen.getByText(/You can request which recorded title is displayed\./)).toBeTruthy();
+    unmount();
+    const opCtx = { ...superuserCtx, titlePicker: picker } as typeof superuserCtx;
+    const again = render(<EditPage ctx={opCtx} mode="superuser" attr="name-title" />);
+    expect(screen.getByText(/You can choose which recorded title is displayed\./)).toBeTruthy();
+    again.unmount();
+    render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
+    expect(screen.queryByText(/which recorded title is displayed/)).toBeNull();
   });
 
   it("name-title names a non-WCM primary institution and blanks a null one", () => {
@@ -583,20 +618,20 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByText("self01@med.cornell.edu")).toBeTruthy();
     // 'public' → "Public" label per SPEC table A.
     expect(screen.getByTestId("email-visibility-label").textContent).toBe("Public");
-    expect(screen.getByTestId("email-visibility-explainer")).toBeTruthy();
-    // #919 — usage line, first-person for self.
-    expect(screen.getByTestId("email-usage-note").textContent).toBe(
-      "This is the contact email shown on your public profile.",
+    expect(screen.getByTestId("email-visibility-explainer").textContent).toBe(
+      "Anyone on the web can see it on the public profile.",
     );
     // #919 — download / on-network policy note (general; no numeric cap surfaced).
     const policy = screen.getByTestId("email-download-policy");
     expect(policy.textContent).toMatch(/signed in or on the campus network/i);
     expect(policy.textContent).toMatch(/internal directory export/i);
     expect(policy.textContent).toMatch(/that access is logged/i);
-    expect(policy.textContent).toMatch(/excluded from the export/i);
-    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
+    expect(policy.textContent).toMatch(/left out of the export/i);
+    expect(policy.textContent).toMatch(/bulk downloads of large groups aren.t supported/i);
     expect(policy.textContent).not.toMatch(/50/);
-    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    // Locked-panels canvas: provenance in the header pill, no "not editable" footer.
+    expect(screen.getByText("Enterprise Directory")).toBeTruthy();
+    expect(screen.queryByText("This section is not editable.")).toBeNull();
     // Read-only: no control that writes the release code, just the SOR link.
     const link = screen.getByTestId("email-web-directory-link");
     expect(link.getAttribute("href")).toBe(
@@ -604,16 +639,11 @@ describe("EditPage router — the Apollo shell + rail", () => {
     );
   });
 
-  it("Email tab reframes the usage line + policy note to the scholar's name for a superuser (#919)", () => {
+  it("Email tab copy is voice-neutral, so a superuser never reads 'your' (#919)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="email" />);
-    // possessive → "{ScholarName}'s" (preferredName), matching the explainer's framing.
-    expect(screen.getByTestId("email-usage-note").textContent).toBe(
-      "This is the contact email shown on Alex Other's public profile.",
-    );
-    const policy = screen.getByTestId("email-download-policy");
-    expect(policy.textContent).toMatch(/download Alex Other's email/i);
-    expect(policy.textContent).not.toMatch(/\byour\b/i);
-    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
+    const panel = document.querySelector('[data-slot="email-panel"]')!;
+    expect(panel.textContent).not.toMatch(/\byour\b/i);
+    expect(panel.textContent).toContain("The contact email on the public profile, and who can see it.");
   });
 
   it("Email tab labels 'institution' as Institution only", () => {
@@ -1053,10 +1083,8 @@ describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () =>
     "Email tab reads in third person for a %s editor (parity with superuser)",
     (mode) => {
       render(<EditPage ctx={superuserCtx} mode={mode} attr="email" />);
-      expect(screen.getByTestId("email-usage-note").textContent).toBe(
-        "This is the contact email shown on Alex Other's public profile.",
-      );
-      expect(screen.getByTestId("email-download-policy").textContent).not.toMatch(/\byour\b/i);
+      const panel = document.querySelector('[data-slot="email-panel"]')!;
+      expect(panel.textContent).not.toMatch(/\byour\b/i);
     },
   );
 

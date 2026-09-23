@@ -1157,12 +1157,21 @@ function renderPanel(
           cwid={cwid}
           scholarName={scholarName}
           heading="Name & title"
-          description="Name, title, degrees, department, and institution come from the WCM directory and faculty records."
+          description={
+            // The second sentence only where there IS a choice: the picker
+            // renders with 2+ applicable titles (TitleField collapses otherwise).
+            ctx.titlePicker && ctx.titlePicker.options.filter((o) => o.value !== null).length > 1
+              ? `Name, degrees, department and institution come from WCM records. You can ${
+                  isSuperuserLike(mode) || mode === "unit-admin" ? "choose" : "request"
+                } which recorded title is displayed.`
+              : "Name, title, degrees, department and institution come from WCM records."
+          }
           fields={[
             { label: "Name", value: ctx.scholar.fullName, issueId: "name-wrong" },
             {
               label: "Title",
               issueId: "title-wrong",
+              alignTop: !!ctx.titlePicker,
               // #2719 — the one editable row on an otherwise read-only panel.
               // Operators (superuser / comms_steward / unit admin) pick; the
               // scholar and their proxy request. Null picker state = flag off,
@@ -1200,8 +1209,6 @@ function renderPanel(
       // context is internal); the visibility value is informational.
       return (
         <EmailCard
-          mode={voiceMode}
-          scholarName={scholarName}
           email={ctx.scholar.email}
           emailVisibility={ctx.scholar.emailVisibility}
         />
@@ -1213,15 +1220,21 @@ function renderPanel(
           cwid={cwid}
           scholarName={scholarName}
           heading="Photo"
-          description="Your profile photo comes from the WCM directory."
-          media={
-            <HeadshotAvatar
-              cwid={cwid}
-              preferredName={scholarName}
-              identityImageEndpoint={identityImageEndpoint(cwid)}
-              size="lg"
-            />
-          }
+          description="The profile photo comes from the WCM directory."
+          fields={[
+            {
+              label: "Photo",
+              alignTop: true,
+              value: (
+                <HeadshotAvatar
+                  cwid={cwid}
+                  preferredName={scholarName}
+                  identityImageEndpoint={identityImageEndpoint(cwid)}
+                  size="lg"
+                />
+              ),
+            },
+          ]}
         />
       );
     case "overview":

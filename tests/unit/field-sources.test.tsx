@@ -70,10 +70,12 @@ describe("panel wiring — source line is surfaced in each sourced panel", () =>
         scholarName="Jane Scholar"
         heading="Name & title"
         description="Name, title, department, email, and ORCID come from the WCM directory."
+        fields={[]}
       />,
     );
+    // Locked panels carry provenance in the header pill (locked-panels canvas).
     const line = document.querySelector('[data-slot="field-source"]')!;
-    expect(line.textContent).toBe("Source: Enterprise Directory");
+    expect(line.textContent).toBe("From Enterprise Directory");
   });
 
   it.each([

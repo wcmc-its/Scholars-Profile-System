@@ -205,8 +205,8 @@ export function TitleField({
                 </span>
               </span>
               {o.tier === savedTier && (
-                <span className="bg-apollo-surface-2 text-[#5c574d] rounded-[10px] px-2 py-px text-xs whitespace-nowrap">
-                  Current
+                <span className="bg-apollo-surface border-apollo-border rounded-[10px] border px-2 py-px text-xs whitespace-nowrap text-[#5c574d]">
+                  Displayed
                 </span>
               )}
             </RadioGroupPrimitive.Item>
@@ -215,41 +215,52 @@ export function TitleField({
       </RadioGroupPrimitive.Root>
       </TooltipProvider>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          size="sm"
-          disabled={busy || !dirty}
-          onClick={() =>
-            canSet
-              ? post("primaryTitle", selectedValue, "Saved")
-              : post("primaryTitleRequest", selectedValue, "Request sent for review.")
-          }
-        >
-          {canSet ? "Save" : "Request"}
-        </Button>
-        {dirty && (
-          <button
-            type="button"
-            className="text-[#5c574d] text-[13px] hover:underline"
-            onClick={() => setSelected(savedTier)}
-          >
-            Cancel
-          </button>
-        )}
-        {canSet && override && !dirty && (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => post("primaryTitle", "", "Reverted to the default title.")}
-          >
-            Use default
-          </Button>
-        )}
-        <span className="text-muted-foreground text-[13px]" aria-live="polite">
-          {dirty ? "Unsaved change" : done ?? ""}
-        </span>
-      </div>
+      {/* Nothing below the list until there is something to do: a pick to save,
+          a pin to undo, or the result of the last action (locked-panels canvas). */}
+      {(dirty || (canSet && override) || done) && (
+        <div className="flex flex-wrap items-center gap-3">
+          {dirty && (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                canSet
+                  ? post("primaryTitle", selectedValue, "Saved. The profile header now shows this title.")
+                  : post("primaryTitleRequest", selectedValue, "Request sent for review.")
+              }
+            >
+              {canSet ? "Save" : "Request"}
+            </Button>
+          )}
+          {dirty && (
+            <button
+              type="button"
+              className="text-[#5c574d] text-[13px] hover:underline"
+              onClick={() => setSelected(savedTier)}
+            >
+              Cancel
+            </button>
+          )}
+          {canSet && override && !dirty && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => post("primaryTitle", "", "Reverted to the default title.")}
+            >
+              Use default
+            </Button>
+          )}
+          {!dirty && done && (
+            <span role="status" className="text-muted-foreground text-[13px]">
+              {done}
+            </span>
+          )}
+        </div>
+      )}
+      <span className="sr-only" aria-live="polite">
+        {dirty ? "Unsaved change" : ""}
+      </span>
 
       {!canSet && (
         <p className="text-muted-foreground text-xs">
