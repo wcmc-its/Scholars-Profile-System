@@ -60,6 +60,41 @@ function tierOf(options: TitleOption[], title: string | null): TitleTier | "" {
   return options.find((o) => o.value === title)?.tier ?? "";
 }
 
+/** Title on line one, its source on line two (with the working-title ⓘ). */
+function OptionText({ option: o }: { option: TitleOption }) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="text-sm font-medium text-[#1f1b19]">{o.value}</span>
+      <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+        {TIER_SOURCE[o.tier]}
+        {o.tier === "working" && (
+          <>
+            {/* A span, not a button: in the picker the row is already a button.
+                Hover shows the tooltip; screen readers get the sr-only text. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span data-testid="working-title-help">
+                  <Info aria-hidden className="size-3.5" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">{WORKING_TITLE_HELP}</TooltipContent>
+            </Tooltip>
+            <span className="sr-only">{WORKING_TITLE_HELP}</span>
+          </>
+        )}
+      </span>
+    </span>
+  );
+}
+
+function DisplayedPill() {
+  return (
+    <span className="bg-apollo-surface border-apollo-border rounded-[10px] border px-2 py-px text-xs whitespace-nowrap text-[#5c574d]">
+      Displayed
+    </span>
+  );
+}
+
 export type TitleFieldProps = {
   cwid: string;
   /** Every tier, in precedence order; `value: null` = does not apply. */
@@ -96,6 +131,41 @@ export function TitleField({
   // control is just the value. Avoids a list with a single choice.
   if (available.length <= 1 && request === null) {
     return <>{savedTitle ?? "—"}</>;
+  }
+
+  // Only a superuser / comms steward sets the title (Paul, 2026-09-23). Everyone
+  // else sees what is on record and which one shows, and asks through the Title
+  // row's Request a change (routes to support).
+  if (!canSet) {
+    const displayedTier = tierOf(options, savedTitle);
+    return (
+      <div className="flex flex-col gap-2">
+        <TooltipProvider delayDuration={200}>
+          <ul
+            aria-label="Recorded titles"
+            className="border-apollo-border-strong flex flex-col overflow-hidden rounded-lg border"
+          >
+            {available.map((o, i) => (
+              <li
+                key={o.tier}
+                data-testid={`title-option-${o.tier}`}
+                className={cn(
+                  "flex items-center gap-3 px-3.5 py-3",
+                  i > 0 && "border-apollo-border border-t",
+                  o.tier === displayedTier ? "bg-apollo-surface-2" : "bg-apollo-surface",
+                )}
+              >
+                <OptionText option={o} />
+                {o.tier === displayedTier && <DisplayedPill />}
+              </li>
+            ))}
+          </ul>
+        </TooltipProvider>
+        <p className="text-muted-foreground text-xs" data-testid="title-recourse">
+          To show a different one of these titles, use Request a change.
+        </p>
+      </div>
+    );
   }
 
   async function post(fieldName: string, value: string, successNote: string) {
@@ -183,32 +253,8 @@ export function TitleField({
               >
                 {on && <span className="bg-apollo-bar size-2 rounded-full" />}
               </span>
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="text-sm font-medium text-[#1f1b19]">{o.value}</span>
-                <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
-                  {TIER_SOURCE[o.tier]}
-                  {o.tier === "working" && (
-                    <>
-                      {/* A span, not a button: the row is already a button. Hover
-                          shows the tooltip; screen readers get the sr-only text. */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span data-testid="working-title-help">
-                            <Info aria-hidden className="size-3.5" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">{WORKING_TITLE_HELP}</TooltipContent>
-                      </Tooltip>
-                      <span className="sr-only">{WORKING_TITLE_HELP}</span>
-                    </>
-                  )}
-                </span>
-              </span>
-              {o.tier === savedTier && (
-                <span className="bg-apollo-surface border-apollo-border rounded-[10px] border px-2 py-px text-xs whitespace-nowrap text-[#5c574d]">
-                  Displayed
-                </span>
-              )}
+              <OptionText option={o} />
+              {o.tier === savedTier && <DisplayedPill />}
             </RadioGroupPrimitive.Item>
           );
         })}
@@ -217,19 +263,17 @@ export function TitleField({
 
       {/* Nothing below the list until there is something to do: a pick to save,
           a pin to undo, or the result of the last action (locked-panels canvas). */}
-      {(dirty || (canSet && override) || done) && (
+      {(dirty || override || done) && (
         <div className="flex flex-wrap items-center gap-3">
           {dirty && (
             <Button
               size="sm"
               disabled={busy}
               onClick={() =>
-                canSet
-                  ? post("primaryTitle", selectedValue, "Saved. The profile header now shows this title.")
-                  : post("primaryTitleRequest", selectedValue, "Request sent for review.")
+                post("primaryTitle", selectedValue, "Saved. The profile header now shows this title.")
               }
             >
-              {canSet ? "Save" : "Request"}
+              Save
             </Button>
           )}
           {dirty && (
@@ -241,7 +285,7 @@ export function TitleField({
               Cancel
             </button>
           )}
-          {canSet && override && !dirty && (
+          {override && !dirty && (
             <Button
               size="sm"
               variant="ghost"
@@ -262,46 +306,25 @@ export function TitleField({
         {dirty ? "Unsaved change" : ""}
       </span>
 
-      {!canSet && (
-        <p className="text-muted-foreground text-xs">
-          Your request goes to a profile administrator. Nothing changes until they approve it.
-        </p>
-      )}
-
       {request !== null && (
         <div className="border-apollo-border flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs">
-          <span className="text-muted-foreground">
-            {canSet ? `${request.requestedBy} requested:` : "Requested:"}
-          </span>
+          <span className="text-muted-foreground">{request.requestedBy} requested:</span>
           <span className="font-medium">{request.value}</span>
-          {canSet ? (
-            <>
-              <Button
-                size="sm"
-                disabled={busy}
-                onClick={() => post("primaryTitle", request.value, "Request approved.")}
-              >
-                Approve
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => post("primaryTitleRequest", "", "Request dismissed.")}
-              >
-                Dismiss
-              </Button>
-            </>
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => post("primaryTitleRequest", "", "Request withdrawn.")}
-            >
-              Withdraw
-            </Button>
-          )}
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => post("primaryTitle", request.value, "Request approved.")}
+          >
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => post("primaryTitleRequest", "", "Request dismissed.")}
+          >
+            Dismiss
+          </Button>
         </div>
       )}
 

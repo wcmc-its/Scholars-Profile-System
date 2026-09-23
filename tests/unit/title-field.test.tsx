@@ -102,14 +102,16 @@ describe("TitleField — radio list", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("a scholar/proxy requests instead of saving", async () => {
+  it("a scholar/proxy/unit admin sees the titles read-only and is pointed at Request a change", () => {
     renderField({ canSet: false });
-    fireEvent.click(screen.getByTestId("title-option-primary"));
-    fireEvent.click(screen.getByRole("button", { name: "Request" }));
-    await waitFor(() => expect(screen.getByText("Request sent for review.")).toBeTruthy());
-    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
-    expect(body.fieldName).toBe("primaryTitleRequest");
-    expect(refresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button", { name: /save|request/i })).toBeNull();
+    const working = screen.getByTestId("title-option-working");
+    expect(within(working).getByText("Displayed")).toBeTruthy();
+    expect(screen.getByTestId("title-recourse").textContent).toBe(
+      "To show a different one of these titles, use Request a change.",
+    );
   });
 
   it("with only one applicable title, shows the plain value (no list)", () => {

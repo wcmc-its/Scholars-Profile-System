@@ -166,11 +166,14 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           // center-head role can outrank it (lib/scholar-title.ts). WHICH of
           // those shows is now a picker on this panel, so the honest split is:
           // the wrong CHOICE is fixable here, a wrong SOURCE VALUE is not.
+          // Since 2026-09-23 only a superuser / comms steward picks among the
+          // listed titles, so this route carries BOTH asks: "show a different
+          // listed title" and "every listed title is wrong".
           note:
-            "Your title comes from ASMS / Enterprise Directory — usually your primary " +
-            "appointment, though a working title or a leadership role can take precedence. " +
-            "If the right title is already listed on this panel, ask for it there instead; " +
-            "write to us when every listed option is wrong at the source.",
+            "Say which title you want displayed. If it's one of the titles listed on this " +
+            "panel, name it. If none of them is right, tell us what it should be. Titles come " +
+            "from ASMS / Enterprise Directory: usually your primary appointment, though a " +
+            "working title or a leadership role can take precedence.",
         }),
       },
       {
