@@ -125,7 +125,7 @@ export interface SubmissionDdbClient {
   send(
     command: PutCommand | QueryCommand | DeleteCommand | UpdateCommand,
     options?: { abortSignal?: AbortSignal },
-  ): Promise<{ Items?: Record<string, unknown>[] }>;
+  ): Promise<{ Items?: Record<string, unknown>[]; LastEvaluatedKey?: Record<string, unknown> }>;
 }
 
 let ddbSingleton: SubmissionDdbClient | undefined;
@@ -210,24 +210,31 @@ function mapSubmissionItem(item: Record<string, unknown>): OpportunitySubmission
 
 /**
  * All submissions, newest-first (the SK is ISO-time-prefixed, so key order IS
- * time order). The queue is human-paced — a page of 200 covers years; no
- * pagination until reality disagrees.
+ * time order). Reads the WHOLE partition: etl:funding-digest submits ~60 links
+ * a week, and both its dedup and the panel's findDuplicate must see a
+ * rejected/suppressed item however old it is.
  */
 export async function listSubmissions(
   opts: { ddb?: SubmissionDdbClient } = {},
 ): Promise<OpportunitySubmission[]> {
   const ddb = opts.ddb ?? defaultDdb();
-  const result = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: "PK = :pk",
-      ExpressionAttributeValues: { ":pk": SUBMISSION_PK },
-      ScanIndexForward: false,
-      Limit: 200,
-    }),
-    { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
-  );
-  return (result.Items ?? []).map(mapSubmissionItem);
+  const out: OpportunitySubmission[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const result = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk",
+        ExpressionAttributeValues: { ":pk": SUBMISSION_PK },
+        ScanIndexForward: false,
+        ExclusiveStartKey: start,
+      }),
+      { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
+    );
+    out.push(...(result.Items ?? []).map(mapSubmissionItem));
+    start = result.LastEvaluatedKey;
+  } while (start);
+  return out;
 }
 
 /**

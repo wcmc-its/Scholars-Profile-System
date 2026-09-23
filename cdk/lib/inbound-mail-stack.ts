@@ -9,6 +9,8 @@ import { type Construct } from "constructs";
 export const INBOUND_MAIL_DOMAIN = "scholars-mail.weill.cornell.edu";
 /** SES writes raw messages under `<prefix><messageId>`; etl/news/clips.ts reads them. */
 export const CLIPS_PREFIX = "clips/";
+/** Research Dean funding digest; etl/opportunities/funding-digest.ts reads them. */
+export const FUNDING_PREFIX = "funding/";
 /** Bucket name, derivable from the account alone so the ETL stacks can grant on it by name. */
 export const inboundMailBucketName = (account: string): string => `sps-inbound-mail-${account}`;
 
@@ -16,6 +18,8 @@ export const inboundMailBucketName = (account: string): string => `sps-inbound-m
  * Inbound mail for SPS: `clips@scholars-mail.weill.cornell.edu` is subscribed to
  * the External Affairs clips list, and SES drops each message into S3
  * for the nightly `etl:news-clips` step (Media Highlights).
+ * `funding@` does the same for the Research Dean's weekly funding digest
+ * (`etl:funding-digest`).
  *
  * ACCOUNT-WIDE SINGLETON, instantiated from the prod app only: SES allows ONE
  * active receipt rule set per account+region and staging/prod share the
@@ -64,6 +68,12 @@ export class InboundMailStack extends Stack {
           scanEnabled: true,
           // The action adds the bucket policy letting SES (this account only) write.
           actions: [new sesActions.S3({ bucket, objectKeyPrefix: CLIPS_PREFIX })],
+        },
+        {
+          receiptRuleName: "funding",
+          recipients: [`funding@${INBOUND_MAIL_DOMAIN}`],
+          scanEnabled: true,
+          actions: [new sesActions.S3({ bucket, objectKeyPrefix: FUNDING_PREFIX })],
         },
       ],
       // SES rejects mail matching no rule, so only clips@ is ever stored.

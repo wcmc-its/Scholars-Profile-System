@@ -237,6 +237,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Adds WCM Newsroom stories that mention a scholar to their profile.",
     origin: "external", // news.weill.cornell.edu
   },
+  FundingDigest: {
+    label: "Funding Digest",
+    description: "Submits new opportunities from the Research Dean's weekly funding email to Grant Matcha.",
+    origin: "external", // Research Dean digest, via SES to S3, then ReciterAI
+  },
   NewsClips: {
     label: "Media Highlights",
     description: "Queues press clips from the daily \"WCM in the News\" email for comms review.",

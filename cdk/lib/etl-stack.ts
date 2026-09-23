@@ -17,7 +17,7 @@ import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
-import { CLIPS_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
+import { CLIPS_PREFIX, FUNDING_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
 
 /** Props for {@link EtlStack}. */
 export interface EtlStackProps extends StackProps {
@@ -545,11 +545,12 @@ export class EtlStack extends Stack {
       ],
     });
 
-    // Media Highlights — etl:news-clips lists + reads the raw "WCM in the News"
-    // digests SES drops into the account-wide inbound-mail bucket
-    // (cdk/lib/inbound-mail-stack.ts, prod-app singleton). Its own policy, not
-    // the ReciterAI one: listing is needed here, and that policy is pinned
-    // Scan/GetObject-only. Both statements are prefix-scoped.
+    // Inbound mail — etl:news-clips (clips/) and etl:funding-digest (funding/)
+    // list + read the raw emails SES drops into the account-wide inbound-mail
+    // bucket (cdk/lib/inbound-mail-stack.ts, prod-app singleton), and the
+    // funding digest writes to the ReciterAI SUBMISSION queue. Its own policy,
+    // not the ReciterAI one: listing and a queue write are needed here, and that
+    // policy is pinned Scan/GetObject-only. Every statement is prefix-scoped.
     new iam.Policy(this, "EtlTaskRoleInboundMailPolicy", {
       policyName: `sps-etl-task-${env}-inbound-mail`,
       roles: [taskRole],
@@ -557,13 +558,29 @@ export class EtlStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["s3:GetObject"],
-          resources: [`arn:aws:s3:::${inboundMailBucketName(this.account)}/${CLIPS_PREFIX}*`],
+          resources: [
+            `arn:aws:s3:::${inboundMailBucketName(this.account)}/${CLIPS_PREFIX}*`,
+            `arn:aws:s3:::${inboundMailBucketName(this.account)}/${FUNDING_PREFIX}*`,
+          ],
         }),
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["s3:ListBucket"],
           resources: [`arn:aws:s3:::${inboundMailBucketName(this.account)}`],
-          conditions: { StringLike: { "s3:prefix": [`${CLIPS_PREFIX}*`] } },
+          conditions: { StringLike: { "s3:prefix": [`${CLIPS_PREFIX}*`, `${FUNDING_PREFIX}*`] } },
+        }),
+        // etl:funding-digest submits new digest links to the SAME queue the
+        // /edit/grant-matcha intake panel writes: PutItem + Query (the dedup
+        // read), pinned to the SUBMISSION partition exactly as the app role's
+        // TaskRoleOpportunitySubmissionPolicy is. No Delete/Update: the ETL
+        // never retracts. Prod-only at runtime (shared table), not here.
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["dynamodb:PutItem", "dynamodb:Query"],
+          resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
+          conditions: {
+            "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["SUBMISSION"] },
+          },
         }),
       ],
     });
@@ -785,7 +802,8 @@ export class EtlStack extends Stack {
       ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
       ARTIFACT_PREFIX: "spotlight",
       // Media Highlights — etl:news-clips (ClipsNightly) reads SES-delivered mail.
-      CLIPS_BUCKET: inboundMailBucketName(this.account),
+      // Media Highlights + funding digest read SES-delivered mail from here.
+      INBOUND_MAIL_BUCKET: inboundMailBucketName(this.account),
       CLIPS_PREFIX,
       HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
       // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
@@ -1761,6 +1779,11 @@ export class EtlStack extends Stack {
       // Incremental by default (upserts new articles, preserves the review queue);
       // a full backfill is an operator run with NEWS_BACKFILL=1.
       { id: "NewsWeekly", npmScript: "etl:news", external: false, tier: "continue" },
+      // Research Dean funding digest — submits new digest links to the ReciterAI
+      // SUBMISSION queue (etl/opportunities/funding-digest.ts); ReciterAI's daily
+      // drain scores them. Prod submits; staging is a logged dry run (the queue
+      // table is shared). external:false (S3 + DynamoDB), continue-tier.
+      { id: "FundingDigestWeekly", npmScript: "etl:funding-digest", external: false, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.

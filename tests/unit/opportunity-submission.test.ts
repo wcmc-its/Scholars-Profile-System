@@ -233,6 +233,28 @@ describe("listSubmissions", () => {
     expect(result[1].status).toBe("pending");
   });
 
+  it("follows LastEvaluatedKey to read the whole partition (dedup must see old rejected items)", async () => {
+    const item = (sk: string, status: string) => ({
+      PK: SUBMISSION_PK,
+      SK: sk,
+      url: `https://x.org/${sk}`,
+      normalized_url: `https://x.org/${sk}`,
+      status,
+    });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Items: [item("b", "pending")], LastEvaluatedKey: { PK: SUBMISSION_PK, SK: "b" } })
+      .mockResolvedValueOnce({ Items: [item("a", "rejected")] });
+    const result = await listSubmissions({ ddb: { send } });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0].input.ExclusiveStartKey).toEqual({ PK: SUBMISSION_PK, SK: "b" });
+    expect(result.map((r) => [r.submissionId, r.status])).toEqual([
+      ["b", "pending"],
+      ["a", "rejected"],
+    ]);
+  });
+
   it("maps the SPS-written suppressed status through", async () => {
     const send = vi.fn().mockResolvedValue({
       Items: [
