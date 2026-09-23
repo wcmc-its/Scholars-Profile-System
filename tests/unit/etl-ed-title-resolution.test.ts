@@ -32,6 +32,8 @@ function fakeClient(opts: {
   divisions?: { code: string; name: string; department: { name: string } | null }[];
   centers?: { code: string; name: string; officialName: string | null }[];
   overrides?: { entityId: string; value: string }[];
+  /** Centers with a CenterProgram taxonomy, i.e. "the Cancer Center". */
+  cancerCenterCodes?: string[];
 }) {
   const updates: { cwid: string; primaryTitle: string | null }[] = [];
   const client = {
@@ -52,12 +54,18 @@ function fakeClient(opts: {
           cwid: r.cwid,
           entityId: r.entityId,
           interim: r.interim ?? false,
-          role: { label: r.label },
+          // Seeded role keys are the snake-cased label ("Co-Director" → co_director).
+          role: { key: r.label.toLowerCase().replace(/[- ]/g, "_"), label: r.label },
         }));
       }),
     },
     division: { findMany: vi.fn(async () => opts.divisions ?? []) },
     center: { findMany: vi.fn(async () => opts.centers ?? []) },
+    centerProgram: {
+      findMany: vi.fn(async () =>
+        (opts.cancerCenterCodes ?? ["CTR-CANCER"]).map((centerCode) => ({ centerCode })),
+      ),
+    },
     fieldOverride: { findMany: vi.fn(async () => opts.overrides ?? []) },
   };
   return { client, updates };
@@ -164,6 +172,30 @@ describe("resolveScholarTitles — derived tiers", () => {
     expect(updates).toEqual([
       { cwid: "sch0005", primaryTitle: "Director, Example Cancer Center" },
     ]);
+  });
+
+  it("ignores every center role except the Cancer Center's Director", async () => {
+    // 2026-09-23 prod: "Associate Director, Cornell Health Policy Center"
+    // replaced "Professor of Population Health Sciences". Only the head of the
+    // Cancer Center (the center with a program taxonomy) outranks the ED title.
+    const { client, updates } = fakeClient({
+      scholars: [
+        { cwid: "sch0020", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
+        { cwid: "sch0021", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
+        { cwid: "sch0022", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
+      ],
+      centerAssignments: [
+        { cwid: "sch0020", entityId: "CTR-POLICY", label: "Director" },
+        { cwid: "sch0021", entityId: "CTR-CANCER", label: "Associate Director" },
+        { cwid: "sch0022", entityId: "CTR-CANCER", label: "Co-Director" },
+      ],
+      centers: [
+        { code: "CTR-CANCER", name: "Example Cancer Center", officialName: null },
+        { code: "CTR-POLICY", name: "Example Policy Center", officialName: null },
+      ],
+    });
+    await resolveScholarTitles(client as never, { applyDerivedTiers: true });
+    expect(updates).toEqual([]);
   });
 
   it("contributes no title when the assignment's unit has vanished", async () => {

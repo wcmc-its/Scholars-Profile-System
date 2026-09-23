@@ -88,6 +88,7 @@ type EditContextReadClient = Pick<
   // #2719 — the title picker resolves the chief / center-head tiers.
   | "division"
   | "center"
+  | "centerProgram"
   | "orcidCandidate"
   | "orcidDismissal"
 >;

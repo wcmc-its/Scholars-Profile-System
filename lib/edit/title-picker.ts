@@ -22,7 +22,7 @@
  * operator's Dismiss takes.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import { CENTER_ENTITY_TYPE } from "@/lib/org-unit-roles";
+import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import {
   ambiguousUnitNames,
   buildTitleOptions,
@@ -49,9 +49,35 @@ export function isTitleResolutionEnabled(): boolean {
   return process.env.SCHOLAR_TITLE_RESOLUTION === "on";
 }
 
+/**
+ * The center-head tier fires ONLY for the Director of the Cancer Center (Paul,
+ * 2026-09-23). Every other center role replaced a faculty rank with something
+ * that reads as a demotion ("Associate Director, Cornell Health Policy Center"
+ * over "Professor of Population Health Sciences"). "The Cancer Center" is a
+ * center with a `CenterProgram` taxonomy, the same data-driven test as
+ * `resolveReportsCenterCode`, so no center code is hardcoded. Matched on the
+ * role KEY (labels are editable); interim directors count.
+ */
+export async function loadCancerCenterCodes(
+  client: Pick<PrismaClient, "centerProgram">,
+): Promise<Set<string>> {
+  const rows = await client.centerProgram.findMany({
+    select: { centerCode: true },
+    distinct: ["centerCode"],
+  });
+  return new Set(rows.map((r) => r.centerCode));
+}
+
+export function isCancerCenterHead(
+  a: { entityId: string; role: { key: string } },
+  cancerCenterCodes: ReadonlySet<string>,
+): boolean {
+  return a.role.key === DIRECTOR_ROLE_KEY && cancerCenterCodes.has(a.entityId);
+}
+
 type TitlePickerClient = Pick<
   PrismaClient,
-  "scholar" | "orgUnitRoleAssignment" | "division" | "center" | "fieldOverride"
+  "scholar" | "orgUnitRoleAssignment" | "division" | "center" | "centerProgram" | "fieldOverride"
 >;
 
 export type PendingTitleRequest = {
@@ -94,7 +120,7 @@ export async function loadTitlePickerState(
   });
   if (!scholar) return null;
 
-  const [assignments, overrideRows] = await Promise.all([
+  const [assignments, overrideRows, cancerCenterCodes] = await Promise.all([
     client.orgUnitRoleAssignment.findMany({
       where: {
         cwid,
@@ -105,7 +131,7 @@ export async function loadTitlePickerState(
         entityType: true,
         entityId: true,
         interim: true,
-        role: { select: { label: true } },
+        role: { select: { key: true, label: true } },
       },
       orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
     }),
@@ -117,10 +143,13 @@ export async function loadTitlePickerState(
       },
       select: { fieldName: true, value: true, actorCwid: true, updatedAt: true },
     }),
+    loadCancerCenterCodes(client),
   ]);
 
   const divAssignment = assignments.find((a) => a.entityType === "division");
-  const centerAssignment = assignments.find((a) => a.entityType === CENTER_ENTITY_TYPE);
+  const centerAssignment = assignments.find(
+    (a) => a.entityType === CENTER_ENTITY_TYPE && isCancerCenterHead(a, cancerCenterCodes),
+  );
 
   let chiefTitle: string | null = null;
   if (divAssignment) {
