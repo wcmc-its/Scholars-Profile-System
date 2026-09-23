@@ -57,7 +57,7 @@ import { isOrgUnitCreateSuperuserOnly } from "@/lib/edit/unit-create-flags";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Create a unit — Scholars Profile Console",
+  title: "Create a unit — Scholars Console",
   robots: { index: false, follow: false },
 };
 

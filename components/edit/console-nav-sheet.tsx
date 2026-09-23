@@ -30,7 +30,7 @@ export function ConsoleNavSheet({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
-        className="inline-flex h-8 max-w-full min-w-0 items-center gap-2 rounded-md border border-white/25 px-3 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none xl:hidden"
+        className="inline-flex h-8 max-w-full min-w-0 items-center gap-2 rounded-md border border-white/25 px-3 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none lg:hidden"
         data-testid="console-nav-sheet-trigger"
       >
         <Menu className="size-4 shrink-0" aria-hidden />
@@ -39,7 +39,7 @@ export function ConsoleNavSheet({
       <SheetContent
         side="left"
         aria-describedby={undefined}
-        className="bg-apollo-page gap-0 overflow-y-auto p-0 xl:hidden"
+        className="bg-apollo-page gap-0 overflow-y-auto p-0 lg:hidden"
       >
         <SheetHeader className="border-apollo-border border-b">
           <SheetTitle>Console</SheetTitle>

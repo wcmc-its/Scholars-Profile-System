@@ -28,7 +28,7 @@ import { isNewsQueueEnabled, loadNewsQueue, loadNewsQueueCounts } from "@/lib/ed
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "News approval — Scholars Profile Console",
+  title: "News approval — Scholars Console",
   robots: { index: false, follow: false },
 };
 

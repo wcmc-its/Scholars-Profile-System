@@ -74,6 +74,8 @@ export type ReportAccessPopoverPersonProps = {
    *  The route enforces the same gate; this only hides controls that would
    *  403. */
   canManage: boolean;
+  /** Who else can always run it — defaults to superusers and comms stewards. */
+  note?: string;
 };
 
 /** Administrator-gated report (report 8): static rule, any unit administrator. */
@@ -147,7 +149,9 @@ export function ReportAccessPopover(props: ReportAccessPopoverProps) {
   return <PersonAccess {...props} />;
 }
 
-function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: ReportAccessPopoverPersonProps) {
+function PersonAccess({ reportKey, initialRows, scopeOptions, canManage, note }: ReportAccessPopoverPersonProps) {
+  // A report with one scope (the wildcard) has nothing to pick or show.
+  const scoped = scopeOptions.length > 1;
   const [rows, setRows] = React.useState<ReadonlyArray<ReportAccessPopoverRow>>(initialRows);
   const [person, setPerson] = React.useState<DirectoryValue | null>(null);
   const [scope, setScope] = React.useState(scopeOptions[0]?.[0] ?? "*");
@@ -191,7 +195,7 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
       <Trigger />
       <PopoverContent align="start" className={CONTENT_CLASS} data-testid="report-access-popover">
         <p className="text-muted-foreground text-xs">
-          Superusers and comms stewards can always run this report.
+          {note ?? "Superusers and comms stewards can always run this report."}
         </p>
         {rows.length === 0 ? (
           <p className="text-muted-foreground mt-2" data-testid="report-access-empty">
@@ -203,7 +207,7 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
               <tr className="text-muted-foreground text-xs tracking-wide uppercase">
                 <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Name</th>
                 <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">CWID</th>
-                <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Program</th>
+                {scoped && <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Program</th>}
                 <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Granted by</th>
                 <th className="py-1.5 pr-4 font-semibold whitespace-nowrap">Date</th>
                 {canManage && <th className="py-1" />}
@@ -218,7 +222,7 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
                 >
                   <td className="py-2 pr-4">{r.name}</td>
                   <td className="py-2 pr-4 font-mono text-xs">{r.cwid}</td>
-                  <td className="py-2 pr-4">{labelFor.get(r.scopeKey) ?? r.scopeKey}</td>
+                  {scoped && <td className="py-2 pr-4">{labelFor.get(r.scopeKey) ?? r.scopeKey}</td>}
                   <td className="py-2 pr-4 font-mono text-xs">{r.grantedBy}</td>
                   <td className="py-2 pr-4 whitespace-nowrap">{formatDate(r.grantedAt)}</td>
                   {canManage && (
@@ -261,21 +265,23 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage }: Repor
                   idPrefix="report-access"
                 />
               </div>
-              <label className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-xs">Program</span>
-                <select
-                  value={scope}
-                  onChange={(e) => setScope(e.target.value)}
-                  className="border-apollo-border rounded border px-2 py-1"
-                  data-testid="report-access-scope"
-                >
-                  {scopeOptions.map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {scoped && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-muted-foreground text-xs">Program</span>
+                  <select
+                    value={scope}
+                    onChange={(e) => setScope(e.target.value)}
+                    className="border-apollo-border rounded border px-2 py-1"
+                    data-testid="report-access-scope"
+                  >
+                    {scopeOptions.map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <Button type="submit" variant="apollo" size="sm" disabled={busy || person === null}>
                 Add
               </Button>

@@ -477,7 +477,7 @@ export function AdminSubnav({
           a tab portal to the body, so they are NOT clipped by this scroller. */}
       <nav
         aria-label="Console"
-        className="hidden h-14 min-w-0 flex-1 items-center gap-6 overflow-x-auto xl:flex"
+        className="hidden h-14 min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:flex"
         data-testid="admin-subnav-tier1"
       >
         {tier1}

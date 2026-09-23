@@ -77,6 +77,29 @@ export const MENTORED_PUBS_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string
   ...MENTORED_PUBS_SCOPES.map((s) => [s, PROGRAM_LABEL[s] ?? s] as const),
 ];
 
+/** Report 8 (Article counts) and report 9 (High-impact publications) take
+ *  person grants too, for staff who administer no unit. Neither has scopes:
+ *  a grant is the wildcard alone. */
+export const ARTICLE_COUNT_REPORT = "article-count";
+export const HIGH_IMPACT_PUBS_REPORT = "high-impact-publications";
+export const WHOLE_REPORT_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string]> = [[ALL_SCOPES, "Whole report"]];
+
+/** Every grantable `reportKey` → the `[scopeKey, label]` pairs it accepts.
+ *  The route validates against this; a new person-granted report is one entry. */
+export const REPORT_ACCESS_SCOPE_OPTIONS: Readonly<Record<string, ReadonlyArray<readonly [string, string]>>> = {
+  [MENTORED_PUBS_REPORT]: MENTORED_PUBS_SCOPE_OPTIONS,
+  [ARTICLE_COUNT_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
+  [HIGH_IMPACT_PUBS_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
+};
+
+/** Whether `cwid` holds a grant on ANY report — the `/edit` landing and the
+ *  console's Reports tab use it to give a grant-only holder a way in. */
+export async function hasAnyReportAccess(cwid: string): Promise<boolean> {
+  if (!cwid) return false;
+  const rows = await db.read.reportAccess.findMany({ where: { cwid }, select: { cwid: true }, take: 1 });
+  return rows.length > 0;
+}
+
 /** Whether `value` is a grantable scope key for the Mentored publications
  *  report: one of `MENTORED_PUBS_SCOPES` or `"*"`. */
 export function isMentoredPubsScopeKey(value: unknown): value is MentoredPubsScope | typeof ALL_SCOPES {
@@ -322,3 +345,9 @@ export async function revokeReportAccess(args: GrantArgs): Promise<ReportAccessW
   });
   return { changed: true, rows };
 }
+
+/** Staff with no unit can always run report 8 via a grant; unit
+ *  administrators can without one. The popover says so. */
+export const ARTICLE_COUNT_ACCESS_NOTE =
+  "Every unit administrator (an Owner or Curator of any unit), superuser and comms steward can always run this report.";
+

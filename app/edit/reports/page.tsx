@@ -86,19 +86,20 @@ import {
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
 import {
-  canManageReportAccess,
+  ARTICLE_COUNT_ACCESS_NOTE,
+  ARTICLE_COUNT_REPORT,
   getReportScopes,
-  listReportAccess,
+  HIGH_IMPACT_PUBS_REPORT,
   MENTORED_PUBS_REPORT,
-  MENTORED_PUBS_SCOPE_OPTIONS,
 } from "@/lib/edit/report-access";
+import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
 import { loadReportMeta, reportLabel, type ReportKey, type ReportMeta } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Reports — Scholars Profile Console",
+  title: "Reports — Scholars Console",
   robots: { index: false, follow: false },
 };
 
@@ -182,10 +183,30 @@ export default async function EditReportsIndexPage({
   const meta = await loadReportMeta();
   const catalog = buildCatalog(meta);
   const programUnit =
-    programScopes.size > 0 ? buildProgramUnit(meta, await loadProgramReportAccess(session)) : null;
-  // Report 8 (Article counts) rides a second pseudo-unit, for every unit
-  // administrator (`canViewArticleCountReport`).
-  const institutionUnit = (await canViewArticleCountReport(session)) ? buildInstitutionUnit(meta) : null;
+    programScopes.size > 0
+      ? buildProgramUnit(meta, await loadReportAccessPopoverProps(MENTORED_PUBS_REPORT, session))
+      : null;
+  // Reports 8 (Article counts: unit administrators + grants) and 9
+  // (High-impact publications: grants) ride a second pseudo-unit.
+  const [canArticleCount, highImpactScopes] = await Promise.all([
+    canViewArticleCountReport(session),
+    getReportScopes(session, HIGH_IMPACT_PUBS_REPORT),
+  ]);
+  const institutionReports = [
+    ...(canArticleCount
+      ? [
+          catalogEntry(
+            meta,
+            8,
+            await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE),
+          ),
+        ]
+      : []),
+    ...(highImpactScopes.size > 0
+      ? [catalogEntry(meta, 9, await loadReportAccessPopoverProps(HIGH_IMPACT_PUBS_REPORT, session))]
+      : []),
+  ];
+  const institutionUnit = institutionReports.length > 0 ? buildInstitutionUnit(institutionReports) : null;
   const extraUnits = [programUnit, institutionUnit].filter((u): u is ReportsIndexUnit => u !== null);
 
   const { center, kind: kindParam } = (await searchParams) ?? {};
@@ -302,30 +323,12 @@ export default async function EditReportsIndexPage({
   );
 }
 
-/** Report 7's "Who can run this report" props for the index row — the same
- *  three things `/edit/reports/7` hands its own header: the grant rows
- *  (`grantedAt` as ISO, plain-serializable), the shared scope options and
- *  whether this session may Add / Remove. Read only when the program row is
- *  shown (`getReportScopes` non-empty), once per request. */
-async function loadProgramReportAccess(
-  session: EditSession,
-): Promise<ReportAccessPopoverPersonProps> {
-  const rows = await listReportAccess(MENTORED_PUBS_REPORT);
-  return {
-    mode: "person",
-    reportKey: MENTORED_PUBS_REPORT,
-    initialRows: rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
-    scopeOptions: MENTORED_PUBS_SCOPE_OPTIONS,
-    canManage: canManageReportAccess(session),
-  };
-}
-
 /** The person-granted Mentored publications report as a one-report
  *  pseudo-unit, so it rides the same list (and filter rail) as every unit —
  *  never a card floating under the table. Not tied to an org unit; access is
  *  a `report_access` row. Rendered only when `getReportScopes` is non-empty.
  *  Its label/blurb come from `report_meta` like every other card; `access`
- *  is `loadProgramReportAccess`'s popover props. */
+ *  is `loadReportAccessPopoverProps`'s result. */
 function buildProgramUnit(
   meta: Map<ReportKey, ReportMeta>,
   access: ReportAccessPopoverPersonProps,
@@ -347,21 +350,19 @@ function buildProgramUnit(
   };
 }
 
-/** Report 8 as a one-report pseudo-unit for every administrator — no grant
- *  rows to show, so its popover is the static admin rule. */
-function buildInstitutionUnit(meta: Map<ReportKey, ReportMeta>): ReportsIndexUnit {
-  const report = catalogEntry(meta, 8, { mode: "admin" });
+/** Reports 8 / 9 — whichever this viewer may run — as one pseudo-unit. */
+function buildInstitutionUnit(reports: ReportsIndexReport[]): ReportsIndexUnit {
   return {
     code: "institution",
     kind: "institution",
     name: "Institution-wide",
     centerType: null,
-    editHref: `/edit/reports/${report.slug}`,
-    liveCount: 1,
-    totalCount: 1,
+    editHref: `/edit/reports/${reports[0].slug}`,
+    liveCount: reports.length,
+    totalCount: reports.length,
     lastRefreshedAt: null,
-    reports: [report],
-    perReport: [{ n: 8, live: true, lastRefreshedAt: null }],
+    reports,
+    perReport: reports.map((r) => ({ n: r.n, live: true, lastRefreshedAt: null })),
   };
 }
 

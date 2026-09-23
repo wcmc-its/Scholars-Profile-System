@@ -5,7 +5,7 @@
  * header over the right body); `unitKindsFor` is exactly what
  * `REPORT_NUMBERS_BY_KIND` says — pinned as a literal AND re-derived from the
  * real record, so a widening there shows up here as a deliberate edit;
- * exactly one person-gated def, keyed on `MENTORED_PUBS_REPORT`; and the
+ * person-gated defs keyed on `MENTORED_PUBS_REPORT` / `HIGH_IMPACT_PUBS_REPORT`; and the
  * drift guard — `app/edit/reports/` holds no numeric directory. The seven
  * `app/edit/reports/{1..7}/page.tsx` were deleted when the dynamic page
  * landed; a static segment beats `[report]`, so any one of them coming back
@@ -21,7 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
 
 import { REPORT_NUMBERS_BY_KIND, type ReportableUnitKind } from "@/lib/edit/cancer-center-reports";
-import { MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import { HIGH_IMPACT_PUBS_REPORT, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
 import { REPORT_KEYS, type ReportKey } from "@/lib/edit/report-meta";
 import { REPORTS, unitKindsFor } from "@/lib/edit/report-registry";
 
@@ -34,9 +34,11 @@ describe("REPORTS", () => {
     }
   });
 
-  it("reports 1–6 are unit-gated; exactly one person-gated def, report 7 on MENTORED_PUBS_REPORT; 8 is admin-gated", () => {
+  it("reports 1–6 are unit-gated; 7 and 9 person-gated on their keys; 8 is admin-gated", () => {
     const person = REPORT_KEYS.filter((k) => REPORTS[k].gate === "person");
-    expect(person).toEqual(["7"]);
+    expect(person).toEqual(["7", "9"]);
+    const nine = REPORTS["9"];
+    expect(nine.gate === "person" && nine.accessKey).toBe(HIGH_IMPACT_PUBS_REPORT);
     expect(REPORTS["8"].gate).toBe("admin");
     const seven = REPORTS["7"];
     expect(seven.gate === "person" && seven.accessKey).toBe(MENTORED_PUBS_REPORT);
@@ -58,6 +60,7 @@ describe("unitKindsFor", () => {
       // Report 7 is person-gated, 8 administrator-gated; no kind lists them.
       "7": [],
       "8": [],
+      "9": [],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);

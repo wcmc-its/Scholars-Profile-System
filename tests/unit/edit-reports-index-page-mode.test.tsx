@@ -56,6 +56,9 @@ vi.mock("@/lib/edit/report-access", () => ({
   canManageReportAccess: () => false,
   MENTORED_PUBS_REPORT: "mentored-publications",
   MENTORED_PUBS_SCOPE_OPTIONS: [["*", "All programs"]],
+  ARTICLE_COUNT_REPORT: "article-count",
+  HIGH_IMPACT_PUBS_REPORT: "high-impact-publications",
+  ARTICLE_COUNT_ACCESS_NOTE: "",
 }));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.

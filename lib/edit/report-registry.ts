@@ -77,6 +77,7 @@ import type * as React from "react";
 import { renderArticleCountReport } from "@/components/edit/reports/article-count-body";
 import { renderClinicalTrialsReport } from "@/components/edit/reports/clinical-trials-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
+import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
 import { renderNciTable2aReport } from "@/components/edit/reports/nci-table-2a-body";
 import { renderNihFundedPubsReport } from "@/components/edit/reports/nih-funded-pubs-body";
@@ -88,7 +89,7 @@ import {
   type ReportableUnitKind,
   type ReportsContext,
 } from "@/lib/edit/cancer-center-reports";
-import { MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import { HIGH_IMPACT_PUBS_REPORT, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
 import type { ReportKey } from "@/lib/edit/report-meta";
 
 /** The page's `searchParams`, awaited — Next's shape (a repeated key is an array). */
@@ -162,7 +163,8 @@ export type ReportDef =
     };
 
 /** Every report, by `report_meta.report_key`. Reports 1–6 are unit-gated;
- *  report 7 (Mentored publications) is person-gated on `MENTORED_PUBS_REPORT`. */
+ *  reports 7 (Mentored publications) and 9 (High-impact publications) are
+ *  person-gated on their `report_access` keys. */
 export const REPORTS: Record<ReportKey, ReportDef> = {
   "1": { n: "1", gate: "unit", render: renderOptimizeMembershipReport },
   "2": { n: "2", gate: "unit", render: renderNciTable2aReport },
@@ -177,6 +179,12 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     render: renderMentoredPublicationsReport,
   },
   "8": { n: "8", gate: "admin", render: renderArticleCountReport },
+  "9": {
+    n: "9",
+    gate: "person",
+    accessKey: HIGH_IMPACT_PUBS_REPORT,
+    render: renderHighImpactPublicationsReport,
+  },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page

@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Prisma } from "@/lib/generated/prisma/client";
 
-const h = vi.hoisted(() => ({ queryRaw: vi.fn(), groupBy: vi.fn(), findFirst: vi.fn(), facets: vi.fn() }));
+const h = vi.hoisted(() => ({ queryRaw: vi.fn(), groupBy: vi.fn(), findFirst: vi.fn(), facets: vi.fn(), grants: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -18,6 +18,7 @@ vi.mock("@/lib/db", () => ({
       scholar: { groupBy: h.groupBy },
       publication: { groupBy: h.groupBy },
       unitAdmin: { findFirst: h.findFirst },
+      reportAccess: { findMany: h.grants },
     },
     write: {},
   },
@@ -313,7 +314,8 @@ describe("buildArticleCountWorkbook", () => {
 
 describe("canViewArticleCountReport", () => {
   const base = { cwid: "abc1234", isSuperuser: false, isCommsSteward: false };
-  it("superuser and comms steward pass without a grant read; any UnitAdmin row passes; none → false", async () => {
+  it("superuser and comms steward pass without a grant read; any UnitAdmin row passes; else an article-count grant; none → false", async () => {
+    h.grants.mockResolvedValue([]);
     expect(await canViewArticleCountReport({ ...base, isSuperuser: true })).toBe(true);
     expect(await canViewArticleCountReport({ ...base, isCommsSteward: true })).toBe(true);
     expect(h.findFirst).not.toHaveBeenCalled();
@@ -321,5 +323,12 @@ describe("canViewArticleCountReport", () => {
     expect(await canViewArticleCountReport(base)).toBe(true);
     h.findFirst.mockResolvedValueOnce(null);
     expect(await canViewArticleCountReport(base)).toBe(false);
+    expect(h.grants).toHaveBeenLastCalledWith({
+      where: { reportKey: "article-count", cwid: "abc1234" },
+      select: { scopeKey: true },
+    });
+    h.findFirst.mockResolvedValueOnce(null);
+    h.grants.mockResolvedValueOnce([{ scopeKey: "*" }]);
+    expect(await canViewArticleCountReport(base)).toBe(true);
   });
 });

@@ -5,9 +5,8 @@
  * `/edit/reports/7`.
  *
  * Body: `{ op: "grant" | "revoke", reportKey, scopeKey, cwid, name? }`.
- *   - `reportKey` must be `MENTORED_PUBS_REPORT` (the one report this table
- *     gates today);
- *   - `scopeKey` one of `MENTORED_PUBS_SCOPES` or `"*"`;
+ *   - `reportKey` a key of `REPORT_ACCESS_SCOPE_OPTIONS` (reports 7, 8, 9);
+ *   - `scopeKey` one of that report's options (`"*"` alone for 8 and 9);
  *   - `cwid` lowercased, then `/^[a-z][a-z0-9]{1,11}$/`;
  *   - `name` (grant only, optional): the grantee's directory display name as
  *     the people picker returned it, stored on the row as `grantee_name` so
@@ -37,8 +36,7 @@ import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/r
 import {
   canManageReportAccess,
   grantReportAccess,
-  isMentoredPubsScopeKey,
-  MENTORED_PUBS_REPORT,
+  REPORT_ACCESS_SCOPE_OPTIONS,
   revokeReportAccess,
   type ReportAccessWriteResult,
 } from "@/lib/edit/report-access";
@@ -81,10 +79,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (op !== "grant" && op !== "revoke") {
     return editError(400, "invalid_op", "op");
   }
-  if (reportKey !== MENTORED_PUBS_REPORT) {
+  if (typeof reportKey !== "string" || !Object.hasOwn(REPORT_ACCESS_SCOPE_OPTIONS, reportKey)) {
     return editError(400, "invalid_report_key", "reportKey");
   }
-  if (!isMentoredPubsScopeKey(scopeKey)) {
+  if (typeof scopeKey !== "string" || !REPORT_ACCESS_SCOPE_OPTIONS[reportKey].some(([k]) => k === scopeKey)) {
     return editError(400, "invalid_scope_key", "scopeKey");
   }
   const cwid = typeof body.cwid === "string" ? body.cwid.trim().toLowerCase() : "";
