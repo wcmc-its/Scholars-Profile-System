@@ -27,7 +27,9 @@ import {
   scopeSql,
   type ArticleCountParams,
 } from "@/lib/edit/article-count-report";
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { formatRoleCategory } from "@/lib/role-display";
 
 type JournalFamily = {
   key: string;
@@ -52,23 +54,9 @@ export const JOURNAL_FAMILIES: readonly JournalFamily[] = [
 ];
 
 // ponytail: "Nat " is Nature Portfolio's NLM prefix, but a few other
-// publishers' titles share it. Excluded by name; add one here if the
-// Summary tab ever shows a non-Nature journal under Nature.
+// publishers' titles share it. Excluded by name; add one here if a
+// non-Nature journal ever shows up in the list.
 const NOT_NATURE = ["Nat Prod Rep", "Nat Prod Res", "Nat Prod Commun", "Nat Sci Sleep"];
-
-/** The family a `journal_abbrev` belongs to, or null. Mirrors {@link journalSql}. */
-export function journalFamilyOf(abbrev: string | null): JournalFamily | null {
-  if (!abbrev) return null;
-  return (
-    JOURNAL_FAMILIES.find(
-      (f) =>
-        f.abbrevs.includes(abbrev) ||
-        (f.prefix !== undefined &&
-          abbrev.startsWith(f.prefix) &&
-          !(f.key === "nature" && NOT_NATURE.includes(abbrev))),
-    ) ?? null
-  );
-}
 
 function journalSql(keys: readonly string[]): Prisma.Sql {
   const clauses = JOURNAL_FAMILIES.filter((f) => keys.includes(f.key)).map((f) => {
@@ -125,24 +113,13 @@ export function highImpactQueryString(p: HighImpactParams, view: HighImpactView 
   return q.toString();
 }
 
-export type JournalCount = { family: string; journal: string; count: number };
-
-/** Distinct articles per journal, family order then count. Always cheap —
- *  the Summary tab and the list-cap decision both read it. */
-export async function loadJournalCounts(p: HighImpactParams): Promise<JournalCount[]> {
+/** Distinct articles in scope — decides whether the list is loaded. */
+export async function loadHighImpactTotal(p: HighImpactParams): Promise<number> {
   const { fromWhere } = scopeSql(p, journalSql(p.journals));
-  const raw = await db.read.$queryRaw<{ abbrev: string | null; journal: string | null; n: bigint | number }[]>`
-    SELECT p.journal_abbrev AS abbrev, MAX(p.journal) AS journal, COUNT(DISTINCT pa.pmid) AS n
-    ${fromWhere}
-     GROUP BY p.journal_abbrev`;
-  const order = new Map(JOURNAL_FAMILIES.map((f, i) => [f.label, i]));
-  return raw
-    .map((r) => ({
-      family: journalFamilyOf(r.abbrev)?.label ?? "Other",
-      journal: r.journal ?? r.abbrev ?? "",
-      count: Number(r.n),
-    }))
-    .sort((a, b) => (order.get(a.family) ?? 99) - (order.get(b.family) ?? 99) || b.count - a.count);
+  const [row] = await db.read.$queryRaw<{ n: bigint | number }[]>`
+    SELECT COUNT(DISTINCT pa.pmid) AS n
+    ${fromWhere}`;
+  return Number(row?.n ?? 0);
 }
 
 /** The list is built only up to this many articles (report 8's cap). */
@@ -161,7 +138,11 @@ export type HighImpactRow = {
   doi: string | null;
   /** Matching WCM authors: `Name (first author)` / `(last author)` / `(middle author)`. */
   authors: string[];
+  /** The same authors, structured, for the people summary. */
+  people: { cwid: string; name: string; department: string | null; personType: string; position: AuthorRole }[];
 };
+
+type AuthorRole = "first" | "last" | "middle";
 
 type RawRow = {
   pmid: string;
@@ -174,6 +155,9 @@ type RawRow = {
   cited_by_count: number | null;
   doi: string | null;
   preferred_name: string;
+  cwid: string;
+  primary_department: string | null;
+  role_category: string | null;
   is_first: number | boolean;
   is_last: number | boolean;
 };
@@ -183,7 +167,8 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
   const { fromWhere } = scopeSql(p, journalSql(p.journals));
   const raw = await db.read.$queryRaw<RawRow[]>`
     SELECT p.pmid, p.title, p.journal, p.year, p.publication_type, j.impact_score_1 AS jif,
-           p.date_added_to_entrez, p.cited_by_count, p.doi, s.preferred_name, pa.is_first, pa.is_last
+           p.date_added_to_entrez, p.cited_by_count, p.doi, s.preferred_name, s.cwid,
+           s.primary_department, s.role_category, pa.is_first, pa.is_last
     ${fromWhere}
      ORDER BY j.impact_score_1 DESC, p.date_added_to_entrez DESC, p.pmid, pa.position`;
   const byPmid = new Map<string, HighImpactRow>();
@@ -201,13 +186,74 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
         citations: r.cited_by_count === null ? null : Number(r.cited_by_count),
         doi: r.doi,
         authors: [],
+        people: [],
       };
       byPmid.set(r.pmid, row);
     }
-    const position = r.is_first ? "first author" : r.is_last ? "last author" : "middle author";
-    row.authors.push(`${r.preferred_name} (${position})`);
+    const position: AuthorRole = r.is_first ? "first" : r.is_last ? "last" : "middle";
+    row.authors.push(`${r.preferred_name} (${position} author)`);
+    row.people.push({
+      cwid: r.cwid,
+      name: r.preferred_name,
+      department: r.primary_department,
+      personType: formatRoleCategory(r.role_category) ?? "",
+      position,
+    });
   }
   return [...byPmid.values()];
+}
+
+export type PersonSummaryRow = {
+  cwid: string;
+  name: string;
+  department: string | null;
+  personType: string;
+  articles: number;
+  firstAuthor: number;
+  lastAuthor: number;
+  /** Sum of the articles' NIH citation counts (none on file = 0). */
+  citations: number;
+  /** Distinct journals, most articles first. */
+  journals: string[];
+};
+
+/** One row per matching scholar, most articles first. An article where the
+ *  same person is somehow listed twice still counts once for them. */
+export function summarizePeople(list: HighImpactRow[]): PersonSummaryRow[] {
+  const byCwid = new Map<string, PersonSummaryRow & { journalCounts: Map<string, number> }>();
+  for (const a of list) {
+    for (const cwid of new Set(a.people.map((x) => x.cwid))) {
+      const roles = a.people.filter((x) => x.cwid === cwid);
+      const who = roles[0];
+      let row = byCwid.get(cwid);
+      if (!row) {
+        row = {
+          cwid,
+          name: who.name,
+          department: who.department,
+          personType: who.personType,
+          articles: 0,
+          firstAuthor: 0,
+          lastAuthor: 0,
+          citations: 0,
+          journals: [],
+          journalCounts: new Map(),
+        };
+        byCwid.set(cwid, row);
+      }
+      row.articles++;
+      if (roles.some((x) => x.position === "first")) row.firstAuthor++;
+      if (roles.some((x) => x.position === "last")) row.lastAuthor++;
+      row.citations += a.citations ?? 0;
+      if (a.journal) row.journalCounts.set(a.journal, (row.journalCounts.get(a.journal) ?? 0) + 1);
+    }
+  }
+  return [...byCwid.values()]
+    .map(({ journalCounts, ...r }) => ({
+      ...r,
+      journals: [...journalCounts].sort((x, y) => y[1] - x[1]).map(([j]) => j),
+    }))
+    .sort((x, y) => y.articles - x.articles || x.name.localeCompare(y.name));
 }
 
 export function describeHighImpactCriteria(
@@ -230,14 +276,56 @@ export function describeHighImpactCriteria(
 
 export async function buildHighImpactWorkbook(
   p: HighImpactParams,
-  counts: JournalCount[],
+  total: number,
   list: HighImpactRow[] | null,
   generatedAt: Date,
   labels?: ReadonlyMap<string, string>,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const bold = (ws: ExcelJS.Worksheet, r: number) => (ws.getRow(r).font = { bold: true });
-  const total = counts.reduce((s, c) => s + c.count, 0);
+  const overCap = `${total.toLocaleString()} articles exceeds the ${HIGH_IMPACT_LIST_CAP.toLocaleString()}-row limit for this sheet. Narrow the filters to list them.`;
+
+  // People first: the report is about who. A list of scholars is a scholar
+  // export, so above SCHOLAR_EXPORT_CAP the sheet is withheld, never truncated.
+  const summary = wb.addWorksheet("People");
+  const people = list ? summarizePeople(list) : null;
+  if (!people) {
+    summary.addRow([overCap]);
+  } else if (people.length > SCHOLAR_EXPORT_CAP) {
+    summary.addRow([
+      `${people.length.toLocaleString()} people match. The people list is only included for ${SCHOLAR_EXPORT_CAP} or fewer; narrow the filters (e.g. by department) to include it. The page's Summary tab lists everyone.`,
+    ]);
+    summary.getColumn(1).width = 100;
+  } else {
+    summary.addRow([
+      "Name",
+      "CWID",
+      "Department",
+      "Person type",
+      "Articles",
+      "As first author",
+      "As last author",
+      "NIH citations",
+      "Journals",
+    ]);
+    bold(summary, 1);
+    summary.views = [{ state: "frozen", ySplit: 1 }];
+    for (const r of people) {
+      summary.addRow([
+        r.name,
+        r.cwid,
+        r.department,
+        r.personType,
+        r.articles,
+        r.firstAuthor,
+        r.lastAuthor,
+        r.citations,
+        r.journals.join("; "),
+      ]);
+    }
+    for (const [i, w] of [28, 10, 30, 22, 10, 12, 12, 12, 60].entries()) summary.getColumn(i + 1).width = w;
+    summary.getColumn(9).alignment = { wrapText: true, vertical: "top" };
+  }
 
   const pubs = wb.addWorksheet("Publications");
   if (list) {
@@ -273,19 +361,8 @@ export async function buildHighImpactWorkbook(
     pubs.getColumn(2).alignment = { wrapText: true, vertical: "top" };
     pubs.getColumn(5).alignment = { wrapText: true, vertical: "top" };
   } else {
-    pubs.addRow([
-      `${total.toLocaleString()} articles exceeds the ${HIGH_IMPACT_LIST_CAP.toLocaleString()}-row limit for this sheet. Narrow the filters to list them.`,
-    ]);
+    pubs.addRow([overCap]);
   }
-
-  const summary = wb.addWorksheet("Summary");
-  summary.addRow(["Journal family", "Journal", "Articles"]);
-  bold(summary, 1);
-  for (const c of counts) summary.addRow([c.family, c.journal, c.count]);
-  summary.addRow(["Total", "", total]);
-  bold(summary, summary.rowCount);
-  summary.getColumn(1).width = 32;
-  summary.getColumn(2).width = 50;
 
   const criteria = wb.addWorksheet("Criteria");
   criteria.addRow(["Criterion", "Value"]);
@@ -297,4 +374,3 @@ export async function buildHighImpactWorkbook(
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
-
