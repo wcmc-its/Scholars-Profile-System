@@ -29,6 +29,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { CENTER_ENTITY_TYPE } from "@/lib/org-unit-roles";
+import { isCancerCenterHead, loadCancerCenterCodes } from "@/lib/edit/title-picker";
 import {
   ambiguousUnitNames,
   formatUnitLeadershipTitle,
@@ -38,7 +39,7 @@ import {
 /** The Prisma surface this pass needs — base client or interactive tx. */
 type TitleResolutionClient = Pick<
   PrismaClient,
-  "scholar" | "orgUnitRoleAssignment" | "division" | "center" | "fieldOverride"
+  "scholar" | "orgUnitRoleAssignment" | "division" | "center" | "centerProgram" | "fieldOverride"
 >;
 
 export type TitleResolutionResult = {
@@ -140,7 +141,7 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
   chiefTitles: Map<string, string>;
   centerTitles: Map<string, string>;
 }> {
-  const [divAssignments, centerAssignments, divisions, centers] = await Promise.all([
+  const [divAssignments, centerAssignments, divisions, centers, cancerCenterCodes] = await Promise.all([
     client.orgUnitRoleAssignment.findMany({
       where: { entityType: "division", role: { roleGroup: "leadership", profileTitle: true } },
       select: {
@@ -160,7 +161,7 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
         cwid: true,
         entityId: true,
         interim: true,
-        role: { select: { label: true } },
+        role: { select: { key: true, label: true } },
       },
       orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
     }),
@@ -168,6 +169,7 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
       select: { code: true, name: true, department: { select: { name: true } } },
     }),
     client.center.findMany({ select: { code: true, name: true, officialName: true } }),
+    loadCancerCenterCodes(client),
   ]);
 
   // Ambiguity is computed from the whole unit table, not from the units that
@@ -198,7 +200,7 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
 
   const centerTitles = new Map<string, string>();
   for (const a of centerAssignments) {
-    if (centerTitles.has(a.cwid)) continue;
+    if (centerTitles.has(a.cwid) || !isCancerCenterHead(a, cancerCenterCodes)) continue;
     const name = centerNameByCode.get(a.entityId);
     if (!name) continue;
     centerTitles.set(
