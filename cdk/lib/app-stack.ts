@@ -1663,8 +1663,8 @@ export class AppStack extends Stack {
         // SCHOLAR_TITLE_RESOLUTION (#2719) — the display-title picker on the
         // /edit Name & title panel, its scholar-facing request path, and the ED
         // ETL's title-resolution post-pass. Read by BOTH the app and the ETL, so
-        // it is wired in etl-stack.ts's baseEnvironment too and BOTH MUST AGREE
-        // for flag parity (same dual-wiring as SELF_EDIT_ED_ADMINS_IMPORT).
+        // it is wired in etl-stack.ts's baseEnvironment too (same dual-wiring as
+        // SELF_EDIT_ED_ADMINS_IMPORT). flag-parity checks wiring, not agreement.
         //
         // OFF ⇒ dark: the picker does not render, `POST /api/edit/field` rejects
         // both `primaryTitle` and `primaryTitleRequest` as unknown fields, and
@@ -1679,9 +1679,12 @@ export class AppStack extends Stack {
         // until an ED ETL run populates them. Flip only AFTER a run, or the
         // picker has nothing to offer.
         //
-        // STAGING-FIRST: on in staging to soak (43 titles change), off in prod
-        // until the regression watchlist has been screened.
-        SCHOLAR_TITLE_RESOLUTION: envConfig.envName === "prod" ? "off" : "on",
+        // PROD IS SPLIT ON PURPOSE: app ON, ETL still OFF. With the ETL copy off,
+        // the post-pass resolves override ?? ED primary title, so no public title
+        // changes. The picker, though, lets operators pin the ED primary for the
+        // 7 working titles that are worse than today's BEFORE the ETL copy flips.
+        // Flip etl-stack.ts's prod value only after those pins are in.
+        SCHOLAR_TITLE_RESOLUTION: "on",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in

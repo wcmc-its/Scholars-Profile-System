@@ -547,7 +547,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLAR_TITLE_RESOLUTION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "MENTORING_COPUB_BRIDGE",
