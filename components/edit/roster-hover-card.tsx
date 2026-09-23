@@ -93,10 +93,12 @@ const SECTION = "border-apollo-border border-t px-4 py-3";
 const LABEL = "text-apollo-ink-2 mb-2 text-[11px] font-semibold tracking-[0.08em] uppercase";
 
 export function RosterScholarCell(p: RosterScholarCellProps) {
+  // The trigger is w-fit: the card anchors to it, and at full cell width the
+  // card opened past the cell's right edge, far from the name being hovered.
   return (
     <HoverCard openDelay={300}>
       <HoverCardTrigger asChild>
-        <div className="flex items-center gap-3">
+        <div className="flex w-fit max-w-full items-center gap-3">
           <Headshot cwid={p.cwid} name={p.name} present={p.hasHeadshot} px={36} />
           <div className="min-w-0">
             <Link

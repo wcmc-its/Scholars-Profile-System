@@ -18,8 +18,9 @@
  * route makes clear the request as a side effect.
  *
  * The picker is a radio list (design handoff option 1a): every tier is a row —
- * title on line one, its source on line two, "Current" on the saved one. A tier
- * that does not apply stays in the list, disabled, saying why. After a save the
+ * title on line one, its source on line two, "Current" on the saved one. Tiers
+ * that do not apply are omitted (Paul, 2026-09-23): the source line on each real
+ * option already says where it comes from. After a save the
  * page refreshes so the identity header above picks up the new title.
  *
  * Imports ONLY `@/lib/scholar-title` (pure, import-free) — never
@@ -30,16 +31,24 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { Info } from "lucide-react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { type TitleOption, type TitleTier } from "@/lib/scholar-title";
 import { cn } from "@/lib/utils";
 
 /** Line two of each row: where the tier's title comes from. */
+/** What a working title is, shown on the working-title row only. The value
+ *  arrives through the Enterprise Directory, but people set it in the Web
+ *  Directory. */
+const WORKING_TITLE_HELP =
+  "Set in the Web Directory for everyday use. Shown instead of the primary title.";
+
 const TIER_SOURCE: Record<TitleTier, string> = {
-  working: "Working title · Enterprise Directory",
+  working: "Working title · Web Directory",
   chief: "Division chief · Org unit leadership",
   centerHead: "Center head · Org unit leadership",
   primary: "Primary title · Enterprise Directory",
@@ -140,6 +149,7 @@ export function TitleField({
 
   return (
     <div className="flex flex-col gap-4">
+      <TooltipProvider delayDuration={200}>
       <RadioGroupPrimitive.Root
         aria-label="Display title"
         value={selected}
@@ -150,42 +160,48 @@ export function TitleField({
         disabled={busy}
         className="border-apollo-border-strong flex flex-col overflow-hidden rounded-lg border"
       >
-        {options.map((o, i) => {
-          const disabled = o.value === null;
+        {available.map((o, i) => {
           const on = selected === o.tier;
           return (
             <RadioGroupPrimitive.Item
               key={o.tier}
               value={o.tier}
-              disabled={disabled}
               data-testid={`title-option-${o.tier}`}
               className={cn(
                 "focus-visible:ring-ring/50 flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-inset",
                 i > 0 && "border-apollo-border border-t",
                 on ? "bg-apollo-surface-2" : "bg-apollo-surface",
-                disabled ? "cursor-not-allowed" : "cursor-pointer",
+                "cursor-pointer",
               )}
             >
               <span
                 aria-hidden
                 className={cn(
                   "flex size-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] bg-white",
-                  disabled ? "border-apollo-border-strong" : on ? "border-apollo-bar" : "border-[#6f6a5e]",
+                  on ? "border-apollo-bar" : "border-[#6f6a5e]",
                 )}
               >
                 {on && <span className="bg-apollo-bar size-2 rounded-full" />}
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span
-                  className={cn(
-                    "text-sm font-medium",
-                    disabled ? "text-muted-foreground" : "text-[#1f1b19]",
+                <span className="text-sm font-medium text-[#1f1b19]">{o.value}</span>
+                <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+                  {TIER_SOURCE[o.tier]}
+                  {o.tier === "working" && (
+                    <>
+                      {/* A span, not a button: the row is already a button. Hover
+                          shows the tooltip; screen readers get the sr-only text. */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span data-testid="working-title-help">
+                            <Info aria-hidden className="size-3.5" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">{WORKING_TITLE_HELP}</TooltipContent>
+                      </Tooltip>
+                      <span className="sr-only">{WORKING_TITLE_HELP}</span>
+                    </>
                   )}
-                >
-                  {o.value ?? o.label}
-                </span>
-                <span className="text-muted-foreground text-xs">
-                  {disabled ? `No ${o.label.toLowerCase().replace(/ title$/, "")} title on record` : TIER_SOURCE[o.tier]}
                 </span>
               </span>
               {o.tier === savedTier && (
@@ -197,6 +213,7 @@ export function TitleField({
           );
         })}
       </RadioGroupPrimitive.Root>
+      </TooltipProvider>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button

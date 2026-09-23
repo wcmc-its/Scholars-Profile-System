@@ -73,8 +73,11 @@ function deaneryLabel(title: string): string | null {
   if (/\binterim dean\b/i.test(title)) return "Interim Dean";
   if (HAS_DEAN.test(title)) return "Dean"; // school-specific dean (Graduate School / Qatar)
   if (/\bprovost\b/i.test(title)) return "Provost";
-  if (/\bpresident\b/i.test(title)) return "President";
+  // Most specific first: a bare /president/ also matches "Vice President …".
   if (/\bexecutive vice (?:president|dean)\b|\bevp\b/i.test(title)) return "EVP";
+  if (/\bsenior vice president\b/i.test(title)) return "Senior Vice President";
+  if (/\bvice president\b/i.test(title)) return "Vice President";
+  if (/\bpresident\b/i.test(title)) return "President";
   return null;
 }
 

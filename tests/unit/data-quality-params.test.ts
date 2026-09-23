@@ -148,8 +148,8 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
       center: { findMany: vi.fn().mockResolvedValue([{ code: "MCC", name: "Meyer Cancer Center" }]) },
       scholar: {
         groupBy: scholarGroupBy,
-        count: vi.fn().mockImplementation((args: { where: { OR?: { primaryTitle?: { contains?: string } }[] } }) =>
-          Promise.resolve(args.where.OR?.[0]?.primaryTitle?.contains === "Lecturer" ? 0 : 5),
+        count: vi.fn().mockImplementation((args: { where: { professorialRank?: string | null } }) =>
+          Promise.resolve(args.where.professorialRank === "Associate Professor" ? 0 : 5),
         ),
       },
       centerMembership: { groupBy: centerGroupBy },
@@ -171,12 +171,11 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
     );
     const facets = await loadDataQualityFacets(client as never);
     expect(facets.roleCategories.map((r) => r.value)).toEqual(["full_time_faculty"]);
-    // count mock: 5 for every rank except lecturer (0 → dropped)
-    expect(facets.ranks?.map((r) => r.value)).toEqual([
-      "professor",
-      "associate",
-      "assistant",
-      "instructor",
+    // count mock: 5 for every rank except Associate (0 → dropped)
+    expect(facets.ranks).toEqual([
+      { value: "professor", label: "Professor", count: 5 },
+      { value: "assistant", label: "Assistant Professor", count: 5 },
+      { value: "instructor", label: "Instructor / Lecturer", count: 5 },
     ]);
   });
 

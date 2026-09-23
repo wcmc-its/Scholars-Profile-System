@@ -1,6 +1,6 @@
 /**
  * `TitleField` (components/edit/title-field.tsx) — the radio-list title picker
- * (design handoff 1a): two-line rows, a disabled tier that says why, "Current"
+ * (design handoff 1a): two-line rows, inapplicable tiers omitted, "Current"
  * on the saved row, Save/Cancel driven by a dirty state, and a header refresh
  * after saving.
  */
@@ -50,16 +50,22 @@ beforeEach(() => {
 });
 
 describe("TitleField — radio list", () => {
-  it("renders every tier as a two-line radio row; a missing tier is disabled and says why", () => {
+  it("renders each applicable tier as a two-line radio row and omits the rest", () => {
     renderField();
-    expect(screen.getAllByRole("radio")).toHaveLength(4);
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
     const working = screen.getByTestId("title-option-working");
     expect(working.textContent).toContain("Associate Dean for Research");
-    expect(working.textContent).toContain("Working title · Enterprise Directory");
-    const center = screen.getByTestId("title-option-centerHead");
-    expect(center.hasAttribute("disabled")).toBe(true);
-    expect(center.textContent).toContain("No center head title on record");
-    expect(screen.queryByText(/not applicable/)).toBeNull();
+    expect(working.textContent).toContain("Working title · Web Directory");
+    expect(screen.queryByTestId("title-option-centerHead")).toBeNull();
+    expect(screen.queryByText(/on record/)).toBeNull();
+  });
+
+  it("explains the working title on its row only", () => {
+    renderField();
+    const working = screen.getByTestId("title-option-working");
+    expect(within(working).getByTestId("working-title-help")).toBeTruthy();
+    expect(working.textContent).toContain("Set in the Web Directory for everyday use.");
+    expect(screen.getAllByTestId("working-title-help")).toHaveLength(1);
   });
 
   it("marks the saved row Current and starts clean (Save disabled, no Cancel)", () => {
