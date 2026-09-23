@@ -25,7 +25,7 @@ export type ReadonlyAttributePanelProps = {
   /** The explanatory line under the heading. */
   description: string;
   /** Optional read-only values to echo (e.g. the current name). `null` renders as "—";
-   *  a node lets one row carry a link or a fix-it line (ORCID, #2650). */
+   *  a node lets one row carry a control (Title picker, #2719). */
   fields?: ReadonlyArray<{ label: string; value: ReactNode }>;
   /** Optional media rendered above the values (e.g. the Photo panel's headshot). */
   media?: ReactNode;
@@ -47,9 +47,8 @@ export function ReadonlyAttributePanel({
       attribute={attribute}
       heading={heading}
       description={description}
+      headerAction={<LockedBadge />}
     >
-      <LockedBadge />
-
       {media}
 
       {fields && fields.length > 0 && (

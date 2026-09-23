@@ -60,9 +60,8 @@ export function CoiCard({
       attribute="coi"
       heading="Conflicts of interest"
       description={`External relationships and financial interests ${possessive === "your" ? "you" : scholarName} disclosed in the Weill Research Gateway. These are shown on the public profile and aren't editable here.`}
+      headerAction={<LockedBadge />}
     >
-      <LockedBadge />
-
       {groups.length === 0 ? (
         <p className="text-muted-foreground text-sm" data-testid="coi-empty">
           {mode === "superuser"
