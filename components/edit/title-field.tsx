@@ -31,14 +31,22 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { Info } from "lucide-react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { type TitleOption, type TitleTier } from "@/lib/scholar-title";
 import { cn } from "@/lib/utils";
 
 /** Line two of each row: where the tier's title comes from. */
+/** What a working title is, shown on the working-title row only. The value
+ *  arrives through the Enterprise Directory, but people set it in the Web
+ *  Directory. */
+const WORKING_TITLE_HELP =
+  "Set in the Web Directory for everyday use. Shown instead of the primary title.";
+
 const TIER_SOURCE: Record<TitleTier, string> = {
   working: "Working title · Enterprise Directory",
   chief: "Division chief · Org unit leadership",
@@ -141,6 +149,7 @@ export function TitleField({
 
   return (
     <div className="flex flex-col gap-4">
+      <TooltipProvider delayDuration={200}>
       <RadioGroupPrimitive.Root
         aria-label="Display title"
         value={selected}
@@ -176,7 +185,24 @@ export function TitleField({
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-sm font-medium text-[#1f1b19]">{o.value}</span>
-                <span className="text-muted-foreground text-xs">{TIER_SOURCE[o.tier]}</span>
+                <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+                  {TIER_SOURCE[o.tier]}
+                  {o.tier === "working" && (
+                    <>
+                      {/* A span, not a button: the row is already a button. Hover
+                          shows the tooltip; screen readers get the sr-only text. */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span data-testid="working-title-help">
+                            <Info aria-hidden className="size-3.5" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">{WORKING_TITLE_HELP}</TooltipContent>
+                      </Tooltip>
+                      <span className="sr-only">{WORKING_TITLE_HELP}</span>
+                    </>
+                  )}
+                </span>
               </span>
               {o.tier === savedTier && (
                 <span className="bg-apollo-surface-2 text-[#5c574d] rounded-[10px] px-2 py-px text-xs whitespace-nowrap">
@@ -187,6 +213,7 @@ export function TitleField({
           );
         })}
       </RadioGroupPrimitive.Root>
+      </TooltipProvider>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button

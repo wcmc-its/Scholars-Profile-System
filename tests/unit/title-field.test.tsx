@@ -60,6 +60,14 @@ describe("TitleField — radio list", () => {
     expect(screen.queryByText(/on record/)).toBeNull();
   });
 
+  it("explains the working title on its row only", () => {
+    renderField();
+    const working = screen.getByTestId("title-option-working");
+    expect(within(working).getByTestId("working-title-help")).toBeTruthy();
+    expect(working.textContent).toContain("Set in the Web Directory for everyday use.");
+    expect(screen.getAllByTestId("working-title-help")).toHaveLength(1);
+  });
+
   it("marks the saved row Current and starts clean (Save disabled, no Cancel)", () => {
     renderField();
     expect(within(screen.getByTestId("title-option-working")).getByText("Current")).toBeTruthy();

@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { LockedBadge } from "@/components/edit/locked-badge";
+import { Button } from "@/components/ui/button";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
@@ -26,7 +27,7 @@ export type ReadonlyAttributePanelProps = {
   description: string;
   /** Optional read-only values to echo (e.g. the current name). `null` renders as "—";
    *  a node lets one row carry a control (Title picker, #2719). */
-  fields?: ReadonlyArray<{ label: string; value: ReactNode }>;
+  fields?: ReadonlyArray<{ label: string; value: ReactNode; issueId?: string }>;
   /** Optional media rendered above the values (e.g. the Photo panel's headshot). */
   media?: ReactNode;
 };
@@ -55,11 +56,35 @@ export function ReadonlyAttributePanel({
         // Read-only display, not a form: a 2-col label/value def-list with row
         // hairlines (was a muted borderless grid). Label left, value emphasized —
         // matches the console mockup's locked-attribute treatment.
-        <dl className="border-apollo-border grid grid-cols-[max-content_1fr] gap-x-8 border-t text-sm">
+        // Each row carries its own "Request a change", opening the router with
+        // that row's issue pre-selected (Paul, 2026-09-23). A row with no
+        // `issueId` opens the full issue list.
+        <dl className="border-apollo-border grid grid-cols-[max-content_1fr_max-content] gap-x-8 border-t text-sm">
           {fields.map((f) => (
             <div key={f.label} className="border-apollo-border contents [&>*]:border-b [&>*]:py-3.5">
               <dt className="text-muted-foreground">{f.label}</dt>
               <dd className="text-foreground font-medium">{f.value ?? "—"}</dd>
+              <div className="text-right">
+                <RequestAChangeDialog
+                  attribute={attribute}
+                  cwid={cwid}
+                  scholarName={scholarName}
+                  initialIssueId={f.issueId}
+                  trigger={(open) => (
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="text-muted-foreground hover:text-foreground h-auto px-0 whitespace-nowrap"
+                      onClick={open}
+                      aria-label={`Request a change to ${f.label}`}
+                      data-testid={`request-a-change-row-${f.label.toLowerCase()}`}
+                    >
+                      Request a change
+                    </Button>
+                  )}
+                />
+              </div>
             </div>
           ))}
         </dl>
@@ -70,14 +95,19 @@ export function ReadonlyAttributePanel({
       <div className="border-apollo-border flex flex-col items-start gap-2 border-t pt-3">
         <p className="text-sm font-medium">This section is not editable.</p>
         <p className="text-muted-foreground text-sm">
-          These fields come from WCM systems of record. Use Request a Change to fix one at its source.
+          {fields && fields.length > 0
+            ? "These fields come from WCM systems of record. Use Request a change on a row to fix it at its source."
+            : "These fields come from WCM systems of record. Use Request a Change to fix one at its source."}
         </p>
-        <RequestAChangeDialog
-          attribute={attribute}
-          cwid={cwid}
-          scholarName={scholarName}
-          triggerTestId="request-a-change-toggle"
-        />
+        {/* Panels without rows (Photo) keep the single panel-level trigger. */}
+        {!(fields && fields.length > 0) && (
+          <RequestAChangeDialog
+            attribute={attribute}
+            cwid={cwid}
+            scholarName={scholarName}
+            triggerTestId="request-a-change-toggle"
+          />
+        )}
       </div>
     </EditPanel>
   );
