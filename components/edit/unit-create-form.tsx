@@ -101,7 +101,7 @@ export function UnitCreateForm({
     if (done) successRef.current?.focus();
   }, [done]);
 
-  const [cancelHref, setCancelHref] = React.useState("/edit/scholars");
+  const [cancelHref, setCancelHref] = React.useState("/edit/profiles");
   React.useEffect(() => {
     const ref = document.referrer;
     if (ref && ref.startsWith(window.location.origin)) {

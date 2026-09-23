@@ -2,7 +2,7 @@
  * The shared admin sub-nav across ALL `/edit` console surfaces (#497 PR-3c,
  * `slug-personalization-ui-spec.md` § 3.1; unified onto the self-edit surface in
  * `role-aware-navigation-entry-points-spec.md`). The maroon-underlined tab strip
- * in the black Apollo bar, linking the Profiles roster (`/edit/scholars`), the
+ * in the black Apollo bar, linking the Profiles roster (`/edit/profiles`), the
  * Profile-URL request queue (`/edit/slug-requests`), the URL registry,
  * Administrators, Method Families, and the matcher tools
  * (`/edit/matcha`, `/edit/grant-matcha`). A pending-count pill sits on the "URL requests"
@@ -218,7 +218,7 @@ export function AdminSubnav({
    *  Superusers already get it via `superuserSurfaces`; this is the escape
    *  hatch, mirroring `reportsTab`. Gap 2 fix (2026-08-14) — previously
    *  piggybacked on `profilesTab`, which a unit Owner/Curator can also earn
-   *  (`/edit/scholars`'s `unitScope !== null` override), showing a News link
+   *  (`/edit/profiles`'s `unitScope !== null` override), showing a News link
    *  that 404s on `isNewsQueueTabVisible`'s actual gate. Default `false`. */
   newsTab?: boolean;
   /** Show the "Cores" tab (`/edit/core`) to a non-superuser comms_steward.
@@ -249,7 +249,7 @@ export function AdminSubnav({
    */
   const tabs: TabSpec[] = (
     [
-      { show: superuserSurfaces || profilesTab, id: "profiles", href: "/edit/scholars", label: "Profiles" },
+      { show: superuserSurfaces || profilesTab, id: "profiles", href: "/edit/profiles", label: "Profiles" },
       { show: unitsTab, id: "units", href: "/edit/units", label: "Org units" },
       {
         show: superuserSurfaces && pendingSlugRequests !== null,

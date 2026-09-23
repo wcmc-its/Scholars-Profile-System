@@ -42,7 +42,7 @@ beforeEach(() => {
 
 describe("ForbiddenEditPage — single destination redirects straight through (2026-08-19)", () => {
   it.each([
-    ["isCvGenerator", "/edit/scholars"],
+    ["isCvGenerator", "/edit/profiles"],
     ["isHonorsCurator", "/edit/honors-queue"],
     ["isDataSharingViewer", "/edit/data-sharing"],
     ["isDeveloper", "/edit/grant-matcha"],
@@ -58,7 +58,7 @@ describe("ForbiddenEditPage — single destination redirects straight through (2
     "%s alone redirects to Profiles, not the generic /edit — they can genuinely edit any scholar's profile",
     (flag) => {
       expect(() => render(<ForbiddenEditPage session={{ [flag]: true }} />)).toThrow(
-        "__REDIRECT__:/edit/scholars",
+        "__REDIRECT__:/edit/profiles",
       );
     },
   );
@@ -66,8 +66,8 @@ describe("ForbiddenEditPage — single destination redirects straight through (2
   it("a superuser who also happens to be cv_generator redirects to Profiles — no redundant read-only duplicate to choose between", () => {
     expect(() =>
       render(<ForbiddenEditPage session={{ isSuperuser: true, isCvGenerator: true }} />),
-    ).toThrow("__REDIRECT__:/edit/scholars");
-    expect(mockRedirect).toHaveBeenCalledWith("/edit/scholars");
+    ).toThrow("__REDIRECT__:/edit/profiles");
+    expect(mockRedirect).toHaveBeenCalledWith("/edit/profiles");
   });
 
   it("no session passed (the two bare-ConsoleTopBar detail pages) redirects to /edit, same as the old fallback link's target", () => {
@@ -86,7 +86,7 @@ describe("ForbiddenEditPage — multiple destinations renders a choice, doesn't 
     const links = screen.getAllByRole("link");
     expect(links.map((l) => l.textContent)).toEqual(["Profiles", "Honors queue", "Grant Matcha"]);
     expect(links.map((l) => l.getAttribute("href"))).toEqual([
-      "/edit/scholars",
+      "/edit/profiles",
       "/edit/honors-queue",
       "/edit/grant-matcha",
     ]);

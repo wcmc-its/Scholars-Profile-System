@@ -100,7 +100,7 @@ function isManageableKind(value: string): value is ManageableUnitKind {
  *  institution has no page; its admin works from the Profiles roster, which
  *  `loadDataQualityScope` already filters to their institution. */
 export function unitEditHref(kind: ManageableUnitKind, code: string): string {
-  if (kind === "institution") return "/edit/scholars";
+  if (kind === "institution") return "/edit/profiles";
   return `/edit/${kind}/${encodeURIComponent(code)}`;
 }
 

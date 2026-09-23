@@ -1085,7 +1085,7 @@ describe("EditPage — unit-admin Profiles crumb (dwd2001 bug #7)", () => {
     render(<EditPage ctx={superuserCtx} mode="unit-admin" profilesNavVisible={true} />);
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     const link = within(crumb).getByTestId("edit-subnav-profiles");
-    expect(link.getAttribute("href")).toBe("/edit/scholars");
+    expect(link.getAttribute("href")).toBe("/edit/profiles");
   });
 
   it("defaults to the flat unit-admin label when profilesNavVisible is omitted", () => {

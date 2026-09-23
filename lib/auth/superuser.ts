@@ -77,10 +77,10 @@ export interface EditSession {
   isDataSharingViewer?: boolean;
   /**
    * Live `cv_generator` verdict — read-only access to every scholar's
-   * `/edit/scholar/[cwid]` and the `/edit/scholars` roster, no write
+   * `/edit/scholar/[cwid]` and the `/edit/profiles` roster, no write
    * capability anywhere (#2482). A superuser is a superset of this. Gates
    * ONLY the read-admitting arm of `resolveScholarEditAccess` and the
-   * `/edit/scholars` roster scope — no write predicate in `lib/edit/authz.ts`
+   * `/edit/profiles` roster scope — no write predicate in `lib/edit/authz.ts`
    * reads it, so like `isDataSharingViewer` it is OPTIONAL: the synthetic
    * `EditSession` shapes the field / unit authz helpers build need not carry
    * a flag they never consume. The live resolvers (`getEditSession` /

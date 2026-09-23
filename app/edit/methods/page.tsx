@@ -47,7 +47,7 @@ export default async function MethodFamiliesPage() {
   if (!isCommsStewardEnabled()) notFound();
 
   // Resolve the EFFECTIVE identity (mirrors the sibling console pages
-  // `/edit/scholars` + `/edit/administrators`), so a "View as" overlay scopes
+  // `/edit/profiles` + `/edit/administrators`), so a "View as" overlay scopes
   // this surface to the impersonated viewer. Without this the page authorized +
   // rendered its tabs from the REAL superuser, so a superuser viewing as a
   // steward saw superuser tabs that the target can't open

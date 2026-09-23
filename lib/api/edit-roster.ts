@@ -1,6 +1,6 @@
 /**
  * The org-unit filter shape shared by the Profiles roster
- * (`lib/api/data-quality.ts`, `/edit/scholars`) — one department, division,
+ * (`lib/api/data-quality.ts`, `/edit/profiles`) — one department, division,
  * center, or institution (ED primary organization, `Scholar.primaryOrgCode`).
  *
  * The roster query this type originally belonged to (`loadEditRoster`) was

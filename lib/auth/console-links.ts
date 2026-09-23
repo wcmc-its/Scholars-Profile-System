@@ -18,12 +18,12 @@
  * `isMethodsTabVisible` / `superuserSurfaces` discipline in `AdminSubnav`).
  *
  * Policy (one entry per privileged role-entry-point, deduped):
- *   - **Superuser** → "Admin console" (`/edit/scholars`) only. The in-console
+ *   - **Superuser** → "Admin console" (`/edit/profiles`) only. The in-console
  *     `AdminSubnav` fans out from the roster to every other surface (URL requests /
  *     URL registry / Administrators / Method Families / Funding matcher), so the
  *     dropdown stays short — it routes them to the console, not to every tab.
  *   - **comms_steward** (not a superuser) → also "Admin console"
- *     (`/edit/scholars`), same collapse as a superuser. A steward's own
+ *     (`/edit/profiles`), same collapse as a superuser. A steward's own
  *     `AdminSubnav` fans out too — Profiles, Org units, Methods, News,
  *     Reports, Data quality, Data sharing all admit stewards per
  *     `TAB_PREDICATES` in `lib/edit/console-tabs.server.ts` — so a dedicated
@@ -33,10 +33,10 @@
  *     unit grant must never remove this row (I3-style monotonicity, mirroring
  *     `console-tabs.server.ts`'s own invariant).
  *   - **Unit Owner / Curator** (not a superuser, not a steward) → "Profiles"
- *     (`/edit/scholars`, scope-filtered to their units — B3), then "Org units"
+ *     (`/edit/profiles`, scope-filtered to their units — B3), then "Org units"
  *     (`/edit/units`).
  *     People first: the roster is what they sign in to do, and it was
- *     previously not linked at all — `/edit/scholars` was superuser-gated, so
+ *     previously not linked at all — `/edit/profiles` was superuser-gated, so
  *     their only door was "Org units". (The roster's own COI-review column is
  *     superuser-only, so it earns no separate link here — see
  *     `lib/edit/data-quality.ts`.)
@@ -98,7 +98,7 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
     links.push({
       id: "manage-profiles",
       label: "Admin console",
-      href: "/edit/scholars",
+      href: "/edit/profiles",
     });
   } else {
     // PEOPLE BEFORE UNITS. A unit Owner/Curator's own words for what they came
@@ -107,7 +107,7 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
     // same NAME every other role uses for it, so the surface reads identically
     // whoever opens it; the roster itself is scope-filtered server-side (B3).
     if (v.managesUnits) {
-      links.push({ id: "profiles", label: "Profiles", href: "/edit/scholars" });
+      links.push({ id: "profiles", label: "Profiles", href: "/edit/profiles" });
     }
     if (v.managesUnits) {
       links.push({ id: "units", label: "Org units", href: "/edit/units" });

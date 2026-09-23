@@ -2,7 +2,7 @@
  * `app/edit/slugs/page.tsx` — the superuser slug-registry page (#497).
  * Route-level authorization + flag-aware segment wiring. Real
  * `requireSuperuserGet` (so the denial log line is exercised), mocked boundary
- * deps — mirroring the `/edit/scholars` roster page test.
+ * deps — mirroring the `/edit/profiles` roster page test.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 

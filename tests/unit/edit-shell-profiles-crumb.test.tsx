@@ -45,7 +45,7 @@ describe("EditShell — Profiles crumb gating (superuser mode)", () => {
     );
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     const link = within(crumb).getByTestId("edit-subnav-profiles");
-    expect(link.getAttribute("href")).toBe("/edit/scholars");
+    expect(link.getAttribute("href")).toBe("/edit/profiles");
     expect(within(crumb).getByText("Jane Doe").textContent).toBe("Jane Doe");
   });
 
@@ -131,7 +131,7 @@ describe("EditShell — Org units crumb gating (unit editor pages)", () => {
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(crumb).queryByTestId("edit-subnav-units")).toBeNull();
     expect(within(crumb).getByTestId("edit-subnav-profiles").getAttribute("href")).toBe(
-      "/edit/scholars",
+      "/edit/profiles",
     );
   });
 });
@@ -160,7 +160,7 @@ describe("EditShell — Profiles crumb gating (unit-admin mode)", () => {
     );
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     const link = within(crumb).getByTestId("edit-subnav-profiles");
-    expect(link.getAttribute("href")).toBe("/edit/scholars");
+    expect(link.getAttribute("href")).toBe("/edit/profiles");
     expect(within(crumb).getByText("Alex Rivera").textContent).toBe("Alex Rivera");
   });
 

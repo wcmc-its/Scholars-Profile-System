@@ -1,6 +1,6 @@
 /**
  * The shared scholar-roster query behind TWO pages that both sort by
- * prominence + leadership: `/edit/scholars` ("Profiles" — headshot/overview
+ * prominence + leadership: `/edit/profiles` ("Profiles" — headshot/overview
  * gaps, Status, everyone who can see Profiles) and `/edit/coi` ("COI" —
  * pending conflict-of-interest review, superuser-only). One query engine,
  * one candidate set per request; each PAGE decides which columns to render
@@ -182,6 +182,9 @@ export type DataQualityEntry = {
   prominence: number;
   /** Deep link into the scholar's edit surface (the edit page enforces authz). */
   editHref: string;
+  /** Plain-text start of the effective overview (override wins), for the roster
+   *  hover card; null when there is none. Not exported to CSV. */
+  overviewExcerpt?: string | null;
 };
 
 export type DataQualityOptions = {
@@ -205,6 +208,10 @@ export type DataQualityOptions = {
   /** Include #536 hidden identity classes (doctoral students / alumni). Default
    *  true; ignored when a specific person-type is chosen. */
   includeHidden?: boolean;
+  /** Only suppressed (not publicly visible) profiles. Profiles-only. */
+  hiddenOnly?: boolean;
+  /** Rank multi-select (ORed); see `RANK_WHERE`. Empty = no filter. */
+  ranks?: readonly RankFilter[];
   /** Page size (default 50, capped at 200). */
   limit?: number;
   /** Page offset (default 0). */
@@ -228,11 +235,82 @@ export type DataQualityResult = {
   counts: DataQualityCounts;
 };
 
+/** Rank facet values, highest first. */
+export const RANK_FILTERS = ["professor", "associate", "assistant", "instructor", "lecturer"] as const;
+export type RankFilter = (typeof RANK_FILTERS)[number];
+const RANK_LABELS: Record<RankFilter, string> = {
+  professor: "Professor",
+  associate: "Associate Professor",
+  assistant: "Assistant Professor",
+  instructor: "Instructor",
+  lecturer: "Lecturer",
+};
+/** Person types the Rank facet supersedes (hidden from the Person type facet). */
+const RANK_SUBSUMED_TYPES = ["instructor", "lecturer"] as const;
+
+const titleContains = (word: string): Prisma.ScholarWhereInput => ({
+  professorialRank: null,
+  OR: [{ primaryTitle: { contains: word } }, { edPrimaryTitle: { contains: word } }],
+});
+
+/**
+ * Rank. The three professorial ranks come from `Scholar.professorialRank` (the
+ * ASMS-authoritative ED rank leaf, `lib/faculty-rank.ts`). ED has no rank leaf
+ * for Instructor / Lecturer and the person type buries most of them under
+ * full-time / affiliated faculty, so those two match on title — only for
+ * scholars with no professorial rank, so "Professor; Lecturer in X" stays a
+ * Professor. MySQL's default collation makes `contains` case-insensitive.
+ */
+const RANK_WHERE: Record<RankFilter, Prisma.ScholarWhereInput> = {
+  professor: { professorialRank: "Professor" },
+  associate: { professorialRank: "Associate Professor" },
+  assistant: { professorialRank: "Assistant Professor" },
+  instructor: titleContains("Instructor"),
+  lecturer: titleContains("Lecturer"),
+};
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 function nonEmpty(s: string | null | undefined): boolean {
   return typeof s === "string" && s.trim().length > 0;
+}
+
+/** Tag-stripped, whitespace-collapsed first ~300 chars (the card clamps to 3 lines). */
+function excerpt(html: string | null | undefined): string | null {
+  if (!nonEmpty(html)) return null;
+  const text = html!.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 300) : null;
+}
+
+/** One current appointment for the roster hover card. */
+export type RosterTitle = { title: string; organization: string; isPrimary: boolean };
+
+/**
+ * Current appointments (primary first) for ONE roster page's cwids — the hover
+ * card's "Titles". Separate from the roster loader so the ~9k-row prominence
+ * pass never reads appointments. Historical ED rows are excluded.
+ */
+export async function loadRosterTitles(
+  cwids: readonly string[],
+  client: Pick<PrismaClient, "appointment">,
+): Promise<Record<string, RosterTitle[]>> {
+  if (cwids.length === 0) return {};
+  const today = new Date();
+  const rows = await client.appointment.findMany({
+    where: {
+      cwid: { in: [...cwids] },
+      source: { not: "ED-HISTORICAL" },
+      OR: [{ endDate: null }, { endDate: { gte: today } }],
+    },
+    select: { cwid: true, title: true, organization: true, isPrimary: true },
+    orderBy: [{ isPrimary: "desc" }, { title: "asc" }],
+  });
+  const out: Record<string, RosterTitle[]> = {};
+  for (const r of rows) {
+    (out[r.cwid] ??= []).push({ title: r.title, organization: r.organization, isPrimary: r.isPrimary });
+  }
+  return out;
 }
 
 /**
@@ -279,6 +357,8 @@ function buildWhere(
     and.push({ OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLES] } }] });
   }
   if (person.unit) and.push(person.unit);
+  if (opts.hiddenOnly) where.status = { not: "active" };
+  if (opts.ranks && opts.ranks.length > 0) and.push({ OR: opts.ranks.map((r) => RANK_WHERE[r]) });
 
   if (opts.scope.all === false) {
     const scopeOr: Prisma.ScholarWhereInput[] = [];
@@ -435,9 +515,10 @@ async function computeDataQualityEntries(
   const chiefs = new Set(chiefRows.map((r) => r.cwid));
   const piCount = new Map(piRows.map((r) => [r.cwid, r._count._all]));
   const nihPiCount = new Map(nihPiRows.map((r) => [r.cwid, r._count._all]));
-  const overviewOverride = new Set(
-    overrideRows.filter((r) => nonEmpty(r.value)).map((r) => r.entityId),
+  const overrideText = new Map(
+    overrideRows.filter((r) => nonEmpty(r.value)).map((r) => [r.entityId, r.value] as const),
   );
+  const overviewOverride = new Set(overrideText.keys());
   const provByCwid = new Map(provRows.map((r) => [r.cwid, r.updatedAt]));
   const coiHigh = new Map<string, number>();
   const coiMedium = new Map<string, number>();
@@ -497,6 +578,7 @@ async function computeDataQualityEntries(
       pendingCoiMedium: coiMedium.get(s.cwid) ?? 0,
       prominence,
       editHref: `/edit/scholar/${encodeURIComponent(s.cwid)}`,
+      overviewExcerpt: excerpt(overrideText.get(s.cwid) ?? s.overview),
     };
   });
 
@@ -652,6 +734,12 @@ export type ParsedDataQualityParams = {
    *  doc comment) but never passes it through to `loadDataQualityRoster`. */
   overviewAge: OverviewAgeFilter;
   includeHidden: boolean;
+  /** Profiles roster: `?students=1` includes doctoral students / alumni, which
+   *  it hides by default. (The COI page keeps the older `hidden=0` switch.) */
+  includeStudents: boolean;
+  /** Profiles roster: `?visibility=hidden` lists only suppressed profiles. */
+  hiddenOnly: boolean;
+  ranks: RankFilter[];
   page: number;
 };
 
@@ -683,6 +771,9 @@ export function parseDataQualityParams(
     gap: parseGap(first("gap")),
     overviewAge: parseOverviewAge(first("overviewAge")),
     includeHidden: !(hidden === "0" || hidden === "false"),
+    includeStudents: first("students") === "1",
+    hiddenOnly: first("visibility") === "hidden",
+    ranks: RANK_FILTERS.filter((r) => valuesOf("rank").includes(r)),
     page: Math.max(Number.parseInt(first("page") ?? "0", 10) || 0, 0),
   };
 }
@@ -707,6 +798,8 @@ export type DataQualityFacets = {
    *  label `institutionDisplayName`). No null bucket: a scholar with no
    *  `primaryOrgCode` (pre-backfill rows) is simply not selectable here. */
   institutions: DataQualityFacetOption[];
+  /** Rank (value = `RankFilter`), highest first, zero-count ranks dropped. */
+  ranks?: DataQualityFacetOption[];
 };
 
 const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
@@ -768,6 +861,11 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
   const roleCategories: DataQualityFacetOption[] = roleAgg
     .map((r) => r.roleCategory)
     .filter((v): v is string => Boolean(v))
+    // The `instructor` / `lecturer` person types hold only the handful whose sole
+    // faculty flag is that leaf (7 in prod vs ~900 Instructor-titled scholars, most
+    // typed full-time or affiliated). The Rank facet finds them all; offering the
+    // tiny bucket here reads as "we only have 7 instructors".
+    .filter((v) => !(RANK_SUBSUMED_TYPES as readonly string[]).includes(v))
     .map((value) => ({
       value,
       label: formatRoleCategory(value) ?? value,
@@ -823,5 +921,14 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
     )
     .sort(byCountDesc);
 
-  return { roleCategories, departments, centers, institutions };
+  const rankCounts = await Promise.all(
+    RANK_FILTERS.map((r) => client.scholar.count({ where: { ...ACTIVE_WHERE, ...RANK_WHERE[r] } })),
+  );
+  const ranks = RANK_FILTERS.map((value, i) => ({
+    value,
+    label: RANK_LABELS[value],
+    count: rankCounts[i],
+  })).filter((r) => r.count > 0);
+
+  return { roleCategories, departments, centers, institutions, ranks };
 }

@@ -291,7 +291,7 @@ describe("AdminSubnav", () => {
   });
 
   // Gap 2 fix (2026-08-14) — News used to piggyback on `profilesTab`, which a
-  // unit Owner/Curator also earns (`/edit/scholars`'s `unitScope !== null`
+  // unit Owner/Curator also earns (`/edit/profiles`'s `unitScope !== null`
   // override), showing a link that 404s on `isNewsQueueTabVisible`'s real
   // isSuperuser-or-isCommsSteward gate. `newsTab` is the dedicated escape
   // hatch now, mirroring `reportsTab`.

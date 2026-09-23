@@ -15,7 +15,7 @@ describe("buildConsoleLinks", () => {
       managesUnits: false,
     });
     expect(links).toEqual([
-      { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
+      { id: "manage-profiles", label: "Admin console", href: "/edit/profiles" },
     ]);
   });
 
@@ -39,7 +39,7 @@ describe("buildConsoleLinks", () => {
       managesUnits: false,
     });
     expect(links).toEqual([
-      { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
+      { id: "manage-profiles", label: "Admin console", href: "/edit/profiles" },
     ]);
   });
 
@@ -55,13 +55,13 @@ describe("buildConsoleLinks", () => {
       managesUnits: true,
     });
     expect(links).toEqual([
-      { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
+      { id: "manage-profiles", label: "Admin console", href: "/edit/profiles" },
     ]);
   });
 
   // The prod complaint these rows exist to answer: a department curator signed
   // in, saw ONLY "Org units", and reported they could not see the people they
-  // are supposed to edit. `/edit/scholars` is the roster that answers that, and
+  // are supposed to edit. `/edit/profiles` is the roster that answers that, and
   // it is named "Profiles" for every role — so the row, the tab, and the page
   // heading all agree.
   it("unit Owner/Curator (not a superuser, not a steward) → 'Profiles' BEFORE 'Org units'", () => {
@@ -71,7 +71,7 @@ describe("buildConsoleLinks", () => {
       managesUnits: true,
     });
     expect(links).toEqual([
-      { id: "profiles", label: "Profiles", href: "/edit/scholars" },
+      { id: "profiles", label: "Profiles", href: "/edit/profiles" },
       { id: "units", label: "Org units", href: "/edit/units" },
     ]);
   });

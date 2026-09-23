@@ -14,7 +14,7 @@
  *
  * The role is **global** (not per-scholar, not unit-scoped) and grants
  * **read-only** access to every scholar's `/edit/scholar/[cwid]` surface plus
- * the `/edit/scholars` roster — the same content a superuser sees, but with
+ * the `/edit/profiles` roster — the same content a superuser sees, but with
  * no write affordance anywhere. It exists for CV generation (staff who need
  * to browse a scholar's full profile to assemble a CV) and, more broadly, to
  * let Faculty Affairs staff see the tool without editing rights (#2482).

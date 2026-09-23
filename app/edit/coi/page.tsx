@@ -5,7 +5,7 @@
  * `{ all: true }` and there's nothing to resolve via `loadDataQualityScope`.
  *
  * A prominence-sorted list of scholars with pending COI-review counts. Split
- * out of the merged Profiles page (`/edit/scholars`) so COI review — the one
+ * out of the merged Profiles page (`/edit/profiles`) so COI review — the one
  * genuinely sensitive signal in this data set — lives somewhere a
  * comms_steward or unit admin can never reach, on-screen or via a crafted
  * query param (see `gap` sanitization below and in the export route).

@@ -41,7 +41,7 @@ export const metadata = {
 };
 
 export default async function RoleVocabularyPage() {
-  // Resolve the EFFECTIVE identity (mirrors `/edit/methods` / `/edit/scholars`
+  // Resolve the EFFECTIVE identity (mirrors `/edit/methods` / `/edit/profiles`
   // / `/edit/administrators`), so a "View as" overlay scopes this surface to
   // the impersonated viewer rather than the real superuser standing behind it.
   const session = await getEffectiveEditSession();

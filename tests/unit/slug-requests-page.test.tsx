@@ -1,7 +1,7 @@
 /**
  * `app/edit/slug-requests/page.tsx` — the superuser approval-queue page
  * (#497 PR-3c). Route-level authorization + flag-gating, mirroring the
- * `/edit/scholars` roster page test (real `requireSuperuserGet`, mocked
+ * `/edit/profiles` roster page test (real `requireSuperuserGet`, mocked
  * boundary deps).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";

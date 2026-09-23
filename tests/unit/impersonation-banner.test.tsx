@@ -58,7 +58,7 @@ describe("ImpersonationBanner role links", () => {
     render(<ImpersonationBanner />);
 
     const profiles = await screen.findByRole("link", { name: "Profiles" });
-    expect(profiles.getAttribute("href")).toBe("/edit/scholars");
+    expect(profiles.getAttribute("href")).toBe("/edit/profiles");
     const units = screen.getByRole("link", { name: "Org units" });
     expect(units.getAttribute("href")).toBe("/edit/units");
   });
@@ -75,7 +75,7 @@ describe("ImpersonationBanner role links", () => {
     render(<ImpersonationBanner />);
 
     const link = await screen.findByRole("link", { name: "Admin console" });
-    expect(link.getAttribute("href")).toBe("/edit/scholars");
+    expect(link.getAttribute("href")).toBe("/edit/profiles");
     expect(screen.queryByRole("link", { name: "Method families" })).toBeNull();
   });
 

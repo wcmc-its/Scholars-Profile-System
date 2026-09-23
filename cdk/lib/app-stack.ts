@@ -1793,7 +1793,7 @@ export class AppStack extends Stack {
         SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
         // `cv_generator` role (#2482) -- read-only access to every scholar's
         // /edit/scholar/[cwid] (superuser-parity content, EditShell renders it
-        // `inert`) and the /edit/scholars roster. For Faculty Affairs staff who
+        // `inert`) and the /edit/profiles roster. For Faculty Affairs staff who
         // need to browse profiles to assemble CVs, and more broadly to open the
         // tool to people who shouldn't get write rights ("socialize the app").
         //   CV_GENERATOR_ENABLED -- master kill switch, same shape as
