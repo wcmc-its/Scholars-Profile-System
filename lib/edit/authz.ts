@@ -85,17 +85,13 @@ export function authorizeFieldEdit(
       | "primaryTitleRequest";
   },
 ): AuthzResult {
-  // #2719 — SETTING the display title is an operator action. Not self: a
-  // scholar picking their own headline title is a governance question (the
-  // institution speaks with one voice — the same reasoning behind the single
-  // role vocabulary in `lib/org-unit-roles.ts`). Unit admins are included
-  // because they already proxy-edit their unit's faculty. A scholar who wants
-  // a different title REQUESTS it — the branch below.
+  // #2719 — SETTING the display title is superuser / comms_steward only. Not
+  // self: a scholar picking their own headline title is a governance question
+  // (the institution speaks with one voice — the same reasoning behind the
+  // single role vocabulary in `lib/org-unit-roles.ts`). Not a unit admin either
+  // (Paul, 2026-09-23): everyone else asks via the Title row's Request a change.
   if (target.fieldName === "primaryTitle") {
     if (session.isSuperuser || session.isCommsSteward) return ALLOW;
-    // Unit-admin authority is unit-scoped and resolved against the target, so
-    // it cannot be decided from the session alone; the route runs that check
-    // and only reaches here for the session-level roles.
     return { ok: false, reason: "not_superuser" };
   }
 

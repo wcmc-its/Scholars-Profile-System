@@ -545,6 +545,22 @@ describe("POST /api/edit/field — unit-admin branch (Amendment 4)", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
+  it("does NOT let a unit admin SET the display title — superuser / comms steward only (403)", async () => {
+    vi.stubEnv("SCHOLAR_TITLE_RESOLUTION", "on");
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    // A real owner row over the scholar's unit: overview would pass, the title must not.
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT-MED", role: "owner" },
+    ]);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch001", fieldName: "primaryTitle", value: "Professor" }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
   it("does NOT extend the unit-admin path to a slug edit (overview-only allowlist) — 403", async () => {
     mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
     // Even with a real unit-admin role, slug stays superuser-only (the branch is

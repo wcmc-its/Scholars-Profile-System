@@ -577,7 +577,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.queryByText("This section is not editable.")).toBeNull();
   });
 
-  it("name-title says choose to an operator and request to the scholar, only when there is a choice", () => {
+  it("name-title says choose only to a superuser / comms steward, and only when there is a choice", () => {
     const picker = {
       options: [
         { tier: "working", label: "Working title", value: "Associate Dean" },
@@ -591,7 +591,10 @@ describe("EditPage router — the Apollo shell + rail", () => {
     };
     const withPicker = { ...ctx, titlePicker: picker } as typeof ctx;
     const { unmount } = render(<EditPage ctx={withPicker} mode="self" attr="name-title" />);
-    expect(screen.getByText(/You can request which recorded title is displayed\./)).toBeTruthy();
+    // The scholar (and a proxy / unit admin) can't pick, so no "choose" sentence;
+    // the read-only list carries the Request a change pointer instead.
+    expect(screen.queryByText(/which recorded title is displayed/)).toBeNull();
+    expect(screen.getByTestId("title-recourse")).toBeTruthy();
     unmount();
     const opCtx = { ...superuserCtx, titlePicker: picker } as typeof superuserCtx;
     const again = render(<EditPage ctx={opCtx} mode="superuser" attr="name-title" />);

@@ -45,7 +45,6 @@ import { containsProfanity } from "@/lib/edit/profanity";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import {
-  resolveEditableUnitViaUnitAdmin,
   type EditableUnit,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
@@ -672,27 +671,12 @@ async function handleTitleFieldEdit(params: {
   // --- authorization (403) ---
   let viaUnitAdminUnit: EditableUnit | null = null;
   if (isOverride) {
-    // SETTING the title is an operator action: superuser / comms_steward, or a
-    // unit admin over this scholar. Deliberately NOT self and NOT a proxy — a
-    // scholar who wants a different title files a request (the else-branch),
-    // which an operator then approves.
-    if (session.isSuperuser || session.isCommsSteward) {
-      // allowed
-    } else if (impersonatedCwid !== null) {
-      // Delegated authority never rides an impersonation overlay (IS-1).
+    // SETTING the title is superuser / comms_steward ONLY (Paul, 2026-09-23).
+    // Not self, not a proxy, and not a unit admin: anyone else asks through the
+    // Title row's Request a change, which routes to support.
+    if (!session.isSuperuser && !session.isCommsSteward) {
       logEditDenial({ actorCwid: session.cwid, targetCwid: entityId, path: PATH, reason: "not_superuser" });
       return editError(403, "not_superuser");
-    } else {
-      const unit = await resolveEditableUnitViaUnitAdmin(
-        realCwid,
-        entityId,
-        db.read as unknown as UnitScholarLookup,
-      );
-      if (!unit) {
-        logEditDenial({ actorCwid: session.cwid, targetCwid: entityId, path: PATH, reason: "not_superuser" });
-        return editError(403, "not_superuser");
-      }
-      viaUnitAdminUnit = unit;
     }
   } else {
     // REQUESTING one rides the same "may edit this scholar's profile" predicate

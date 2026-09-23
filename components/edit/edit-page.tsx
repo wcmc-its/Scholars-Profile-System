@@ -1160,10 +1160,13 @@ function renderPanel(
           description={
             // The second sentence only where there IS a choice: the picker
             // renders with 2+ applicable titles (TitleField collapses otherwise).
-            ctx.titlePicker && ctx.titlePicker.options.filter((o) => o.value !== null).length > 1
-              ? `Name, degrees, department and institution come from WCM records. You can ${
-                  isSuperuserLike(mode) || mode === "unit-admin" ? "choose" : "request"
-                } which recorded title is displayed.`
+            // Only a superuser / comms steward picks (Paul, 2026-09-23); everyone
+            // else gets the recorded titles read-only plus a pointer to Request a
+            // change, so the sentence about choosing is theirs alone.
+            isSuperuserLike(mode) &&
+            ctx.titlePicker &&
+            ctx.titlePicker.options.filter((o) => o.value !== null).length > 1
+              ? "Name, degrees, department and institution come from WCM records. You can choose which recorded title is displayed."
               : "Name, title, degrees, department and institution come from WCM records."
           }
           fields={[
@@ -1185,7 +1188,7 @@ function renderPanel(
                     ctx.titlePicker.override !== null && ctx.titlePicker.override !== ""
                   }
                   pending={ctx.titlePicker.pending}
-                  canSet={isSuperuserLike(mode) || mode === "unit-admin"}
+                  canSet={isSuperuserLike(mode)}
                 />
               ) : (
                 ctx.scholar.primaryTitle
