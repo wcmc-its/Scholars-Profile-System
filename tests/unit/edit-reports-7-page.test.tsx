@@ -92,6 +92,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import EditReportPage from "@/app/edit/reports/[report]/page";
+import { resolveSuspense } from "@/tests/util/resolve-suspense";
 
 /** The dynamic page at report 7's default slug — the same call shape the
  *  numbered page used to take, plus the segment. */
@@ -99,7 +100,10 @@ const EditReportsMentoredPublicationsPage = ({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string>>;
-}) => EditReportPage({ params: Promise.resolve({ report: "mentored-publications" }), searchParams });
+}) =>
+  EditReportPage({ params: Promise.resolve({ report: "mentored-publications" }), searchParams }).then((t) =>
+    resolveSuspense(t),
+  );
 const BASE = "/edit/reports/mentored-publications";
 
 const HOLDER = { cwid: "usr0001", isSuperuser: false, isCommsSteward: false };

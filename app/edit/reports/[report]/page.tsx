@@ -44,8 +44,13 @@
  * → `ConsoleShell` → "← All reports" → `ReportHeader` (h1, popover, pencil,
  * the body's `subtitle`, the "About this report" disclosure) → the body's
  * `main`. `force-dynamic`, noindex, like every `/edit/*` console page.
+ *
+ * Loading: no route `loading.tsx` (it replaced the whole page, top bar
+ * included, since the shell needs the session). The body streams under
+ * `Suspense` with `ReportBodySkeleton`, so only the report area shimmers.
  */
 import type * as React from "react";
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -53,6 +58,7 @@ import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { ReportAccessPopover } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { db } from "@/lib/db";
@@ -215,14 +221,23 @@ export default async function EditReportPage({
     render = () => def.render({ n, scopes, session, searchParams: sp, basePath });
   }
 
-  const [pendingSlugRequests, pendingHonors, access, { subtitle, main }] = await Promise.all([
+  // The body is NOT awaited here: the shell, back link and header render at
+  // once and the body streams in under its own skeleton (the Suspense
+  // boundaries below). Started now so it runs alongside the shell reads.
+  const rendered = render();
+  // Mark it handled so a body that fails before a boundary awaits it is not
+  // reported as an unhandled rejection; the boundaries still see the error.
+  rendered.catch(() => {});
+  const [pendingSlugRequests, pendingHonors, access] = await Promise.all([
     session.isSuperuser && isSlugRequestEnabled()
       ? countPendingSlugRequests(db.read)
       : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
     loadAccess(),
-    render(),
   ]);
+  // Keyed on the query so a filter change (same route, new params) shows the
+  // skeleton again instead of leaving the old results up while it loads.
+  const bodyKey = querySuffix(sp);
   return (
     <ConsoleShell
       active="reports"
@@ -235,9 +250,45 @@ export default async function EditReportPage({
         &larr; All reports
       </Link>
       <ReportHeader n={n} session={session} access={access}>
-        {subtitle}
+        <Suspense key={bodyKey} fallback={<Skeleton className="h-4 w-96 max-w-full" />}>
+          <RenderedPart rendered={rendered} part="subtitle" />
+        </Suspense>
       </ReportHeader>
-      {main}
+      <Suspense key={bodyKey} fallback={<ReportBodySkeleton />}>
+        <RenderedPart rendered={rendered} part="main" />
+      </Suspense>
     </ConsoleShell>
+  );
+}
+
+/** One half of a body's `ReportRender`, once the body resolves. */
+async function RenderedPart({
+  rendered,
+  part,
+}: {
+  rendered: Promise<ReportRender>;
+  part: keyof ReportRender;
+}) {
+  return (await rendered)[part] ?? null;
+}
+
+/** The body's loading state: a filter rail beside tabs and a table. Only the
+ *  body — the shell, back link and report title are already on screen. */
+function ReportBodySkeleton() {
+  return (
+    <div aria-busy="true" className="mt-4 flex flex-col gap-6 lg:flex-row lg:items-start">
+      <div role="status" className="sr-only">
+        Loading report…
+      </div>
+      <Skeleton className="hidden h-96 rounded-xl lg:block lg:w-64 lg:shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="border-apollo-border flex gap-6 border-b pb-2">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-5 w-28" />
+        </div>
+        <Skeleton className="mt-4 h-4 w-80 max-w-full" />
+        <Skeleton className="mt-4 h-96 w-full rounded-md" />
+      </div>
+    </div>
   );
 }
