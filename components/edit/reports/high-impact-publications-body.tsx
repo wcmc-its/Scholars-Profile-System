@@ -3,13 +3,16 @@
  * families, the Profiles roster's person-type / unit facets, article type,
  * author position; plain GET params, `AutoSubmitForm` like reports 7 and 8)
  * beside Summary (one row per person, `summarizePeople`) / Publications
- * tabs and the `.xlsx` link
+ * tabs with the `.xlsx` button at the right of the tab row
  * (`/api/edit/reports/high-impact-publications`, same query string). Loaders,
  * journal families and defaults live in `lib/edit/high-impact-pubs-report.ts`.
  */
+import { Download } from "lucide-react";
+
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import { Button } from "@/components/ui/button";
 import { PersonFilterFacets } from "@/components/edit/reports/article-count-facets";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
@@ -273,10 +276,21 @@ export async function renderHighImpactPublicationsReport({
               <Rail basePath={basePath} params={params} choices={choices} idSuffix="-sheet" />
             </FiltersSheet>
           </div>
-          <nav className="border-apollo-border mb-4 flex gap-6 border-b" aria-label="Report views">
-            {tab("summary", `Summary (${people.length.toLocaleString()} people)`)}
-            {tab("publications", `Publications (${total.toLocaleString()})`)}
-          </nav>
+          <div className="border-apollo-border mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-b">
+            <nav className="flex gap-6" aria-label="Report views">
+              {tab("summary", `Summary (${people.length.toLocaleString()} people)`)}
+              {tab("publications", `Publications (${total.toLocaleString()})`)}
+            </nav>
+            <Button asChild variant="apollo" size="sm" className="mb-1.5 sm:ml-auto">
+              <a
+                href={`/api/edit/reports/high-impact-publications?${highImpactQueryString(params)}`}
+                data-testid="high-impact-download"
+              >
+                <Download className="size-4" aria-hidden />
+                Download .xlsx
+              </a>
+            </Button>
+          </div>
           {list ? (
             params.view === "summary" ? (
               <SummaryTable people={people} />
@@ -289,22 +303,9 @@ export async function renderHighImpactPublicationsReport({
               filters to list them.
             </p>
           )}
-          <p className="mt-4">
-            <a
-              href={`/api/edit/reports/high-impact-publications?${highImpactQueryString(params)}`}
-              className="text-apollo-maroon text-sm underline-offset-2 hover:underline"
-              data-testid="high-impact-download"
-            >
-              Download .xlsx
-            </a>
-            <span className="text-muted-foreground text-xs">
-              {" "}
-              &mdash; people (included for {SCHOLAR_EXPORT_CAP} or fewer), publications (title, journal, impact
-              factor, WCM first/last authors, Entrez date, NIH citations) and the criteria
-            </span>
-          </p>
           <p className="text-muted-foreground mt-4 max-w-prose text-xs" role="note">
-            {ARTICLE_COUNT_CAVEAT} Only ReCiter-confirmed authorships of active scholars count.
+            {ARTICLE_COUNT_CAVEAT} Only ReCiter-confirmed authorships of active scholars count. The download&rsquo;s
+            People sheet is included for {SCHOLAR_EXPORT_CAP} or fewer people.
           </p>
         </div>
       </div>
