@@ -101,7 +101,7 @@ export function EditPanel({
   return (
     <section data-slot={slot} className={cn("flex flex-col gap-4", className)} {...rest}>
       <header className="flex flex-col gap-1.5">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           {subsection ? (
             <h3
               id={resolvedHeadingId}
@@ -114,15 +114,19 @@ export function EditPanel({
               {heading}
             </h2>
           )}
-          {headerAction}
+          {/* Editability cues (Yours to edit / Locked) sit top-right with any status badge. */}
+          {owned && !attribute ? (
+            <div className="flex items-center gap-2">
+              <OwnedBadge />
+              {headerAction}
+            </div>
+          ) : (
+            headerAction
+          )}
         </div>
         {/* No rule under the heading: the maroon h2 rule was dropped in design
             round 3 (2026-09-21); provenance is the badge / Source line below. */}
-        {attribute ? (
-          <FieldSourceLine attribute={attribute} label={sourceLabel} />
-        ) : owned ? (
-          <OwnedBadge />
-        ) : null}
+        {attribute && <FieldSourceLine attribute={attribute} label={sourceLabel} />}
         {description && <p className="text-muted-foreground mt-1 text-[13px]">{description}</p>}
       </header>
       {children}

@@ -16,7 +16,6 @@ import { HonorsCard } from "@/components/edit/honors-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { MenteeSuggestionsCard } from "@/components/edit/mentee-suggestions-card";
-import { OrcidValue } from "@/components/edit/orcid-value";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -1158,7 +1157,7 @@ function renderPanel(
           cwid={cwid}
           scholarName={scholarName}
           heading="Name & title"
-          description="Name, title, degrees, department, institution, and ORCID come from the WCM directory and faculty records."
+          description="Name, title, degrees, department, and institution come from the WCM directory and faculty records."
           fields={[
             { label: "Name", value: ctx.scholar.fullName },
             {
@@ -1189,15 +1188,6 @@ function renderPanel(
               value: ctx.scholar.primaryOrgCode
                 ? institutionDisplayName(ctx.scholar.primaryOrgCode)
                 : null,
-            },
-            {
-              label: "ORCID",
-              value: (
-                <OrcidValue
-                  orcid={orcidRowState(ctx).onFile}
-                  editHref={orcidEditHref(orcidTabEnabled, detailBase, cwid)}
-                />
-              ),
             },
           ]}
         />

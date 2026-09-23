@@ -72,9 +72,8 @@ export function EmailCard({ mode, scholarName, email, emailVisibility }: EmailCa
       attribute="name-title"
       heading="Email"
       description={`The email shown on ${possessive} public profile and who can see it. Both come from the WCM Web Directory and aren't editable here.`}
+      headerAction={<LockedBadge />}
     >
-      <LockedBadge />
-
       <dl className="border-apollo-border grid grid-cols-[max-content_1fr] gap-x-8 border-t text-sm">
         <div className="border-apollo-border contents [&>*]:border-b [&>*]:py-3.5">
           <dt className="text-muted-foreground">Email</dt>

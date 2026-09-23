@@ -323,9 +323,8 @@ export function EntityPanel<T extends EntityRow>({
       sourceLabel={sourceLabel}
       heading={copy.heading}
       description={copy.description}
+      headerAction={<LockedBadge />}
     >
-      <LockedBadge />
-
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm" aria-live="polite">
           <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>{" "}
