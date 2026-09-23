@@ -32,7 +32,7 @@ import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
-import { isNewsQueueEnabled } from "@/lib/edit/news-queue";
+import { isMediaHighlightsQueueEnabled, isNewsQueueEnabled } from "@/lib/edit/news-queue";
 
 export type AdminSubnavActive =
   | "profiles"
@@ -40,6 +40,7 @@ export type AdminSubnavActive =
   | "slug-requests"
   | "honors-queue"
   | "news-queue"
+  | "media-highlights-queue"
   | "slugs"
   | "administrators"
   | "methods"
@@ -97,6 +98,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   "slug-requests": "queues",
   "honors-queue": "queues",
   "news-queue": "queues",
+  "media-highlights-queue": "queues",
   cores: "queues",
   /** Reference/config data you look up; rarely mutated. */
   slugs: "registries",
@@ -275,6 +277,13 @@ export function AdminSubnav({
         id: "news-queue",
         href: "/edit/news-queue",
         label: "News",
+      },
+      // Press clips (etl/news/clips.ts) — same reviewers as News, own queue.
+      {
+        show: (superuserSurfaces || newsTab) && isMediaHighlightsQueueEnabled(),
+        id: "media-highlights-queue",
+        href: "/edit/media-highlights-queue",
+        label: "Media Highlights",
       },
       // Always visible to superusers — the slug namespace exists regardless of the
       // slug-request flag.

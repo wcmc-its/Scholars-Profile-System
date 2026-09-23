@@ -201,16 +201,34 @@ export type NewsQueueCounts = {
  */
 export async function loadNewsQueueCounts(
   client: Pick<NewsQueueClient, "newsMention">,
+  kind: NewsQueueKind = "newsroom",
 ): Promise<NewsQueueCounts> {
   const [approved, approvedHidden] = await Promise.all([
-    client.newsMention.count({ where: { status: "published" } }),
-    client.newsMention.count({ where: { status: "published", showOnProfile: false } }),
+    client.newsMention.count({ where: { status: "published", ...kindWhere(kind) } }),
+    client.newsMention.count({ where: { status: "published", showOnProfile: false, ...kindWhere(kind) } }),
   ]);
   return { approved, approvedHidden };
 }
 
 export function isNewsQueueEnabled(): boolean {
   return process.env.NEWS_APPROVAL_QUEUE === "on";
+}
+
+/**
+ * Which queue a mention belongs to. A Media Highlights clip (etl/news/clips.ts)
+ * is the only row with `outlet` set, so the split is that column alone:
+ * `/edit/news-queue` reviews newsroom mentions, `/edit/media-highlights-queue`
+ * reviews press clips. They publish to different profile sections.
+ */
+export type NewsQueueKind = "newsroom" | "clips";
+
+function kindWhere(kind: NewsQueueKind) {
+  return kind === "clips" ? { outlet: { not: null } } : { outlet: null };
+}
+
+/** The clips queue shares the news queue's gate plus the section's own flag. */
+export function isMediaHighlightsQueueEnabled(): boolean {
+  return isNewsQueueEnabled() && process.env.MEDIA_HIGHLIGHTS_SECTION === "on";
 }
 
 /**
@@ -286,12 +304,13 @@ export const NEWS_HISTORY_LIMIT = 500;
 export async function loadNewsQueue(
   client: NewsQueueClient,
   status: NewsMentionStatus = "pending",
+  kind: NewsQueueKind = "newsroom",
 ): Promise<NewsQueueGroup[]> {
   // Pending is the working queue: complete, oldest-first. History is capped, so
   // it must order newest-first at the DB or the cap would keep the oldest rows.
   const isHistory = status !== "pending";
   const rows = await client.newsMention.findMany({
-    where: { status },
+    where: { status, ...kindWhere(kind) },
     orderBy: isHistory
       ? [{ publishedAt: "desc" }, { createdAt: "desc" }]
       : { createdAt: "asc" },

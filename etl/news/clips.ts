@@ -8,7 +8,7 @@
  * step reads the recent messages, parses each clip (headline, outlet, link,
  * the "• Dr. X ..." summary line), and runs the newsroom matcher over it.
  *
- * Every clip lands `pending`: comms reviews all of them in /edit/news-queue.
+ * Every clip lands `pending`: comms reviews all of them in /edit/media-highlights-queue.
  * A clip row is a news_mention with `outlet` set — that column is the whole
  * newsroom-vs-press distinction (the profile renders the two in separate
  * sections). Upsert and review-state discipline are shared with etl:news.
