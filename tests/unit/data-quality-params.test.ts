@@ -169,10 +169,10 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
     expect(facets.centers).toEqual([{ value: "center:MCC", label: "Meyer Cancer Center", count: 7 }]);
 
     // Institutions: inst:CODE from the scholar column, labelled for display (the
-    // home code named, an unmapped code left bare), label-sorted, NO null bucket.
+    // home code named, an unmapped code left bare), largest-first, NO null bucket.
     expect(facets.institutions).toEqual([
-      { value: "inst:HSS", label: "Hospital for Special Surgery", count: 40 },
       { value: "inst:WCMC", label: "Weill Cornell Medicine", count: 9000 },
+      { value: "inst:HSS", label: "Hospital for Special Surgery", count: 40 },
       { value: "inst:ZZZ", label: "ZZZ", count: 1 },
     ]);
   });
