@@ -853,8 +853,8 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
     divByDept.set(d.deptCode, arr);
   }
 
-  // Units list largest-first (counts are static, so the order never reshuffles
-  // under a click); the facet's search box covers finding one by name.
+  // Units and institutions list largest-first (counts are static, so the order
+  // never reshuffles under a click); the facet's search box covers finding one by name.
   const departments = deptRows
     .map((dep) => ({
       value: `dept:${dep.code}`,
@@ -884,7 +884,7 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
           ]
         : [],
     )
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort(byCountDesc);
 
   return { roleCategories, departments, centers, institutions };
 }
