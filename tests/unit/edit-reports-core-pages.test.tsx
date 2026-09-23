@@ -89,13 +89,14 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import EditReportPage from "@/app/edit/reports/[report]/page";
+import { resolveSuspense } from "@/tests/util/resolve-suspense";
 
 /** The dynamic page at one report's slug — the same call shape the six
  *  numbered pages used to take, plus the segment. */
 const pageAt =
   (slug: string) =>
   ({ searchParams }: { searchParams: Promise<Record<string, string>> }) =>
-    EditReportPage({ params: Promise.resolve({ report: slug }), searchParams });
+    EditReportPage({ params: Promise.resolve({ report: slug }), searchParams }).then((t) => resolveSuspense(t));
 const EditReportsPublicationsPage = pageAt("publications");
 const EditReportsNihFundedPublicationsPage = pageAt("nih-funded-pubs");
 

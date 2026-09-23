@@ -11,10 +11,12 @@
  * mirroring `isDataQualityDashboardEnabled`'s dark-launch pattern. `force-dynamic`
  * + `noindex`, matching the rest of `/edit/*`.
  */
+import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { DataSharingDashboard } from "@/components/edit/data-sharing-dashboard";
+import { Skeleton } from "@/components/ui/skeleton";
 import { loadDataSharingReport } from "@/lib/api/data-sharing-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -51,8 +53,7 @@ export default async function EditDataSharingPage({
   // a client island.
   const ui = parseDataSharingParams((await searchParams) ?? {});
 
-  const [report, pendingSlugRequests, pendingHonors] = await Promise.all([
-    loadDataSharingReport(db.read, ui.filters),
+  const [pendingSlugRequests, pendingHonors] = await Promise.all([
     isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
   ]);
@@ -69,7 +70,39 @@ export default async function EditDataSharingPage({
         Dataset deposits synced from reciterdb via the weekly data-sharing bridge — aggregate
         views for research leadership, compliance/grant reporting, and the library/RDM team.
       </p>
-      <DataSharingDashboard report={report} ui={ui} />
+      {/* The report streams under a body-only skeleton; keyed on the query so
+          a filter or sort change shows it again. */}
+      <Suspense key={JSON.stringify(ui)} fallback={<DataSharingBodySkeleton />}>
+        <DataSharingBody ui={ui} />
+      </Suspense>
     </ConsoleShell>
+  );
+}
+
+async function DataSharingBody({ ui }: { ui: ReturnType<typeof parseDataSharingParams> }) {
+  const report = await loadDataSharingReport(db.read, ui.filters);
+  return <DataSharingDashboard report={report} ui={ui} />;
+}
+
+/** Stat cards, the spectrum bar and two tables — the dashboard's shape, so
+ *  the swap barely shifts. The shell and title are already on screen. */
+function DataSharingBodySkeleton() {
+  return (
+    <div aria-busy="true">
+      <div role="status" className="sr-only">
+        Loading data-sharing dashboard…
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="border-apollo-border bg-apollo-surface rounded-md border p-4">
+            <Skeleton className="mb-2 h-7 w-16" />
+            <Skeleton className="h-3 w-28" />
+          </div>
+        ))}
+      </div>
+      <Skeleton className="mt-4 h-24 w-full rounded-md" />
+      <Skeleton className="mt-10 h-48 w-full rounded-md" />
+      <Skeleton className="mt-10 h-48 w-full rounded-md" />
+    </div>
   );
 }

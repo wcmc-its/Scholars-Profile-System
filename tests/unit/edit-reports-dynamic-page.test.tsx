@@ -139,6 +139,7 @@ vi.mock("@/components/ui/hover-tooltip", () => ({
 vi.mock("@/components/funding/expanded-grant", () => ({ LowerConfidenceBadge: () => null }));
 
 import EditReportPage, { generateMetadata } from "@/app/edit/reports/[report]/page";
+import { resolveSuspense } from "@/tests/util/resolve-suspense";
 
 const OWNER = { cwid: "owner01", isSuperuser: false, isCommsSteward: false };
 const SUPERUSER = { cwid: "adm0001", isSuperuser: true, isCommsSteward: false };
@@ -157,7 +158,7 @@ const page = (segment: string, query: Record<string, string | string[]> = {}) =>
   EditReportPage({
     params: Promise.resolve({ report: segment }),
     searchParams: Promise.resolve(query),
-  });
+  }).then((t) => resolveSuspense(t));
 
 /** Render the awaited tree and return the "← All reports" link's href. */
 function renderBackHref(tree: unknown): string | null {
