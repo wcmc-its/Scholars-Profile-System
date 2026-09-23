@@ -1,17 +1,20 @@
 /**
  * Report 8 — "Article counts": distinct publications per year for the
- * scholars matching the facets (person type, primary department, primary
- * institution, article type, minimum Journal Impact Factor, author
- * position), by calendar or
- * fiscal year. One `COUNT(DISTINCT pmid)` query, grouped by year; the page
+ * scholars matching the facets (person type, department / division /
+ * center / institution, article type, minimum Journal Impact Factor, author
+ * position), by calendar or fiscal year. Person type and unit take the
+ * Profiles roster's URL vocabulary (`/edit/scholars`): repeated `type` (raw
+ * roleCategory) and repeated `unit` (`dept:` / `div:` / `center:` / `inst:`
+ * + CODE, `parseUnitValue`), and the rail shows the same facets
+ * (`loadDataQualityFacets`). One `COUNT(DISTINCT pmid)` query, grouped by year; the page
  * and the `.xlsx` route (`/api/edit/reports/article-count`) share it; the
  * workbook adds an Articles sheet (one row per counted article with its
  * matching scholars, `loadArticleList`) up to `ARTICLE_LIST_CAP`.
  *
  * Counting rule: an article counts once however many matching authors it
  * has; only ReCiter-confirmed authorships (`is_confirmed`) of active,
- * non-deleted scholars count, and the person type / department read the
- * scholar's CURRENT row — which is why historical numbers drift (the caveat
+ * non-deleted scholars count, and the person type / units read the
+ * scholar's CURRENT row and center memberships — which is why historical numbers drift (the caveat
  * `CAVEAT` the page and the workbook both carry).
  *
  * Fiscal year is July–June, named by the ending calendar year (FY2025 =
@@ -26,13 +29,17 @@
  */
 import ExcelJS from "exceljs";
 
+import { loadDataQualityFacets, parseUnitValue, type DataQualityFacets } from "@/lib/api/data-quality";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { institutionDisplayName } from "@/lib/institutions";
-import { roleCategoryLabel } from "@/lib/match-display";
+import { formatRoleCategory } from "@/lib/role-display";
+
+/** The rail's label (`loadDataQualityFacets`), so page and workbook agree. */
+const roleCategoryLabel = (r: string | null) => formatRoleCategory(r) ?? "";
 
 export const ARTICLE_COUNT_CAVEAT =
   "Historical numbers may change slightly over time as publication records are updated and people's person types change.";
@@ -54,10 +61,11 @@ export const BASIS_LABEL = {
 export type YearBasis = keyof typeof BASIS_LABEL;
 
 export type ArticleCountParams = {
+  /** Raw roleCategory values (`type`). */
   types: string[];
-  depts: string[];
-  /** ED primary-organization codes (`Scholar.primaryOrgCode`), not names. */
-  insts: string[];
+  /** Encoded unit values (`unit`: `dept:CODE` / `div:CODE` / `center:CODE` /
+   *  `inst:CODE`), kept raw so they round-trip; `scopeSql` decodes them. */
+  units: string[];
   atypes: string[];
   jif: number;
   pos: AuthorPosition;
@@ -78,10 +86,9 @@ export function parseArticleCountParams(sp: URLSearchParams): ArticleCountParams
     allowed.find((v) => v === sp.get(k)) ?? dflt;
   const from = int("from", thisYear - 4, 1900, 2100);
   return {
-    types: sp.getAll("types").filter(Boolean),
-    depts: sp.getAll("dept").filter(Boolean),
-    insts: sp.getAll("inst").filter(Boolean),
-    atypes: sp.getAll("atype").filter(Boolean),
+    types: sp.getAll("type").map((v) => v.trim()).filter(Boolean),
+    units: sp.getAll("unit").map((v) => v.trim()).filter(Boolean),
+    atypes: sp.getAll("atype").map((v) => v.trim()).filter(Boolean),
     jif: int("jif", 0, 0, JIF_MAX),
     pos: pick("pos", Object.keys(POSITION_LABEL) as AuthorPosition[], "any"),
     basis: pick("basis", Object.keys(BASIS_LABEL) as YearBasis[], "cy"),
@@ -92,9 +99,8 @@ export function parseArticleCountParams(sp: URLSearchParams): ArticleCountParams
 
 export function articleCountQueryString(p: ArticleCountParams): string {
   const q = new URLSearchParams();
-  for (const t of p.types) q.append("types", t);
-  for (const d of p.depts) q.append("dept", d);
-  for (const i of p.insts) q.append("inst", i);
+  for (const t of p.types) q.append("type", t);
+  for (const u of p.units) q.append("unit", u);
   for (const a of p.atypes) q.append("atype", a);
   q.set("jif", String(p.jif));
   q.set("pos", p.pos);
@@ -108,33 +114,35 @@ export async function canViewArticleCountReport(session: EditSession): Promise<b
   return session.isCommsSteward || canViewUsage(session, db.read);
 }
 
-/** The facet vocabularies, from what the data actually holds. */
+/** The rail's facets: person type and the four unit groups are the Profiles
+ *  roster's own (`loadDataQualityFacets`, static active-scholar counts);
+ *  article type is what `publication` actually holds. */
 export async function loadArticleCountChoices(): Promise<{
-  types: string[];
-  depts: string[];
-  /** Codes; the rail labels them via `institutionDisplayName`. */
-  insts: string[];
+  facets: DataQualityFacets;
   atypes: string[];
 }> {
-  const [roles, depts, insts, atypes] = await Promise.all([
-    db.read.scholar.groupBy({ by: ["roleCategory"], where: { deletedAt: null, status: "active" } }),
-    db.read.scholar.groupBy({ by: ["primaryDepartment"], where: { deletedAt: null, status: "active" } }),
-    db.read.scholar.groupBy({
-      by: ["primaryOrgCode"],
-      where: { deletedAt: null, status: "active" },
-    }),
+  const [facets, atypes] = await Promise.all([
+    loadDataQualityFacets(db.read),
     db.read.publication.groupBy({ by: ["publicationType"] }),
   ]);
-  const strings = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort();
   return {
-    types: strings(roles.map((r) => r.roleCategory)),
-    depts: strings(depts.map((r) => r.primaryDepartment)),
-    // Codes, but ordered by the name the select shows (the roster facet label-sorts too).
-    insts: strings(insts.map((r) => r.primaryOrgCode)).sort((a, b) =>
-      institutionDisplayName(a).localeCompare(institutionDisplayName(b)),
-    ),
-    atypes: strings(atypes.map((r) => r.publicationType)),
+    facets,
+    atypes: atypes
+      .map((r) => r.publicationType)
+      .filter((x): x is string => !!x)
+      .sort(),
   };
+}
+
+/** `unit` value → display label (department / division / center name,
+ *  institution display name), for the Criteria sheet. */
+export function unitLabels(facets: DataQualityFacets): Map<string, string> {
+  const opts = [
+    ...facets.departments.flatMap((d) => [d, ...d.divisions]),
+    ...facets.centers,
+    ...facets.institutions,
+  ];
+  return new Map(opts.map((o) => [o.value, o.label]));
 }
 
 export type ArticleCountRow = { year: number; count: number };
@@ -156,6 +164,32 @@ function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Pri
   }[p.pos];
   const inList = (col: Prisma.Sql, xs: string[]) =>
     xs.length > 0 ? Prisma.sql`AND ${col} IN (${Prisma.join(xs)})` : Prisma.empty;
+  // Units OR together, as on the Profiles roster (`buildWhere` in
+  // `lib/api/data-quality.ts`): dept / div / ED primary org are scholar
+  // columns; a center is its date-active members (pending / expired
+  // excluded). Units given but none decode → match nothing, never everyone.
+  let unitExpr = Prisma.empty;
+  if (p.units.length > 0) {
+    const decoded = p.units.map(parseUnitValue);
+    const codes = (kind: string) => decoded.flatMap((u) => (u?.kind === kind ? [u.code] : []));
+    const ors: Prisma.Sql[] = [];
+    const add = (col: Prisma.Sql, xs: string[]) => {
+      if (xs.length > 0) ors.push(Prisma.sql`${col} IN (${Prisma.join(xs)})`);
+    };
+    add(Prisma.sql`s.dept_code`, codes("department"));
+    add(Prisma.sql`s.div_code`, codes("division"));
+    add(Prisma.sql`s.primary_org_code`, codes("institution"));
+    const centers = codes("center");
+    if (centers.length > 0) {
+      // UTC "today", as the Profiles loader computes it — not the DB session's CURDATE().
+      const today = new Date().toISOString().slice(0, 10);
+      ors.push(Prisma.sql`s.cwid IN (SELECT cm.cwid FROM center_membership cm
+         WHERE cm.center_code IN (${Prisma.join(centers)})
+           AND (cm.start_date IS NULL OR cm.start_date <= ${today})
+           AND (cm.end_date IS NULL OR cm.end_date >= ${today}))`);
+    }
+    unitExpr = ors.length > 0 ? Prisma.sql`AND (${Prisma.join(ors, " OR ")})` : Prisma.sql`AND 1 = 0`;
+  }
   const fromWhere = Prisma.sql`
       FROM publication_author pa
       JOIN scholar s ON s.cwid = pa.cwid
@@ -164,8 +198,7 @@ function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Pri
      WHERE pa.is_confirmed = 1
        AND s.deleted_at IS NULL AND s.status = 'active'
        ${inList(Prisma.sql`s.role_category`, p.types)}
-       ${inList(Prisma.sql`s.primary_department`, p.depts)}
-       ${inList(Prisma.sql`s.primary_org_code`, p.insts)}
+       ${unitExpr}
        ${inList(Prisma.sql`p.publication_type`, p.atypes)}
        ${p.jif > 0 ? Prisma.sql`AND j.impact_score_1 >= ${p.jif}` : Prisma.empty}
        ${posExpr}
@@ -287,15 +320,25 @@ export async function loadArticleList(p: ArticleCountParams): Promise<ArticleRow
   return [...byPmid.values()];
 }
 
-/** The filters as `[label, value]` pairs — the Criteria sheet, verbatim. */
-export function describeCriteria(p: ArticleCountParams, generatedAt: Date): [string, string][] {
+/** The filters as `[label, value]` pairs — the Criteria sheet, verbatim.
+ *  `labels` names each `unit` value ({@link unitLabels}); an unknown one
+ *  prints raw. */
+export function describeCriteria(
+  p: ArticleCountParams,
+  generatedAt: Date,
+  labels: ReadonlyMap<string, string> = new Map(),
+): [string, string][] {
   const list = (xs: string[]) => (xs.length > 0 ? xs.join("; ") : "All");
   return [
     ["Report", "8. Article counts"],
     ["Generated", generatedAt.toISOString()],
     ["Person type", list(p.types.map(roleCategoryLabel))],
-    ["Primary department", list(p.depts)],
-    ["Primary institution", list(p.insts.map(institutionDisplayName))],
+    [
+      "Department / division / center / institution",
+      p.units.length > 1
+        ? `Any of: ${list(p.units.map((u) => labels.get(u) ?? u))}`
+        : list(p.units.map((u) => labels.get(u) ?? u)),
+    ],
     ["Article type", list(p.atypes)],
     [
       "Minimum Journal Impact Factor",
@@ -311,7 +354,7 @@ export function describeCriteria(p: ArticleCountParams, generatedAt: Date): [str
     ["Years", `${p.from}–${p.to}`],
     [
       "Counting rule",
-      "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department and institution are the scholar's current values.",
+      "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department, division, institution and center membership are the scholar's current values.",
     ],
     ["Note", ARTICLE_COUNT_CAVEAT],
   ];
@@ -325,6 +368,8 @@ export async function buildArticleCountWorkbook(
   /** The counted articles when `total <= ARTICLE_LIST_CAP`, else null — the
    *  sheet then says so. */
   articles: ArticleRow[] | null,
+  /** `unit` value → label for the Criteria sheet ({@link unitLabels}). */
+  labels: ReadonlyMap<string, string> = new Map(),
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const bold = (ws: ExcelJS.Worksheet, r: number) => (ws.getRow(r).font = { bold: true });
@@ -341,7 +386,7 @@ export async function buildArticleCountWorkbook(
   const criteria = wb.addWorksheet("Criteria");
   criteria.addRow(["Criterion", "Value"]);
   bold(criteria, 1);
-  for (const [k, v] of describeCriteria(p, generatedAt)) criteria.addRow([k, v]);
+  for (const [k, v] of describeCriteria(p, generatedAt, labels)) criteria.addRow([k, v]);
   criteria.addRow([
     "Articles sheet",
     articles
