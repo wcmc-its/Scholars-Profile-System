@@ -9,10 +9,13 @@
  * Below `lg` the rail moves into the shared phone `FiltersSheet` (Profiles'
  * pattern); the sheet copy carries `idSuffix` so the two forms never share an id.
  */
+import { Download } from "lucide-react";
+
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
 import { ArticleCountFacets } from "@/components/edit/reports/article-count-facets";
 import { JifSlider } from "@/components/edit/reports/jif-slider";
+import { Button } from "@/components/ui/button";
 import {
   ARTICLE_COUNT_CAVEAT,
   ARTICLE_LIST_CAP,
@@ -172,9 +175,17 @@ export async function renderArticleCountReport({ searchParams, basePath }: Admin
               <Rail basePath={basePath} params={params} choices={choices} idSuffix="-sheet" />
             </FiltersSheet>
           </div>
-          <p className="text-3xl font-bold tabular-nums" data-testid="article-count-total">
-            {total.toLocaleString()}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="text-3xl font-bold tabular-nums" data-testid="article-count-total">
+              {total.toLocaleString()}
+            </p>
+            <Button asChild variant="apollo" size="sm">
+              <a href={`/api/edit/reports/article-count?${qs}`} data-testid="article-count-download">
+                <Download className="size-4" aria-hidden />
+                Download .xlsx
+              </a>
+            </Button>
+          </div>
           <p className="text-muted-foreground text-sm">
             articles, {params.basis === "fy" ? "FY" : ""}
             {params.from}
@@ -197,23 +208,11 @@ export async function renderArticleCountReport({ searchParams, basePath }: Admin
               ))}
             </tbody>
           </table>
-          <p className="mt-4">
-            <a
-              href={`/api/edit/reports/article-count?${qs}`}
-              className="text-apollo-maroon text-sm underline-offset-2 hover:underline"
-              data-testid="article-count-download"
-            >
-              Download .xlsx
-            </a>
-            <span className="text-muted-foreground text-xs">
-              {" "}
-              &mdash; counts, a Criteria sheet, and the article list with matching scholars
-              {total > ARTICLE_LIST_CAP &&
-                ` (omitted above ${ARTICLE_LIST_CAP.toLocaleString()} articles — narrow the filters)`}
-            </span>
-          </p>
           <p className="text-muted-foreground mt-4 max-w-prose text-xs" role="note">
-            {ARTICLE_COUNT_CAVEAT}
+            {ARTICLE_COUNT_CAVEAT} The download adds a Criteria sheet and the article list with matching scholars
+            {total > ARTICLE_LIST_CAP &&
+              ` (omitted above ${ARTICLE_LIST_CAP.toLocaleString()} articles — narrow the filters)`}
+            .
             {params.basis === "fy" &&
               " Fiscal years run July 1 – June 30, named by the ending year, and are assigned by the date the article was added to PubMed."}
             {params.jif > 0 && " Articles in journals with no impact factor on file are excluded."}

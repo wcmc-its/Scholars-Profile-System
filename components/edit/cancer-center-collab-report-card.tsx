@@ -651,14 +651,14 @@ export function CancerCenterCollabReportCard({ centerCode, centerName }: CancerC
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <MeshLogicModal />
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="apollo" size="sm">
             {/* Plain `<a download>` — no JS/blob dance, the browser handles the
                 download off the route's `Content-Disposition` header. */}
             <a
               href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export`}
               aria-label="Download full report (CSV)"
             >
-              <Download className="size-3.5" aria-hidden />
+              <Download className="size-4" aria-hidden />
               Download full report (CSV)
             </a>
           </Button>
