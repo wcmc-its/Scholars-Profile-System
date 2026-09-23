@@ -2,8 +2,9 @@
  * Display labels for `scholar.role_category`.
  *
  * Maps both UPPER_SNAKE_CASE (DB / ETL output) and lower_snake_case (test
- * fixtures and OpenSearch facet keys) to human-readable strings. Falls back
- * to the raw value when unmapped so we never silently drop a category.
+ * fixtures and OpenSearch facet keys) to human-readable strings. The ONE
+ * person-type vocabulary: `formatRoleCategory` and `roleCategoryLabel` both
+ * read it, and differ only in what an UNMAPPED code shows (raw vs humanized).
  */
 export const ROLE_DISPLAY: Record<string, string> = {
   FULL_TIME_FACULTY: "Full-time faculty",
@@ -53,4 +54,53 @@ export const ROLE_DISPLAY: Record<string, string> = {
 export function formatRoleCategory(raw: string | null | undefined): string | null {
   if (!raw) return null;
   return ROLE_DISPLAY[raw] ?? raw;
+}
+
+/** Person types in descending career stage, keyed by display LABEL (both raw
+ *  spellings share one label). Unlisted labels sort last, A–Z. */
+export const CAREER_STAGE_ORDER: readonly string[] = [
+  "Full-time faculty",
+  "Affiliated faculty",
+  "Voluntary faculty",
+  "Adjunct faculty",
+  "Courtesy faculty",
+  "Instructor",
+  "Lecturer",
+  "Postdoc",
+  "Fellow",
+  "Research staff",
+  "Doctoral student",
+  "MD-PhD student",
+  "MD student",
+  "PhD student",
+  "Faculty emeritus",
+  "Non-faculty academic",
+  "Non-academic",
+  "Affiliate alumni",
+];
+const careerRank = (label: string) => {
+  const i = CAREER_STAGE_ORDER.indexOf(label);
+  return i === -1 ? CAREER_STAGE_ORDER.length : i;
+};
+
+/** Sort comparator for person-type options (`{ label }`): career stage, then A–Z.
+ *  The Profiles / report 8 / ORCID facets (`loadDataQualityFacets`) and report 3's
+ *  client-side rail share it. */
+export const byCareerStage = (a: { label: string }, b: { label: string }): number =>
+  careerRank(a.label) - careerRank(b.label) || a.label.localeCompare(b.label);
+
+/**
+ * Human label for an ED person-type code: `ROLE_DISPLAY`, else the code
+ * HUMANIZED (`some_new_role` → "Some new role"), never dropped — ED owns the
+ * vocabulary and can extend it without asking us, and a label that hid every
+ * scholar carrying a new code would be worse than an imperfect one. Empty
+ * string for absent: the caller decides what absence means (the Matcha facet
+ * leaves such a candidate out rather than inventing a bucket).
+ */
+export function roleCategoryLabel(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const known = ROLE_DISPLAY[raw];
+  if (known) return known;
+  const humanized = raw.replace(/_/g, " ").trim();
+  return humanized ? humanized.charAt(0).toUpperCase() + humanized.slice(1) : "";
 }

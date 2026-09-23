@@ -8,8 +8,11 @@
  * Standalone console page like `/edit/usage` (org-wide, not a unit-scoped
  * `/edit/reports/N`): same audience (`canViewUsage` — superuser or any
  * `UnitAdmin` grant), auth re-checked on every GET, aggregates only, one CSV
- * of the department table. Filters are plain `<select>`s in a GET form
- * (`AutoSubmitForm`, report 7's idiom). No charts, no trend — there is no
+ * of the department table. Filters ride a GET form (`AutoSubmitForm`, report
+ * 7's idiom): the shared who-filter (`PersonFilterFacets` — the Profiles
+ * roster's person type / department-division / centers / institution facets,
+ * `type` + `unit` params, `lib/edit/person-filter.ts`) plus the NIH `<select>`.
+ * No charts, no trend — there is no
  * history table (a nightly snapshot row is the 10-line ETL step if one is
  * ever wanted).
  */
@@ -19,6 +22,8 @@ import { redirect } from "next/navigation";
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { PersonFilterFacets } from "@/components/edit/reports/article-count-facets";
+import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
@@ -38,6 +43,7 @@ import {
   parseOrcidCoverageParams,
   pct,
 } from "@/lib/edit/orcid-coverage";
+import { unitLabels } from "@/lib/edit/person-filter";
 // `ORCID_MANAGE_URL` is per-person (`{cwid}`); this page is aggregate-only, so
 // it links the ReCiter front door and names the Manage profile page in prose.
 import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
@@ -153,25 +159,14 @@ function CoverageTable({
   );
 }
 
-function Filters({ data }: { data: OrcidCoverage }) {
-  const { params, roles, depts } = data;
+function Filters({ data, facets }: { data: OrcidCoverage; facets: DataQualityFacets }) {
+  const { params } = data;
   return (
     <AutoSubmitForm
       action="/edit/orcid-coverage"
       className="group border-apollo-border bg-apollo-surface mt-4 flex flex-wrap items-end gap-4 rounded-md border p-3 text-xs"
       data-testid="orcid-coverage-filters"
     >
-      <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground">Person type (department table)</span>
-        <select name="role" defaultValue={params.role ?? "all"} className={selectClass}>
-          <option value="all">All person types</option>
-          {roles.map(([key, label]) => (
-            <option key={key} value={key}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
       <label className="flex flex-col gap-1">
         <span className="text-muted-foreground">NIH funding</span>
         <select name="nih" defaultValue={params.nih} className={selectClass}>
@@ -182,17 +177,19 @@ function Filters({ data }: { data: OrcidCoverage }) {
           ))}
         </select>
       </label>
-      <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground">Department (person-type table)</span>
-        <select name="dept" defaultValue={params.dept ?? "all"} className={selectClass}>
-          <option value="all">All departments</option>
-          {depts.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="basis-full">
+        <PersonFilterFacets
+          facets={facets}
+          types={params.types}
+          units={params.units}
+          testId="orcid-coverage-person-facets"
+          className="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-4"
+        />
+        <p className="text-muted-foreground mt-1">
+          Person type narrows the department table only; the units narrow both tables. None
+          selected = everyone.
+        </p>
+      </div>
       {/* No-JS fallback; the island hides it once hydrated. */}
       <button
         type="submit"
@@ -204,12 +201,20 @@ function Filters({ data }: { data: OrcidCoverage }) {
   );
 }
 
-function Body({ data }: { data: OrcidCoverage }) {
+/** "A, B or C" — selection criteria in a caption. */
+const orList = (xs: string[]) =>
+  xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}`;
+
+function Body({ data, facets }: { data: OrcidCoverage; facets: DataQualityFacets }) {
   const { params, tiles } = data;
+  const typeLabels = new Map(facets.roleCategories.map((o) => [o.value, o.label]));
+  const units = unitLabels(facets);
   const roleLabel =
-    params.role === null
+    params.types.length === 0
       ? "all person types"
-      : (data.roles.find(([k]) => k === params.role)?.[1] ?? params.role);
+      : orList(params.types.map((t) => typeLabels.get(t) ?? t));
+  const unitText =
+    params.units.length === 0 ? "" : ` in ${orList(params.units.map((u) => units.get(u) ?? u))}`;
   const nihLabel = params.nih === "all" ? "" : ` · ${NIH_FILTER_LABELS[params.nih]}`;
   return (
     <>
@@ -247,12 +252,12 @@ function Body({ data }: { data: OrcidCoverage }) {
         <Tile label="NIH-funded (any award) full-time faculty" c={tiles.nihFullTime} />
       </div>
 
-      <Filters data={data} />
+      <Filters data={data} facets={facets} />
 
       <section className="mt-8">
         <h2 className="text-base font-semibold">By person type</h2>
         <CoverageTable
-          caption={`Every person type${params.dept ? ` in ${params.dept}` : ""}${nihLabel}.`}
+          caption={`Every person type${unitText}${nihLabel}.`}
           firstHeader="Person type"
           rows={data.byRole}
           testId="orcid-coverage-by-role"
@@ -263,7 +268,7 @@ function Body({ data }: { data: OrcidCoverage }) {
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-base font-semibold">By department</h2>
           <Link
-            href={`/edit/orcid-coverage/export${orcidCoverageQuery({ role: params.role, nih: params.nih })}`}
+            href={`/edit/orcid-coverage/export${orcidCoverageQuery(params)}`}
             className="text-xs underline"
             data-testid="orcid-coverage-download"
           >
@@ -271,7 +276,7 @@ function Body({ data }: { data: OrcidCoverage }) {
           </Link>
         </div>
         <CoverageTable
-          caption={`${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}${nihLabel}, ${
+          caption={`${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}${unitText}${nihLabel}, ${
             params.nih === "none"
               ? "sorted by people."
               : "sorted by NIH-funded people without an asserted ORCID iD — the outreach list."
@@ -319,9 +324,13 @@ export default async function EditOrcidCoveragePage({
   const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
 
   const params = parseOrcidCoverageParams(await searchParams);
-  let data: OrcidCoverage | null = null;
+  let data: { coverage: OrcidCoverage; facets: DataQualityFacets } | null = null;
   try {
-    data = await loadOrcidCoverage(db.read, params);
+    const [coverage, facets] = await Promise.all([
+      loadOrcidCoverage(db.read, params),
+      loadDataQualityFacets(db.read),
+    ]);
+    data = { coverage, facets };
   } catch (err) {
     console.error(
       JSON.stringify({
@@ -347,7 +356,7 @@ export default async function EditOrcidCoveragePage({
             if this persists.
           </p>
         ) : (
-          <Body data={data} />
+          <Body data={data.coverage} facets={data.facets} />
         )}
       </div>
     </ConsoleShell>

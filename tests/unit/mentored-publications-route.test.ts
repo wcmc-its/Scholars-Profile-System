@@ -82,7 +82,7 @@ describe("gating", () => {
   });
 
   it("a roster type outside the caller's scopes is dropped, never a 403; nothing left → the default", async () => {
-    const res = await GET(req("?types=mdphd,thesis&years=2025"));
+    const res = await GET(req("?mtype=mdphd,thesis&years=2025"));
     expect(res.status).toBe(200);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
       scopes: ["md", "ecr"],
@@ -91,7 +91,7 @@ describe("gating", () => {
       tail: 1,
       ...MENTORED,
     });
-    await GET(req("?types=mdphd&years=2025"));
+    await GET(req("?mtype=mdphd&years=2025"));
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
       scopes: ["md", "ecr"],
       ...AOC_ECR,
@@ -104,8 +104,8 @@ describe("gating", () => {
   it("400 on malformed params", async () => {
     expect((await GET(req("?years=20x4"))).status).toBe(400);
     expect((await GET(req("?tail=9"))).status).toBe(400);
-    expect((await GET(req("?types=phd"))).status).toBe(400);
-    expect(await (await GET(req("?types=phd"))).text()).toBe("invalid_types");
+    expect((await GET(req("?mtype=phd"))).status).toBe(400);
+    expect(await (await GET(req("?mtype=phd"))).text()).toBe("invalid_types");
     expect((await GET(req("?pubs=everything"))).status).toBe(400);
     expect(await (await GET(req("?pubs=everything"))).text()).toBe("invalid_pubs");
     expect((await GET(req("?view=raw"))).status).toBe(400);
@@ -149,7 +149,7 @@ describe("response", () => {
   });
 
   it("explicit types reach the loader (scopes untouched) and name the file: one or two labels joined by +, more = Mixed", async () => {
-    const res = await GET(req("?types=aoc&years=2024,2025&tail=2"));
+    const res = await GET(req("?mtype=aoc&years=2024,2025&tail=2"));
     expect(res.status).toBe(200);
     expect(h.mockLoadGradYears).not.toHaveBeenCalled();
     expect(h.mockLoadReport).toHaveBeenCalledWith({
@@ -162,11 +162,11 @@ describe("response", () => {
     expect(res.headers.get("content-disposition")).toBe(
       'attachment; filename="Mentored Publications MD 2024-2025 - 2026-09-18.xlsx"',
     );
-    const two = await GET(req("?types=thesis,likely&years=2025"));
+    const two = await GET(req("?mtype=thesis,likely&years=2025"));
     expect(two.headers.get("content-disposition")).toBe(
       'attachment; filename="Mentored Publications PhD-MD-PhD thesis advisor+Likely mentee (from co-authorship) 2025 - 2026-09-18.xlsx"',
     );
-    const three = await GET(req("?types=aoc,ecr,thesis&years=2025"));
+    const three = await GET(req("?mtype=aoc,ecr,thesis&years=2025"));
     expect(three.headers.get("content-disposition")).toBe(
       'attachment; filename="Mentored Publications Mixed 2025 - 2026-09-18.xlsx"',
     );
@@ -195,7 +195,7 @@ describe("response", () => {
   });
 
   it("pubs=all reaches the loader and suffixes the filename; view is accepted and ignored", async () => {
-    const res = await GET(req("?types=aoc&years=2025&pubs=all&view=publications"));
+    const res = await GET(req("?mtype=aoc&years=2025&pubs=all&view=publications"));
     expect(res.status).toBe(200);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
       scopes: ["md", "ecr"],
@@ -212,7 +212,7 @@ describe("response", () => {
   it("a superuser's '*' scope reaches the loader as '*', every confirmed type by default, any type on request", async () => {
     h.mockSession.mockResolvedValue({ cwid: "adm0001", isSuperuser: true, isCommsSteward: false });
     h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
-    await GET(req("?types=mdphd&years=2025"));
+    await GET(req("?mtype=mdphd&years=2025"));
     expect(h.mockLoadReport).toHaveBeenCalledWith({
       scopes: ["*"],
       types: ["mdphd"],

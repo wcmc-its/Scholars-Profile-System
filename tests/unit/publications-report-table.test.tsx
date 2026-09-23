@@ -104,6 +104,28 @@ describe("PublicationsReportTable — rows", () => {
 });
 
 describe("PublicationsReportTable — Person type filter", () => {
+  it("options use the shared label and career-stage order, not headcount", () => {
+    render(
+      <PublicationsReportTable
+        rows={[
+          row({ pmid: "1", authorRoleCategories: ["postdoc"] }),
+          row({ pmid: "2", authorRoleCategories: ["postdoc"] }),
+          row({ pmid: "3", authorRoleCategories: ["doctoral_student_md", "postdoc"] }),
+          row({ pmid: "4", authorRoleCategories: ["full_time_faculty"] }),
+        ]}
+      />,
+    );
+    const names = screen
+      .getAllByRole("button")
+      .map((b) => b.textContent ?? "")
+      .filter((t) => /faculty|Postdoc|student/.test(t));
+    expect(names.map((t) => t.replace(/\d+$/, "").trim())).toEqual([
+      "Full-time faculty",
+      "Postdoc",
+      "MD student",
+    ]);
+  });
+
   it("with no filter selected, every row shows", () => {
     render(
       <PublicationsReportTable

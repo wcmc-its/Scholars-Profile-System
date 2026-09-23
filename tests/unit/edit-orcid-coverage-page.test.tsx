@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockCanViewUsage: vi.fn(),
   mockLoad: vi.fn(),
+  mockFacets: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`__REDIRECT__:${url}`);
   }),
@@ -42,6 +43,7 @@ vi.mock("@/lib/edit/slug-request", () => ({
 }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+vi.mock("@/lib/api/data-quality", () => ({ loadDataQualityFacets: h.mockFacets }));
 
 import EditOrcidCoveragePage from "@/app/edit/orcid-coverage/page";
 import { buildOrcidCoverage, parseOrcidCoverageParams } from "@/lib/edit/orcid-coverage";
@@ -50,8 +52,26 @@ const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 const sp = (o: Record<string, string> = {}) => Promise.resolve(o);
 const TODAY = new Date("2026-09-18T00:00:00Z");
 
+const FACETS = {
+  roleCategories: [
+    { value: "full_time_faculty", label: "Full-time faculty", count: 3 },
+    { value: "postdoc", label: "Postdoc", count: 1 },
+  ],
+  departments: [
+    {
+      value: "dept:AA1",
+      label: "Dept A",
+      count: 3,
+      divisions: [{ value: "div:AA2", label: "Div X (Dept A)", count: 1 }],
+    },
+  ],
+  centers: [{ value: "center:CC1", label: "Center Q", count: 2 }],
+  institutions: [{ value: "inst:II1", label: "Inst Z", count: 4 }],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  h.mockFacets.mockResolvedValue(FACETS);
   h.mockGetEditSession.mockResolvedValue(ADMIN);
   h.mockCanViewUsage.mockResolvedValue(true);
   h.mockLoad.mockImplementation(
@@ -127,10 +147,10 @@ describe("/edit/orcid-coverage", () => {
 
   it("renders tiles, both tables and the filtered CSV link inside the page root", async () => {
     const { getByTestId } = render(
-      await EditOrcidCoveragePage({ searchParams: sp({ nih: "ever", role: "all" }) }),
+      await EditOrcidCoveragePage({ searchParams: sp({ nih: "ever" }) }),
     );
     const page = within(getByTestId("orcid-coverage-page"));
-    expect(h.mockLoad).toHaveBeenCalledWith({}, { role: null, nih: "ever", dept: null });
+    expect(h.mockLoad).toHaveBeenCalledWith({}, { types: [], units: [], nih: "ever" });
     expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
       "2 of 4 with an asserted ORCID iD",
     );
@@ -158,11 +178,15 @@ describe("/edit/orcid-coverage", () => {
     expect(cell("Confirmed")).toBe("1");
     expect(cell("Inferred, strong")).toBe("0");
     expect(page.getByTestId("orcid-coverage-download").getAttribute("href")).toBe(
-      "/edit/orcid-coverage/export?role=all&nih=ever",
+      "/edit/orcid-coverage/export?nih=ever",
     );
     const form = page.getByTestId("orcid-coverage-filters") as HTMLFormElement;
     expect(form.getAttribute("action")).toBe("/edit/orcid-coverage");
     expect((form.elements.namedItem("nih") as HTMLSelectElement).value).toBe("ever");
+    // The shared who-filter island sits inside the form; the old single selects are gone.
+    expect(within(form).getByTestId("orcid-coverage-person-facets")).toBeTruthy();
+    expect(form.elements.namedItem("role")).toBeNull();
+    expect(form.elements.namedItem("dept")).toBeNull();
     // Never a per-person cell.
     expect(getByTestId("orcid-coverage-page").textContent).not.toMatch(/f1|0000-0002/);
     // The weak definition must match the fold: a second candidate demotes only when it is
@@ -171,6 +195,35 @@ describe("/edit/orcid-coverage", () => {
       "weak = no single strong candidate (a name-only registry match, thin support, a contradiction, or two or more strong candidate ORCIDs)",
     );
     expect(getByTestId("orcid-coverage-page").textContent).not.toContain("several candidate");
+  });
+
+  it("type + unit selection: hidden inputs, captions name the selection, CSV link carries it", async () => {
+    const { getByTestId } = render(
+      await EditOrcidCoveragePage({
+        searchParams: Promise.resolve({ type: "postdoc", unit: ["dept:AA1", "center:CC1"] }),
+      }),
+    );
+    expect(h.mockLoad).toHaveBeenCalledWith(
+      {},
+      { types: ["postdoc"], units: ["dept:AA1", "center:CC1"], nih: "all" },
+    );
+    const page = within(getByTestId("orcid-coverage-page"));
+    const form = page.getByTestId("orcid-coverage-filters") as HTMLFormElement;
+    const hidden = (name: string) =>
+      [...form.querySelectorAll<HTMLInputElement>(`input[type=hidden][name=${name}]`)].map(
+        (i) => i.value,
+      );
+    expect(hidden("type")).toEqual(["postdoc"]);
+    expect(hidden("unit")).toEqual(["dept:AA1", "center:CC1"]);
+    expect(
+      page.getByTestId("orcid-coverage-by-role").querySelector("caption")?.textContent,
+    ).toBe("Every person type in Dept A or Center Q.");
+    expect(
+      page.getByTestId("orcid-coverage-by-dept").querySelector("caption")?.textContent,
+    ).toMatch(/^Postdoc in Dept A or Center Q, sorted by/);
+    expect(page.getByTestId("orcid-coverage-download").getAttribute("href")).toBe(
+      "/edit/orcid-coverage/export?type=postdoc&unit=dept%3AAA1&unit=center%3ACC1&nih=all",
+    );
   });
 
   it("loader failure → unavailable notice, page root still renders", async () => {

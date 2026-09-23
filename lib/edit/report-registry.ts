@@ -34,6 +34,23 @@
  * entry in `report-meta.ts` (name, summary, slug) and, for a unit report, its
  * number in `REPORT_NUMBERS_BY_KIND`. The page needs no change.
  *
+ * Adding a report — checklist:
+ *   - Reserved params, same meaning everywhere: `type` (raw roleCategory,
+ *     repeated), `unit` (`dept:` / `div:` / `center:` / `inst:` + CODE,
+ *     repeated, OR'd), `from` / `to` (year window), `q` (name / CWID search).
+ *   - Who-filters: `parsePersonFilter` + `personFilterSql` (or
+ *     `personFilterWhere`) from `lib/edit/person-filter.ts`, the rail from
+ *     `loadDataQualityFacets` rendered with `RosterFacet`. Never re-read
+ *     `type` / `unit` yourself (`tests/unit/report-filter-guard.test.ts`).
+ *   - The page body and the download route call ONE `parse…Params` and ONE
+ *     query loader.
+ *   - The export carries a Criteria sheet stating every filter, "All" when unset.
+ *   - Scholar / email lists: `SCHOLAR_EXPORT_CAP` (50, `lib/api/export-scholars.ts`).
+ *     Above it, no download; never truncate to fit.
+ *   - If it writes: register the action / entity in `lib/edit/audit.ts` AND
+ *     all four ENUM sites in `scripts/sql/audit-log.sql`.
+ *   - No `@/lib/db` (or anything constructing prisma) in a `"use client"` file.
+ *
  * Server-only: this module imports the bodies, which import loaders that reach
  * `@/lib/db`. Never import it from a `"use client"` file (the
  * `manageable-units.ts` trap in CLAUDE.md).

@@ -86,7 +86,7 @@ export function mentorshipLabel(t: MentorshipType): string {
 
 /** The filter's vocabulary, in display order: the three roster buckets,
  *  the two other confirmed sources, the two co-author inference tiers, then
- *  the mentor's own assertions (appended last so no existing link's `types=`
+ *  the mentor's own assertions (appended last so no existing link's `mtype=`
  *  order shifts). */
 export const MENTORSHIP_TYPE_KEYS = [
   "aoc",

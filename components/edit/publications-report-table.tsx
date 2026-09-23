@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
-import { formatRoleCategory } from "@/lib/role-display";
+import { byCareerStage, formatRoleCategory } from "@/lib/role-display";
 import type { PublicationsReportRow } from "@/lib/edit/cancer-center-publications-report";
 
 /**
@@ -23,7 +23,9 @@ import type { PublicationsReportRow } from "@/lib/edit/cancer-center-publication
  * Person type = `Scholar.roleCategory` on a row's CONFIRMED unit-member
  * authors (`PublicationsReportRow.authorRoleCategories`, computed server-side
  * — see that module). A row with no selected role category among its authors
- * is filtered out; with nothing selected, every row shows.
+ * is filtered out; with nothing selected, every row shows. Options use the
+ * shared label (`formatRoleCategory`) and career-stage order (`byCareerStage`)
+ * the Profiles / report 8 facets use.
  */
 
 const thClass = "px-3 py-2 font-medium";
@@ -45,7 +47,7 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
     }
     return Array.from(counts.entries())
       .map(([value, count]) => ({ value, label: formatRoleCategory(value) ?? value, count }))
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      .sort(byCareerStage);
   }, [rows]);
 
   const toggleRole = (value: string) => {

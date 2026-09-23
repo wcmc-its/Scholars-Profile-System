@@ -73,7 +73,7 @@ system has not been provided (the #1855 handoff).
 All filters are plain GET params, parsed once by `parseMentoredPubsParams` so the page and the
 download route can never disagree. Malformed input: the route 400s, the page falls back to defaults.
 
-- `types=` — comma-separated and/or repeated `MENTORSHIP_TYPE_KEYS`. Resolved against the caller's
+- `mtype=` (legacy `types=` still read when `mtype` is absent) — comma-separated and/or repeated `MENTORSHIP_TYPE_KEYS`. Resolved against the caller's
   scopes (`resolveMentorshipTypes`): a roster key whose scope the caller does not hold is dropped
   silently — never a 403, never a wider set; nothing left → the default. Absent → the default:
   every confirmed key for a `*` holder, else the roster key of each held scope (an `md` holder opens

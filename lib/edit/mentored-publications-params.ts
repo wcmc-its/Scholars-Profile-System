@@ -9,9 +9,12 @@
  *               with no graduation year (`null` in the parsed list);
  *               `years=all` = every year; absent → the caller's default
  *               (`defaultMentoredPubsYears`);
- *   - `types`   which types of mentorship (`MENTORSHIP_TYPE_KEYS`), comma-
+ *   - `mtype`   which types of mentorship (`MENTORSHIP_TYPE_KEYS`), comma-
  *               separated and/or repeated like `years`; absent → the caller's
- *               default (`defaultMentorshipTypes`). LEGACY: a pre-types link's
+ *               default (`defaultMentorshipTypes`). Not `type`/`types`: `type`
+ *               is the shared PERSON-type param (`lib/edit/person-filter.ts`).
+ *               LEGACY: `types=` (this param's old name) is read when `mtype`
+ *               is absent; a pre-types link's
  *               `program=<scope>` reads as that scope's roster type
  *               (`ROSTER_TYPE_BY_SCOPE`); `program=all` or an unknown program
  *               reads as absent — an old link never 400s;
@@ -103,7 +106,8 @@ export function parseMentoredPubsParams(
   }
 
   let types: MentorshipTypeKey[] | null = null;
-  const typeTokens = getAll("types")
+  const mtype = getAll("mtype");
+  const typeTokens = (mtype.length > 0 ? mtype : getAll("types")) // legacy name
     .flatMap((v) => v.split(","))
     .map((t) => t.trim().toLowerCase())
     .filter((t) => t.length > 0);
@@ -152,17 +156,17 @@ export function parseMentoredPubsParams(
 }
 
 /** The query string the page's links and the download button carry — the
- *  inverse of `parseMentoredPubsParams`, so a round-trip is lossless. `types`
+ *  inverse of `parseMentoredPubsParams`, so a round-trip is lossless. `mtype`
  *  and `pubs` are written whenever known (the download link must carry
  *  them; the page always resolves both); `view` only when it is not the
  *  default, so the download link stays view-free. `program` is never
- *  written — it is read-only legacy. */
+ *  written, nor `types` — both are read-only legacy. */
 export function mentoredPubsQueryString(p: MentoredPubsParams): string {
   const sp = new URLSearchParams();
   if (p.years !== null) {
     sp.set("years", p.years.length > 0 ? p.years.map((y) => y ?? "unknown").join(",") : "all");
   }
-  if (p.types !== null) sp.set("types", p.types.join(","));
+  if (p.types !== null) sp.set("mtype", p.types.join(","));
   sp.set("tail", String(p.tail));
   sp.set("pubs", p.pubs);
   if (p.view !== "summary") sp.set("view", p.view);

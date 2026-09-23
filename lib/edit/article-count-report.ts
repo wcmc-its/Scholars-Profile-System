@@ -5,7 +5,8 @@
  * position), by calendar or fiscal year. Person type and unit take the
  * Profiles roster's URL vocabulary (`/edit/scholars`): repeated `type` (raw
  * roleCategory) and repeated `unit` (`dept:` / `div:` / `center:` / `inst:`
- * + CODE, `parseUnitValue`), and the rail shows the same facets
+ * + CODE; `parsePersonFilter` / `personFilterSql` in `lib/edit/person-filter.ts`,
+ * the rule the Profiles roster shares), and the rail shows the same facets
  * (`loadDataQualityFacets`). One `COUNT(DISTINCT pmid)` query, grouped by year; the page
  * and the `.xlsx` route (`/api/edit/reports/article-count`) share it; the
  * workbook adds an Articles sheet (one row per counted article with its
@@ -29,12 +30,13 @@
  */
 import ExcelJS from "exceljs";
 
-import { loadDataQualityFacets, parseUnitValue, type DataQualityFacets } from "@/lib/api/data-quality";
+import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { parsePersonFilter, personFilterSql, unitLabels } from "@/lib/edit/person-filter";
 import { institutionDisplayName } from "@/lib/institutions";
 import { formatRoleCategory } from "@/lib/role-display";
 
@@ -85,9 +87,10 @@ export function parseArticleCountParams(sp: URLSearchParams): ArticleCountParams
   const pick = <T extends string>(k: string, allowed: readonly T[], dflt: T): T =>
     allowed.find((v) => v === sp.get(k)) ?? dflt;
   const from = int("from", thisYear - 4, 1900, 2100);
+  const person = parsePersonFilter(sp);
   return {
-    types: sp.getAll("type").map((v) => v.trim()).filter(Boolean),
-    units: sp.getAll("unit").map((v) => v.trim()).filter(Boolean),
+    types: person.types,
+    units: person.unitValues,
     atypes: sp.getAll("atype").map((v) => v.trim()).filter(Boolean),
     jif: int("jif", 0, 0, JIF_MAX),
     pos: pick("pos", Object.keys(POSITION_LABEL) as AuthorPosition[], "any"),
@@ -134,16 +137,8 @@ export async function loadArticleCountChoices(): Promise<{
   };
 }
 
-/** `unit` value → display label (department / division / center name,
- *  institution display name), for the Criteria sheet. */
-export function unitLabels(facets: DataQualityFacets): Map<string, string> {
-  const opts = [
-    ...facets.departments.flatMap((d) => [d, ...d.divisions]),
-    ...facets.centers,
-    ...facets.institutions,
-  ];
-  return new Map(opts.map((o) => [o.value, o.label]));
-}
+/** Moved to `lib/edit/person-filter.ts` (ORCID coverage labels its captions with it too). */
+export { unitLabels };
 
 export type ArticleCountRow = { year: number; count: number };
 
@@ -164,32 +159,6 @@ function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Pri
   }[p.pos];
   const inList = (col: Prisma.Sql, xs: string[]) =>
     xs.length > 0 ? Prisma.sql`AND ${col} IN (${Prisma.join(xs)})` : Prisma.empty;
-  // Units OR together, as on the Profiles roster (`buildWhere` in
-  // `lib/api/data-quality.ts`): dept / div / ED primary org are scholar
-  // columns; a center is its date-active members (pending / expired
-  // excluded). Units given but none decode → match nothing, never everyone.
-  let unitExpr = Prisma.empty;
-  if (p.units.length > 0) {
-    const decoded = p.units.map(parseUnitValue);
-    const codes = (kind: string) => decoded.flatMap((u) => (u?.kind === kind ? [u.code] : []));
-    const ors: Prisma.Sql[] = [];
-    const add = (col: Prisma.Sql, xs: string[]) => {
-      if (xs.length > 0) ors.push(Prisma.sql`${col} IN (${Prisma.join(xs)})`);
-    };
-    add(Prisma.sql`s.dept_code`, codes("department"));
-    add(Prisma.sql`s.div_code`, codes("division"));
-    add(Prisma.sql`s.primary_org_code`, codes("institution"));
-    const centers = codes("center");
-    if (centers.length > 0) {
-      // UTC "today", as the Profiles loader computes it — not the DB session's CURDATE().
-      const today = new Date().toISOString().slice(0, 10);
-      ors.push(Prisma.sql`s.cwid IN (SELECT cm.cwid FROM center_membership cm
-         WHERE cm.center_code IN (${Prisma.join(centers)})
-           AND (cm.start_date IS NULL OR cm.start_date <= ${today})
-           AND (cm.end_date IS NULL OR cm.end_date >= ${today}))`);
-    }
-    unitExpr = ors.length > 0 ? Prisma.sql`AND (${Prisma.join(ors, " OR ")})` : Prisma.sql`AND 1 = 0`;
-  }
   const fromWhere = Prisma.sql`
       FROM publication_author pa
       JOIN scholar s ON s.cwid = pa.cwid
@@ -197,8 +166,7 @@ function scopeSql(p: ArticleCountParams): { yearExpr: Prisma.Sql; fromWhere: Pri
       LEFT JOIN journal_impact_factor j ON j.journal_abbrev = p.journal_abbrev
      WHERE pa.is_confirmed = 1
        AND s.deleted_at IS NULL AND s.status = 'active'
-       ${inList(Prisma.sql`s.role_category`, p.types)}
-       ${unitExpr}
+       ${personFilterSql({ types: p.types, unitValues: p.units }, { scholar: "s", centerMembership: "cm" })}
        ${inList(Prisma.sql`p.publication_type`, p.atypes)}
        ${p.jif > 0 ? Prisma.sql`AND j.impact_score_1 >= ${p.jif}` : Prisma.empty}
        ${posExpr}

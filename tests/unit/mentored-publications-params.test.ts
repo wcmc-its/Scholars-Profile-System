@@ -65,37 +65,50 @@ describe("parseMentoredPubsParams", () => {
   });
 
   it("types: comma list, repeated keys, or both; deduped, in vocabulary order; case-insensitive", () => {
-    expect(parseMentoredPubsParams({ types: "thesis,aoc" })).toMatchObject({
+    expect(parseMentoredPubsParams({ mtype: "thesis,aoc" })).toMatchObject({
       ok: true,
       value: { types: ["aoc", "thesis"] },
     });
-    expect(parseMentoredPubsParams({ types: ["likely", "aoc", "likely"] })).toMatchObject({
+    expect(parseMentoredPubsParams({ mtype: ["likely", "aoc", "likely"] })).toMatchObject({
       ok: true,
       value: { types: ["aoc", "likely"] },
     });
     expect(
-      parseMentoredPubsParams(new URLSearchParams("types=postdoc&types=aoc,ecr")),
+      parseMentoredPubsParams(new URLSearchParams("mtype=postdoc&mtype=aoc,ecr")),
     ).toMatchObject({
       ok: true,
       value: { types: ["aoc", "ecr", "postdoc"] },
     });
-    expect(parseMentoredPubsParams({ types: "AOC" })).toMatchObject({
+    expect(parseMentoredPubsParams({ mtype: "AOC" })).toMatchObject({
       ok: true,
       value: { types: ["aoc"] },
     });
-    expect(parseMentoredPubsParams({ types: "" })).toMatchObject({
+    expect(parseMentoredPubsParams({ mtype: "" })).toMatchObject({
       ok: true,
       value: { types: null },
     });
   });
 
   it("types: an unknown key is an error, not a silent drop", () => {
-    expect(parseMentoredPubsParams({ types: "aoc,phd" })).toEqual({
+    expect(parseMentoredPubsParams({ mtype: "aoc,phd" })).toEqual({
       ok: false,
       error: "invalid_types",
     });
-    expect(parseMentoredPubsParams({ types: "md" })).toEqual({ ok: false, error: "invalid_types" });
-    expect(parseMentoredPubsParams({ types: "*" })).toEqual({ ok: false, error: "invalid_types" });
+    expect(parseMentoredPubsParams({ mtype: "md" })).toEqual({ ok: false, error: "invalid_types" });
+    expect(parseMentoredPubsParams({ mtype: "*" })).toEqual({ ok: false, error: "invalid_types" });
+  });
+
+  it("legacy `types=` (mtype's old name) is read only when `mtype` is absent; never `type` (person type)", () => {
+    expect(parseMentoredPubsParams({ types: "thesis,aoc" })).toMatchObject({
+      ok: true,
+      value: { types: ["aoc", "thesis"] },
+    });
+    expect(parseMentoredPubsParams(new URLSearchParams("mtype=aoc&types=thesis"))).toMatchObject({
+      ok: true,
+      value: { types: ["aoc"] },
+    });
+    expect(parseMentoredPubsParams({ types: "phd" })).toEqual({ ok: false, error: "invalid_types" });
+    expect(parseMentoredPubsParams({ type: "aoc" })).toMatchObject({ ok: true, value: { types: null } });
   });
 
   it("legacy program=<scope> with no types reads as that scope's roster type; all / unknown → null, never an error", () => {
@@ -173,12 +186,12 @@ describe("mentoredPubsQueryString", () => {
     // download carries them); `program` never; `view` only when not the default.
     expect(
       mentoredPubsQueryString({ ...DEFAULTS, years: [2024, 2025], types: ["aoc", "thesis"] }),
-    ).toBe("years=2024%2C2025&types=aoc%2Cthesis&tail=1&pubs=mentored");
+    ).toBe("years=2024%2C2025&mtype=aoc%2Cthesis&tail=1&pubs=mentored");
     expect(mentoredPubsQueryString({ ...DEFAULTS, years: [] })).toBe(
       "years=all&tail=1&pubs=mentored",
     );
     expect(mentoredPubsQueryString({ ...DEFAULTS, years: [2025, null], types: ["aoc"] })).toBe(
-      "years=2025%2Cunknown&types=aoc&tail=1&pubs=mentored",
+      "years=2025%2Cunknown&mtype=aoc&tail=1&pubs=mentored",
     );
     expect(
       mentoredPubsQueryString({
@@ -188,6 +201,6 @@ describe("mentoredPubsQueryString", () => {
         pubs: "all",
         view: "publications",
       }),
-    ).toBe("years=all&types=aoc&tail=1&pubs=all&view=publications");
+    ).toBe("years=all&mtype=aoc&tail=1&pubs=all&view=publications");
   });
 });

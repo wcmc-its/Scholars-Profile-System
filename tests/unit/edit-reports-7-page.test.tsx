@@ -270,20 +270,20 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     // Nothing else of it below the tables — the bottom-of-page card is gone.
     expect(findByTestId(result, "report-access-panel")).toBeNull();
     expect(findByType(result, h.mockTable)?.props.downloadHref).toBe(
-      "/api/edit/reports/mentored-publications?years=2026%2C2025&types=aoc&tail=1&pubs=mentored",
+      "/api/edit/reports/mentored-publications?years=2026%2C2025&mtype=aoc&tail=1&pubs=mentored",
     );
   });
 
   it("Type of mentorship: an md holder sees MD (checked) and the five non-roster types, never MD-PhD / ECR; faculty offered but unchecked; no Program select", async () => {
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
     const form = findByType(result, h.mockAutoSubmitForm);
-    expect(checkboxes(form).filter(([name]) => name === "types")).toEqual([
-      ["types", "aoc", true],
-      ["types", "thesis", false],
-      ["types", "postdoc", false],
-      ["types", "likely", false],
-      ["types", "possible", false],
-      ["types", "faculty", false],
+    expect(checkboxes(form).filter(([name]) => name === "mtype")).toEqual([
+      ["mtype", "aoc", true],
+      ["mtype", "thesis", false],
+      ["mtype", "postdoc", false],
+      ["mtype", "likely", false],
+      ["mtype", "possible", false],
+      ["mtype", "faculty", false],
     ]);
     const text = textOf(form);
     expect(text).toContain("Type of mentorship");
@@ -333,12 +333,12 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       ...MENTORED,
     });
     expect(checkboxes(findByType(result, h.mockAutoSubmitForm)).filter(([, , on]) => on)).toEqual([
-      ["types", "aoc", true],
-      ["types", "likely", true],
+      ["mtype", "aoc", true],
+      ["mtype", "likely", true],
       ["years", "2025", true],
     ]);
     expect(findByType(result, h.mockTable)?.props.downloadHref).toBe(
-      "/api/edit/reports/mentored-publications?years=2025&types=aoc%2Clikely&tail=2&pubs=mentored",
+      "/api/edit/reports/mentored-publications?years=2025&mtype=aoc%2Clikely&tail=2&pubs=mentored",
     );
 
     await EditReportsMentoredPublicationsPage({
@@ -416,7 +416,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     ]);
     expect(textOf(findByType(result, h.mockAutoSubmitForm))).toContain("Unknown grad year");
     expect(findByType(result, h.mockTable)?.props.downloadHref).toBe(
-      "/api/edit/reports/mentored-publications?years=2026%2C2025%2Cunknown&types=aoc&tail=1&pubs=mentored",
+      "/api/edit/reports/mentored-publications?years=2026%2C2025%2Cunknown&mtype=aoc&tail=1&pubs=mentored",
     );
   });
 
@@ -483,7 +483,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       tail: 2,
       pubs: "all",
     });
-    const base = "years=2025&types=aoc&tail=2";
+    const base = "years=2025&mtype=aoc&tail=2";
     // The island owns the tabs and the download link; it gets every href
     // with the other params kept, and the download carries pubs but never view.
     expect(findByType(result, h.mockTable)?.props).toMatchObject({
@@ -524,12 +524,12 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     expect(findByType(summary, h.mockTable)?.props).toEqual({
       view: "summary",
       viewHrefs: {
-        summary: `${BASE}?years=2026%2C2025&types=aoc&tail=1&pubs=mentored`,
+        summary: `${BASE}?years=2026%2C2025&mtype=aoc&tail=1&pubs=mentored`,
         publications:
-          `${BASE}?years=2026%2C2025&types=aoc&tail=1&pubs=mentored&view=publications`,
+          `${BASE}?years=2026%2C2025&mtype=aoc&tail=1&pubs=mentored&view=publications`,
       },
       downloadHref:
-        "/api/edit/reports/mentored-publications?years=2026%2C2025&types=aoc&tail=1&pubs=mentored",
+        "/api/edit/reports/mentored-publications?years=2026%2C2025&mtype=aoc&tail=1&pubs=mentored",
       summary: [summaryRow],
       publications: [pub],
       pubsMode: "mentored",
@@ -616,16 +616,16 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
     expect(
-      checkboxes(findByType(result, h.mockAutoSubmitForm)).filter(([name]) => name === "types"),
+      checkboxes(findByType(result, h.mockAutoSubmitForm)).filter(([name]) => name === "mtype"),
     ).toEqual([
-      ["types", "aoc", true],
-      ["types", "mdphd", true],
-      ["types", "ecr", true],
-      ["types", "thesis", true],
-      ["types", "postdoc", true],
-      ["types", "likely", false],
-      ["types", "possible", false],
-      ["types", "faculty", true],
+      ["mtype", "aoc", true],
+      ["mtype", "mdphd", true],
+      ["mtype", "ecr", true],
+      ["mtype", "thesis", true],
+      ["mtype", "postdoc", true],
+      ["mtype", "likely", false],
+      ["mtype", "possible", false],
+      ["mtype", "faculty", true],
     ]);
     const confirmed = ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty"];
     expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], confirmed);

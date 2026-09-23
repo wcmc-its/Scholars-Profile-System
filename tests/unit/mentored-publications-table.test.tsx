@@ -149,10 +149,10 @@ const LEARNERS: MentoredPubsSummaryRow[] = [
 ];
 
 const HREFS = {
-  summary: "/edit/reports/7?years=2025&types=aoc",
-  publications: "/edit/reports/7?years=2025&types=aoc&view=publications",
+  summary: "/edit/reports/7?years=2025&mtype=aoc",
+  publications: "/edit/reports/7?years=2025&mtype=aoc&view=publications",
 };
-const DOWNLOAD = "/api/edit/reports/mentored-publications?years=2025&types=aoc";
+const DOWNLOAD = "/api/edit/reports/mentored-publications?years=2025&mtype=aoc";
 
 const rowIds = (table: HTMLElement, prefix: string) =>
   [...table.querySelectorAll("tbody tr")].map((tr) => tr.getAttribute("data-testid")?.replace(prefix, ""));
