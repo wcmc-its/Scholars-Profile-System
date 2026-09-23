@@ -657,8 +657,10 @@ function parseOverviewAge(v: string | undefined): OverviewAgeFilter {
     : "all";
 }
 
-/** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`). */
-function parseUnitValue(v: string): EditRosterUnitFilter | null {
+/** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`).
+ *  Exported for report 8 (`lib/edit/article-count-report.ts`), which takes the same
+ *  `unit` vocabulary. */
+export function parseUnitValue(v: string): EditRosterUnitFilter | null {
   const sep = v.indexOf(":");
   if (sep < 0) return null;
   const kind = v.slice(0, sep);

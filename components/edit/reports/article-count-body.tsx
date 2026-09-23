@@ -1,13 +1,14 @@
 /**
- * Report 8 — "Article counts" body: a filter rail (person type, primary
- * department, primary institution, article type, minimum JIF, author
- * position, year basis and
- * range — plain GET params, `AutoSubmitForm` like report 7) beside the
- * total, the per-year table and the `.xlsx` link
+ * Report 8 — "Article counts" body: a filter rail (year basis and range,
+ * the Profiles roster's person-type / department-division / centers /
+ * institution facets — `ArticleCountFacets` — then article type, minimum
+ * JIF and author position; plain GET params, `AutoSubmitForm` like report 7)
+ * beside the total, the per-year table and the `.xlsx` link
  * (`/api/edit/reports/article-count`, same query string). The loader,
  * counting rule and caveat live in `lib/edit/article-count-report.ts`.
  */
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
+import { ArticleCountFacets } from "@/components/edit/reports/article-count-facets";
 import { JifSlider } from "@/components/edit/reports/jif-slider";
 import {
   ARTICLE_COUNT_CAVEAT,
@@ -21,8 +22,7 @@ import {
   POSITION_LABEL,
   type ArticleCountParams,
 } from "@/lib/edit/article-count-report";
-import { institutionDisplayName } from "@/lib/institutions";
-import { roleCategoryLabel } from "@/lib/match-display";
+import type { DataQualityFacets } from "@/lib/api/data-quality";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 
 const RAIL_HEADING = "mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
@@ -45,7 +45,7 @@ function FilterForm({
 }: {
   basePath: string;
   params: ArticleCountParams;
-  choices: { types: string[]; depts: string[]; insts: string[]; atypes: string[] };
+  choices: { facets: DataQualityFacets; atypes: string[] };
 }) {
   const years = Array.from({ length: 30 }, (_, i) => new Date().getFullYear() + 1 - i);
   return (
@@ -86,38 +86,7 @@ function FilterForm({
           </select>
         </label>
       </div>
-      <fieldset className="mb-5">
-        <legend className={RAIL_HEADING}>Person type</legend>
-        {choices.types.map((t) => (
-          <label key={t} className={RAIL_OPTION}>
-            <input type="checkbox" name="types" value={t} defaultChecked={params.types.includes(t)} className={RAIL_BOX} />
-            {roleCategoryLabel(t)}
-          </label>
-        ))}
-        <p className="text-muted-foreground mt-1 text-[11px]">None checked = all.</p>
-      </fieldset>
-      <label className="mb-5 flex flex-col">
-        <span className={RAIL_HEADING}>Primary department</span>
-        <select name="dept" multiple size={8} defaultValue={params.depts} className={SELECT}>
-          {choices.depts.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
-        <span className="text-muted-foreground mt-1 text-[11px]">None selected = all. Ctrl/Cmd-click for several.</span>
-      </label>
-      <label className="mb-5 flex flex-col">
-        <span className={RAIL_HEADING}>Primary institution</span>
-        <select name="inst" multiple size={4} defaultValue={params.insts} className={SELECT}>
-          {choices.insts.map((i) => (
-            <option key={i} value={i}>
-              {institutionDisplayName(i)}
-            </option>
-          ))}
-        </select>
-        <span className="text-muted-foreground mt-1 text-[11px]">None selected = all.</span>
-      </label>
+      <ArticleCountFacets facets={choices.facets} types={params.types} units={params.units} />
       <label className="mb-5 flex flex-col">
         <span className={RAIL_HEADING}>Article type</span>
         <select name="atype" multiple size={6} defaultValue={params.atypes} className={SELECT}>
@@ -167,6 +136,12 @@ export async function renderArticleCountReport({ searchParams, basePath }: Admin
     main: (
       <div className="mt-4 md:flex md:items-start md:gap-6">
         <div className="border-apollo-rail-border bg-apollo-rail rounded-xl border p-3 md:w-64 md:shrink-0">
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-muted-foreground text-xs">Filters apply automatically</span>
+            <a href={basePath} className="text-muted-foreground ml-auto text-xs hover:underline">
+              Clear
+            </a>
+          </div>
           <FilterForm basePath={basePath} params={params} choices={choices} />
         </div>
         <div className="mt-4 flex-1 md:mt-0">

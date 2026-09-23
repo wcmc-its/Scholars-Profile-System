@@ -1,15 +1,15 @@
 /**
  * Report 8 (Article counts) — the one check per branch: param parsing and
- * clamping, the SQL the facets produce (FY expression, IN lists, the JIF
- * join, the position clause), zero-filled years, the two workbook sheets
- * and the gate.
+ * clamping, the SQL the facets produce (FY expression, IN lists, the unit
+ * OR clause with its center subquery, the JIF join, the position clause),
+ * zero-filled years, the two workbook sheets and the gate.
  */
 import ExcelJS from "exceljs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Prisma } from "@/lib/generated/prisma/client";
 
-const h = vi.hoisted(() => ({ queryRaw: vi.fn(), groupBy: vi.fn(), findFirst: vi.fn() }));
+const h = vi.hoisted(() => ({ queryRaw: vi.fn(), groupBy: vi.fn(), findFirst: vi.fn(), facets: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -23,6 +23,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/api/data-quality", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api/data-quality")>()),
+  loadDataQualityFacets: h.facets,
+}));
+
+import { db } from "@/lib/db";
 import {
   ARTICLE_COUNT_CAVEAT,
   ARTICLE_LIST_CAP,
@@ -34,9 +40,11 @@ import {
   loadArticleCounts,
   loadArticleList,
   parseArticleCountParams,
+  unitLabels,
 } from "@/lib/edit/article-count-report";
 
 const thisYear = new Date().getFullYear();
+const today = new Date().toISOString().slice(0, 10);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -55,8 +63,7 @@ describe("parseArticleCountParams", () => {
   it("defaults: all facets open, no JIF floor, any position, calendar years ending this year", () => {
     expect(parseArticleCountParams(new URLSearchParams())).toEqual({
       types: [],
-      depts: [],
-      insts: [],
+      units: [],
       atypes: [],
       jif: 0,
       pos: "any",
@@ -68,34 +75,36 @@ describe("parseArticleCountParams", () => {
 
   it("reads repeated keys, clamps the JIF, rejects unknown enums, keeps to ≥ from", () => {
     const p = parseArticleCountParams(
-      new URLSearchParams("types=postdoc&types=fellow&dept=A&inst=HSS&atype=Review&jif=999&pos=bogus&basis=fy&from=2020&to=2010"),
+      new URLSearchParams("type=postdoc&type=fellow&unit=dept:A&unit=inst:HSS&atype=Review&jif=999&pos=bogus&basis=fy&from=2020&to=2010"),
     );
-    expect(p).toMatchObject({ types: ["postdoc", "fellow"], depts: ["A"], insts: ["HSS"], atypes: ["Review"], jif: 100, pos: "any", basis: "fy", from: 2020, to: 2020 });
+    expect(p).toMatchObject({ types: ["postdoc", "fellow"], units: ["dept:A", "inst:HSS"], atypes: ["Review"], jif: 100, pos: "any", basis: "fy", from: 2020, to: 2020 });
     // Round-trips through the query string the page and the download share.
     expect(parseArticleCountParams(new URLSearchParams(articleCountQueryString(p)))).toEqual(p);
   });
 });
 
-describe("loadArticleCountChoices", () => {
-  it("institution choices are the active scholars' primaryOrgCode values, nulls dropped, ordered by display name", async () => {
-    // One shared groupBy mock serves scholar (role, department, institution) and publication (type).
-    h.groupBy
-      .mockResolvedValueOnce([{ roleCategory: "full_time_faculty" }])
-      .mockResolvedValueOnce([{ primaryDepartment: "Medicine" }])
-      .mockResolvedValueOnce([
-        { primaryOrgCode: "WCMC" },
-        { primaryOrgCode: "HSS" },
-        { primaryOrgCode: null },
-        { primaryOrgCode: "MSKCC" },
-      ])
-      .mockResolvedValueOnce([{ publicationType: "Journal Article" }]);
+const FACETS = {
+  roleCategories: [{ value: "postdoc", label: "Postdoc", count: 3 }],
+  departments: [
+    { value: "dept:MED", label: "Medicine", count: 9, divisions: [{ value: "div:CARD", label: "Cardiology (Medicine)", count: 4 }] },
+  ],
+  centers: [{ value: "center:CC", label: "Cancer Center", count: 2 }],
+  institutions: [{ value: "inst:HSS", label: "Hospital for Special Surgery", count: 1 }],
+};
+
+describe("loadArticleCountChoices / unitLabels", () => {
+  it("reuses the Profiles facets on db.read, adds sorted article types, and labels every unit value", async () => {
+    h.facets.mockResolvedValue(FACETS);
+    h.groupBy.mockResolvedValue([{ publicationType: "Review" }, { publicationType: null }, { publicationType: "Journal Article" }]);
     const choices = await loadArticleCountChoices();
-    // Hospital for Special Surgery < Memorial Sloan Kettering… < Weill Cornell Medicine (the WCMC display alias).
-    expect(choices.insts).toEqual(["HSS", "MSKCC", "WCMC"]);
-    expect(h.groupBy).toHaveBeenCalledWith({
-      by: ["primaryOrgCode"],
-      where: { deletedAt: null, status: "active" },
-    });
+    expect(h.facets).toHaveBeenCalledWith(db.read);
+    expect(choices).toEqual({ facets: FACETS, atypes: ["Journal Article", "Review"] });
+    expect([...unitLabels(FACETS)]).toEqual([
+      ["dept:MED", "Medicine"],
+      ["div:CARD", "Cardiology (Medicine)"],
+      ["center:CC", "Cancer Center"],
+      ["inst:HSS", "Hospital for Special Surgery"],
+    ]);
   });
 });
 
@@ -114,19 +123,30 @@ describe("loadArticleCounts", () => {
   it("fiscal basis shifts the PubMed add date by six months; facets, JIF and position each add their clause", async () => {
     await loadArticleCounts(
       parseArticleCountParams(
-        new URLSearchParams("basis=fy&types=full_time_faculty&dept=Medicine&inst=HSS&inst=MSKCC&atype=Review&jif=10&pos=either&from=2025&to=2025"),
+        new URLSearchParams(
+          "basis=fy&type=full_time_faculty&unit=inst:HSS&unit=dept:MED&unit=center:CC&unit=div:CARD&unit=inst:MSKCC&unit=bogus&atype=Review&jif=10&pos=either&from=2025&to=2025",
+        ),
       ),
     );
     const { text, values } = lastSql();
     expect(text).toContain("YEAR(DATE_ADD(p.date_added_to_entrez, INTERVAL 6 MONTH)) AS y");
     expect(text).toContain("AND j.impact_score_1 >= ?");
     expect(text).toContain("AND s.role_category IN (?)");
-    expect(text).toContain("AND s.primary_department IN (?)");
-    // The institution facet binds the ED CODE, never the display name.
-    expect(text).toContain("AND s.primary_org_code IN (?,?)");
+    // Units OR together (the Profiles roster's rule); a center is its date-active
+    // members; the institution binds the ED CODE; an undecodable value is dropped.
+    expect(text).toContain(
+      "AND (s.dept_code IN (?) OR s.div_code IN (?) OR s.primary_org_code IN (?,?) OR s.cwid IN (SELECT cm.cwid FROM center_membership cm WHERE cm.center_code IN (?) AND (cm.start_date IS NULL OR cm.start_date <= ?) AND (cm.end_date IS NULL OR cm.end_date >= ?)))",
+    );
     expect(text).toContain("AND p.publication_type IN (?)");
     expect(text).toContain("AND (pa.is_first = 1 OR pa.is_last = 1)");
-    expect(values).toEqual(["full_time_faculty", "Medicine", "HSS", "MSKCC", "Review", 10, 2025, 2025]);
+    expect(values).toEqual(["full_time_faculty", "MED", "CARD", "HSS", "MSKCC", "CC", today, today, "Review", 10, 2025, 2025]);
+  });
+
+  it("units given but none decode match nothing, never everyone", async () => {
+    await loadArticleCounts(parseArticleCountParams(new URLSearchParams("unit=bogus&unit=dept:&from=2025&to=2025")));
+    const { text } = lastSql();
+    expect(text).toContain("AND 1 = 0");
+    expect(text).not.toContain("IN (");
   });
 
   it("fills every year in the range, zero where the query returned nothing, and totals (BigInt-safe)", async () => {
@@ -216,7 +236,9 @@ describe("loadArticleList", () => {
 
 describe("buildArticleCountWorkbook", () => {
   it("writes a Counts sheet (years + total) and a Criteria sheet carrying every filter and the caveat", async () => {
-    const p = parseArticleCountParams(new URLSearchParams("basis=fy&jif=5&pos=first&from=2024&to=2025&types=postdoc&inst=WCMC&inst=HSS"));
+    const p = parseArticleCountParams(
+      new URLSearchParams("basis=fy&jif=5&pos=first&from=2024&to=2025&type=postdoc&unit=dept:MED&unit=center:CC&unit=inst:GONE"),
+    );
     const article = {
       pmid: "100",
       citation: "Smith JA. A title. J Test. 2024.",
@@ -228,7 +250,7 @@ describe("buildArticleCountWorkbook", () => {
       doi: "10.1/x",
       scholars: ["Jane Smith (jas2001), Postdoc, Medicine, first author"],
     };
-    const buf = await buildArticleCountWorkbook(p, [{ year: 2024, count: 3 }, { year: 2025, count: 4 }], 7, new Date("2026-09-21T00:00:00Z"), [article]);
+    const buf = await buildArticleCountWorkbook(p, [{ year: 2024, count: 3 }, { year: 2025, count: 4 }], 7, new Date("2026-09-21T00:00:00Z"), [article], unitLabels(FACETS));
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf as unknown as ExcelJS.Buffer);
     expect(wb.worksheets.map((w) => w.name)).toEqual(["Counts", "Criteria", "Articles"]);
@@ -246,8 +268,8 @@ describe("buildArticleCountWorkbook", () => {
     const cells = new Map<string, string>();
     criteria.eachRow((row) => cells.set(String(row.getCell(1).value), String(row.getCell(2).value)));
     expect(cells.get("Person type")).toBe("Postdoc");
-    expect(cells.get("Primary department")).toBe("All");
-    expect(cells.get("Primary institution")).toBe("Weill Cornell Medicine; Hospital for Special Surgery");
+    // Named from the facets; a value the facets don't know prints raw.
+    expect(cells.get("Department / division / center / institution")).toBe("Any of: Medicine; Cancer Center; inst:GONE");
     expect(cells.get("Minimum Journal Impact Factor")).toContain("5 or higher");
     expect(cells.get("Author position")).toBe("First author");
     expect(cells.get("Year basis")).toContain("July 1 – June 30");
