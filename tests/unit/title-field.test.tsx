@@ -55,7 +55,7 @@ describe("TitleField — radio list", () => {
     expect(screen.getAllByRole("radio")).toHaveLength(3);
     const working = screen.getByTestId("title-option-working");
     expect(working.textContent).toContain("Associate Dean for Research");
-    expect(working.textContent).toContain("Working title · Enterprise Directory");
+    expect(working.textContent).toContain("Working title · Web Directory");
     expect(screen.queryByTestId("title-option-centerHead")).toBeNull();
     expect(screen.queryByText(/on record/)).toBeNull();
   });

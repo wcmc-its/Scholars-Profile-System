@@ -48,7 +48,7 @@ const WORKING_TITLE_HELP =
   "Set in the Web Directory for everyday use. Shown instead of the primary title.";
 
 const TIER_SOURCE: Record<TitleTier, string> = {
-  working: "Working title · Enterprise Directory",
+  working: "Working title · Web Directory",
   chief: "Division chief · Org unit leadership",
   centerHead: "Center head · Org unit leadership",
   primary: "Primary title · Enterprise Directory",
