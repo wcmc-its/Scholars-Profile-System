@@ -18,8 +18,9 @@
  * route makes clear the request as a side effect.
  *
  * The picker is a radio list (design handoff option 1a): every tier is a row —
- * title on line one, its source on line two, "Current" on the saved one. A tier
- * that does not apply stays in the list, disabled, saying why. After a save the
+ * title on line one, its source on line two, "Current" on the saved one. Tiers
+ * that do not apply are omitted (Paul, 2026-09-23): the source line on each real
+ * option already says where it comes from. After a save the
  * page refreshes so the identity header above picks up the new title.
  *
  * Imports ONLY `@/lib/scholar-title` (pure, import-free) — never
@@ -150,43 +151,32 @@ export function TitleField({
         disabled={busy}
         className="border-apollo-border-strong flex flex-col overflow-hidden rounded-lg border"
       >
-        {options.map((o, i) => {
-          const disabled = o.value === null;
+        {available.map((o, i) => {
           const on = selected === o.tier;
           return (
             <RadioGroupPrimitive.Item
               key={o.tier}
               value={o.tier}
-              disabled={disabled}
               data-testid={`title-option-${o.tier}`}
               className={cn(
                 "focus-visible:ring-ring/50 flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-inset",
                 i > 0 && "border-apollo-border border-t",
                 on ? "bg-apollo-surface-2" : "bg-apollo-surface",
-                disabled ? "cursor-not-allowed" : "cursor-pointer",
+                "cursor-pointer",
               )}
             >
               <span
                 aria-hidden
                 className={cn(
                   "flex size-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] bg-white",
-                  disabled ? "border-apollo-border-strong" : on ? "border-apollo-bar" : "border-[#6f6a5e]",
+                  on ? "border-apollo-bar" : "border-[#6f6a5e]",
                 )}
               >
                 {on && <span className="bg-apollo-bar size-2 rounded-full" />}
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span
-                  className={cn(
-                    "text-sm font-medium",
-                    disabled ? "text-muted-foreground" : "text-[#1f1b19]",
-                  )}
-                >
-                  {o.value ?? o.label}
-                </span>
-                <span className="text-muted-foreground text-xs">
-                  {disabled ? `No ${o.label.toLowerCase().replace(/ title$/, "")} title on record` : TIER_SOURCE[o.tier]}
-                </span>
+                <span className="text-sm font-medium text-[#1f1b19]">{o.value}</span>
+                <span className="text-muted-foreground text-xs">{TIER_SOURCE[o.tier]}</span>
               </span>
               {o.tier === savedTier && (
                 <span className="bg-apollo-surface-2 text-[#5c574d] rounded-[10px] px-2 py-px text-xs whitespace-nowrap">
