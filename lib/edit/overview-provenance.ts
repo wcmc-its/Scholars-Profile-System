@@ -16,6 +16,8 @@
  * Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
+import { sanitizeOverviewHtml } from "@/lib/edit/validators";
+import { sanitizeVIVOHtml } from "@/lib/utils";
 import { normalizeOverviewParams, type OverviewParams } from "@/lib/edit/overview-params";
 
 /** The provenance classification of the currently-published overview. */
@@ -57,6 +59,9 @@ export interface OverviewGenerationSummary {
   params: OverviewParams;
   createdAt: Date;
   text: string;
+  /** The History-panel label, or null for the default "AI draft N". */
+  name: string | null;
+  createdByCwid: string;
 }
 
 /**
@@ -73,7 +78,8 @@ export async function listOverviewGenerations(
     // Only SUCCEEDED runs reach the history/restore panel — failed attempts are now
     // persisted too (audit/debug trail) but a draft-less, error-only row is not
     // something the scholar can reload or regenerate from.
-    where: { cwid, status: "succeeded" },
+    // Hidden (deleted from the History panel) drafts stay for the audit trail.
+    where: { cwid, status: "succeeded", hiddenAt: null },
     orderBy: { createdAt: "desc" },
     take: GENERATION_HISTORY_LIMIT,
     select: {
@@ -83,6 +89,8 @@ export async function listOverviewGenerations(
       params: true,
       createdAt: true,
       text: true,
+      name: true,
+      createdByCwid: true,
     },
   });
   return rows.map((row) => ({
@@ -94,7 +102,51 @@ export async function listOverviewGenerations(
     // `text` is now nullable (failed rows store NULL), but the status filter above
     // guarantees these are succeeded rows with a draft; coerce defensively.
     text: row.text ?? "",
+    name: row.name,
+    createdByCwid: row.createdByCwid,
   }));
+}
+
+/** One saved overview for the History panel, newest first. */
+export interface OverviewVersionSummary {
+  id: string;
+  html: string;
+  origin: OverviewOrigin;
+  savedByCwid: string;
+  createdAt: Date;
+}
+
+/** The scholar's recent saved overviews (not hidden), newest first. The newest is
+ *  the live text. Reads only (`db.read`). */
+export async function listOverviewVersions(cwid: string): Promise<OverviewVersionSummary[]> {
+  const rows = await db.read.overviewVersion.findMany({
+    where: { cwid, hiddenAt: null },
+    orderBy: { createdAt: "desc" },
+    take: GENERATION_HISTORY_LIMIT,
+    select: { id: true, html: true, origin: true, savedByCwid: true, createdAt: true },
+  });
+  return rows.map((r) => ({ ...r, origin: r.origin as OverviewOrigin }));
+}
+
+/** The overview imported from the previous profile system (the ETL column,
+ *  sanitized exactly as the public read does), or null when there is none. */
+export async function loadImportedOverview(cwid: string): Promise<string | null> {
+  const row = await db.read.scholar.findUnique({ where: { cwid }, select: { overview: true } });
+  if (!row?.overview) return null;
+  const clean = sanitizeOverviewHtml(sanitizeVIVOHtml(row.overview));
+  return clean === "" ? null : clean;
+}
+
+/** Display names for the cwids that drafted / saved history rows; a cwid with no
+ *  scholar row (e.g. a staff superuser) is simply absent. */
+export async function loadHistoryNames(cwids: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(cwids)];
+  if (unique.length === 0) return {};
+  const rows = await db.read.scholar.findMany({
+    where: { cwid: { in: unique } },
+    select: { cwid: true, preferredName: true },
+  });
+  return Object.fromEntries(rows.map((r) => [r.cwid, r.preferredName]));
 }
 
 /**

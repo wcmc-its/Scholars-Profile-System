@@ -1226,10 +1226,8 @@ describe("EditPage router — superuser mode", () => {
     };
     try {
       render(<EditPage ctx={noBio} mode="superuser" attr="overview" />);
-      // #1246 — the Draft-with-AI block now starts collapsed regardless of bio
-      // state; expand it to reach the Generate button.
+      // The Draft-with-AI rail sits beside the editor, always open.
       expect(screen.getByTestId("overview-draft-block")).toBeTruthy();
-      fireEvent.click(screen.getByTestId("overview-draft-block-toggle"));
       expect(screen.getByTestId("overview-generate")).toBeTruthy();
     } finally {
       fetchSpy.mockRestore();

@@ -13,7 +13,6 @@ import {
   OVERVIEW_INSTRUCTIONS_MAX,
   type OverviewParams,
 } from "@/lib/edit/overview-params";
-import type { OverviewPromptVersionMeta } from "@/lib/edit/overview-prompt-versions";
 
 function renderControls(overrides?: Partial<OverviewParams>) {
   const value: OverviewParams = { ...DEFAULT_OVERVIEW_PARAMS, ...overrides };
@@ -23,18 +22,18 @@ function renderControls(overrides?: Partial<OverviewParams>) {
 }
 
 describe("OverviewGenerateControls — rendering", () => {
-  it("renders a radio per voice / tone / length option", () => {
+  it("renders a radio per voice / length option and one tone & audience select", () => {
     renderControls();
     for (const id of ["overview-voice-third", "overview-voice-first"]) {
       expect(screen.getByTestId(id)).toBeTruthy();
     }
-    for (const id of [
-      "overview-tone-formal",
-      "overview-tone-neutral",
-      "overview-tone-conversational",
-    ]) {
-      expect(screen.getByTestId(id)).toBeTruthy();
-    }
+    const select = screen.getByTestId("overview-tone-audience") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      "Plain · general public",
+      "Formal · informed readers",
+      "Technical · specialists",
+    ]);
+    expect(select.value).toBe(DEFAULT_OVERVIEW_PARAMS.audience);
     for (const id of [
       "overview-length-short",
       "overview-length-standard",
@@ -71,10 +70,16 @@ describe("OverviewGenerateControls — onChange", () => {
     expect(onChange).toHaveBeenCalledWith({ ...value, voice: "first" });
   });
 
-  it("selecting a Tone radio calls onChange with the new tone", () => {
+  it("picking a tone & audience sets BOTH tone and audience", () => {
     const { value, onChange } = renderControls();
-    fireEvent.click(screen.getByTestId("overview-tone-conversational"));
-    expect(onChange).toHaveBeenCalledWith({ ...value, tone: "conversational" });
+    fireEvent.change(screen.getByTestId("overview-tone-audience"), {
+      target: { value: "accessible" },
+    });
+    expect(onChange).toHaveBeenCalledWith({ ...value, audience: "accessible", tone: "neutral" });
+    fireEvent.change(screen.getByTestId("overview-tone-audience"), {
+      target: { value: "technical" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith({ ...value, audience: "technical", tone: "formal" });
   });
 
   it("checking an unchecked element adds it (in display order)", () => {
@@ -131,71 +136,5 @@ describe("OverviewGenerateControls — onChange", () => {
       true,
     );
     expect(screen.getByTestId("overview-voice-first").hasAttribute("disabled")).toBe(true);
-  });
-});
-
-describe("OverviewGenerateControls — prompt version selector (superuser / curator)", () => {
-  const versions: OverviewPromptVersionMeta[] = [
-    {
-      id: "v3",
-      label: "v3 — keyword-rich narrative",
-      description: "The keyword-rich narrative prompt.",
-      status: "default",
-      model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    },
-    {
-      id: "v2",
-      label: "v2 — concise (legacy)",
-      description: "The original concise prompt.",
-      status: "deprecated",
-    },
-  ];
-
-  it("renders the superuser/curator-only callout and the per-draft cost line", () => {
-    render(
-      <OverviewGenerateControls
-        value={{ ...DEFAULT_OVERVIEW_PARAMS, promptVersion: "v3" }}
-        onChange={vi.fn()}
-        canSelectPromptVersion
-        promptVersions={versions}
-      />,
-    );
-    expect(screen.getByText("Visible to superusers and curators only.")).toBeTruthy();
-    // The selected version (v3) carries a resolved model, so the cost line renders.
-    expect(screen.getByTestId("overview-prompt-version-cost").textContent).toContain("per draft");
-  });
-});
-
-describe("OverviewGenerateControls — audience tier", () => {
-  it("renders a radio per audience tier with the short label", () => {
-    renderControls();
-    for (const id of [
-      "overview-audience-accessible",
-      "overview-audience-informed",
-      "overview-audience-technical",
-    ]) {
-      expect(screen.getByTestId(id)).toBeTruthy();
-    }
-    // Short labels ride the buttons (General / Informed / Expert).
-    expect(screen.getByText("General")).toBeTruthy();
-    expect(screen.getByText("Expert")).toBeTruthy();
-  });
-
-  it("selecting an audience tier calls onChange with the new audience", () => {
-    const { onChange } = renderControls({ audience: "informed" });
-    fireEvent.click(screen.getByTestId("overview-audience-technical"));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ audience: "technical" }));
-  });
-
-  it("wires each audience tier as a Radix tooltip trigger (description on hover)", () => {
-    renderControls();
-    // Radix Tooltip.Trigger (asChild) stamps `data-state` on the audience segment label,
-    // so it is a tooltip trigger; the description-less Voice control does NOT — proving the
-    // hover tooltip is wired only where there is a description. (The portaled tooltip text
-    // only mounts on hover, which jsdom can't drive without user-event, so we assert wiring.)
-    const audienceLabel = screen.getByTestId("overview-audience-accessible").closest("label");
-    expect(audienceLabel?.getAttribute("data-state")).toBeTruthy();
-    const voiceLabel = screen.getByTestId("overview-voice-third").closest("label");
-    expect(voiceLabel?.getAttribute("data-state")).toBeNull();
   });
 });

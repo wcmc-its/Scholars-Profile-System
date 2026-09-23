@@ -6,9 +6,18 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { mockGenerationFindMany, mockProvenanceFindUnique } = vi.hoisted(() => ({
+const {
+  mockGenerationFindMany,
+  mockProvenanceFindUnique,
+  mockVersionFindMany,
+  mockScholarFindUnique,
+  mockScholarFindMany,
+} = vi.hoisted(() => ({
   mockGenerationFindMany: vi.fn(),
   mockProvenanceFindUnique: vi.fn(),
+  mockVersionFindMany: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
+  mockScholarFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -16,6 +25,8 @@ vi.mock("@/lib/db", () => ({
     read: {
       overviewGeneration: { findMany: mockGenerationFindMany },
       overviewProvenance: { findUnique: mockProvenanceFindUnique },
+      overviewVersion: { findMany: mockVersionFindMany },
+      scholar: { findUnique: mockScholarFindUnique, findMany: mockScholarFindMany },
     },
   },
 }));
@@ -23,6 +34,9 @@ vi.mock("@/lib/db", () => ({
 import {
   computeOverviewOrigin,
   listOverviewGenerations,
+  listOverviewVersions,
+  loadHistoryNames,
+  loadImportedOverview,
   loadOverviewProvenance,
 } from "@/lib/edit/overview-provenance";
 
@@ -54,7 +68,8 @@ describe("listOverviewGenerations", () => {
       expect.objectContaining({
         // Only SUCCEEDED runs reach the history panel — failed attempts are persisted
         // for the audit trail but never offered for reload/restore.
-        where: { cwid: "self01", status: "succeeded" },
+        // Hidden (History-panel-deleted) drafts are excluded too.
+        where: { cwid: "self01", status: "succeeded", hiddenAt: null },
         orderBy: { createdAt: "desc" },
         take: 20,
       }),
@@ -127,5 +142,37 @@ describe("loadOverviewProvenance", () => {
       sourceGenerationId: "gen9",
       updatedAt,
     });
+  });
+});
+
+describe("History-panel reads", () => {
+  it("listOverviewVersions reads the scholar's un-hidden saves newest-first", async () => {
+    mockVersionFindMany.mockResolvedValue([]);
+    await listOverviewVersions("self01");
+    expect(mockVersionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { cwid: "self01", hiddenAt: null },
+        orderBy: { createdAt: "desc" },
+      }),
+    );
+  });
+
+  it("loadImportedOverview sanitizes the ETL text and nulls an empty one", async () => {
+    mockScholarFindUnique.mockResolvedValue({ overview: "<p>Hi</p><script>x()</script>" });
+    expect(await loadImportedOverview("self01")).toBe("<p>Hi</p>");
+    mockScholarFindUnique.mockResolvedValue({ overview: "" });
+    expect(await loadImportedOverview("self01")).toBeNull();
+    mockScholarFindUnique.mockResolvedValue(null);
+    expect(await loadImportedOverview("self01")).toBeNull();
+  });
+
+  it("loadHistoryNames de-dupes cwids and skips the query when there are none", async () => {
+    expect(await loadHistoryNames([])).toEqual({});
+    expect(mockScholarFindMany).not.toHaveBeenCalled();
+    mockScholarFindMany.mockResolvedValue([{ cwid: "a1", preferredName: "Ann" }]);
+    expect(await loadHistoryNames(["a1", "a1", "zz"])).toEqual({ a1: "Ann" });
+    expect(mockScholarFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: { in: ["a1", "zz"] } } }),
+    );
   });
 });

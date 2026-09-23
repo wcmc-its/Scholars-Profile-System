@@ -58,6 +58,8 @@ export type EditPanelProps = {
   description?: React.ReactNode;
   /** Optional element pinned to the top-right of the header (e.g. a status badge). */
   headerAction?: React.ReactNode;
+  /** Optional inline element right after the heading (e.g. a draft-status pill). */
+  headingBadge?: React.ReactNode;
   /** `data-slot` for tests/styling hooks (e.g. "overview-card"). */
   slot?: string;
   className?: string;
@@ -88,6 +90,7 @@ export function EditPanel({
   subsection = false,
   description,
   headerAction,
+  headingBadge,
   slot = "edit-panel",
   className,
   children,
@@ -109,6 +112,13 @@ export function EditPanel({
             >
               {heading}
             </h3>
+          ) : headingBadge ? (
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h2 id={resolvedHeadingId} className="text-[17px] font-[600] tracking-[-0.015em]">
+                {heading}
+              </h2>
+              {headingBadge}
+            </div>
           ) : (
             <h2 id={resolvedHeadingId} className="text-[17px] font-[600] tracking-[-0.015em]">
               {heading}

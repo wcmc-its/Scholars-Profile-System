@@ -389,6 +389,16 @@ async function handleScholarFieldEdit(params: {
             updatedByCwid: session.cwid,
           },
         });
+        // The History panel's saved-version log — every publish is recoverable.
+        await tx.overviewVersion.create({
+          data: {
+            cwid: entityId,
+            html: storedValue,
+            origin,
+            sourceGenerationId: provenanceSource,
+            savedByCwid: session.cwid,
+          },
+        });
       }
       if (fieldName === "slug") {
         await reconcileScholarSlug(tx, entityId, storedValue);

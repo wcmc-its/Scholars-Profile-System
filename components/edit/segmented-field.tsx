@@ -42,6 +42,7 @@ export function SegmentedField({
   disabled,
   onValueChange,
   compact = false,
+  soft = false,
 }: {
   legend: string;
   name: string;
@@ -59,6 +60,9 @@ export function SegmentedField({
    * overview generate controls pass this; the biosketch controls keep the pills.
    */
   compact?: boolean;
+  /** With `compact`: the neutral track + raised white selected segment (the overview
+   *  "Draft with AI" rail) instead of the maroon fill. */
+  soft?: boolean;
 }) {
   // Any option with a description gets a styled Radix tooltip on hover, which needs a
   // TooltipProvider ancestor. Controls with no descriptions (voice / tone / length, the
@@ -71,7 +75,9 @@ export function SegmentedField({
       onValueChange={onValueChange}
       disabled={disabled}
       className={cn(
-        compact
+        compact && soft
+          ? "border-apollo-border bg-apollo-surface-2 grid w-full auto-cols-fr grid-flow-col gap-0.5 rounded-[7px] border p-0.5"
+          : compact
           ? "border-apollo-border-strong flex w-full overflow-hidden rounded-md border"
           : "inline-flex w-fit flex-wrap gap-1 rounded-lg p-0",
       )}
@@ -85,7 +91,15 @@ export function SegmentedField({
             key={opt.value}
             htmlFor={id}
             className={
-              compact
+              compact && soft
+                ? cn(
+                    "flex min-w-0 cursor-pointer justify-center truncate rounded-[5px] px-1 py-1.5 text-center text-[13px] transition-colors select-none",
+                    selected
+                      ? "text-foreground bg-white font-semibold shadow-[0_1px_2px_rgba(34,30,28,0.12),0_0_0_1px_var(--apollo-border-strong)]"
+                      : "text-muted-foreground hover:text-foreground",
+                    disabled && "cursor-not-allowed opacity-60",
+                  )
+                : compact
                 ? cn(
                     "cursor-pointer items-center transition-colors select-none",
                     "border-apollo-border-strong flex min-w-0 flex-1 justify-center truncate border-l px-2 py-1 text-center text-[12.5px] first:border-l-0",
@@ -125,7 +139,9 @@ export function SegmentedField({
       <legend
         className={cn(
           "mb-1",
-          compact
+          soft
+            ? "text-muted-foreground text-xs font-semibold"
+            : compact
             ? "text-muted-foreground text-[11px] font-semibold tracking-wide uppercase"
             : "text-foreground text-sm font-medium",
         )}

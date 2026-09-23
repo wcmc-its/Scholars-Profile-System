@@ -37,6 +37,11 @@ function options(over: Partial<OverviewSourceOptions> = {}): OverviewSourceOptio
   };
 }
 
+/** Sources are tabbed; Publications is open by default. */
+function openTab(type: string) {
+  fireEvent.click(screen.getByTestId(`overview-source-tab-${type}`));
+}
+
 function deltas(over: Partial<OverviewSelectionDeltas> = {}): OverviewSelectionDeltas {
   return { ...DEFAULT_OVERVIEW_SELECTION_DELTAS, ...over };
 }
@@ -79,6 +84,7 @@ describe("OverviewIncludePicker — tiers", () => {
       ],
     });
     render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    openTab("method");
     expect(screen.getByTestId("overview-source-section-method")).toBeTruthy();
     fireEvent.click(screen.getByTestId("overview-source-why-method-AAV vectors"));
     expect(screen.getByText(/delivered the transgene/)).toBeTruthy();
@@ -92,6 +98,7 @@ describe("OverviewIncludePicker — tiers", () => {
       ],
     });
     render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    openTab("method");
     expect(screen.getByTestId("overview-source-section-method").textContent).toContain(
       "(Echocardiography…)",
     );
@@ -173,6 +180,7 @@ describe("OverviewIncludePicker — led ⇄ all toggle", () => {
       ],
     });
     render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    openTab("funding");
     expect(screen.getByTestId("overview-source-empty-led")).toBeTruthy();
   });
 
@@ -185,6 +193,7 @@ describe("OverviewIncludePicker — led ⇄ all toggle", () => {
         onChange={() => {}}
       />,
     );
+    openTab("funding");
     const row = screen.getByTestId("overview-source-row-funding-g1");
     expect(row.getAttribute("data-state")).toBe("excluded");
     expect(screen.getByTestId("overview-source-undo-funding-g1")).toBeTruthy();
@@ -277,6 +286,7 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
 
   it("renders the scaffold as name · primary title · department (the strings the bio grounds on)", () => {
     render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={() => {}} />);
+    openTab("title");
     const scaffold = screen.getByTestId("overview-source-scaffold-title");
     expect(scaffold.textContent).toContain("Always shown");
     expect(scaffold.textContent).toContain("Jane Smith · Associate Professor of Medicine · Medicine");
@@ -292,6 +302,7 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
       ],
     });
     render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    openTab("title");
     expect(screen.getByTestId("overview-source-section-title")).toBeTruthy();
     expect(screen.queryByTestId("overview-source-scaffold-title")).toBeNull();
     expect(screen.getByTestId("overview-source-row-title-a1")).toBeTruthy();
@@ -305,6 +316,7 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
         onChange={() => {}}
       />,
     );
+    openTab("title");
     const row = screen.getByTestId("overview-source-row-title-a1");
     expect(row.getAttribute("data-state")).toBe("excluded");
     expect(screen.getByTestId("overview-source-undo-title-a1")).toBeTruthy();
@@ -319,6 +331,7 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
         onChange={onChange}
       />,
     );
+    openTab("title");
     // a2 is an Available (non-featured) row pinned in → exclude-only section, so it gets
     // an Unpin control, and clicking it clears the pin rather than minting an exclude.
     fireEvent.click(screen.getByTestId("overview-source-pin-title-a2"));
@@ -341,8 +354,10 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
       ],
     });
     render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    openTab("title");
     fireEvent.click(screen.getByTestId("overview-source-more-title"));
     expect(screen.getByTestId("overview-source-row-title-a3").textContent).toContain("until 2019");
+    openTab("education");
     const eduRow = screen.getByTestId("overview-source-row-education-e3");
     expect(eduRow.textContent).toContain("Some University");
     expect(eduRow.textContent).not.toContain("null");
@@ -350,6 +365,7 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
 
   it("features the significant current role exclude-only (no pin); the rest sits behind '+ more'", () => {
     render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={() => {}} />);
+    openTab("title");
     expect(screen.getByTestId("overview-source-row-title-a1")).toBeTruthy();
     expect(screen.getByTestId("overview-source-exclude-title-a1")).toBeTruthy();
     expect(screen.queryByTestId("overview-source-pin-title-a1")).toBeNull();
@@ -360,6 +376,7 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
   it("excludes a featured title and adds an Available one (add-and-pin)", () => {
     const onChange = vi.fn();
     render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={onChange} />);
+    openTab("title");
     fireEvent.click(screen.getByTestId("overview-source-exclude-title-a1"));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ excluded: expect.objectContaining({ title: ["a1"] }) }),
@@ -373,6 +390,7 @@ describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
 
   it("features terminal/professional education exclude-only; the minor cert sits behind '+ more'", () => {
     render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={() => {}} />);
+    openTab("education");
     expect(screen.getByTestId("overview-source-row-education-e1")).toBeTruthy();
     expect(screen.getByTestId("overview-source-exclude-education-e1")).toBeTruthy();
     expect(screen.queryByTestId("overview-source-pin-education-e1")).toBeNull();

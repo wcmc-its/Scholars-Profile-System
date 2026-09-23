@@ -34,6 +34,10 @@ vi.mock("@/components/edit/overview-editor", () => ({
 }));
 
 import { OverviewCard } from "@/components/edit/overview-card";
+import type {
+  OverviewPromptVersionId,
+  OverviewPromptVersionMeta,
+} from "@/lib/edit/overview-prompt-versions";
 
 const CWID = "self01";
 
@@ -86,7 +90,7 @@ describe("OverviewCard — Save disabled states", () => {
     const over = "y".repeat(2_501);
     fireEvent.change(screen.getByTestId("mock-editor"), { target: { value: over } });
     const counter = screen.getByTestId("overview-counter");
-    expect(counter.textContent).toBe("2,501/2,500");
+    expect(counter.textContent).toBe("2,501 / 2,500");
     expect(counter.className).toContain("text-destructive");
   });
 
@@ -94,7 +98,7 @@ describe("OverviewCard — Save disabled states", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" />);
     fireEvent.change(screen.getByTestId("mock-editor"), { target: { value: "a".repeat(120) } });
     const counter = screen.getByTestId("overview-counter");
-    expect(counter.textContent).toBe("120");
+    expect(counter.textContent).toBe("120 / 2,500");
     expect(counter.className).not.toContain("text-destructive");
     expect(counter.className).not.toContain("text-apollo-amber");
   });
@@ -103,7 +107,7 @@ describe("OverviewCard — Save disabled states", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" />);
     fireEvent.change(screen.getByTestId("mock-editor"), { target: { value: "a".repeat(2_100) } });
     const counter = screen.getByTestId("overview-counter");
-    expect(counter.textContent).toBe("2,100/2,500");
+    expect(counter.textContent).toBe("2,100 / 2,500");
     expect(counter.className).toContain("text-apollo-amber");
   });
 
@@ -114,7 +118,7 @@ describe("OverviewCard — Save disabled states", () => {
       target: { value: "<p>hello world</p>" },
     });
     const counter = screen.getByTestId("overview-counter");
-    expect(counter.textContent).toBe("11");
+    expect(counter.textContent).toBe("11 / 2,500");
     expect(counter.className).not.toContain("text-destructive");
     expect(counter.className).not.toContain("text-apollo-amber");
   });
@@ -125,7 +129,7 @@ describe("OverviewCard — Save disabled states", () => {
     const html = "<b>x</b>".repeat(400);
     fireEvent.change(screen.getByTestId("mock-editor"), { target: { value: html } });
     const counter = screen.getByTestId("overview-counter");
-    expect(counter.textContent).toBe("400");
+    expect(counter.textContent).toBe("400 / 2,500");
     expect(counter.className).not.toContain("text-destructive");
     // Under the visible cap → Save stays enabled even though the HTML is > 2,500.
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(false);
@@ -137,7 +141,7 @@ describe("OverviewCard — Save disabled states", () => {
     const html = "<b>x</b>".repeat(2_501);
     fireEvent.change(screen.getByTestId("mock-editor"), { target: { value: html } });
     const counter = screen.getByTestId("overview-counter");
-    expect(counter.textContent).toBe("2,501/2,500");
+    expect(counter.textContent).toBe("2,501 / 2,500");
     expect(counter.className).toContain("text-destructive");
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
   });
@@ -290,8 +294,6 @@ describe("OverviewCard — live preview link", () => {
 // #742 — the overview-statement generator affordance (SELF arm, behind a flag)
 // ---------------------------------------------------------------------------
 
-const GENERATE_BANNER =
-  "Draft generated from your Scholars data. Review and edit it before saving — nothing is published until you save.";
 const GENERATE_SPARSE =
   "We don't have enough of your work indexed to draft an overview yet. You can write your own, or review My Publications first.";
 const GENERATE_RATE_LIMITED =
@@ -410,14 +412,10 @@ function postCall(f: FetchSpy): [string, RequestInit] {
   return call as unknown as [string, RequestInit];
 }
 
-/** #875 — the Draft-with-AI block is inline (no tabs). #1246 — it is now
- *  collapsed by default regardless of saved-bio state; tests that drive
- *  generation or query the block body must expand it first. */
-function expandBlock() {
-  const toggle = screen.queryByTestId("overview-draft-block-toggle");
-  if (toggle && toggle.getAttribute("aria-expanded") === "false") {
-    fireEvent.click(toggle);
-  }
+/** The drafts & versions list lives behind the header's History toggle. */
+async function openHistory() {
+  const toggle = await screen.findByTestId("overview-history-toggle");
+  if (toggle.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
 }
 
 describe("OverviewCard — generator affordance", () => {
@@ -429,24 +427,21 @@ describe("OverviewCard — generator affordance", () => {
 
   it("shows the fixed 'Generate a draft' button when enabled and the bio is empty", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     expect(screen.getByTestId("overview-generate")).toBeTruthy();
-    expect(screen.getByTestId("overview-generate").textContent).toContain("Generate a draft");
+    expect(screen.getByTestId("overview-generate").textContent).toContain("Generate draft");
   });
 
   it("shows the same 'Generate a draft' label even when a rich bio exists (no Regenerate)", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>An existing bio.</p>" generateEnabled />);
-    expandBlock();
-    expect(screen.getByTestId("overview-generate").textContent).toContain("Generate a draft");
+    expect(screen.getByTestId("overview-generate").textContent).toContain("Generate draft");
     expect(screen.queryByTestId("overview-regenerate")).toBeNull();
   });
 
   it("POSTs to /api/edit/overview/generate with { entityId, params }", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
-    await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
+    await screen.findByTestId("overview-draft-review-card");
     const [url, opts] = postCall(f);
     expect(url).toBe("/api/edit/overview/generate");
     expect(opts.method).toBe("POST");
@@ -462,14 +457,14 @@ describe("OverviewCard — generator affordance", () => {
   it("on 200 lands the draft in the review card, NOT the editor — Save stays disabled (clobber-safety)", async () => {
     stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     // Pristine empty bio → Save disabled before generating.
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByTestId("overview-generate"));
-    await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
+    await screen.findByTestId("overview-draft-review-card");
     // The draft is in the review card; the editor (and Save) is untouched.
     expect(screen.getByTestId("overview-draft-review-card")).toBeTruthy();
     expect(screen.getByTestId("overview-draft-body").innerHTML).toBe("<p>A drafted overview.</p>");
+    fireEvent.click(screen.getByTestId("overview-review-view-current"));
     expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("");
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
     // The Generate button stays put (no Regenerate flip).
@@ -479,7 +474,6 @@ describe("OverviewCard — generator affordance", () => {
   it("Replace overwrites the editor with the draft and enables Save", async () => {
     stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-replace");
     fireEvent.click(screen.getByTestId("overview-draft-replace"));
@@ -496,7 +490,6 @@ describe("OverviewCard — generator affordance", () => {
   it("Insert below appends the draft to the editor's current contents", async () => {
     stubGenerateOk("<p>drafted.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="<p>existing.</p>" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-insert");
     fireEvent.click(screen.getByTestId("overview-draft-insert"));
@@ -510,7 +503,6 @@ describe("OverviewCard — generator affordance", () => {
   it("Discard clears only the review card; the editor stays pristine", async () => {
     stubGenerateOk("<p>drafted.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-discard");
     fireEvent.click(screen.getByTestId("overview-draft-discard"));
@@ -526,16 +518,15 @@ describe("OverviewCard — generator affordance", () => {
       return jsonResponse({ ok: true, draft: `<p>draft ${n}</p>`, model: "openai/gpt", generationId: `gen-${n}` });
     });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-review-card");
     fireEvent.click(screen.getByTestId("overview-generate"));
     // Two drafts → the pager appears, newest first.
-    await waitFor(() => expect(screen.getByText("Draft 1 of 2 · view previous")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("AI draft 2 of 2")).toBeTruthy());
     expect(screen.getByTestId("overview-draft-body").innerHTML).toBe("<p>draft 2</p>");
     // Step back to the first draft.
-    fireEvent.click(screen.getByTestId("overview-draft-next"));
-    expect(screen.getByText("Draft 2 of 2 · view previous")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("overview-draft-prev"));
+    expect(screen.getByText("AI draft 1 of 2")).toBeTruthy();
     expect(screen.getByTestId("overview-draft-body").innerHTML).toBe("<p>draft 1</p>");
   });
 
@@ -545,11 +536,10 @@ describe("OverviewCard — generator affordance", () => {
     vi.stubGlobal("confirm", confirmSpy);
     stubGenerateOk("<p>drafted.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="<p>edited bio.</p>" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-review-card");
     fireEvent.click(screen.getByTestId("overview-generate"));
-    await waitFor(() => expect(screen.getByText("Draft 1 of 2 · view previous")).toBeTruthy());
+    await screen.findByTestId("overview-draft-review-card");
     expect(confirmSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -557,7 +547,6 @@ describe("OverviewCard — generator affordance", () => {
   it("on 422 insufficient_facts shows the sparse-data message and leaves the editor unchanged", async () => {
     stubGenerateError(422, "insufficient_facts");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_SPARSE)).toBeTruthy());
     // No review card; editor untouched ⇒ still pristine ⇒ Save disabled.
@@ -569,7 +558,6 @@ describe("OverviewCard — generator affordance", () => {
   it("on 429 rate_limited shows the rate-limit message", async () => {
     stubGenerateError(429, "rate_limited");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_RATE_LIMITED)).toBeTruthy());
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
@@ -578,7 +566,6 @@ describe("OverviewCard — generator affordance", () => {
   it("on a 502 shows the inline generation error and leaves the editor unchanged (G8)", async () => {
     stubGenerateError(502, "generation_failed");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
     expect(screen.queryByTestId("overview-draft-review-card")).toBeNull();
@@ -589,7 +576,6 @@ describe("OverviewCard — generator affordance", () => {
   it("on a network failure shows the inline generation error", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
   });
@@ -604,7 +590,6 @@ describe("OverviewCard — generator affordance", () => {
 describe("OverviewCard — generation options (params)", () => {
   it("renders the controls with defaults when generateEnabled", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     // Default voice is third person; the radio reflects the default value.
     expect(screen.getByTestId("overview-voice-third").getAttribute("aria-checked")).toBe("true");
     expect(screen.getByTestId("overview-voice-first").getAttribute("aria-checked")).toBe("false");
@@ -618,10 +603,9 @@ describe("OverviewCard — generation options (params)", () => {
   it("after changing voice to First, Generate sends params.voice === 'first'", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-voice-first"));
     fireEvent.click(screen.getByTestId("overview-generate"));
-    await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
+    await screen.findByTestId("overview-draft-review-card");
     const [, opts] = postCall(f);
     const body = JSON.parse(opts.body as string) as { params: { voice: string } };
     expect(body.params.voice).toBe("first");
@@ -630,12 +614,11 @@ describe("OverviewCard — generation options (params)", () => {
   it("typing instructions is reflected in the sent params", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.change(screen.getByTestId("overview-instructions"), {
       target: { value: "keep it accessible" },
     });
     fireEvent.click(screen.getByTestId("overview-generate"));
-    await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
+    await screen.findByTestId("overview-draft-review-card");
     const [, opts] = postCall(f);
     const body = JSON.parse(opts.body as string) as { params: { instructions: string } };
     expect(body.params.instructions).toBe("keep it accessible");
@@ -667,7 +650,6 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("fetches GET /api/edit/overview/generations on mount when generateEnabled", async () => {
     const f = stubFetchRouted(() => jsonResponse({ ok: true }), { generations: HISTORY });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     await waitFor(() =>
       expect(
         f.mock.calls.some(
@@ -675,7 +657,8 @@ describe("OverviewCard — version history (Phase B)", () => {
         ),
       ).toBe(true),
     );
-    // The fetched draft surfaces in the in-block "Earlier drafts" affordance.
+    // The fetched draft surfaces in the History panel.
+    await openHistory();
     expect(await screen.findByTestId("overview-versions-panel")).toBeTruthy();
     expect(screen.getByTestId("overview-version-load-gen-1")).toBeTruthy();
   });
@@ -704,9 +687,9 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("imported-bio label when there's a saved overview but no provenance (#1077)", async () => {
     stubFetchRouted(() => jsonResponse({ ok: true }), { provenance: null });
     render(<OverviewCard cwid={CWID} initialHtml="<p>An imported bio.</p>" generateEnabled />);
-    const note = await screen.findByTestId("overview-provenance-note");
-    expect(note.textContent).toContain("Imported from the previous profile system");
-    expect(note.textContent).not.toContain("Last updated");
+    const status = await screen.findByTestId("overview-status");
+    expect(status.textContent).toBe("Imported · not edited here");
+    expect(screen.queryByTestId("overview-provenance-note")).toBeNull();
   });
 
   it("superuser mode reframes 'written by you' to 'written manually' (#1077 follow-up)", async () => {
@@ -723,13 +706,14 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("viewing a version lands it in the review card (not the editor) with the banner", async () => {
     stubFetchRouted(() => jsonResponse({ ok: true }), { generations: HISTORY });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
+    await openHistory();
     fireEvent.click(await screen.findByTestId("overview-version-load-gen-1"));
     // The draft is proposed in the review card; the editor stays empty.
     expect(await screen.findByTestId("overview-draft-review-card")).toBeTruthy();
     expect(screen.getByTestId("overview-draft-body").innerHTML).toBe("<p>An earlier draft.</p>");
+    expect(screen.getByText(/nothing changes until you use it/)).toBeTruthy();
+    fireEvent.click(screen.getByTestId("overview-review-view-current"));
     expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("");
-    expect(screen.getByText(GENERATE_BANNER)).toBeTruthy();
     // Editor untouched ⇒ Save still disabled until a choice is made.
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
   });
@@ -737,7 +721,6 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("Save sends sourceGenerationId after generate → Replace", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>", "gen-new");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-replace");
     fireEvent.click(screen.getByTestId("overview-draft-replace"));
@@ -763,7 +746,7 @@ describe("OverviewCard — version history (Phase B)", () => {
       { generations: HISTORY },
     );
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
+    await openHistory();
     fireEvent.click(await screen.findByTestId("overview-version-load-gen-1"));
     fireEvent.click(await screen.findByTestId("overview-draft-replace"));
     await waitFor(() =>
@@ -785,7 +768,6 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("hand-editing an accepted draft un-links provenance (saves as authored)", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>", "gen-new");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-replace");
     fireEvent.click(screen.getByTestId("overview-draft-replace"));
@@ -805,9 +787,9 @@ describe("OverviewCard — version history (Phase B)", () => {
       ],
     });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     // Default voice is third; applying the version (voice: first) flips the radio.
     expect(screen.getByTestId("overview-voice-third").getAttribute("aria-checked")).toBe("true");
+    await openHistory();
     fireEvent.click(await screen.findByTestId("overview-version-use-settings-gen-1"));
     await waitFor(() =>
       expect(screen.getByTestId("overview-voice-first").getAttribute("aria-checked")).toBe("true"),
@@ -873,14 +855,14 @@ describe("OverviewCard — version history (Phase B)", () => {
     });
 
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     // Default selection (all default-selected) → 3 publications + 2 awards.
     expect(
       await screen.findByText(
-        "No overview yet. Generate a draft from your 3 publications and 2 awards above, or start writing here.",
+        "No overview yet. Generate a draft from your 3 publications and 2 awards with Draft with AI, or start writing here.",
       ),
     ).toBeTruthy();
 
+    await openHistory();
     fireEvent.click(await screen.findByTestId("overview-version-use-settings-gen-1"));
 
     // Restored = saved selection minus the stale pmid 999 and the un-saved
@@ -888,7 +870,7 @@ describe("OverviewCard — version history (Phase B)", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "No overview yet. Generate a draft from your 1 publication and 1 award above, or start writing here.",
+          "No overview yet. Generate a draft from your 1 publication and 1 award with Draft with AI, or start writing here.",
         ),
       ).toBeTruthy(),
     );
@@ -899,50 +881,79 @@ describe("OverviewCard — version history (Phase B)", () => {
 // #875 — the Draft-with-AI collapsible block (default-open/collapsed, summary)
 // ---------------------------------------------------------------------------
 
-describe("OverviewCard — Draft-with-AI block", () => {
-  it("is collapsed by default even when there is no saved bio (#1246)", () => {
-    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expect(screen.getByTestId("overview-draft-block-toggle").getAttribute("aria-expanded")).toBe(
-      "false",
-    );
-    expect(screen.queryByTestId("overview-draft-block-body")).toBeNull();
-  });
-
-  it("is collapsed by default when a saved hand-written bio exists, showing a settings summary", () => {
+describe("OverviewCard — Draft-with-AI rail", () => {
+  it("is always shown beside the editor (no collapse toggle)", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>An existing bio.</p>" generateEnabled />);
-    expect(screen.getByTestId("overview-draft-block-toggle").getAttribute("aria-expanded")).toBe(
-      "false",
-    );
-    expect(screen.queryByTestId("overview-draft-block-body")).toBeNull();
-    // The collapsed summary is the compact form: voice/tone/length + emphasis COUNT.
-    const summary = screen.getByTestId("overview-draft-block-summary").textContent ?? "";
-    expect(summary).toContain("Third person");
-    expect(summary).toContain("emphases");
-  });
-
-  it("toggling expands/collapses the block", () => {
-    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" generateEnabled />);
-    fireEvent.click(screen.getByTestId("overview-draft-block-toggle"));
-    expect(screen.getByTestId("overview-draft-block-body")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("overview-draft-block-toggle"));
-    expect(screen.queryByTestId("overview-draft-block-body")).toBeNull();
+    expect(screen.getByTestId("overview-draft-block")).toBeTruthy();
+    expect(screen.getByTestId("overview-voice-third")).toBeTruthy();
+    expect(screen.queryByTestId("overview-draft-block-toggle")).toBeNull();
   });
 
   it("renders the Generate button BELOW the settings + sources (button last)", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
-    const body = screen.getByTestId("overview-draft-block-body");
     const voice = screen.getByTestId("overview-voice-third");
     const sources = screen.getByTestId("overview-sources-trigger");
     const generate = screen.getByTestId("overview-generate");
-    // DOM order: voice (settings) < sources < generate.
-    expect(body.compareDocumentPosition(generate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(
-      voice.compareDocumentPosition(generate) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      sources.compareDocumentPosition(generate) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(voice.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(sources.compareDocumentPosition(generate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("Advanced (superusers) holds the prompt version, model + cost; owners never see it", () => {
+    const versions = [
+      {
+        id: "v3",
+        label: "v3 — keyword-rich narrative",
+        description: "The keyword-rich narrative prompt.",
+        status: "default",
+        model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      },
+    ] as unknown as OverviewPromptVersionMeta[];
+    const { unmount } = render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expect(screen.queryByTestId("overview-advanced-toggle")).toBeNull();
+    unmount();
+    render(
+      <OverviewCard
+        cwid={CWID}
+        initialHtml=""
+        generateEnabled
+        canSelectPromptVersion
+        promptVersions={versions}
+        defaultPromptVersion={"v3" as OverviewPromptVersionId}
+      />,
+    );
+    expect(screen.queryByTestId("overview-prompt-version")).toBeNull();
+    fireEvent.click(screen.getByTestId("overview-advanced-toggle"));
+    expect(screen.getByTestId("overview-prompt-version")).toBeTruthy();
+    expect(screen.getByTestId("overview-prompt-version-cost").textContent).toContain("per draft");
+  });
+
+  it("flips the button to Regenerate while a draft is under review", async () => {
+    stubGenerateOk("<p>drafted.</p>");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await screen.findByTestId("overview-draft-review-card");
+    expect(screen.getByTestId("overview-generate").textContent).toBe("Regenerate draft");
+    expect(screen.getByTestId("overview-status").textContent).toBe("Draft pending review");
+  });
+
+  it("Current text shows the editor during review; Use this draft then Restore previous text undoes it", async () => {
+    stubGenerateOk("<p>drafted.</p>");
+    render(<OverviewCard cwid={CWID} initialHtml="<p>existing.</p>" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await screen.findByTestId("overview-draft-review-card");
+    expect(screen.queryByTestId("mock-editor")).toBeNull();
+    fireEvent.click(screen.getByTestId("overview-review-view-current"));
+    expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>existing.</p>");
+    fireEvent.click(screen.getByTestId("overview-review-view-draft"));
+    fireEvent.click(screen.getByTestId("overview-draft-replace"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>drafted.</p>"),
+    );
+    fireEvent.click(screen.getByTestId("overview-restore-previous"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>existing.</p>"),
+    );
+    expect(screen.queryByTestId("overview-restore-previous")).toBeNull();
   });
 });
 
@@ -1005,7 +1016,7 @@ describe("OverviewCard — editor empty-state", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     expect(
       await screen.findByText(
-        "No overview yet. Generate a draft from your 2 publications and 1 award above, or start writing here.",
+        "No overview yet. Generate a draft from your 2 publications and 1 award with Draft with AI, or start writing here.",
       ),
     ).toBeTruthy();
   });
@@ -1014,7 +1025,7 @@ describe("OverviewCard — editor empty-state", () => {
     // No fetch stub installed → source-options never resolves synchronously.
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     expect(
-      screen.getByText("No overview yet. Generate a draft from your work above, or start writing here."),
+      screen.getByText("No overview yet. Generate a draft with Draft with AI, or start writing here."),
     ).toBeTruthy();
     // Never flashes a "0 publications and 0 awards".
     expect(screen.queryByText(/0 publications and 0 awards/)).toBeNull();
@@ -1023,7 +1034,7 @@ describe("OverviewCard — editor empty-state", () => {
   it("shows count-less fallback on the manual (no-flag) surface", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" />);
     expect(
-      screen.getByText("No overview yet. Generate a draft from your work above, or start writing here."),
+      screen.getByText("No overview yet. Start writing here."),
     ).toBeTruthy();
   });
 
@@ -1084,17 +1095,16 @@ describe("OverviewCard — conditional hints", () => {
   it("fires the emphasis-conflict hint when awards are selected but Grants & funding is off", async () => {
     stubSourceOptions({ pubs: 3, awardsSelected: true });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     const hint = await screen.findByTestId("overview-hint-emphasis-conflict");
-    expect(hint.textContent).toContain(
-      "awards are selected as sources but won't be mentioned directly — turn on Grants & funding to include them in the overview.",
-    );
+    expect(hint.textContent).toMatch(/in sources but won’t be mentioned\./);
+    // "Include them" turns Grants & funding on and clears the hint.
+    fireEvent.click(screen.getByTestId("overview-hint-include-grants"));
+    await waitFor(() => expect(screen.queryByTestId("overview-hint-emphasis-conflict")).toBeNull());
   });
 
   it("hides the conflict hint once Grants & funding is toggled on", async () => {
     stubSourceOptions({ pubs: 3, awardsSelected: true });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     await screen.findByTestId("overview-hint-emphasis-conflict");
     fireEvent.click(screen.getByTestId("overview-element-grants_funding"));
     await waitFor(() =>
@@ -1105,7 +1115,6 @@ describe("OverviewCard — conditional hints", () => {
   it("fires the sparse-sources hint when <=1 publication and 0 awards are selected", async () => {
     stubSourceOptions({ pubs: 1, awardsSelected: false });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     const hint = await screen.findByTestId("overview-hint-sparse-sources");
     expect(hint.textContent).toContain("Limited sources may produce a generic draft.");
     // Distinct from the post-422 server message.
@@ -1115,7 +1124,6 @@ describe("OverviewCard — conditional hints", () => {
   it("does NOT fire the sparse hint with multiple publications", async () => {
     stubSourceOptions({ pubs: 5, awardsSelected: false });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
-    expandBlock();
     await screen.findByTestId("overview-generate");
     expect(screen.queryByTestId("overview-hint-sparse-sources")).toBeNull();
   });
@@ -1195,5 +1203,152 @@ describe("OverviewCard — read-only preview mark styling (#2579)", () => {
   it("carries no `prose` class", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly />);
     expect(previewClass()).not.toMatch(/\bprose\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// History panel — named drafts, the saved-version log, Restore, rename, delete
+// ---------------------------------------------------------------------------
+
+describe("OverviewCard — History panel actions", () => {
+  const HISTORY_BODY = {
+    generations: [
+      {
+        id: "gen-1",
+        model: "openai/gpt",
+        params: { voice: "third", tone: "formal", length: "short", audience: "informed", elements: [], instructions: "" },
+        createdAt: "2026-06-01T12:00:00.000Z",
+        text: "<p>Draft text.</p>",
+        name: "Short take",
+        by: "Pat Self",
+      },
+    ],
+    provenance: { origin: "authored", model: null, updatedAt: "2026-06-03T12:00:00.000Z" },
+    versions: [
+      { id: "v-live", html: "<p>Live.</p>", origin: "authored", createdAt: "2026-06-03T12:00:00.000Z", by: "Pat Self" },
+      { id: "v-old", html: "<p>Older.</p>", origin: "generated", createdAt: "2026-06-02T12:00:00.000Z", by: null },
+    ],
+    importedHtml: "<p>Imported.</p>",
+  };
+
+  function stubHistory() {
+    return vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.startsWith("/api/edit/overview/generations")) return jsonResponse(HISTORY_BODY);
+        if (url.startsWith("/api/edit/overview/source-options")) {
+          return jsonResponse({ ok: true, publications: [], funding: [], tools: [] });
+        }
+        if (url.startsWith("/api/edit/overview/selection")) {
+          return jsonResponse({ ok: true, deltas: EMPTY_DELTAS });
+        }
+        if (url.startsWith("/api/edit/overview/history")) return jsonResponse({ ok: true, method: init?.method });
+        return jsonResponse({ ok: true });
+      });
+  }
+
+  function historyCalls(f: ReturnType<typeof stubHistory>) {
+    return f.mock.calls
+      .filter((c) => String(c[0]).startsWith("/api/edit/overview/history"))
+      .map((c) => ({
+        url: String(c[0]),
+        method: (c[1] as RequestInit).method,
+        body: JSON.parse((c[1] as RequestInit).body as string) as unknown,
+      }));
+  }
+
+  it("lists the named draft, the saved versions (newest = Published) and the imported text", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    const draft = await screen.findByTestId("overview-version-gen-1");
+    expect(draft.textContent).toContain("Short take");
+    expect(draft.textContent).toContain("by Pat Self");
+    const live = screen.getByTestId("overview-version-v-live");
+    expect(live.textContent).toContain("Published");
+    // The live version can be neither restored nor deleted.
+    expect(screen.queryByTestId("overview-version-delete-v-live")).toBeNull();
+    expect(screen.queryByTestId("overview-version-restore-v-live")).toBeNull();
+    expect(screen.getByTestId("overview-version-delete-v-old")).toBeTruthy();
+    expect(screen.getByTestId("overview-version-imported").textContent).toContain("Imported text");
+    expect(screen.getByTestId("overview-history-toggle").textContent).toContain("4");
+  });
+
+  it("Restore puts an older version in the editor; Restore previous text undoes it", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-restore-v-old"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>Older.</p>"),
+    );
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByTestId("overview-restore-previous"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>Live.</p>"),
+    );
+  });
+
+  it("Restore on the imported text reseeds the editor with it", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-restore-imported"));
+    await waitFor(() =>
+      expect((screen.getByTestId("mock-editor") as HTMLTextAreaElement).value).toBe("<p>Imported.</p>"),
+    );
+  });
+
+  it("renaming a draft PATCHes the trimmed name for the edited scholar", async () => {
+    const f = stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-rename-gen-1"));
+    const input = screen.getByTestId("overview-version-name-gen-1");
+    fireEvent.change(input, { target: { value: "  For the grant  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    await waitFor(() => expect(historyCalls(f)).toHaveLength(1));
+    expect(historyCalls(f)[0]).toEqual({
+      url: `/api/edit/overview/history?cwid=${CWID}`,
+      method: "PATCH",
+      body: { kind: "draft", id: "gen-1", name: "For the grant" },
+    });
+  });
+
+  it("Escape cancels a rename without a request", async () => {
+    const f = stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-rename-gen-1"));
+    fireEvent.keyDown(screen.getByTestId("overview-version-name-gen-1"), { key: "Escape" });
+    expect(screen.queryByTestId("overview-version-name-gen-1")).toBeNull();
+    expect(historyCalls(f)).toHaveLength(0);
+  });
+
+  it("delete asks to confirm, then DELETEs the row", async () => {
+    const f = stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    fireEvent.click(await screen.findByTestId("overview-version-delete-v-old"));
+    expect(historyCalls(f)).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("overview-version-confirm-delete-v-old"));
+    await waitFor(() => expect(historyCalls(f)).toHaveLength(1));
+    expect(historyCalls(f)[0]).toMatchObject({
+      method: "DELETE",
+      body: { kind: "version", id: "v-old" },
+    });
+  });
+
+  it("a draft under review cannot be deleted", async () => {
+    stubHistory();
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Live.</p>" generateEnabled />);
+    await openHistory();
+    expect(await screen.findByTestId("overview-version-delete-gen-1")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("overview-version-load-gen-1"));
+    expect(await screen.findByText("Short take · draft 1 of 1")).toBeTruthy();
+    await openHistory();
+    expect(screen.queryByTestId("overview-version-delete-gen-1")).toBeNull();
   });
 });
