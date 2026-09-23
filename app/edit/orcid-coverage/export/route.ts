@@ -3,19 +3,25 @@
  * department table (aggregates only — never a per-person list, see
  * `SCHOLAR_EXPORT_CAP`). Same `?type=&unit=&nih=` filter the page reads, parsed
  * and queried by the same functions (`parseOrcidCoverageParams`,
- * `loadOrcidCoverage`). The CSV has no criteria header — the link carries the
- * page's own query string. Gate order mirrors `/edit/data-sharing/export`:
+ * `loadOrcidCoverage`). The CSV opens with a `Filter,Value` criteria block
+ * (`orcidCoverageCriteria`, the shared `personFilterCriteria` rows + NIH +
+ * generated-at), one blank line, then the department table; the filename
+ * carries a short filter summary. Gate order mirrors `/edit/data-sharing/export`:
  * no session → 401 · not `canViewUsage` → 404 · else text/csv attachment.
  */
 import { NextResponse } from "next/server";
 
+import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
   loadOrcidCoverage,
-  orcidCoverageCsv,
+  orcidCoverageCriteria,
+  orcidCoverageExportCsv,
+  orcidCoverageFilename,
   parseOrcidCoverageParams,
 } from "@/lib/edit/orcid-coverage";
+import { unitLabels } from "@/lib/edit/person-filter";
 import { canViewUsage } from "@/lib/edit/usage-access";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +33,15 @@ export async function GET(request: Request) {
     return new NextResponse("Not found", { status: 404 });
 
   const params = parseOrcidCoverageParams(new URL(request.url).searchParams);
-  const { byDept } = await loadOrcidCoverage(db.read, params);
+  const generatedAt = new Date();
+  const [{ byDept }, labels] = await Promise.all([
+    loadOrcidCoverage(db.read, params),
+    // Labels only prettify the criteria block + filename; a facet-load failure
+    // falls back to raw unit values (as the page captions do), not a 500.
+    params.units.length > 0
+      ? loadDataQualityFacets(db.read).then(unitLabels).catch(() => undefined)
+      : undefined,
+  ]);
   console.log(
     JSON.stringify({
       event: "export_orcid_coverage",
@@ -36,12 +50,12 @@ export async function GET(request: Request) {
       rows: byDept.length,
     }),
   );
-  const date = new Date().toISOString().slice(0, 10);
-  return new NextResponse(orcidCoverageCsv(byDept), {
+  const csv = orcidCoverageExportCsv(byDept, orcidCoverageCriteria(params, generatedAt, labels));
+  return new NextResponse(csv, {
     status: 200,
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="orcid-coverage-by-department-${date}.csv"`,
+      "Content-Disposition": `attachment; filename="${orcidCoverageFilename(params, generatedAt, labels)}"`,
       "Cache-Control": "no-store",
     },
   });

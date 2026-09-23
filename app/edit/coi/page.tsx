@@ -58,7 +58,7 @@ export default async function EditCoiPage({
         scope: { all: true },
         query: params.q,
         roleCategories: params.roleCategories,
-        units: params.units,
+        unitValues: params.unitValues,
         gap,
         includeHidden: params.includeHidden,
         limit: PAGE_SIZE,

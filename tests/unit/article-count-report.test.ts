@@ -32,6 +32,7 @@ import { db } from "@/lib/db";
 import {
   ARTICLE_COUNT_CAVEAT,
   ARTICLE_LIST_CAP,
+  articleCountActiveFilters,
   articleCountQueryString,
   buildArticleCountWorkbook,
   canViewArticleCountReport,
@@ -58,6 +59,21 @@ function lastSql(): { text: string; values: unknown[] } {
   const sql = Prisma.sql(strings, ...values);
   return { text: sql.sql.replace(/\s+/g, " "), values: sql.values };
 }
+
+describe("articleCountActiveFilters", () => {
+  it("0 on defaults; one per selection, one per non-default scalar filter", () => {
+    const d = parseArticleCountParams(new URLSearchParams());
+    expect(articleCountActiveFilters(d)).toBe(0);
+    expect(
+      articleCountActiveFilters({ ...d, types: ["postdoc"], units: ["dept:A", "center:B"], atypes: ["Review"] }),
+    ).toBe(4);
+    expect(articleCountActiveFilters({ ...d, basis: "fy" })).toBe(1);
+    expect(articleCountActiveFilters({ ...d, from: d.from - 1 })).toBe(1);
+    expect(articleCountActiveFilters({ ...d, from: d.from - 1, to: d.to - 1 })).toBe(1);
+    expect(articleCountActiveFilters({ ...d, jif: 5 })).toBe(1);
+    expect(articleCountActiveFilters({ ...d, pos: "first" })).toBe(1);
+  });
+});
 
 describe("parseArticleCountParams", () => {
   it("defaults: all facets open, no JIF floor, any position, calendar years ending this year", () => {

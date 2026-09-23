@@ -12,6 +12,10 @@
  * 7's idiom): the shared who-filter (`PersonFilterFacets` — the Profiles
  * roster's person type / department-division / centers / institution facets,
  * `type` + `unit` params, `lib/edit/person-filter.ts`) plus the NIH `<select>`.
+ * Below `lg` the filter panel moves into the shared phone `FiltersSheet`
+ * (Profiles' pattern). Coverage and facets load independently: no coverage →
+ * the "temporarily unavailable" notice; no facets → the numbers still render
+ * (the URL's filters still apply) and the panel becomes a one-line notice.
  * No charts, no trend — there is no
  * history table (a nightly snapshot row is the 10-line ETL step if one is
  * ever wanted).
@@ -21,6 +25,7 @@ import { redirect } from "next/navigation";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { ConsoleShell } from "@/components/edit/console-shell";
+import { FiltersSheet } from "@/components/edit/filters-sheet";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { PersonFilterFacets } from "@/components/edit/reports/article-count-facets";
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
@@ -39,6 +44,7 @@ import {
   neither,
   nihNoOrcid,
   piNoEra,
+  orcidCoverageActiveFilters,
   orcidCoverageQuery,
   parseOrcidCoverageParams,
   pct,
@@ -159,12 +165,23 @@ function CoverageTable({
   );
 }
 
-function Filters({ data, facets }: { data: OrcidCoverage; facets: DataQualityFacets }) {
+function Filters({
+  data,
+  facets,
+  inSheet = false,
+}: {
+  data: OrcidCoverage;
+  facets: DataQualityFacets;
+  /** The phone sheet's copy: one column, no page margin. */
+  inSheet?: boolean;
+}) {
   const { params } = data;
   return (
     <AutoSubmitForm
       action="/edit/orcid-coverage"
-      className="group border-apollo-border bg-apollo-surface mt-4 flex flex-wrap items-end gap-4 rounded-md border p-3 text-xs"
+      className={`group border-apollo-border bg-apollo-surface flex gap-4 rounded-md border p-3 text-xs ${
+        inSheet ? "flex-col" : "mt-4 flex-wrap items-end"
+      }`}
       data-testid="orcid-coverage-filters"
     >
       <label className="flex flex-col gap-1">
@@ -183,7 +200,7 @@ function Filters({ data, facets }: { data: OrcidCoverage; facets: DataQualityFac
           types={params.types}
           units={params.units}
           testId="orcid-coverage-person-facets"
-          className="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-4"
+          className={inSheet ? undefined : "grid gap-x-6 sm:grid-cols-2 lg:grid-cols-4"}
         />
         <p className="text-muted-foreground mt-1">
           Person type narrows the department table only; the units narrow both tables. None
@@ -205,10 +222,19 @@ function Filters({ data, facets }: { data: OrcidCoverage; facets: DataQualityFac
 const orList = (xs: string[]) =>
   xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}`;
 
-function Body({ data, facets }: { data: OrcidCoverage; facets: DataQualityFacets }) {
+function Body({
+  data,
+  facets,
+  ignoredLegacyDept,
+}: {
+  data: OrcidCoverage;
+  /** null = the facet load failed: numbers render, the filter panel does not. */
+  facets: DataQualityFacets | null;
+  ignoredLegacyDept: boolean;
+}) {
   const { params, tiles } = data;
-  const typeLabels = new Map(facets.roleCategories.map((o) => [o.value, o.label]));
-  const units = unitLabels(facets);
+  const typeLabels = new Map((facets?.roleCategories ?? []).map((o) => [o.value, o.label]));
+  const units = facets ? unitLabels(facets) : new Map<string, string>();
   const roleLabel =
     params.types.length === 0
       ? "all person types"
@@ -252,7 +278,34 @@ function Body({ data, facets }: { data: OrcidCoverage; facets: DataQualityFacets
         <Tile label="NIH-funded (any award) full-time faculty" c={tiles.nihFullTime} />
       </div>
 
-      <Filters data={data} facets={facets} />
+      {facets === null ? (
+        <p
+          className="text-muted-foreground mt-4 text-xs"
+          data-testid="orcid-coverage-filters-unavailable"
+        >
+          Filters are unavailable right now.
+        </p>
+      ) : (
+        <>
+          <div className="hidden lg:block" data-testid="orcid-coverage-rail">
+            <Filters data={data} facets={facets} />
+          </div>
+          <div className="mt-4 lg:hidden">
+            <FiltersSheet
+              activeCount={orcidCoverageActiveFilters(params)}
+              testId="orcid-coverage-filters-sheet-trigger"
+            >
+              <Filters data={data} facets={facets} inSheet />
+            </FiltersSheet>
+          </div>
+        </>
+      )}
+
+      {ignoredLegacyDept && (
+        <p className="text-muted-foreground mt-4 text-xs" data-testid="orcid-coverage-legacy-dept">
+          A department filter from an older link was ignored — pick it under Department / division.
+        </p>
+      )}
 
       <section className="mt-8">
         <h2 className="text-base font-semibold">By person type</h2>
@@ -323,23 +376,25 @@ export default async function EditOrcidCoveragePage({
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
 
-  const params = parseOrcidCoverageParams(await searchParams);
-  let data: { coverage: OrcidCoverage; facets: DataQualityFacets } | null = null;
-  try {
-    const [coverage, facets] = await Promise.all([
-      loadOrcidCoverage(db.read, params),
-      loadDataQualityFacets(db.read),
-    ]);
-    data = { coverage, facets };
-  } catch (err) {
+  const { ignoredLegacyDept, ...params } = parseOrcidCoverageParams(await searchParams);
+  // Independent loads: a facet failure must not blank the numbers. Nothing here
+  // is cached, so a degraded render never outlives this request.
+  const [coverageR, facetsR] = await Promise.allSettled([
+    loadOrcidCoverage(db.read, params),
+    loadDataQualityFacets(db.read),
+  ]);
+  const logFailure = (event: string, err: unknown) =>
     console.error(
       JSON.stringify({
-        event: "orcid_coverage_read_failed",
+        event,
         path: "/edit/orcid-coverage",
         error: err instanceof Error ? err.message : String(err),
       }),
     );
-  }
+  if (coverageR.status === "rejected") logFailure("orcid_coverage_read_failed", coverageR.reason);
+  if (facetsR.status === "rejected") logFailure("orcid_coverage_facets_failed", facetsR.reason);
+  const coverage = coverageR.status === "fulfilled" ? coverageR.value : null;
+  const facets = facetsR.status === "fulfilled" ? facetsR.value : null;
 
   return (
     <ConsoleShell
@@ -350,13 +405,13 @@ export default async function EditOrcidCoveragePage({
     >
       <div data-testid="orcid-coverage-page">
         <h1 className="mb-1 text-xl font-bold">ORCID coverage</h1>
-        {data === null ? (
+        {coverage === null ? (
           <p className="text-muted-foreground mt-8" data-testid="orcid-coverage-unavailable">
             Coverage data is temporarily unavailable. Please try again later or contact ITS Support
             if this persists.
           </p>
         ) : (
-          <Body data={data.coverage} facets={data.facets} />
+          <Body data={coverage} facets={facets} ignoredLegacyDept={ignoredLegacyDept} />
         )}
       </div>
     </ConsoleShell>

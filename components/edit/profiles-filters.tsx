@@ -22,10 +22,9 @@
  */
 import { useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { SlidersHorizontal } from "lucide-react";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { FiltersSheet } from "@/components/edit/filters-sheet";
 import type {
   DataQualityFacets,
   DataQualityGapFilter,
@@ -316,25 +315,11 @@ export function ProfilesFiltersSheet({
   activeCount,
   ...props
 }: ProfilesFiltersProps & { activeCount: number }) {
+  // ponytail: this instance re-inits from the URL on each open; the hidden
+  // desktop rail keeps its own state, which only matters on a resize across lg.
   return (
-    <Sheet>
-      <SheetTrigger
-        className="border-apollo-border-strong bg-apollo-surface inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm lg:hidden"
-        data-testid="profiles-filters-sheet-trigger"
-      >
-        <SlidersHorizontal className="size-4" aria-hidden />
-        {activeCount ? `Filters (${activeCount})` : "Filters"}
-      </SheetTrigger>
-      {/* ponytail: this instance re-inits from the URL on each open; the hidden
-          desktop rail keeps its own state, which only matters on a resize across lg. */}
-      <SheetContent side="left" className="bg-apollo-page gap-0 overflow-y-auto p-0 lg:hidden">
-        <SheetHeader>
-          <SheetTitle>Filters</SheetTitle>
-        </SheetHeader>
-        <div className="p-3">
-          <ProfilesFilters {...props} />
-        </div>
-      </SheetContent>
-    </Sheet>
+    <FiltersSheet activeCount={activeCount} testId="profiles-filters-sheet-trigger">
+      <ProfilesFilters {...props} />
+    </FiltersSheet>
   );
 }

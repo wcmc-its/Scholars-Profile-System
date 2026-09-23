@@ -6,13 +6,17 @@
  * beside the total, the per-year table and the `.xlsx` link
  * (`/api/edit/reports/article-count`, same query string). The loader,
  * counting rule and caveat live in `lib/edit/article-count-report.ts`.
+ * Below `lg` the rail moves into the shared phone `FiltersSheet` (Profiles'
+ * pattern); the sheet copy carries `idSuffix` so the two forms never share an id.
  */
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
+import { FiltersSheet } from "@/components/edit/filters-sheet";
 import { ArticleCountFacets } from "@/components/edit/reports/article-count-facets";
 import { JifSlider } from "@/components/edit/reports/jif-slider";
 import {
   ARTICLE_COUNT_CAVEAT,
   ARTICLE_LIST_CAP,
+  articleCountActiveFilters,
   articleCountQueryString,
   BASIS_LABEL,
   JIF_MAX,
@@ -38,19 +42,19 @@ function toSearchParams(sp: AdminReportProps["searchParams"]): URLSearchParams {
   return out;
 }
 
-function FilterForm({
-  basePath,
-  params,
-  choices,
-}: {
+type RailProps = {
   basePath: string;
   params: ArticleCountParams;
   choices: { facets: DataQualityFacets; atypes: string[] };
-}) {
+  /** Appended to every DOM id: the phone sheet's copy passes "-sheet". */
+  idSuffix?: string;
+};
+
+function FilterForm({ basePath, params, choices, idSuffix = "" }: RailProps) {
   const years = Array.from({ length: 30 }, (_, i) => new Date().getFullYear() + 1 - i);
   return (
     <AutoSubmitForm
-      id="article-count-filters"
+      id={`article-count-filters${idSuffix}`}
       action={basePath}
       className="group flex flex-col text-sm"
       data-testid="article-count-filters"
@@ -87,6 +91,13 @@ function FilterForm({
         </label>
       </div>
       <ArticleCountFacets facets={choices.facets} types={params.types} units={params.units} />
+      {/* The facet counts are people; report 8's own number is articles. */}
+      <p
+        className="text-muted-foreground -mt-3 mb-5 text-[11px]"
+        data-testid="article-count-facets-note"
+      >
+        Counts are active people, not articles.
+      </p>
       <label className="mb-5 flex flex-col">
         <span className={RAIL_HEADING}>Article type</span>
         <select name="atype" multiple size={6} defaultValue={params.atypes} className={SELECT}>
@@ -122,6 +133,20 @@ function FilterForm({
   );
 }
 
+function Rail(props: RailProps) {
+  return (
+    <div className="border-apollo-rail-border bg-apollo-rail rounded-xl border p-3">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="text-muted-foreground text-xs">Filters apply automatically</span>
+        <a href={props.basePath} className="text-muted-foreground ml-auto text-xs hover:underline">
+          Clear
+        </a>
+      </div>
+      <FilterForm {...props} />
+    </div>
+  );
+}
+
 export async function renderArticleCountReport({ searchParams, basePath }: AdminReportProps): Promise<ReportRender> {
   const params = parseArticleCountParams(toSearchParams(searchParams));
   const [choices, { rows, total }] = await Promise.all([loadArticleCountChoices(), loadArticleCounts(params)]);
@@ -134,17 +159,19 @@ export async function renderArticleCountReport({ searchParams, basePath }: Admin
       </p>
     ),
     main: (
-      <div className="mt-4 md:flex md:items-start md:gap-6">
-        <div className="border-apollo-rail-border bg-apollo-rail rounded-xl border p-3 md:w-64 md:shrink-0">
-          <div className="mb-4 flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">Filters apply automatically</span>
-            <a href={basePath} className="text-muted-foreground ml-auto text-xs hover:underline">
-              Clear
-            </a>
+      <div className="mt-4 flex flex-col gap-6 lg:flex-row lg:items-start">
+        <aside className="hidden lg:block lg:w-64 lg:shrink-0" data-testid="article-count-rail">
+          <Rail basePath={basePath} params={params} choices={choices} />
+        </aside>
+        <div className="min-w-0 flex-1">
+          <div className="mb-4 lg:hidden">
+            <FiltersSheet
+              activeCount={articleCountActiveFilters(params)}
+              testId="article-count-filters-sheet-trigger"
+            >
+              <Rail basePath={basePath} params={params} choices={choices} idSuffix="-sheet" />
+            </FiltersSheet>
           </div>
-          <FilterForm basePath={basePath} params={params} choices={choices} />
-        </div>
-        <div className="mt-4 flex-1 md:mt-0">
           <p className="text-3xl font-bold tabular-nums" data-testid="article-count-total">
             {total.toLocaleString()}
           </p>

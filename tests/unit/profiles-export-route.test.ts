@@ -164,11 +164,7 @@ describe("/edit/scholars/export gating", () => {
       expect.objectContaining({
         query: "harr",
         roleCategories: ["postdoc", "staff"],
-        units: [
-          { kind: "department", code: "MED" },
-          { kind: "center", code: "MCC" },
-          { kind: "institution", code: "HSS" },
-        ],
+        unitValues: ["dept:MED", "center:MCC", "inst:HSS"],
         gap: "no-overview", // a Profiles-native value — nothing sanitizes it
         includeHidden: false,
       }),

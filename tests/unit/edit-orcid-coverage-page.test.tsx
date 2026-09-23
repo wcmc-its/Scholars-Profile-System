@@ -2,7 +2,7 @@
  * `app/edit/orcid-coverage/page.tsx` — gate (`canViewUsage`, like `/edit/usage`)
  * and a render scoped to the page root, not `document.body`.
  */
-import { render, within } from "@testing-library/react";
+import { fireEvent, render, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -229,8 +229,110 @@ describe("/edit/orcid-coverage", () => {
   it("loader failure → unavailable notice, page root still renders", async () => {
     h.mockLoad.mockRejectedValue(new Error("boom"));
     const { getByTestId } = render(await EditOrcidCoveragePage({ searchParams: sp() }));
+    const page = within(getByTestId("orcid-coverage-page"));
+    expect(page.getByTestId("orcid-coverage-unavailable")).toBeTruthy();
+    expect(page.queryByTestId("orcid-coverage-tiles")).toBeNull();
+  });
+
+  it("facet failure → numbers still render with the URL's filters; the panel becomes a notice", async () => {
+    h.mockFacets.mockRejectedValue(new Error("facets down"));
+    const { getByTestId } = render(
+      await EditOrcidCoveragePage({
+        searchParams: Promise.resolve({ type: "postdoc", unit: "dept:AA1", nih: "all" }),
+      }),
+    );
+    const page = within(getByTestId("orcid-coverage-page"));
+    // The selection is still applied: the loader got the URL's params.
+    expect(h.mockLoad).toHaveBeenCalledWith(
+      {},
+      { types: ["postdoc"], units: ["dept:AA1"], nih: "all" },
+    );
+    expect(page.queryByTestId("orcid-coverage-unavailable")).toBeNull();
+    expect(page.getByTestId("orcid-coverage-tiles")).toBeTruthy();
+    expect(page.getByTestId("orcid-coverage-by-role")).toBeTruthy();
+    expect(page.getByTestId("orcid-coverage-by-dept")).toBeTruthy();
+    expect(page.getByTestId("orcid-coverage-filters-unavailable").textContent).toBe(
+      "Filters are unavailable right now.",
+    );
+    expect(page.queryByTestId("orcid-coverage-filters")).toBeNull();
+    expect(page.queryByTestId("orcid-coverage-filters-sheet-trigger")).toBeNull();
+    // No labels without facets: captions fall back to the raw values.
     expect(
-      within(getByTestId("orcid-coverage-page")).getByTestId("orcid-coverage-unavailable"),
+      page.getByTestId("orcid-coverage-by-dept").querySelector("caption")?.textContent,
+    ).toMatch(/^Postdoc in dept:AA1, sorted by/);
+    expect(page.getByTestId("orcid-coverage-download").getAttribute("href")).toBe(
+      "/edit/orcid-coverage/export?type=postdoc&unit=dept%3AAA1&nih=all",
+    );
+  });
+
+  it("legacy dept= → one muted notice above the tables; absent otherwise", async () => {
+    const legacy = render(
+      await EditOrcidCoveragePage({ searchParams: sp({ dept: "Dept A", nih: "ever" }) }),
+    );
+    const page = within(legacy.getByTestId("orcid-coverage-page"));
+    expect(h.mockLoad).toHaveBeenCalledWith({}, { types: [], units: [], nih: "ever" });
+    const note = page.getByTestId("orcid-coverage-legacy-dept");
+    expect(note.textContent).toBe(
+      "A department filter from an older link was ignored — pick it under Department / division.",
+    );
+    // Above the tables.
+    expect(
+      note.compareDocumentPosition(page.getByTestId("orcid-coverage-by-role")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    legacy.unmount();
+
+    const plain = render(await EditOrcidCoveragePage({ searchParams: sp({ nih: "ever" }) }));
+    expect(
+      within(plain.getByTestId("orcid-coverage-page")).queryByTestId("orcid-coverage-legacy-dept"),
+    ).toBeNull();
+  });
+
+  it("phone sheet: trigger counts the active filters; the sheet copy is a second GET form, no shared ids", async () => {
+    const { getByTestId, getByRole } = render(
+      await EditOrcidCoveragePage({
+        searchParams: Promise.resolve({
+          type: "postdoc",
+          unit: ["dept:AA1", "center:CC1"],
+          nih: "ever",
+        }),
+      }),
+    );
+    const root = getByTestId("orcid-coverage-page");
+    const page = within(root);
+    const trigger = page.getByTestId("orcid-coverage-filters-sheet-trigger");
+    expect(trigger.textContent).toBe("Filters (4)");
+    expect(trigger.className).toContain("lg:hidden");
+    expect(page.getByTestId("orcid-coverage-rail").className).toContain("hidden lg:block");
+    // Report 8's "people, not articles" caption is not ORCID's — people ARE the unit here.
+    expect(root.textContent).not.toContain("Counts are active people");
+
+    fireEvent.click(trigger);
+    const dialog = getByRole("dialog");
+    const sheetForm = within(dialog).getByTestId("orcid-coverage-filters") as HTMLFormElement;
+    const railForm = within(page.getByTestId("orcid-coverage-rail")).getByTestId(
+      "orcid-coverage-filters",
+    ) as HTMLFormElement;
+    expect(sheetForm).not.toBe(railForm);
+    expect(sheetForm.getAttribute("action")).toBe("/edit/orcid-coverage");
+    expect((sheetForm.elements.namedItem("nih") as HTMLSelectElement).value).toBe("ever");
+    const hidden = [
+      ...sheetForm.querySelectorAll<HTMLInputElement>("input[type=hidden][name=unit]"),
+    ];
+    expect(hidden.map((i) => i.value)).toEqual(["dept:AA1", "center:CC1"]);
+    const ids = [...root.querySelectorAll("[id]"), ...dialog.querySelectorAll("[id]")].map(
+      (e) => e.id,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('phone sheet trigger reads plain "Filters" when nothing is filtered', async () => {
+    const { getByTestId } = render(
+      await EditOrcidCoveragePage({ searchParams: sp({ nih: "all" }) }),
+    );
+    expect(
+      within(getByTestId("orcid-coverage-page")).getByTestId("orcid-coverage-filters-sheet-trigger")
+        .textContent,
+    ).toBe("Filters");
   });
 });

@@ -367,12 +367,7 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     await loadDataQualityRoster(
       {
         scope: { all: true },
-        units: [
-          { kind: "department", code: "MED" },
-          { kind: "division", code: "CARD" },
-          { kind: "center", code: "MCC" },
-          { kind: "institution", code: "HSS" },
-        ],
+        unitValues: ["dept:MED", "div:CARD", "center:MCC", "inst:HSS"],
       },
       asClient(client),
     );
@@ -396,7 +391,7 @@ describe("loadDataQualityRoster — filters + pagination", () => {
   it("an institution-only unit filter is a bare primaryOrgCode IN, with no membership read", async () => {
     const { client, scholarFindMany } = fakeClient({ scholars: [] });
     await loadDataQualityRoster(
-      { scope: { all: true }, units: [{ kind: "institution", code: "MSKCC" }] },
+      { scope: { all: true }, unitValues: ["inst:MSKCC"] },
       asClient(client),
     );
     expect(client.centerMembership.findMany).not.toHaveBeenCalled();
@@ -416,7 +411,7 @@ describe("loadDataQualityRoster — filters + pagination", () => {
       ],
     });
     await loadDataQualityRoster(
-      { scope: { all: true }, units: [{ kind: "center", code: "MCC" }] },
+      { scope: { all: true }, unitValues: ["center:MCC"] },
       asClient(client),
     );
     const where = scholarFindMany.mock.calls[0][0].where;
@@ -426,6 +421,14 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     );
     // Only the date-active member is in the filter; expired + pending are dropped.
     expect(unitClause).toEqual({ OR: [{ cwid: { in: ["active1"] } }] });
+  });
+
+  it("unit values given but none decode → match nothing (the one shared rule), not everyone", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster({ scope: { all: true }, unitValues: ["bogus", "dept:"] }, asClient(client));
+    expect(client.centerMembership.findMany).not.toHaveBeenCalled();
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND).toContainEqual({ cwid: { in: [] } });
   });
 });
 

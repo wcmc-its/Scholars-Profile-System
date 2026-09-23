@@ -9,6 +9,11 @@
  * OR'd together. dept / div / institution are scholar columns; a center is its
  * CURRENT members (`isCurrentCenterMembership` / `currentCenterMembershipSql`).
  *
+ * ONE rule for undecodable units, every consumer: a unit filter is present iff
+ * any `unit` value was given (`unitValues`, raw) — both builders key on that and
+ * decode it themselves. Values given but none decode → match NOTHING, never
+ * everyone (a mangled link must not widen to the whole institution).
+ *
  * `UNIT_KINDS` is the single kind → column table both builders iterate, so a
  * kind cannot be added to one side only (`tests/unit/person-filter-parity.test.ts`).
  *
@@ -66,6 +71,11 @@ export type PersonFilter = {
   units: EditRosterUnitFilter[];
 };
 
+/** The decodable subset of raw `unit` values, in order. */
+export function decodeUnitValues(values: readonly string[]): EditRosterUnitFilter[] {
+  return values.map(parseUnitValue).filter((u): u is EditRosterUnitFilter => u !== null);
+}
+
 /** Parse `type` / `unit` from a `URLSearchParams` OR a Next searchParams object. */
 export function parsePersonFilter(
   source: URLSearchParams | Record<string, string | string[] | undefined>,
@@ -83,7 +93,7 @@ export function parsePersonFilter(
   return {
     types: clean(PERSON_FILTER_PARAMS.type),
     unitValues,
-    units: unitValues.map(parseUnitValue).filter((u): u is EditRosterUnitFilter => u !== null),
+    units: decodeUnitValues(unitValues),
   };
 }
 
@@ -101,6 +111,24 @@ export function unitLabels(facets: DataQualityFacets): Map<string, string> {
     ...facets.institutions,
   ];
   return new Map(opts.map((o) => [o.value, o.label]));
+}
+
+/**
+ * The who-filter rows of an export's criteria block — report 8's Criteria sheet
+ * and the ORCID CSV header state the selection the same way. Pure (labels are
+ * passed in). An unknown unit value prints raw. "All" when unset.
+ */
+export function personFilterCriteria(
+  f: { types: readonly string[]; unitValues: readonly string[] },
+  labels: ReadonlyMap<string, string>,
+  roleLabel: (roleCategory: string) => string,
+): [string, string][] {
+  const list = (xs: string[]) => (xs.length > 0 ? xs.join("; ") : "All");
+  const units = f.unitValues.map((u) => labels.get(u) ?? u);
+  return [
+    ["Person type", list(f.types.map(roleLabel))],
+    ["Department / division / center / institution", units.length > 1 ? `Any of: ${list(units)}` : list(units)],
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -134,16 +162,13 @@ export function currentCenterMembershipSql(alias: string, today: string): Prisma
 }
 
 // ---------------------------------------------------------------------------
-// Builders. Each caller's "units given but none decode" posture is explicit:
-//  - report 8 (SQL) keys on the RAW values → match nothing, never everyone;
-//  - Profiles / COI (Prisma) keys on the DECODED units → an undecodable-only
-//    selection is no unit filter (the long-standing Profiles behavior).
-// Both: decoded units given but nothing resolves (e.g. an empty center) →
-// match nothing.
+// Builders. Both take the RAW `unitValues` and decode them (module doc: one
+// undecodable-unit rule). Units given but none decode, or decoded but nothing
+// resolves (e.g. an empty center) → match nothing, on both sides.
 // ---------------------------------------------------------------------------
 
 /** `AND role_category IN (…) AND (unit OR group)` for a raw-SQL report. Undecodable-only
- *  units match nothing. `aliases.scholar` is the `scholar` table alias. */
+ *  units match nothing (`AND 1 = 0`). `aliases.scholar` is the `scholar` table alias. */
 export function personFilterSql(
   f: Pick<PersonFilter, "types" | "unitValues">,
   aliases: { scholar: string; centerMembership?: string },
@@ -156,7 +181,7 @@ export function personFilterSql(
     parts.push(Prisma.sql`AND ${col(PERSON_TYPE_COLUMN.sql)} IN (${Prisma.join(f.types)})`);
   }
   if (f.unitValues.length > 0) {
-    const units = f.unitValues.map(parseUnitValue).filter((u): u is EditRosterUnitFilter => u !== null);
+    const units = decodeUnitValues(f.unitValues);
     const ors: Prisma.Sql[] = [];
     for (const kind of KIND_ORDER) {
       const codes = unitCodes(units, kind);
@@ -180,23 +205,25 @@ export function personFilterSql(
  * Prisma form for the rosters. `centerMemberCwids` = the current members of
  * the selected centers (resolved by the caller with `isCurrentCenterMembership`).
  * Returns the roleCategory filter (undefined = none; the caller owns the
- * include-hidden fallback) and the unit OR clause (undefined = no units).
+ * include-hidden fallback) and the unit OR clause (undefined = no `unit` given;
+ * `{ cwid: { in: [] } }` = match nothing).
  */
 export function personFilterWhere(
-  f: Pick<PersonFilter, "types" | "units">,
+  f: Pick<PersonFilter, "types" | "unitValues">,
   centerMemberCwids: readonly string[],
 ): { roleCategory?: { in: string[] }; unit?: Prisma.ScholarWhereInput } {
   const out: { roleCategory?: { in: string[] }; unit?: Prisma.ScholarWhereInput } = {};
   const types = f.types.filter(Boolean);
   if (types.length > 0) out.roleCategory = { in: [...types] };
-  if (f.units.length > 0) {
+  if (f.unitValues.length > 0) {
+    const units = decodeUnitValues(f.unitValues);
     const ors: Prisma.ScholarWhereInput[] = [];
     for (const kind of KIND_ORDER) {
       const field = UNIT_KINDS[kind].prisma;
       if (field) {
-        const codes = unitCodes(f.units, kind);
+        const codes = unitCodes(units, kind);
         if (codes.length > 0) ors.push({ [field]: { in: codes } });
-      } else if (unitCodes(f.units, kind).length > 0 && centerMemberCwids.length > 0) {
+      } else if (unitCodes(units, kind).length > 0 && centerMemberCwids.length > 0) {
         ors.push({ cwid: { in: [...centerMemberCwids] } });
       }
     }

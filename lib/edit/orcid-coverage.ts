@@ -65,7 +65,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { toCsv } from "@/lib/csv";
-import { parsePersonFilter, personFilterSql } from "@/lib/edit/person-filter";
+import { parsePersonFilter, personFilterCriteria, personFilterSql } from "@/lib/edit/person-filter";
 import { PI_ROLES } from "@/lib/funding-roles";
 import { formatRoleCategory } from "@/lib/role-display";
 
@@ -98,10 +98,11 @@ export type OrcidCoverageParams = {
  *  department table to full-time faculty; any form submit carries `nih`, so an
  *  empty type selection there means every type. Legacy links: a single
  *  `role=X` reads as `type=X` (`role=all` = every type) when no `type` is
- *  given; `dept=` (a department NAME) is ignored — use `unit=dept:CODE`. */
+ *  given; `dept=` (a department NAME) is ignored — use `unit=dept:CODE` — and
+ *  `ignoredLegacyDept` says so, for the page's one-line notice. */
 export function parseOrcidCoverageParams(
   raw: Record<string, string | string[] | undefined> | URLSearchParams,
-): OrcidCoverageParams {
+): OrcidCoverageParams & { ignoredLegacyDept: boolean } {
   const has = (k: string) => (raw instanceof URLSearchParams ? raw.has(k) : raw[k] !== undefined);
   const first = (k: string) => {
     const v = raw instanceof URLSearchParams ? raw.get(k) : raw[k];
@@ -125,7 +126,14 @@ export function parseOrcidCoverageParams(
             : [],
     units: person.unitValues,
     nih: (NIH_FILTERS as readonly string[]).includes(nih) ? (nih as NihFilter) : "all",
+    ignoredLegacyDept: first("dept") !== undefined,
   };
+}
+
+/** The phone sheet trigger's "Filters (n)": one per who-filter selection, plus
+ *  one for a non-"all" NIH filter. */
+export function orcidCoverageActiveFilters(params: OrcidCoverageParams): number {
+  return params.types.length + params.units.length + (params.nih === "all" ? 0 : 1);
 }
 
 /** `?type=…&unit=…&nih=…` — the page and its CSV route share it. Always carries
@@ -538,4 +546,52 @@ export function orcidCoverageCsv(rows: CoverageRow[]): string {
       piNoEra(r),
     ]),
   );
+}
+
+/** The export's criteria block: every filter the table reflects, "All" when
+ *  unset (the shared who-filter rows, `personFilterCriteria`). `labels` names
+ *  each `unit` value (`unitLabels`); an unknown one prints raw. */
+export function orcidCoverageCriteria(
+  params: OrcidCoverageParams,
+  generatedAt: Date,
+  labels: ReadonlyMap<string, string> = new Map(),
+): [string, string][] {
+  return [
+    ["Report", "ORCID coverage by department"],
+    ["Generated", generatedAt.toISOString()],
+    ...personFilterCriteria({ types: params.types, unitValues: params.units }, labels, (t) => roleLabel(t)),
+    ["NIH funding", NIH_FILTER_LABELS[params.nih]],
+  ];
+}
+
+/** The download: a two-column `Filter,Value` criteria block, ONE blank line,
+ *  then the department table exactly as `orcidCoverageCsv` writes it. */
+export function orcidCoverageExportCsv(rows: CoverageRow[], criteria: [string, string][]): string {
+  return `${toCsv(["Filter", "Value"], criteria)}\r\n${orcidCoverageCsv(rows)}`;
+}
+
+const FILENAME_SUMMARY_MAX = 60;
+
+/** `orcid-coverage-by-department-<filter summary>-<YYYY-MM-DD>.csv`. The
+ *  summary (person types, units, NIH filter; "all" when none) is reduced to
+ *  `[a-z0-9-]` and capped at 60 chars — safe inside the quoted
+ *  Content-Disposition filename. */
+export function orcidCoverageFilename(
+  params: OrcidCoverageParams,
+  generatedAt: Date,
+  labels: ReadonlyMap<string, string> = new Map(),
+): string {
+  const parts = [
+    ...params.types.map((t) => roleLabel(t)),
+    ...params.units.map((u) => labels.get(u) ?? u),
+    ...(params.nih === "all" ? [] : [params.nih === "none" ? "no-nih" : `nih-${params.nih}`]),
+  ];
+  const summary =
+    parts
+      .join("-")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, FILENAME_SUMMARY_MAX)
+      .replace(/^-+|-+$/g, "") || "all";
+  return `orcid-coverage-by-department-${summary}-${generatedAt.toISOString().slice(0, 10)}.csv`;
 }

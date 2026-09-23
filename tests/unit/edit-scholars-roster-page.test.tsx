@@ -391,7 +391,7 @@ describe("/edit/scholars — query parsing", () => {
     expect(opts).toMatchObject({
       query: "smith",
       roleCategories: ["postdoc"],
-      units: [{ kind: "department", code: "MED" }],
+      unitValues: ["dept:MED"],
       gap: "no-headshot",
       overviewAge: "lt1yr",
       limit: 100, // PAGE_SIZE
