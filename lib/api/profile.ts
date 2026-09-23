@@ -774,6 +774,11 @@ export type ProfilePayload = {
     /** Absolute thumbnail URL under the WCM origin; null when none. */
     thumbnailUrl: string | null;
   }>;
+  /** Media Highlights — press clips from the External Affairs "WCM in the News"
+   *  digest (etl/news/clips.ts): news_mention rows with `outlet` set, published
+   *  only after comms review. Same row shape as `news` plus the outlet. Dark
+   *  unless MEDIA_HIGHLIGHTS_SECTION is on; `news` never carries these rows. */
+  mediaHighlights: Array<ProfilePayload["news"][number] & { outlet: string }>;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
@@ -834,6 +839,23 @@ export type ProfilePayload = {
  * This function returns ALL appointments with `isActive` annotated; the UI
  * decides how to present them.
  */
+/** A published news_mention row as the profile renders it (News and Media Highlights). */
+function toNewsRow(n: {
+  url: string;
+  title: string;
+  publishedAt: Date | null;
+  excerpt: string | null;
+  thumbnailUrl: string | null;
+}): ProfilePayload["news"][number] {
+  return {
+    url: n.url,
+    title: n.title,
+    publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
+    excerpt: n.excerpt,
+    thumbnailUrl: n.thumbnailUrl,
+  };
+}
+
 function annotateAppointments<
   T extends { startDate: Date | null; endDate: Date | null; isInterim: boolean },
 >(appts: T[], now: Date) {
@@ -1992,13 +2014,14 @@ export const getScholarFullProfileBySlug = cache(
       // already filtered to published + per-row-visible rows.
       news:
         process.env.NEWS_MENTIONS_SECTION === "on" && !hiddenSections.has("hideNews")
-          ? scholar.newsMentions.map((n) => ({
-              url: n.url,
-              title: n.title,
-              publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
-              excerpt: n.excerpt,
-              thumbnailUrl: n.thumbnailUrl,
-            }))
+          ? scholar.newsMentions.filter((n) => n.outlet === null).map(toNewsRow)
+          : [],
+      // Clips share the table (and `hideNews`) but render in their own section.
+      mediaHighlights:
+        process.env.MEDIA_HIGHLIGHTS_SECTION === "on" && !hiddenSections.has("hideNews")
+          ? scholar.newsMentions.flatMap((n) =>
+              n.outlet === null ? [] : [{ ...toNewsRow(n), outlet: n.outlet }],
+            )
           : [],
       keywords,
       // section-visibility — `hideMethods` drops the Methods & Tools lens from the

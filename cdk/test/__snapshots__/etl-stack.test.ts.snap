@@ -1851,6 +1851,14 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "spotlight",
               },
               {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
+              },
+              {
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
@@ -2433,6 +2441,14 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "spotlight",
               },
               {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
+              },
+              {
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
@@ -2944,6 +2960,14 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ARTIFACT_PREFIX",
                 "Value": "spotlight",
+              },
+              {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
               },
               {
                 "Name": "HIERARCHY_BUCKET",
@@ -3894,6 +3918,14 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "spotlight",
               },
               {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
+              },
+              {
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
@@ -4511,6 +4543,39 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Version": "2012-10-17",
         },
         "PolicyName": "EtlTaskRoleDefaultPolicyB7A1E2B1",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlTaskRoleInboundMailPolicyE2864160": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::sps-inbound-mail-123456789012/clips/*",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "clips/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::sps-inbound-mail-123456789012",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-etl-task-prod-inbound-mail",
         "Roles": [
           {
             "Ref": "EtlTaskRoleD514E3A1",
@@ -5769,7 +5834,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClipsNightly"}],"Next":"TaskClipsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -6033,7 +6098,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"MeshAnchorNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- MeshAnchorNightly failed"}},"TaskPubMedRetractions":{"Next":"TaskSearchIndexNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyPubMedRetractions"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"MeshAnchorNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- MeshAnchorNightly failed"}},"TaskPubMedRetractions":{"Next":"TaskClipsNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyPubMedRetractions"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -6049,7 +6114,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"MeshAliasNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- MeshAliasNightly failed"}},"TaskSearchIndexNightly":{"Next":"TaskRevalidateNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifySearchIndexNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"MeshAliasNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- MeshAliasNightly failed"}},"TaskClipsNightly":{"Next":"TaskSearchIndexNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyClipsNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -6057,7 +6122,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","search:index"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyPubMedRetractions":{"Next":"TaskSearchIndexNightly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:news-clips"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyPubMedRetractions":{"Next":"TaskClipsNightly","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -6065,7 +6130,23 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"PubMedRetractions","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- PubMedRetractions failed"}},"TaskRevalidateNightly":{"Next":"TaskIntegrityNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyRevalidateNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"PubMedRetractions","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- PubMedRetractions failed"}},"TaskSearchIndexNightly":{"Next":"TaskRevalidateNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifySearchIndexNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","search:index"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyClipsNightly":{"Next":"TaskSearchIndexNightly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"ClipsNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- ClipsNightly failed"}},"TaskRevalidateNightly":{"Next":"TaskIntegrityNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyRevalidateNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -11696,6 +11777,14 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "spotlight",
               },
               {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
+              },
+              {
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
@@ -12278,6 +12367,14 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "spotlight",
               },
               {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
+              },
+              {
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
@@ -12789,6 +12886,14 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "ARTIFACT_PREFIX",
                 "Value": "spotlight",
+              },
+              {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
               },
               {
                 "Name": "HIERARCHY_BUCKET",
@@ -13739,6 +13844,14 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "spotlight",
               },
               {
+                "Name": "CLIPS_BUCKET",
+                "Value": "sps-inbound-mail-123456789012",
+              },
+              {
+                "Name": "CLIPS_PREFIX",
+                "Value": "clips/",
+              },
+              {
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
@@ -14361,6 +14474,39 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Version": "2012-10-17",
         },
         "PolicyName": "EtlTaskRoleDefaultPolicyB7A1E2B1",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlTaskRoleInboundMailPolicyE2864160": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::sps-inbound-mail-123456789012/clips/*",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "clips/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::sps-inbound-mail-123456789012",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-etl-task-staging-inbound-mail",
         "Roles": [
           {
             "Ref": "EtlTaskRoleD514E3A1",
@@ -15619,7 +15765,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClipsNightly"}],"Next":"TaskClipsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -15867,7 +16013,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"MeshAnchorNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- MeshAnchorNightly failed"}},"TaskPubMedRetractions":{"Next":"TaskSearchIndexNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyPubMedRetractions"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"MeshAnchorNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- MeshAnchorNightly failed"}},"TaskPubMedRetractions":{"Next":"TaskClipsNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyPubMedRetractions"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -15883,7 +16029,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"MeshAliasNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- MeshAliasNightly failed"}},"TaskSearchIndexNightly":{"Next":"TaskRevalidateNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifySearchIndexNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"MeshAliasNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- MeshAliasNightly failed"}},"TaskClipsNightly":{"Next":"TaskSearchIndexNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyClipsNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -15891,7 +16037,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","search:index"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyPubMedRetractions":{"Next":"TaskSearchIndexNightly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:news-clips"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyPubMedRetractions":{"Next":"TaskClipsNightly","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -15899,7 +16045,23 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"PubMedRetractions","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- PubMedRetractions failed"}},"TaskRevalidateNightly":{"Next":"TaskIntegrityNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyRevalidateNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"PubMedRetractions","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- PubMedRetractions failed"}},"TaskSearchIndexNightly":{"Next":"TaskRevalidateNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifySearchIndexNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","search:index"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyClipsNightly":{"Next":"TaskSearchIndexNightly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"ClipsNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- ClipsNightly failed"}},"TaskRevalidateNightly":{"Next":"TaskIntegrityNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyRevalidateNightly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },

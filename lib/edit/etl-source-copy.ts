@@ -237,6 +237,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Adds WCM Newsroom stories that mention a scholar to their profile.",
     origin: "external", // news.weill.cornell.edu
   },
+  NewsClips: {
+    label: "Media Highlights",
+    description: "Queues press clips from the daily \"WCM in the News\" email for comms review.",
+    origin: "external", // External Affairs digest, via SES to S3
+  },
   Spotlight: {
     label: "Homepage Spotlight",
     description: "Refreshes the Spotlight research cards on the home page.",

@@ -778,6 +778,22 @@ export async function ProfileView({ slug }: { slug: string }) {
             </Section>
           ) : null}
 
+          {/* Press clips from the External Affairs "WCM in the News" digest,
+              published after comms review (etl/news/clips.ts). */}
+          {profile.mediaHighlights.length > 0 ? (
+            <Section
+              id="media-highlights"
+              title="Media Highlights"
+              headingLg
+              count={{
+                value: profile.mediaHighlights.length,
+                unit: profile.mediaHighlights.length === 1 ? "clip" : "clips",
+              }}
+            >
+              <NewsSection news={profile.mediaHighlights} />
+            </Section>
+          ) : null}
+
           {mentees.length > 0 ? (() => {
             // Issue #189 — header link points to the all-mentees co-pubs
             // rollup. Hidden when no mentee has any co-pub (the rollup

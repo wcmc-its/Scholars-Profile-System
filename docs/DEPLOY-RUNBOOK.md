@@ -151,6 +151,18 @@ aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/about" 
 
 This is the **only** invalidation the design needs — after it, the 60 s clamp + the S3 origin self-heal, and no deploy-time invalidation is ever required again.
 
+## Media Highlights inbound mail (Sps-InboundMail) — MANUAL, one time
+
+`Sps-InboundMail` (`cdk/lib/inbound-mail-stack.ts`) receives the External Affairs "WCM in the News" digest at `clips@scholars-mail.weill.cornell.edu` and stores each message in S3 for the nightly `ClipsNightly` step (`etl/news/clips.ts`). It is an account-wide singleton: SES allows one active receipt rule set per account and region, so only the prod app declares it.
+
+1. Deploy from `origin/master`: `cd cdk && npx cdk deploy -c env=prod Sps-InboundMail`.
+2. Send ITS the `NameServers` stack output and ask them to delegate `scholars-mail.weill.cornell.edu` to those four NS records (same arrangement as `cviche.weill.cornell.edu`). Confirm with `dig +short NS scholars-mail.weill.cornell.edu`.
+3. Activate the rule set. CloudFormation cannot do this: `aws ses set-active-receipt-rule-set --rule-set-name sps-inbound-mail`.
+4. Once SES shows the domain as verified, ask External Affairs to add the address to their clips list.
+5. After the first digest arrives (`aws s3 ls s3://sps-inbound-mail-<account>/clips/`), run `ClipsNightly` or wait for the nightly. Then check `/edit/news-queue` for the pending clips.
+
+Stopgap before step 4: load a forwarded `.eml` by hand on the ETL task family with `npm run etl:news-clips -- <file.eml>`. The profile section is behind `MEDIA_HIGHLIGHTS_SECTION` (staging on, prod off).
+
 ## Bootstrap two-step (first deploy of an env)
 
 On the first deploy of `Sps-App-${env}`, ECR is empty and the ECS service can't pull an image. The first workflow run will fail at step "Build image" or "Push image" if the repo doesn't exist yet, or at step "Wait for service to stabilize" if ECR is empty. This is one-time setup per env, manual:

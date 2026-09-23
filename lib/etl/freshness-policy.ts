@@ -281,6 +281,10 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // MAX_SAMPLE_AGE_HOURS in etl/integrity/index.ts). News was absent here, so
   // that delegate did not exist and a silent News death alarmed nobody.
   News: { cadence: "weekly" },
+  // Deployed nightly step (cdk/lib/etl-stack.ts ClipsNightly, tier:"continue")
+  // that writes source "NewsClips" (etl/news/clips.ts). A run with no new digest
+  // still succeeds, so staleness here means the step itself stopped running.
+  NewsClips: { cadence: "nightly" },
   // Monthly cadence. Spotlight is the one source whose producer is OUTSIDE this
   // repo: ReciterAI publishes the artifact and SPS only loads what it finds, so
   // the SLA here has to track the PRODUCER's schedule, not our loader's. That

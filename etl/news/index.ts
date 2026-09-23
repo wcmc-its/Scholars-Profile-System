@@ -60,6 +60,8 @@ type MentionUpsert = {
    *  UI (#2578 follow-up). Null for VIVO and for a NAME match with no prose
    *  position (TAG/CAPTION) — see DetectedMention.contextSnippet. */
   contextSnippet: string | null;
+  /** Press outlet for a Media Highlights clip (etl/news/clips.ts); null for a newsroom story. */
+  outlet: string | null;
 };
 
 async function recordRun(args: {
@@ -114,6 +116,7 @@ export function articlesToMentions(
       publishedAt,
       excerpt: a.excerpt,
       thumbnailUrl: a.thumbnailUrl,
+      outlet: a.outlet ?? null,
     };
     const put = (row: MentionUpsert) => {
       // #2241 — key on the STORY, not the url: the feed publishes some articles
@@ -187,6 +190,7 @@ export type ExistingMention = {
    *  matchBasis: refreshed on a NAME->NAME re-scrape, cleared on a VIVO upgrade,
    *  never touched on a human-touched row. */
   contextSnippet: string | null;
+  outlet: string | null;
 };
 
 /**
@@ -204,6 +208,7 @@ export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string
   if (!sameDate(cur.publishedAt, r.publishedAt)) data.publishedAt = r.publishedAt;
   if (cur.excerpt !== r.excerpt) data.excerpt = r.excerpt;
   if (cur.thumbnailUrl !== r.thumbnailUrl) data.thumbnailUrl = r.thumbnailUrl;
+  if (cur.outlet !== r.outlet) data.outlet = r.outlet;
 
   const humanTouched = cur.enteredByCwid !== null;
   if (!humanTouched) {
@@ -229,7 +234,7 @@ export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string
   return data;
 }
 
-async function upsertMentions(rows: MentionUpsert[]): Promise<{
+export async function upsertMentions(rows: MentionUpsert[]): Promise<{
   inserted: number;
   updated: number;
   preserved: number;
@@ -255,6 +260,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
           matchBasis: true,
           sourceRef: true,
           contextSnippet: true,
+          outlet: true,
         },
       })
     : [];
@@ -317,6 +323,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
               matchBasis: r.matchBasis,
               sourceRef: r.sourceRef,
               contextSnippet: r.contextSnippet,
+              outlet: r.outlet,
               // enteredByCwid stays null: the ETL is not a manual edit.
             },
           });
@@ -367,7 +374,8 @@ export async function assertNoLegacyOriginRows(
   // false all-clear and let the run proceed against un-migrated rows.
   countLegacy: () => Promise<number> = () =>
     db.write.newsMention.count({
-      where: { NOT: { url: { startsWith: NEWS_ORIGIN + NEWS_PATH_PREFIX } } },
+      // Media Highlights clips (outlet set) link off-site by design — not legacy.
+      where: { outlet: null, NOT: { url: { startsWith: NEWS_ORIGIN + NEWS_PATH_PREFIX } } },
     }),
 ): Promise<void> {
   const legacy = await countLegacy();
