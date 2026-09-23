@@ -1,7 +1,7 @@
 /**
  * `components/edit/profiles-filters.tsx` — the Profiles roster's client filter
  * island (formerly `data-quality-filters.tsx` / `DataQualityFilters`, folded in
- * when the standalone Data Quality dashboard merged into `/edit/scholars`, then
+ * when the standalone Data Quality dashboard merged into `/edit/profiles`, then
  * split again so COI moved to its own page/component — `coi-filters.tsx`).
  * Verifies auto-apply: every change navigates via router.replace to a query
  * string the server parser decodes (repeated ?type=/?unit=, the gap and
@@ -17,9 +17,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const replace = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace, push: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams("type=postdoc&page=2"),
 }));
 
-import { ProfilesFilters } from "@/components/edit/profiles-filters";
+import { ProfilesFilters, ProfilesSearch } from "@/components/edit/profiles-filters";
 
 const facets = {
   roleCategories: [
@@ -47,7 +48,9 @@ function renderFilters(over: Record<string, unknown> = {}) {
       q=""
       gap="all"
       overviewAge="all"
-      includeHidden={true}
+      includeStudents={false}
+      hiddenOnly={false}
+      ranks={[]}
       {...over}
     />,
   );
@@ -121,16 +124,54 @@ describe("ProfilesFilters — auto-apply", () => {
     expect(lastUrl()).toContain("overviewAge=imported");
   });
 
-  it("navigates when the hide-students checkbox changes", () => {
+  it("hides students by default; switching the toggle off includes them (?students=1)", () => {
     renderFilters();
-    fireEvent.click(screen.getByLabelText(/Hide students/));
-    expect(lastUrl()).toContain("hidden=0");
+    const toggle = screen.getByTestId("profiles-hide-students");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(lastUrl()).toContain("students=1");
   });
 
-  it("debounces the search box, then navigates with ?q=", () => {
+  it("offers a Rank facet and navigates with ?rank=", () => {
+    renderFilters({
+      facets: {
+        ...facets,
+        ranks: [{ value: "instructor", label: "Instructor", count: 900 }],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Instructor/ }));
+    expect(lastUrl()).toContain("rank=instructor");
+  });
+
+  it("explains the students toggle", () => {
+    renderFilters();
+    expect(screen.getByRole("button", { name: /don’t have their own profiles/ })).toBeTruthy();
+  });
+
+  it("filters to hidden profiles only (?visibility=hidden)", () => {
+    renderFilters();
+    fireEvent.click(screen.getByTestId("profiles-hidden-only"));
+    expect(lastUrl()).toContain("visibility=hidden");
+  });
+
+  it("has no search box and no 'Filters apply automatically' filler", () => {
+    renderFilters();
+    expect(screen.queryByLabelText(/Search name or CWID/)).toBeNull();
+    expect(screen.queryByText(/Filters apply automatically/)).toBeNull();
+  });
+
+  it("keeps the search term when a rail filter changes", () => {
+    renderFilters({ q: "smith" });
+    fireEvent.click(screen.getByTestId("profiles-hidden-only"));
+    expect(lastUrl()).toContain("q=smith");
+  });
+});
+
+describe("ProfilesSearch — above the table", () => {
+  it("debounces, then navigates with ?q=, keeping filters and resetting the page", () => {
     vi.useFakeTimers();
     try {
-      renderFilters({ roleCategories: [], units: [] });
+      render(<ProfilesSearch q="" />);
       fireEvent.change(screen.getByLabelText(/Search name or CWID/), {
         target: { value: "harrington" },
       });
@@ -139,22 +180,27 @@ describe("ProfilesFilters — auto-apply", () => {
         vi.advanceTimersByTime(400);
       });
       expect(lastUrl()).toContain("q=harrington");
+      expect(lastUrl()).toContain("type=postdoc");
+      expect(lastUrl()).not.toContain("page=");
     } finally {
       vi.useRealTimers();
     }
   });
 
   it("applies the search immediately on Enter", () => {
-    const { container } = renderFilters({ roleCategories: [], units: [] });
+    const { container } = render(<ProfilesSearch q="" />);
     fireEvent.change(screen.getByLabelText(/Search name or CWID/), { target: { value: "silver" } });
     fireEvent.submit(container.querySelector("form")!);
     expect(lastUrl()).toContain("q=silver");
   });
+});
+
+describe("ProfilesFilters — misc", () => {
 
   it("Clear navigates back to the unfiltered route", () => {
     renderFilters();
     fireEvent.click(screen.getByRole("button", { name: /clear/i }));
-    expect(replace).toHaveBeenLastCalledWith("/edit/scholars", { scroll: false });
+    expect(replace).toHaveBeenLastCalledWith("/edit/profiles", { scroll: false });
   });
 
   it("renders departments and divisions as a flat (non-indented) list", () => {

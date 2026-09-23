@@ -523,7 +523,7 @@ describe("loadNewsQueue — showOnProfile + the decider", () => {
 
 /**
  * The shared prominence scorer (`lib/api/prominence.ts`), pinned from its second
- * consumer: /edit/scholars and this queue must never rank the same scholar
+ * consumer: /edit/profiles and this queue must never rank the same scholar
  * differently, which is why the formula was extracted rather than copied.
  */
 describe("scoreProminence — the one prominence definition", () => {

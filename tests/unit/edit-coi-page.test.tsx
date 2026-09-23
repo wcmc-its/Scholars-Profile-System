@@ -1,7 +1,7 @@
 /**
  * `app/edit/coi/page.tsx` — the COI (conflict-of-interest) dashboard.
  * Superuser-only AND behind `EDIT_DATA_QUALITY_DASHBOARD`, with NO
- * comms_steward / unit-admin escape hatch at all (unlike `/edit/scholars`) —
+ * comms_steward / unit-admin escape hatch at all (unlike `/edit/profiles`) —
  * a non-superuser 404s regardless of any unit grants, and scope is always
  * `{ all: true }` (`loadDataQualityScope` is never even called).
  *
@@ -50,7 +50,7 @@ vi.mock("@/lib/api/data-quality", async (importActual) => {
   };
 });
 // `loadDataQualityScope` is mocked here purely so we can assert it's NEVER
-// called from this page — unlike `/edit/scholars`, there's no unit-scoped
+// called from this page — unlike `/edit/profiles`, there's no unit-scoped
 // variant of the COI dashboard to resolve.
 vi.mock("@/lib/edit/data-quality", () => ({
   isDataQualityDashboardEnabled: mockEnabled,

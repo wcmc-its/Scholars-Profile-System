@@ -1,7 +1,7 @@
 /**
  * Profiles roster — feature flag (for its COI-review slice) and access scope.
  *
- * `/edit/scholars` ("Profiles") is a prominence-sorted list of scholars, scoped
+ * `/edit/profiles` ("Profiles") is a prominence-sorted list of scholars, scoped
  * for every `/edit` user EXCEPT a plain scholar editing their own profile: a
  * superuser or comms_steward sees ALL scholars; a unit Owner / Curator sees only
  * scholars in the unit(s) they administer (dept→division cascade + center

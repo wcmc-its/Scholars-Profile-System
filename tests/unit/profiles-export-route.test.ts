@@ -1,7 +1,7 @@
 /**
- * GET /edit/scholars/export — CSV download route gating + headers (the
+ * GET /edit/profiles/export — CSV download route gating + headers (the
  * Profiles roster's export; formerly the standalone Data Quality dashboard's
- * `/edit/data-quality/export`, see `app/edit/scholars/export/route.ts`).
+ * `/edit/data-quality/export`, see `app/edit/profiles/export/route.ts`).
  *
  * COI is gone from this route entirely — no gating on it, and the CSV never
  * carries COI columns for anyone, superuser or not. `gap=has-coi` is silently
@@ -35,9 +35,9 @@ vi.mock("@/lib/api/data-quality", async (importActual) => {
 });
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
-import { GET } from "@/app/edit/scholars/export/route";
+import { GET } from "@/app/edit/profiles/export/route";
 
-const req = (qs = "") => new NextRequest(`http://localhost/edit/scholars/export${qs}`);
+const req = (qs = "") => new NextRequest(`http://localhost/edit/profiles/export${qs}`);
 
 const ROW: DataQualityEntry = {
   cwid: "fac1",
@@ -74,7 +74,7 @@ beforeEach(() => {
   mockExport.mockResolvedValue({ rows: [ROW], total: 1, truncated: false });
 });
 
-describe("/edit/scholars/export gating", () => {
+describe("/edit/profiles/export gating", () => {
   it("401s with no session", async () => {
     mockSession.mockResolvedValue(null);
     const res = await GET(req());

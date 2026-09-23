@@ -345,6 +345,32 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     expect(where.AND).toBeUndefined();
   });
 
+  it("hiddenOnly narrows to suppressed profiles (status not active)", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster({ scope: { all: true }, hiddenOnly: true }, asClient(client));
+    expect(scholarFindMany.mock.calls[0][0].where.status).toEqual({ not: "active" });
+  });
+
+  it("rank: professorial ranks read professorialRank; instructor matches title only without a rank", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: true }, ranks: ["professor", "instructor"] },
+      asClient(client),
+    );
+    const clause = scholarFindMany.mock.calls[0][0].where.AND.at(-1);
+    expect(clause.OR[0]).toEqual({ professorialRank: "Professor" });
+    expect(clause.OR[1].professorialRank).toBeNull();
+    expect(JSON.stringify(clause.OR[1].OR)).toContain('"contains":"Instructor"');
+  });
+
+  it("builds a tag-stripped overview excerpt, override winning", async () => {
+    const { client } = fakeClient({
+      scholars: [{ cwid: "x1", overview: "<p>Seed &nbsp;text</p>" }],
+    });
+    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+    expect(entries[0].overviewExcerpt).toBe("Seed text");
+  });
+
   it("a name/CWID search ORs preferredName/fullName/cwid as its own AND clause", async () => {
     const { client, scholarFindMany } = fakeClient({ scholars: [] });
     await loadDataQualityRoster({ scope: { all: true }, query: "  harr " }, asClient(client));

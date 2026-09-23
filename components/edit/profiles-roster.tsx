@@ -1,5 +1,5 @@
 /**
- * The Profiles roster table for `/edit/scholars` (#160 UI follow-up,
+ * The Profiles roster table for `/edit/profiles` (#160 UI follow-up,
  * `self-edit-launch-spec.md` § The Profiles roster). The admin entry point: a
  * searchable, prominence-sorted scholar index whose per-row name links to that
  * scholar's editor. Server-rendered — the filter sidebar is a small client
@@ -9,20 +9,30 @@
  * Formerly two separate surfaces: this roster (Name/Title/Unit/Type/Status) and
  * the standalone Data Quality dashboard (prominence sort, leadership badges,
  * headshot/overview/COI gap tracking). They merged here — the roster kept its
- * Status column and its superuser-only "View as" action, and gained the
+ * superuser-only "View as" action, and gained the
  * dashboard's prominence sort, leadership badges, and headshot/overview gap
  * tracking. COI review did NOT carry over here — it's superuser-only and lives
  * on its own page (`/edit/coi`, `components/edit/coi-roster.tsx`) precisely so
  * this broader-audience page never touches it. See `lib/api/data-quality.ts`.
  *
+ * The headshot shows as a real thumbnail (a missing one is a dashed initials
+ * circle), so reviewers can spot wrong or bad photos, not just absent ones.
+ * Visibility is shown only for the exception (a "Hidden" tag); the
+ * "Only profiles hidden from the public" filter lists them all.
+ *
  * Authorization is the page's job (superuser-gated; org-unit-admin scope is
  * B3); this component only renders what it's handed.
  */
 import Link from "next/link";
+import { Download } from "lucide-react";
 
-import { ProfilesFilters, ProfilesFiltersSheet } from "@/components/edit/profiles-filters";
+import {
+  ProfilesFilters,
+  ProfilesFiltersSheet,
+  ProfilesSearch,
+} from "@/components/edit/profiles-filters";
+import { RosterScholarCell, type RosterCardTitle } from "@/components/edit/roster-hover-card";
 import { ViewAsButton } from "@/components/edit/view-as-button";
-import { Badge } from "@/components/ui/badge";
 import { formatRoleCategory } from "@/lib/role-display";
 import type {
   DataQualityCounts,
@@ -30,6 +40,7 @@ import type {
   DataQualityFacets,
   DataQualityGapFilter,
   OverviewAgeFilter,
+  RankFilter,
 } from "@/lib/api/data-quality";
 
 export type ProfilesRosterProps = {
@@ -46,7 +57,11 @@ export type ProfilesRosterProps = {
   q: string;
   gap: DataQualityGapFilter;
   overviewAge: OverviewAgeFilter;
-  includeHidden: boolean;
+  includeStudents: boolean;
+  hiddenOnly: boolean;
+  ranks: RankFilter[];
+  /** Current appointments per cwid, for this page's hover cards. */
+  titles: Record<string, RosterCardTitle[]>;
   page: number;
   pageSize: number;
   /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729). */
@@ -55,7 +70,7 @@ export type ProfilesRosterProps = {
   viewerCwid: string;
 };
 
-const BASE = "/edit/scholars";
+const BASE = "/edit/profiles";
 
 type FilterState = {
   roleCategories: string[];
@@ -63,7 +78,9 @@ type FilterState = {
   q: string;
   gap: DataQualityGapFilter;
   overviewAge: OverviewAgeFilter;
-  includeHidden: boolean;
+  includeStudents: boolean;
+  hiddenOnly: boolean;
+  ranks: RankFilter[];
 };
 
 /** Serialize the current filters into a URLSearchParams (repeated `type`/`unit`). */
@@ -71,10 +88,12 @@ function filterParams(f: FilterState): URLSearchParams {
   const p = new URLSearchParams();
   if (f.q) p.set("q", f.q);
   for (const r of f.roleCategories) p.append("type", r);
+  for (const r of f.ranks) p.append("rank", r);
   for (const u of f.units) p.append("unit", u);
   if (f.gap !== "all") p.set("gap", f.gap);
   if (f.overviewAge !== "all") p.set("overviewAge", f.overviewAge);
-  if (!f.includeHidden) p.set("hidden", "0");
+  if (f.includeStudents) p.set("students", "1");
+  if (f.hiddenOnly) p.set("visibility", "hidden");
   return p;
 }
 
@@ -114,14 +133,6 @@ function Gap() {
     </span>
   );
 }
-function Unknown() {
-  return (
-    <span className="text-muted-foreground" aria-label="not checked" title="Not checked yet">
-      —
-    </span>
-  );
-}
-
 export function ProfilesRoster({
   entries,
   total,
@@ -132,29 +143,55 @@ export function ProfilesRoster({
   q,
   gap,
   overviewAge,
-  includeHidden,
+  includeStudents,
+  hiddenOnly,
+  ranks,
+  titles,
   page,
   pageSize,
   canImpersonate,
   viewerCwid,
 }: ProfilesRosterProps) {
-  const filters: FilterState = { roleCategories, units, q, gap, overviewAge, includeHidden };
+  const filters: FilterState = {
+    roleCategories,
+    units,
+    q,
+    gap,
+    overviewAge,
+    includeStudents,
+    hiddenOnly,
+    ranks,
+  };
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
   const hasPrev = page > 0;
   const hasNext = end < total;
-  const filterProps = { facets, roleCategories, units, q, gap, overviewAge, includeHidden };
+  const filterProps = {
+    facets,
+    roleCategories,
+    units,
+    q,
+    gap,
+    overviewAge,
+    includeStudents,
+    hiddenOnly,
+    ranks,
+  };
+  // Rail filters only (search sits above the table); the default "hide students"
+  // state is not an active filter.
   const activeFilters =
     roleCategories.length +
+    ranks.length +
     units.length +
-    (q ? 1 : 0) +
     (gap !== "all" ? 1 : 0) +
     (overviewAge !== "all" ? 1 : 0) +
-    (includeHidden ? 0 : 1);
+    (includeStudents ? 1 : 0) +
+    (hiddenOnly ? 1 : 0);
+  const gapHref = (g: DataQualityGapFilter) => pageHref({ ...filters, gap: g }, 0);
 
   return (
     <div data-slot="profiles-roster">
-      <h1 className="mb-4 text-xl font-bold">Profiles</h1>
+      <h1 className="text-apollo-ink mb-4 text-xl font-bold">Profiles</h1>
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside className="hidden lg:block lg:w-64 lg:shrink-0">
@@ -162,36 +199,41 @@ export function ProfilesRoster({
         </aside>
 
         <div className="min-w-0 flex-1">
+          <div className="mb-4">
+            <ProfilesSearch q={q} />
+          </div>
           <div className="mb-4 lg:hidden">
             <ProfilesFiltersSheet {...filterProps} activeCount={activeFilters} />
           </div>
-          {/* Summary chips across the in-scope set (before the gap/age filters). */}
-          <div className="text-muted-foreground mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          {/* Summary chips across the in-scope set (before the gap/age filters);
+              the two gaps link to that gap filter. */}
+          <div className="text-apollo-ink-2 mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <span>
-              <strong className="text-foreground">{counts.inScope.toLocaleString()}</strong> in scope
+              <strong className="text-apollo-ink">{counts.inScope.toLocaleString()}</strong> in scope
             </span>
-            <span>
-              <strong className="text-foreground">{counts.missingHeadshot.toLocaleString()}</strong> no
+            <Link href={gapHref("no-headshot")} className="hover:underline" data-testid="profiles-gap-headshot">
+              <strong className="text-apollo-ink">{counts.missingHeadshot.toLocaleString()}</strong> no
               headshot
-            </span>
-            <span>
-              <strong className="text-foreground">{counts.missingOverview.toLocaleString()}</strong> no
+            </Link>
+            <Link href={gapHref("no-overview")} className="hover:underline" data-testid="profiles-gap-overview">
+              <strong className="text-apollo-ink">{counts.missingOverview.toLocaleString()}</strong> no
               overview
-            </span>
+            </Link>
           </div>
 
           <div className="mb-2 flex items-center justify-between">
             <div className="text-muted-foreground text-sm" data-testid="profiles-result-count">
               {total === 0
                 ? "No scholars match these filters."
-                : `Showing ${start}–${end} of ${total}`}
+                : `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()}`}
             </div>
             {total > 0 && (
               <a
                 href={exportHref(filters)}
-                className="text-sm hover:underline"
+                className="border-apollo-border-strong text-apollo-ink hover:bg-apollo-surface-2 inline-flex h-8 items-center gap-1.5 rounded-md border bg-white px-3 text-sm font-medium"
                 data-testid="profiles-export-link"
               >
+                <Download className="text-apollo-icon size-4" aria-hidden />
                 Download CSV
               </a>
             )}
@@ -199,12 +241,10 @@ export function ProfilesRoster({
 
           <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
             <table className="[&_td]:align-middle w-full text-sm" data-testid="profiles-table">
-              <thead className="bg-apollo-surface-2 text-muted-foreground text-left text-xs uppercase">
+              <thead className="bg-apollo-surface-2 text-apollo-ink-2 text-left text-xs uppercase">
                 <tr>
                   <th className="px-3 py-2">Scholar</th>
                   <th className="px-3 py-2">Person type</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2 text-center">Headshot</th>
                   <th className="px-3 py-2 text-center">Overview</th>
                   <th className="px-3 py-2">Overview updated</th>
                   <th className="px-3 py-2">
@@ -212,10 +252,10 @@ export function ProfilesRoster({
                   </th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="text-apollo-ink">
                 {entries.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-muted-foreground px-3 py-6 text-center">
+                    <td colSpan={5} className="text-muted-foreground px-3 py-6 text-center">
                       No profiles match your search.
                     </td>
                   </tr>
@@ -223,37 +263,29 @@ export function ProfilesRoster({
                   entries.map((e) => (
                     <tr key={e.cwid} className="border-t" data-testid={`roster-row-${e.cwid}`}>
                       <td className="px-3 py-2">
-                        <Link
-                          href={e.editHref}
-                          className="text-apollo-maroon font-medium hover:underline"
-                          data-testid={`roster-name-${e.cwid}`}
-                        >
-                          {e.name}
-                        </Link>{" "}
-                        <span className="text-muted-foreground">({e.cwid})</span>
-                        {e.leadership && (
-                          <span className="bg-muted text-muted-foreground ml-2 rounded px-1.5 py-0.5 text-xs">
-                            {e.leadership}
-                          </span>
-                        )}
-                        <div className="text-muted-foreground text-xs">
-                          {[e.title, e.unit].filter(Boolean).join(" · ") || e.cwid}
-                        </div>
+                        <RosterScholarCell
+                          cwid={e.cwid}
+                          name={e.name}
+                          slug={e.slug}
+                          editHref={e.editHref}
+                          hasHeadshot={e.headshot === "present"}
+                          isVisible={e.isVisible}
+                          leadership={e.leadership}
+                          subtitle={[e.title, e.unit].filter(Boolean).join(" · ") || null}
+                          personType={formatRoleCategory(e.roleCategory)}
+                          titles={titles[e.cwid] ?? []}
+                          hasOverview={e.hasOverview}
+                          overviewLabel={
+                            e.overviewUpdatedAt
+                              ? `Edited ${formatDate(e.overviewUpdatedAt)}`
+                              : e.overviewState === "imported"
+                                ? "Imported"
+                                : null
+                          }
+                          overviewExcerpt={e.overviewExcerpt ?? null}
+                        />
                       </td>
-                      <td className="text-muted-foreground px-3 py-2">
-                        {formatRoleCategory(e.roleCategory) ?? "—"}
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge
-                          variant="outline"
-                          className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
-                        >
-                          {e.isVisible ? "Visible" : "Hidden"}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {e.headshot === "present" ? <Yes /> : e.headshot === "missing" ? <Gap /> : <Unknown />}
-                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatRoleCategory(e.roleCategory) ?? "—"}</td>
                       <td className="px-3 py-2 text-center">{e.hasOverview ? <Yes /> : <Gap />}</td>
                       <td className="text-muted-foreground px-3 py-2 text-xs whitespace-nowrap">
                         {overviewUpdated(e)}
@@ -261,7 +293,7 @@ export function ProfilesRoster({
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-3">
                           {canImpersonate && e.cwid !== viewerCwid && (
-                            <ViewAsButton targetCwid={e.cwid} targetName={e.name} />
+                            <ViewAsButton targetCwid={e.cwid} targetName={e.name} variant="ghost" />
                           )}
                         </div>
                       </td>

@@ -259,7 +259,7 @@ describe("report checklist — an export built on parsePersonFilter states its w
   /** Profiles / COI roster CSVs predate the criteria rule: a per-person table
    *  with no criteria block yet. Remove an entry when its export gains one. */
   const CRITERIA_ALLOWLIST = new Set([
-    "app/edit/scholars/export/route.ts", // Profiles roster CSV — table only, no criteria block yet
+    "app/edit/profiles/export/route.ts", // Profiles roster CSV — table only, no criteria block yet
     "app/edit/coi/export/route.ts", // COI roster CSV — table only, no criteria block yet
   ]);
 

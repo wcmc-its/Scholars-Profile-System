@@ -1,5 +1,5 @@
 /**
- * `app/edit/scholars/page.tsx` — the Profiles roster page (#160 UI follow-up;
+ * `app/edit/profiles/page.tsx` — the Profiles roster page (#160 UI follow-up;
  * merged with the former standalone Data Quality dashboard, then split again
  * so COI moved to its own page, see `lib/api/data-quality.ts` and
  * `app/edit/coi/page.tsx`). Route-level authorization + query-wiring tests.
@@ -9,7 +9,7 @@
  * stubbed `db.read`), mirroring the `/edit/scholar/[cwid]` page test.
  */
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 const {
   mockGetEditSession,
@@ -44,6 +44,7 @@ vi.mock("@/lib/api/data-quality", async (importActual) => {
     ...actual, // keep the real parseDataQualityParams so param threading is exercised
     loadDataQualityRoster: mockLoadDataQualityRoster,
     loadDataQualityFacets: mockLoadDataQualityFacets,
+    loadRosterTitles: async () => ({}),
   };
 });
 vi.mock("@/components/edit/profiles-roster", () => ({ ProfilesRoster: mockRoster }));
@@ -54,6 +55,7 @@ vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: moc
 vi.mock("@/components/edit/profiles-filters", () => ({
   ProfilesFilters: () => null,
   ProfilesFiltersSheet: () => null,
+  ProfilesSearch: () => null,
 }));
 // For the component-render test below: render `next/link` as a plain anchor and
 // stub the roster's child components so the real ProfilesRoster renders without
@@ -85,7 +87,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import EditScholarsPage from "@/app/edit/scholars/page";
+import EditScholarsPage from "@/app/edit/profiles/page";
 
 type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
@@ -134,11 +136,11 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllEnvs());
 
-describe("/edit/scholars — authorization", () => {
-  it("signed-out → SAML redirect with ?return=/edit/scholars", async () => {
+describe("/edit/profiles — authorization", () => {
+  it("signed-out → SAML redirect with ?return=/edit/profiles", async () => {
     mockGetEditSession.mockResolvedValue(null);
     await expect(EditScholarsPage({ searchParams: sp() })).rejects.toThrow(
-      "__REDIRECT__:/api/auth/saml/login?return=/edit/scholars",
+      "__REDIRECT__:/api/auth/saml/login?return=/edit/profiles",
     );
     expect(mockLoadDataQualityRoster).not.toHaveBeenCalled();
   });
@@ -340,7 +342,7 @@ describe("/edit/scholars — authorization", () => {
   });
 });
 
-describe("/edit/scholars — gap sanitization (COI never leaks into Profiles)", () => {
+describe("/edit/profiles — gap sanitization (COI never leaks into Profiles)", () => {
   // The key security-relevant assertion: not just no COI column rendered — the
   // query itself is narrowed server-side, so a crafted `?gap=has-coi` can't leak
   // COI presence through which rows come back, for ANY viewer of this page.
@@ -374,7 +376,7 @@ describe("/edit/scholars — gap sanitization (COI never leaks into Profiles)", 
   });
 });
 
-describe("/edit/scholars — query parsing", () => {
+describe("/edit/profiles — query parsing", () => {
   it("parses q, type, unit, gap, overviewAge, and page into the roster query", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     await EditScholarsPage({
@@ -409,6 +411,28 @@ describe("/edit/scholars — query parsing", () => {
 
 // Render the real ProfilesRoster (the page tests above mock it). The per-row
 // name is the link into the editor; there is no separate "Edit" link.
+const ROW: import("@/lib/api/data-quality").DataQualityEntry = {
+  cwid: "abc1001",
+  slug: "abc",
+  name: "Ada Lovelace",
+  title: null,
+  unit: null,
+  roleCategory: null,
+  isChair: false,
+  isChief: false,
+  leadership: null,
+  leadershipTier: 3,
+  isVisible: true,
+  headshot: "present",
+  hasOverview: true,
+  overviewUpdatedAt: "2026-01-01T00:00:00.000Z",
+  overviewState: "lt1yr",
+  pendingCoiHigh: 0,
+  pendingCoiMedium: 0,
+  prominence: 1.2,
+  editHref: "/edit/scholar/abc1001",
+};
+
 describe("ProfilesRoster — row name links to the editor", () => {
   // The module-level vi.mock replaces ProfilesRoster with a spy for the page
   // tests, so reach for the real implementation here.
@@ -420,29 +444,7 @@ describe("ProfilesRoster — row name links to the editor", () => {
     >("@/components/edit/profiles-roster");
     render(
       <ProfilesRoster
-        entries={[
-          {
-            cwid: "abc1001",
-            slug: "abc",
-            name: "Ada Lovelace",
-            title: null,
-            unit: null,
-            roleCategory: null,
-            isChair: false,
-            isChief: false,
-            leadership: null,
-            leadershipTier: 3,
-            isVisible: true,
-            headshot: "present",
-            hasOverview: true,
-            overviewUpdatedAt: "2026-01-01T00:00:00.000Z",
-            overviewState: "lt1yr",
-            pendingCoiHigh: 0,
-            pendingCoiMedium: 0,
-            prominence: 1.2,
-            editHref: "/edit/scholar/abc1001",
-          },
-        ]}
+        entries={[ROW]}
         total={1}
         counts={{ ...COUNTS, inScope: 1 }}
         facets={{ roleCategories: [], departments: [], centers: [], institutions: [] }}
@@ -451,7 +453,10 @@ describe("ProfilesRoster — row name links to the editor", () => {
         q=""
         gap="all"
         overviewAge="all"
-        includeHidden={true}
+        includeStudents={false}
+        hiddenOnly={false}
+        ranks={[]}
+        titles={{}}
         page={0}
         pageSize={100}
         canImpersonate={false}
@@ -490,7 +495,7 @@ describe("ProfilesRoster — row name links to the editor", () => {
     expect(screen.queryByTestId("view-as-abc1001")).toBeNull();
   });
 
-  it("renders the Status chip reflecting isVisible, for every viewer (not gated at all)", async () => {
+  it("tags a hidden profile 'Hidden' (the only visibility cue — no Status column)", async () => {
     await renderRoster({
       entries: [
         {
@@ -516,8 +521,72 @@ describe("ProfilesRoster — row name links to the editor", () => {
         },
       ],
     });
+    expect(screen.getByTestId("roster-hidden-abc1001").textContent).toBe("Hidden");
+    expect(screen.getByRole("table").textContent).not.toContain("Status");
+  });
+
+  it("a visible profile gets no visibility tag", async () => {
+    await renderRoster();
+    expect(screen.queryByTestId("roster-hidden-abc1001")).toBeNull();
+    expect(screen.getByRole("table").textContent).not.toContain("Visible");
+  });
+
+  it("shows the headshot as a lazy thumbnail when present, CWID in mono", async () => {
+    await renderRoster();
+    const imgs = screen.getByTestId("roster-row-abc1001").querySelectorAll("img");
+    expect(imgs.length).toBeGreaterThan(0);
+    for (const img of imgs) expect(img.getAttribute("loading")).toBe("lazy");
+    expect(imgs[0].getAttribute("src")).toContain("abc1001");
+    expect(screen.getByText("abc1001").className).toContain("font-mono");
+  });
+
+  it("the hover card carries titles (primary marked), the overview excerpt and a public link", async () => {
+    await renderRoster({
+      entries: [{ ...ROW, roleCategory: "full_time_faculty", overviewExcerpt: "Studies things." }],
+      titles: {
+        abc1001: [
+          { title: "Professor of Medicine", organization: "Medicine", isPrimary: true },
+          { title: "Professor of Surgery", organization: "Surgery", isPrimary: false },
+        ],
+      },
+    });
+    // Radix opens the card on trigger focus as well as hover (jsdom has no hover).
+    fireEvent.focus(screen.getByTestId("roster-name-abc1001").closest("div")!.parentElement!);
+    const card = await screen.findByTestId("roster-card-abc1001", {}, { timeout: 2000 });
+    expect(card.textContent).toContain("Full-time faculty");
+    expect(card.textContent).toContain("Professor of MedicinePrimary");
+    expect(card.textContent).toContain("Surgery");
+    expect(card.textContent).toContain("Studies things.");
+    expect(card.textContent).toContain("Edited");
+    expect(card.querySelector('a[href="/abc"]')?.textContent).toBe("Public profile");
+  });
+
+  it("the name link still navigates on touch (Radix trigger cancels touchstart)", async () => {
+    await renderRoster();
+    const link = screen.getByTestId("roster-name-abc1001");
+    const clicked = vi.fn((e: Event) => e.preventDefault());
+    link.addEventListener("click", clicked);
+    expect(fireEvent.touchEnd(link)).toBe(false);
+    expect(clicked).toHaveBeenCalledTimes(1);
+  });
+
+  it("a missing headshot is a dashed initials circle, not an image", async () => {
+    await renderRoster({ entries: [{ ...ROW, headshot: "missing" }] });
     const row = screen.getByTestId("roster-row-abc1001");
-    expect(row.textContent).toContain("Hidden");
+    expect(row.querySelector("img")).toBeNull();
+    expect(screen.getByTestId("roster-avatar-missing-abc1001").textContent).toBe("AL");
+  });
+
+  it("formats counts with commas and links the gap chips to their filter", async () => {
+    await renderRoster({
+      total: 9438,
+      counts: { ...COUNTS, inScope: 9438, missingHeadshot: 6720, missingOverview: 8886 },
+    });
+    expect(screen.getByTestId("profiles-result-count").textContent).toBe("Showing 1–100 of 9,438");
+    expect(screen.getByTestId("profiles-gap-headshot").getAttribute("href")).toBe(
+      "/edit/profiles?gap=no-headshot",
+    );
+    expect(screen.getByTestId("profiles-gap-overview").textContent).toContain("8,886");
   });
 
   it("never renders a COI column or cell — COI lives on /edit/coi now", async () => {

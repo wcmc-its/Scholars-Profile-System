@@ -34,6 +34,9 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
       gap: "has-coi",
       overviewAge: "all",
       includeHidden: false,
+      includeStudents: false,
+      hiddenOnly: false,
+      ranks: [],
       page: 2,
     });
   });
@@ -67,7 +70,7 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
     expect(parseDataQualityParams(new URLSearchParams("page=4")).page).toBe(4);
     expect(parseDataQualityParams(new URLSearchParams("gap=bogus")).gap).toBe("all");
     // The parser itself accepts every `DataQualityGapFilter` value — it's the
-    // shared page↔export boundary for BOTH `/edit/scholars` and `/edit/coi`,
+    // shared page↔export boundary for BOTH `/edit/profiles` and `/edit/coi`,
     // so it can't drop a value one of the two pages actually uses. Each PAGE
     // sanitizes down to its own subset afterward (see the page/export-route
     // tests), not this parser.
@@ -83,6 +86,13 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
     for (const v of ["imported", "never", "lt1yr", "1to2yr", "gt2yr"]) {
       expect(parseDataQualityParams(new URLSearchParams(`overviewAge=${v}`)).overviewAge).toBe(v);
     }
+  });
+
+  it("Profiles: students hidden unless students=1; visibility=hidden → hidden only", () => {
+    expect(parseDataQualityParams(new URLSearchParams("")).includeStudents).toBe(false);
+    expect(parseDataQualityParams(new URLSearchParams("students=1")).includeStudents).toBe(true);
+    expect(parseDataQualityParams(new URLSearchParams("")).hiddenOnly).toBe(false);
+    expect(parseDataQualityParams(new URLSearchParams("visibility=hidden")).hiddenOnly).toBe(true);
   });
 
   it("defaults includeHidden true; only 0/false hide", () => {
@@ -136,13 +146,39 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
         ]),
       },
       center: { findMany: vi.fn().mockResolvedValue([{ code: "MCC", name: "Meyer Cancer Center" }]) },
-      scholar: { groupBy: scholarGroupBy },
+      scholar: {
+        groupBy: scholarGroupBy,
+        count: vi.fn().mockImplementation((args: { where: { OR?: { primaryTitle?: { contains?: string } }[] } }) =>
+          Promise.resolve(args.where.OR?.[0]?.primaryTitle?.contains === "Lecturer" ? 0 : 5),
+        ),
+      },
       centerMembership: { groupBy: centerGroupBy },
     };
     return { client, centerGroupBy };
   }
 
   beforeEach(() => vi.clearAllMocks());
+
+  it("hides the tiny instructor/lecturer person types and counts ranks", async () => {
+    const { client } = facetClient();
+    const roles = [
+      { roleCategory: "full_time_faculty", _count: { _all: 10 } },
+      { roleCategory: "instructor", _count: { _all: 7 } },
+    ];
+    const base = client.scholar.groupBy.getMockImplementation()!;
+    client.scholar.groupBy.mockImplementation((args: { by: string[] }) =>
+      args.by[0] === "roleCategory" ? Promise.resolve(roles) : base(args),
+    );
+    const facets = await loadDataQualityFacets(client as never);
+    expect(facets.roleCategories.map((r) => r.value)).toEqual(["full_time_faculty"]);
+    // count mock: 5 for every rank except lecturer (0 → dropped)
+    expect(facets.ranks?.map((r) => r.value)).toEqual([
+      "professor",
+      "associate",
+      "assistant",
+      "instructor",
+    ]);
+  });
 
   it("nests divisions under their parent dept, encodes values, and maps counts", async () => {
     const { client } = facetClient();

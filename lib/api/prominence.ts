@@ -2,7 +2,7 @@
  * The ONE definition of a scholar's "prominence" score and institutional-
  * leadership tier.
  *
- * Extracted from `lib/api/data-quality.ts` (still the owner of the /edit/scholars
+ * Extracted from `lib/api/data-quality.ts` (still the owner of the /edit/profiles
  * + /edit/coi roster query) when the news-approval queue needed to offer the same
  * ordering. Two copies of this formula would drift the first time anyone tuned a
  * weight — the repeated failure mode this module exists to prevent — so the

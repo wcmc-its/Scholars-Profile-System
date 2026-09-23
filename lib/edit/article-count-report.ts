@@ -3,7 +3,7 @@
  * scholars matching the facets (person type, department / division /
  * center / institution, article type, minimum Journal Impact Factor, author
  * position), by calendar or fiscal year. Person type and unit take the
- * Profiles roster's URL vocabulary (`/edit/scholars`): repeated `type` (raw
+ * Profiles roster's URL vocabulary (`/edit/profiles`): repeated `type` (raw
  * roleCategory) and repeated `unit` (`dept:` / `div:` / `center:` / `inst:`
  * + CODE; `parsePersonFilter` / `personFilterSql` in `lib/edit/person-filter.ts`,
  * the rule the Profiles roster shares), and the rail shows the same facets

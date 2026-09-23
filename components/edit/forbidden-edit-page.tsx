@@ -7,9 +7,9 @@
  * (`/edit/scholar/[other-cwid]`, `/edit/publication/[pmid]` — "edit this
  * profile" / "edit another scholar's profile"), but `ForbiddenEditPage` is the
  * shared 403 for the ~20 `ConsoleShell`-wrapped list/queue/dashboard pages too
- * (`/edit/scholars`, `/edit/usage`, `/edit/grant-matcha`, …), most of which
+ * (`/edit/profiles`, `/edit/usage`, `/edit/grant-matcha`, …), most of which
  * aren't about editing any specific profile at all — a `development`-role
- * viewer denied `/edit/scholars` was never trying to "edit another scholar's
+ * viewer denied `/edit/profiles` was never trying to "edit another scholar's
  * profile", they were trying to browse a roster their role doesn't cover. The
  * "scholar" variant's copy (2026-08-19) is now generic enough to be true for
  * both: it names no specific action and no specific role. The wire status is
@@ -43,10 +43,10 @@ type OwnHomeSession = {
   isDeveloper?: boolean;
 };
 
-/** `/edit/scholars`, labeled for someone who can actually WRITE there — as
+/** `/edit/profiles`, labeled for someone who can actually WRITE there — as
  *  opposed to `GLOBAL_ROLE_HOME.cv_generator`, the same href for a read-only
  *  visitor. Kept as its own constant so the two never drift apart. */
-const PROFILES_LINK = { href: "/edit/scholars", label: "Profiles" };
+const PROFILES_LINK = { href: "/edit/profiles", label: "Profiles" };
 
 /**
  * Every destination this session actually has, in priority order — NOT just
@@ -66,7 +66,7 @@ const PROFILES_LINK = { href: "/edit/scholars", label: "Profiles" };
  *
  * (Deliberately NOT keyed on unit-admin/`managesUnits` — that verdict needs
  * its own DB read (`loadManageableUnits`), not a plain `EditSession` field,
- * and a unit owner/curator is already admitted by `/edit/scholars`'s own D5/
+ * and a unit owner/curator is already admitted by `/edit/profiles`'s own D5/
  * B3 scope check whenever they hold a grant, so they rarely reach this page's
  * scholar-variant at all. `EditSession`'s existing boolean fields cover every
  * case that's actually been hit.)

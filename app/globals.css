@@ -76,6 +76,10 @@
      background. */
   --apollo-bar: #2a2421; /* warm near-black header */
   --apollo-maroon: #8a1f2b; /* WCM editor maroon */
+  /* Console text tiers: primary / secondary; tertiary is --muted-foreground. */
+  --apollo-ink: #1f1b19;
+  --apollo-ink-2: #5c574d;
+  --apollo-icon: #8a847c; /* icons only */
   --apollo-maroon-press: #6e1620; /* hover / active maroon */
   --apollo-maroon-on-bar: #c9505d; /* active-tab underline ON the dark bar (maroon vanishes there) */
   --apollo-maroon-foreground: #ffffff;
@@ -310,6 +314,9 @@
   /* Apollo chrome utilities (bg-apollo-bar, text-apollo-maroon, …). */
   --color-apollo-bar: var(--apollo-bar);
   --color-apollo-maroon: var(--apollo-maroon);
+  --color-apollo-ink: var(--apollo-ink);
+  --color-apollo-ink-2: var(--apollo-ink-2);
+  --color-apollo-icon: var(--apollo-icon);
   --color-apollo-maroon-press: var(--apollo-maroon-press);
   --color-apollo-maroon-on-bar: var(--apollo-maroon-on-bar);
   --color-apollo-maroon-foreground: var(--apollo-maroon-foreground);

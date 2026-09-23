@@ -86,7 +86,7 @@ describe("AccountMenu — role-aware console links", () => {
     mockProbe({
       scholar: null,
       displayName: "Dana Davis",
-      consoleLinks: [{ id: "manage-profiles", label: "Admin console", href: "/edit/scholars" }],
+      consoleLinks: [{ id: "manage-profiles", label: "Admin console", href: "/edit/profiles" }],
     });
     render(<AccountMenu scholar={null} />);
     // No scholar row → trigger falls back to the probe's stewardDirectory name,
@@ -95,7 +95,7 @@ describe("AccountMenu — role-aware console links", () => {
     fireEvent.click(screen.getByLabelText("Account menu"));
 
     const manage = screen.getByTestId("account-menu-console-manage-profiles");
-    expect(manage.getAttribute("href")).toBe("/edit/scholars");
+    expect(manage.getAttribute("href")).toBe("/edit/profiles");
     expect(manage.textContent).toContain("Admin console");
 
     // The console section renders even without a profile — the whole point.
@@ -114,13 +114,13 @@ describe("AccountMenu — role-aware console links", () => {
     const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
     mockProbe({
       scholar: sue,
-      consoleLinks: [{ id: "manage-profiles", label: "Admin", href: "/edit/scholars" }],
+      consoleLinks: [{ id: "manage-profiles", label: "Admin", href: "/edit/profiles" }],
     });
     render(<AccountMenu scholar={sue} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
 
     const manage = screen.getByTestId("account-menu-console-manage-profiles");
-    expect(manage.getAttribute("href")).toBe("/edit/scholars");
+    expect(manage.getAttribute("href")).toBe("/edit/profiles");
     expect(screen.queryByTestId("account-menu-console-methods")).toBeNull();
     expect(screen.queryByTestId("account-menu-console-units")).toBeNull();
   });
@@ -139,7 +139,7 @@ describe("AccountMenu — role-aware console links", () => {
   it("unit Owner/Curator → both rows, Profiles before Org units", () => {
     mockProbe({
       consoleLinks: [
-        { id: "profiles", label: "Profiles", href: "/edit/scholars" },
+        { id: "profiles", label: "Profiles", href: "/edit/profiles" },
         { id: "units", label: "Org units", href: "/edit/units" },
       ],
     });
@@ -176,7 +176,7 @@ describe("AccountMenu — unified dropdown", () => {
     const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
     mockProbe({
       scholar: sue,
-      consoleLinks: [{ id: "manage-profiles", label: "Admin console", href: "/edit/scholars" }],
+      consoleLinks: [{ id: "manage-profiles", label: "Admin console", href: "/edit/profiles" }],
     });
     render(<AccountMenu scholar={sue} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
@@ -195,7 +195,7 @@ describe("AccountMenu — unified dropdown", () => {
       // No prop scholar is passed (the AdminSubnav mount omits it) — the chip and
       // links come from the probe.
       consoleLinks: [
-        { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
+        { id: "manage-profiles", label: "Admin console", href: "/edit/profiles" },
         { id: "methods", label: "Method families", href: "/edit/methods" },
       ],
     });

@@ -265,7 +265,7 @@ export function EditShell({
         <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
           {isSuperuser && isProfileEntity ? (
             <BreadcrumbCrumb
-              href="/edit/scholars"
+              href="/edit/profiles"
               label="Profiles"
               current={scholarName}
               testId="edit-subnav-profiles"
@@ -292,7 +292,7 @@ export function EditShell({
             // manage — the same roster ("Profiles") a superuser returns to,
             // gated on their own profiles-tab grant rather than assumed.
             <BreadcrumbCrumb
-              href="/edit/scholars"
+              href="/edit/profiles"
               label="Profiles"
               current={scholarName}
               testId="edit-subnav-profiles"
@@ -316,7 +316,7 @@ export function EditShell({
               </span>
               {canBrowseProfiles && (
                 <Link
-                  href="/edit/scholars"
+                  href="/edit/profiles"
                   className="text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-3 text-sm"
                   data-testid="edit-subnav-profiles"
                 >

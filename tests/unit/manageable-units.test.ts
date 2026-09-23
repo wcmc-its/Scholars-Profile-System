@@ -209,7 +209,7 @@ describe("loadManageableUnits", () => {
         code: "HMC",
         name: "Hamad Medical Corporation",
         role: "owner",
-        href: "/edit/scholars",
+        href: "/edit/profiles",
       },
     ]);
     expect(r.total).toBe(1);

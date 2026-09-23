@@ -52,7 +52,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
  *  actual page — by redirect in the first case, by a direct link in the
  *  second — instead of 404ing or bouncing through a generic `/edit`. */
 export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string }> = {
-  cv_generator: { href: "/edit/scholars", label: "Profiles (read-only)" },
+  cv_generator: { href: "/edit/profiles", label: "Profiles (read-only)" },
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
   development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
