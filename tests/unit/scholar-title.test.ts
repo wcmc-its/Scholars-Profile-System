@@ -180,6 +180,16 @@ describe("resolveScholarTitle — rank, not source", () => {
     expect(r).toMatchObject({ tier: "working", value: "Meyer Cancer Center Director" });
   });
 
+  it("an ED primary title wording the same directorship keeps its wording too", () => {
+    const r = resolveScholarTitle({
+      ...NONE,
+      override: null,
+      centerHeadTitle: "Director, Drukier Institute for Children's Health",
+      edPrimaryTitle: "Director, Drukier Institute",
+    });
+    expect(r).toMatchObject({ tier: "primary", value: "Director, Drukier Institute" });
+  });
+
   it("a working title naming a DIFFERENT center does not borrow the role's rank", () => {
     expect(
       resolveScholarTitle({

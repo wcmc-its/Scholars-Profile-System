@@ -190,27 +190,25 @@ export type TitleInputs = {
  * not apply, and sorts last.
  */
 export function buildTitleOptions(inputs: TitleInputs): TitleOption[] {
-  const appointment = bestRanked(inputs.appointmentTitles ?? []);
   const centerHead = blankToNull(inputs.centerHeadTitle);
-  const working = ranked(inputs.workingTitle);
-  // A working title that words the SAME directorship the role confers
-  // ("Meyer Cancer Center Director") keeps the person's own wording: it takes
-  // the role's rank, and the working tier wins the tie. Text alone can only
-  // say "some center" (rank 10); the role knows it is a tracked one (5).
-  if (
+  // A text title that words the SAME directorship the role confers ("Meyer
+  // Cancer Center Director", an ED "Director, Drukier Institute") keeps the
+  // person's own wording: it takes the role's rank, and the text tier wins the
+  // tie. Text alone can only say "some center" (rank 10); the role knows it
+  // is a tracked one (5).
+  const sameDirectorship = (r: [string | null, number]): [string | null, number] =>
     centerHead !== null &&
-    working[0] !== null &&
-    working[1] === TITLE_RANK.unitCenterDirector &&
-    sharesUnitName(working[0], centerHead)
-  ) {
-    working[1] = TITLE_RANK.institutionalCenterDirector;
-  }
+    r[0] !== null &&
+    r[1] === TITLE_RANK.unitCenterDirector &&
+    sharesUnitName(r[0], centerHead)
+      ? [r[0], TITLE_RANK.institutionalCenterDirector]
+      : r;
   const byTier: Record<TitleTier, [string | null, number]> = {
-    working,
-    appointment: appointment,
+    working: sameDirectorship(ranked(inputs.workingTitle)),
+    appointment: sameDirectorship(bestRanked(inputs.appointmentTitles ?? [])),
     centerHead: [centerHead, TITLE_RANK.institutionalCenterDirector],
     chief: [blankToNull(inputs.chiefTitle), TITLE_RANK.divisionChief],
-    primary: ranked(inputs.edPrimaryTitle),
+    primary: sameDirectorship(ranked(inputs.edPrimaryTitle)),
   };
   return TITLE_TIERS.map((tier) => ({
     tier,
