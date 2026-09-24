@@ -162,6 +162,23 @@ export default async function EditSelfPage({
         return <ProxyLanding scholars={scholars} />;
       }
     }
+    // A unit Owner/Curator with no Scholar row of their own — e.g. a center's
+    // administrative staff managing its roster. Their console entry point is the
+    // unit they administer (one grant → straight there; several → the
+    // `/edit/units` index that exists for exactly them). Without this they
+    // signed in and hit a 404. Checked before `report_access`: the unit is the
+    // primary job, and its "View reports" link still reaches the reports.
+    const units = await loadManageableUnits(editCwid, db.read);
+    if (units.total > 0) {
+      const all = [
+        ...units.departments,
+        ...units.divisions,
+        ...units.centers,
+        ...units.cores,
+        ...units.institutions,
+      ];
+      redirect(all.length === 1 ? all[0].href : "/edit/units");
+    }
     // A `report_access` holder (reports 7–9) — staff with no Scholar row, no
     // ED-group role and no proxy grant. Their console entry point is the
     // reports index, which lists exactly the reports they were granted
