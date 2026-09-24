@@ -27,6 +27,8 @@ function row(over: Partial<NewsQueueRow>): NewsQueueRow {
     publishedAt: null,
     outlet: null,
     possibleRepeatOf: null,
+    placements: [],
+    leadOf: null,
     detectedName: "Invented Person",
     likelihood: "HIGH",
     matchBasis: "BODY",

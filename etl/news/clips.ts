@@ -16,6 +16,8 @@
  * Usage:
  *   npm run etl:news-clips                     read INBOUND_MAIL_BUCKET/CLIPS_PREFIX
  *   npm run etl:news-clips -- a.eml b.eml      load hand-forwarded emails
+ *   npm run etl:news-clips -- --regroup        one-off: group every ungrouped clip
+ *                                              row with its story's other copies
  *
  * Env:
  *   INBOUND_MAIL_BUCKET  SES receipt bucket (required unless files are given);
@@ -27,6 +29,7 @@
 import { readFileSync } from "node:fs";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { db } from "@/lib/db";
+import { assignGroups } from "@/lib/edit/clip-repeats";
 import { withEtlRun } from "@/lib/etl-run";
 import { articlesToMentions, upsertMentions } from "./index";
 import { NEWS_ORIGIN, type ScrapedArticle } from "./seed";
@@ -231,7 +234,12 @@ export type Clip = {
   outlet: string | null;
   summary: string | null;
   publishedAt: string | null;
+  /** "(This article originally appeared in X)" → X; picks a group's lead. */
+  creditedOutlet?: string | null;
 };
+
+/** "(This article originally appeared in KFF Health News)" — the syndication credit. */
+const CREDIT_LINE = /^\(\s*this (?:article|story) (?:originally )?(?:appeared|was published) (?:in|on|by) (.+?)\.?\s*\)$/i;
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 const DATE_LINE = /^(?:mon|tues|wednes|thurs|fri|satur|sun)day,\s+([a-z]+)\s+(\d{1,2}),\s+(\d{4})$/i;
@@ -255,7 +263,14 @@ export function parseClipLines(text: string): Clip[] {
   const flush = () => {
     if (!cur) return;
     const summary = cur.bullets.join(" ").trim();
-    clips.push({ url: cur.url, title: cur.title, outlet: cur.outlet, summary: summary || null, publishedAt: cur.publishedAt });
+    clips.push({
+      url: cur.url,
+      title: cur.title,
+      outlet: cur.outlet,
+      summary: summary || null,
+      publishedAt: cur.publishedAt,
+      ...(cur.creditedOutlet ? { creditedOutlet: cur.creditedOutlet } : {}),
+    });
     cur = null;
   };
   for (const rawLine of text.split(/\r?\n/)) {
@@ -287,9 +302,13 @@ export function parseClipLines(text: string): Clip[] {
       }
       continue;
     }
+    const credit = line.match(CREDIT_LINE);
+    if (cur && credit) {
+      cur.creditedOutlet = credit[1].trim().slice(0, 255);
+      continue;
+    }
     if (cur && cur.outlet === null && cur.bullets.length === 0) cur.outlet = line.slice(0, 255);
-    // ponytail: other lines (editor asides like "(This article originally
-    // appeared in …)") are dropped; append them to the summary if comms asks.
+    // ponytail: other editor asides are dropped; append them if comms asks.
   }
   flush();
   return clips;
@@ -326,6 +345,7 @@ export function clipToArticle(c: Clip): ScrapedArticle {
     tags: c.summary ? doctorNames(c.summary) : [],
     captionText: "",
     outlet: c.outlet ?? "",
+    ...(c.creditedOutlet ? { creditedOutlet: c.creditedOutlet } : {}),
   };
 }
 
@@ -395,8 +415,40 @@ export async function readBucketEmails(prefix: string): Promise<RawEmail[]> {
   return out;
 }
 
+/**
+ * Group this run's new clip rows with the copies of the same story already
+ * stored (`assignGroups`), writing `duplicate_of` on the new rows only.
+ * `regroupAll` (the one-off `--regroup` backfill) treats every ungrouped clip
+ * row as new. Returns how many rows joined a story.
+ */
+export async function groupNewClips(cwids: readonly string[], since: Date, regroupAll = false): Promise<number> {
+  if (cwids.length === 0 && !regroupAll) return 0;
+  const rows = await db.write.newsMention.findMany({
+    where: { outlet: { not: null }, ...(regroupAll ? {} : { cwid: { in: [...cwids] } }) },
+    select: {
+      id: true,
+      cwid: true,
+      url: true,
+      title: true,
+      outlet: true,
+      publishedAt: true,
+      createdAt: true,
+      duplicateOf: true,
+      creditedOutlet: true,
+    },
+  });
+  const isFresh = (r: (typeof rows)[number]) =>
+    regroupAll ? r.duplicateOf === null : r.createdAt >= since && r.duplicateOf === null;
+  const changes = assignGroups(rows.filter(isFresh), rows.filter((r) => !isFresh(r)));
+  for (const [id, duplicateOf] of changes) {
+    await db.write.newsMention.update({ where: { id }, data: { duplicateOf } });
+  }
+  return changes.size;
+}
+
 async function main(): Promise<number> {
-  const files = process.argv.slice(2);
+  const regroupAll = process.argv.includes("--regroup");
+  const files = process.argv.slice(2).filter((a) => a !== "--regroup");
   const fromBucket = files.length === 0;
   const raws: RawEmail[] = fromBucket
     ? await readBucketEmails(process.env.CLIPS_PREFIX ?? "clips/")
@@ -438,9 +490,12 @@ async function main(): Promise<number> {
   // in the review queue ("Possible repeat of…", findPossibleRepeat), never
   // dropped silently. Grouping copies under one story is planned separately.
   const rows = clipMentionRows(articles, scholars);
+  // 5 s of slack: `created_at` is the database clock, this is the task's.
+  const runStart = new Date(Date.now() - 5000);
   const { inserted, updated, preserved, deduped } = await upsertMentions(rows);
+  const grouped = await groupNewClips([...new Set(rows.map((r) => r.cwid))], runStart, regroupAll);
   console.log(
-    `[NewsClips] ${JSON.stringify({ event: "news_clips_complete", emails: raws.length, skipped, auth, clips: articles.length, mentions: rows.length, inserted, updated, preserved, deduped })}`,
+    `[NewsClips] ${JSON.stringify({ event: "news_clips_complete", emails: raws.length, skipped, auth, clips: articles.length, mentions: rows.length, inserted, updated, preserved, deduped, grouped })}`,
   );
   // A digest that yields no clips means the email format moved under us. Fail
   // AFTER upserting the rest so one odd email does not hold back the others.

@@ -1,7 +1,11 @@
 import type { ProfilePayload } from "@/lib/api/profile";
 
 /** A Media highlights clip adds its press outlet; a newsroom story has none. */
-type NewsMention = ProfilePayload["news"][number] & { outlet?: string };
+type NewsMention = ProfilePayload["news"][number] & {
+  outlet?: string;
+  /** Media highlights: the story's other copies (story grouping). */
+  alsoIn?: ProfilePayload["mediaHighlights"][number]["alsoIn"];
+};
 
 /** Most scholars have a handful of mentions; the rest collapse into a <details>. */
 const ROW_CAP = 5;
@@ -32,6 +36,24 @@ function NewsRow({ item }: { item: NewsMention }) {
           {item.title}
         </a>
         {byline ? <div className="text-muted-foreground mt-0.5 text-xs">{byline}</div> : null}
+        {item.alsoIn && item.alsoIn.shown.length > 0 ? (
+          <div className="text-muted-foreground mt-0.5 text-xs" data-testid="news-also-in">
+            Also in{" "}
+            {item.alsoIn.shown.map((o, i) => (
+              <span key={o.outlet}>
+                {i > 0 ? (i === item.alsoIn!.shown.length - 1 && item.alsoIn!.more === 0 ? " and " : ", ") : ""}
+                {o.url ? (
+                  <a href={o.url} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">
+                    {o.outlet}
+                  </a>
+                ) : (
+                  o.outlet
+                )}
+              </span>
+            ))}
+            {item.alsoIn.more > 0 ? ` and ${item.alsoIn.more} more` : ""}
+          </div>
+        ) : null}
         {item.excerpt ? <p className="text-muted-foreground mt-1 text-sm">{item.excerpt}</p> : null}
       </div>
     </li>

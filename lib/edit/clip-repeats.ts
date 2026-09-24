@@ -75,3 +75,106 @@ export function findPossibleRepeat<T extends ClipLike & { id: string }>(
     }) ?? null
   );
 }
+
+// ---------------------------------------------------------------------------
+// Story grouping: every copy is kept; a later copy points at its story's lead
+// (`news_mention.duplicate_of`). Auto-grouping is deliberately narrow; anything
+// looser stays a queue suggestion (`findPossibleRepeat`) for a human.
+
+/** Copies of one story arrive within this many days of each other. */
+export const GROUP_WINDOW_DAYS = 14;
+/** A headline needs this many content words before it can auto-group, so a
+ *  recurring column name ("At A Glance") never merges two different stories. */
+export const GROUP_MIN_WORDS = 4;
+
+export type GroupableClip = ClipLike & {
+  id: string;
+  outlet: string | null;
+  duplicateOf: string | null;
+  creditedOutlet: string | null;
+  createdAt?: Date | string;
+};
+
+const sameOutlet = (a: string | null, b: string | null) =>
+  (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
+/**
+ * `duplicate_of` for each of the `fresh` rows (just imported, ungrouped) that is
+ * another copy of a story: same scholar, same headline (`headlineKey`), at least
+ * `GROUP_MIN_WORDS` content words, a DIFFERENT outlet, within
+ * `GROUP_WINDOW_DAYS` of a row in `fresh` or `existing`. A copy joins the
+ * story's existing lead. When a story is formed only of fresh rows, the copy
+ * from the outlet the digest credits as the original publisher leads, else the
+ * earliest. Existing rows are never regrouped, so a reviewer's Ungroup or Make
+ * lead stands. Returns only the rows whose `duplicate_of` should change.
+ */
+export function assignGroups(
+  fresh: readonly GroupableClip[],
+  existing: readonly GroupableClip[],
+): Map<string, string | null> {
+  const time = (c: GroupableClip) => new Date(c.publishedAt ?? c.createdAt ?? 0).getTime();
+  const pool: GroupableClip[] = existing.map((c) => ({ ...c }));
+  const freshIds = new Set(fresh.map((c) => c.id));
+  const byId = new Map(pool.map((c) => [c.id, c]));
+  const leadOf = (c: GroupableClip) => (c.duplicateOf && byId.has(c.duplicateOf) ? c.duplicateOf : c.id);
+
+  for (const r of [...fresh].sort((a, b) => time(a) - time(b))) {
+    const row: GroupableClip = { ...r, duplicateOf: null };
+    if (contentWords(r.title).size >= GROUP_MIN_WORDS) {
+      const key = headlineKey(r.title);
+      const match = pool.find((p) => {
+        if (p.cwid !== r.cwid || headlineKey(p.title) !== key || sameOutlet(p.outlet, r.outlet)) return false;
+        const d = daysApart(p.publishedAt, r.publishedAt);
+        return d !== null && d <= GROUP_WINDOW_DAYS;
+      });
+      if (match) row.duplicateOf = leadOf(match);
+    }
+    pool.push(row);
+    byId.set(row.id, row);
+  }
+
+  // A story made only of fresh rows: prefer the credited original as lead.
+  const members = new Map<string, GroupableClip[]>();
+  for (const c of pool) {
+    if (!freshIds.has(c.id)) continue;
+    const lead = leadOf(c);
+    members.set(lead, [...(members.get(lead) ?? []), c]);
+  }
+  for (const [lead, group] of members) {
+    if (group.length < 2 || !freshIds.has(lead) || group.some((c) => !freshIds.has(c.id))) continue;
+    const credited = group.map((c) => c.creditedOutlet).filter((x): x is string => !!x);
+    const original = group.find((c) => credited.some((x) => sameOutlet(x, c.outlet)));
+    if (!original || original.id === lead) continue;
+    for (const c of group) c.duplicateOf = c.id === original.id ? null : original.id;
+  }
+
+  const out = new Map<string, string | null>();
+  for (const c of pool) if (freshIds.has(c.id) && c.duplicateOf !== null) out.set(c.id, c.duplicateOf);
+  return out;
+}
+
+/** A placement shown in the profile's "Also in …" line. */
+export type AlsoInLink = { outlet: string; url: string | null };
+
+/** Links that are not a public article page (a saved broadcast clip). */
+const NOT_PUBLIC_PAGE = /^https?:\/\/(?:www\.)?muckrack\.com\/broadcast\//i;
+/** Outlet names shown before "and N more". */
+export const ALSO_IN_CAP = 3;
+
+/** The "Also in …" entries for a story's visible placements, first seen
+ *  first: one per outlet, the lead's own outlet excluded, a saved broadcast
+ *  clip unlinked. `more` counts the outlets past `ALSO_IN_CAP`. */
+export function alsoIn(
+  leadOutlet: string | null,
+  placements: readonly { outlet: string | null; url: string }[],
+): { shown: AlsoInLink[]; more: number } {
+  const seen = new Set([(leadOutlet ?? "").trim().toLowerCase()]);
+  const all: AlsoInLink[] = [];
+  for (const p of placements) {
+    const name = (p.outlet ?? "").trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    all.push({ outlet: name, url: NOT_PUBLIC_PAGE.test(p.url) ? null : p.url });
+  }
+  return { shown: all.slice(0, ALSO_IN_CAP), more: Math.max(0, all.length - ALSO_IN_CAP) };
+}

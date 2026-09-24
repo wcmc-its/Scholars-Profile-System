@@ -78,6 +78,8 @@ type StoredRow = {
   detectedName: string | null;
   sourceRef: string | null;
   showOnProfile: boolean;
+  /** Set on a Media highlights clip; only a clip can have copies. */
+  outlet?: string | null;
 };
 
 function snapshot(row: StoredRow) {
@@ -171,6 +173,38 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // un-reject path (case 2) lands here unchanged: still-PENDING siblings are
       // rejected, and siblings already rejected are left alone — re-writing a
       // terminal row would emit an audit row that says nothing.
+      // Media highlights story grouping: the other copies of this story
+      // (`duplicate_of` = this row) take the same decision, each audited. Only
+      // undecided copies (pending; or rejected when approving) are touched.
+      const copies = !row.outlet
+        ? []
+        : ((await tx.newsMention.findMany({
+            where: {
+              duplicateOf: row.id,
+              status: approving ? { in: ["pending", "rejected"] } : "pending",
+            },
+          })) as StoredRow[]);
+      for (const copy of copies) {
+        const after = (await tx.newsMention.update({
+          where: { id: copy.id },
+          data: hide
+            ? { status: nextStatus, showOnProfile: false, enteredByCwid: realCwid }
+            : { status: nextStatus, enteredByCwid: realCwid },
+        })) as StoredRow;
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "news_mention",
+          requestId,
+          targetEntityId: copy.id,
+          action: "news_mention_update",
+          fieldsChanged: hide ? ["status", "showOnProfile"] : ["status"],
+          beforeValues: snapshot(copy),
+          afterValues: snapshot(after),
+          ts,
+        });
+      }
+
       let siblingsRejected = 0;
       const affectedCwids = new Set<string>([row.cwid]);
       if (approving && row.sourceRef) {

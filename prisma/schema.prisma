@@ -3562,6 +3562,16 @@ model NewsMention {
   /// marks the row as an off-site press clip: it renders in the profile's Media
   /// Highlights section instead of News. Null for newsroom stories.
   outlet         String?           @db.VarChar(255)
+  /// Media highlights: the id of the LEAD clip this row is another copy of (a
+  /// syndicated copy, a later digest). Null = its own story (or the lead). Always
+  /// points at the lead, never at another placement. No FK on purpose: lead and
+  /// placements share a cwid and are deleted together; a dangling id just makes
+  /// the row its own story (lib/edit/clip-repeats.ts, `groupClips`).
+  duplicateOf    String?           @map("duplicate_of") @db.VarChar(64)
+  /// Media highlights: the original publisher the digest credits for this clip
+  /// ("(This article originally appeared in KFF Health News)"); used to pick
+  /// the lead of a group. Null when the digest credits none.
+  creditedOutlet String?           @map("credited_outlet") @db.VarChar(255)
   /// Per-mention profile hide (the scholar's /edit "hide" control). A published
   /// mention renders only when this is true.
   showOnProfile  Boolean           @default(true) @map("show_on_profile")
@@ -3574,6 +3584,7 @@ model NewsMention {
 
   @@unique([cwid, url])
   @@index([cwid, status, showOnProfile])
+  @@index([duplicateOf])
   @@map("news_mention")
 }
 

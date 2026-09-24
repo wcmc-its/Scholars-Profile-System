@@ -31,6 +31,7 @@ const existing = (over: Partial<ExistingMention>): ExistingMention => ({
   sourceRef: `${URL}|jane roe`,
   contextSnippet: null,
   outlet: null,
+  creditedOutlet: null,
   ...over,
 });
 
@@ -49,6 +50,7 @@ const incomingName = {
   sourceRef: `${URL}|jane roe`,
   contextSnippet: null,
   outlet: null as string | null,
+  creditedOutlet: null as string | null,
 };
 
 /** The VIVO shape of the same row: the whole NAME provenance set is null. */

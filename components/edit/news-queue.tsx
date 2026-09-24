@@ -194,7 +194,20 @@ const REPEAT_STATUS_LABEL: Record<string, string> = {
 /** The scholar identity block a reviewer weighs: name, title, department, and the
  *  match likelihood + basis for a name-detected candidate. `decidedNote` rides on
  *  the secondary line (Approved tab only — see the call site). */
-function Candidate({ row, decidedNote }: { row: NewsQueueRow; decidedNote?: string | null }) {
+type RegroupOp = "ungroup" | "make_lead" | "group";
+
+function Candidate({
+  row,
+  decidedNote,
+  onRegroup,
+  busy = false,
+}: {
+  row: NewsQueueRow;
+  decidedNote?: string | null;
+  /** Media highlights story grouping (POST /api/edit/news-mention/group). */
+  onRegroup?: (op: RegroupOp, id: string, leadId?: string) => void;
+  busy?: boolean;
+}) {
   const basis = row.matchBasis ? BASIS_LABEL[row.matchBasis] : undefined;
   return (
     <div className="min-w-0">
@@ -265,6 +278,74 @@ function Candidate({ row, decidedNote }: { row: NewsQueueRow; decidedNote?: stri
             “{row.possibleRepeatOf.title}”
           </a>{" "}
           ({REPEAT_STATUS_LABEL[row.possibleRepeatOf.status] ?? row.possibleRepeatOf.status})
+          {onRegroup ? (
+            <button
+              type="button"
+              disabled={busy}
+              className="ml-2 font-medium underline underline-offset-2"
+              onClick={() => onRegroup("group", row.id, row.possibleRepeatOf!.id)}
+              data-testid="news-queue-group-with"
+            >
+              Group with it
+            </button>
+          ) : null}
+        </p>
+      ) : null}
+      {/* Story grouping: this card is the lead; its other copies are decided
+          with it. Make lead / Ungroup correct the ETL's automatic grouping. */}
+      {row.placements.length > 0 ? (
+        <div className="text-muted-foreground mt-1 text-[12px]" data-testid="news-queue-placements">
+          Also ran in:{" "}
+          {row.placements.map((p, i) => (
+            <span key={p.id}>
+              {i > 0 ? "; " : ""}
+              <a href={p.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+                {p.outlet ?? "another outlet"}
+              </a>
+              {p.publishedAt ? ` (${p.publishedAt})` : ""}
+              {onRegroup ? (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="text-apollo-slate hover:underline"
+                    onClick={() => onRegroup("make_lead", p.id)}
+                  >
+                    Make lead
+                  </button>
+                  {" · "}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="text-apollo-slate hover:underline"
+                    onClick={() => onRegroup("ungroup", p.id)}
+                  >
+                    Ungroup
+                  </button>
+                </>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {row.leadOf ? (
+        <p className="text-muted-foreground mt-1 text-[12px]" data-testid="news-queue-copy-of">
+          Copy of{" "}
+          <a href={row.leadOf.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+            “{row.leadOf.title}”
+          </a>{" "}
+          ({REPEAT_STATUS_LABEL[row.leadOf.status] ?? row.leadOf.status})
+          {onRegroup ? (
+            <button
+              type="button"
+              disabled={busy}
+              className="text-apollo-slate ml-2 hover:underline"
+              onClick={() => onRegroup("ungroup", row.id)}
+            >
+              Ungroup
+            </button>
+          ) : null}
         </p>
       ) : null}
       {/* Name-in-context snippet (#2578 follow-up) — the raw article text around
@@ -358,6 +439,28 @@ export function NewsQueue({
       startTransition(() => router.refresh());
     } catch {
       setError("We couldn't update this mention. Please try again.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Media highlights story grouping: ungroup / make lead / group with. */
+  async function regroup(op: RegroupOp, id: string, leadId?: string) {
+    setError(null);
+    setBusyId(id);
+    try {
+      const res = await fetch("/api/edit/news-mention/group", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op, id, leadId }),
+      });
+      if (!res.ok) {
+        setError("We couldn't regroup that clip. Please try again.");
+        return;
+      }
+      startTransition(() => router.refresh());
+    } catch {
+      setError("We couldn't regroup that clip. Please try again.");
     } finally {
       setBusyId(null);
     }
@@ -628,7 +731,12 @@ export function NewsQueue({
                     `matched to this name.`;
                   return (
                     <li key={row.id} className="flex items-center justify-between gap-3 py-2">
-                      <Candidate row={row} decidedNote={decidedNote} />
+                      <Candidate
+                        row={row}
+                        decidedNote={decidedNote}
+                        onRegroup={row.outlet !== null ? regroup : undefined}
+                        busy={busyId === row.id}
+                      />
                       {tab === "pending" ? (
                         <div className="flex flex-none gap-2">
                           <Button

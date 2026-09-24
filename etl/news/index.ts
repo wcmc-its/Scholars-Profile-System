@@ -62,6 +62,8 @@ type MentionUpsert = {
   contextSnippet: string | null;
   /** Press outlet for a Media highlights clip (etl/news/clips.ts); null for a newsroom story. */
   outlet: string | null;
+  /** Clips only: the digest's "originally appeared in X" credit. */
+  creditedOutlet: string | null;
 };
 
 async function recordRun(args: {
@@ -117,6 +119,7 @@ export function articlesToMentions(
       excerpt: a.excerpt,
       thumbnailUrl: a.thumbnailUrl,
       outlet: a.outlet ?? null,
+      creditedOutlet: a.creditedOutlet ?? null,
     };
     const put = (row: MentionUpsert) => {
       // #2241 — key on the STORY, not the url: the feed publishes some articles
@@ -191,6 +194,7 @@ export type ExistingMention = {
    *  never touched on a human-touched row. */
   contextSnippet: string | null;
   outlet: string | null;
+  creditedOutlet: string | null;
 };
 
 /**
@@ -209,6 +213,7 @@ export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string
   if (cur.excerpt !== r.excerpt) data.excerpt = r.excerpt;
   if (cur.thumbnailUrl !== r.thumbnailUrl) data.thumbnailUrl = r.thumbnailUrl;
   if (cur.outlet !== r.outlet) data.outlet = r.outlet;
+  if (cur.creditedOutlet !== r.creditedOutlet) data.creditedOutlet = r.creditedOutlet;
 
   const humanTouched = cur.enteredByCwid !== null;
   if (!humanTouched) {
@@ -261,6 +266,7 @@ export async function upsertMentions(rows: MentionUpsert[]): Promise<{
           sourceRef: true,
           contextSnippet: true,
           outlet: true,
+          creditedOutlet: true,
         },
       })
     : [];
@@ -324,6 +330,7 @@ export async function upsertMentions(rows: MentionUpsert[]): Promise<{
               sourceRef: r.sourceRef,
               contextSnippet: r.contextSnippet,
               outlet: r.outlet,
+              creditedOutlet: r.creditedOutlet,
               // enteredByCwid stays null: the ETL is not a manual edit.
             },
           });

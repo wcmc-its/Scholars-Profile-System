@@ -32,6 +32,14 @@ export type NewsEditCardProps = {
   variant?: "news" | "clips";
 };
 
+/** Each story's lead followed by its copies; stories keep their order. A copy
+ *  whose lead is absent stands on its own. */
+function storyOrder(news: ReadonlyArray<EditContextNews>): EditContextNews[] {
+  const ids = new Set(news.map((n) => n.id));
+  const isCopy = (n: EditContextNews) => n.duplicateOf !== null && ids.has(n.duplicateOf);
+  return news.filter((n) => !isCopy(n)).flatMap((lead) => [lead, ...news.filter((n) => isCopy(n) && n.duplicateOf === lead.id)]);
+}
+
 /** ISO YYYY-MM-DD → "July 16, 2026" in UTC (deterministic). */
 function formatDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -90,13 +98,15 @@ export function NewsEditCard({ mode, scholarName, news, variant = "news" }: News
         </p>
       ) : (
         <ul className="divide-apollo-border divide-y" data-slot="news-list">
-          {news.map((n) => {
+          {storyOrder(news).map((n) => {
+            // A copy of a story (story grouping) sits indented under its lead.
+            const copy = clips && n.duplicateOf !== null && news.some((x) => x.id === n.duplicateOf);
             const date = formatDate(n.publishedAt);
             const busy = pending && busyId === n.id;
             return (
               <li
                 key={n.id}
-                className="flex items-start justify-between gap-3 py-3"
+                className={`flex items-start justify-between gap-3 py-3${copy ? " pl-6" : ""}`}
                 data-testid={`news-row-${n.id}`}
               >
                 <div className="min-w-0">
@@ -109,6 +119,7 @@ export function NewsEditCard({ mode, scholarName, news, variant = "news" }: News
                     {n.title}
                   </a>
                   <p className="text-muted-foreground text-xs">
+                    {copy ? "Also ran in " : ""}
                     {clips && n.outlet ? `${n.outlet} · ` : ""}
                     {date ?? "Undated"}
                     {!n.showOnProfile ? " · Hidden from profile" : ""}
