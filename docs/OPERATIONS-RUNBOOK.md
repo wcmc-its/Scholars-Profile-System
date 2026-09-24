@@ -399,7 +399,7 @@ Nightly step `CtscRoster` (`npm run etl:ctsc-roster`, [`etl/ctsc-roster/index.ts
 - **Writes.** A profiled, active scholar gets a `center_membership` row with `source='ctsc-feed'`. Anyone else gets an `external_member` (`cuid` = `ctsc:<feed PrimaryKey>`, `source='ctsc-feed'`) plus a `center_membership` row with `source='ctsc-feed-external'`, shown on the roster as an unlinked plain name with the feed's institution. Suppressed or deleted scholars are skipped. Only rows carrying those sources are ever deleted; a manual row for the same person is never overwritten.
 - **Feed CWID issues.** `ctsc_feed_issue` is full-replaced each run and shown as "Feed CWID issues" on the CTSC center's `/edit` page, one row per record CTSC should fix at the source (suggested CWID and the email it matched, where ED resolved one). A corrected record drops off after the next sync.
 - **Task def and secret.** Runs on its own task def `sps-etl-ctsc-<env>`, which carries `scholars/<env>/etl/ctsc` (JSON keys `CTSC_FEED_URL`, `CTSC_FEED_TOKEN`) plus the ED bind. The feed URL is an internal hostname: it lives only in the secret, never in the repo or a ticket.
-- **Freshness.** Source `CTSC-Roster`, cadence nightly, acked until **2026-10-31** (`lib/etl/freshness-policy.ts`) so the heartbeat stays green during setup. Continue-tier failures are invisible to the status alarm, so freshness is this step's only net once the ack lapses.
+- **Freshness.** Source `CTSC-Roster`, cadence nightly (`lib/etl/freshness-policy.ts`). Its setup ack was dropped once both envs ran green (first sync 2026-09-24). Continue-tier failures are invisible to the status alarm, so freshness is this step's only net.
 
 **Rollout, in order, per env:**
 
@@ -547,7 +547,6 @@ Properties: **fail-closed** (a directory error denies; an ED outage blocks all e
 | **2026-08-19** | Active WCM IdP signing cert (CN `login-proxy.weill.cornell.edu`, issued 2016-08-19) **expires** — every SSO login breaks unless both certs are trusted beforehand. Successor (2026-03-27→2036-03-27) already in IdP metadata |
 | **2026-08-26** | Reminder: drop the expired cert from `SAML_IDP_CERT` |
 | Within **3 days** of an Observability deploy | Confirm the notify-topic email subscription from `paa2013@med.cornell.edu`'s inbox or it expires |
-| **2026-10-31** | `CTSC-Roster` freshness ack lapses (`lib/etl/freshness-policy.ts`). By then the CTSC rollout must be done in both envs and the step succeeding nightly, or the heartbeat goes red; renew the ack only if rollout slipped. See [CTSC roster sync](#ctsc-roster-sync) |
 | **2036-03-27** | Successor IdP cert expiry (next rollover horizon) |
 
 **Governance gaps:** no formal access-recertification cadence (superuser group / `unit_admin`); no standing emergency-superuser account (elevation depends on ED reachability); post-launch operations ownership unresolved.
