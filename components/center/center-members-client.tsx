@@ -27,7 +27,7 @@ import type {
   CenterMembershipType,
   CenterMembersResult,
 } from "@/lib/api/centers";
-import { HOME_INSTITUTION_CODE, institutionDisplayName } from "@/lib/institutions";
+import { HOME_INSTITUTION_CODE, institutionCodeForName, institutionDisplayName } from "@/lib/institutions";
 
 export function CenterMembersClient({
   result,
@@ -170,7 +170,11 @@ function GroupedRoster({
   // `primaryOrgCode`; bucket it by its institution name (unmapped strings
   // display as-is), or WCM when the feed lists WCM itself.
   const instKey = (m: RowWithProgram) =>
-    m.isExternal ? m.externalInstitution ?? HOME_INSTITUTION_CODE : m.primaryOrgCode || NO_INST;
+    m.isExternal
+      ? m.externalInstitution
+        ? (institutionCodeForName(m.externalInstitution) ?? m.externalInstitution)
+        : HOME_INSTITUTION_CODE
+      : m.primaryOrgCode || NO_INST;
   const typeKey = (m: RowWithProgram): string => m.membershipType ?? "";
   // #962 — the family overlay-key values a member belongs to (facet membership).
   const methodValues = (m: RowWithProgram): string[] =>

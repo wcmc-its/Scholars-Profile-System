@@ -14,8 +14,15 @@
  */
 import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
 
-export const CORNELL_EXTERNAL_SOURCE = "cornell-ithaca";
+export const CORNELL_EXTERNAL_SOURCE: string = "cornell-ithaca";
 export const CTSC_EXTERNAL_SOURCE = "ctsc-feed-external";
+/** A CTSC feed person who IS a profiled scholar (keyed by CWID). */
+export const CTSC_LINKED_SOURCE = "ctsc-feed";
+/** Membership rows `etl/ctsc-roster` owns and re-mirrors nightly. */
+export const CTSC_FEED_SOURCES: readonly string[] = [CTSC_LINKED_SOURCE, CTSC_EXTERNAL_SOURCE];
+/** The CTSC center is found by SLUG: /edit mints a random `man-<hex>` code at
+ *  creation, but the superuser picks the slug. Create it with slug "ctsc". */
+export const CTSC_CENTER_SLUG = "ctsc";
 
 export function enabledExternalMemberSources(): string[] {
   return isCornellDirectoryMembersEnabled()

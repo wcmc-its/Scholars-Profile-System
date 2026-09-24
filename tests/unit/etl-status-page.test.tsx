@@ -586,10 +586,16 @@ describe("/edit/etl-status page", () => {
     expect(row.getAttribute("data-state")).toBe("never-ran");
     expect(row.textContent).toContain(ack.until);
     expect(row.textContent).toContain(ack.reason);
-    // Every other source is never-ran too, so this one is the single exclusion.
+    // Every other source is never-ran too, so each ack still in force at this
+    // instant (this one, plus any other not yet lapsed) is an exclusion.
     const total = expectedSources().length;
+    const now = Date.parse(ack.until) - DAY;
+    const inForce = Object.values(TRACKED).filter(
+      (s) => s.ack !== undefined && Date.parse(s.ack.until) >= now,
+    ).length;
+    expect(inForce).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("etl-status-headline").textContent).toContain(
-      `${total - 1} of ${total} imports need attention`,
+      `${total - inForce} of ${total} imports need attention`,
     );
   });
 

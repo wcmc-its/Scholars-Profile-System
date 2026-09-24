@@ -72,6 +72,7 @@ import {
 } from "@/lib/edit/validators";
 import type { EditSession } from "@/lib/auth/superuser";
 import { fetchCornellPersonByNetid } from "@/lib/sources/cornell-ldap";
+import { CTSC_FEED_SOURCES } from "@/lib/edit/external-member-sources";
 
 const PATH = "/api/edit/roster";
 
@@ -427,6 +428,17 @@ async function handleCenter(p: {
   // nothing else rides on it, and removing it cannot vacate a leadership role.
   if (action === "add" && existing) return editOk({ unitCode, cwid, action, changed: false });
   if (action === "remove" && !existing) return editOk({ unitCode, cwid, action, changed: false });
+  // A CTSC feed row would be re-added by the next nightly sync, so Remove would
+  // silently undo itself. End-dating sticks (the sync never overwrites a row).
+  if (action === "remove") {
+    const owner = await db.read.centerMembership.findUnique({
+      where: { centerCode_cwid: { centerCode: unitCode, cwid } },
+      select: { source: true },
+    });
+    if (owner && CTSC_FEED_SOURCES.includes(owner.source)) {
+      return editError(409, "feed_owned_membership", "cwid");
+    }
+  }
 
   // The set of columns this write applies — only fields present in the body.
   const applied: Record<string, unknown> = {};

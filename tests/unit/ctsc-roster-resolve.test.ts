@@ -85,6 +85,15 @@ describe("resolveCtscFeed", () => {
     expect(r.externals.map((e) => e.cuid)).toEqual(["ctsc:6", "ctsc:7"]);
   });
 
+  it("never republishes a suppressed / deleted scholar as a plain name", () => {
+    const r = resolveCtscFeed(
+      [rec(11, { CWID: "other1003", LastName: "Brown" })],
+      edByUid, edUidsByEmail, scholars, new Set(["other1003"]),
+    );
+    expect(r.linkedCwids).toEqual([]);
+    expect(r.externals).toEqual([]);
+  });
+
   it("makes an in-ED person with no SPS profile a plain name, no issue", () => {
     const r = resolveCtscFeed([rec(10, { CWID: "other1003", LastName: "Brown", Institutions: ["Hospital for Special Surgery"] })], edByUid, edUidsByEmail, scholars);
     expect(r.linkedCwids).toEqual([]);
@@ -98,6 +107,7 @@ describe("parseCtscFeed", () => {
     const r = parseCtscFeed({
       CTSCInvestigatorsAndTrainees: [
         { PrimaryKey: "123", LastName: "A" },
+        { PrimaryKey: "0123", LastName: "dup" },
         { PrimaryKey: 7, LastName: "B" },
         { PrimaryKey: "x1", LastName: "C" },
         { LastName: "D" },

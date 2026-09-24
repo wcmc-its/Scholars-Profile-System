@@ -37,9 +37,7 @@ import { UnitRosterCard } from "@/components/edit/unit-roster-card";
 import { UnitNameCard } from "@/components/edit/unit-name-card";
 import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import { CtscFeedIssuesPanel } from "@/components/edit/ctsc-feed-issues-panel";
-
-/** The CTSC center's code (created in /edit; `etl/ctsc-roster` writes to it). */
-const CTSC_CENTER_CODE = "ctsc";
+import { CTSC_CENTER_SLUG } from "@/lib/edit/external-member-sources";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
 import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
@@ -144,7 +142,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   {
     key: "feed-issues",
     label: "Feed CWID issues",
-    visible: (ctx) => ctx.unit.unitType === "center" && ctx.unit.code === CTSC_CENTER_CODE,
+    visible: (ctx) => ctx.unit.unitType === "center" && ctx.unit.slug === CTSC_CENTER_SLUG,
   },
 ];
 

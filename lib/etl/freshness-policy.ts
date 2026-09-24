@@ -123,7 +123,14 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // is invisible to the ExecutionsFailed alarm, so freshness is its only net.
   "ED-Admins": { cadence: "nightly" },
   // Deployed nightly step CtscRoster (tier:"continue") — freshness is its only net.
-  "CTSC-Roster": { cadence: "nightly" },
+  "CTSC-Roster": {
+    cadence: "nightly",
+    ack: {
+      until: "2026-10-31",
+      reason:
+        "This roster import is new. It starts running once its feed credentials and the CTSC center are set up in this environment; until then there is nothing to do here.",
+    },
+  },
   ReCiter: { cadence: "nightly" },
   // PubMed competing-interest statements backfill — runs right after ReCiter.
   "ReCiter-COI-Statements": { cadence: "nightly" },

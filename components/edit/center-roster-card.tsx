@@ -1611,6 +1611,8 @@ function mapErrorToMessage(code: string): string {
       return "This disease is no longer in the current assignment list. Refresh the page to see what changed.";
     case "unknown_disease_code":
       return "That disease code isn't recognized. Refresh the page and try again.";
+    case "feed_owned_membership":
+      return "This member comes from the nightly CTSC feed, so removing them here would be undone overnight. Set an end date instead, or have CTSC update the record.";
     default:
       return "Something went wrong — the change wasn't saved. Please try again.";
   }

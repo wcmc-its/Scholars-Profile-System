@@ -73,10 +73,12 @@ export function parseCtscFeed(body: unknown): CtscFeedRecord[] {
   const records = (body as { CTSCInvestigatorsAndTrainees?: unknown })?.CTSCInvestigatorsAndTrainees;
   if (!Array.isArray(records)) throw new Error("CTSC feed: missing CTSCInvestigatorsAndTrainees array");
   const out: CtscFeedRecord[] = [];
+  const seen = new Set<number>();
   for (const r of records as Array<Record<string, unknown>>) {
     const raw = r?.PrimaryKey;
     const pk = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
-    if (!Number.isSafeInteger(pk)) continue;
+    if (!Number.isSafeInteger(pk) || seen.has(pk)) continue;
+    seen.add(pk);
     out.push({ ...(r as CtscFeedRecord), PrimaryKey: pk });
   }
   return out;
@@ -115,6 +117,8 @@ export function resolveCtscFeed(
   edByUid: Map<string, EdPerson>,
   edUidsByEmail: Map<string, string[]>,
   activeScholarCwids: Set<string>,
+  /** Suppressed or soft-deleted scholars: never republished as a plain name. */
+  hiddenScholarCwids: Set<string> = new Set(),
 ): CtscResolution {
   const linked = new Set<string>();
   const externalCwids = new Set<string>();
@@ -149,13 +153,13 @@ export function resolveCtscFeed(
       suggested: EdPerson | undefined = undefined,
     ): CtscIssue => ({
       primaryKey: r.PrimaryKey,
-      name,
-      institution,
-      feedCwid,
+      name: name.slice(0, 255),
+      institution: institution?.slice(0, 255) ?? null,
+      feedCwid: feedCwid?.slice(0, 64) ?? null,
       reason,
-      suggestedCwid: suggested?.uid ?? null,
-      suggestedName: suggested?.displayName ?? null,
-      matchedEmail: suggested ? matchedEmail : null,
+      suggestedCwid: suggested?.uid.slice(0, 32) ?? null,
+      suggestedName: suggested?.displayName?.slice(0, 255) ?? null,
+      matchedEmail: suggested ? (matchedEmail?.slice(0, 255) ?? null) : null,
     });
 
     let cwid: string | null = null;
@@ -185,6 +189,10 @@ export function resolveCtscFeed(
 
     if (cwid && activeScholarCwids.has(cwid)) {
       linked.add(cwid);
+      continue;
+    }
+    if (cwid && hiddenScholarCwids.has(cwid)) {
+      externalCwids.add(cwid);
       continue;
     }
     if (cwid) externalCwids.add(cwid);

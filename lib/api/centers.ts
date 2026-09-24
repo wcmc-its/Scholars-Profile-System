@@ -58,7 +58,10 @@ import {
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
-import { enabledExternalMemberSources } from "@/lib/edit/external-member-sources";
+import {
+  CORNELL_EXTERNAL_SOURCE,
+  enabledExternalMemberSources,
+} from "@/lib/edit/external-member-sources";
 import {
   buildExternalMemberHit,
   loadExternalMembersByCuid,
@@ -787,9 +790,12 @@ async function getCenterMembersUncached(
     if (label === null) continue;
     roleCategoryCounts[label] = (roleCategoryCounts[label] ?? 0) + 1;
   }
-  if (cornellHits.length > 0) {
+  // Only Cornell externals are faculty; a CTSC plain name (trainees, staff,
+  // outside investigators) has no known role and sits in no role chip.
+  const cornellFacultyCount = cornellHits.filter((h) => h.externalProfileUrl).length;
+  if (cornellFacultyCount > 0) {
     roleCategoryCounts["Affiliated faculty"] =
-      (roleCategoryCounts["Affiliated faculty"] ?? 0) + cornellHits.length;
+      (roleCategoryCounts["Affiliated faculty"] ?? 0) + cornellFacultyCount;
   }
 
   // Is this a programmed center with at least one active programmed member?
@@ -997,7 +1003,7 @@ export async function getCenterMembersByType(
   // flat SSR roster's Cornell branch (`getCenterMembersUncached`).
   let cornellHits: CenterMemberHit[] = [];
   if (roleGroup === "Affiliated faculty") {
-    const externalSources = enabledExternalMemberSources();
+    const externalSources = enabledExternalMemberSources().filter((s) => s === CORNELL_EXTERNAL_SOURCE);
     const cornellCwids = activeMemberships
       .filter((m) => externalSources.includes(m.source))
       .map((m) => m.cwid);

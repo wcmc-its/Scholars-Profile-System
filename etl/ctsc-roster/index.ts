@@ -26,11 +26,14 @@ import { assertPruneVolume, assertSourceVolume } from "@/lib/etl-guard";
 import { withEtlRun } from "@/lib/etl-run";
 import { escapeLdapFilter, openLdap } from "@/lib/sources/ldap";
 import { MEMBER_ROLE_KEY } from "@/lib/org-unit-roles";
-import { CTSC_EXTERNAL_SOURCE } from "@/lib/edit/external-member-sources";
+import {
+  CTSC_CENTER_SLUG,
+  CTSC_EXTERNAL_SOURCE,
+  CTSC_FEED_SOURCES,
+  CTSC_LINKED_SOURCE as LINKED_SOURCE,
+} from "@/lib/edit/external-member-sources";
 import { feedEmails, parseCtscFeed, resolveCtscFeed, type CtscFeedRecord, type EdPerson } from "./resolve";
 
-export const CTSC_CENTER_CODE = "ctsc";
-const LINKED_SOURCE = "ctsc-feed";
 const SEARCH_BASE = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? "ou=people,dc=weill,dc=cornell,dc=edu";
 const BATCH = 100;
 
@@ -105,12 +108,13 @@ async function lookupEd(records: CtscFeedRecord[]) {
 }
 
 async function main(): Promise<number> {
-  const center = await db.write.center.findUnique({ where: { code: CTSC_CENTER_CODE } });
-  if (!center) throw new Error(`center "${CTSC_CENTER_CODE}" not found — create it in /edit first`);
+  const center = await db.write.center.findUnique({ where: { slug: CTSC_CENTER_SLUG }, select: { code: true } });
+  if (!center) throw new Error(`no center with slug "${CTSC_CENTER_SLUG}" — create it in /edit with that slug`);
+  const centerCode = center.code;
 
   const records = await fetchFeed();
   const existing = await db.write.centerMembership.findMany({
-    where: { centerCode: CTSC_CENTER_CODE, source: { in: [LINKED_SOURCE, CTSC_EXTERNAL_SOURCE] } },
+    where: { centerCode: centerCode, source: { in: [...CTSC_FEED_SOURCES] } },
     select: { cwid: true, source: true },
   });
   // Feed volume vs what we mirrored last night (bootstrap: existing = 0 → skipped).
@@ -118,15 +122,24 @@ async function main(): Promise<number> {
   console.log(`CTSC feed: ${records.length} records; ${existing.length} feed memberships held.`);
 
   const { edByUid, edUidsByEmail } = await lookupEd(records);
-  const scholars = await db.write.scholar.findMany({
-    where: { deletedAt: null, status: "active" },
-    select: { cwid: true },
+  const allScholars = await db.write.scholar.findMany({
+    select: { cwid: true, status: true, deletedAt: true },
   });
+  const scholars = allScholars.filter((s) => s.deletedAt === null && s.status === "active");
   const active = new Set(scholars.map((s) => s.cwid.toLowerCase()));
-  const { linkedCwids, externals, issues } = resolveCtscFeed(records, edByUid, edUidsByEmail, active);
+  // Suppressed / soft-deleted: never republished under the feed as a plain name.
+  const hidden = new Set(allScholars.filter((s) => !active.has(s.cwid.toLowerCase())).map((s) => s.cwid.toLowerCase()));
+  const { linkedCwids, externals, issues } = resolveCtscFeed(records, edByUid, edUidsByEmail, active, hidden);
   console.log(
     `Resolved: ${linkedCwids.length} profiled scholars, ${externals.length} plain names, ${issues.length} issues.`,
   );
+  // A degraded ED read (empty/partial result, no error) would demote profiled
+  // members to plain names; compare against last night's linked rows.
+  assertSourceVolume("ctsc:linked", {
+    incoming: linkedCwids.length,
+    existing: existing.filter((m) => m.source === LINKED_SOURCE).length,
+    maxDropPct: 20,
+  });
 
   // Scholar CWIDs may be stored mixed-case; write the stored form.
   const storedCwid = new Map(scholars.map((s) => [s.cwid.toLowerCase(), s.cwid]));
@@ -140,8 +153,8 @@ async function main(): Promise<number> {
   for (let i = 0; i < stale.length; i += 500) {
     await db.write.centerMembership.deleteMany({
       where: {
-        centerCode: CTSC_CENTER_CODE,
-        source: { in: [LINKED_SOURCE, CTSC_EXTERNAL_SOURCE] },
+        centerCode: centerCode,
+        source: { in: [...CTSC_FEED_SOURCES] },
         cwid: { in: stale.slice(i, i + 500) },
       },
     });
@@ -173,7 +186,7 @@ async function main(): Promise<number> {
   }
 
   const rows = [...want].map(([cwid, source]) => ({
-    centerCode: CTSC_CENTER_CODE,
+    centerCode: centerCode,
     cwid,
     source,
     membershipRoleKey: MEMBER_ROLE_KEY,
@@ -185,7 +198,7 @@ async function main(): Promise<number> {
 
   await db.write.$transaction([
     db.write.ctscFeedIssue.deleteMany({}),
-    db.write.ctscFeedIssue.createMany({ data: issues }),
+    db.write.ctscFeedIssue.createMany({ data: issues, skipDuplicates: true }),
   ]);
 
   console.log(`Wrote ${rows.length} memberships (pruned ${stale.length}), ${issues.length} issues.`);
