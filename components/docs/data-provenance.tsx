@@ -49,6 +49,7 @@ const WCM: Source[] = [
   { name: "Center for Technology Licensing", data: "Available technologies", cad: "weekly" },
   { name: "WCM Newsroom", data: "News mentions", cad: "weekly" },
   { name: "Muck Rack", data: "Media highlights, as curated by External Affairs", cad: "nightly" },
+  { name: "Clinical & Translational Science Center", data: "Clinical & Translational Science Center roster (not publications)", cad: "nightly" },
 ];
 
 const EXT: Source[] = [
@@ -129,6 +130,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     label: "Center roles",
     rows: [
       { field: "Center membership", source: "Scholars", cadence: "On save", tag: "Unit curator", how: "The center’s Owner or Curator edits the roster. You can hide the Centers card." },
+      { field: "CTSC membership", detail: "Clinical & Translational Science Center investigators and trainees", source: "Clinical & Translational Science Center", cadence: "Nightly", tag: "At the source", how: "Ask the CTSC to correct its roster. It appears after the next nightly sync." },
       { field: "Center director and program leader", source: "Scholars", cadence: "On save", tag: "Unit curator", how: "Set by the center’s Owner or Curator." },
     ],
   },

@@ -136,7 +136,7 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from.</em> 24 authoritative sources, among them
+              <em>Where your data comes from.</em> 25 authoritative sources, among them
               the Enterprise Directory, the WCM Web Directory, ASMS, InfoEd, Jenzabar, OnCore, the
               External Relationships / COI system, PubMed, Scopus, NIH RePORTER, the WCM Newsroom,
               and Muck Rack (the full list is in{" "}
@@ -430,6 +430,9 @@ export default function DocsPage() {
           highlights are stored here as well, but those are an individual&apos;s own profile rather
           than shared data about the institution. Center rosters are not held anywhere upstream, so
           they are maintained in this application, and they are self-serve for the right roles.
+          The one exception is the Clinical &amp; Translational Science Center: its roster comes
+          nightly from the CTSC&apos;s own investigators-and-trainees list, so a change to that
+          roster is made by the CTSC at the source.
         </p>
         <p>
           A center Owner or Curator manages the roster at <code>/edit/center/[code]</code>: add,
