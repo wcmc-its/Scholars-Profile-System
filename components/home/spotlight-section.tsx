@@ -5,8 +5,8 @@
  *   - Left pane: the active spotlight (kicker, name, lede, papers with WCM
  *     author chips, browse-all-publications link).
  *   - Right pane: 2-column grid of small button-cards (one per spotlight).
- *     Click swaps the active spotlight. Active card shows a Cornell-red
- *     left rule + tinted background.
+ *     Click swaps the active spotlight. Active card = rail tint + "Showing"
+ *     (home refinements mockup, 2026-09-24).
  *
  * Behavior:
  *   - On mount the active card is randomized (the SSR render starts at 0;
@@ -32,6 +32,7 @@
 import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { usePublicationModal } from "@/components/publication/publication-modal";
+import { SectionHeading } from "@/components/home/section-heading";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -76,24 +77,26 @@ export function SpotlightSection({
 
   return (
     <section
-      className="mt-12"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
     >
-      <h2 className="inline-flex items-center gap-2 text-lg font-semibold">
+      <SectionHeading
+        aside={
+          <SectionInfoButton label="Spotlight" anchor="spotlight">
+            Spotlight rotates subareas with the strongest recent activity at
+            WCM, one per research area, refreshed weekly. Subareas are scored
+            from ReCiterAI publication scores on PubMed records.
+          </SectionInfoButton>
+        }
+      >
         Spotlight
-        <SectionInfoButton label="Spotlight" anchor="spotlight">
-          Spotlight rotates subareas with the strongest recent activity at
-          WCM, one per research area, refreshed weekly. Subareas are scored
-          from ReCiterAI publication scores on PubMed records.
-        </SectionInfoButton>
-      </h2>
+      </SectionHeading>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
         <SpotlightDetail card={active} />
-        <div className="grid grid-cols-2 content-start gap-2">
+        <div className="grid auto-rows-fr grid-cols-1 content-start gap-2 sm:grid-cols-2">
           {display.map((card, i) => (
             <SpotlightCardButton
               key={card.subtopicId}
@@ -140,16 +143,16 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
     <div
       // `key` retriggers the fade-in transition on activeIdx swap.
       key={card.subtopicId}
-      className="animate-in fade-in slide-in-from-bottom-1 flex min-h-[380px] flex-col gap-4 rounded-xl border border-zinc-200 bg-gradient-to-b from-zinc-50 to-white p-6 duration-300"
+      className="animate-in fade-in slide-in-from-bottom-1 border-apollo-border bg-apollo-surface flex min-h-[380px] flex-col rounded-[var(--apollo-radius-card)] border border-t-[3px] border-t-apollo-maroon p-7 shadow-[var(--apollo-shadow-card)] duration-300"
     >
       <a
         href={parentHref}
         aria-label={`View research area ${card.parentTopicLabel}`}
-        className={`text-[10.5px] font-medium uppercase tracking-[0.13em] text-[var(--color-primary-cornell-red)] ${noUnderlineHover}`}
+        className={`text-[11px] leading-4 font-semibold tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase ${noUnderlineHover}`}
       >
         {card.parentTopicLabel}
       </a>
-      <h3 className="text-3xl font-medium leading-tight tracking-tight">
+      <h3 className="mt-2.5 text-[28px] leading-[34px] font-medium tracking-[-0.01em] text-balance">
         <a
           href={subtopicHref}
           aria-label={`View subarea ${card.displayName}`}
@@ -158,17 +161,17 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
           {card.displayName}
         </a>
       </h3>
-      <p className="text-muted-foreground text-sm leading-relaxed">{card.lede}</p>
+      <p className="text-muted-foreground mt-3.5 max-w-[62ch] text-sm leading-[22px] text-pretty">{card.lede}</p>
 
       {hasPubCount || hasScholarCount ? (
-        <div className="flex flex-wrap gap-x-6 gap-y-1 border-y border-zinc-200 py-3 text-sm text-zinc-600">
+        <div className="bg-apollo-surface-2 mt-5 flex flex-wrap gap-x-6 gap-y-1 rounded-lg px-3.5 py-2.5 text-sm">
           {hasPubCount ? (
             <a
               href={pubsHref}
               aria-label={`Browse all ${card.publicationCount!.toLocaleString()} publications in ${card.displayName}`}
-              className={`text-zinc-600 ${noUnderlineHover}`}
+              className={`text-[var(--color-accent-slate)] ${noUnderlineHover}`}
             >
-              <span className="font-medium text-zinc-900">
+              <span className="font-semibold">
                 {card.publicationCount!.toLocaleString()}
               </span>{" "}
               publications
@@ -178,9 +181,9 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
             <a
               href={scholarsHref}
               aria-label={`Browse all ${card.scholarCount!.toLocaleString()} scholars working in ${card.displayName}`}
-              className={`text-zinc-600 ${noUnderlineHover}`}
+              className={`text-[var(--color-accent-slate)] ${noUnderlineHover}`}
             >
-              <span className="font-medium text-zinc-900">
+              <span className="font-semibold">
                 {card.scholarCount!.toLocaleString()}
               </span>{" "}
               scholars
@@ -189,8 +192,8 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-5">
-        <div className="text-[10.5px] font-medium uppercase tracking-[0.13em] text-zinc-500">
+      <div className="mt-5 flex flex-col">
+        <div className="text-muted-foreground mb-1 text-[11px] leading-4 tracking-[0.1em] uppercase">
           Representative papers
         </div>
         {card.papers.map((p, slot) => (
@@ -207,6 +210,11 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
           />
         ))}
       </div>
+      {hasPubCount ? (
+        <a href={pubsHref} className={`mt-4 text-sm text-[var(--color-accent-slate)] ${noUnderlineHover}`}>
+          See all {card.publicationCount!.toLocaleString()} publications →
+        </a>
+      ) : null}
     </div>
   );
 }
@@ -265,7 +273,7 @@ function PaperRow({
   }
 
   return (
-    <div className="text-sm leading-snug">
+    <div className="border-apollo-border flex flex-col gap-2 border-b py-3.5">
       {/* Title opens the shared publication modal (#947), mirroring the
           profile/search rows. The spotlight_paper_click CTR beacon (#286/#343)
           still fires alongside open(); PubMed remains reachable from the modal
@@ -276,23 +284,28 @@ function PaperRow({
           handleClick();
           open(pmid);
         }}
-        className="text-left font-medium text-zinc-900 hover:underline"
-        dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(title) }}
+        className="text-foreground text-left text-[15px] leading-[22px] text-pretty hover:underline"
+        dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(stripTrailingPeriod(title)) }}
       />
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[13px] text-zinc-500">
         {visible.map((a) => (
           <AuthorChip key={a.cwid} author={a} />
         ))}
         {overflow > 0 ? <span className="text-zinc-500">+{overflow} more</span> : null}
         {senior ? <AuthorChip key={`senior-${senior.cwid}`} author={senior} /> : null}
-        <span aria-hidden="true">·</span>
-        <span className="italic">
-          <span dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(journal) }} />
-          {`, ${year}`}
-        </span>
+      </div>
+      <div className="text-muted-foreground text-[13px] leading-[18px]">
+        <em dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(journal) }} />
+        {`, ${year}`}
       </div>
     </div>
   );
+}
+
+/** PubMed titles end in a period; the card reads cleaner without it. Case is left
+ *  as PubMed has it — re-casing Title Case would lowercase proper nouns. */
+export function stripTrailingPeriod(title: string): string {
+  return title.trim().replace(/\.$/, "");
 }
 
 function AuthorChip({ author }: { author: SpotlightAuthor }) {
@@ -340,32 +353,33 @@ function SpotlightCardButton({
       onClick={onSelect}
       aria-pressed={active}
       className={[
-        "flex min-h-[78px] flex-col gap-1 rounded-lg border p-3 text-left transition-all",
+        "flex h-full min-w-0 flex-col gap-1.5 rounded-[10px] border px-3.5 py-3 text-left transition-colors",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary-cornell-red)]",
-        // Active = quieter than the spotlight: darker neutral border, hairline
-        // crimson left rule, no full-perimeter outline. The spotlight pane
-        // earns the visual weight; these cards are navigation.
+        // Active = the rail tint + a "Showing" label; the detail pane earns the
+        // visual weight, these cards are navigation.
         active
-          ? "border-zinc-400 bg-zinc-50 pl-4 shadow-[inset_2px_0_0_var(--color-primary-cornell-red)]"
-          : "border-zinc-200 bg-white hover:-translate-y-px hover:border-zinc-400",
+          ? "border-apollo-rail-border bg-apollo-rail"
+          : "border-apollo-border bg-apollo-surface hover:border-apollo-border-strong shadow-[var(--apollo-shadow-card)]",
       ].join(" ")}
     >
-      <div className="text-[9.5px] font-medium uppercase tracking-[0.09em] text-[var(--color-primary-cornell-red)]">
+      <div className="line-clamp-2 min-h-[30px] text-[10.5px] leading-[15px] font-semibold tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase">
         {card.parentTopicLabel}
       </div>
-      <div className="text-[13px] font-medium leading-tight text-zinc-900">
+      <div className="text-foreground line-clamp-3 text-[14px] leading-[19px] font-medium text-pretty">
         {card.displayName}
       </div>
       {/* #2218 — same rule as the detail pane: an absent aggregate row is not
           "0 pubs · 0 scholars". Omit the line rather than assert a false zero. */}
-      {card.publicationCount !== null && card.scholarCount !== null ? (
-        <div className="mt-auto text-[11px] text-zinc-500">
-          <span className="font-medium text-zinc-700">
-            {card.publicationCount.toLocaleString()}
-          </span>{" "}
-          pubs · {card.scholarCount.toLocaleString()} scholars
-        </div>
-      ) : null}
+      <div className="text-muted-foreground mt-auto flex items-baseline justify-between gap-2 pt-1.5 text-xs">
+        {card.publicationCount !== null && card.scholarCount !== null ? (
+          <span>
+            {card.publicationCount.toLocaleString()} pubs · {card.scholarCount.toLocaleString()} scholars
+          </span>
+        ) : (
+          <span />
+        )}
+        {active ? <span className="text-foreground text-[11px] font-semibold">Showing</span> : null}
+      </div>
     </button>
   );
 }

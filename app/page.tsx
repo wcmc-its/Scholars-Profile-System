@@ -15,6 +15,7 @@
  * (lib/api/home.ts) and pre-warmed at boot (lib/warmup.ts), so in steady state
  * the sections resolve before the shell flushes and no fallback is shown.
  */
+import Link from "next/link";
 import { cache, Suspense } from "react";
 import {
   getSpotlights,
@@ -41,7 +42,7 @@ import { SiteFooter } from "@/components/site/footer";
 export const revalidate = 7200; // 2 hours
 export const dynamicParams = true;
 
-// methodCategories drives BOTH the hero "N methods" stat (in HomeStatsStrip)
+// methodCategories drives BOTH the hero "N method families" stat (in HomeStats)
 // and the Browse-by-method section, which now stream as independent Suspense
 // boundaries. Memoize per request so the (uncached) taxonomy query runs once,
 // not twice. React cache() is request-scoped, so — unlike a cross-request
@@ -64,19 +65,19 @@ export default function HomePage() {
       </a>
       <SiteHeader revealOnScrollPast="home-hero-search-sentinel" />
       <main id="main-content" tabIndex={-1} className="flex-1 outline-none">
-        {/* Hero — data-free, paints immediately so search is usable at once.
-            Faint Cornell-red radial wash bridges the red header into the hero
-            and fades out before the search box. rgba is --color-primary-cornell-red
-            (#B31B1B) at 10%. */}
+        {/* Hero — the title + search are data-free and paint immediately; only
+            the stats row streams in (below the chips). Warm red-tint radial wash
+            bridges the red header into the hero (home refinements mockup,
+            2026-09-24). */}
         <section
-          className="border-border border-b bg-white px-6 py-16"
+          className="border-apollo-border-strong border-b px-6 pt-16 pb-12"
           style={{
             backgroundImage:
-              "radial-gradient(ellipse 70% 70% at 50% 0%, rgba(179, 27, 27, 0.1), transparent 72%)",
+              "radial-gradient(ellipse 70% 110% at 50% 0%, var(--apollo-red-tint), var(--apollo-surface-2) 75%)",
           }}
         >
           <div className="mx-auto max-w-[760px] text-center">
-            <h1 className="page-title text-4xl font-semibold tracking-tight sm:text-5xl">
+            <h1 className="page-title text-4xl leading-[1.1] font-normal tracking-[-0.01em] text-balance sm:text-5xl">
               Scholars at Weill Cornell Medicine
             </h1>
             <p className="text-muted-foreground mt-4 text-base">
@@ -86,15 +87,14 @@ export default function HomePage() {
               <SearchAutocomplete variant="hero" />
               <TrySuggestionsChips count={4} />
             </div>
+            {/* Each data region streams independently behind its own Suspense. */}
+            <Suspense fallback={null}>
+              <HomeStats />
+            </Suspense>
           </div>
         </section>
 
-        {/* Each data region streams independently behind its own Suspense. */}
-        <Suspense fallback={null}>
-          <HomeStatsStrip />
-        </Suspense>
-
-        <div className="mx-auto max-w-[1100px] px-6 py-12">
+        <div className="mx-auto max-w-[1100px] px-6 pt-14 pb-20">
           <Suspense fallback={null}>
             <HomeSpotlights />
           </Suspense>
@@ -119,39 +119,39 @@ export default function HomePage() {
 // null when its data is absent/sparse, exactly as the previous inline render
 // did.
 
-async function HomeStatsStrip() {
+async function HomeStats() {
   const [stats, methodCategories] = await Promise.all([
     getHomeStats().catch(() => null),
     getMethodCategoriesOnce().catch(() => null),
   ]);
   if (!stats) return null;
+  const stat = "flex flex-col items-center gap-0.5 text-[13px] text-muted-foreground no-underline hover:underline underline-offset-4 decoration-1";
+  const figure = "font-serif text-[30px] leading-[34px] text-apollo-bar";
   return (
-    <div className="border-border border-b">
-      <div className="mx-auto flex max-w-[1100px] flex-wrap justify-center gap-8 px-6 py-5 text-sm text-zinc-500">
-        <span>
-          <strong className="text-zinc-700">{stats.scholarCount.toLocaleString()}</strong> scholars
-        </span>
-        <span>
-          <strong className="text-zinc-700">{stats.publicationCount.toLocaleString()}</strong> publications
-        </span>
-        <a
-          href="#browse-all-research-areas"
-          aria-label={`Browse ${stats.researchAreaCount} research areas`}
-          className="no-underline hover:underline underline-offset-4 decoration-1"
+    <div className="mt-10 flex flex-wrap justify-center gap-x-12 gap-y-4">
+      <Link href="/search" className={stat}>
+        <span className={figure}>{stats.scholarCount.toLocaleString()}</span>scholars
+      </Link>
+      <Link href="/search?type=publications" className={stat}>
+        <span className={figure}>{stats.publicationCount.toLocaleString()}</span>publications
+      </Link>
+      <a
+        href="#browse-all-research-areas"
+        aria-label={`Browse ${stats.researchAreaCount} research areas`}
+        className={stat}
+      >
+        <span className={figure}>{stats.researchAreaCount}</span>research areas
+      </a>
+      {methodCategories ? (
+        <MethodBeaconLink
+          href="#browse-by-method"
+          event="home_methods_stat_click"
+          aria-label={`Browse ${methodCategories.totalFamilyCount} method families`}
+          className={stat}
         >
-          <strong className="text-zinc-700">{stats.researchAreaCount}</strong> research areas
-        </a>
-        {methodCategories ? (
-          <MethodBeaconLink
-            href="#browse-by-method"
-            event="home_methods_stat_click"
-            aria-label={`Browse ${methodCategories.totalFamilyCount} methods`}
-            className="no-underline hover:underline underline-offset-4 decoration-1"
-          >
-            <strong className="text-zinc-700">{methodCategories.totalFamilyCount}</strong> methods
-          </MethodBeaconLink>
-        ) : null}
-      </div>
+          <span className={figure}>{methodCategories.totalFamilyCount.toLocaleString()}</span>method families
+        </MethodBeaconLink>
+      ) : null}
     </div>
   );
 }

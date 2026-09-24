@@ -6193,6 +6193,85 @@ export async function loadMethodFamilyCandidates(
   return out;
 }
 
+const FINDER_SUBAREA_CAP = 3;
+const FINDER_TOTAL_CAP = 6;
+
+/**
+ * The home page's "Find a method" typeahead: subareas first, then method
+ * families, each prefix-matches-first. Separate from `suggestEntities` so the
+ * hero autocomplete's ranking (#231) and telemetry stay untouched. Subarea rows
+ * read "Area · N scholars" like the family rows; N is distinct active scholars
+ * over `publication_topic` (2020+ only by construction), omitted when the pair
+ * has no row (#2218 — missing is not zero).
+ */
+export async function suggestMethodFinder(prefix: string): Promise<EntitySuggestion[]> {
+  const q = prefix.trim();
+  if (q.length < 2) return [];
+  const lower = q.toLowerCase();
+  const rank = (s: string) => {
+    const i = s.toLowerCase().indexOf(lower);
+    return i === 0 ? 0 : i > 0 ? 1 : 2; // 2 = matched via a member tool name
+  };
+
+  const [subsR, famsR] = await Promise.allSettled([
+    prisma.subtopic.findMany({
+      where: { label: { contains: q } }, // label, not displayName — see suggestEntities (D-19)
+      orderBy: { label: "asc" },
+      take: FINDER_SUBAREA_CAP * 2,
+      select: { id: true, label: true, displayName: true, parentTopicId: true, parentTopic: { select: { label: true } } },
+    }),
+    loadMethodFamilyCandidates(q, FINDER_TOTAL_CAP),
+  ]);
+  const subs = dedupeFirstByKey(subsR.status === "fulfilled" ? subsR.value : [], (s) =>
+    (s.displayName?.trim() || s.label).toLowerCase(),
+  )
+    .map((s) => ({ ...s, title: s.displayName?.trim() || s.label }))
+    .sort((a, b) => rank(a.title) - rank(b.title))
+    .slice(0, FINDER_SUBAREA_CAP);
+  const fams = (famsR.status === "fulfilled" ? famsR.value : []).sort(
+    (a, b) => rank(a.familyLabel) - rank(b.familyLabel) || b.scholarCount - a.scholarCount,
+  );
+
+  const scholars = new Map<string, number>();
+  if (subs.length > 0) {
+    const rows = (await prisma
+      .$queryRawUnsafe(
+        `SELECT pt.parent_topic_id AS p, pt.primary_subtopic_id AS s, COUNT(DISTINCT pt.cwid) AS n
+           FROM publication_topic pt
+           JOIN scholar sc ON sc.cwid = pt.cwid
+          WHERE sc.deleted_at IS NULL AND sc.status = 'active'
+            AND (${subs.map(() => "(pt.parent_topic_id = ? AND pt.primary_subtopic_id = ?)").join(" OR ")})
+          GROUP BY pt.parent_topic_id, pt.primary_subtopic_id`,
+        ...subs.flatMap((s) => [s.parentTopicId, s.id]),
+      )
+      .catch(() => [])) as Array<{ p: string; s: string; n: number | bigint }>;
+    for (const r of rows) scholars.set(`${r.p}::${r.s}`, Number(r.n));
+  }
+
+  const plural = (n: number) => `${n.toLocaleString()} ${n === 1 ? "scholar" : "scholars"}`;
+  const out: EntitySuggestion[] = subs.map((s) => {
+    const n = scholars.get(`${s.parentTopicId}::${s.id}`);
+    const area = s.parentTopic?.label ?? "Subarea";
+    return {
+      kind: "subtopic",
+      title: s.title,
+      subtitle: n ? `${area} · ${plural(n)}` : area,
+      href: `/topics/${s.parentTopicId}?subtopic=${encodeURIComponent(s.id)}#publications`,
+    };
+  });
+  for (const m of fams) {
+    if (out.length >= FINDER_TOTAL_CAP) break;
+    const sc = supercategoryLabel(m.supercategory);
+    out.push({
+      kind: "method",
+      title: m.familyLabel,
+      subtitle: m.scholarCount ? `${sc} · ${plural(m.scholarCount)}` : sc,
+      href: methodFamilyPath(m.supercategory, m.familyId, m.familyLabel),
+    });
+  }
+  return out;
+}
+
 /**
  * Mixed-entity autocomplete: returns people, topics, subtopics, departments,
  * divisions, centers, and (flag-gated, #824) method families in a single ranked
