@@ -906,7 +906,14 @@ export async function matchQueryToTaxonomy(
  */
 export async function resolveQueryTaxonomy(
   q: string,
-): Promise<{ taxonomyMatch: TaxonomyMatchResult; taxonomyMatchMs: number }> {
+): Promise<{
+  taxonomyMatch: TaxonomyMatchResult;
+  taxonomyMatchMs: number;
+  /** MeSH confidence of the UNSTRIPPED query's own resolution (before any #692
+   *  retry could replace it). Consumers pass it to `stripDeprioritizedUnlessResolved`
+   *  so a phrase that resolved verbatim is searched as typed, not as a fragment. */
+  fullQueryMeshConfidence: MeshResolution["confidence"] | null;
+}> {
   const start = Date.now();
   // Issue #692 — generic-term demotion. Strip deprioritized filler tokens once
   // up front; `removed` is empty when nothing was stripped (incl. the
@@ -924,6 +931,7 @@ export async function resolveQueryTaxonomy(
   );
 
   let taxonomyMatch = await matchQueryToTaxonomy(q);
+  const fullQueryMeshConfidence = taxonomyMatch.meshResolution?.confidence ?? null;
   // Issue #692 §4.1 — full query first; only on a weak MeSH resolution retry against
   // the stripped content query. Full-first protects descriptors built from filler
   // ("gene therapy", "clinical trial") — those resolve on the first call and never
@@ -987,7 +995,7 @@ export async function resolveQueryTaxonomy(
       taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
     }
   }
-  return { taxonomyMatch, taxonomyMatchMs: Date.now() - start };
+  return { taxonomyMatch, taxonomyMatchMs: Date.now() - start, fullQueryMeshConfidence };
 }
 
 /**

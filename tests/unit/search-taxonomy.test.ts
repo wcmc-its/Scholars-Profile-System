@@ -2148,6 +2148,17 @@ describe("resolveQueryTaxonomy (#2115) — #1980 stripKeptEnough guard", () => {
     expect(taxonomyMatch.meshResolution?.descriptorUi).toBe("D007668");
     expect(taxonomyMatch.meshResolution?.confidence).toBe("exact");
   });
+
+  it("#692 follow-up: fullQueryMeshConfidence is the UNSTRIPPED query's, not the retry's", async () => {
+    // The adopted retry is exact, but the phrase as typed resolved nothing — so the
+    // search must still strip. Reporting the final confidence would stop that.
+    const adopted = await resolveQueryTaxonomy("kidney disease");
+    expect(adopted.taxonomyMatch.meshResolution?.confidence).toBe("exact");
+    expect(adopted.fullQueryMeshConfidence).toBeNull();
+    // A query that resolves as typed reports its own confidence.
+    const verbatim = await resolveQueryTaxonomy("kidney");
+    expect(verbatim.fullQueryMeshConfidence).toBe("exact");
+  });
 });
 
 /**

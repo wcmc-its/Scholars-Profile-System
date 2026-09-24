@@ -59,7 +59,7 @@ import {
 } from "@/lib/api/search-flags";
 import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
-import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
+import { stripDeprioritizedUnlessResolved } from "@/lib/api/deprioritized-terms";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -233,6 +233,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       : Promise.resolve({
           taxonomyMatch: { state: "none" as const, meshResolution: null },
           taxonomyMatchMs: null,
+          fullQueryMeshConfidence: null,
         }),
     // Perf — boot-cached classifier sets fetched in parallel with the
     // taxonomy resolver rather than sequentially after it. The two are
@@ -244,8 +245,13 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // identically to a subsequent client fetch. `removed` is empty (incl. the
   // never-strip-to-empty case) when nothing was stripped, so `genericDemote`
   // stays inert. `contentQuery` also drives the highlight/fallback fields below.
+  // A phrase whose FULL form resolved verbatim in MeSH is kept as typed (see
+  // `stripDeprioritizedUnlessResolved`), same as the route.
   const genericTermMode = resolveGenericTermMode();
-  const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
+  const { contentQuery, removed: genericRemoved } = stripDeprioritizedUnlessResolved(
+    q,
+    taxonomyResolved.fullQueryMeshConfidence,
+  );
   const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
 
   const taxonomyMatch = taxonomyResolved.taxonomyMatch;
