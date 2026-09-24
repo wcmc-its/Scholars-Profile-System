@@ -182,9 +182,6 @@ export type DataQualityEntry = {
   prominence: number;
   /** Deep link into the scholar's edit surface (the edit page enforces authz). */
   editHref: string;
-  /** Plain-text start of the effective overview (override wins), for the roster
-   *  hover card; null when there is none. Not exported to CSV. */
-  overviewExcerpt?: string | null;
 };
 
 export type DataQualityOptions = {
@@ -313,6 +310,72 @@ export async function loadRosterTitles(
     (out[r.cwid] ??= []).push({ title: r.title, organization: r.organization, isPrimary: r.isPrimary });
   }
   return out;
+}
+
+/** Everything the /edit scholar hover card shows, for one cwid. */
+export type ScholarCard = {
+  cwid: string;
+  name: string;
+  slug: string;
+  isVisible: boolean;
+  hasHeadshot: boolean;
+  /** Already release-gated for an internal viewer; `null` = withheld or none. */
+  email: string | null;
+  personType: string | null;
+  titles: RosterTitle[];
+  hasOverview: boolean;
+  /** ISO date of the last /edit save; `null` + hasOverview = imported seed. */
+  overviewUpdatedAt: string | null;
+  overviewExcerpt: string | null;
+};
+
+/**
+ * One scholar's hover card — the per-cwid twin of the roster's card fields
+ * (same override-wins overview, same provenance date, same current titles).
+ * `null` for an unknown or deleted cwid.
+ */
+export async function loadScholarCard(
+  cwid: string,
+  client: Pick<PrismaClient, "scholar" | "fieldOverride" | "overviewProvenance" | "appointment">,
+  gateEmail: (email: string | null, visibility: string | null) => string | null,
+): Promise<ScholarCard | null> {
+  const [s, override, prov, titles] = await Promise.all([
+    client.scholar.findFirst({
+      where: { cwid, deletedAt: null },
+      select: {
+        cwid: true,
+        preferredName: true,
+        slug: true,
+        status: true,
+        hasHeadshot: true,
+        email: true,
+        emailVisibility: true,
+        roleCategory: true,
+        overview: true,
+      },
+    }),
+    client.fieldOverride.findFirst({
+      where: { entityType: "scholar", entityId: cwid, fieldName: "overview" },
+      select: { value: true },
+    }),
+    client.overviewProvenance.findUnique({ where: { cwid }, select: { updatedAt: true } }),
+    loadRosterTitles([cwid], client),
+  ]);
+  if (!s) return null;
+  const overview = nonEmpty(override?.value) ? override!.value : s.overview;
+  return {
+    cwid: s.cwid,
+    name: s.preferredName,
+    slug: s.slug,
+    isVisible: s.status === "active",
+    hasHeadshot: s.hasHeadshot === true,
+    email: gateEmail(s.email, s.emailVisibility),
+    personType: formatRoleCategory(s.roleCategory),
+    titles: titles[cwid] ?? [],
+    hasOverview: nonEmpty(overview),
+    overviewUpdatedAt: prov?.updatedAt.toISOString() ?? null,
+    overviewExcerpt: excerpt(overview),
+  };
 }
 
 /**
@@ -580,7 +643,6 @@ async function computeDataQualityEntries(
       pendingCoiMedium: coiMedium.get(s.cwid) ?? 0,
       prominence,
       editHref: `/edit/scholar/${encodeURIComponent(s.cwid)}`,
-      overviewExcerpt: excerpt(overrideText.get(s.cwid) ?? s.overview),
     };
   });
 

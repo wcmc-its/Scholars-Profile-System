@@ -7,6 +7,7 @@ import { RosterFacet, type FacetOption } from "@/components/center/center-roster
 import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { citationIdentifier } from "@/lib/citation";
+import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import type {
   MentoredPubsLearnerOnPub,
   MentoredPubsPublicationRow,
@@ -275,7 +276,9 @@ function MentorCell({ mentors }: { mentors: ReadonlyArray<MentorRef & { mentorsh
     <ul className="m-0 list-none p-0">
       {mentors.map((m) => (
         <li key={m.cwid}>
-          {m.name}
+          <ScholarHoverCard cwid={m.cwid}>
+            <span className="hover:underline">{m.name}</span>
+          </ScholarHoverCard>
           <span className={CWID_CLASS}>{m.cwid}</span>
           {m.mentorships?.map((t) => (
             <div key={mentorshipKey(t)} className="text-muted-foreground text-xs">
@@ -438,7 +441,9 @@ function PublicationsView({
                           const pos = learnerPosition(l, p.authorCount);
                           return (
                             <li key={l.cwid} className="whitespace-nowrap">
-                              {learnerName(l)}
+                              <ScholarHoverCard cwid={l.cwid}>
+                                <span className="hover:underline">{learnerName(l)}</span>
+                              </ScholarHoverCard>
                               <span className={CWID_CLASS}>{l.cwid}</span>
                               {pos === "first" && (
                                 <span className={CHIP_CLASS} title="Learner is first author">
@@ -598,7 +603,9 @@ function LearnersView({
                 <tr key={r.cwid} data-testid={`mentored-pubs-learner-${r.cwid}`}>
                   <td className={TD_CLASS}>{r.gradYear ?? "—"}</td>
                   <td className={TD_CLASS}>
-                    {learnerName(r)}
+                    <ScholarHoverCard cwid={r.cwid}>
+                      <span className="hover:underline">{learnerName(r)}</span>
+                    </ScholarHoverCard>
                     <span className={CWID_CLASS}>{r.cwid}</span>
                     {r.entryYearSource === "fallback" && (
                       <span className={CHIP_CLASS} title="Entry year not on the pairing sheet; window assumes a 4-year track.">

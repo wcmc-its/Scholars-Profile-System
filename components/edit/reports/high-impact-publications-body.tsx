@@ -35,6 +35,7 @@ import {
   type PersonSummaryRow,
 } from "@/lib/edit/high-impact-pubs-report";
 import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
+import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 
 const RAIL_HEADING = "mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 const RAIL_OPTION = "flex items-start gap-2 py-[3px] text-[13px] leading-[1.4]";
@@ -168,7 +169,9 @@ function SummaryTable({ people }: { people: PersonSummaryRow[] }) {
           {people.map((r) => (
             <tr key={r.cwid}>
               <td className={TD}>
-                {r.name}
+                <ScholarHoverCard cwid={r.cwid}>
+                  <span className="hover:underline">{r.name}</span>
+                </ScholarHoverCard>
                 <span className="text-muted-foreground ml-2 font-mono text-xs">{r.cwid}</span>
                 <span className="text-muted-foreground block text-xs">{r.personType}</span>
               </td>
