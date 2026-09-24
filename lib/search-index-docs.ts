@@ -1459,10 +1459,11 @@ export async function buildPeopleDoc(
       centerCode: true,
       startDate: true,
       endDate: true,
+      membershipRoleKey: true,
     },
   });
   for (const row of centerRows) {
-    if (!isCenterMembershipActive(row.startDate, row.endDate, centerToday)) {
+    if (!isCenterMembershipActive(row, centerToday)) {
       continue;
     }
     deptDivKeys.push(`center:${row.centerCode}`);

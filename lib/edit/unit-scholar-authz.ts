@@ -135,8 +135,10 @@ export type UnitScholarLookup = UnitAdminLookup &
   centerMembership: {
     findMany: (args: {
       where: { cwid: string };
-      select: { centerCode: true; startDate: true; endDate: true };
-    }) => Promise<Array<{ centerCode: string; startDate: Date | null; endDate: Date | null }>>;
+      select: { centerCode: true; startDate: true; endDate: true; membershipRoleKey: true };
+    }) => Promise<
+      Array<{ centerCode: string; startDate: Date | null; endDate: Date | null; membershipRoleKey: string | null }>
+    >;
   };
 };
 
@@ -208,10 +210,10 @@ export async function resolveEditableUnitViaUnitAdmin(
     const today = new Date().toISOString().slice(0, 10);
     const centerRows = await db.centerMembership.findMany({
       where: { cwid: scholarCwid },
-      select: { centerCode: true, startDate: true, endDate: true },
+      select: { centerCode: true, startDate: true, endDate: true, membershipRoleKey: true },
     });
     for (const row of centerRows) {
-      if (isCenterMembershipActive(row.startDate, row.endDate, today)) {
+      if (isCenterMembershipActive(row, today)) {
         centerCodes.add(row.centerCode);
       }
     }
@@ -371,8 +373,10 @@ export type UnitAdminEditorsLookup = {
   centerMembership: {
     findMany: (args: {
       where: { cwid: string };
-      select: { centerCode: true; startDate: true; endDate: true };
-    }) => Promise<Array<{ centerCode: string; startDate: Date | null; endDate: Date | null }>>;
+      select: { centerCode: true; startDate: true; endDate: true; membershipRoleKey: true };
+    }) => Promise<
+      Array<{ centerCode: string; startDate: Date | null; endDate: Date | null; membershipRoleKey: string | null }>
+    >;
   };
   /** #1104 — center display names for the listed center-conferring rows. */
   center: {
@@ -470,10 +474,10 @@ export async function listUnitAdminEditorsForScholar(
     const today = new Date().toISOString().slice(0, 10);
     const centerRows = await db.centerMembership.findMany({
       where: { cwid: scholarCwid },
-      select: { centerCode: true, startDate: true, endDate: true },
+      select: { centerCode: true, startDate: true, endDate: true, membershipRoleKey: true },
     });
     for (const row of centerRows) {
-      if (isCenterMembershipActive(row.startDate, row.endDate, today)) {
+      if (isCenterMembershipActive(row, today)) {
         centerCodes.add(row.centerCode);
       }
     }

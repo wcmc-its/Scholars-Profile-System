@@ -630,7 +630,7 @@ describe("loadDataQualityRoster — scope", () => {
     );
     expect(client.centerMembership.findMany).toHaveBeenCalledWith({
       where: { centerCode: { in: ["CTR1"] } },
-      select: { cwid: true, centerCode: true, startDate: true, endDate: true },
+      select: { cwid: true, centerCode: true, startDate: true, endDate: true, membershipRoleKey: true },
     });
     const where = scholarFindMany.mock.calls[0][0].where;
     expect(where.AND?.[0]).toEqual({ OR: [{ cwid: { in: ["m1", "m2"] } }] });

@@ -152,7 +152,7 @@ describe("loadArticleCounts", () => {
     // Units OR together (the Profiles roster's rule); a center is its date-active
     // members; the institution binds the ED CODE; an undecodable value is dropped.
     expect(text).toContain(
-      "AND (s.dept_code IN (?) OR s.div_code IN (?) OR s.primary_org_code IN (?,?) OR s.cwid IN (SELECT cm.cwid FROM center_membership cm WHERE cm.center_code IN (?) AND (cm.start_date IS NULL OR cm.start_date <= ?) AND (cm.end_date IS NULL OR cm.end_date >= ?)))",
+      "AND (s.dept_code IN (?) OR s.div_code IN (?) OR s.primary_org_code IN (?,?) OR s.cwid IN (SELECT cm.cwid FROM center_membership cm WHERE cm.center_code IN (?) AND (cm.start_date IS NULL OR cm.start_date <= ?) AND (cm.end_date IS NULL OR cm.end_date >= ?) AND (cm.membership_role_key IS NULL OR cm.membership_role_key <> 'invited')))",
     );
     expect(text).toContain("AND p.publication_type IN (?)");
     expect(text).toContain("AND (pa.is_first = 1 OR pa.is_last = 1)");

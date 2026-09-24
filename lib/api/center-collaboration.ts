@@ -77,16 +77,17 @@ export async function buildCenterCollaboration(
   // 1. Active memberships (§3.3 predicate) + each member's program code.
   const memberships = (await prisma.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, programCode: true, startDate: true, endDate: true },
+    select: { cwid: true, programCode: true, startDate: true, endDate: true, membershipRoleKey: true },
   })) as Array<{
     cwid: string;
     programCode: string | null;
     startDate: Date | null;
     endDate: Date | null;
+    membershipRoleKey: string | null;
   }>;
   const programByCwid = new Map<string, string | null>();
   for (const m of memberships) {
-    if (isCenterMembershipActive(m.startDate, m.endDate, today)) {
+    if (isCenterMembershipActive(m, today)) {
       programByCwid.set(m.cwid, m.programCode);
     }
   }

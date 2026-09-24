@@ -21,8 +21,8 @@
  * dropped from its own always-on column since it's a rare action, not
  * something that needs permanent width on every row.
  *
- * ONE mutually-exclusive filter — All members (default) / Inactive / Departed
- * — rendered as a 3-button segmented control, so the roster opens on the
+ * ONE mutually-exclusive filter — All members (default) / Invited / Inactive /
+ * Departed — rendered as a segmented control, so the roster opens on the
  * whole thing and nothing is ever silently hidden. Two independent "X only"
  * checkboxes could not say this honestly: both unchecked reads as no
  * restriction, both checked as an impossible intersection.
@@ -86,7 +86,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { DiseaseCodeOption, RosterDiseaseRow } from "@/lib/api/unit-edit-context";
-import { MEMBER_ROLE_KEY, deriveMembershipType } from "@/lib/org-unit-roles";
+import { INVITED_ROLE_KEY, MEMBER_ROLE_KEY, deriveMembershipType } from "@/lib/org-unit-roles";
 
 export type RosterMember = {
   cwid: string;
@@ -148,18 +148,20 @@ export type CenterRosterCardProps = {
   cornellDirectoryEnabled?: boolean;
 };
 
-type Status = "active" | "pending" | "inactive";
+type Status = "active" | "pending" | "inactive" | "invited";
 
-/** The three mutually-exclusive roster views. `all` is the default. */
-type RosterFilter = "all" | "inactive" | "departed";
+/** The mutually-exclusive roster views. `all` is the default. */
+type RosterFilter = "all" | "invited" | "inactive" | "departed";
 
 type ConfidenceFilter = "any" | "high" | "medium" | "low";
 
 /** Chips shown before the "+N more" overflow chip kicks in. */
 const MAX_DISEASE_CHIPS = 3;
 
-/** #552 §3.3 active filter, inclusive boundaries, nulls open. */
+/** #552 §3.3 active filter, inclusive boundaries, nulls open. Mirrors
+ *  `isCenterMembershipActive`: an invitee is never active, whatever its dates. */
 function statusOf(member: RosterMember, today: string): Status {
+  if (member.membershipRoleKey === INVITED_ROLE_KEY) return "invited";
   if (member.startDate && member.startDate > today) return "pending";
   if (member.endDate && member.endDate < today) return "inactive";
   return "active";
@@ -1012,8 +1014,8 @@ export function CenterRosterCard({
   const hasDiseases = members.some((m) => (m.diseases ?? []).length > 0);
 
   const rosterFiltered =
-    filter === "inactive"
-      ? members.filter((m) => statusOf(m, now) === "inactive")
+    filter === "inactive" || filter === "invited"
+      ? members.filter((m) => statusOf(m, now) === filter)
       : filter === "departed"
         ? members.filter((m) => m.scholarState === "departed")
         : members;
@@ -1153,7 +1155,7 @@ export function CenterRosterCard({
               mockup, and stays the same "one mutually-exclusive choice"
               semantics the docblock above argues for. One bordered container
               with the buttons conjoined (no gap, no per-button radius) so it
-              reads as a single control, not three floating pills. */}
+              reads as a single control, not floating pills. */}
           <div
             className="border-apollo-border flex overflow-hidden rounded-md border"
             role="group"
@@ -1162,6 +1164,7 @@ export function CenterRosterCard({
             {(
               [
                 ["all", "All members"],
+                ["invited", "Invited"],
                 ["inactive", "Inactive"],
                 ["departed", "Departed"],
               ] as ReadonlyArray<readonly [RosterFilter, string]>
@@ -1500,7 +1503,13 @@ export function CenterRosterCard({
                           }`}
                           data-testid={`roster-status-${m.cwid}`}
                         >
-                          {status === "active" ? "Active" : status === "pending" ? "Pending" : "Inactive"}
+                          {status === "active"
+                            ? "Active"
+                            : status === "pending"
+                              ? "Pending"
+                              : status === "invited"
+                                ? "Invited"
+                                : "Inactive"}
                         </Badge>
                       </td>
                     </tr>

@@ -42,6 +42,7 @@ import { loadCenterDirectors, scoreProminence } from "@/lib/api/prominence";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
+import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 import {
   decodeUnitValues,
   isCurrentCenterMembership,
@@ -487,7 +488,7 @@ async function computeDataQualityEntries(
     const today = utcToday();
     const rows = await client.centerMembership.findMany({
       where: { centerCode: { in: allCenterCodes } },
-      select: { cwid: true, centerCode: true, startDate: true, endDate: true },
+      select: { cwid: true, centerCode: true, startDate: true, endDate: true, membershipRoleKey: true },
     });
     const scopeSet = new Set(scopeCenterCodes);
     const filterSet = new Set(filterCenterCodes);
@@ -497,7 +498,7 @@ async function computeDataQualityEntries(
       // Exclude pending / expired memberships (consistent with every other center
       // surface) — a still-active scholar who rotated off a center must not appear
       // when that center is filtered or scoped.
-      if (!isCurrentCenterMembership(r.startDate, r.endDate, today)) continue;
+      if (!isCurrentCenterMembership(r, today)) continue;
       if (scopeSet.has(r.centerCode)) scope.add(r.cwid);
       if (filterSet.has(r.centerCode)) filter.add(r.cwid);
     }
@@ -912,6 +913,9 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
           AND: [
             { OR: [{ startDate: null }, { startDate: { lte: today } }] },
             { OR: [{ endDate: null }, { endDate: { gte: today } }] },
+            // Invitees are not current members. Explicit null arm: Prisma
+            // `not` never matches a NULL row in MySQL.
+            { OR: [{ membershipRoleKey: null }, { membershipRoleKey: { not: INVITED_ROLE_KEY } }] },
           ],
         },
         _count: { _all: true },

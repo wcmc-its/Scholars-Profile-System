@@ -25,6 +25,7 @@
 import type { DataQualityFacets } from "@/lib/api/data-quality";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 
 /** Reserved URL param names. A report must not reuse them for anything else. */
 export const PERSON_FILTER_PARAMS = { type: "type", unit: "unit" } as const;
@@ -133,7 +134,8 @@ export function personFilterCriteria(
 
 // ---------------------------------------------------------------------------
 // "Current center membership" — the ONE date rule: UTC today; start null or
-// <= today; end null or >= today (pending / expired excluded).
+// <= today; end null or >= today (pending / expired excluded). An `invited`
+// row is never current (same rule as `isCenterMembershipActive`).
 // ---------------------------------------------------------------------------
 
 /** UTC calendar date `YYYY-MM-DD` — not the DB session's CURDATE(). */
@@ -143,12 +145,12 @@ export function utcToday(): string {
 
 /** In-app form (the Prisma path reads rows, then filters). */
 export function isCurrentCenterMembership(
-  startDate: Date | null,
-  endDate: Date | null,
+  row: { startDate: Date | null; endDate: Date | null; membershipRoleKey: string | null },
   today: string,
 ): boolean {
-  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
-  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
+  if (row.membershipRoleKey === INVITED_ROLE_KEY) return false;
+  const start = row.startDate ? row.startDate.toISOString().slice(0, 10) : null;
+  const end = row.endDate ? row.endDate.toISOString().slice(0, 10) : null;
   if (start && start > today) return false; // pending
   if (end && end < today) return false; // expired
   return true;
@@ -158,7 +160,8 @@ export function isCurrentCenterMembership(
 export function currentCenterMembershipSql(alias: string, today: string): Prisma.Sql {
   const a = Prisma.raw(alias);
   return Prisma.sql`(${a}.start_date IS NULL OR ${a}.start_date <= ${today})
-           AND (${a}.end_date IS NULL OR ${a}.end_date >= ${today})`;
+           AND (${a}.end_date IS NULL OR ${a}.end_date >= ${today})
+           AND (${a}.membership_role_key IS NULL OR ${a}.membership_role_key <> ${Prisma.raw(`'${INVITED_ROLE_KEY}'`)})`;
 }
 
 // ---------------------------------------------------------------------------
