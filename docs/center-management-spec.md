@@ -283,6 +283,7 @@ Audit-schema impact: zero. The B03 row shape already accepts arbitrary `before` 
 | Area | Change |
 |---|---|
 | `etl/ed/index.ts` | None — ED is not the source for `CenterMembership`. |
+| `etl/ctsc-roster/index.ts` (nightly step `CtscRoster`, added by #2780) | The one ETL writer of `CenterMembership`, and only for the center with slug `ctsc` (Clinical & Translational Science Center). It mirrors the CTSC investigators-and-trainees feed: a profiled scholar gets a row with `source='ctsc-feed'`; anyone else gets an `ExternalMember` (`cuid` = `ctsc:<feed PrimaryKey>`, `source='ctsc-feed'`) plus a row with `source='ctsc-feed-external'` whose `cwid` holds that cuid. It deletes only rows carrying those two sources and never overwrites a manual row. /edit Remove on a feed-owned row returns `409 feed_owned_membership` (the next sync would re-add it); end-dating still works. See [`OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md#ctsc-roster-sync). |
 | `etl/search-index/index.ts` | When building a scholar's document, include `centerProgram:<code>` facet keys **only for memberships where the active-filter predicate is true and `programCode IS NOT NULL`**. Inactive memberships do not contribute facet keys. Pending memberships do not contribute facet keys until their `startDate`. |
 | `lib/api/centers.ts` | Apply active-filter when building public roster; pass `programs` map for grouping. |
 | `lib/api/scholars.ts` | "Centers" chips on the profile honor the active-filter; expired chips disappear. |

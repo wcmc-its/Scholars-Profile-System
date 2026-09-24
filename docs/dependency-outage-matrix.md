@@ -35,6 +35,7 @@ flowchart LR
     rai[ReciterAI DynamoDB/S3]:::low
     ext[NIH RePORTER / NSF / NLM MeSH]:::low
     scrape[WCM Newsroom / CTL portfolio]:::low
+    ctsc[CTSC roster feed]:::low
   end
   ses[Amazon SES]:::low
 
@@ -81,6 +82,7 @@ Step Functions alarms.
 | **NLM MeSH** (`nlmpubs.nlm.nih.gov`) | [`etl/mesh-descriptors`](../etl/mesh-descriptors/) | annual (NLM publishes in Nov) | `MeshDescriptor` catalog (taxonomy-aware search) | MeSH catalog stays at the last release; no user-visible effect mid-year. See [`mesh-resolver-cache`](./taxonomy-aware-search.md). |
 | **WCM Newsroom** (`news.weill.cornell.edu/news/feed.json`) | [`etl/news`](../etl/news/) | weekly | `NewsMention` — the profile "News mentions" section and the `/edit/news-queue` review queue | News mentions stop updating; already-ingested articles still render, and pending queue rows are untouched. The read is incremental and never deletes, so an outage costs freshness only. The research site's news page is a **syndication target** of this feed, not a second source (#2200/#2231). |
 | **CTL portfolio** (`innovation.weill.cornell.edu`) | [`etl/technologies`](../etl/technologies/) | weekly | `ScholarTechnology` — licensable-technology profile section | Technologies stop updating. The step's volume guard aborts itself rather than blanking the section on a bad scrape. |
+| **CTSC roster feed** (CTSC investigators-and-trainees feed; host kept in the secret) | [`etl/ctsc-roster`](../etl/ctsc-roster/) (nightly step `CtscRoster`, #2780) | nightly | The `ctsc` center's `CenterMembership` rows (`source` `ctsc-feed` / `ctsc-feed-external`), `ExternalMember` plain names, `CtscFeedIssue` | The CTSC roster stops updating; last night's roster keeps rendering. A short or failed read aborts before any delete, and the `ctsc:feed` / `ctsc:linked` / `ctsc:prune` guards refuse a large drop. Roster only: the feed is never used for publications. |
 
 ### The one internal consistency window worth knowing
 

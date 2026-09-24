@@ -10,7 +10,7 @@ import { A } from "../lib.mjs";
 const AX = 40, BX = 350, SW = 300, SH = 52; // col-A x, col-B x, source width, height
 
 const nodes = {
-  // ----- left: WCM source systems (2 cols × 5 rows) -----  (chip = ETL cadence)
+  // ----- left: WCM source systems (2 cols × 6 rows) -----  (chip = ETL cadence)
   // Row pairs keep the source-to-source lineage arrows short & horizontal
   // (ASMS→ED on row 1, OnCore→ReciterDB on row 3).
   ed:     { x: AX, y: 150, w: SW, h: SH, kind: "ext", title: "Enterprise Directory", sub: ["LDAPS · person types, appointments, headshots"], chip: { tone: "nightly", text: "nightly" } },
@@ -23,13 +23,14 @@ const nodes = {
   jenz:   { x: BX, y: 330, w: SW, h: SH, kind: "ext", title: "Jenzabar", sub: ["MS SQL · grad-school mentoring"], chip: { tone: "nightly", text: "nightly" } },
   hr:     { x: AX, y: 390, w: SW, h: SH, kind: "ext", title: "Human Resources", sub: ["employer / employee mentees"], chip: { tone: "planned", text: "planned" } },
   pops:   { x: BX, y: 390, w: SW, h: SH, kind: "ext", title: "POPS directory", sub: ["HTTPS · board certs, specialties, expertise"], chip: { tone: "nightly", text: "nightly" } },
+  ctsc:   { x: AX, y: 450, w: SW, h: SH, kind: "ext", title: "CTSC roster feed", sub: ["HTTPS · CTSC center roster (not publications)"], chip: { tone: "nightly", text: "nightly" } },
   // ----- left: external (public HTTPS) (2 cols × 2 rows) -----
-  ctgov:  { x: AX, y: 514, w: SW, h: SH, kind: "ext", title: "ClinicalTrials.gov", sub: ["HTTPS API v2 · NCT trial enrichment"], chip: { tone: "weekly", text: "weekly" } },
-  nih:    { x: BX, y: 514, w: SW, h: SH, kind: "ext", title: "NIH RePORTER", sub: ["HTTPS · grant enrichment"], chip: { tone: "ondemand", text: "on-demand" } },
-  nsf:    { x: AX, y: 574, w: SW, h: SH, kind: "ext", title: "NSF Awards", sub: ["HTTPS · federal awards"], chip: { tone: "ondemand", text: "on-demand" } },
-  mesh:   { x: BX, y: 574, w: SW, h: SH, kind: "ext", title: "NLM MeSH", sub: ["HTTPS · taxonomy"], chip: { tone: "annual", text: "annual" } },
-  ctl:    { x: AX, y: 634, w: SW, h: SH, kind: "ext", title: "CTL portfolio", sub: ["HTTPS · WCM licensable technologies"], chip: { tone: "weekly", text: "weekly" } },
-  news:   { x: BX, y: 634, w: SW, h: SH, kind: "ext", title: "WCM Newsroom", sub: ["feed.json · scholar news mentions"], chip: { tone: "weekly", text: "weekly" } },
+  ctgov:  { x: AX, y: 574, w: SW, h: SH, kind: "ext", title: "ClinicalTrials.gov", sub: ["HTTPS API v2 · NCT trial enrichment"], chip: { tone: "weekly", text: "weekly" } },
+  nih:    { x: BX, y: 574, w: SW, h: SH, kind: "ext", title: "NIH RePORTER", sub: ["HTTPS · grant enrichment"], chip: { tone: "ondemand", text: "on-demand" } },
+  nsf:    { x: AX, y: 634, w: SW, h: SH, kind: "ext", title: "NSF Awards", sub: ["HTTPS · federal awards"], chip: { tone: "ondemand", text: "on-demand" } },
+  mesh:   { x: BX, y: 634, w: SW, h: SH, kind: "ext", title: "NLM MeSH", sub: ["HTTPS · taxonomy"], chip: { tone: "annual", text: "annual" } },
+  ctl:    { x: AX, y: 694, w: SW, h: SH, kind: "ext", title: "CTL portfolio", sub: ["HTTPS · WCM licensable technologies"], chip: { tone: "weekly", text: "weekly" } },
+  news:   { x: BX, y: 694, w: SW, h: SH, kind: "ext", title: "WCM Newsroom", sub: ["feed.json · scholar news mentions"], chip: { tone: "weekly", text: "weekly" } },
   // ----- center: the platform -----
   etl:    { x: 738, y: 172, w: 320, h: 54, kind: "app", title: "ETL pipeline", sub: ["Step Functions · nightly / weekly / annual"] },
   aur:    { x: 738, y: 284, w: 154, h: 60, kind: "data", title: "Aurora MySQL", sub: ["canonical store"] },
@@ -44,8 +45,8 @@ const nodes = {
 };
 
 const groups = [
-  { x: 26, y: 118, w: 640, h: 344, kind: "ext", title: "WCM source systems" },
-  { x: 26, y: 484, w: 640, h: 210, kind: "ext", title: "External data (HTTPS)" },
+  { x: 26, y: 118, w: 640, h: 404, kind: "ext", title: "WCM source systems" },
+  { x: 26, y: 544, w: 640, h: 210, kind: "ext", title: "External data (HTTPS)" },
   { x: 706, y: 136, w: 384, h: 436, kind: "edge", title: "Scholars Profile System" },
   { x: 1138, y: 136, w: 372, h: 436, kind: "net", title: "Who it serves" },
 ];
@@ -63,7 +64,7 @@ const edges = [
   // its path (SPS never calls it; ReciterAI pulls it upstream). OnCore likewise stages
   // via reciterdb (footnote) — its own arrow is dropped in the 2-col layout because a
   // same-row connector is too short to read; the footnote carries that lineage.
-  { p0: A(nodes.ctgov, "l", 0.5), p1: A(nodes.rdb, "l", 0.3), color: "gray", w: 1.5, dash: true, points: [{ x: 18, y: 540 }, { x: 18, y: 286 }] },
+  { p0: A(nodes.ctgov, "l", 0.5), p1: A(nodes.rdb, "l", 0.3), color: "gray", w: 1.5, dash: true, points: [{ x: 18, y: 600 }, { x: 18, y: 286 }] },
   { p0: A(nodes.etl, "b", 0.3), p1: A(nodes.aur, "t", 0.5), color: "teal" },
   { p0: A(nodes.etl, "b", 0.72), p1: A(nodes.os, "t", 0.5), color: "teal" },
   { p0: A(nodes.aur, "b", 0.5), p1: A(nodes.app, "t", 0.28), color: "gray", label: "read" },
@@ -75,7 +76,7 @@ const edges = [
   { p0: A(nodes.idp, "t", 0.5), p1: A(nodes.staff, "b", 0.5), color: "gray", label: "SSO" },
 ];
 
-export const spec = { id: "system-context", vb: [1540, 724], groups, nodes, edges };
+export const spec = { id: "system-context", vb: [1540, 784], groups, nodes, edges };
 
 export const meta = {
   nav: "① System context",
@@ -126,6 +127,10 @@ export const meta = {
     "article body publishes the mention outright; a prose name-match queues it for human review in " +
     "<code>/edit</code>. The Research office's news page " +
     "(<code>research.weill.cornell.edu/about-us/news-updates</code>) is a <b>syndication target</b> of " +
-    "the newsroom, not a source — SPS scraped it until #2200/#2231.",
-  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/pops/index.ts · docs/pops-clinical-search-spec.md · etl/clinical-trials/* · docs/clinical-trials-source-spec.md · etl/news/* · docs/2026-07-18-news-mentions-plan.md",
+    "the newsroom, not a source — SPS scraped it until #2200/#2231. " +
+    "<b>CTSC roster feed</b> (the Clinical &amp; Translational Science Center's investigators-and-trainees " +
+    "feed, the one the ReCiter Institutional Client reads) mirrors the <code>ctsc</code> center roster " +
+    "nightly (<code>etl/ctsc-roster</code>). It is <b>not</b> a publication source: its PubMed IDs are " +
+    "never read, and its CWIDs are checked against Enterprise Directory before a member is linked.",
+  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/pops/index.ts · docs/pops-clinical-search-spec.md · etl/clinical-trials/* · docs/clinical-trials-source-spec.md · etl/news/* · docs/2026-07-18-news-mentions-plan.md · etl/ctsc-roster/*",
 };
