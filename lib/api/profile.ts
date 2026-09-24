@@ -840,6 +840,17 @@ export type ProfilePayload = {
  * decides how to present them.
  */
 /** A published news_mention row as the profile renders it (News and Media Highlights). */
+/** A Media Highlights clip as the profile shows it: headline, outlet, date — NO
+ *  excerpt. A clip's text is the digest's "• Dr. X" bullet: usually just the
+ *  scholar's own name, occasionally a one-line summary of unknown authorship
+ *  (the digest is a Muck Rack newsletter). It still drives matching and shows to
+ *  reviewers in /edit/media-highlights-queue; it is never published. */
+export function toClipRow(
+  n: Parameters<typeof toNewsRow>[0] & { outlet: string },
+): ProfilePayload["mediaHighlights"][number] {
+  return { ...toNewsRow(n), excerpt: null, outlet: n.outlet };
+}
+
 function toNewsRow(n: {
   url: string;
   title: string;
@@ -2020,7 +2031,7 @@ export const getScholarFullProfileBySlug = cache(
       mediaHighlights:
         process.env.MEDIA_HIGHLIGHTS_SECTION === "on" && !hiddenSections.has("hideNews")
           ? scholar.newsMentions.flatMap((n) =>
-              n.outlet === null ? [] : [{ ...toNewsRow(n), outlet: n.outlet }],
+              n.outlet === null ? [] : [toClipRow({ ...n, outlet: n.outlet })],
             )
           : [],
       keywords,
