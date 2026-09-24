@@ -53,6 +53,9 @@ export type ScrapedArticle = {
    * stories, which is what keeps them in the News section.
    */
   outlet?: string;
+  /** Clips only: the original publisher the digest credits ("(This article
+   *  originally appeared in X)"). */
+  creditedOutlet?: string;
 };
 
 /** Shared with the scraper so a cwid it emits can never fail validation here. */
