@@ -32,6 +32,7 @@ import {
 } from "@/lib/api/search-taxonomy";
 import {
   stripDeprioritized,
+  stripDeprioritizedUnlessResolved,
   isAllDeprioritized,
 } from "@/lib/api/deprioritized-terms";
 import {
@@ -132,7 +133,6 @@ async function handleSearch(request: NextRequest) {
   const genericTermMode = resolveGenericTermMode();
   const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
   const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
-  const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
   // #1980 — did the strip keep enough of the query for its result to be adopted when
   // NOTHING resolved? Counted off `q` rather than `contentQuery` so the denominator is
   // what the user actually typed, independent of `stripDeprioritized`'s internals.
@@ -144,11 +144,13 @@ async function handleSearch(request: NextRequest) {
   const meshOnlyResolution = type === "publications" || type === "funding";
   const taxonomyStart = Date.now();
   let taxonomyMatch: TaxonomyMatchResult;
+  let fullQueryMeshConfidence: string | null | undefined;
   if (meshOnlyResolution) {
     // Perf #1406 — MeSH-only path (see block comment above). Same object the
     // full matcher would embed as `meshResolution`; it has its own <3-char
     // short-circuit and fails closed to null.
     let mesh = await resolveMeshDescriptor(q);
+    fullQueryMeshConfidence = mesh?.confidence;
     // Issue #692 §4.1, mesh-only shape — retry the stripped content query on a
     // weak MeSH resolution. #1982 — the full path below no longer requires a
     // curated-match miss before retrying either (it merges only `meshResolution`
@@ -186,8 +188,15 @@ async function handleSearch(request: NextRequest) {
     // `stripKeptEnough` above are still consumed by the mesh-only branch and
     // the response body below; `resolveQueryTaxonomy` recomputes its own copy
     // internally rather than taking them as params.
-    ({ taxonomyMatch } = await resolveQueryTaxonomy(q));
+    ({ taxonomyMatch, fullQueryMeshConfidence } = await resolveQueryTaxonomy(q));
   }
+  // #692 follow-up — the content query the SEARCH scores/highlights on. When the
+  // whole typed phrase resolved verbatim in MeSH ("Climate change", "Gene editing"),
+  // it is searched as typed; stripping its filler left the literal mention arm
+  // matching a fragment ("Climate"). Otherwise the strip above stands.
+  const { contentQuery: searchContentQuery, removed: searchGenericRemoved } =
+    stripDeprioritizedUnlessResolved(q, fullQueryMeshConfidence);
+  const genericDemote = genericTermMode === "on" && searchGenericRemoved.length > 0;
   const taxonomyMatchMs = Date.now() - taxonomyStart;
   // Server-Timing `taxonomy` span desc — names the resolver actually run
   // (#1406: mesh-only on the publications/funding branches). The span name
@@ -388,7 +397,7 @@ async function handleSearch(request: NextRequest) {
       // Issue #692 — generic-term demotion (mode `on`). BM25 scores on the
       // content query (gate) with the full query discounted; inert otherwise.
       genericDemote,
-      contentQuery,
+      contentQuery: searchContentQuery,
       // §6.2 — chip's "Narrow to this concept only" opt-in. Forces
       // strict-mode admission under flag = `expanded`. `?mesh=off`
       // precedence is already enforced upstream by nulling the resolution.
@@ -733,7 +742,7 @@ async function handleSearch(request: NextRequest) {
     // and highlight on the content query (full query discounted); inert
     // otherwise and never applied to name/department shapes.
     genericDemote,
-    contentQuery,
+    contentQuery: searchContentQuery,
     // Issue #532 — env-gated dept-shape leadership boost. Ignored for
     // non-dept shapes inside `searchPeople`.
     deptLeadershipBoost: resolveDeptLeadershipBoost(),

@@ -99,6 +99,11 @@ const RESOLUTIONS: Record<string, ReturnType<typeof mesh> | null> = {
   // stripped forms resolve.
   kidney: mesh("D007668", "Kidney", "kidney", "exact"),
   asthma: mesh("D001249", "Asthma", "asthma", "exact"),
+  // #692 follow-up — synthetic: the FULL phrase resolves verbatim, so the search
+  // must run on the phrase as typed, not on the strip's fragment ("Climate").
+  "climate change": mesh("DSYNCLIM", "Climate Change", "climate change", "exact"),
+  // …while a phrase that only resolves AFTER the strip still searches the fragment.
+  microbiome: mesh("DSYNMICR", "Microbiota", "microbiome", "entry-term"),
   // #1980 fix (2) — real staging measurements (2026-07-31), strip removes exactly HALF
   // the typed tokens (same ratio as the admitted `asthma patients` / `cancer research`
   // wins above), so `stripKeptEnough` admits both, yet both land on the wrong,
@@ -151,6 +156,7 @@ vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
         q.trim().split(/\s+/).filter(Boolean).length,
       );
       let taxonomyMatch = await matchQueryToTaxonomy(q);
+      const fullQueryMeshConfidence = taxonomyMatch.meshResolution?.confidence ?? null;
       if (
         genericStripped &&
         taxonomyMatch.state === "none" &&
@@ -172,7 +178,7 @@ vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
           taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
         }
       }
-      return { taxonomyMatch, taxonomyMatchMs: 0 };
+      return { taxonomyMatch, taxonomyMatchMs: 0, fullQueryMeshConfidence };
     }),
   };
 });
@@ -327,6 +333,47 @@ describe("#2094 — searchInterpretation reports the descendant-set size and tru
       expect(i.conceptLabel ?? null).toBeNull();
       expect(i.descendantCount).toBeNull();
       expect(i.descendantTruncated).toBe(false);
+    });
+  }
+});
+
+/**
+ * #692 follow-up — a phrase whose FULL form resolved verbatim is SEARCHED as typed.
+ * Staging served "Climate change" (resolved Climate Change, exact) with a mention term
+ * of "Climate": the literal keyword arm scored the strip's fragment. The gate is the
+ * full query's own confidence, so a phrase that resolves only after the strip
+ * ("Microbiome Research" → Microbiota) keeps demoting exactly as before.
+ */
+describe("#692 follow-up — a verbatim-resolved phrase is not stripped for the search", () => {
+  beforeEach(() => {
+    process.env.SEARCH_GENERIC_TERM_DEMOTE = "on";
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
+    vi.resetModules();
+  });
+
+  async function searchOptsFor(q: string, type: "people" | "publications") {
+    await conceptFor(q, type);
+    const search = await import("@/lib/api/search");
+    const fn = type === "people" ? search.searchPeople : search.searchPublications;
+    const calls = vi.mocked(fn).mock.calls as unknown as Array<
+      [{ contentQuery?: string; genericDemote?: boolean }]
+    >;
+    return calls[calls.length - 1][0];
+  }
+
+  for (const type of ["people", "publications"] as const) {
+    it(`${type}: Climate change (exact) searches the phrase, no demotion`, async () => {
+      const opts = await searchOptsFor("Climate change", type);
+      expect(opts.contentQuery).toBe("Climate change");
+      expect(opts.genericDemote).toBe(false);
+    });
+
+    it(`${type}: Microbiome Research (resolves only after the strip) still demotes`, async () => {
+      const opts = await searchOptsFor("Microbiome Research", type);
+      expect(opts.contentQuery).toBe("Microbiome");
+      expect(opts.genericDemote).toBe(true);
     });
   }
 });

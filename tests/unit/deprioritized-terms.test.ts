@@ -12,6 +12,7 @@ import { normalizeForMatch } from "@/lib/api/normalize";
 import {
   loadDeprioritizedSet,
   stripDeprioritized,
+  stripDeprioritizedUnlessResolved,
   _resetDeprioritizedCacheForTests,
 } from "@/lib/api/deprioritized-terms";
 import { resolveGenericTermMode } from "@/lib/api/search-flags";
@@ -76,6 +77,84 @@ describe("stripDeprioritized (#692)", () => {
 
   it("returns empty for an empty/whitespace query", () => {
     expect(stripDeprioritized("   ")).toEqual({ contentQuery: "", removed: [] });
+  });
+});
+
+describe("stripDeprioritized — dangling connectors (#692 follow-up)", () => {
+  it("drops a connector left dangling at the END", () => {
+    // Staging served the mention term "Large language models in".
+    expect(stripDeprioritized("Large language models in medicine").contentQuery).toBe(
+      "Large language models",
+    );
+  });
+
+  it("drops an ampersand made adjacent to a removed token", () => {
+    expect(stripDeprioritized("Climate change & health").contentQuery).toBe("Climate");
+    expect(stripDeprioritized("Maternal mortality & morbidity").contentQuery).toBe("Maternal");
+  });
+
+  it("drops a connector left dangling at the START", () => {
+    expect(stripDeprioritized("the research microbiome").contentQuery).toBe("microbiome");
+  });
+
+  it("keeps an interior connector still between two kept content words", () => {
+    expect(stripDeprioritized("Health equity & disparities").contentQuery).toBe(
+      "equity & disparities",
+    );
+  });
+
+  it("drops a whole connector RUN touching a removed token", () => {
+    expect(stripDeprioritized("microbiome research in the gut").contentQuery).toBe(
+      "microbiome gut",
+    );
+  });
+
+  it("does not report connectors in `removed` (the #1980 ratio counts filler only)", () => {
+    expect(stripDeprioritized("Climate change & health").removed).toEqual(["change", "health"]);
+  });
+
+  it("leaves a query with nothing stripped untouched, connectors and all", () => {
+    expect(stripDeprioritized("microbiome of the gut")).toEqual({
+      contentQuery: "microbiome of the gut",
+      removed: [],
+    });
+  });
+
+  it("NEVER-EMPTY: filler + connectors only returns the query intact", () => {
+    expect(stripDeprioritized("research in the clinical trial")).toEqual({
+      contentQuery: "research in the clinical trial",
+      removed: [],
+    });
+  });
+});
+
+describe("stripDeprioritizedUnlessResolved (#692 follow-up)", () => {
+  it("keeps the phrase as typed when the FULL query resolved exact", () => {
+    // Staging: "Climate change" resolved Climate Change (exact) but searched "Climate".
+    expect(stripDeprioritizedUnlessResolved("  Climate change ", "exact")).toEqual({
+      contentQuery: "Climate change",
+      removed: [],
+    });
+  });
+
+  it("keeps the phrase as typed when the FULL query resolved via an entry term", () => {
+    expect(stripDeprioritizedUnlessResolved("Gene editing", "entry-term")).toEqual({
+      contentQuery: "Gene editing",
+      removed: [],
+    });
+  });
+
+  it("still strips when the full query did not resolve (Microbiome Research)", () => {
+    expect(stripDeprioritizedUnlessResolved("Microbiome Research", null)).toEqual({
+      contentQuery: "Microbiome",
+      removed: ["Research"],
+    });
+  });
+
+  it("still strips on a partial (window-fallback) resolution", () => {
+    expect(stripDeprioritizedUnlessResolved("Microbiome Research", "partial").contentQuery).toBe(
+      "Microbiome",
+    );
   });
 });
 

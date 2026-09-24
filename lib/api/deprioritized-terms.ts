@@ -65,14 +65,65 @@ export function stripDeprioritized(query: string): {
   const trimmed = query.trim();
   if (trimmed.length === 0) return { contentQuery: "", removed: [] };
 
+  const tokens = trimmed.split(/\s+/);
+  const isRemoved = tokens.map((t) => set.has(normalizeForMatch(t)));
+  const removed = tokens.filter((_, i) => isRemoved[i]);
+  if (removed.length === 0) return { contentQuery: trimmed, removed: [] };
+
+  // A connector run ("in", "&", "of the") survives only when it still sits between
+  // two KEPT content words, exactly as typed. One left dangling at an edge, or made
+  // to touch a removed token, is dropped: "Climate change & health" → "Climate", not
+  // "Climate &"; "Large language models in medicine" → "Large language models".
+  // Connectors are not reported in `removed` (that list is the filler actually
+  // demoted, and feeds the #1980 kept-enough ratio).
+  const isConnector = tokens.map((t) => CONNECTORS.has(t.toLowerCase()));
+  const isContent = (i: number) =>
+    i >= 0 && i < tokens.length && !isRemoved[i] && !isConnector[i];
   const kept: string[] = [];
-  const removed: string[] = [];
-  for (const token of trimmed.split(/\s+/)) {
-    if (set.has(normalizeForMatch(token))) removed.push(token);
-    else kept.push(token);
+  for (let i = 0; i < tokens.length; i++) {
+    if (isRemoved[i]) continue;
+    if (!isConnector[i]) {
+      kept.push(tokens[i]);
+      continue;
+    }
+    let start = i;
+    while (start > 0 && isConnector[start - 1] && !isRemoved[start - 1]) start--;
+    let end = i;
+    while (end < tokens.length - 1 && isConnector[end + 1] && !isRemoved[end + 1]) end++;
+    if (isContent(start - 1) && isContent(end + 1)) kept.push(tokens[i]);
   }
-  if (kept.length === 0) return { contentQuery: trimmed, removed: [] };
+  // Only filler + connectors → NEVER-EMPTY contract: leave the query intact.
+  if (kept.length === 0) {
+    return { contentQuery: trimmed, removed: [] };
+  }
   return { contentQuery: kept.join(" "), removed };
+}
+
+/** Function words / joiners that carry no meaning once a neighbor is stripped. */
+const CONNECTORS: ReadonlySet<string> = new Set([
+  "in", "of", "for", "and", "or", "the", "a", "an", "with", "on", "to", "&", "+", "/",
+]);
+
+/**
+ * #692 follow-up — the content query a SEARCH should score/highlight on, given how
+ * the FULL typed query resolved in MeSH. When the whole phrase resolved verbatim
+ * (`exact` / `entry-term` — "Climate change", "Gene editing", "Value-based care"),
+ * the phrase itself is the concept, so it is kept as typed: stripping its filler
+ * word left the literal mention arm matching a fragment ("Climate", "editing").
+ * Any other outcome (no resolution, `partial`, or a verbatim hit that only the
+ * stripped retry found) strips as before, so "Microbiome Research" still demotes.
+ *
+ * `fullQueryMeshConfidence` must be the resolution of the UNSTRIPPED query — not the
+ * final, possibly retry-adopted one (see `resolveQueryTaxonomy`).
+ */
+export function stripDeprioritizedUnlessResolved(
+  query: string,
+  fullQueryMeshConfidence: string | null | undefined,
+): { contentQuery: string; removed: string[] } {
+  if (fullQueryMeshConfidence === "exact" || fullQueryMeshConfidence === "entry-term") {
+    return { contentQuery: query.trim(), removed: [] };
+  }
+  return stripDeprioritized(query);
 }
 
 /**
