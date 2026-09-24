@@ -212,7 +212,10 @@ export async function CenterPage({
           {(
             [
               detail.scholarCount > 0
-                ? { value: detail.scholarCount, label: "scholars" }
+                ? {
+                    value: detail.scholarCount,
+                    label: detail.hasExternalMembers ? "members" : "scholars",
+                  }
                 : null,
               pubsCountResult.total > 0
                 ? { value: pubsCountResult.total, label: "publications" }
@@ -272,6 +275,7 @@ export async function CenterPage({
           scholarsCount={detail.scholarCount}
           publicationsCount={pubsCountResult.total}
           showCollaboration={showCollaboration}
+          scholarsLabel={detail.hasExternalMembers ? "Members" : "Scholars"}
         />
 
         {tab === "scholars" && members && (

@@ -58,6 +58,7 @@ import {
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
+import { fetchDirectoryPeopleByCwid, type DirectoryPerson } from "@/lib/sources/ldap";
 import {
   CORNELL_EXTERNAL_SOURCE,
   enabledExternalMemberSources,
@@ -218,7 +219,9 @@ export type CenterLeader = {
   cwid: string;
   preferredName: string;
   primaryTitle: string | null;
-  slug: string;
+  /** Null for a leader with no Scholar row (e.g. an executive director on
+   *  staff): named from ED, rendered without a profile link. */
+  slug: string | null;
   identityImageEndpoint: string;
   /** The vocabulary entry's display label — `OrgUnitRole.label` — e.g.
    *  "Director", "Co-Director", "Associate Director". The noun `center-page.tsx`
@@ -245,6 +248,9 @@ export type CenterDetail = {
    */
   leadership: CenterLeader[];
   scholarCount: number;
+  /** True when `scholarCount` includes external members with no profile (CTSC
+   *  feed / Cornell), so the page labels the count "members", not "scholars". */
+  hasExternalMembers: boolean;
 };
 
 /** Research vs clinical membership flavor (#552). Null on legacy/unclassified
@@ -435,18 +441,36 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
       select: { cwid: true, preferredName: true, primaryTitle: true, slug: true },
     });
     const byCwid = new Map(scholars.map((s) => [s.cwid, s]));
-    // A source whose scholar row is missing contributes no card, matching the
-    // old single-director behavior (`if (d)` below the point lookup).
-    leadership = sources.flatMap((s) => {
+    // A leader a superuser assigned who has no Scholar row (staff, e.g. CTSC's
+    // Executive Director) is named from ED and rendered unlinked. Fail-soft: an
+    // ED miss or outage drops just that card, as before this fallback existed.
+    const directory = await directoryPeopleSafe(
+      sources.map((s) => s.cwid).filter((c) => !byCwid.has(c)),
+    );
+    leadership = sources.flatMap((s): CenterLeader[] => {
       const d = byCwid.get(s.cwid);
-      return d
+      if (d) {
+        return [
+          {
+            cwid: d.cwid,
+            preferredName: d.preferredName,
+            primaryTitle: d.primaryTitle,
+            slug: d.slug,
+            identityImageEndpoint: identityImageEndpoint(d.cwid),
+            roleLabel: s.roleLabel,
+            isInterim: s.interim,
+          },
+        ];
+      }
+      const p = directory.get(s.cwid.toLowerCase());
+      return p
         ? [
             {
-              cwid: d.cwid,
-              preferredName: d.preferredName,
-              primaryTitle: d.primaryTitle,
-              slug: d.slug,
-              identityImageEndpoint: identityImageEndpoint(d.cwid),
+              cwid: s.cwid,
+              preferredName: p.name,
+              primaryTitle: p.title,
+              slug: null,
+              identityImageEndpoint: identityImageEndpoint(s.cwid),
               roleLabel: s.roleLabel,
               isInterim: s.interim,
             },
@@ -505,6 +529,7 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
     url: center.url,
     leadership,
     scholarCount,
+    hasExternalMembers: cornellMemberCount > 0,
   };
 }
 
@@ -1436,4 +1461,16 @@ export function getCenterTopResearchAreas(
   return cachedRead(`center:topareas:${centerCode}`, () =>
     getCenterTopResearchAreasUncached(centerCode),
   );
+}
+
+/** ED names for non-Scholar cwids, keyed lowercase; `{}` on any ED failure. */
+async function directoryPeopleSafe(cwids: string[]): Promise<Map<string, DirectoryPerson>> {
+  if (cwids.length === 0) return new Map();
+  try {
+    const people = await fetchDirectoryPeopleByCwid(cwids);
+    return new Map(people.map((p) => [p.cwid.toLowerCase(), p]));
+  } catch (err) {
+    console.warn("center leadership: ED lookup failed", err);
+    return new Map();
+  }
 }
