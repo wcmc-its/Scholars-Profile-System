@@ -30,6 +30,7 @@
 import { tokenizeWithSpans } from "@/etl/news/names";
 import { LEADERSHIP_TIER, computeProminence } from "@/lib/api/prominence";
 import { formatPublishedName } from "@/lib/postnominal";
+import { FLAG_REPEAT_DAYS, findPossibleRepeat } from "@/lib/edit/clip-repeats";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { NewsMentionStatus } from "@/lib/generated/prisma/enums";
@@ -64,6 +65,11 @@ export type NewsQueueRow = {
   /** Press outlet when this is a Media Highlights clip (etl/news/clips.ts);
    *  null for a newsroom story. Tells the reviewer which section it lands in. */
   outlet: string | null;
+  /** Media Highlights only: another clip for the same scholar within a week
+   *  whose headline shares most of its words (`findPossibleRepeat`) — a
+   *  syndicated copy or re-airing the ETL could not safely drop. Advisory; null
+   *  when none, and always null for newsroom rows. */
+  possibleRepeatOf: { title: string; url: string; status: string } | null;
   /** The prose name string the ETL matched — "the name being matched against". */
   detectedName: string | null;
   likelihood: string | null;
@@ -367,6 +373,25 @@ export async function loadNewsQueue(
   ]);
   const byCwid = new Map(scholars.map((s) => [s.cwid, s]));
 
+  // Clips: every other clip for these scholars in the window, any status, so a
+  // pending copy of an already-approved (or rejected) story is flagged too.
+  const dated = rows.flatMap((r) => (r.publishedAt ? [r.publishedAt.getTime()] : []));
+  const windowMs = FLAG_REPEAT_DAYS * 86_400_000;
+  const clipPeers =
+    kind === "clips" && dated.length > 0
+      ? await client.newsMention.findMany({
+          where: {
+            cwid: { in: mentionCwids },
+            outlet: { not: null },
+            publishedAt: {
+              gte: new Date(Math.min(...dated) - windowMs),
+              lte: new Date(Math.max(...dated) + windowMs),
+            },
+          },
+          select: { id: true, cwid: true, url: true, title: true, publishedAt: true, status: true },
+        })
+      : [];
+
   // Group by detected-name line. A NULL sourceRef is its own group keyed by id,
   // never lumped with other NULLs (which would falsely mark rows as competing).
   const groups = new Map<string, typeof rows>();
@@ -409,6 +434,10 @@ export async function loadNewsQueue(
           articleUrl: r.url,
           publishedAt: r.publishedAt ? r.publishedAt.toISOString().slice(0, 10) : null,
           outlet: r.outlet,
+          possibleRepeatOf: (() => {
+            const p = findPossibleRepeat(r, clipPeers);
+            return p ? { title: p.title, url: p.url, status: p.status } : null;
+          })(),
           detectedName: r.detectedName,
           likelihood: r.likelihood,
           matchBasis: r.matchBasis,

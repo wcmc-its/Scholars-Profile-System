@@ -27,6 +27,7 @@
 import { readFileSync } from "node:fs";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { db } from "@/lib/db";
+import { dropHeadlineRepeats } from "@/lib/edit/clip-repeats";
 import { withEtlRun } from "@/lib/etl-run";
 import { articlesToMentions, upsertMentions } from "./index";
 import { NEWS_ORIGIN, type ScrapedArticle } from "./seed";
@@ -193,6 +194,23 @@ export function unwrapLink(href: string): string | null {
   return u.toString();
 }
 
+/**
+ * A clip link normalized so one story compares equal across digests: tracking
+ * params and the fragment dropped (URL lowercases the host). The path is left
+ * alone — this becomes the public href, and not every site redirects a
+ * trailing-slash variant; dropHeadlineRepeats catches that case instead.
+ * Clips only: the funding digest reads fragments (`#/…` portal routes) to skip.
+ */
+export function normalizeClipUrl(url: string): string {
+  const u = new URL(url);
+  for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM.test(k)) u.searchParams.delete(k);
+  u.hash = "";
+  return u.toString();
+}
+
+/** Query params that only track the click — never part of the story's identity. */
+const TRACKING_PARAM = /^(utm_.*|fbclid|gclid|mc_cid|mc_eid|ocid|cmpid|smid|sr_share|mkt_tok)$/i;
+
 export type Clip = {
   url: string;
   title: string;
@@ -248,7 +266,8 @@ export function parseClipLines(text: string): Clip[] {
     const h = line.match(HEADLINE);
     if (h) {
       flush();
-      const url = unwrapLink(h[2]);
+      const unwrapped = unwrapLink(h[2]);
+      const url = unwrapped && normalizeClipUrl(unwrapped);
       if (url && url.length <= 512 && h[1].length <= 512) {
         cur = { url, title: h[1], outlet: null, summary: null, publishedAt: date, bullets: [] };
       }
@@ -396,10 +415,17 @@ async function main(): Promise<number> {
     select: { cwid: true, fullName: true, preferredName: true, primaryTitle: true, primaryDepartment: true },
   });
   // Clips carry no VIVO cwids, so every row is a NAME match: `pending`.
-  const rows = clipMentionRows(articles, scholars);
+  const candidates = clipMentionRows(articles, scholars);
+  // The same headline under another url within HEADLINE_REPEAT_DAYS — a later
+  // digest, a syndicated copy — is the same story: keep the first.
+  const existing = await db.write.newsMention.findMany({
+    where: { cwid: { in: [...new Set(candidates.map((r) => r.cwid))] }, outlet: { not: null } },
+    select: { cwid: true, url: true, title: true, publishedAt: true },
+  });
+  const { kept: rows, dropped: repeats } = dropHeadlineRepeats(candidates, existing);
   const { inserted, updated, preserved, deduped } = await upsertMentions(rows);
   console.log(
-    `[NewsClips] ${JSON.stringify({ event: "news_clips_complete", emails: raws.length, skipped, auth, clips: articles.length, mentions: rows.length, inserted, updated, preserved, deduped })}`,
+    `[NewsClips] ${JSON.stringify({ event: "news_clips_complete", emails: raws.length, skipped, auth, clips: articles.length, mentions: rows.length, repeats, inserted, updated, preserved, deduped })}`,
   );
   // A digest that yields no clips means the email format moved under us. Fail
   // AFTER upserting the rest so one odd email does not hold back the others.
