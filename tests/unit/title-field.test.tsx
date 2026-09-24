@@ -16,10 +16,10 @@ import { TitleField } from "@/components/edit/title-field";
 import type { TitleOption } from "@/lib/scholar-title";
 
 const OPTIONS: TitleOption[] = [
-  { tier: "working", label: "Working title", value: "Associate Dean for Research" },
-  { tier: "chief", label: "Division chief", value: "Chief, Example Division" },
-  { tier: "centerHead", label: "Center head", value: null },
-  { tier: "primary", label: "Primary title", value: "Professor of Medicine" },
+  { tier: "working", label: "Working title", value: "Associate Dean for Research", rank: 7 },
+  { tier: "chief", label: "Division chief", value: "Chief, Example Division", rank: 6 },
+  { tier: "centerHead", label: "Center director", value: null, rank: 13 },
+  { tier: "primary", label: "Primary title", value: "Professor of Medicine", rank: 12 },
 ];
 
 function renderField(over: Partial<React.ComponentProps<typeof TitleField>> = {}) {

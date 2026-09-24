@@ -75,6 +75,9 @@ function fakeClient(opts: {
       findMany: vi.fn().mockResolvedValue((opts.chiefs ?? []).map((c) => ({ chiefCwid: c }))),
     },
     grant: { groupBy: grantGroupBy },
+    // Center-director reads (EA title ladder) — no directors unless a test adds one.
+    center: { findMany: vi.fn().mockResolvedValue([]) },
+    centerProgram: { findMany: vi.fn().mockResolvedValue([]) },
     coiGapCandidate: {
       groupBy: vi
         .fn()
@@ -222,7 +225,7 @@ describe("loadDataQualityRoster — leadership + COI + prominence", () => {
       chairDepartments: [{ chairCwid: "dir1", category: "administrative" }],
     });
     const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(entries[0]).toMatchObject({ isChair: true, leadership: "Director", leadershipTier: 2 });
+    expect(entries[0]).toMatchObject({ isChair: true, leadership: "Director", leadershipTier: 4 });
   });
 
   // The three non-administrative categories all read "Chair" — only
@@ -235,15 +238,17 @@ describe("loadDataQualityRoster — leadership + COI + prominence", () => {
         chairDepartments: [{ chairCwid: "ch1", category }],
       });
       const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-      expect(entries[0]).toMatchObject({ isChair: true, leadership: "Chair", leadershipTier: 2 });
+      expect(entries[0]).toMatchObject({ isChair: true, leadership: "Chair", leadershipTier: 4 });
     },
   );
 
   it("sorts by prominence desc (chair/chief + PI/NIH + faculty all feed in)", async () => {
     const { client } = setup();
     const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(entries.map((e) => e.cwid)).toEqual(["fac1", "fac2", "stu1"]);
-    expect(entries[0].prominence).toBeGreaterThan(entries[1].prominence);
+    // Tier first: the chair (rank 4) outranks the chief (rank 6) on the EA
+    // ladder even though the chief's prominence is higher.
+    expect(entries.map((e) => e.cwid)).toEqual(["fac2", "fac1", "stu1"]);
+    expect(entries[1].prominence).toBeGreaterThan(entries[0].prominence);
     expect(entries[1].prominence).toBeGreaterThan(entries[2].prominence);
   });
 
@@ -481,67 +486,88 @@ describe("loadDataQualityRoster — leadership tier (#1)", () => {
     scholarRow({ cwid: "plain", preferredName: "Plain Prof", primaryTitle: "Professor", scoredPubCount: 1000, hIndex: 200 }),
   ];
 
-  it("ranks THE Dean #1, deanery next, then chairs, with Emeritus demoted to prominence", async () => {
+  it("ranks THE Dean #1, then the EA ladder (Chair above Associate Dean), Emeritus demoted", async () => {
     const { client } = fakeClient({ scholars: cohort, chairs: ["chair"] });
     const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(entries.map((e) => e.cwid)).toEqual(["dean", "assoc", "chair", "plain", "emeritus"]);
+    expect(entries.map((e) => e.cwid)).toEqual(["dean", "chair", "assoc", "plain", "emeritus"]);
     expect(entries[0]).toMatchObject({ leadership: "Dean", leadershipTier: 0 });
-    expect(entries[1]).toMatchObject({ leadership: "Associate Dean", leadershipTier: 1 });
-    expect(entries[2]).toMatchObject({ leadership: "Chair", leadershipTier: 2 });
-    // Emeritus dean is NOT leadership — ranks last here despite huge prominence.
-    expect(entries[4]).toMatchObject({ cwid: "emeritus", leadership: null, leadershipTier: 3 });
+    expect(entries[1]).toMatchObject({ leadership: "Chair", leadershipTier: 4 });
+    expect(entries[2]).toMatchObject({ leadership: "Associate Dean", leadershipTier: 7 });
+    expect(entries[3]).toMatchObject({ cwid: "plain", leadershipTier: 12 });
+    // Emeritus dean holds no office — ranks last here despite huge prominence.
+    expect(entries[4]).toMatchObject({ cwid: "emeritus", leadership: null, leadershipTier: 13 });
   });
 });
 
 describe("classifyLeadership — title heuristic (#1)", () => {
   // Grounded against the live DB (the 5 "Dean" titles) + the deaneryLabel branches.
   const cases: Array<[string | null, number, string | null]> = [
-    ["Stephen and Suzanne Weiss Dean", 0, "Dean"], // rharrington → THE Dean
-    ["Associate Dean", 1, "Associate Dean"], // rbsilve
-    ["Senior Associate Dean, Education", 1, "Senior Associate Dean"], // jos9046 (precedence)
-    ["Assistant Dean", 1, "Assistant Dean"],
-    ["Affiliate Dean (NYP Queens)", 1, "Affiliate Dean"],
-    ["Vice Dean", 1, "Vice Dean"],
-    ["Deputy Dean", 1, "Vice Dean"],
+    ["Stephen and Suzanne Weiss Dean", 0, "Dean"], // THE Dean
+    // EA title ladder (2026-09-24): 1 Dean/Provost · 2 Vice Provost/Dean/President ·
+    // 3 Senior Associate Dean · 7 Associate/Assistant Dean · 8 Assoc/Asst Vice Provost.
+    ["Associate Dean", 7, "Associate Dean"],
+    ["Senior Associate Dean, Education", 3, "Senior Associate Dean"], // precedence
+    ["Assistant Dean", 7, "Assistant Dean"],
+    ["Affiliate Dean (NYP Queens)", 7, "Affiliate Dean"],
+    ["Vice Dean", 2, "Vice Dean"],
+    ["Deputy Dean", 2, "Vice Dean"],
     ["Interim Dean", 1, "Interim Dean"],
     ["Dean, Weill Cornell Graduate School of Medical Sciences", 1, "Dean"], // school-specific → not tier 0
     ["Dean, Weill Cornell Medicine-Qatar", 1, "Dean"],
     ["Provost", 1, "Provost"],
+    ["Vice Provost for Research", 2, "Vice Provost"],
+    ["Associate Vice Provost", 8, "Associate Vice Provost"],
     ["President, Cornell University", 1, "President"],
-    ["EVP for Health", 1, "EVP"],
+    ["EVP for Health", 2, "EVP"],
     // A bare /president/ used to tag every VP "President".
-    ["Vice President and Chief Global Information Officer", 1, "Vice President"],
-    ["Senior Vice President for External Affairs", 1, "Senior Vice President"],
-    ["Executive Vice President for Health", 1, "EVP"],
+    ["Vice President and Chief Global Information Officer", 2, "Vice President"],
+    ["Senior Vice President for External Affairs", 2, "Senior Vice President"],
+    ["Executive Vice President for Health", 2, "EVP"],
     // The load-bearing demotion: Emeritus wins over the Provost/Dean branches.
-    ["Provost for Medical Affairs and Dean Emeritus", 3, null], // amg2004
-    ["Dean Emeritus", 3, null], // dalonso
-    ["Professor", 3, null],
-    [null, 3, null],
+    ["Provost for Medical Affairs and Dean Emeritus", 13, null],
+    ["Dean Emeritus", 13, null],
+    ["Professor", 12, null],
+    [null, 13, null],
   ];
   it.each(cases)("%s → tier %i / %s", (title, tier, label) => {
     expect(classifyLeadership(title, null, false)).toEqual({ tier, label });
   });
 
-  it("a non-leader title falls back to the FK chair/chief tier", () => {
-    expect(classifyLeadership("Professor", "Chair", false)).toEqual({ tier: 2, label: "Chair" });
-    expect(classifyLeadership("Professor", null, true)).toEqual({ tier: 2, label: "Chief" });
+  it("a non-leader title falls back to the FK chair/chief/center-director tier", () => {
+    expect(classifyLeadership("Professor", "Chair", false)).toEqual({ tier: 4, label: "Chair" });
+    expect(classifyLeadership("Professor", null, true)).toEqual({ tier: 6, label: "Chief" });
+    expect(classifyLeadership("Professor", null, false, "institutional")).toEqual({
+      tier: 5,
+      label: "Center Director",
+    });
+    expect(classifyLeadership("Professor", null, false, "unit")).toEqual({
+      tier: 10,
+      label: "Center Director",
+    });
   });
 
-  it("an active dean title outranks a chair FK (dean office beats chair)", () => {
-    expect(classifyLeadership("Associate Dean", "Chair", false)).toEqual({
-      tier: 1,
-      label: "Associate Dean",
+  it("the best of title and FK roles wins, on the EA ladder", () => {
+    // Chair (4) outranks Associate Dean (7)…
+    expect(classifyLeadership("Associate Dean", "Chair", false)).toEqual({ tier: 4, label: "Chair" });
+    // …but Senior Associate Dean (3) outranks Chair.
+    expect(classifyLeadership("Senior Associate Dean", "Chair", false)).toEqual({
+      tier: 3,
+      label: "Senior Associate Dean",
+    });
+    // An institutional center director (5) outranks a division chief (6).
+    expect(classifyLeadership("Professor", null, true, "institutional")).toEqual({
+      tier: 5,
+      label: "Center Director",
     });
   });
 
   // #58 / #2542 Phase D — an administrative department's leader is a
   // DIRECTOR, not a Chair. `classifyLeadership` itself is category-agnostic
   // (it trusts whatever label the caller resolved); this just confirms the
-  // resolved label passes through as the tier-2 display label unchanged.
+  // resolved label passes through as the chair-tier display label unchanged.
   it("passes through a pre-resolved 'Director' label for an administrative department", () => {
     expect(classifyLeadership("Professor", "Director", false)).toEqual({
-      tier: 2,
+      tier: 4,
       label: "Director",
     });
   });

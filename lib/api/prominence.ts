@@ -20,15 +20,50 @@
  * import, so it loads under vitest with a fake client — matching `data-quality.ts`.
  */
 import { PI_ROLES } from "@/lib/funding-roles";
+import { loadInstitutionalCenterCodes } from "@/lib/edit/title-picker";
 import {
+  CENTER_ENTITY_TYPE,
   DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIRECTOR_ROLE_KEY,
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { rankTitleText, TITLE_RANK } from "@/lib/scholar-title";
 
 /** The Prisma surface `computeProminence` reads — a `db.read` client satisfies it. */
-export type ProminenceClient = Pick<PrismaClient, "scholar" | "grant" | "orgUnitRoleAssignment">;
+export type ProminenceClient = Pick<
+  PrismaClient,
+  "scholar" | "grant" | "orgUnitRoleAssignment" | "centerProgram" | "center"
+>;
+
+/**
+ * cwid → center-director standing, institutional winning over unit-based.
+ * `cwids` bounds the read (`computeProminence`); omit it for a whole-roster
+ * load (`data-quality.ts`).
+ */
+export async function loadCenterDirectors(
+  client: Pick<PrismaClient, "orgUnitRoleAssignment" | "centerProgram" | "center">,
+  cwids?: readonly string[],
+): Promise<Map<string, CenterDirectorKind>> {
+  const [rows, institutional] = await Promise.all([
+    client.orgUnitRoleAssignment.findMany({
+      where: {
+        entityType: CENTER_ENTITY_TYPE,
+        roleKey: DIRECTOR_ROLE_KEY,
+        ...(cwids ? { cwid: { in: [...cwids] } } : {}),
+      },
+      select: { cwid: true, entityId: true },
+    }),
+    loadInstitutionalCenterCodes(client),
+  ]);
+  const out = new Map<string, CenterDirectorKind>();
+  for (const r of rows) {
+    if (institutional.has(r.entityId)) out.set(r.cwid, "institutional");
+    else if (!out.has(r.cwid)) out.set(r.cwid, "unit");
+  }
+  return out;
+}
 
 /** Prominence weights — kept here so they're easy to tune in one place.
  *  Leadership weights mirror the people-search #532 constants (chair > chief). */
@@ -40,21 +75,21 @@ const W_CHIEF = 1.5;
 const W_FACULTY = 1.0;
 
 /**
- * Institutional-leadership sort tiers (lower number ranks higher), #1 v2 decision.
- * The Dean must rank #1 even though he is not a department chair. Tiers 0/1 are
- * derived from `primaryTitle` TEXT — no hand-maintained cwid map — so the set
- * stays current as titles change; chairs/chiefs (tier 2) keep their FK-based
- * prominence boost; everyone else is tier 3. Within a tier, prominence then name.
+ * Institutional-leadership sort tiers (lower number ranks higher). Since
+ * 2026-09-24 these ARE the EA title ladder (`TITLE_RANK`, lib/scholar-title.ts)
+ * — one ladder for both the display-title pick and this sort — plus tier 0,
+ * which keeps THE Dean alone above rank 1 (#1 v2 decision: the Dean ranks #1
+ * even though he is not a department chair).
  *
- *   0 — THE Dean (an unmodified "Dean": not Associate/…, not school-specific)
- *   1 — the active deanery + named institutional officers (Provost/President/EVP)
- *   2 — department chairs / division chiefs (FK-identified)
- *   3 — everyone else
+ * The rank is the best of the resolved `primaryTitle` TEXT (no hand-maintained
+ * cwid map, so it stays current as titles change) and the FK roles the text
+ * cannot always express: department chair (4), center director (5 or 10),
+ * division chief (6). Within a tier, prominence then name.
  *
- * Emeritus/Emerita titles are excluded from leadership entirely — a retired dean
- * ranks by prominence like everyone else (#1 v2 refinement).
+ * Emeritus/Emerita titles hold no office — a retired dean ranks as academic
+ * by prominence like everyone else (#1 v2 refinement).
  */
-export const LEADERSHIP_TIER = { dean: 0, deanery: 1, chairChief: 2, none: 3 } as const;
+export const LEADERSHIP_TIER = { dean: 0, ...TITLE_RANK, none: TITLE_RANK.unranked } as const;
 
 const TITLE_EMERITUS = /\bemerit(?:us|a|i)\b/i;
 const HAS_DEAN = /\bdean\b/i;
@@ -71,20 +106,27 @@ function deaneryLabel(title: string): string | null {
   if (/\baffiliate dean\b/i.test(title)) return "Affiliate Dean";
   if (/\b(?:vice|deputy) dean\b/i.test(title)) return "Vice Dean";
   if (/\binterim dean\b/i.test(title)) return "Interim Dean";
+  if (/\bassociate vice provost\b/i.test(title)) return "Associate Vice Provost";
+  if (/\bassistant vice provost\b/i.test(title)) return "Assistant Vice Provost";
+  if (/\bvice provost\b/i.test(title)) return "Vice Provost";
   if (HAS_DEAN.test(title)) return "Dean"; // school-specific dean (Graduate School / Qatar)
   if (/\bprovost\b/i.test(title)) return "Provost";
   // Most specific first: a bare /president/ also matches "Vice President …".
   if (/\bexecutive vice (?:president|dean)\b|\bevp\b/i.test(title)) return "EVP";
   if (/\bsenior vice president\b/i.test(title)) return "Senior Vice President";
+  if (/\b(?:associate|assistant) vice president\b/i.test(title)) return "Associate Vice President";
   if (/\bvice president\b/i.test(title)) return "Vice President";
   if (/\bpresident\b/i.test(title)) return "President";
   return null;
 }
 
+/** Center-director standing for {@link classifyLeadership}; see
+ *  `loadInstitutionalCenterCodes` for what makes a center institutional. */
+export type CenterDirectorKind = "institutional" | "unit" | null;
+
 /**
  * Classify a scholar's leadership tier + display label from their title + the
- * chair/chief FK flags. THE Dean (tier 0) sorts above the active deanery (tier 1),
- * which sorts above FK chairs/chiefs (tier 2), which sort above everyone (tier 3).
+ * FK role flags: the best (lowest) of the title's ladder rank and each role's.
  *
  * `chairLabel` is pre-resolved by the caller, not a plain "is this cwid a
  * department chair" boolean: an administrative department's leader is a
@@ -99,18 +141,32 @@ export function classifyLeadership(
   title: string | null,
   chairLabel: string | null,
   isChief: boolean,
+  centerDirector: CenterDirectorKind = null,
 ): { tier: number; label: string | null } {
   const t = (title ?? "").trim();
-  if (t && !TITLE_EMERITUS.test(t)) {
-    if (HAS_DEAN.test(t) && !SUBDEAN_MODIFIER.test(t) && !SCHOOL_SPECIFIC_DEAN.test(t)) {
-      return { tier: LEADERSHIP_TIER.dean, label: "Dean" };
-    }
-    const label = deaneryLabel(t);
-    if (label) return { tier: LEADERSHIP_TIER.deanery, label };
+  const active = t !== "" && !TITLE_EMERITUS.test(t);
+  if (active && HAS_DEAN.test(t) && !SUBDEAN_MODIFIER.test(t) && !SCHOOL_SPECIFIC_DEAN.test(t)) {
+    return { tier: LEADERSHIP_TIER.dean, label: "Dean" };
   }
-  if (chairLabel) return { tier: LEADERSHIP_TIER.chairChief, label: chairLabel };
-  if (isChief) return { tier: LEADERSHIP_TIER.chairChief, label: "Chief" };
-  return { tier: LEADERSHIP_TIER.none, label: null };
+  const textRank = rankTitleText(t);
+  const candidates: Array<[number, string | null]> = [
+    [textRank, textRank <= TITLE_RANK.associateViceProvost && active ? deaneryLabel(t) : null],
+  ];
+  if (textRank === TITLE_RANK.chair) candidates[0][1] = "Chair";
+  if (textRank === TITLE_RANK.divisionChief) candidates[0][1] = "Chief";
+  if (chairLabel) candidates.push([TITLE_RANK.chair, chairLabel]);
+  if (centerDirector) {
+    candidates.push([
+      centerDirector === "institutional"
+        ? TITLE_RANK.institutionalCenterDirector
+        : TITLE_RANK.unitCenterDirector,
+      "Center Director",
+    ]);
+  }
+  if (isChief) candidates.push([TITLE_RANK.divisionChief, "Chief"]);
+  // Stable: on a tie the title text (listed first) keeps its own label.
+  const [tier, label] = candidates.reduce((best, c) => (c[0] < best[0] ? c : best));
+  return { tier, label };
 }
 
 /** Everything the formula reads. Nulls are the DB's own — never pre-coerced by
@@ -124,13 +180,15 @@ export type ProminenceInputs = {
    *  a department leader. See `classifyLeadership` on why this is not a boolean. */
   chairLabel: string | null;
   isChief: boolean;
+  /** Director of a center, if any. Defaults to none. */
+  centerDirector?: CenterDirectorKind;
   piCount: number | null;
   nihPiCount: number | null;
 };
 
 export type ProminenceEntry = {
   prominence: number;
-  /** Leadership sort tier (0 Dean · 1 deanery · 2 chair/chief · 3 none). */
+  /** Leadership sort tier: 0 THE Dean, then the EA ladder 1–12, 13 none. */
   leadershipTier: number;
   /** Display label ("Dean", "Associate Dean", "Chair", "Chief", …) or null. */
   leadershipLabel: string | null;
@@ -153,7 +211,12 @@ export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
     W_NIH_PI * Math.log1p(input.nihPiCount ?? 0) +
     (input.roleCategory === "full_time_faculty" ? W_FACULTY : 0);
 
-  const { tier, label } = classifyLeadership(input.primaryTitle, input.chairLabel, input.isChief);
+  const { tier, label } = classifyLeadership(
+    input.primaryTitle,
+    input.chairLabel,
+    input.isChief,
+    input.centerDirector ?? null,
+  );
   return { prominence, leadershipTier: tier, leadershipLabel: label };
 }
 
@@ -181,7 +244,7 @@ export async function computeProminence(
   const unique = [...new Set(cwids)];
   if (unique.length === 0) return out;
 
-  const [scholars, chairRows, chiefRows, piRows, nihPiRows] = await Promise.all([
+  const [scholars, chairRows, chiefRows, piRows, nihPiRows, centerDirectors] = await Promise.all([
     client.scholar.findMany({
       where: { cwid: { in: unique } },
       select: {
@@ -223,6 +286,7 @@ export async function computeProminence(
       },
       _count: { _all: true },
     }),
+    loadCenterDirectors(client, unique),
   ]);
 
   const chairLabelByCwid = new Map<string, string>();
@@ -243,6 +307,7 @@ export async function computeProminence(
         primaryTitle: s.primaryTitle ?? null,
         chairLabel: chairLabelByCwid.get(s.cwid) ?? null,
         isChief: chiefs.has(s.cwid),
+        centerDirector: centerDirectors.get(s.cwid) ?? null,
         piCount: piCount.get(s.cwid) ?? 0,
         nihPiCount: nihPiCount.get(s.cwid) ?? 0,
       }),

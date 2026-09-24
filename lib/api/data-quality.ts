@@ -38,7 +38,7 @@ import {
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
-import { scoreProminence } from "@/lib/api/prominence";
+import { loadCenterDirectors, scoreProminence } from "@/lib/api/prominence";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
@@ -67,6 +67,7 @@ export type DataQualityClient = Pick<
   | "divisionMembership"
   | "overviewProvenance"
   | "orgUnitRoleAssignment"
+  | "centerProgram"
 >;
 
 /** A single org-unit filter (department / division / center / institution);
@@ -159,7 +160,7 @@ export type DataQualityEntry = {
   /** Leadership display label for the row/CSV ("Dean", "Associate Dean",
    *  "Provost", "Chair", "Chief", …) or null. */
   leadership: string | null;
-  /** Leadership sort tier (0 Dean · 1 deanery · 2 chair/chief · 3 none). */
+  /** Leadership sort tier: 0 THE Dean, then the EA ladder 1–12, 13 none. */
   leadershipTier: number;
   /** True when the profile is publicly visible (`status === 'active'`); false
    *  when it is suppressed (self or admin). Drives the Visible / Hidden chip. */
@@ -509,6 +510,7 @@ async function computeDataQualityEntries(
 
   // Candidate identities + prominence inputs. The whole in-scope set loads (the
   // prominence sort is computed in-app over all of it, then paginated).
+  const centerDirectorsRead = loadCenterDirectors(client);
   const [candidates, chairRows, chiefRows, piRows, nihPiRows, coiRows, overrideRows, provRows] =
     await Promise.all([
       client.scholar.findMany({
@@ -578,6 +580,7 @@ async function computeDataQualityEntries(
     chairLabelByCwid.set(r.cwid, r.roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair");
   }
   const chiefs = new Set(chiefRows.map((r) => r.cwid));
+  const centerDirectors = await centerDirectorsRead;
   const piCount = new Map(piRows.map((r) => [r.cwid, r._count._all]));
   const nihPiCount = new Map(nihPiRows.map((r) => [r.cwid, r._count._all]));
   const overrideText = new Map(
@@ -609,6 +612,7 @@ async function computeDataQualityEntries(
       primaryTitle: s.primaryTitle ?? null,
       chairLabel,
       isChief,
+      centerDirector: centerDirectors.get(s.cwid) ?? null,
       piCount: piCount.get(s.cwid) ?? 0,
       nihPiCount: nihPiCount.get(s.cwid) ?? 0,
     });

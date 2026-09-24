@@ -135,6 +135,8 @@ function client(rows: Row[], people: Record<string, Person> = {}, omitCwids: str
     },
     grant: { groupBy: async () => [] },
     orgUnitRoleAssignment: { findMany: async () => [] },
+    centerProgram: { findMany: async () => [] },
+    center: { findMany: async () => [] },
   };
   return { client: c as unknown as Parameters<typeof loadNewsQueue>[0], calls, scholarCwids };
 }
@@ -560,8 +562,10 @@ describe("scoreProminence — the one prominence definition", () => {
     expect(chair.prominence).toBeGreaterThan(chief.prominence);
     expect(chair.leadershipLabel).toBe("Chair");
     expect(chief.leadershipLabel).toBe("Chief");
-    // Both are tier 2 — the chair/chief difference is in the SCORE, not the tier.
-    expect(chair.leadershipTier).toBe(chief.leadershipTier);
+    // EA title ladder (2026-09-24): Chair is rank 4, Division Chief rank 6 —
+    // the difference is in the TIER now, not only the score.
+    expect(chair.leadershipTier).toBe(4);
+    expect(chief.leadershipTier).toBe(6);
   });
 });
 
@@ -572,7 +576,7 @@ describe("scoreProminence — the one prominence definition", () => {
  * than an error — so nothing else in the suite notices when they invert.
  */
 describe("prominence fallbacks — the unpinned defaults", () => {
-  it("scores a mention whose scholar is missing as tier 3, not tier 0", async () => {
+  it("scores a mention whose scholar is missing as tier none (13), not tier 0", async () => {
     // The worst possible inversion: default the tier to 0 and an unresolvable
     // cwid outranks the actual Dean and every chair on the `prominence` sort.
     // Mutating LEADERSHIP_TIER.none -> 0 here used to leave the suite green.
@@ -582,7 +586,7 @@ describe("prominence fallbacks — the unpinned defaults", () => {
       ["ghost001"],
     );
     const groups = await loadNewsQueue(c, "pending");
-    expect(groups[0].rows[0].leadershipTier).toBe(3);
+    expect(groups[0].rows[0].leadershipTier).toBe(13);
     expect(groups[0].rows[0].prominence).toBe(0);
   });
 

@@ -40,7 +40,7 @@ import type { NewsMentionStatus } from "@/lib/generated/prisma/enums";
  *  `orgUnitRoleAssignment` are `computeProminence`'s reads, not this loader's. */
 type NewsQueueClient = Pick<
   PrismaClient,
-  "newsMention" | "scholar" | "grant" | "orgUnitRoleAssignment"
+  "newsMention" | "scholar" | "grant" | "orgUnitRoleAssignment" | "centerProgram" | "center"
 >;
 
 export type NewsQueueRow = {

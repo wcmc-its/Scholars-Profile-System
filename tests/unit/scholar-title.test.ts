@@ -4,6 +4,7 @@ import {
   ambiguousUnitNames,
   buildTitleOptions,
   formatUnitLeadershipTitle,
+  rankTitleText,
   resolveScholarTitle,
   TITLE_TIERS,
   type TitleInputs,
@@ -74,6 +75,119 @@ describe("resolveScholarTitle — precedence", () => {
   });
 });
 
+describe("rankTitleText — the EA ladder (2026-09-24)", () => {
+  const cases: Array<[string | null, number]> = [
+    ["Stephen and Suzanne Weiss Dean", 1],
+    ["Provost", 1],
+    ["Interim Dean", 1],
+    ["Vice Provost for Research", 2],
+    ["Vice Dean", 2],
+    ["Senior Vice President and Chief Operating Officer", 2],
+    ["Senior Associate Dean, Education", 3],
+    ["Chair of Medicine", 4],
+    ["Sanford I. Weill Chair of Medicine", 4],
+    ["Chairman, Department of Surgery", 4],
+    ["Vice Chair for Research", 13], // not a department chair, and no rank
+    ["Chief of Cardiology", 6],
+    ["Chief, Sleep Neurology", 6],
+    ["Associate Dean for Research", 7],
+    ["Assistant Dean", 7],
+    ["Associate Vice Provost", 8],
+    ["Assistant Vice President", 8],
+    ["Gale and Ira Drukier Professor of Children's Health", 9],
+    ["The Foo Family Chair in Cardiology", 9],
+    ["Director, Example Center for Health Policy", 10],
+    ["Director of the Example Institute", 10],
+    ["Associate Director, Example Center", 13], // #2735: associate directors never count
+    ["Program Director, Internal Medicine Residency", 11],
+    ["Director, Fellowship Program in Cardiology", 11],
+    ["Professor of Medicine", 12],
+    ["Associate Professor of Clinical Medicine", 12],
+    ["Adjunct Assistant Professor", 12],
+    ["Instructor in Medicine", 12],
+    ["Postdoctoral Associate", 12],
+    ["Director of Example Center and Professor of Medicine", 10], // not endowed
+    ["Anne Example, M.D. Assistant Professor of Otolaryngology", 9], // comma in a name
+    ["Vice Chair for Research and Professor of Medicine", 12], // an office, not a name
+    ["Professor Emeritus of Medicine", 12],
+    ["Dean Emeritus", 13],
+    ["Attending Physician", 13],
+    [null, 13],
+    ["   ", 13],
+  ];
+  it.each(cases)("%s → %i", (title, rank) => {
+    expect(rankTitleText(title)).toBe(rank);
+  });
+});
+
+describe("resolveScholarTitle — rank, not source", () => {
+  it("a division chief beats a working title that is only an academic rank", () => {
+    // Before 2026-09-24 the working title won unconditionally.
+    expect(
+      resolveScholarTitle({
+        ...NONE,
+        override: null,
+        workingTitle: "Professor of Medicine",
+        chiefTitle: "Chief, Sleep Neurology",
+        edPrimaryTitle: "Professor of Clinical Medicine",
+      }).tier,
+    ).toBe("chief");
+  });
+
+  it("a division chief beats an Associate Dean working title (6 over 7)", () => {
+    expect(
+      resolveScholarTitle({
+        ...NONE,
+        override: null,
+        workingTitle: "Associate Dean for Research",
+        chiefTitle: "Chief, Sleep Neurology",
+      }).value,
+    ).toBe("Chief, Sleep Neurology");
+  });
+
+  it("an institutional center director beats a chief; a unit-based one does not", () => {
+    const base = {
+      ...NONE,
+      override: null,
+      chiefTitle: "Chief, Sleep Neurology",
+      centerHeadTitle: "Director, Example Cancer Center",
+    };
+    expect(resolveScholarTitle({ ...base, centerHeadInstitutional: true }).tier).toBe("centerHead");
+    expect(resolveScholarTitle({ ...base, centerHeadInstitutional: false }).tier).toBe("chief");
+  });
+
+  it("a plain academic appointment never displaces the ED primary title", () => {
+    // Only appointments ABOVE academic rank compete; otherwise a sibling
+    // appointment's wording would churn "Professor of X" on every tie.
+    const r = resolveScholarTitle({
+      ...NONE,
+      override: null,
+      appointmentTitles: ["Professor of Biochemistry", "Leon Example Professor of Surgery"],
+      edPrimaryTitle: "Professor of Surgery",
+    });
+    expect(r).toMatchObject({ tier: "appointment", value: "Leon Example Professor of Surgery" });
+    expect(
+      resolveScholarTitle({
+        ...NONE,
+        override: null,
+        appointmentTitles: ["Professor of Biochemistry"],
+        edPrimaryTitle: "Professor of Surgery",
+      }).tier,
+    ).toBe("primary");
+  });
+
+  it("on a tie the working title still wins (source order breaks ties)", () => {
+    expect(
+      resolveScholarTitle({
+        ...NONE,
+        override: null,
+        workingTitle: "Professor of Medicine",
+        edPrimaryTitle: "Professor of Clinical Medicine",
+      }).tier,
+    ).toBe("working");
+  });
+});
+
 describe("resolveScholarTitle — override", () => {
   it("an override beats the working title", () => {
     expect(
@@ -130,9 +244,25 @@ describe("blank handling", () => {
 });
 
 describe("buildTitleOptions", () => {
-  it("always returns every tier, in precedence order", () => {
+  it("always returns every tier; with nothing ranked, in tie-break order", () => {
     const options = buildTitleOptions(NONE);
     expect(options.map((o) => o.tier)).toEqual([...TITLE_TIERS]);
+  });
+
+  it("orders applicable rows by rank, highest first", () => {
+    const options = buildTitleOptions({
+      ...NONE,
+      workingTitle: "Associate Dean for Research",
+      chiefTitle: "Chief, Sleep Neurology",
+      edPrimaryTitle: "Professor of Medicine",
+    });
+    expect(options.map((o) => [o.tier, o.rank])).toEqual([
+      ["chief", 6],
+      ["working", 7],
+      ["primary", 12],
+      ["appointment", 13],
+      ["centerHead", 13],
+    ]);
   });
 
   it("marks an inapplicable tier null rather than dropping the row", () => {
@@ -144,10 +274,16 @@ describe("buildTitleOptions", () => {
       edPrimaryTitle: "Chair of Example Sciences",
     });
     expect(options).toEqual([
-      { tier: "working", label: "Working title", value: "Senior Associate Dean, Example Programme" },
-      { tier: "chief", label: "Division chief", value: null },
-      { tier: "centerHead", label: "Center head", value: null },
-      { tier: "primary", label: "Primary title", value: "Chair of Example Sciences" },
+      {
+        tier: "working",
+        label: "Working title",
+        value: "Senior Associate Dean, Example Programme",
+        rank: 3,
+      },
+      { tier: "primary", label: "Primary title", value: "Chair of Example Sciences", rank: 4 },
+      { tier: "appointment", label: "Appointment title", value: null, rank: 13 },
+      { tier: "centerHead", label: "Center director", value: null, rank: 13 },
+      { tier: "chief", label: "Division chief", value: null, rank: 13 },
     ]);
   });
 });

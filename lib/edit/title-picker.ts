@@ -27,7 +27,7 @@ import {
   ambiguousUnitNames,
   buildTitleOptions,
   formatUnitLeadershipTitle,
-  resolveScholarTitle,
+  resolveFromOptions,
   type TitleOption,
 } from "@/lib/scholar-title";
 
@@ -50,34 +50,58 @@ export function isTitleResolutionEnabled(): boolean {
 }
 
 /**
- * The center-head tier fires ONLY for the Director of the Cancer Center (Paul,
- * 2026-09-23). Every other center role replaced a faculty rank with something
- * that reads as a demotion ("Associate Director, Cornell Health Policy Center"
- * over "Professor of Population Health Sciences"). "The Cancer Center" is a
- * center with a `CenterProgram` taxonomy, the same data-driven test as
- * `resolveReportsCenterCode`, so no center code is hardcoded. Matched on the
- * role KEY (labels are editable); interim directors count.
+ * Center directors title their holder on the EA ladder (2026-09-24): an
+ * INSTITUTIONAL center's director ranks 5, above division chief; any other
+ * center's director ranks 10, above a plain academic title. This supersedes
+ * #2735's Cancer-Center-only rule. Associate directors still never count —
+ * that was the #2735 demotion ("Associate Director, … Center" over
+ * "Professor of …"). Matched on the role KEY (labels are editable); interim
+ * directors count.
+ *
+ * "Institutional" is data-driven, no center code hardcoded: a center with a
+ * `CenterProgram` taxonomy (the Cancer Center, the same test as
+ * `resolveReportsCenterCode`) or `centerType = "institute"`.
  */
-export async function loadCancerCenterCodes(
-  client: Pick<PrismaClient, "centerProgram">,
+export async function loadInstitutionalCenterCodes(
+  client: Pick<PrismaClient, "centerProgram" | "center">,
 ): Promise<Set<string>> {
-  const rows = await client.centerProgram.findMany({
-    select: { centerCode: true },
-    distinct: ["centerCode"],
-  });
-  return new Set(rows.map((r) => r.centerCode));
+  const [programs, institutes] = await Promise.all([
+    client.centerProgram.findMany({ select: { centerCode: true }, distinct: ["centerCode"] }),
+    client.center.findMany({ where: { centerType: "institute" }, select: { code: true } }),
+  ]);
+  return new Set([...programs.map((r) => r.centerCode), ...institutes.map((c) => c.code)]);
 }
 
-export function isCancerCenterHead(
-  a: { entityId: string; role: { key: string } },
-  cancerCenterCodes: ReadonlySet<string>,
-): boolean {
-  return a.role.key === DIRECTOR_ROLE_KEY && cancerCenterCodes.has(a.entityId);
+/** Director only — co- and associate directors do not title their holder
+ *  (#2735, kept on the ladder: its ranks name "Director"). */
+export function isCenterDirector(a: { role: { key: string } }): boolean {
+  return a.role.key === DIRECTOR_ROLE_KEY;
+}
+
+/** A scholar's current ED appointment titles — the `appointment` tier's pool. */
+export async function loadCurrentAppointmentTitles(
+  client: Pick<PrismaClient, "appointment">,
+  cwids?: readonly string[],
+): Promise<Map<string, string[]>> {
+  const rows = await client.appointment.findMany({
+    where: { source: "ED", endDate: null, ...(cwids ? { cwid: { in: [...cwids] } } : {}) },
+    select: { cwid: true, title: true },
+    orderBy: [{ isPrimary: "desc" }, { id: "asc" }],
+  });
+  const out = new Map<string, string[]>();
+  for (const r of rows) out.set(r.cwid, [...(out.get(r.cwid) ?? []), r.title]);
+  return out;
 }
 
 type TitlePickerClient = Pick<
   PrismaClient,
-  "scholar" | "orgUnitRoleAssignment" | "division" | "center" | "centerProgram" | "fieldOverride"
+  | "scholar"
+  | "orgUnitRoleAssignment"
+  | "division"
+  | "center"
+  | "centerProgram"
+  | "fieldOverride"
+  | "appointment"
 >;
 
 export type PendingTitleRequest = {
@@ -89,7 +113,7 @@ export type PendingTitleRequest = {
 };
 
 export type TitlePickerState = {
-  /** Every tier, in precedence order; `value: null` marks one that does not
+  /** Every tier, highest rank first; `value: null` marks one that does not
    *  apply. Rendered disabled rather than omitted so an operator can see WHY
    *  a tier did not win. */
   options: TitleOption[];
@@ -120,7 +144,7 @@ export async function loadTitlePickerState(
   });
   if (!scholar) return null;
 
-  const [assignments, overrideRows, cancerCenterCodes] = await Promise.all([
+  const [assignments, overrideRows, institutionalCenters, appointmentTitles] = await Promise.all([
     client.orgUnitRoleAssignment.findMany({
       where: {
         cwid,
@@ -143,13 +167,17 @@ export async function loadTitlePickerState(
       },
       select: { fieldName: true, value: true, actorCwid: true, updatedAt: true },
     }),
-    loadCancerCenterCodes(client),
+    loadInstitutionalCenterCodes(client),
+    loadCurrentAppointmentTitles(client, [cwid]),
   ]);
 
   const divAssignment = assignments.find((a) => a.entityType === "division");
-  const centerAssignment = assignments.find(
-    (a) => a.entityType === CENTER_ENTITY_TYPE && isCancerCenterHead(a, cancerCenterCodes),
+  // An institutional directorship outranks a unit-based one, so prefer it.
+  const centerDirectorships = assignments.filter(
+    (a) => a.entityType === CENTER_ENTITY_TYPE && isCenterDirector(a),
   );
+  const centerAssignment =
+    centerDirectorships.find((a) => institutionalCenters.has(a.entityId)) ?? centerDirectorships[0];
 
   let chiefTitle: string | null = null;
   if (divAssignment) {
@@ -193,8 +221,11 @@ export async function loadTitlePickerState(
   return {
     options: buildTitleOptions({
       workingTitle: scholar.workingTitle,
+      appointmentTitles: appointmentTitles.get(cwid) ?? [],
       chiefTitle,
       centerHeadTitle,
+      centerHeadInstitutional:
+        centerAssignment !== undefined && institutionalCenters.has(centerAssignment.entityId),
       edPrimaryTitle: scholar.edPrimaryTitle,
     }),
     current: scholar.primaryTitle,
@@ -233,14 +264,7 @@ export function resolveWithOverride(
   state: TitlePickerState,
   override: string | null,
 ): string | null {
-  const byTier = new Map(state.options.map((o) => [o.tier, o.value]));
-  return resolveScholarTitle({
-    override,
-    workingTitle: byTier.get("working") ?? null,
-    chiefTitle: byTier.get("chief") ?? null,
-    centerHeadTitle: byTier.get("centerHead") ?? null,
-    edPrimaryTitle: byTier.get("primary") ?? null,
-  }).value;
+  return resolveFromOptions(state.options, override).value;
 }
 
 // ponytail: pending requests are discoverable on the profile an operator is

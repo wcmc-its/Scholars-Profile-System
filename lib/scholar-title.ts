@@ -7,13 +7,17 @@
  * live beside it as `Scholar.edPrimaryTitle` and `Scholar.workingTitle`, so
  * the `/edit` picker can offer the losing tiers without re-reading LDAP.
  *
- * Precedence, highest first:
+ * Precedence is BY RANK, not by source (EA pecking order, 2026-09-24 — see
+ * {@link TITLE_RANK}). An operator override wins outright; otherwise every
+ * candidate below is ranked and the highest-ranked one wins, ties going to
+ * the earlier source in {@link TITLE_TIERS}:
  *
- *   1. operator override   `field_override(scholar, <cwid>, 'primaryTitle')`
- *   2. ED working title    `weillCornellEduWorkingTitle`
- *   3. division chief      `OrgUnitRoleAssignment(division, …, profileTitle)`
- *   4. center head         `OrgUnitRoleAssignment(center, …, profileTitle)`
- *   5. ED primary title    `weillCornellEduPrimaryTitle`
+ *   working       ED `weillCornellEduWorkingTitle`
+ *   primary       ED `weillCornellEduPrimaryTitle` (the official wording wins
+ *                 a tie with a sibling appointment's)
+ *   appointment   best-ranked current ED appointment title (chair, endowed…)
+ *   centerHead    center Director (`OrgUnitRoleAssignment(center, director)`)
+ *   chief         division chief (`OrgUnitRoleAssignment(division, …)`)
  *
  * DEPENDENCY-FREE ON PURPOSE, for the same reason `lib/org-unit-roles.ts` is:
  * `components/edit/edit-page.tsx` imports this at runtime, so it reaches the
@@ -24,64 +28,207 @@
  * pass data in, this module only computes strings.
  */
 
-/** The tiers, in precedence order. `primary` is the floor. */
-export type TitleTier = "working" | "chief" | "centerHead" | "primary";
+/**
+ * The External Affairs title pecking order (from Institutional Communications,
+ * 2026-09-24; Paul added Vice President to rank 2). LOWER ranks HIGHER. One
+ * ladder drives both the display-title pick here and the leadership sort in
+ * `lib/api/prominence.ts`, so the two cannot disagree.
+ */
+export const TITLE_RANK = {
+  deanProvost: 1,
+  viceProvostDean: 2,
+  seniorAssociateDean: 3,
+  chair: 4,
+  institutionalCenterDirector: 5,
+  divisionChief: 6,
+  associateDean: 7,
+  associateViceProvost: 8,
+  endowed: 9,
+  unitCenterDirector: 10,
+  unitProgramDirector: 11,
+  academic: 12,
+  /** Anything the ladder does not name ("Attending Physician", "Lecturer"). */
+  unranked: 13,
+} as const;
 
-/** Precedence order, highest first. Exported so callers iterate ONE list
- *  rather than each re-encoding the order and drifting from it. */
+const EMERITUS = /\bemerit(?:us|a|i)\b/i;
+/** Words that qualify an academic rank without making it a named (endowed) one. */
+const RANK_WORDS = new Set([
+  "the",
+  "and",
+  "associate",
+  "assistant",
+  "adjunct",
+  "clinical",
+  "visiting",
+  "research",
+  "full",
+  "courtesy",
+  "affiliate",
+  "interim",
+  "acting",
+  "senior",
+]);
+
+/**
+ * Rank a title STRING on the ladder. Role-derived ranks the text cannot
+ * express (institutional vs unit-based center director) are the caller's.
+ *
+ * Most specific first: "Associate Vice Provost" must not read as Vice Provost,
+ * "Senior Associate Dean" not as Associate Dean, "Vice Dean" not as Dean.
+ * Emeritus titles hold no office, so they rank as academic at best.
+ */
+export function rankTitleText(title: string | null | undefined): number {
+  const t = blankToNull(title ?? null);
+  if (t === null) return TITLE_RANK.unranked;
+  if (!EMERITUS.test(t)) {
+    if (/\b(?:associate|assistant) vice (?:provost|president)\b/i.test(t)) {
+      return TITLE_RANK.associateViceProvost;
+    }
+    if (/\bsenior associate dean\b/i.test(t)) return TITLE_RANK.seniorAssociateDean;
+    if (/\b(?:associate|assistant|affiliate) dean\b/i.test(t)) return TITLE_RANK.associateDean;
+    if (/\b(?:vice|deputy) (?:dean|provost)\b|\bvice president\b|\bevp\b/i.test(t)) {
+      return TITLE_RANK.viceProvostDean;
+    }
+    if (/\b(?:dean|provost|president)\b/i.test(t)) return TITLE_RANK.deanProvost;
+    // Department chair ("Chair of Medicine", "Sanford I. Weill Chair of
+    // Medicine", "Chairman, …"); a named chair IN a field is endowed, below.
+    if (
+      /\bchair(?:man|woman|person)?\b(?! in\b)/i.test(t) &&
+      !/\b(?:vice|associate|deputy|assistant)[- ]chair/i.test(t)
+    ) {
+      return TITLE_RANK.chair;
+    }
+    if (/\bchief of\b|\bdivision chief\b|^(?:interim |acting )?chief,/i.test(t)) {
+      return TITLE_RANK.divisionChief;
+    }
+  }
+  if (isEndowed(t)) return TITLE_RANK.endowed;
+  if (!EMERITUS.test(t) && isDirectorOf(t, /\b(?:center|centre|institute)\b/i)) {
+    return TITLE_RANK.unitCenterDirector;
+  }
+  if (!EMERITUS.test(t) && isDirectorOf(t, /\bprogram\b/i)) return TITLE_RANK.unitProgramDirector;
+  if (/\b(?:professor|instructor|postdoctoral associate)\b/i.test(t)) return TITLE_RANK.academic;
+  return TITLE_RANK.unranked;
+}
+
+/** "Gale and Ira Drukier Professor of …", "… Chair in …", "Endowed …". A
+ *  professorship is named when a non-rank word precedes "Professor" —
+ *  "Associate Professor of Clinical Medicine" is not. A lead naming an office
+ *  or carrying of/for/in is another role joined on ("Director of X and
+ *  Professor"), not a name; a comma alone is not ("Anne Belcher, M.D.
+ *  Assistant Professor"). */
+function isEndowed(t: string): boolean {
+  if (/\bendowed\b|\bchair in\b/i.test(t)) return true;
+  const m = /^(.*?)\bprofessor\b/i.exec(t);
+  if (!m || /\b(?:of|for|in|director|chief|chair|dean|provost|president|head)\b/i.test(m[1])) {
+    return false;
+  }
+  const lead = m[1].toLowerCase().match(/[a-z.'-]+/g) ?? [];
+  return lead.some((w) => !RANK_WORDS.has(w));
+}
+
+/** Director (or Co-Director) of a unit matching `unit` — never an
+ *  Associate/Assistant/Deputy Director, the #2735 demotion case. */
+function isDirectorOf(t: string, unit: RegExp): boolean {
+  if (/\b(?:associate|assistant|deputy) (?:co-)?director\b/i.test(t)) return false;
+  return /\b(?:co-)?director\b/i.test(t) && unit.test(t);
+}
+
+/** The candidate sources. Order is the TIE-BREAK between equal ranks only. */
+export type TitleTier = "working" | "primary" | "appointment" | "centerHead" | "chief";
+
 export const TITLE_TIERS: readonly TitleTier[] = [
   "working",
-  "chief",
-  "centerHead",
   "primary",
+  "appointment",
+  "centerHead",
+  "chief",
 ] as const;
 
 /** Operator-facing label per tier — drives the `/edit` picker's option rows. */
 export const TITLE_TIER_LABEL: Record<TitleTier, string> = {
   working: "Working title",
+  appointment: "Appointment title",
+  centerHead: "Center director",
   chief: "Division chief",
-  centerHead: "Center head",
   primary: "Primary title",
 };
 
 /** One row in the `/edit` picker. `value` is null when the tier does not apply
- *  to this scholar — the row still renders (disabled) so an operator can see
- *  WHY a tier did not win, rather than wondering where it went. */
+ *  to this scholar. `rank` is its place on {@link TITLE_RANK}. */
 export type TitleOption = {
   tier: TitleTier;
   label: string;
   value: string | null;
+  rank: number;
 };
 
-/** The per-scholar inputs. Every field is already a finished display string;
+/** The per-scholar inputs. Every string is already a finished display string;
  *  this module never reaches a database or formats a unit name itself. */
 export type TitleInputs = {
   /** ED `weillCornellEduWorkingTitle`, annotation-stripped. */
   workingTitle: string | null;
+  /** Current ED appointment titles; the best-ranked one is the candidate. */
+  appointmentTitles?: readonly string[];
   /** Pre-formatted, e.g. "Chief, Cardiology (Medicine)" — see {@link formatUnitLeadershipTitle}. */
   chiefTitle: string | null;
   /** Pre-formatted, e.g. "Director, Example Cancer Center". */
   centerHeadTitle: string | null;
+  /** True when the center is institution-wide (rank 5), else unit-based (10). */
+  centerHeadInstitutional?: boolean;
   /** ED `weillCornellEduPrimaryTitle`, annotation-stripped. */
   edPrimaryTitle: string | null;
 };
 
 /**
- * Build the picker's rows, in precedence order. Every tier always produces a
- * row; `value: null` marks a tier that does not apply.
+ * Build the picker's rows, highest rank first (ties in {@link TITLE_TIERS}
+ * order). Every tier always produces a row; `value: null` marks one that does
+ * not apply, and sorts last.
  */
 export function buildTitleOptions(inputs: TitleInputs): TitleOption[] {
-  const byTier: Record<TitleTier, string | null> = {
-    working: blankToNull(inputs.workingTitle),
-    chief: blankToNull(inputs.chiefTitle),
-    centerHead: blankToNull(inputs.centerHeadTitle),
-    primary: blankToNull(inputs.edPrimaryTitle),
+  const appointment = bestRanked(inputs.appointmentTitles ?? []);
+  const byTier: Record<TitleTier, [string | null, number]> = {
+    working: ranked(inputs.workingTitle),
+    appointment: appointment,
+    centerHead: [
+      blankToNull(inputs.centerHeadTitle),
+      inputs.centerHeadInstitutional
+        ? TITLE_RANK.institutionalCenterDirector
+        : TITLE_RANK.unitCenterDirector,
+    ],
+    chief: [blankToNull(inputs.chiefTitle), TITLE_RANK.divisionChief],
+    primary: ranked(inputs.edPrimaryTitle),
   };
   return TITLE_TIERS.map((tier) => ({
     tier,
     label: TITLE_TIER_LABEL[tier],
-    value: byTier[tier],
-  }));
+    value: byTier[tier][0],
+    rank: byTier[tier][0] === null ? TITLE_RANK.unranked : byTier[tier][1],
+  })).sort(
+    (a, b) =>
+      Number(a.value === null) - Number(b.value === null) ||
+      a.rank - b.rank ||
+      TITLE_TIERS.indexOf(a.tier) - TITLE_TIERS.indexOf(b.tier),
+  );
+}
+
+function ranked(title: string | null): [string | null, number] {
+  const v = blankToNull(title);
+  return [v, rankTitleText(v)];
+}
+
+/** Best-ranked title among `titles`, counting only those ABOVE a plain
+ *  academic rank (endowed, chair, …). The ED primary title already carries the
+ *  academic rank; letting an equal-rank appointment compete would swap
+ *  "Professor of Medicine" for a sibling appointment's wording on a tie. */
+function bestRanked(titles: readonly string[]): [string | null, number] {
+  let best: [string | null, number] = [null, TITLE_RANK.academic];
+  for (const t of titles) {
+    const r = ranked(t);
+    if (r[0] !== null && r[1] < best[1]) best = r;
+  }
+  return best[0] === null ? [null, TITLE_RANK.unranked] : best;
 }
 
 export type ResolvedTitle = {
@@ -113,15 +260,21 @@ export type ResolvedTitle = {
 export function resolveScholarTitle(
   inputs: TitleInputs & { override: string | null },
 ): ResolvedTitle {
-  const override = blankToNull(inputs.override);
-  if (override !== null) return { value: override, tier: null, overridden: true };
+  return resolveFromOptions(buildTitleOptions(inputs), inputs.override);
+}
 
-  for (const option of buildTitleOptions(inputs)) {
-    if (option.value !== null) {
-      return { value: option.value, tier: option.tier, overridden: false };
-    }
-  }
-  return { value: null, tier: null, overridden: false };
+/** {@link resolveScholarTitle} over already-built options (the `/edit` write
+ *  path holds those, not the raw inputs). */
+export function resolveFromOptions(
+  options: readonly TitleOption[],
+  override: string | null,
+): ResolvedTitle {
+  const pinned = blankToNull(override);
+  if (pinned !== null) return { value: pinned, tier: null, overridden: true };
+  const winner = options.find((o) => o.value !== null);
+  return winner
+    ? { value: winner.value, tier: winner.tier, overridden: false }
+    : { value: null, tier: null, overridden: false };
 }
 
 /**
