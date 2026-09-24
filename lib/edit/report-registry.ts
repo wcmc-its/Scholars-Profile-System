@@ -61,6 +61,9 @@
  *   - Scholar / email lists: `SCHOLAR_EXPORT_CAP` (50, `lib/api/export-scholars.ts`).
  *     Above it, no download; never truncate to fit. [enforced for an export
  *     with an "email" header literal: report-filter-guard; truncation review]
+ *   - A person's name in a table: wrap it in `ScholarHoverCard cwid={…}`
+ *     (`components/edit/scholar-hover-card.tsx`) — headshot, email, titles,
+ *     overview, fetched on hover. Don't hand-roll a per-report card. [review]
  *   - If it writes: register the action / entity in `lib/edit/audit.ts` AND
  *     all four ENUM sites in `scripts/sql/audit-log.sql`. [review]
  *   - No `@/lib/db`, `@/lib/edit/person-filter` or the Prisma client as a VALUE
