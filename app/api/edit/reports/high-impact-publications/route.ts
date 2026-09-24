@@ -34,7 +34,7 @@ export async function GET(request: Request) {
   const list = total <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;
   const labels = params.units.length > 0 ? unitLabels(await loadDataQualityFacets(db.read)) : undefined;
   const buffer = await buildHighImpactWorkbook(params, total, list, generatedAt, labels);
-  const filename = `High-impact publications ${params.from}-${params.to} ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
+  const filename = `Top clinical and high-impact journal publications ${params.from}-${params.to} ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
 
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,

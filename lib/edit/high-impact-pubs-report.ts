@@ -1,5 +1,5 @@
 /**
- * Report 9 — "High-impact publications": articles in a fixed set of
+ * Report 9 — "Top clinical and high-impact journal publications": articles in a fixed set of
  * top-tier journals (JAMA, Lancet, NEJM, JCO, Sci Transl Med, Nature, Blood,
  * Circulation, Science, Cell — the families below) by the scholars matching
  * the facets. Built for the Top Ten Clinical Research Achievement Awards ask:
@@ -264,7 +264,7 @@ export function describeHighImpactCriteria(
   const rows = describeCriteria(p, generatedAt, labels).filter(
     ([k]) => k !== "Year basis" && k !== "Minimum Journal Impact Factor",
   );
-  rows[0] = ["Report", "9. High-impact publications"];
+  rows[0] = ["Report", "9. Top clinical and high-impact journal publications"];
   rows.splice(2, 0, [
     "Journals",
     JOURNAL_FAMILIES.filter((f) => p.journals.includes(f.key))

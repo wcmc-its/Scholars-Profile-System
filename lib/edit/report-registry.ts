@@ -166,7 +166,7 @@ export type ReportDef =
     };
 
 /** Every report, by `report_meta.report_key`. Reports 1–6 are unit-gated;
- *  reports 7 (Mentored publications) and 9 (High-impact publications) are
+ *  reports 7 (Mentored publications) and 9 (Top clinical and high-impact journal publications) are
  *  person-gated on their `report_access` keys. */
 export const REPORTS: Record<ReportKey, ReportDef> = {
   "1": { n: "1", gate: "unit", render: renderOptimizeMembershipReport },

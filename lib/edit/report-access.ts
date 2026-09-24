@@ -77,7 +77,7 @@ export const MENTORED_PUBS_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string
   ...MENTORED_PUBS_SCOPES.map((s) => [s, PROGRAM_LABEL[s] ?? s] as const),
 ];
 
-/** Report 8 (Article counts) and report 9 (High-impact publications) take
+/** Report 8 (Article counts) and report 9 (Top clinical and high-impact journal publications) take
  *  person grants too, for staff who administer no unit. Neither has scopes:
  *  a grant is the wildcard alone. */
 export const ARTICLE_COUNT_REPORT = "article-count";
