@@ -1,5 +1,5 @@
 /**
- * Report 9 — "High-impact publications" body: a filter rail (years, journal
+ * Report 9 — "Top clinical journal publications" body: a filter rail (years, journal
  * families, the Profiles roster's person-type / unit facets, article type,
  * author position; plain GET params, `AutoSubmitForm` like reports 7 and 8)
  * beside Summary (one row per person, `summarizePeople`) / Publications
