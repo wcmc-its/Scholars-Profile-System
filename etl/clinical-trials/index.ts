@@ -5,14 +5,15 @@
  * Source of truth chain:
  *   institutional CTMS export → reciterdb.clinical_trials
  *     (cwid, protocolNumber, piName, title, dates, sponsor, status — the spine)
- *   ClinicalTrials.gov API v2 → reciterdb.clinical_trials_enriched
- *     (briefTitle/officialTitle, summary, phases, conditions, MeSH, enrollment;
- *      joined on nctNumber, populated upstream by ReciterAI's enrichment job)
+ *   ClinicalTrials.gov API v2, fetched live each run for every NCT in the feed
+ *     (briefTitle/officialTitle, summary, phases, conditions, MeSH, enrollment,
+ *      primary completion date); reciterdb.clinical_trials_enriched is only the
+ *      per-NCT fallback when a CT.gov batch fails
  *     → clinical_trial + person_clinical_trial  (this script)
  *
  * The institutional table already carries cwid, so — unlike etl/nih-profile —
- * no entity resolution is needed; trials arrive pre-linked. `role` is the one
- * derived field (name-match of the scholar against piName).
+ * no entity resolution is needed; trials arrive pre-linked. The feed lists the
+ * active PI only, so every link's role is "Principal Investigator".
  *
  * Full-replace each run (the institutional export is a static snapshot).
  *
@@ -28,7 +29,14 @@ import { db } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { closeReciterPool } from "@/lib/sources/reciterdb";
 import { withEtlRun } from "@/lib/etl-run";
-import { buildTrialsAndLinks, loadScholars, readReciterdbTables, replaceAll } from "./shared";
+import {
+  buildTrialsAndLinks,
+  cleanNct,
+  fetchCtgovStudies,
+  loadScholars,
+  readReciterdbTables,
+  replaceAll,
+} from "./shared";
 
 async function main() {
   const start = Date.now();
@@ -45,7 +53,14 @@ async function main() {
       `Loaded ${institutional.length} institutional rows, ${enriched.length} enriched rows.`,
     );
 
-    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholars, now);
+    const ncts = institutional.map((r) => cleanNct(r.nctNumber)).filter((n): n is string => !!n);
+    const ctgov = await fetchCtgovStudies(ncts);
+    console.log(
+      `ClinicalTrials.gov: ${ctgov.studies.size} of ${new Set(ncts).size} NCTs fetched` +
+        (ctgov.complete ? "." : " (INCOMPLETE — falling back to reciterdb enrichment where missing)."),
+    );
+
+    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholars, now, ctgov);
     console.log(
       `Built ${stats.trials} trials (${stats.enrichedHits} institutional rows had NCT enrichment) ` +
         `and ${stats.links} person links. ` +

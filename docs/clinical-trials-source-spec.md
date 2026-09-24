@@ -10,6 +10,38 @@ Date: 2026-06-18
 > search/facets deferred. Migration timestamp `20260618174500` (bumped off
 > `…170000` to avoid colliding with the open overview-selection PR).
 
+> **Update 2026-09-24 — source, enrichment, role and status rules changed.**
+> The sections below are the original v1 design; where they conflict with this
+> note, this note wins.
+>
+> - **Spine source.** `reciterdb.clinical_trials` is now loaded from an OnCore
+>   "Protocol Profile Report" export sent by the clinical research office and
+>   loaded by hand (full replace), until a Power BI or SQL feed is available. The
+>   export lists **one row per protocol, active PI only**, and only protocols
+>   opened to accrual since 2019-04-01. Dates arrive as real dates (ISO), not
+>   M/D/YY. Rows whose PI has no CWID in OnCore are dropped at load. The manual
+>   refresh procedure is kept outside the repo.
+> - **Enrichment (§4, §6 step 2, §8).** `etl:clinical-trials` now fetches every
+>   NCT live from the ClinicalTrials.gov v2 API (100 ids per request) each run.
+>   `clinical_trials_enriched` is only a per-NCT fallback when a batch fails — it
+>   has no writer that adds new NCTs, so relying on it left new trials unenriched.
+> - **Role (§6 step 4, §9.2).** Every link is "Principal Investigator"; the
+>   name-match heuristic is removed. It mislabelled real PIs as "Investigator"
+>   whenever the name forms differed.
+> - **CTA date.** For inactive trials (`IRB STUDY CLOSURE`, `CLOSED TO ACCRUAL`)
+>   the clinical research office considers the OnCore CTA date unreliable, so
+>   `firstCtaDate` is the ClinicalTrials.gov ACTUAL primary completion date, else
+>   null (CT.gov has no closed-to-accrual date; primary completion is the nearest
+>   proxy). If the CT.gov fetch was incomplete, the OnCore date is kept. Open and
+>   suspended trials keep the OnCore date. No surface displays this date today.
+> - **Status filtering (§9.1).** The public profile hides withdrawn trials **and
+>   `SUSPENDED` ones** (`isHiddenTrialStatus` in `lib/api/profile.ts`) — a
+>   suspension is usually a temporary hold, and the trial reappears if it reopens.
+>   Admin reports still list both.
+> - **Refresh.** Weekly, via `TaskClinicalTrialsWeekly` in `scholars-weekly-<env>`
+>   on the `sps-etl-sources-<env>` task family (not `etl/orchestrate.ts`, which is
+>   the local prototype runner only).
+
 ## 1. Goal
 
 Surface each scholar's clinical trials on the Scholars Profile System (SPS), end to
@@ -123,6 +155,8 @@ Plus a `clinicalTrials PersonClinicalTrial[]` relation on `Scholar`. One migrati
    else null.
 4. Build `PersonClinicalTrial` rows: derive `role` by normalized compare of the
    scholar's name to `piName` (match → "Principal Investigator", else "Investigator").
+   *Superseded 2026-09-24: the feed is PI-only, so every link is "Principal
+   Investigator".*
 5. Idempotent upsert (`protocolNumber` natural key); stamp `lastRefreshedAt`.
 6. Register `"etl:clinical-trials": "tsx etl/clinical-trials/index.ts"` in
    `package.json`; slot into `etl/orchestrate.ts` after COI (independent step — its

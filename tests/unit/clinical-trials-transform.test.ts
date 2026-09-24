@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   buildTrialsAndLinks,
   cleanNct,
-  isLikelyPi,
+  fetchCtgovStudies,
   parseLooseDate,
+  type CtgovStudy,
   type EnrichedRow,
   type InstitutionalRow,
 } from "@/etl/clinical-trials/shared";
@@ -26,18 +27,6 @@ function inst(p: Partial<InstitutionalRow>): InstitutionalRow {
     ...p,
   };
 }
-
-describe("isLikelyPi", () => {
-  it("matches first+last regardless of order/format", () => {
-    expect(isLikelyPi("Jane Smith", "Smith, Jane")).toBe(true);
-    expect(isLikelyPi("Jane Smith", "Jane A. Smith")).toBe(true);
-  });
-  it("rejects a different person and missing/short names", () => {
-    expect(isLikelyPi("Jane Smith", "John Doe")).toBe(false);
-    expect(isLikelyPi("Jane Smith", null)).toBe(false);
-    expect(isLikelyPi("Smith", "Smith, Jane")).toBe(false); // single token → not enough
-  });
-});
 
 describe("parseLooseDate", () => {
   it("parses M/D/YY and M/D/YYYY", () => {
@@ -74,7 +63,7 @@ describe("buildTrialsAndLinks", () => {
     ["def5678", { cwid: "def5678", name: "Robert Jones" }],
   ]);
 
-  it("dedupes one trial per protocol, links each investigator, derives role, merges enrichment", () => {
+  it("dedupes one trial per protocol, links each investigator as PI, merges enrichment", () => {
     const institutional: InstitutionalRow[] = [
       inst({
         cwid: "abc1234",
@@ -121,9 +110,8 @@ describe("buildTrialsAndLinks", () => {
     expect(trial.enrichmentSource).toBe("ClinicalTrials.gov");
     expect(trial.statusDate?.toISOString().slice(0, 10)).toBe("2024-03-15");
 
-    const byCwid = Object.fromEntries(links.map((l) => [l.cwid, l.role]));
-    expect(byCwid["abc1234"]).toBe("Principal Investigator"); // name matches piName
-    expect(byCwid["def5678"]).toBe("Investigator"); // does not match piName
+    // The feed lists the active PI only: no name heuristic, every link is PI.
+    expect(links.map((l) => l.role)).toEqual(["Principal Investigator", "Principal Investigator"]);
   });
 
   it("skips rows without a protocol and with cwids not in the scholar set", () => {
@@ -178,5 +166,103 @@ describe("buildTrialsAndLinks", () => {
     expect(links).toHaveLength(1);
     expect(links[0].cwid).toBe("abc1234"); // canonical scholar.cwid, not the uppercase source
     expect(links[0].role).toBe("Principal Investigator");
+  });
+});
+
+describe("ClinicalTrials.gov live enrichment + CTA rule", () => {
+  const scholars = new Map([["abc1234", { cwid: "abc1234", name: "Jane Smith" }]]);
+  const study = (p: Partial<CtgovStudy>): CtgovStudy => ({
+    nctNumber: "NCT00001",
+    officialTitle: null,
+    briefTitle: null,
+    briefSummary: null,
+    studyType: null,
+    phases: null,
+    conditions: null,
+    meshTerms: null,
+    enrollment: null,
+    primaryCompletionActual: null,
+    ...p,
+  });
+  const row = (p: Partial<InstitutionalRow>) =>
+    inst({ cwid: "abc1234", protocolNumber: "P-1", nctNumber: "NCT00001", firstCTADate: "2020-01-01", ...p });
+  const cta = (r: InstitutionalRow, ctgov?: { studies: Map<string, CtgovStudy>; complete: boolean }) =>
+    buildTrialsAndLinks([r], [], scholars, NOW, ctgov).trials[0].firstCtaDate?.toISOString().slice(0, 10) ?? null;
+
+  it("prefers the live CT.gov study over the reciterdb enriched row", () => {
+    const enriched: EnrichedRow[] = [{ ...study({ officialTitle: "Stale" }) }];
+    const ctgov = { studies: new Map([["NCT00001", study({ officialTitle: "Live" })]]), complete: true };
+    expect(buildTrialsAndLinks([row({})], enriched, scholars, NOW, ctgov).trials[0].title).toBe("Live");
+  });
+
+  it("keeps the OnCore CTA date for active and suspended trials", () => {
+    const ctgov = { studies: new Map([["NCT00001", study({ primaryCompletionActual: "2023-05-01" })]]), complete: true };
+    expect(cta(row({ overallCurrentStatus: "OPEN TO ACCRUAL" }), ctgov)).toBe("2020-01-01");
+    expect(cta(row({ overallCurrentStatus: "SUSPENDED" }), ctgov)).toBe("2020-01-01");
+  });
+
+  it("inactive trials take the CT.gov ACTUAL primary completion date, else null", () => {
+    const withDate = { studies: new Map([["NCT00001", study({ primaryCompletionActual: "2023-05-01" })]]), complete: true };
+    const noDate = { studies: new Map([["NCT00001", study({})]]), complete: true };
+    expect(cta(row({ overallCurrentStatus: "IRB STUDY CLOSURE" }), withDate)).toBe("2023-05-01");
+    expect(cta(row({ overallCurrentStatus: "CLOSED TO ACCRUAL" }), noDate)).toBeNull();
+    expect(cta(row({ overallCurrentStatus: "CLOSED TO ACCRUAL", nctNumber: "NA" }), withDate)).toBeNull();
+  });
+
+  it("keeps OnCore's CTA for an inactive trial CT.gov failed to return (can't tell missing from not fetched)", () => {
+    const failed = { studies: new Map<string, CtgovStudy>(), complete: false };
+    expect(cta(row({ overallCurrentStatus: "IRB STUDY CLOSURE" }), failed)).toBe("2020-01-01");
+  });
+});
+
+describe("fetchCtgovStudies", () => {
+  const body = {
+    studies: [
+      {
+        protocolSection: {
+          identificationModule: { nctId: "NCT04472351", officialTitle: "Official", briefTitle: "Brief" },
+          statusModule: { primaryCompletionDateStruct: { date: "2022-09-15", type: "ACTUAL" } },
+          descriptionModule: { briefSummary: "Sum" },
+          conditionsModule: { conditions: ["A", "B"] },
+          designModule: { studyType: "INTERVENTIONAL", phases: ["PHASE2"], enrollmentInfo: { count: 27 } },
+        },
+        derivedSection: { conditionBrowseModule: { meshes: [{ term: "Cognitive Dysfunction" }] } },
+      },
+      {
+        protocolSection: {
+          identificationModule: { nctId: "NCT00000002" },
+          statusModule: { primaryCompletionDateStruct: { date: "2027-01", type: "ESTIMATED" } },
+        },
+      },
+    ],
+  };
+
+  it("maps the v2 shape to the enriched-row format; ESTIMATED dates are not actual", async () => {
+    const fake = (async () => new Response(JSON.stringify(body))) as typeof fetch;
+    const { studies, complete } = await fetchCtgovStudies(["NCT04472351", "NCT00000002"], fake);
+    expect(complete).toBe(true);
+    expect(studies.get("NCT04472351")).toMatchObject({
+      officialTitle: "Official",
+      conditions: "A; B",
+      meshTerms: "Cognitive Dysfunction",
+      phases: "PHASE2",
+      enrollment: 27,
+      primaryCompletionActual: "2022-09-15",
+    });
+    expect(studies.get("NCT00000002")?.primaryCompletionActual).toBeNull();
+  });
+
+  it("batches 100 ids per request and reports incomplete on a failed batch", async () => {
+    const urls: string[] = [];
+    let n = 0;
+    const fake = (async (url: string) => {
+      urls.push(url);
+      return ++n === 2 ? new Response("down", { status: 503 }) : new Response(JSON.stringify({ studies: [] }));
+    }) as unknown as typeof fetch;
+    const ids = Array.from({ length: 150 }, (_, i) => `NCT${String(i).padStart(8, "0")}`);
+    const { complete } = await fetchCtgovStudies(ids, fake);
+    expect(urls).toHaveLength(2);
+    expect(new URL(urls[0]).searchParams.get("filter.ids")?.split(",")).toHaveLength(100);
+    expect(complete).toBe(false);
   });
 });

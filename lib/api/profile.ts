@@ -982,15 +982,16 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(authors: T[], owner
   return next;
 }
 
-/** A trial we never display (withdrawn / never-enrolled). Checked before the
- *  active test below so "no longer available" doesn't count as "available".
- *  The institutional `overallCurrentStatus` vocabulary (OPEN/CLOSED TO ACCRUAL,
- *  IRB STUDY CLOSURE, SUSPENDED) has no withdrawn state, so this only matches the
- *  ClinicalTrials.gov terms — kept for any future CTgov-sourced status.
+/** A trial we never display on the public profile: withdrawn / never-enrolled
+ *  (ClinicalTrials.gov terms), or institutionally SUSPENDED — usually a
+ *  temporary regulatory, safety or sponsor hold that a public "Suspended" label
+ *  would misrepresent; if it reopens, OnCore flips it to OPEN TO ACCRUAL and it
+ *  reappears. Admin reports still list it. Checked before the active test below
+ *  so "no longer available" doesn't count as "available".
  *  @internal exported for tests. */
-export function isWithdrawnTrialStatus(status: string | null): boolean {
+export function isHiddenTrialStatus(status: string | null): boolean {
   const s = (status ?? "").toLowerCase();
-  return s.includes("withdrawn") || s.includes("no longer available");
+  return s.includes("withdrawn") || s.includes("no longer available") || s.trim() === "suspended";
 }
 
 /** Coarse Active vs Completed split for the trial section, from the raw status.
@@ -1958,7 +1959,7 @@ export const getScholarFullProfileBySlug = cache(
         // addition to the CLINICAL_TRIALS_SECTION dark-launch gate).
         process.env.CLINICAL_TRIALS_SECTION === "on" && !hiddenSections.has("hideClinicalTrials")
           ? scholar.clinicalTrials
-              .filter((ct) => !isWithdrawnTrialStatus(ct.trial.status))
+              .filter((ct) => !isHiddenTrialStatus(ct.trial.status))
               .map((ct) => ({
                 protocolNumber: ct.trial.protocolNumber,
                 nctNumber: ct.trial.nctNumber,

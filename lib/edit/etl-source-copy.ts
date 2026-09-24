@@ -225,7 +225,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   ClinicalTrials: {
     label: "Clinical Trials",
-    description: "Adds the clinical trials each scholar leads or takes part in.",
+    description: "Adds the clinical trials each scholar leads as principal investigator.",
     origin: "external", // sibling ReCiterDB
   },
   DataSharing: {
