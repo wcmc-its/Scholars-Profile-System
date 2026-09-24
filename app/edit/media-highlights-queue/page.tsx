@@ -33,7 +33,7 @@ import { isMediaHighlightsQueueEnabled, loadNewsQueue, loadNewsQueueCounts } fro
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Media highlights approval — Scholars Console",
+  title: "Media highlights — Scholars Console",
   robots: { index: false, follow: false },
 };
 
@@ -72,7 +72,7 @@ export default async function MediaHighlightsQueuePage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-        <h1 className="mb-1 text-xl font-bold">Media highlights approval</h1>
+        <h1 className="mb-1 text-xl font-bold">Media highlights</h1>
         <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
           {pendingCount === 0
             ? "Press clips from the External Affairs \u201cWCM in the News\u201d digest awaiting confirmation. Nothing here shows on a profile until it is approved."
