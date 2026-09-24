@@ -53,7 +53,7 @@ type ScholarRow = {
   deletedAt?: Date | null;
 };
 /** A center membership the scholar holds, with its dated window. */
-type CenterMemRow = { centerCode: string; startDate: Date | null; endDate: Date | null };
+type CenterMemRow = { centerCode: string; startDate: Date | null; endDate: Date | null; membershipRoleKey?: string | null };
 
 /** A `UnitScholarLookup` mock whose reads honor their `where` clauses (so the
  *  predicate's query logic — not the mock — is what each test exercises). */
@@ -101,7 +101,9 @@ function lookup(opts: {
       ),
     },
     centerMembership: {
-      findMany: vi.fn(async ({ where }) => centerMemberships[where.cwid] ?? []),
+      findMany: vi.fn(async ({ where }) =>
+        (centerMemberships[where.cwid] ?? []).map((r) => ({ membershipRoleKey: null, ...r })),
+      ),
     },
     unitAdmin: {
       findMany: vi.fn(async ({ where }) =>
@@ -311,6 +313,16 @@ describe("canEditScholarViaUnit — center membership when flag ON (#1104)", () 
     expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(true);
   });
 
+  it("an INVITED membership confers nothing — invitees are not members yet", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [{ ...OPEN, membershipRoleKey: "invited" }] },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
+  });
+
   it("denies a center admin when the scholar is NOT a member of that center", async () => {
     withCenterProxyFlag(true);
     const db = lookup({
@@ -508,7 +520,9 @@ function inverseLookup(opts: {
       ),
     },
     centerMembership: {
-      findMany: vi.fn(async ({ where }) => centerMemberships[where.cwid] ?? []),
+      findMany: vi.fn(async ({ where }) =>
+        (centerMemberships[where.cwid] ?? []).map((r) => ({ membershipRoleKey: null, ...r })),
+      ),
     },
     center: {
       findMany: vi.fn(async ({ where }) =>

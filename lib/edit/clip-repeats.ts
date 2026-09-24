@@ -1,5 +1,5 @@
 /**
- * Repeat detection for Media Highlights clips (etl/news/clips.ts). The same
+ * Repeat detection for Media highlights clips (etl/news/clips.ts). The same
  * story reaches the digest more than once: a second day's digest, a syndicated
  * copy, a broadcast re-airing. The exact (cwid, url) repeat is already a no-op
  * (`@@unique([cwid, url])` + the upsert), so this covers what reaches us under

@@ -87,9 +87,9 @@ function fromPrisma(qs: string): Normalized {
 function prismaDateOps(): string[] {
   const d = (s: string) => new Date(`${s}T00:00:00Z`);
   const [yesterday, tomorrow] = ["2026-09-21", "2026-09-23"];
-  expect(isCurrentCenterMembership(null, null, TODAY)).toBe(true);
-  const start = isCurrentCenterMembership(d(TODAY), null, TODAY) && !isCurrentCenterMembership(d(tomorrow), null, TODAY);
-  const end = isCurrentCenterMembership(null, d(TODAY), TODAY) && !isCurrentCenterMembership(null, d(yesterday), TODAY);
+  expect(isCurrentCenterMembership({ startDate: null, endDate: null, membershipRoleKey: null }, TODAY)).toBe(true);
+  const start = isCurrentCenterMembership({ startDate: d(TODAY), endDate: null, membershipRoleKey: null }, TODAY) && !isCurrentCenterMembership({ startDate: d(tomorrow), endDate: null, membershipRoleKey: null }, TODAY);
+  const end = isCurrentCenterMembership({ startDate: null, endDate: d(TODAY), membershipRoleKey: null }, TODAY) && !isCurrentCenterMembership({ startDate: null, endDate: d(yesterday), membershipRoleKey: null }, TODAY);
   return [start ? "start_date <=" : "start_date ?", end ? "end_date >=" : "end_date ?"];
 }
 
@@ -149,8 +149,12 @@ describe("person filter — SQL and Prisma builders agree", () => {
 
   it("the center date rule: the SQL fragment and the in-app predicate are the same inequalities", () => {
     const text = currentCenterMembershipSql("cm", TODAY).sql.replace(/\s+/g, " ");
-    expect(text).toBe("(cm.start_date IS NULL OR cm.start_date <= ?) AND (cm.end_date IS NULL OR cm.end_date >= ?)");
+    expect(text).toBe(
+      "(cm.start_date IS NULL OR cm.start_date <= ?) AND (cm.end_date IS NULL OR cm.end_date >= ?) AND (cm.membership_role_key IS NULL OR cm.membership_role_key <> 'invited')",
+    );
     expect(prismaDateOps()).toEqual(["start_date <=", "end_date >="]);
+    // …and both exclude an invited row, whatever its dates.
+    expect(isCurrentCenterMembership({ startDate: null, endDate: null, membershipRoleKey: "invited" }, TODAY)).toBe(false);
   });
 
   // ONE rule, every consumer: `unit` given but none decode → match NOTHING

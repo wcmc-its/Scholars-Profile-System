@@ -1,7 +1,7 @@
 /**
  * Hero search "Try:" suggestion pool.
  *
- * 162 curated lay-term research topics ("CAR-T cell therapy", "Long COVID",
+ * 157 curated lay-term research topics ("CAR-T cell therapy", "Frailty",
  * "Antibody-drug conjugates", …) that replace the old generic department- and
  * topic-name chips. Each one is the *lay term* a visitor would actually type;
  * the MeSH-aware search resolves it to a differently-named descriptor (CAR-T →
@@ -48,7 +48,6 @@ export const HERO_SEARCH_SUGGESTIONS: readonly string[] = [
   "Epigenetics",
   "Ferroptosis",
   "Myelodysplastic syndromes",
-  "Spatial transcriptomics",
   "Single-cell sequencing",
   "CRISPR",
   "Gene editing",
@@ -72,9 +71,7 @@ export const HERO_SEARCH_SUGGESTIONS: readonly string[] = [
   "Amyloid-beta",
   "Neuroinflammation",
   "Alpha-synuclein",
-  "Senolytics",
   "Deep brain stimulation",
-  "Long COVID",
   "HIV pre-exposure prophylaxis (PrEP)",
   "In vitro fertilization",
   "Preimplantation genetic testing",
@@ -105,10 +102,8 @@ export const HERO_SEARCH_SUGGESTIONS: readonly string[] = [
   "Wearable devices & sensors",
   "Triple-negative breast cancer",
   "CDK4/6 inhibitors",
-  "Cardio-oncology",
   "Atrial fibrillation ablation",
   "Autophagy",
-  "Epitranscriptomics",
   "Atopic dermatitis (dupilumab)",
   "Melanoma",
   "Induced pluripotent stem cells",
@@ -190,7 +185,7 @@ export const HERO_SEARCH_SUGGESTIONS: readonly string[] = [
   "Graft-versus-host disease",
   "Kidney stones",
   "Bladder cancer",
-  "Polycystic ovary syndrome (PCOS)",
+  "Polycystic ovary syndrome",
   "Menopause",
   "Implementation science",
 ];
@@ -199,7 +194,7 @@ export const HERO_SEARCH_SUGGESTIONS: readonly string[] = [
  * Pick `n` distinct random entries from the suggestion pool.
  *
  * Draws uniformly from the *whole* curated pool so a single page load can show
- * a broad range — short punchy terms ("Sepsis", "Melanoma", "Long COVID") next
+ * a broad range — short punchy terms ("Sepsis", "Melanoma", "Frailty") next
  * to longer descriptive ones ("Antibody-drug conjugates"). The earlier
  * 12–22-character "balanced length" band (issue #214) was dropped because it
  * suppressed ~60% of the curated terms — exactly the recognizable showcase

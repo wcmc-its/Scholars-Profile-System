@@ -1,4 +1,4 @@
-/** Media Highlights repeat detection (`lib/edit/clip-repeats.ts`) and the clip
+/** Media highlights repeat detection (`lib/edit/clip-repeats.ts`) and the clip
  *  link normalization in `unwrapLink`. */
 import { describe, expect, it, vi } from "vitest";
 

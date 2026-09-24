@@ -249,7 +249,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     origin: "external", // Research Dean digest, via SES to S3, then ReciterAI
   },
   NewsClips: {
-    label: "Media Highlights",
+    label: "Media highlights",
     description: "Queues press clips from the daily \"WCM in the News\" email for comms review.",
     origin: "external", // External Affairs digest, via SES to S3
   },

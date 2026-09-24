@@ -60,7 +60,7 @@ type MentionUpsert = {
    *  UI (#2578 follow-up). Null for VIVO and for a NAME match with no prose
    *  position (TAG/CAPTION) — see DetectedMention.contextSnippet. */
   contextSnippet: string | null;
-  /** Press outlet for a Media Highlights clip (etl/news/clips.ts); null for a newsroom story. */
+  /** Press outlet for a Media highlights clip (etl/news/clips.ts); null for a newsroom story. */
   outlet: string | null;
 };
 
@@ -374,7 +374,7 @@ export async function assertNoLegacyOriginRows(
   // false all-clear and let the run proceed against un-migrated rows.
   countLegacy: () => Promise<number> = () =>
     db.write.newsMention.count({
-      // Media Highlights clips (outlet set) link off-site by design — not legacy.
+      // Media highlights clips (outlet set) link off-site by design — not legacy.
       where: { outlet: null, NOT: { url: { startsWith: NEWS_ORIGIN + NEWS_PATH_PREFIX } } },
     }),
 ): Promise<void> {

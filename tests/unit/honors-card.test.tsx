@@ -1,5 +1,5 @@
 /**
- * #1760 — the `HonorsCard` curation editor on its own Honors & Distinctions tab. Mirrors
+ * #1760 — the `HonorsCard` curation editor on its own Honors & distinctions tab. Mirrors
  * `profile-appointments-card.test.tsx`: the fetch-on-mount list render (with the
  * Hidden marker and the non-`published` status marker the curator view depends
  * on), the add flow (POST create + optimistic append), and the remove flow (POST

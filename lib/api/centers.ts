@@ -89,10 +89,10 @@ export const loadActiveCenterMemberCwids = cache(async (
   const today = todayIso();
   const rows = (await prisma.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, startDate: true, endDate: true },
-  })) as Array<{ cwid: string; startDate: Date | null; endDate: Date | null }>;
+    select: { cwid: true, startDate: true, endDate: true, membershipRoleKey: true },
+  })) as Array<{ cwid: string; startDate: Date | null; endDate: Date | null; membershipRoleKey: string | null }>;
   const activeCwids = rows
-    .filter((r) => isCenterMembershipActive(r.startDate, r.endDate, today))
+    .filter((r) => isCenterMembershipActive(r, today))
     .map((r) => r.cwid);
   if (activeCwids.length === 0) return [];
   const scholars = await prisma.scholar.findMany({
@@ -150,6 +150,7 @@ export async function getScholarCenterAffiliations(
     select: {
       centerCode: true,
       membershipType: true,
+      membershipRoleKey: true,
       startDate: true,
       endDate: true,
       center: {
@@ -168,6 +169,7 @@ export async function getScholarCenterAffiliations(
     membershipType: CenterMembershipType | null;
     startDate: Date | null;
     endDate: Date | null;
+    membershipRoleKey: string | null;
     center: {
       code: string;
       slug: string;
@@ -183,7 +185,7 @@ export async function getScholarCenterAffiliations(
   const active = memberships.filter(
     (m) =>
       m.center !== null &&
-      isCenterMembershipActive(m.startDate, m.endDate, today),
+      isCenterMembershipActive(m, today),
   );
   if (active.length === 0) return [];
 
@@ -485,12 +487,11 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
     const externalSources = enabledExternalMemberSources();
     const rows = await prisma.centerMembership.findMany({
       where: { centerCode: center.code },
-      select: { source: true, startDate: true, endDate: true },
+      select: { source: true, startDate: true, endDate: true, membershipRoleKey: true },
     });
     const today = todayIso();
     return rows.filter(
-      (r) =>
-        externalSources.includes(r.source) && isCenterMembershipActive(r.startDate, r.endDate, today),
+      (r) => externalSources.includes(r.source) && isCenterMembershipActive(r, today),
     ).length;
   })();
   const scholarCount =
@@ -659,7 +660,7 @@ async function getCenterMembersUncached(
     source: string;
   }>;
   const activeMemberships = memberships.filter((m) =>
-    isCenterMembershipActive(m.startDate, m.endDate, today),
+    isCenterMembershipActive(m, today),
   );
   const activeCwids = activeMemberships.map((m) => m.cwid);
   if (activeCwids.length === 0) return emptyFlat;
@@ -981,7 +982,7 @@ export async function getCenterMembersByType(
     source: string;
   }>;
   const activeMemberships = memberships.filter((m) =>
-    isCenterMembershipActive(m.startDate, m.endDate, today),
+    isCenterMembershipActive(m, today),
   );
   const activeCwids = activeMemberships.map((m) => m.cwid);
   if (activeCwids.length === 0) return empty;

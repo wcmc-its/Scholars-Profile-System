@@ -248,7 +248,7 @@ function Candidate({ row, decidedNote }: { row: NewsQueueRow; decidedNote?: stri
         {[row.title, row.department, row.roleLabel].filter(Boolean).join(" · ") || "—"}
         {decidedNote ? ` · ${decidedNote}` : ""}
       </p>
-      {/* Media Highlights: a probable repeat of another clip for this scholar
+      {/* Media highlights: a probable repeat of another clip for this scholar
           (syndicated copy, re-airing). Advisory — the reviewer decides. */}
       {row.possibleRepeatOf ? (
         <p
@@ -575,7 +575,7 @@ export function NewsQueue({
                 </a>
                 <p className="text-muted-foreground text-xs">
                   {g.rows[0].outlet !== null
-                    ? `Media Highlights${g.rows[0].outlet ? ` · ${g.rows[0].outlet}` : ""} · `
+                    ? `Media highlights${g.rows[0].outlet ? ` · ${g.rows[0].outlet}` : ""} · `
                     : ""}
                   {formatDate(g.rows[0].publishedAt)}
                   {g.detectedName ? ` · detected name: “${g.detectedName}”` : ""}

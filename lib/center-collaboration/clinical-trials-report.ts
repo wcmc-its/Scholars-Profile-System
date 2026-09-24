@@ -71,12 +71,12 @@ export async function loadClinicalTrialsReport(
   const today = todayIso();
   const memberships = await client.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, startDate: true, endDate: true },
+    select: { cwid: true, startDate: true, endDate: true, membershipRoleKey: true },
   });
   const activeCwids = [
     ...new Set(
       memberships
-        .filter((m) => isCenterMembershipActive(m.startDate, m.endDate, today))
+        .filter((m) => isCenterMembershipActive(m, today))
         .map((m) => m.cwid),
     ),
   ];

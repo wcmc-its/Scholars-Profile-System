@@ -281,7 +281,7 @@ export type EditContextNews = {
   showOnProfile: boolean;
   /** How it was attached: VIVO (article link) | NAME (queue-confirmed) | CURATOR. */
   source: string;
-  /** Press outlet for a Media Highlights clip (etl/news/clips.ts); null for a
+  /** Press outlet for a Media highlights clip (etl/news/clips.ts); null for a
    *  newsroom article. */
   outlet: string | null;
 };
@@ -684,7 +684,7 @@ export type EditContext = {
    */
   news: ReadonlyArray<EditContextNews>;
   /**
-   * The scholar's PUBLISHED Media Highlights clips (`outlet` set) for the /edit
+   * The scholar's PUBLISHED Media highlights clips (`outlet` set) for the /edit
    * "Media highlights" card — the profile's split, so a clip never shows under
    * News mentions. Empty unless `MEDIA_HIGHLIGHTS_SECTION` is on.
    */
@@ -1218,7 +1218,7 @@ export async function loadEditContext(
         }))
       : [];
 
-  // News mentions + Media Highlights — the two interactive /edit cards. Loaded
+  // News mentions + Media highlights — the two interactive /edit cards. Loaded
   // for every caller (public info like publications/technologies). PUBLISHED
   // rows only (pending rows live in the review queues, never on the profile);
   // hidden ones included so the scholar can un-hide. One read, split on

@@ -58,9 +58,9 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
   // `CenterCollabCandidate`).
   const memberships = await db.write.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, programCode: true, membershipType: true, startDate: true, endDate: true },
+    select: { cwid: true, programCode: true, membershipType: true, startDate: true, endDate: true, membershipRoleKey: true },
   });
-  const active = memberships.filter((m) => isCenterMembershipActive(m.startDate, m.endDate, today));
+  const active = memberships.filter((m) => isCenterMembershipActive(m, today));
   const anyActiveMemberCwids = new Set(active.map((m) => m.cwid));
   const researchMembers = active.filter(
     (m) => m.membershipType === "research" && fullTimeFacultyCwids.has(m.cwid),

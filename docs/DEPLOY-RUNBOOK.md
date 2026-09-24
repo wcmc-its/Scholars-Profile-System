@@ -151,7 +151,7 @@ aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/about" 
 
 This is the **only** invalidation the design needs — after it, the 60 s clamp + the S3 origin self-heal, and no deploy-time invalidation is ever required again.
 
-## Media Highlights inbound mail (Sps-InboundMail) — MANUAL, one time
+## Media highlights inbound mail (Sps-InboundMail) — MANUAL, one time
 
 `Sps-InboundMail` (`cdk/lib/inbound-mail-stack.ts`) receives the External Affairs "WCM in the News" digest at `clips@scholars-mail.weill.cornell.edu` and stores each message in S3 for the nightly `ClipsNightly` step (`etl/news/clips.ts`). It is an account-wide singleton: SES allows one active receipt rule set per account and region, so only the prod app declares it.
 
