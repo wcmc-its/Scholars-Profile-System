@@ -284,6 +284,8 @@ export type EditContextNews = {
   /** Press outlet for a Media highlights clip (etl/news/clips.ts); null for a
    *  newsroom article. */
   outlet: string | null;
+  /** Media highlights story grouping: the lead clip this row is a copy of. */
+  duplicateOf: string | null;
 };
 
 /**
@@ -1239,6 +1241,7 @@ export async function loadEditContext(
               showOnProfile: true,
               source: true,
               outlet: true,
+              duplicateOf: true,
             },
             orderBy: [{ publishedAt: "desc" }],
           })
@@ -1250,6 +1253,7 @@ export async function loadEditContext(
           showOnProfile: n.showOnProfile,
           source: n.source,
           outlet: n.outlet,
+          duplicateOf: n.duplicateOf,
         }))
       : [];
   const news = newsOn ? mentions.filter((n) => n.outlet === null) : [];

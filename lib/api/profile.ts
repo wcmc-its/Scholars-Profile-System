@@ -6,6 +6,7 @@
  * profile page server component imports this directly for ISR; the equivalent
  * external API endpoint would call the same function.
  */
+import { alsoIn, type AlsoInLink } from "@/lib/edit/clip-repeats";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import {
@@ -778,7 +779,13 @@ export type ProfilePayload = {
    *  digest (etl/news/clips.ts): news_mention rows with `outlet` set, published
    *  only after comms review. Same row shape as `news` plus the outlet. Dark
    *  unless MEDIA_HIGHLIGHTS_SECTION is on; `news` never carries these rows. */
-  mediaHighlights: Array<ProfilePayload["news"][number] & { outlet: string }>;
+  mediaHighlights: Array<
+    ProfilePayload["news"][number] & {
+      outlet: string;
+      /** The story's other visible copies ("Also in …"), capped (`alsoIn`). */
+      alsoIn: { shown: AlsoInLink[]; more: number };
+    }
+  >;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
@@ -847,8 +854,31 @@ export type ProfilePayload = {
  *  reviewers in /edit/media-highlights-queue; it is never published. */
 export function toClipRow(
   n: Parameters<typeof toNewsRow>[0] & { outlet: string },
-): ProfilePayload["mediaHighlights"][number] {
+): Omit<ProfilePayload["mediaHighlights"][number], "alsoIn"> {
   return { ...toNewsRow(n), excerpt: null, outlet: n.outlet };
+}
+
+/**
+ * One profile entry per clip STORY (story grouping, lib/edit/clip-repeats.ts):
+ * each lead — a visible clip with no `duplicateOf` — carrying its visible
+ * copies as "Also in …" links, first seen first. `rows` are the scholar's
+ * published, profile-visible clips. A copy whose lead is not among them is
+ * dropped: hiding the lead hides the whole story.
+ */
+export function toClipStories(
+  rows: ReadonlyArray<Parameters<typeof toNewsRow>[0] & { id: string; outlet: string; duplicateOf: string | null }>,
+): ProfilePayload["mediaHighlights"] {
+  const copiesOf = new Map<string, typeof rows[number][]>();
+  for (const r of rows) {
+    if (r.duplicateOf) copiesOf.set(r.duplicateOf, [...(copiesOf.get(r.duplicateOf) ?? []), r]);
+  }
+  const time = (d: Date | null) => (d ? d.getTime() : Number.MAX_SAFE_INTEGER);
+  return rows
+    .filter((r) => r.duplicateOf === null)
+    .map((lead) => {
+      const copies = [...(copiesOf.get(lead.id) ?? [])].sort((a, b) => time(a.publishedAt) - time(b.publishedAt));
+      return { ...toClipRow(lead), alsoIn: alsoIn(lead.outlet, copies) };
+    });
 }
 
 function toNewsRow(n: {
@@ -2030,8 +2060,8 @@ export const getScholarFullProfileBySlug = cache(
       // Clips share the table (and `hideNews`) but render in their own section.
       mediaHighlights:
         process.env.MEDIA_HIGHLIGHTS_SECTION === "on" && !hiddenSections.has("hideNews")
-          ? scholar.newsMentions.flatMap((n) =>
-              n.outlet === null ? [] : [toClipRow({ ...n, outlet: n.outlet })],
+          ? toClipStories(
+              scholar.newsMentions.flatMap((n) => (n.outlet === null ? [] : [{ ...n, outlet: n.outlet }])),
             )
           : [],
       keywords,

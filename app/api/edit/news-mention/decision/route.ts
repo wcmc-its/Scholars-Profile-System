@@ -78,6 +78,8 @@ type StoredRow = {
   detectedName: string | null;
   sourceRef: string | null;
   showOnProfile: boolean;
+  /** Set on a Media highlights clip; only a clip can have copies. */
+  outlet?: string | null;
 };
 
 function snapshot(row: StoredRow) {
@@ -174,12 +176,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Media highlights story grouping: the other copies of this story
       // (`duplicate_of` = this row) take the same decision, each audited. Only
       // undecided copies (pending; or rejected when approving) are touched.
-      const copies = (await tx.newsMention.findMany({
-        where: {
-          duplicateOf: row.id,
-          status: approving ? { in: ["pending", "rejected"] } : "pending",
-        },
-      })) as StoredRow[];
+      const copies = !row.outlet
+        ? []
+        : ((await tx.newsMention.findMany({
+            where: {
+              duplicateOf: row.id,
+              status: approving ? { in: ["pending", "rejected"] } : "pending",
+            },
+          })) as StoredRow[]);
       for (const copy of copies) {
         const after = (await tx.newsMention.update({
           where: { id: copy.id },
