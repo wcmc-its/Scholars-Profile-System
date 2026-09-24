@@ -3,23 +3,33 @@ import { buildOrganizationJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   centerHasPrograms,
   getCenter,
+  getCenterGrantsList,
   getCenterMembers,
   getCenterPrograms,
   getCenterPublicationsList,
   getCenterTopResearchAreas,
 } from "@/lib/api/centers";
 import { getSpotlightCardsForCenter } from "@/lib/api/spotlight";
+import { applyAreaPreviewCounts, getUnitAreaPreviews } from "@/lib/api/unit-area-previews";
 import { CenterMembersClient } from "@/components/center/center-members-client";
+import { parseRosterSort } from "@/lib/roster-sort";
 import { CenterCollaborationTab } from "@/components/center/center-collaboration-tab";
 import { isCenterProgramPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { isCenterCollaborationNetworkEnabled } from "@/lib/center-collaboration/flags";
 import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
+import { DeptGrantsList } from "@/components/department/dept-grants-list";
 import { Spotlight } from "@/components/shared/spotlight";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
+import {
+  UnitResearchAreas,
+  UnitStatsLine,
+  UnitSubunitChips,
+  type UnitStat,
+} from "@/components/shared/unit-hero";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
-import type { PubSort } from "@/lib/api/dept-lists";
+import type { GrantSort, PubSort } from "@/lib/api/dept-lists";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -29,24 +39,30 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-type Tab = "scholars" | "publications" | "collaboration";
+type Tab = "scholars" | "publications" | "grants" | "collaboration";
 
 export async function CenterPage({
   centerSlug,
   page,
   tab = "scholars",
   sort = null,
+  area = null,
 }: {
   centerSlug: string;
   page: number;
   tab?: Tab;
   sort?: string | null;
+  /** Research-area filter for the Publications tab (the `/areas/{topic}` route). */
+  area?: { id: string; label: string } | null;
 }) {
   const detail = await getCenter(centerSlug);
   if (!detail) notFound();
 
   const basePath = `/centers/${detail.slug}`;
   const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  const grantSort: GrantSort = sort === "end_date" ? "end_date" : "most_recent";
+  // Unit Page v2 roster toolbar — the Scholars tab's own `?sort=` values.
+  const rosterSort = parseRosterSort(sort);
   // A 2-column leadership grid only earns its keep once the stacked column
   // would push the roster far down the page (#2542 follow-up) — 1-3 leaders
   // render exactly as before.
@@ -67,6 +83,8 @@ export async function CenterPage({
     spotlightCards,
     pubsCountResult,
     pubsListMaybe,
+    grantsCountResult,
+    grantsListMaybe,
     members,
     programs,
     hasPrograms,
@@ -78,16 +96,79 @@ export async function CenterPage({
       ? getCenterPublicationsList(detail.code, {
           page: Math.max(0, page - 1),
           sort: pubSort,
+          area: area?.id ?? null,
+        })
+      : Promise.resolve(null),
+    // Grants tab: page-0 doubles as the tab count (same pattern as pubs).
+    getCenterGrantsList(detail.code, { page: 0, sort: "most_recent" }),
+    tab === "grants"
+      ? getCenterGrantsList(detail.code, {
+          page: Math.max(0, page - 1),
+          sort: grantSort,
         })
       : Promise.resolve(null),
     tab === "scholars"
-      ? getCenterMembers(detail.code, { page: Math.max(0, page - 1) })
+      ? getCenterMembers(detail.code, { page: Math.max(0, page - 1), sort: rosterSort })
       : Promise.resolve(null),
     programPagesEnabled ? getCenterPrograms(detail.code) : Promise.resolve([]),
     collaborationFlag ? centerHasPrograms(detail.code) : Promise.resolve(false),
   ]);
 
   const pubsList = pubsListMaybe ?? pubsCountResult;
+  const grantsList = grantsListMaybe ?? grantsCountResult;
+
+  // Hero research-area hover previews; the pill counts become each preview's
+  // visible total (= its "See all" and the filtered tab), re-sorted by it.
+  const areaPreviews = await getUnitAreaPreviews(
+    "center",
+    detail.code,
+    topResearchAreas.map((t) => t.topicId),
+  );
+  const researchAreas = applyAreaPreviewCounts(topResearchAreas, areaPreviews);
+
+  // Unit Page v2 — program chips carry a member count. The grouped roster
+  // (cached; the same read the Scholars tab makes) is the source of truth, so a
+  // chip's count always equals its roster section. Only loaded when the program
+  // nav renders (flag on + page-eligible programs); off the Scholars tab this is
+  // one extra cached read.
+  const rosterForCounts =
+    programs.length === 0
+      ? null
+      : members && page <= 1
+        ? members
+        : await getCenterMembers(detail.code, { page: 0 });
+  const programMemberCount = new Map<string, number>(
+    rosterForCounts?.mode === "grouped"
+      ? rosterForCounts.groups
+          .filter((g) => g.code !== null)
+          .map((g) => [g.code as string, g.members.length])
+      : [],
+  );
+
+  // Hero stats — each links into the page (Unit Page v2).
+  const stats: UnitStat[] = [
+    detail.scholarCount > 0
+      ? {
+          value: detail.scholarCount,
+          label: detail.hasExternalMembers ? "members" : "scholars",
+          href: `${basePath}#people`,
+        }
+      : null,
+    programs.length > 0
+      ? {
+          value: programs.length,
+          label: programs.length === 1 ? "program" : "programs",
+          href: "#subunits",
+        }
+      : null,
+    pubsCountResult.total > 0
+      ? {
+          value: pubsCountResult.total,
+          label: "publications",
+          href: `${basePath}?tab=publications#people`,
+        }
+      : null,
+  ].filter((s): s is UnitStat => s !== null);
   // #1137 — Collaboration tab: flag on AND the center has a program taxonomy
   // (data-driven → today only the Meyer Cancer Center).
   const showCollaboration = collaborationFlag && hasPrograms;
@@ -108,43 +189,48 @@ export async function CenterPage({
   });
 
   return (
-    <main className="mx-auto max-w-[1100px] px-6 py-12">
+    <main className="unit-surface mx-auto max-w-[1100px] px-6 pb-24 pt-12">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
-      <Breadcrumb className="mb-4">
-        <BreadcrumbList>
+      {/* Unit Page v2: Home › Departments & Centers › {name}. /browse is itself
+          titled "Departments & Centers". */}
+      <Breadcrumb>
+        <BreadcrumbList className="gap-2.5 text-[14px] sm:gap-2.5">
           <BreadcrumbItem>
             <BreadcrumbLink href="/">Home</BreadcrumbLink>
           </BreadcrumbItem>
-          <BreadcrumbSeparator>›</BreadcrumbSeparator>
-          <BreadcrumbItem>
-            <BreadcrumbLink href="/browse">Browse</BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator>›</BreadcrumbSeparator>
+          <BreadcrumbSeparator className="text-[12px]">›</BreadcrumbSeparator>
           <BreadcrumbItem>
             <BreadcrumbLink href="/browse#centers">
-              Centers &amp; institutes
+              Departments &amp; Centers
             </BreadcrumbLink>
           </BreadcrumbItem>
-          <BreadcrumbSeparator>›</BreadcrumbSeparator>
+          <BreadcrumbSeparator className="text-[12px]">›</BreadcrumbSeparator>
           <BreadcrumbItem>
             <BreadcrumbPage>{detail.name}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
-      <section className="rounded-lg border border-border bg-background px-7 py-[26px]">
-        <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.13em] text-[var(--color-primary-cornell-red)]">
-          Center
+      <section className="mt-4 rounded-[10px] border border-apollo-border bg-background px-7 pb-[26px] pt-7">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+          <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--color-primary-cornell-red)]">
+            Center
+          </span>
+          <UnitWebsiteLink
+            url={detail.url}
+            unitName={detail.name}
+            variant="text"
+            label="Center website"
+          />
         </div>
-        <h1 className="page-title mb-[18px] text-[40px] font-medium leading-none tracking-[-0.01em]">
+        <h1 className="page-title mt-2 text-balance text-[40px] font-normal leading-[1.15]">
           {detail.name}
-          <UnitWebsiteLink url={detail.url} unitName={detail.name} />
         </h1>
         {detail.description && (
-          <p className="mb-[22px] max-w-prose text-[15px] leading-[1.65] text-muted-foreground">
+          <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
             {detail.description}
           </p>
         )}
@@ -154,11 +240,10 @@ export async function CenterPage({
             vocabulary order. The noun comes from `leader.roleLabel`; the
             "Interim" modifier from `leader.isInterim` — nothing is hardcoded
             to "Director". A 2-column grid only kicks in at 4+ leaders — with
-            1-3 the cards render exactly as before (stacked, each keeping its
-            own default mt-6/max-w-[460px]), so byte-identical output for
-            every center with a small leadership group. */}
+            1-3 the cards render stacked, each keeping its own default
+            top margin / max-w-[460px]. */}
         {twoColumnLeadership ? (
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <div className="mt-[22px] grid gap-3 sm:grid-cols-2">
             {detail.leadership.map((leader) => (
               <LeaderCard
                 key={`${leader.cwid}-${leader.roleLabel}`}
@@ -180,128 +265,104 @@ export async function CenterPage({
           ))
         )}
 
-        {topResearchAreas.length > 0 && (
-          <div className="mt-6">
-            <div className="mb-[11px] inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-              Top research areas
-              <SectionInfoButton label="Top research areas" anchor="topResearchAreas">
-                Research areas are aggregated from ReCiterAI publication scores
-                for this center&apos;s members. The order reflects recent
-                publication activity, not editorial judgment.
-              </SectionInfoButton>
-            </div>
-            <div className="flex flex-wrap gap-[7px]">
-              {topResearchAreas.map((t) => (
-                <a
-                  key={t.topicId}
-                  href={`/topics/${t.topicSlug}`}
-                  className="inline-flex items-center gap-[7px] rounded-full border border-border bg-background px-3 py-[5px] text-[13px] text-foreground hover:bg-accent"
-                  style={{ textDecoration: "none" }}
-                >
-                  {t.topicLabel}
-                  <span className="text-[12px] text-[var(--color-text-tertiary)]">
-                    {t.pubCount.toLocaleString()}
-                  </span>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* #1105 — program chips only when the flag is on (links never point at
+            a 404). Unit Page v2 moves them into the hero, above research areas. */}
+        <UnitSubunitChips
+          noun={["program", "programs"]}
+          ariaLabel="Programs"
+          chips={programs.map((p) => ({
+            key: p.code,
+            label: p.label,
+            href: `/centers/${detail.slug}/programs/${p.code}`,
+            count: programMemberCount.get(p.code) ?? null,
+          }))}
+        />
 
-        <div className="mt-[22px] flex flex-wrap gap-[9px] border-t border-dashed border-border pt-4 text-[14px] text-muted-foreground">
-          {(
-            [
-              detail.scholarCount > 0
-                ? {
-                    value: detail.scholarCount,
-                    label: detail.hasExternalMembers ? "members" : "scholars",
-                  }
-                : null,
-              pubsCountResult.total > 0
-                ? { value: pubsCountResult.total, label: "publications" }
-                : null,
-            ].filter(Boolean) as Array<{ value: number; label: string }>
-          ).map((s, i, all) => (
-            <span key={s.label}>
-              <b className="font-medium text-foreground">
-                {s.value.toLocaleString()}
-              </b>{" "}
-              {s.label}
-              {i < all.length - 1 && (
-                <span className="ml-[9px] text-[var(--color-text-tertiary)]">
-                  ·
-                </span>
-              )}
-            </span>
-          ))}
-          {detail.scholarCount === 0 && pubsCountResult.total === 0 && (
-            <span>Membership data pending</span>
+        <UnitResearchAreas
+          areas={researchAreas}
+          previews={areaPreviews}
+          basePath={basePath}
+          unitShort={detail.name}
+          membersNoun="members"
+          infoButton={
+            <SectionInfoButton label="Top research areas" anchor="topResearchAreas">
+              Research areas are aggregated from ReCiterAI publication scores
+              for this center&apos;s members. The order reflects recent
+              publication activity, not editorial judgment.
+            </SectionInfoButton>
+          }
+        />
+
+        <UnitStatsLine
+          stats={stats}
+          fallback={
+            detail.scholarCount === 0 && pubsCountResult.total === 0 ? (
+              <span>Membership data pending</span>
+            ) : null
+          }
+        />
+      </section>
+
+      <Spotlight data={spotlightData} variant="unit" />
+
+      {/* #people is the Unit Page v2 anchor (hero stats); #tab-content stays for
+          the existing tab / Spotlight / deep links. scroll-mt clears the
+          sticky site header. */}
+      <section id="people" className="mt-14 scroll-mt-16">
+        <div id="tab-content" className="scroll-mt-16">
+          <CenterTabs
+            active={tab}
+            basePath={basePath}
+            scholarsCount={detail.scholarCount}
+            publicationsCount={pubsCountResult.total}
+            grantsCount={grantsCountResult.total}
+            showCollaboration={showCollaboration}
+            scholarsLabel={detail.hasExternalMembers ? "Members" : "Scholars"}
+          />
+
+          {tab === "scholars" && members && (
+            <CenterMembersClient
+              result={members}
+              centerSlug={detail.slug}
+              centerCode={detail.code}
+              programPagesEnabled={programPagesEnabled}
+              initialSort={rosterSort}
+            />
+          )}
+
+          {tab === "publications" && (
+            <DeptPublicationsList
+              hits={pubsList.hits}
+              total={pubsList.total}
+              page={pubsList.page + 1}
+              pageSize={pubsList.pageSize}
+              sort={pubSort}
+              basePath={basePath}
+              listBasePath={area ? `${basePath}/areas/${encodeURIComponent(area.id)}` : undefined}
+              activeArea={
+                area
+                  ? { label: area.label, clearHref: `${basePath}?tab=publications#people` }
+                  : null
+              }
+            />
+          )}
+
+          {tab === "grants" && (
+            <DeptGrantsList
+              hits={grantsList.hits}
+              total={grantsList.total}
+              page={grantsList.page + 1}
+              pageSize={grantsList.pageSize}
+              sort={grantSort}
+              basePath={basePath}
+            />
+          )}
+
+          {tab === "collaboration" && showCollaboration && (
+            <CenterCollaborationTab centerSlug={detail.slug} centerName={detail.name} />
           )}
         </div>
       </section>
-
-      {programs.length > 0 && (
-        <nav className="mt-8" aria-label="Programs">
-          <div className="mb-[11px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Programs
-          </div>
-          <div className="flex flex-wrap gap-[7px]">
-            {programs.map((p) => (
-              <a
-                key={p.code}
-                href={`/centers/${detail.slug}/programs/${p.code}`}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-[5px] text-[13px] text-foreground hover:bg-accent"
-                style={{ textDecoration: "none" }}
-              >
-                {p.label}
-                <span
-                  aria-hidden
-                  className="text-[12px] text-[var(--color-text-tertiary)]"
-                >
-                  →
-                </span>
-              </a>
-            ))}
-          </div>
-        </nav>
-      )}
-
-      <Spotlight data={spotlightData} />
-
-      <div id="tab-content" className="mt-12 scroll-mt-16">
-        <CenterTabs
-          active={tab}
-          basePath={basePath}
-          scholarsCount={detail.scholarCount}
-          publicationsCount={pubsCountResult.total}
-          showCollaboration={showCollaboration}
-          scholarsLabel={detail.hasExternalMembers ? "Members" : "Scholars"}
-        />
-
-        {tab === "scholars" && members && (
-          <CenterMembersClient
-            result={members}
-            centerSlug={detail.slug}
-            centerCode={detail.code}
-            programPagesEnabled={programPagesEnabled}
-          />
-        )}
-
-        {tab === "publications" && (
-          <DeptPublicationsList
-            hits={pubsList.hits}
-            total={pubsList.total}
-            page={pubsList.page + 1}
-            pageSize={pubsList.pageSize}
-            sort={pubSort}
-            basePath={basePath}
-          />
-        )}
-
-        {tab === "collaboration" && showCollaboration && (
-          <CenterCollaborationTab centerSlug={detail.slug} />
-        )}
-      </div>
     </main>
   );
 }

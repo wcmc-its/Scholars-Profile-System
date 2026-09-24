@@ -65,8 +65,14 @@ export function RoleChipRow({
     return byGroup;
   }, [faculty, roleCategoryCounts, totalCount]);
 
+  // Unit Page v2 — "APPOINTMENT" label + 28px pills. Active: slate fill, white
+  // text, count at 0.85 opacity. Inactive: strong-border white pill, muted
+  // count, surface-2 hover. `aria-pressed` carries the toggle state.
   return (
-    <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:overflow-x-auto">
+    <div role="group" aria-label="Appointment" className="flex flex-wrap items-center gap-2">
+      <span className="mr-0.5 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+        Appointment
+      </span>
       {ROLE_GROUPS.map((g) => {
         const count = counts.get(g.label) ?? 0;
         // Omit chips with 0 count except "All" which is always shown.
@@ -76,17 +82,16 @@ export function RoleChipRow({
           <button
             key={g.label}
             type="button"
+            aria-pressed={isActive}
             onClick={() => onChange(g.label)}
-            className={`rounded-full border px-3 py-1 text-sm ${
+            className={`inline-flex h-7 items-center gap-[7px] whitespace-nowrap rounded-full border px-3 text-[13.5px] leading-none transition-colors duration-[120ms] ease-out ${
               isActive
-                ? "border-transparent bg-[var(--color-accent-slate)] text-white"
-                : "border-border bg-white text-foreground hover:bg-accent"
+                ? "border-apollo-slate bg-apollo-slate text-white"
+                : "border-apollo-border-strong bg-white text-foreground hover:bg-apollo-surface-2"
             }`}
           >
             <span>{g.label}</span>
-            <span
-              className={`ml-2 ${isActive ? "text-white" : "text-muted-foreground"}`}
-            >
+            <span className={isActive ? "opacity-85" : "text-muted-foreground"}>
               {count.toLocaleString()}
             </span>
           </button>

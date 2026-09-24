@@ -14,9 +14,12 @@ import {
   getDivisionGrantsList,
 } from "@/lib/api/divisions";
 import { getSpotlightCardsForDivision } from "@/lib/api/spotlight";
+import { applyAreaPreviewCounts, getUnitAreaPreviews } from "@/lib/api/unit-area-previews";
+import { AreaPreviewPill } from "@/components/shared/area-preview-pill";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
+import { parseRosterSort } from "@/lib/roster-sort";
 import { Spotlight } from "@/components/shared/spotlight";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
 import { DeptTabs } from "@/components/department/dept-tabs";
@@ -40,12 +43,15 @@ export async function DivisionPage({
   page,
   tab = "scholars",
   sort = null,
+  area = null,
 }: {
   deptSlug: string;
   divSlug: string;
   page: number;
   tab?: Tab;
   sort?: string | null;
+  /** Research-area filter for the Publications tab (the `/areas/{topic}` route). */
+  area?: { id: string; label: string } | null;
 }) {
   const detail = await getDivision(deptSlug, divSlug);
   if (!detail) notFound();
@@ -56,13 +62,25 @@ export async function DivisionPage({
   const pageIdx = Math.max(0, page - 1);
   const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
   const grantSort = (sort === "end_date" ? "end_date" : "most_recent") as GrantSort;
-  const [spotlightCards, faculty, pubsList, grantsList] = await Promise.all([
+  // Unit Page v2 roster toolbar — the Scholars tab's own `?sort=` values.
+  const rosterSort = parseRosterSort(sort);
+  const [spotlightCards, areaPreviews, faculty, pubsList, grantsList] = await Promise.all([
     getSpotlightCardsForDivision(detail.parentDept.code, detail.division.code),
+    // Hero research-area hover previews (cached per division + area list).
+    getUnitAreaPreviews(
+      "division",
+      detail.division.code,
+      detail.topResearchAreas.map((t) => t.topicId),
+    ),
     tab === "scholars"
-      ? getDivisionFaculty(detail.division.code, { page: pageIdx })
+      ? getDivisionFaculty(detail.division.code, { page: pageIdx, sort: rosterSort })
       : Promise.resolve(null),
     tab === "publications"
-      ? getDivisionPublicationsList(detail.division.code, { page: pageIdx, sort: pubSort })
+      ? getDivisionPublicationsList(detail.division.code, {
+          page: pageIdx,
+          sort: pubSort,
+          area: area?.id ?? null,
+        })
       : Promise.resolve(null),
     tab === "grants"
       ? getDivisionGrantsList(detail.division.code, { page: pageIdx, sort: grantSort })
@@ -77,9 +95,12 @@ export async function DivisionPage({
     : null;
 
   const parentShortName = detail.parentDept.name.replace(/^Department of /, "");
+  // Pill counts = the preview's visible total (= its "See all" and the
+  // filtered tab), re-sorted by it.
+  const researchAreas = applyAreaPreviewCounts(detail.topResearchAreas, areaPreviews);
 
   return (
-    <main className="mx-auto max-w-[1100px] px-6 py-12">
+    <main className="unit-surface mx-auto max-w-[1100px] px-6 py-12">
       <Breadcrumb className="mb-4">
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -134,7 +155,7 @@ export async function DivisionPage({
           />
         )}
 
-        {detail.topResearchAreas.length > 0 && (
+        {researchAreas.length > 0 && (
           <div className="mt-6">
             <div className="mb-[11px] inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Top research areas in this division
@@ -145,18 +166,18 @@ export async function DivisionPage({
               </SectionInfoButton>
             </div>
             <div className="flex flex-wrap gap-[7px]">
-              {detail.topResearchAreas.map((t) => (
-                <a
+              {researchAreas.map((t) => (
+                <AreaPreviewPill
                   key={t.topicId}
-                  href={`/topics/${t.topicSlug}`}
-                  className="inline-flex items-center gap-[7px] rounded-full border border-border bg-background px-3 py-[5px] text-[13px] text-foreground hover:bg-accent"
-                  style={{ textDecoration: "none" }}
-                >
-                  {t.topicLabel}
-                  <span className="text-[12px] text-[var(--color-text-tertiary)]">
-                    {t.pubCount.toLocaleString()}
-                  </span>
-                </a>
+                  area={t}
+                  preview={areaPreviews[t.topicId]}
+                  basePath={basePath}
+                  unitShort={detail.division.name}
+                  membersNoun="faculty"
+                  anchor="tab-content"
+                  className="inline-flex items-center gap-[7px] rounded-full border border-border bg-background px-3 py-[5px] text-[13px] text-foreground no-underline hover:bg-apollo-surface-2 hover:no-underline"
+                  countClassName="text-[12px] text-[var(--color-text-tertiary)]"
+                />
               ))}
             </div>
           </div>
@@ -174,7 +195,7 @@ export async function DivisionPage({
                   return (
                     <span
                       key={s.code}
-                      className="rounded-full border border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] px-3 py-[3px] text-[12px] font-medium text-white"
+                      className="rounded-full border border-apollo-slate bg-apollo-slate px-3 py-[3px] text-[12px] font-medium text-white"
                     >
                       {s.name}
                     </span>
@@ -184,7 +205,7 @@ export async function DivisionPage({
                   <a
                     key={s.code}
                     href={`/departments/${detail.parentDept.slug}/divisions/${s.slug}`}
-                    className="rounded-full border border-[var(--color-accent-slate)] bg-white px-3 py-[3px] text-[12px] text-[var(--color-accent-slate)] hover:bg-[var(--color-accent-slate)] hover:text-white"
+                    className="rounded-full border border-apollo-slate bg-white px-3 py-[3px] text-[12px] text-apollo-slate hover:bg-apollo-slate hover:text-white"
                     style={{ textDecoration: "none" }}
                   >
                     {s.name}
@@ -224,7 +245,7 @@ export async function DivisionPage({
         </div>
       </section>
 
-      <Spotlight data={spotlightData} />
+      <Spotlight data={spotlightData} variant="unit" />
 
       <div id="tab-content" className="mt-12 scroll-mt-16">
         <DeptTabs
@@ -247,6 +268,7 @@ export async function DivisionPage({
             methodFacet={faculty.methodFacet}
             unitKind="division"
             unitCode={detail.division.code}
+            initialSort={rosterSort}
           />
         )}
         {tab === "publications" && pubsList && (
@@ -257,6 +279,12 @@ export async function DivisionPage({
             pageSize={pubsList.pageSize}
             sort={(sort === "most_cited" ? "most_cited" : "newest") as PubSort}
             basePath={basePath}
+            listBasePath={area ? `${basePath}/areas/${encodeURIComponent(area.id)}` : undefined}
+            activeArea={
+              area
+                ? { label: area.label, clearHref: `${basePath}?tab=publications#tab-content` }
+                : null
+            }
           />
         )}
         {tab === "grants" && grantsList && (

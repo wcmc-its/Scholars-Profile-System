@@ -15,6 +15,7 @@ import {
   todayIso,
 } from "@/lib/api/center-member-count";
 import { cachedRead } from "@/lib/api/swr-cache";
+import { attachTopMesh, loadTopMeshForMembers, withTopMesh } from "@/lib/api/roster-mesh";
 
 // Re-exported for the many call sites that already import them from here.
 export {
@@ -28,6 +29,14 @@ import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
+import {
+  matchesRosterQuery,
+  normalizeRosterQuery,
+  rankRoster,
+  type RankableRosterEntry,
+  type RosterSort,
+} from "@/lib/roster-sort";
+import { loadRosterCounts } from "@/lib/api/roster-counts";
 import {
   CENTER_ENTITY_TYPE,
   CENTER_PROGRAM_ENTITY_TYPE,
@@ -43,13 +52,20 @@ import type { AuthorChip } from "@/components/publication/author-chip-row";
 import type { DeptPublicationCard } from "@/lib/api/dept-highlights";
 import type {
   PubSort,
+  PubListOpts,
   DeptListPubResult,
+  GrantSort,
+  DeptListGrantResult,
 } from "@/lib/api/dept-lists";
+import {
+  buildUnitGrantCards,
+  loadUnitGrantProjects,
+} from "@/lib/api/unit-grant-projects";
+import { unitPublicationWhere } from "@/lib/api/unit-publication-where";
 import {
   isAuthorHidden,
   isUnitSuppressed,
   loadAllPublicationSuppressions,
-  resolveActiveGrantSuppression,
   resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 import {
@@ -580,39 +596,14 @@ type CenterScholarHit = DepartmentFacultyHit & {
 async function buildCenterMemberHits(
   rows: CenterScholarRow[],
 ): Promise<CenterScholarHit[]> {
-  const cwids = rows.map((s) => s.cwid);
-  const now = new Date();
-  const [pubCounts, grantRows] = cwids.length > 0
-    ? await Promise.all([
-        prisma.publicationTopic.groupBy({
-          by: ["cwid"],
-          where: { cwid: { in: cwids } },
-          _count: { pmid: true },
-        }) as unknown as Promise<Array<{ cwid: string; _count: { pmid: number } }>>,
-        prisma.grant.findMany({
-          where: { cwid: { in: cwids }, endDate: { gte: now }, source: { not: "RePORTER" } },
-          select: { cwid: true, externalId: true, id: true },
-        }) as Promise<
-          Array<{ cwid: string; externalId: string | null; id: string }>
-        >,
-      ])
-    : [[], []];
-
-  const pubMap = new Map(pubCounts.map((p) => [p.cwid, p._count.pmid]));
-
-  // #481(b) — exclude #160-suppressed grants from the per-faculty badge so a
-  // hidden grant never inflates the count, keeping the roster badge in agreement
-  // with the grants-list total (which already drops suppressed rows).
-  // Same per-investigator `externalId` keying as resolveActiveGrantSuppression.
-  const suppressed =
-    grantRows.length > 0
-      ? (await resolveActiveGrantSuppression(grantRows, prisma)).suppressed
-      : new Set<string>();
-  const grantMap = new Map<string, number>();
-  for (const g of grantRows) {
-    if (g.externalId !== null && suppressed.has(g.externalId)) continue;
-    grantMap.set(g.cwid, (grantMap.get(g.cwid) ?? 0) + 1);
-  }
+  // #481(b) — `loadRosterCounts("center")` drops #160-suppressed grants from the
+  // per-faculty badge so a hidden grant never inflates the count, keeping the
+  // roster badge in agreement with the grants-list total. The same counts rank
+  // the roster's "Most publications" / "Most grants" sorts.
+  const { pubs: pubMap, grants: grantMap } = await loadRosterCounts(
+    "center",
+    rows.map((s) => s.cwid),
+  );
 
   return rows.map((s) => ({
     cwid: s.cwid,
@@ -643,9 +634,10 @@ async function buildCenterMemberHits(
  */
 async function getCenterMembersUncached(
   centerCode: string,
-  opts: { page?: number } = {},
+  opts: { page?: number; sort?: RosterSort } = {},
 ): Promise<CenterMembersResult> {
   const page = Math.max(0, opts.page ?? 0);
+  const sort: RosterSort = opts.sort ?? "last";
   // #2537 — `page` above stays the INTERNAL 0-indexed slicing index (input
   // convention unchanged); `displayPage` is the 1-indexed value the flat-mode
   // `page` field now echoes. See the `CenterMembersResult` JSDoc.
@@ -839,41 +831,45 @@ async function getCenterMembersUncached(
     scholars.some((s) => programByCwid.get(s.cwid) != null);
 
   if (!programmed) {
-    if (cornellHits.length === 0) {
-      // Flat, paginated list — today's behavior for unprogrammed centers.
-      const pageRows = scholars.slice(
-        page * MEMBERS_PAGE_SIZE,
-        (page + 1) * MEMBERS_PAGE_SIZE,
-      );
-      const hits = attachType(await buildCenterMemberHits(pageRows));
-      return {
-        mode: "flat",
-        hits,
-        total,
-        page: displayPage,
-        pageSize: MEMBERS_PAGE_SIZE,
-        roleCategoryCounts,
-      };
-    }
-    // #2519 — Cornell present: build hits for the WHOLE WCM roster (not just
-    // this page) so the two sources interleave correctly by surname across
-    // page boundaries, then paginate the merged list. Only this flag-gated,
-    // Cornell-populated path pays the extra per-request cost — an
-    // unprogrammed center with no Cornell members keeps the cheap
-    // page-only query above untouched.
-    const wcmHitsAll = attachType(await buildCenterMemberHits(scholars));
-    const merged = [...wcmHitsAll, ...cornellHits].sort(
-      (a, b) =>
-        extractLastNameSort(a.preferredName).localeCompare(
-          extractLastNameSort(b.preferredName),
-        ) || a.preferredName.localeCompare(b.preferredName),
+    // Flat, paginated list. Unit Page v2 — ranked by the roster toolbar sort
+    // over the WHOLE roster (WCM + #2519 Cornell externals interleave), then
+    // only this page is hydrated. Counts are loaded only for a count sort.
+    const counts =
+      sort === "last" ? null : await loadRosterCounts("center", scholars.map((s) => s.cwid));
+    type FlatItem = RankableRosterEntry & { row?: CenterScholarRow; ext?: CenterMemberHit };
+    const items: FlatItem[] = [
+      ...scholars.map((s) => ({
+        cwid: s.cwid,
+        preferredName: s.preferredName,
+        primaryTitle: s.primaryTitle,
+        pubCount: counts?.pubs.get(s.cwid) ?? 0,
+        grantCount: counts?.grants.get(s.cwid) ?? 0,
+        row: s,
+      })),
+      ...cornellHits.map((h) => ({
+        cwid: h.cwid,
+        preferredName: h.preferredName,
+        primaryTitle: h.primaryTitle,
+        pubCount: 0,
+        grantCount: 0,
+        ext: h,
+      })),
+    ];
+    const pageItems = rankRoster(items, { sort }).slice(
+      page * MEMBERS_PAGE_SIZE,
+      (page + 1) * MEMBERS_PAGE_SIZE,
     );
-    const mergedTotal = merged.length;
-    const hits = merged.slice(page * MEMBERS_PAGE_SIZE, (page + 1) * MEMBERS_PAGE_SIZE);
+    const wcmHits = attachType(
+      await buildCenterMemberHits(pageItems.flatMap((i) => (i.row ? [i.row] : []))),
+    );
+    const wcmByCwid = new Map(wcmHits.map((h) => [h.cwid, h]));
+    const hits = pageItems
+      .map((i) => i.ext ?? wcmByCwid.get(i.cwid))
+      .filter((h): h is CenterMemberHit => h !== undefined);
     return {
       mode: "flat",
       hits,
-      total: mergedTotal,
+      total: items.length,
       page: displayPage,
       pageSize: MEMBERS_PAGE_SIZE,
       roleCategoryCounts,
@@ -925,66 +921,61 @@ async function getCenterMembersUncached(
  */
 export function getCenterMembers(
   centerCode: string,
-  opts: { page?: number } = {},
+  opts: { page?: number; sort?: RosterSort } = {},
 ): Promise<CenterMembersResult> {
   const page = Math.max(0, opts.page ?? 0);
-  return cachedRead(`center:members:${centerCode}:${page}`, () =>
-    getCenterMembersUncached(centerCode, { page }),
-  );
+  const sort: RosterSort = opts.sort ?? "last";
+  // The grouped (programmed) shape ignores `sort` server-side — its sections are
+  // sorted in the browser — so a grouped center caches one entry per sort; the
+  // flat shape is ranked here.
+  return cachedRead(`center:members:${centerCode}:${page}:${sort}`, () =>
+    getCenterMembersUncached(centerCode, { page, sort }),
+  ).then(attachCenterTopMesh);
 }
 
 /**
- * #2537 — one page of a center's ACTIVE members filtered to a single
- * role-category GROUP (`?type=`). Backs the same uncacheable
- * `/api/units/[kind]/[code]/members` route as `getUnitMembersFiltered`
- * (dept/division); centers get their OWN function here, not a third branch
- * bolted onto `getUnitMembersFiltered`, because center membership is sourced
- * from `CenterMembership` + § 3.3's active-date window rather than a
- * `deptCode`/`divCode` column — the gating shape genuinely differs.
- *
- * Same PAGE contract as `UnitMembersByMethodsResult` (0-indexed `page`, size
- * `MEMBERS_PAGE_SIZE`) — NOT the 1-indexed convention `CenterMembersResult`'s
- * flat mode uses; those are two different consumers (see that type's JSDoc).
- *
- * Gating mirrors `getCenterMembersUncached`'s own flat/unprogrammed branch
- * exactly: § 3.3 active-membership filter, then `deletedAt: null, status:
- * "active", ...publicRoleWhere()` (the #536/#2202 carve) plus the fail-closed
- * `isPubliclyDisplayed` re-check (#2271) on the raw column, ordered by surname
- * (matching the People search "Last name (A–Z)" sort, same as the SSR roster —
- * NOT the dept/division `preferredName` ASC convention `unit-members.ts` uses).
- *
- * `roleGroup === "Affiliated faculty"` ALSO unions in the center's active
- * Cornell (Ithaca) external members (#2519), same as the flat SSR roster's
- * `roleCategoryCounts` now folds them in — an external member carries no
- * `roleCategory` for `groupToRawValues`'s `IN (...)` filter to match, so they
- * can't come back from the `scholar.findMany` above; they're loaded and
- * merged in separately instead, sorted into the same surname order and
- * counted into `total`. Every other role group still excludes them: they
- * have no `roleCategory` to place them there.
+ * Unit Page v2 — attach TOPICS chips AFTER the cached roster read (so a degraded
+ * OpenSearch empty is never baked into the swr entry): ONE lookup for every
+ * member on the page, flat or grouped.
  */
-export type CenterMembersByTypeResult = {
-  hits: CenterMemberHit[];
-  total: number;
-  /** 0-indexed — see the doc comment above. */
-  page: number;
-  pageSize: number;
+async function attachCenterTopMesh(result: CenterMembersResult): Promise<CenterMembersResult> {
+  if (result.mode === "flat") {
+    return { ...result, hits: await attachTopMesh(result.hits) };
+  }
+  const cwids = result.groups.flatMap((g) =>
+    g.members.filter((m) => !m.isExternal).map((m) => m.cwid),
+  );
+  const mesh = await loadTopMeshForMembers(cwids);
+  return {
+    ...result,
+    groups: result.groups.map((g) => ({ ...g, members: withTopMesh(g.members, mesh) })),
+  };
+}
+
+/**
+ * Unit Page v2 — the cached whole-roster INDEX a center's flat roster route
+ * ranks, filters and paginates from. One entry per active member (§ 3.3
+ * window): WCM members through the same carve as `getCenterMembersUncached`
+ * (`deletedAt: null, status: "active", ...publicRoleWhere()` plus the #2271
+ * fail-closed `isPubliclyDisplayed` re-check on the raw column), plus every
+ * enabled external member source (#2519 Cornell, CTSC feed) with its pre-built
+ * hit. Pub/grant counts (`loadRosterCounts("center")`) are a second cached read,
+ * loaded only for a count sort. Keys sit under `center:` so unit-edit busts
+ * clear them.
+ */
+type CenterRosterEntry = RankableRosterEntry & {
+  primaryTitle: string | null;
+  /** RAW `scholar.role_category`; null on externals. */
+  roleCategory: string | null;
+  lastKey: string;
+  membershipType: CenterMembershipType | null;
+  membershipRoleLabel: string | null;
+  /** External members only: their source + finished hit (no Scholar row). */
+  externalSource?: string;
+  externalHit?: CenterMemberHit;
 };
 
-export async function getCenterMembersByType(
-  centerCode: string,
-  roleGroup: RoleGroupLabel,
-  page: number,
-): Promise<CenterMembersByTypeResult> {
-  const safePage = Math.max(0, page);
-  const empty: CenterMembersByTypeResult = {
-    hits: [],
-    total: 0,
-    page: safePage,
-    pageSize: MEMBERS_PAGE_SIZE,
-  };
-  const rawValues = groupToRawValues(roleGroup);
-  if (rawValues.length === 0) return empty;
-
+async function loadCenterRosterBaseUncached(centerCode: string): Promise<CenterRosterEntry[]> {
   const today = todayIso();
   const memberships = (await prisma.centerMembership.findMany({
     where: { centerCode },
@@ -1006,120 +997,253 @@ export async function getCenterMembersByType(
     endDate: Date | null;
     source: string;
   }>;
-  const activeMemberships = memberships.filter((m) =>
-    isCenterMembershipActive(m, today),
-  );
-  const activeCwids = activeMemberships.map((m) => m.cwid);
-  if (activeCwids.length === 0) return empty;
+  const active = memberships.filter((m) => isCenterMembershipActive(m, today));
+  if (active.length === 0) return [];
+  const byCwid = new Map(active.map((m) => [m.cwid, m]));
+  const classify = (cwid: string) => {
+    const m = byCwid.get(cwid);
+    return {
+      membershipType: m?.membershipType ?? null,
+      membershipRoleLabel: m
+        ? membershipRoleLabelFor(m.membershipRoleKey, m.roleVocabulary?.label)
+        : null,
+    };
+  };
 
-  // Per-cwid vocabulary role label (independent of source — a Cornell row's
-  // `membershipRoleKey` resolves the same way as a WCM row's).
-  const membershipRoleLabelByCwid = new Map<string, string | null>();
-  for (const m of activeMemberships) {
-    membershipRoleLabelByCwid.set(
-      m.cwid,
-      membershipRoleLabelFor(m.membershipRoleKey, m.roleVocabulary?.label),
-    );
-  }
-
-  // #2519 — "Affiliated faculty" also draws in the center's active Cornell
-  // (Ithaca) external members (see the docblock above); every other group
-  // stays WCM-only since an external member has no `roleCategory` for
-  // `groupToRawValues`'s filter to place it in. Built the same way as the
-  // flat SSR roster's Cornell branch (`getCenterMembersUncached`).
-  let cornellHits: CenterMemberHit[] = [];
-  if (roleGroup === "Affiliated faculty") {
-    const externalSources = enabledExternalMemberSources().filter((s) => s === CORNELL_EXTERNAL_SOURCE);
-    const cornellCwids = activeMemberships
-      .filter((m) => externalSources.includes(m.source))
-      .map((m) => m.cwid);
-    if (cornellCwids.length > 0) {
-      const externalByCuid = await loadExternalMembersByCuid(cornellCwids);
-      cornellHits = cornellCwids
-        .map((cwid) => externalByCuid.get(cwid))
-        .filter((m): m is NonNullable<typeof m> => m !== undefined)
-        .map((m): CenterMemberHit => ({
-          ...buildExternalMemberHit(m),
-          membershipType: null,
-          membershipRoleLabel: membershipRoleLabelByCwid.get(m.cuid) ?? null,
-          professorialRank: null,
-          primaryOrgCode: null,
-        }));
-    }
-  }
-
-  // Same carve as `getCenterMembersUncached`'s flat branch: active + not
-  // soft-deleted + `publicRoleWhere()` (denylist), then the fail-closed
-  // `isPubliclyDisplayed` re-check on the raw column (#2271) below.
   const loaded = (await prisma.scholar.findMany({
     where: {
-      cwid: { in: activeCwids },
+      cwid: { in: active.map((m) => m.cwid) },
       deletedAt: null,
       status: "active",
-      roleCategory: { in: rawValues },
       ...publicRoleWhere(),
     },
-    orderBy: [{ preferredName: "asc" }],
-    select: {
-      cwid: true,
-      preferredName: true,
-      slug: true,
-      primaryTitle: true,
-      primaryDepartment: true,
-      roleCategory: true,
-      overview: true,
-      professorialRank: true,
-      primaryOrgCode: true,
-      department: { select: { name: true } },
-      division: { select: { name: true } },
-    },
-  })) as CenterScholarRow[];
-  const scholars = loaded.filter((s) => isPubliclyDisplayed(s.roleCategory));
-  scholars.sort(
-    (a, b) =>
-      extractLastNameSort(a.preferredName).localeCompare(
-        extractLastNameSort(b.preferredName),
-      ) || a.preferredName.localeCompare(b.preferredName),
-  );
-  if (scholars.length === 0 && cornellHits.length === 0) return empty;
-
-  const membershipTypeByCwid = new Map<string, CenterMembershipType | null>();
-  for (const m of activeMemberships) membershipTypeByCwid.set(m.cwid, m.membershipType);
-
-  if (cornellHits.length === 0) {
-    // No Cornell rows to merge in — keep the cheap page-only query (unchanged
-    // from before #2519 partition parity).
-    const total = scholars.length;
-    const pageRows = scholars.slice(
-      safePage * MEMBERS_PAGE_SIZE,
-      (safePage + 1) * MEMBERS_PAGE_SIZE,
-    );
-    const hits: CenterMemberHit[] = (await buildCenterMemberHits(pageRows)).map((h) => ({
-      ...h,
-      membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
-      membershipRoleLabel: membershipRoleLabelByCwid.get(h.cwid) ?? null,
+    select: { cwid: true, preferredName: true, primaryTitle: true, roleCategory: true },
+  })) as Array<{
+    cwid: string;
+    preferredName: string | null;
+    primaryTitle: string | null;
+    roleCategory: string | null;
+  }>;
+  const entries: CenterRosterEntry[] = loaded
+    .filter((s) => isPubliclyDisplayed(s.roleCategory))
+    .map((s) => ({
+      cwid: s.cwid,
+      preferredName: s.preferredName ?? "",
+      primaryTitle: s.primaryTitle ?? null,
+      roleCategory: s.roleCategory ?? null,
+      lastKey: extractLastNameSort(s.preferredName ?? ""),
+      pubCount: 0,
+      grantCount: 0,
+      ...classify(s.cwid),
     }));
-    return { hits, total, page: safePage, pageSize: MEMBERS_PAGE_SIZE };
+
+  const externalSources = enabledExternalMemberSources();
+  const externalRows = active.filter((m) => externalSources.includes(m.source));
+  if (externalRows.length > 0) {
+    const externalByCuid = await loadExternalMembersByCuid(externalRows.map((m) => m.cwid));
+    for (const row of externalRows) {
+      const m = externalByCuid.get(row.cwid);
+      if (!m) continue;
+      const cls = classify(m.cuid);
+      const hit: CenterMemberHit = {
+        ...buildExternalMemberHit(m),
+        membershipType: null,
+        membershipRoleLabel: cls.membershipRoleLabel,
+        professorialRank: null,
+        primaryOrgCode: null,
+      };
+      entries.push({
+        cwid: hit.cwid,
+        preferredName: hit.preferredName,
+        primaryTitle: hit.primaryTitle,
+        roleCategory: null,
+        lastKey: extractLastNameSort(hit.preferredName),
+        pubCount: 0,
+        grantCount: 0,
+        membershipType: null,
+        membershipRoleLabel: cls.membershipRoleLabel,
+        externalSource: row.source,
+        externalHit: hit,
+      });
+    }
+  }
+  return entries;
+}
+
+async function loadCenterRosterIndex(
+  centerCode: string,
+  opts: { withCounts?: boolean } = {},
+): Promise<CenterRosterEntry[]> {
+  const base = await cachedRead(`center:roster-base:${centerCode}`, () =>
+    loadCenterRosterBaseUncached(centerCode),
+  );
+  if (!opts.withCounts) return [...base];
+  const wcmCwids = base.filter((e) => !e.externalHit).map((e) => e.cwid);
+  const counts = await cachedRead(`center:roster-counts:${centerCode}`, async () => {
+    const { pubs, grants } = await loadRosterCounts("center", wcmCwids);
+    return wcmCwids.map((c): [string, number, number] => [
+      c,
+      pubs.get(c) ?? 0,
+      grants.get(c) ?? 0,
+    ]);
+  });
+  const byCwid = new Map(counts.map(([c, p, g]) => [c, { p, g }]));
+  return base.map((e) => {
+    const c = byCwid.get(e.cwid);
+    return c ? { ...e, pubCount: c.p, grantCount: c.g } : e;
+  });
+}
+
+/**
+ * #2537 / Unit Page v2 — one page of a center's ACTIVE members, optionally
+ * filtered to a role-category GROUP (`?type=`) and/or a name/title query
+ * (`?q=`), in the roster toolbar's sort (`?sort=`, default surname A–Z).
+ * Backs the same uncacheable `/api/units/[kind]/[code]/members` route as
+ * `getUnitMembersFiltered` (dept/division); centers get their OWN function
+ * because center membership is sourced from `CenterMembership` + § 3.3's
+ * active-date window rather than a `deptCode`/`divCode` column.
+ *
+ * Same PAGE contract as `UnitMembersByMethodsResult` (0-indexed `page`, size
+ * `MEMBERS_PAGE_SIZE`) — NOT the 1-indexed convention `CenterMembersResult`'s
+ * flat mode uses; those are two different consumers (see that type's JSDoc).
+ *
+ * Gating mirrors the flat SSR roster exactly (see `loadCenterRosterIndex`).
+ * External members: with no role group, every enabled external source is
+ * included, as the flat SSR roster does. `roleGroup === "Affiliated faculty"`
+ * keeps only the Cornell (Ithaca) externals (#2519) — an external member
+ * carries no `roleCategory` for `groupToRawValues`'s filter, so it is matched
+ * on source instead; every other role group excludes externals.
+ *
+ * `roleCategoryCounts` is computed over the query-filtered set BEFORE the role
+ * group narrows it (Cornell faculty folded into "Affiliated faculty", as the
+ * SSR roster does), so the Appointment pills keep whole-set counts while a
+ * name query is active.
+ */
+export type CenterMembersByTypeResult = {
+  hits: CenterMemberHit[];
+  total: number;
+  /** 0-indexed — see the doc comment above. */
+  page: number;
+  pageSize: number;
+  roleCategoryCounts?: Record<string, number>;
+};
+
+export async function getCenterMembersFiltered(
+  centerCode: string,
+  filter: { roleGroup?: RoleGroupLabel; sort?: RosterSort; q?: string },
+  page: number,
+): Promise<CenterMembersByTypeResult> {
+  const safePage = Math.max(0, page);
+  const empty: CenterMembersByTypeResult = {
+    hits: [],
+    total: 0,
+    page: safePage,
+    pageSize: MEMBERS_PAGE_SIZE,
+  };
+  const sort: RosterSort = filter.sort ?? "last";
+  const q = normalizeRosterQuery(filter.q);
+  const rawValues = filter.roleGroup ? groupToRawValues(filter.roleGroup) : null;
+  if (rawValues && rawValues.length === 0) return empty;
+
+  const index = await loadCenterRosterIndex(centerCode, { withCounts: sort !== "last" });
+  if (index.length === 0) return empty;
+
+  const scoped = index.filter((e) => matchesRosterQuery(e, q));
+  const roleCategoryCounts: Record<string, number> = {};
+  for (const e of scoped) {
+    if (e.externalHit) {
+      // Only Cornell externals are faculty; a CTSC plain name has no role.
+      if (e.externalHit.externalProfileUrl) {
+        roleCategoryCounts["Affiliated faculty"] =
+          (roleCategoryCounts["Affiliated faculty"] ?? 0) + 1;
+      }
+      continue;
+    }
+    const label = formatRoleCategory(e.roleCategory);
+    if (label === null) continue;
+    roleCategoryCounts[label] = (roleCategoryCounts[label] ?? 0) + 1;
   }
 
-  // Cornell present: build hits for the WHOLE matching WCM set (not just this
-  // page) so the two sources interleave correctly by surname across page
-  // boundaries, then paginate the merged list — same shape as the flat SSR
-  // roster's Cornell-present branch above.
-  const wcmHits: CenterMemberHit[] = (await buildCenterMemberHits(scholars)).map((h) => ({
-    ...h,
-    membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
-    membershipRoleLabel: membershipRoleLabelByCwid.get(h.cwid) ?? null,
-  }));
-  const merged = [...wcmHits, ...cornellHits].sort(
-    (a, b) =>
-      extractLastNameSort(a.preferredName).localeCompare(
-        extractLastNameSort(b.preferredName),
-      ) || a.preferredName.localeCompare(b.preferredName),
+  const filtered = rawValues
+    ? scoped.filter((e) =>
+        e.externalHit
+          ? filter.roleGroup === "Affiliated faculty" &&
+            e.externalSource === CORNELL_EXTERNAL_SOURCE
+          : e.roleCategory !== null && rawValues.includes(e.roleCategory),
+      )
+    : scoped;
+  const ranked = rankRoster(filtered, { sort });
+  const total = ranked.length;
+  const slice = ranked.slice(safePage * MEMBERS_PAGE_SIZE, (safePage + 1) * MEMBERS_PAGE_SIZE);
+  if (slice.length === 0) {
+    return { hits: [], total, page: safePage, pageSize: MEMBERS_PAGE_SIZE, roleCategoryCounts };
+  }
+
+  // Hydrate only this page's WCM rows, re-applying the carve (+ #2271 re-check
+  // and the role group) on the query that actually emits names.
+  const pageCwids = slice.filter((e) => !e.externalHit).map((e) => e.cwid);
+  // TOPICS chips: one people-index lookup for the page, in parallel with the
+  // row query (fail-soft to an empty map).
+  const meshPromise = loadTopMeshForMembers(pageCwids);
+  const rows =
+    pageCwids.length === 0
+      ? []
+      : ((await prisma.scholar.findMany({
+          where: {
+            cwid: { in: pageCwids },
+            deletedAt: null,
+            status: "active",
+            ...(rawValues ? { roleCategory: { in: rawValues } } : {}),
+            ...publicRoleWhere(),
+          },
+          select: {
+            cwid: true,
+            preferredName: true,
+            slug: true,
+            primaryTitle: true,
+            primaryDepartment: true,
+            roleCategory: true,
+            overview: true,
+            professorialRank: true,
+            primaryOrgCode: true,
+            department: { select: { name: true } },
+            division: { select: { name: true } },
+          },
+        })) as CenterScholarRow[]);
+  const rowByCwid = new Map(
+    rows.filter((r) => isPubliclyDisplayed(r.roleCategory)).map((r) => [r.cwid, r]),
   );
-  const total = merged.length;
-  const hits = merged.slice(safePage * MEMBERS_PAGE_SIZE, (safePage + 1) * MEMBERS_PAGE_SIZE);
-  return { hits, total, page: safePage, pageSize: MEMBERS_PAGE_SIZE };
+  const orderedRows = pageCwids
+    .map((c) => rowByCwid.get(c))
+    .filter((r): r is CenterScholarRow => r !== undefined);
+  const entryByCwid = new Map(slice.map((e) => [e.cwid, e]));
+  const wcmHits = new Map(
+    (await buildCenterMemberHits(orderedRows)).map((h): [string, CenterMemberHit] => [
+      h.cwid,
+      {
+        ...h,
+        membershipType: entryByCwid.get(h.cwid)?.membershipType ?? null,
+        membershipRoleLabel: entryByCwid.get(h.cwid)?.membershipRoleLabel ?? null,
+      },
+    ]),
+  );
+  const hits = withTopMesh(
+    slice
+      .map((e) => e.externalHit ?? wcmHits.get(e.cwid))
+      .filter((h): h is CenterMemberHit => h !== undefined),
+    await meshPromise,
+  );
+  return { hits, total, page: safePage, pageSize: MEMBERS_PAGE_SIZE, roleCategoryCounts };
+}
+
+/** @deprecated Unit Page v2 — kept for existing callers/tests; the route calls
+ *  `getCenterMembersFiltered` with the toolbar's sort + query too. */
+export async function getCenterMembersByType(
+  centerCode: string,
+  roleGroup: RoleGroupLabel,
+  page: number,
+): Promise<CenterMembersByTypeResult> {
+  return getCenterMembersFiltered(centerCode, { roleGroup }, page);
 }
 
 /** #1105 — a program leader for the program page hero (LeaderCard shape). */
@@ -1300,7 +1424,7 @@ const PUB_PAGE_SIZE = 20;
  */
 async function getCenterPublicationsListUncached(
   centerCode: string,
-  opts: { page?: number; sort?: PubSort } = {},
+  opts: PubListOpts = {},
 ): Promise<DeptListPubResult> {
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
@@ -1313,14 +1437,16 @@ async function getCenterPublicationsListUncached(
   // #1505 — push center membership into the page query/count via an
   // `authors: { some }` relation filter instead of materializing every distinct
   // member pmid; invert suppression (see resolveUnitDarkPmids). #356 — total and
-  // the page window are both computed over this visible set.
+  // the page window are both computed over this visible set. `opts.area`
+  // narrows to one research area (the hero pill's "See all").
   const membership = { cwid: { in: memberCwids } };
   const suppressions = await loadAllPublicationSuppressions(prisma);
   const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
-  const visibleWhere = {
-    authors: { some: { isConfirmed: true, ...membership } },
-    ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
-  };
+  const visibleWhere = unitPublicationWhere({
+    membership,
+    darkPmids: unitDarkPmids,
+    area: opts.area,
+  });
   const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
@@ -1401,12 +1527,72 @@ async function getCenterPublicationsListUncached(
  */
 export function getCenterPublicationsList(
   centerCode: string,
-  opts: { page?: number; sort?: PubSort } = {},
+  opts: PubListOpts = {},
 ): Promise<DeptListPubResult> {
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
-  return cachedRead(`center:pubs:${centerCode}:${page}:${sort}`, () =>
-    getCenterPublicationsListUncached(centerCode, { page, sort }),
+  const area = opts.area ?? null;
+  return cachedRead(`center:pubs:${centerCode}:${page}:${sort}:${area ?? "-"}`, () =>
+    getCenterPublicationsListUncached(centerCode, { page, sort, area }),
+  );
+}
+
+const CENTER_GRANT_PAGE_SIZE = 20;
+
+/**
+ * Center Grants tab (Unit Page v2). §16 (#52, f978bbe8) dropped the tab when
+ * Spotlight replaced the highlights rows; #556 re-enabled dept/division and left
+ * center parity to #481(b); reinstated here with #2066 project grouping and
+ * #160/#481(b) suppression. This mirrors `getDivisionGrantsListUncached` over the center's active
+ * member set: active (endDate >= now), non-RePORTER grants held by current
+ * members, ONE card per funding project, #160/#481(b) suppression applied
+ * inside `loadUnitGrantProjects`. These are grants held by members, not awards
+ * the center administers.
+ */
+async function getCenterGrantsListUncached(
+  centerCode: string,
+  opts: { page?: number; sort?: GrantSort } = {},
+): Promise<DeptListGrantResult> {
+  const page = Math.max(0, opts.page ?? 0);
+  const sort: GrantSort = opts.sort ?? "most_recent";
+  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
+  if (memberCwids.length === 0) {
+    return { hits: [], total: 0, page, pageSize: CENTER_GRANT_PAGE_SIZE };
+  }
+  const sortedGroups = await loadUnitGrantProjects(
+    {
+      cwid: { in: memberCwids },
+      endDate: { gte: new Date() },
+      source: { not: "RePORTER" }, // exclude individual RePORTER history
+    },
+    sort,
+  );
+  const total = sortedGroups.length;
+  if (total === 0) {
+    return { hits: [], total: 0, page, pageSize: CENTER_GRANT_PAGE_SIZE };
+  }
+  const hits = await buildUnitGrantCards(
+    sortedGroups.slice(
+      page * CENTER_GRANT_PAGE_SIZE,
+      (page + 1) * CENTER_GRANT_PAGE_SIZE,
+    ),
+  );
+  return { hits, total, page, pageSize: CENTER_GRANT_PAGE_SIZE };
+}
+
+/**
+ * Cached: keyed by page+sort. The page-0/most_recent key doubles as the
+ * always-loaded Grants tab count. `reflectUnitChange` busts the `center:`
+ * prefix on center edits.
+ */
+export function getCenterGrantsList(
+  centerCode: string,
+  opts: { page?: number; sort?: GrantSort } = {},
+): Promise<DeptListGrantResult> {
+  const page = Math.max(0, opts.page ?? 0);
+  const sort: GrantSort = opts.sort ?? "most_recent";
+  return cachedRead(`center:grants:${centerCode}:${page}:${sort}`, () =>
+    getCenterGrantsListUncached(centerCode, { page, sort }),
   );
 }
 

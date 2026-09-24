@@ -16,13 +16,21 @@ const {
   mockFamilyFindMany,
   mockPubGroupBy,
   mockGrantGroupBy,
+  mockAuthorGroupBy,
+  mockSuppressionFindMany,
   mockLoadOverlayGate,
   mockLoadDivisionMemberCwids,
+  mockLoadTopMesh,
+  mockResolveDivisionChief,
 } = vi.hoisted(() => ({
+  mockResolveDivisionChief: vi.fn(),
+  mockLoadTopMesh: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockFamilyFindMany: vi.fn(),
   mockPubGroupBy: vi.fn(),
   mockGrantGroupBy: vi.fn(),
+  mockAuthorGroupBy: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
   mockLoadOverlayGate: vi.fn(),
   mockLoadDivisionMemberCwids: vi.fn(),
 }));
@@ -32,6 +40,9 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: mockScholarFindMany },
     scholarFamily: { findMany: mockFamilyFindMany },
     publicationTopic: { groupBy: mockPubGroupBy },
+    // Division rosters count confirmed authorships minus #356 hides.
+    publicationAuthor: { groupBy: mockAuthorGroupBy },
+    suppression: { findMany: mockSuppressionFindMany },
     grant: { groupBy: mockGrantGroupBy },
   },
 }));
@@ -43,21 +54,37 @@ vi.mock("@/lib/api/methods-overlay", async () => {
 });
 vi.mock("@/lib/api/divisions", () => ({
   loadDivisionMemberCwids: (...a: unknown[]) => mockLoadDivisionMemberCwids(...a),
+  resolveDivisionChiefCwid: (...a: unknown[]) => mockResolveDivisionChief(...a),
 }));
+// Unit Page v2 TOPICS chips — the people-index lookup is mocked (no OpenSearch);
+// `withTopMesh` stays real so the attach logic is exercised.
+vi.mock("@/lib/api/roster-mesh", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/roster-mesh")>(
+    "@/lib/api/roster-mesh",
+  );
+  return { ...actual, loadTopMeshForMembers: (...a: unknown[]) => mockLoadTopMesh(...a) };
+});
 // loadPublicFamiliesForMembers (chips) is exercised via the real methods-roster
 // module against the mocked scholarFamily.findMany below.
 
-import { getUnitMembersByMethods, getUnitMembersFiltered } from "@/lib/api/unit-members";
+import {
+  buildHits,
+  getUnitMembersByMethods,
+  getUnitMembersFiltered,
+} from "@/lib/api/unit-members";
 
 const SC = "imaging_x";
 
-function scholarRow(cwid: string) {
+function scholarRow(
+  cwid: string,
+  over: { preferredName?: string; roleCategory?: string; primaryTitle?: string } = {},
+) {
   return {
     cwid,
-    preferredName: cwid.toUpperCase(),
+    preferredName: over.preferredName ?? cwid.toUpperCase(),
     slug: cwid,
-    primaryTitle: "Professor",
-    roleCategory: "full_time_faculty",
+    primaryTitle: over.primaryTitle ?? "Professor",
+    roleCategory: over.roleCategory ?? "full_time_faculty",
     overview: null,
     primaryDepartment: "Radiology",
     department: { name: "Department of Radiology" },
@@ -70,7 +97,25 @@ beforeEach(() => {
   mockLoadOverlayGate.mockResolvedValue({ suppressed: new Set(), sensitive: new Set() });
   mockPubGroupBy.mockResolvedValue([]);
   mockGrantGroupBy.mockResolvedValue([]);
+  mockAuthorGroupBy.mockResolvedValue([]);
+  mockSuppressionFindMany.mockResolvedValue([]);
+  mockLoadTopMesh.mockResolvedValue(new Map());
+  mockResolveDivisionChief.mockResolvedValue(null);
 });
+
+/** Route `scholar.findMany`: the index member select (no `include`) returns
+ *  `rows`; the page hydration (`include`) returns the requested cwids' rows. */
+function routeScholars(rows: ReturnType<typeof scholarRow>[]) {
+  const byCwid = new Map(rows.map((r) => [r.cwid, r]));
+  mockScholarFindMany.mockImplementation(
+    (args: { include?: unknown; where: { cwid?: { in: string[] } } }) =>
+      Promise.resolve(
+        "include" in args
+          ? args.where.cwid!.in.flatMap((c) => (byCwid.has(c) ? [byCwid.get(c)!] : []))
+          : rows,
+      ),
+  );
+}
 
 describe("getUnitMembersByMethods — department", () => {
   it("OR-filters members across selected families, paginates, returns chips", async () => {
@@ -79,7 +124,7 @@ describe("getUnitMembersByMethods — department", () => {
     mockScholarFindMany.mockImplementation((args: { include?: unknown }) =>
       "include" in args
         ? Promise.resolve(
-            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map(scholarRow),
+            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map((c) => scholarRow(c)),
           )
         : Promise.resolve([{ cwid: "m1" }, { cwid: "m2" }, { cwid: "m3" }, { cwid: "m4" }]),
     );
@@ -171,7 +216,7 @@ describe("getUnitMembersByMethods — department", () => {
       "include" in args
         ? // chip-less page assembly: return the page's scholar rows
           Promise.resolve(
-            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map(scholarRow),
+            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map((c) => scholarRow(c)),
           )
         : Promise.resolve(
             Array.from({ length: 25 }, (_, i) => ({ cwid: `m${String(i).padStart(2, "0")}` })),
@@ -222,26 +267,12 @@ describe("getUnitMembersByMethods — division", () => {
  * (methods + type) paths added alongside the original methods-only path above.
  */
 describe("getUnitMembersFiltered — type-only (department)", () => {
-  it("filters member cwids by roleCategory: { in } AND publicRoleWhere(), paginates, builds hits", async () => {
-    // scholar.findMany is called three possible ways here: (1) member-cwid
-    // select (no cwid.in, no include) — the deptCode query; (2) the type-only
-    // match select (cwid.in + roleCategory.in, no include); (3) the page-row
-    // assembly (cwid.in + include).
-    mockScholarFindMany.mockImplementation(
-      (args: { where?: { deptCode?: string; roleCategory?: unknown }; include?: unknown }) => {
-        if (args.where?.deptCode) {
-          return Promise.resolve([{ cwid: "m1" }, { cwid: "m2" }, { cwid: "m3" }]);
-        }
-        if ("include" in args) {
-          return Promise.resolve(
-            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map(scholarRow),
-          );
-        }
-        // Type-only match select — must carry the roleCategory filter.
-        expect(args.where?.roleCategory).toEqual({ in: expect.any(Array) });
-        return Promise.resolve([{ cwid: "m1" }, { cwid: "m2" }]);
-      },
-    );
+  it("filters the index by the raw role group in memory, re-applies it on the page rows", async () => {
+    routeScholars([
+      scholarRow("m1"),
+      scholarRow("m2"),
+      scholarRow("m3", { roleCategory: "postdoc" }),
+    ]);
 
     const result = await getUnitMembersFiltered(
       "department",
@@ -252,13 +283,19 @@ describe("getUnitMembersFiltered — type-only (department)", () => {
 
     expect(result.total).toBe(2);
     expect(result.hits.map((h) => h.cwid).sort()).toEqual(["m1", "m2"]);
+    // The index member query carries the #536 carve (publicRoleWhere's OR).
+    const indexCall = mockScholarFindMany.mock.calls.find((c) => !("include" in c[0]))![0];
+    expect(indexCall.where.deptCode).toBe("N1140");
+    expect(indexCall.where).toHaveProperty("OR");
+    // buildHits' own row query re-applies the role group (#2537).
+    const rowCall = mockScholarFindMany.mock.calls.find((c) => "include" in c[0])![0];
+    expect(rowCall.where.roleCategory).toEqual({ in: expect.any(Array) });
     // No OR-across-families filter query ran — this is the type-only path.
-    // (scholarFamily.findMany IS still called once, by buildHits' own chip
-    // loader — that's the `distinct: ["cwid"]` call, absent here, that would
-    // signal the methods filter path.)
     expect(
       mockFamilyFindMany.mock.calls.some((c) => (c[0] as { distinct?: string[] })?.distinct),
     ).toBe(false);
+    // Appointment pill counts cover the whole (unfiltered-by-role) set.
+    expect(result.roleCategoryCounts).toEqual({ "Full-time faculty": 2, Postdoc: 1 });
   });
 
   it("returns empty (no queries beyond the member-cwid select) when the group is All", async () => {
@@ -269,15 +306,43 @@ describe("getUnitMembersFiltered — type-only (department)", () => {
   });
 });
 
+describe("getUnitMembersFiltered — Division facet (department, Unit Page v2)", () => {
+  it("intersects the dept's members with the selected divisions (OR within), no role filter", async () => {
+    mockLoadDivisionMemberCwids.mockImplementation((code: string) =>
+      Promise.resolve(code === "D1" ? ["m1", "x9"] : ["m3"]),
+    );
+    routeScholars([scholarRow("m1"), scholarRow("m2"), scholarRow("m3")]);
+
+    const result = await getUnitMembersFiltered(
+      "department",
+      "N1140",
+      { divisionCodes: ["D1", "D2"] },
+      0,
+    );
+
+    // x9 is in D1 but not in the department → never widens the roster.
+    expect(result.hits.map((h) => h.cwid).sort()).toEqual(["m1", "m3"]);
+    expect(result.total).toBe(2);
+    expect(mockLoadDivisionMemberCwids).toHaveBeenCalledWith("D1");
+    expect(mockLoadDivisionMemberCwids).toHaveBeenCalledWith("D2");
+    // Division-only: the page-row query carries no roleCategory condition.
+    const rowCall = mockScholarFindMany.mock.calls.find((c) => "include" in c[0])![0];
+    expect(rowCall.where).not.toHaveProperty("roleCategory");
+  });
+
+  it("is ignored on a division roster (the division's own ranked roster comes back)", async () => {
+    mockLoadDivisionMemberCwids.mockResolvedValue(["m1"]);
+    routeScholars([scholarRow("m1")]);
+    const result = await getUnitMembersFiltered("division", "D1", { divisionCodes: ["D2"] }, 0);
+    expect(result.total).toBe(1);
+    expect(mockLoadDivisionMemberCwids).toHaveBeenCalledTimes(1);
+    expect(mockLoadDivisionMemberCwids).toHaveBeenCalledWith("D1");
+  });
+});
+
 describe("getUnitMembersFiltered — combined methods + type (department)", () => {
   it("nests roleCategory inside the scholar: relation filter, not top-level", async () => {
-    mockScholarFindMany.mockImplementation((args: { include?: unknown }) =>
-      "include" in args
-        ? Promise.resolve(
-            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map(scholarRow),
-          )
-        : Promise.resolve([{ cwid: "m1" }, { cwid: "m2" }]),
-    );
+    routeScholars([scholarRow("m1"), scholarRow("m2")]);
     mockFamilyFindMany.mockImplementation((args: { distinct?: string[] }) =>
       args.distinct?.includes("cwid")
         ? Promise.resolve([{ cwid: "m1" }])
@@ -304,5 +369,180 @@ describe("getUnitMembersFiltered — combined methods + type (department)", () =
     // buildHits' own row query re-applies the same filter (rows agree with total).
     const rowCall = mockScholarFindMany.mock.calls.find((c) => "include" in c[0])![0];
     expect(rowCall.where.roleCategory).toEqual({ in: expect.any(Array) });
+  });
+});
+
+/**
+ * Unit Page v2 roster toolbar — sort + name/title query ranked over the WHOLE
+ * filtered set (not re-sorted within each page).
+ */
+describe("getUnitMembersFiltered — sort + q (Unit Page v2)", () => {
+  // 25 members whose cwid order, first-name order and surname order all differ.
+  const rows = Array.from({ length: 25 }, (_, i) =>
+    scholarRow(`c${String(24 - i).padStart(2, "0")}`, {
+      preferredName: `${String.fromCharCode(90 - i)}first ${String.fromCharCode(65 + i)}last`,
+    }),
+  );
+
+  it("a sort/q-free, facet-free request returns the surname-ranked roster; page 1 continues it", async () => {
+    routeScholars([...rows].reverse());
+    const p0 = await getUnitMembersFiltered("department", "N1140", {}, 0);
+    const p1 = await getUnitMembersFiltered("department", "N1140", {}, 1);
+    expect(p0.total).toBe(25);
+    expect(p0.hits).toHaveLength(20);
+    expect(p1.hits).toHaveLength(5);
+    // Regression: the old tail sliced in CWID order and re-sorted only within
+    // each page, so page 0 held c00–c19 whatever the names were.
+    expect([...p0.hits, ...p1.hits].map((h) => h.preferredName)).toEqual(
+      rows.map((r) => r.preferredName),
+    );
+    // Counts are not loaded for the default surname sort.
+    expect(mockAuthorGroupBy.mock.calls.every((c) => c[0].where.cwid.in.length <= 20)).toBe(true);
+  });
+
+  it("q filters by name or title, case- and accent-blind", async () => {
+    routeScholars([
+      scholarRow("a1", { preferredName: "José Alvarez" }),
+      scholarRow("a2", { preferredName: "Ann Brown", primaryTitle: "Chief of Cardiology" }),
+      scholarRow("a3", { preferredName: "Cy Cole" }),
+    ]);
+    const byName = await getUnitMembersFiltered("department", "N1140", { q: "JOSE" }, 0);
+    expect(byName.hits.map((h) => h.cwid)).toEqual(["a1"]);
+    const byTitle = await getUnitMembersFiltered("department", "N1140", { q: "cardio" }, 0);
+    expect(byTitle.hits.map((h) => h.cwid)).toEqual(["a2"]);
+    expect(byTitle.total).toBe(1);
+    expect(byTitle.roleCategoryCounts).toEqual({ "Full-time faculty": 1 });
+  });
+
+  it("methods + q + sort=pubs compose: facet ∩ query, ranked by the displayed pub count", async () => {
+    routeScholars([
+      scholarRow("p1", { preferredName: "Amy Smith" }),
+      scholarRow("p2", { preferredName: "Bo Smith" }),
+      scholarRow("p3", { preferredName: "Cy Smith" }),
+      scholarRow("p4", { preferredName: "Di Jones" }),
+    ]);
+    mockFamilyFindMany.mockImplementation((args: { distinct?: string[] }) =>
+      args.distinct?.includes("cwid")
+        ? Promise.resolve([{ cwid: "p1" }, { cwid: "p3" }, { cwid: "p4" }])
+        : Promise.resolve([]),
+    );
+    mockAuthorGroupBy.mockResolvedValue([
+      { cwid: "p1", _count: { _all: 3 } },
+      { cwid: "p2", _count: { _all: 50 } },
+      { cwid: "p3", _count: { _all: 7 } },
+      { cwid: "p4", _count: { _all: 99 } },
+    ]);
+
+    const result = await getUnitMembersFiltered(
+      "department",
+      "N1140",
+      { methodKeys: [`${SC}::A`], q: "smith", sort: "pubs" },
+      0,
+    );
+    // p2 fails the facet, p4 fails the query.
+    expect(result.hits.map((h) => h.cwid)).toEqual(["p3", "p1"]);
+    expect(result.hits.map((h) => h.pubCount)).toEqual([7, 3]);
+    expect(result.total).toBe(2);
+  });
+
+  it("sort=grants on a division ranks by the division's grant count", async () => {
+    mockLoadDivisionMemberCwids.mockResolvedValue(["g1", "g2"]);
+    routeScholars([
+      scholarRow("g1", { preferredName: "Amy Able" }),
+      scholarRow("g2", { preferredName: "Bo Best" }),
+    ]);
+    mockGrantGroupBy.mockResolvedValue([
+      { cwid: "g1", _count: { _all: 1 } },
+      { cwid: "g2", _count: { _all: 4 } },
+    ]);
+    const result = await getUnitMembersFiltered("division", "D1", { sort: "grants" }, 0);
+    expect(result.hits.map((h) => [h.cwid, h.grantCount])).toEqual([
+      ["g2", 4],
+      ["g1", 1],
+    ]);
+  });
+});
+
+describe("getUnitMembersFiltered — division chief pin (agrees with getDivisionFaculty)", () => {
+  function seedDivision() {
+    mockLoadDivisionMemberCwids.mockResolvedValue(["c1", "c2", "c3"]);
+    routeScholars([
+      scholarRow("c1", { preferredName: "Amy Able" }),
+      scholarRow("c2", { preferredName: "Bo Best" }),
+      scholarRow("c3", { preferredName: "Cy Chief" }),
+    ]);
+    mockAuthorGroupBy.mockResolvedValue([
+      { cwid: "c1", _count: { _all: 1 } },
+      { cwid: "c2", _count: { _all: 9 } },
+      { cwid: "c3", _count: { _all: 5 } },
+    ]);
+    mockResolveDivisionChief.mockResolvedValue("c3");
+  }
+
+  it("pins the chief first under the surname sort", async () => {
+    seedDivision();
+    const result = await getUnitMembersFiltered("division", "D1", {}, 0);
+    expect(result.hits.map((h) => h.cwid)).toEqual(["c3", "c1", "c2"]);
+    expect(mockResolveDivisionChief).toHaveBeenCalledWith("D1");
+  });
+
+  it("does not pin under a count sort — the explicit ranking wins", async () => {
+    seedDivision();
+    const result = await getUnitMembersFiltered("division", "D1", { sort: "pubs" }, 0);
+    expect(result.hits.map((h) => h.cwid)).toEqual(["c2", "c3", "c1"]);
+  });
+
+  it("does not add a chief the query filtered out", async () => {
+    seedDivision();
+    const result = await getUnitMembersFiltered("division", "D1", { q: "best" }, 0);
+    expect(result.hits.map((h) => h.cwid)).toEqual(["c2"]);
+  });
+
+  it("pins a single selected division's chief on a department roster (as the divCode SSR path does)", async () => {
+    routeScholars([
+      scholarRow("c1", { preferredName: "Amy Able" }),
+      scholarRow("c3", { preferredName: "Cy Chief" }),
+    ]);
+    mockLoadDivisionMemberCwids.mockResolvedValue(["c1", "c3"]);
+    mockResolveDivisionChief.mockResolvedValue("c3");
+    const result = await getUnitMembersFiltered("department", "DEPT", { divisionCodes: ["D1"] }, 0);
+    expect(result.hits.map((h) => h.cwid)).toEqual(["c3", "c1"]);
+    expect(mockResolveDivisionChief).toHaveBeenCalledWith("D1");
+  });
+});
+
+describe("buildHits", () => {
+  it("keeps the caller's (ranked) cwid order, not name order", async () => {
+    routeScholars([
+      scholarRow("z1", { preferredName: "Aaron A" }),
+      scholarRow("z2", { preferredName: "Zed Z" }),
+    ]);
+    const hits = await buildHits(["z2", "z1", "gone"], {
+      kind: "department",
+      chipsEnabled: false,
+    });
+    expect(hits.map((h) => h.cwid)).toEqual(["z2", "z1"]);
+  });
+});
+
+describe("getUnitMembersFiltered — TOPICS (MeSH) chips, Unit Page v2", () => {
+  it("looks up MeSH ONCE for the page's rows (no N+1) and returns topMesh on hits", async () => {
+    routeScholars([scholarRow("tst0001"), scholarRow("tst0002"), scholarRow("tst0003")]);
+    mockFamilyFindMany.mockResolvedValue([]);
+    mockLoadTopMesh.mockResolvedValue(
+      new Map([["tst0002", [{ ui: "D000001", label: "Alpha Term" }]]]),
+    );
+
+    const result = await getUnitMembersFiltered("department", "N1140", {}, 0);
+
+    expect(mockLoadTopMesh).toHaveBeenCalledTimes(1);
+    expect([...(mockLoadTopMesh.mock.calls[0][0] as string[])].sort()).toEqual([
+      "tst0001",
+      "tst0002",
+      "tst0003",
+    ]);
+    const byCwid = new Map(result.hits.map((h) => [h.cwid, h]));
+    expect(byCwid.get("tst0002")?.topMesh).toEqual([{ ui: "D000001", label: "Alpha Term" }]);
+    expect(byCwid.get("tst0001")).not.toHaveProperty("topMesh");
   });
 });

@@ -385,6 +385,15 @@
   font-family: var(--font-serif);
 }
 
+/* Unit pages (department / division / center, "Unit Page v2"): every link and
+   button inside the page shell gets the Apollo keyboard-focus ring. Scoped to
+   `.unit-surface` (set on those pages' <main>) so it never ripples site-wide. */
+.unit-surface :is(a, button, [role="tab"]):focus-visible {
+  outline: 2px solid var(--apollo-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* The single white detail-panel card for /edit surfaces (Scholars Profile
    Console mockup). Exactly one per surface: EditShell wraps the active panel
    in this card; the panel itself stays flat (see edit-panel.tsx) so there is
@@ -552,12 +561,25 @@
    (via :has on the home-page-root wrapper) so other surfaces — e.g. the
    About-page anchor TOC — keep their instant jumps. Honors reduced-motion.
    The root scrolling element (html/:root) is what actually scrolls for in-page
-   anchors, so scroll-behavior must live on :root, conditioned on the home page. */
-:root:has(.home-page-root) {
+   anchors, so scroll-behavior must live on :root, conditioned on the home page.
+   The /browse hub (.browse-page-root) opts in too, for its sticky
+   section-anchor strip. */
+:root:has(.home-page-root),
+:root:has(.browse-page-root) {
   scroll-behavior: smooth;
 }
 @media (prefers-reduced-motion: reduce) {
-  :root:has(.home-page-root) {
+  :root:has(.home-page-root),
+  :root:has(.browse-page-root) {
     scroll-behavior: auto;
   }
+}
+
+/* /browse hub: every link and button gets the Apollo maroon keyboard-focus
+   ring (Departments & Centers v2 mock). Scoped to .browse-page-root so other
+   public pages are unaffected. */
+.browse-page-root :is(a, button):focus-visible {
+  outline: 2px solid var(--apollo-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

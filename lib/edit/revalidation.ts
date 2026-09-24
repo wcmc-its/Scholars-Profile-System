@@ -254,6 +254,16 @@ export async function reflectUnitChange(params: {
     }
   }
   revalidatePaths(paths);
+  // Unit Page v2 — each unit page has research-area views under
+  // `{unitPath}/areas/{topic}` (the hero preview's "See all"). They render the
+  // same hero, so a leader/description/slug edit must purge them at the edge
+  // too; an invalidation of `/departments/x` does not cover sub-paths. The
+  // area routes read searchParams (dynamic render, no ISR entry), so only the
+  // CDN needs the wildcard — it is off the revalidatePath allow-list by design.
+  const areaWildcards = paths
+    .filter((p) => p.startsWith("/departments/") || p.startsWith("/centers/"))
+    .filter((p) => !p.includes("/programs/"))
+    .map((p) => `${p}/areas/*`);
   // #1537 — the ISR/CDN busts above don't touch the in-process swr-cache Map
   // that getCenter/getDepartment/getDivision (+ their members/pubs/spotlight
   // reads) serve through, so the origin task would re-serve the pre-edit rollup
@@ -264,7 +274,7 @@ export async function reflectUnitChange(params: {
       ? ["division:", "department:"]
       : [`${params.unitKind}:`];
   for (const prefix of bustPrefixes) bust(prefix);
-  await invalidateCloudFront(paths);
+  await invalidateCloudFront([...paths, ...areaWildcards]);
 }
 
 /**

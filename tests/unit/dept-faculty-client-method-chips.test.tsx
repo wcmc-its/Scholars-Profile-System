@@ -16,6 +16,13 @@ vi.mock("@/components/scholar/headshot-avatar", () => ({
 vi.mock("@/components/scholar/person-popover", () => ({
   PersonPopover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+// Unit Page v2 — `PersonRow` shows ONE tag row, TOPICS (MeSH) by default; the
+// wrench method row renders only in "methods" mode. Pin that mode so this still
+// proves the client's `topMethods` → `methodChips` wiring.
+vi.mock("@/lib/roster-row-tags", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/roster-row-tags")>()),
+  ROSTER_ROW_TAGS: "methods",
+}));
 
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";

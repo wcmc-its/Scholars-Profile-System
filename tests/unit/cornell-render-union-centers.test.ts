@@ -39,6 +39,7 @@ vi.mock("@/lib/db", () => ({
     centerMembership: { findMany: membershipFindMany },
     centerProgram: { findMany: vi.fn(async () => []) },
     publicationTopic: { groupBy: vi.fn(async () => []) },
+    publicationAuthor: { groupBy: vi.fn(async () => []) },
     grant: { findMany: vi.fn(async () => []) },
     externalMember: { findMany: externalMemberFindMany },
     suppression: { findFirst: vi.fn(async () => null), findMany: vi.fn(async () => []) },
@@ -311,11 +312,13 @@ describe("center render union — getCenterMembersByType", () => {
     membershipFindMany.mockImplementation(() =>
       Promise.resolve([WCM_ROW, AFFILIATED_ROW, CORNELL_ROW]),
     );
+    // Unit Page v2 — the whole-roster index select carries no role filter (the
+    // role group is applied in memory); only the page hydration re-applies it.
     scholarFindMany.mockImplementation(
       (args: { where?: { roleCategory?: { in?: string[] } } }) => {
-        const rawValues = args?.where?.roleCategory?.in ?? [];
-        const rows = [WCM_SCHOLAR, AFFILIATED_SCHOLAR].filter((s) =>
-          rawValues.includes(s.roleCategory),
+        const rawValues = args?.where?.roleCategory?.in;
+        const rows = [WCM_SCHOLAR, AFFILIATED_SCHOLAR].filter(
+          (s) => !rawValues || rawValues.includes(s.roleCategory),
         );
         return Promise.resolve(rows);
       },
@@ -442,10 +445,15 @@ describe("center render union — getCenterMembersByType — pagination across a
       ]),
     );
     scholarFindMany.mockImplementation(
-      (args: { where?: { roleCategory?: { in?: string[] } } }) => {
-        const rawValues = args?.where?.roleCategory?.in ?? [];
+      (args: { where?: { roleCategory?: { in?: string[] }; cwid?: { in?: string[] } } }) => {
+        const rawValues = args?.where?.roleCategory?.in;
+        const cwids = args?.where?.cwid?.in;
         return Promise.resolve(
-          PAGE_WCM_SCHOLARS.filter((s) => rawValues.includes(s.roleCategory)),
+          PAGE_WCM_SCHOLARS.filter(
+            (s) =>
+              (!rawValues || rawValues.includes(s.roleCategory)) &&
+              (!cwids || cwids.includes(s.cwid)),
+          ),
         );
       },
     );
@@ -475,14 +483,15 @@ describe("center render union — getCenterMembersByType — pagination across a
     expect(page1.hits.every((h) => !h.isExternal)).toBe(true);
   });
 
-  it("'Full-time faculty' on the same fixture never calls the externalMember mock", async () => {
-    externalMemberFindMany.mockClear();
+  it("'Full-time faculty' on the same fixture excludes the external member", async () => {
+    // Unit Page v2 — externals live in the cached roster index (loaded once per
+    // center), so the lookup may run; the role group is what keeps them out.
     const result = await getCenterMembersByType(
       "TEST_CENTER_PAGE_BOUNDARY",
       "Full-time faculty",
       0,
     );
     expect(result.total).toBe(0);
-    expect(externalMemberFindMany).not.toHaveBeenCalled();
+    expect(result.hits).toEqual([]);
   });
 });

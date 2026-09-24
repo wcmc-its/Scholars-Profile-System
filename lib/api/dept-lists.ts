@@ -31,10 +31,13 @@ import {
   loadAllPublicationSuppressions,
   resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
+import { unitPublicationWhere } from "@/lib/api/unit-publication-where";
 
 const PAGE_SIZE = 20;
 
 export type PubSort = "newest" | "most_cited";
+/** Publications-tab list options. `area` is a parent topic id (`Topic.id`). */
+export type PubListOpts = { page?: number; sort?: PubSort; area?: string | null };
 /** Re-exported (type-only, so nothing is pulled into the client bundle) because
  *  the department/division page components already import it from here. */
 export type { GrantSort };
@@ -54,7 +57,7 @@ export type DeptListGrantResult = {
 
 async function getDeptPublicationsListUncached(
   deptCode: string,
-  opts: { page?: number; sort?: PubSort } = {},
+  opts: PubListOpts = {},
 ): Promise<DeptListPubResult> {
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
@@ -65,13 +68,15 @@ async function getDeptPublicationsListUncached(
   // SMALL sitewide active-suppression set, resolve the unit's dark pmids from it
   // (tens of rows), and exclude them via `pmid: { notIn }`. #356 — total and the
   // page window are both computed over this visible set.
+  // `opts.area` narrows to one research area (the hero pill's "See all").
   const membership = { scholar: { deptCode, deletedAt: null, status: "active" } };
   const suppressions = await loadAllPublicationSuppressions(prisma);
   const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
-  const visibleWhere = {
-    authors: { some: { isConfirmed: true, ...membership } },
-    ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
-  };
+  const visibleWhere = unitPublicationWhere({
+    membership,
+    darkPmids: unitDarkPmids,
+    area: opts.area,
+  });
   const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PAGE_SIZE };
@@ -194,12 +199,9 @@ async function getDeptGrantsListUncached(
 
 // --- Cached public wrappers (viewer-independent reads via lib/api/swr-cache;
 //     mirrors the center-page caching in lib/api/centers.ts). ---
-export const getDeptPublicationsList = (
-  deptCode: string,
-  opts: { page?: number; sort?: PubSort } = {},
-) =>
+export const getDeptPublicationsList = (deptCode: string, opts: PubListOpts = {}) =>
   cachedRead(
-    `department:pubs:${deptCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}`,
+    `department:pubs:${deptCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}:${opts.area ?? "-"}`,
     () => getDeptPublicationsListUncached(deptCode, opts),
   );
 

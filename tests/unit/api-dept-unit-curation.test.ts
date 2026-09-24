@@ -62,6 +62,7 @@ vi.mock("@/lib/db", () => ({
       groupBy: mockScholarGroupBy,
     },
     appointment: { findFirst: mockAppointmentFindFirst },
+    $queryRaw: vi.fn(async () => []),
     publicationTopic: {
       groupBy: mockPublicationTopicGroupBy,
       count: mockPublicationTopicCount,

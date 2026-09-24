@@ -8,8 +8,9 @@
  * See also: lib/api/topics.ts — getDistinctScholarCountForTopic (D-10 affordance lives there
  * for semantic correctness, since it operates on Topic data).
  *
- * Ordering: chief-of-division first when filtering by division; remaining faculty
- * sorted by preferredName ASC (pub-count DESC would require raw SQL — see note below).
+ * Ordering (Unit Page v2 roster toolbar): surname A–Z by default, or most
+ * publications / most grants; chief-of-division first when filtering by
+ * division under the surname sort.
  *
  * Eligibility: NO role carve on department faculty list per UI-SPEC §6.10 — all 11
  * role values shown. Only deletedAt IS NULL + status = active apply.
@@ -19,7 +20,10 @@
  *   - .planning/phases/03-topic-and-department-detail-pages/03-CONTEXT.md (D-01, D-03, D-10, D-12)
  */
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { cachedRead } from "@/lib/api/swr-cache";
+import { attachTopMesh } from "@/lib/api/roster-mesh";
+import type { RosterMeshChip } from "@/lib/roster-row-tags";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -39,11 +43,12 @@ import {
 import { loadUnitGrantProjects } from "@/lib/api/unit-grant-projects";
 import {
   aggregatePublicFamiliesForUnit,
-  loadPublicFamiliesForMembers,
-  ROSTER_ROW_METHODS_CAP,
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
 import type { FacetOption } from "@/components/center/center-roster-facets";
+import { loadUnitRosterIndex } from "@/lib/api/unit-roster-index";
+import { hydrateRosterPage } from "@/lib/api/unit-members";
+import { rankRoster, type RosterSort } from "@/lib/roster-sort";
 import {
   isOrgUnitMethodsChipsEnabled,
   isOrgUnitMethodsFacetEnabled,
@@ -210,16 +215,24 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
     }
   }
 
-  // --- Top research areas: top 10 parent topics by distinct pub count for dept scholars ---
-  const topicCounts = await prisma.publicationTopic.groupBy({
-    by: ["parentTopicId"],
-    where: {
-      scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
-    },
-    _count: { pmid: true },
-    orderBy: { _count: { pmid: "desc" } },
-    take: 10,
-  });
+  // --- Top research areas: top 10 parent topics by DISTINCT pub count for dept scholars ---
+  // COUNT(DISTINCT pmid), not a `groupBy` `_count.pmid`: publication_topic is
+  // keyed (pmid, cwid, parent_topic_id), so a row count counted a paper once
+  // per department author. Same shape as the browse page (lib/api/browse.ts)
+  // and the center / division loaders.
+  const topicCounts = (
+    ((await prisma.$queryRaw(
+      Prisma.sql`SELECT pt.parent_topic_id AS parentTopicId, COUNT(DISTINCT pt.pmid) AS pubCount
+                   FROM publication_topic pt
+                   JOIN scholar s ON s.cwid = pt.cwid
+                  WHERE s.dept_code = ${dept.code}
+                    AND s.deleted_at IS NULL
+                    AND s.status = 'active'
+                  GROUP BY pt.parent_topic_id
+                  ORDER BY pubCount DESC, pt.parent_topic_id ASC
+                  LIMIT 10`,
+    )) as Array<{ parentTopicId: string; pubCount: number | bigint }> | undefined) ?? []
+  ).map((r) => ({ parentTopicId: r.parentTopicId, pubCount: Number(r.pubCount) }));
   const topicIds = topicCounts.map((t: { parentTopicId: string }) => t.parentTopicId);
   const topicMeta =
     topicIds.length > 0
@@ -231,14 +244,12 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
   const labelMap = new Map<string, string>(
     topicMeta.map((t: { id: string; label: string }) => [t.id, t.label]),
   );
-  const topResearchAreas: DepartmentTopicArea[] = topicCounts.map(
-    (t: { parentTopicId: string; _count: { pmid: number } }) => ({
-      topicId: t.parentTopicId,
-      topicLabel: labelMap.get(t.parentTopicId) ?? t.parentTopicId,
-      topicSlug: t.parentTopicId, // Topic.id IS the slug per 02-SCHEMA-DECISION.md
-      pubCount: t._count.pmid,
-    }),
-  );
+  const topResearchAreas: DepartmentTopicArea[] = topicCounts.map((t) => ({
+    topicId: t.parentTopicId,
+    topicLabel: labelMap.get(t.parentTopicId) ?? t.parentTopicId,
+    topicSlug: t.parentTopicId, // Topic.id IS the slug per 02-SCHEMA-DECISION.md
+    pubCount: t.pubCount,
+  }));
 
   // --- Divisions for this dept, sorted by scholarCount DESC ---
   const rawDivisions = await prisma.division.findMany({
@@ -385,6 +396,10 @@ export type DepartmentFacultyHit = {
    *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
    *  has ≥1 public family; undefined otherwise (off-path payload carries nothing). */
   topMethods?: MemberMethodFamily[];
+  /** Unit Page v2 — top ≤3 MeSH terms (people index `topMeshTerms`) for the
+   *  roster TOPICS chips. Attached OUTSIDE the cached roster read
+   *  (lib/api/roster-mesh.ts); absent when the member has none. */
+  topMesh?: RosterMeshChip[];
   /** #2519 — true only for a Cornell (Ithaca) external member (no `Scholar`
    *  row). Undefined on every WCM hit. `PersonRow` must branch on this BEFORE
    *  the `isPubliclyDisplayed`/`slug` profile-link logic, which does not apply
@@ -428,64 +443,58 @@ const FACULTY_PAGE_SIZE = 20;
 const normalizeRoleCategory = formatRoleCategory;
 
 /**
- * Returns paginated faculty for a department, optionally filtered by division.
+ * Returns paginated faculty for a department, optionally filtered by division,
+ * in the roster toolbar's `sort` order (Unit Page v2): "last" = surname A–Z
+ * (`extractLastNameSort`, the People-search / center-roster key — the default,
+ * and a change from the old first-name `preferredName` ASC), "pubs" / "grants"
+ * = the row's displayed count, descending, surname tiebreak.
  *
- * Ordering: chief-of-division first (when divCode is set and chief is on page 0),
- * then remaining faculty sorted by preferredName ASC.
- *
- * NOTE: pub-count DESC ordering would require a subquery or raw SQL in Prisma.
- * preferredName ASC is used as the deterministic fallback for Phase 3 first pass.
- * If pub-count ordering becomes a hard requirement, add a prisma.$queryRaw variant.
+ * The page is ranked from the cached whole-roster index
+ * (`loadUnitRosterIndex`), sliced, and hydrated through the same `buildHits`
+ * the filtered route uses, so SSR and route rows cannot drift. With a divCode
+ * and the surname sort, the division chief is pinned first.
  *
  * Eligibility: UI-SPEC §6.10 shows all ELIGIBILITY roles, but the #536 public-display
  * carve is an identity-class rule that overrides it (#2202) — doctoral students and
  * `affiliate_alumni` are not enumerable on a directed, crawlable surface. The carve
- * lives in `baseWhere` below, so a hidden scholar is never LOADED; the render-time
- * guard in `person-row.tsx` is now a second line of defense, not the only one.
+ * lives in the index's member query, so a hidden scholar is never LOADED, and
+ * `buildHits` repeats it on the page rows; the render-time guard in
+ * `person-row.tsx` is a second line of defense, not the only one.
  */
 async function getDepartmentFacultyUncached(
   deptCode: string,
-  opts: { divCode?: string; page?: number },
+  opts: { divCode?: string; page?: number; sort?: RosterSort },
 ): Promise<DepartmentFacultyResult> {
   const page = Math.max(0, opts.page ?? 0);
-  // ONE where drives `total`, `roleCategoryCounts`, the chief row, the page rows
-  // and the methodFacet cwid select — so the #536 carve shrinks all five together
-  // and nothing can desync. The "Doctoral students" chip then counts 0 and
-  // `role-chip-row.tsx` omits it.
-  const baseWhere = {
-    deptCode,
-    deletedAt: null,
-    status: "active" as const,
-    ...(opts.divCode ? { divCode: opts.divCode } : {}),
-    ...publicRoleWhere(),
-  };
-
-  const total = await prisma.scholar.count({ where: baseWhere });
+  const sort: RosterSort = opts.sort ?? "last";
+  // ONE carved member list drives `total`, `roleCategoryCounts`, the chief pin,
+  // the page rows and the methodFacet cwid set — so the #536 carve shrinks all
+  // five together and nothing can desync. The "Doctoral students" chip then
+  // counts 0 and `role-chip-row.tsx` omits it.
+  const index = await loadUnitRosterIndex("department", deptCode, {
+    withCounts: sort !== "last",
+  });
+  const scope = opts.divCode ? index.filter((e) => e.divCode === opts.divCode) : index;
+  const total = scope.length;
   if (total === 0) {
     return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
   }
 
   // Whole-scope role-category counts so the chip-row reflects the entire
   // dataset, not just the visible page. (#17)
-  const roleCategoryCounts = await (async () => {
-    const rows = await prisma.scholar.groupBy({
-      by: ["roleCategory"],
-      where: baseWhere,
-      _count: { _all: true },
-    });
-    const out: Record<string, number> = {};
-    for (const r of rows) {
-      const label = normalizeRoleCategory(r.roleCategory);
-      if (label === null) continue;
-      out[label] = (out[label] ?? 0) + r._count._all;
-    }
-    return out;
-  })();
+  const roleCategoryCounts: Record<string, number> = {};
+  for (const e of scope) {
+    const label = normalizeRoleCategory(e.roleCategory);
+    if (label === null) continue;
+    roleCategoryCounts[label] = (roleCategoryCounts[label] ?? 0) + 1;
+  }
 
-  // Chief-first ordering when divCode is provided. Override > assignment
-  // (#2542 contract A), same precedence as the division page itself.
-  let chiefCwid: string | null = null;
-  if (opts.divCode) {
+  let ranked = rankRoster(scope, { sort });
+
+  // Chief-first ordering when divCode is provided (surname sort only — a count
+  // sort is an explicit ranking). Override > assignment (#2542 contract A),
+  // same precedence as the division page itself.
+  if (opts.divCode && sort === "last") {
     const divOverrides = await loadUnitFieldOverrides("division", opts.divCode, prisma);
     const resolvedChief = await resolveUnitLeader({
       entityType: "division",
@@ -495,128 +504,38 @@ async function getDepartmentFacultyUncached(
       fallbackLabel: "Chief",
       client: prisma,
     });
-    chiefCwid = resolvedChief?.cwid ?? null;
+    const chiefIdx = resolvedChief?.cwid
+      ? ranked.findIndex((e) => e.cwid === resolvedChief.cwid)
+      : -1;
+    if (chiefIdx > 0) {
+      ranked = [ranked[chiefIdx], ...ranked.slice(0, chiefIdx), ...ranked.slice(chiefIdx + 1)];
+    }
   }
 
-  // Scholar rows include department and division names.
-  const includeClause = {
-    department: { select: { name: true } },
-    division: { select: { name: true } },
-  } as const;
+  // #974 — the hydration attaches top-≤3 PUBLIC method families for the per-row
+  // chips, keyed on the visible page's ≤20 CWIDs. The loader self-gates on the
+  // flag, so off → no chips, and the page stays CloudFront-cacheable (a plain
+  // DB read, no per-viewer call).
+  const hits = await hydrateRosterPage(
+    "department",
+    ranked.slice(page * FACULTY_PAGE_SIZE, (page + 1) * FACULTY_PAGE_SIZE),
+    { chipsEnabled: isOrgUnitMethodsChipsEnabled() },
+  );
 
-  // Fetch chief separately on page 0 if one exists.
-  let chiefRow: Awaited<ReturnType<typeof prisma.scholar.findFirst>> | null = null;
-  if (chiefCwid && page === 0) {
-    chiefRow = await prisma.scholar.findFirst({
-      where: { cwid: chiefCwid, ...baseWhere },
-      include: includeClause,
-    });
-  }
-
-  // Fetch remaining scholars (excluding chief if present on page 0).
-  const restWhere = chiefRow ? { ...baseWhere, NOT: { cwid: chiefRow.cwid } } : baseWhere;
-  // If chief occupies a slot on page 0, rest gets PAGE_SIZE - 1 rows from offset 0.
-  // For page > 0, offset adjusts by -1 to account for chief consuming slot 0.
-  const restTake = chiefRow ? FACULTY_PAGE_SIZE - 1 : FACULTY_PAGE_SIZE;
-  const restSkip = chiefRow && page > 0 ? page * FACULTY_PAGE_SIZE - 1 : page * FACULTY_PAGE_SIZE;
-
-  const rest = await prisma.scholar.findMany({
-    where: restWhere,
-    skip: Math.max(0, restSkip),
-    take: restTake,
-    orderBy: [{ preferredName: "asc" }],
-    include: includeClause,
-  });
-
-  const allRows = chiefRow ? [chiefRow, ...rest] : rest;
-
-  type ScholarRow = (typeof allRows)[number];
-
-  // Batch-fetch pub + grant counts.
-  const cwids = allRows.map((s: ScholarRow) => s.cwid);
-  const now = new Date();
-
-  type PubGroupRow = { cwid: string; _count: { pmid: number } };
-  type GrantGroupRow = { cwid: string; _count: { _all: number } };
-
-  let pubCounts: PubGroupRow[] = [];
-  let grantCounts: GrantGroupRow[] = [];
-
-  if (cwids.length > 0) {
-    const [pc, gc] = await Promise.all([
-      prisma.publicationTopic.groupBy({
-        by: ["cwid"],
-        where: { cwid: { in: cwids } },
-        _count: { pmid: true },
-        orderBy: { cwid: "asc" },
-      }) as unknown as Promise<PubGroupRow[]>,
-      prisma.grant.groupBy({
-        by: ["cwid"],
-        where: { cwid: { in: cwids }, endDate: { gte: now }, source: { not: "RePORTER" } },
-        _count: { _all: true },
-        orderBy: { cwid: "asc" },
-      }) as unknown as Promise<GrantGroupRow[]>,
-    ]);
-    pubCounts = pc;
-    grantCounts = gc;
-  }
-
-  const pubMap = new Map<string, number>(pubCounts.map((r: PubGroupRow) => [r.cwid, r._count.pmid]));
-  const grantMap = new Map<string, number>(grantCounts.map((r: GrantGroupRow) => [r.cwid, r._count._all]));
-
-  const hits: DepartmentFacultyHit[] = allRows.map((s: ScholarRow) => ({
-    cwid: s.cwid,
-    preferredName: s.preferredName,
-    slug: s.slug,
-    primaryTitle: s.primaryTitle,
-    divisionName: (s as ScholarRow & { division?: { name: string } | null }).division?.name ?? null,
-    departmentName:
-      (s as ScholarRow & { department?: { name: string } | null }).department?.name ??
-      s.primaryDepartment ??
-      "",
-    identityImageEndpoint: identityImageEndpoint(s.cwid),
-    roleCategory: normalizeRoleCategory(s.roleCategory),
-    roleCategoryRaw: s.roleCategory,
-    overview: s.overview ? s.overview.slice(0, 120).trimEnd() + (s.overview.length > 120 ? "…" : "") : null,
-    pubCount: pubMap.get(s.cwid) ?? 0,
-    grantCount: grantMap.get(s.cwid) ?? 0,
-    primaryOrgCode: s.primaryOrgCode ?? null,
-  }));
-
-  // #974 — attach top-≤3 PUBLIC method families for the per-row chips, keyed on
-  // the visible page's ≤20 CWIDs (no whole-dataset aggregation — that's Phase 2).
-  // The loader self-gates on the flag, so off → empty map → hits pass through
-  // byte-identical, and the page stays CloudFront-cacheable (a plain DB read,
-  // no per-viewer call).
-  const famByCwid = await loadPublicFamiliesForMembers(cwids, {
-    enabled: isOrgUnitMethodsChipsEnabled(),
-  });
-  const finalHits =
-    famByCwid.size === 0
-      ? hits
-      : hits.map((h) => {
-          const fams = famByCwid.get(h.cwid);
-          return fams && fams.length > 0
-            ? { ...h, topMethods: fams.slice(0, ROSTER_ROW_METHODS_CAP) }
-            : h;
-        });
-
-  // #974 Phase 2 — unit-wide "Methods & tools" facet buckets. Cheap `select cwid`
-  // of the FULL active member set (the paginated page above is only ≤20 rows),
-  // aggregated into PUBLIC family buckets. Flag-gated: when off, no extra query
-  // runs and `methodFacet` is undefined → omitted from JSON → off-path payload is
-  // byte-identical. Viewer-independent → the page stays CloudFront-cacheable.
+  // #974 Phase 2 — unit-wide "Methods & tools" facet buckets over the FULL
+  // carved member set (the page above is only ≤20 rows), aggregated into PUBLIC
+  // family buckets. Flag-gated: when off, no extra query runs and `methodFacet`
+  // is undefined → omitted from JSON → off-path payload is byte-identical.
+  // Viewer-independent → the page stays CloudFront-cacheable.
   const methodFacet = isOrgUnitMethodsFacetEnabled()
     ? await aggregatePublicFamiliesForUnit(
-        (
-          await prisma.scholar.findMany({ where: baseWhere, select: { cwid: true } })
-        ).map((r) => r.cwid),
+        scope.map((e) => e.cwid),
         { enabled: true },
       )
     : undefined;
 
   return {
-    hits: finalHits,
+    hits,
     total,
     roleCategoryCounts,
     page,
@@ -630,11 +549,15 @@ async function getDepartmentFacultyUncached(
 export const getDepartment = (slug: string) =>
   cachedRead(`department:detail:${slug}`, () => getDepartmentUncached(slug));
 
-export const getDepartmentFaculty = (
+export const getDepartmentFaculty = async (
   deptCode: string,
-  opts: { divCode?: string; page?: number },
-) =>
-  cachedRead(
-    `department:faculty:${deptCode}:${opts.divCode ?? ""}:${Math.max(0, opts.page ?? 0)}`,
+  opts: { divCode?: string; page?: number; sort?: RosterSort },
+): Promise<DepartmentFacultyResult> => {
+  const result = await cachedRead(
+    `department:faculty:${deptCode}:${opts.divCode ?? ""}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "last"}`,
     () => getDepartmentFacultyUncached(deptCode, opts),
   );
+  // TOPICS chips attach after the cached read so a degraded (OpenSearch-down)
+  // empty is never baked into this roster's swr entry.
+  return { ...result, hits: await attachTopMesh(result.hits) };
+};

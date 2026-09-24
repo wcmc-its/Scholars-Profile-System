@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 
 export type FacetOption = { value: string; label: string; count: number };
 
@@ -11,6 +13,12 @@ export type FacetOption = { value: string; label: string; count: number };
  * cross-facet selection is disabled (not hidden) so the option list is stable.
  * `collapseAfter` caps the visible rows (the Organizational-unit facet has many
  * departments) behind a "Show all" toggle.
+ *
+ * `variant="unit"` (Unit Page v2): 11px / 0.14em group label, DS `Checkbox` +
+ * `<label>` rows (grid 14px | 1fr | auto), 13px foreground labels, muted
+ * tabular counts, DS `Input` search with a leading icon. Each checkbox's
+ * accessible name is "{label} {count}" (aria-labelledby over both cells). The
+ * default variant is the original button-row facet (/edit rails share it).
  */
 export function RosterFacet({
   title,
@@ -21,6 +29,7 @@ export function RosterFacet({
   searchable = false,
   searchPlaceholder = "Search…",
   noMatchLabel = "No matches",
+  variant = "default",
 }: {
   title: string;
   options: FacetOption[];
@@ -30,9 +39,14 @@ export function RosterFacet({
   searchable?: boolean;
   searchPlaceholder?: string;
   noMatchLabel?: string;
+  /** "unit" — the Unit Page v2 look (dept / division / center rosters): DS
+   *  Checkbox rows, 0.14em label, DS Input search. "default" keeps the
+   *  original button-row facet the /edit console rails share, unchanged. */
+  variant?: "default" | "unit";
 }) {
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
+  const idBase = useId();
   if (options.length === 0) return null;
 
   // Search input only when explicitly enabled AND there are enough options to
@@ -61,6 +75,101 @@ export function RosterFacet({
   }
   const hiddenCount = q ? 0 : options.length - visible.length;
   const noMatches = showSearch && q.length > 0 && visible.length === 0;
+
+  if (variant === "unit") {
+    return (
+      <div className="flex flex-col gap-2">
+        <h3 className="text-[11px] font-normal uppercase tracking-[0.14em] text-muted-foreground">
+          {title}
+        </h3>
+        {showSearch ? (
+          <div className="relative">
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute left-[9px] top-1/2 z-[1] size-[13px] -translate-y-1/2 text-muted-foreground"
+              strokeWidth={2}
+            />
+            <Input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={searchPlaceholder}
+              aria-label={`Search ${title}`}
+              className="h-8 border-muted-foreground bg-white pl-7 text-[13px] md:text-[13px]"
+            />
+          </div>
+        ) : null}
+        <ul className="m-0 flex list-none flex-col p-0">
+          {visible.map((o, i) => {
+            const isSelected = selected.has(o.value);
+            const disabled = o.count === 0 && !isSelected;
+            const id = `${idBase}-${i}`;
+            return (
+              <li
+                key={o.value}
+                className={`grid grid-cols-[14px_minmax(0,1fr)_auto] items-start gap-[7px] py-[3px] ${
+                  disabled ? "opacity-40" : ""
+                }`}
+              >
+                <Checkbox
+                  id={id}
+                  checked={isSelected}
+                  disabled={disabled}
+                  onCheckedChange={() => onToggle(o.value)}
+                  aria-labelledby={`${id}-label ${id}-count`}
+                  className="mt-[2px] size-3.5 border-muted-foreground bg-white"
+                />
+                <label
+                  id={`${id}-label`}
+                  htmlFor={id}
+                  className={`break-words text-[13px] leading-[18px] text-foreground ${
+                    disabled ? "cursor-default" : "cursor-pointer"
+                  }`}
+                >
+                  {o.label}
+                </label>
+                <span
+                  id={`${id}-count`}
+                  className="text-[12px] leading-[18px] tabular-nums text-muted-foreground"
+                >
+                  {o.count.toLocaleString()}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        {noMatches ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="py-1 text-[12px] text-muted-foreground"
+          >
+            {noMatchLabel}
+          </div>
+        ) : null}
+        {!q && !showAll && hiddenCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="inline-flex cursor-pointer items-center gap-1 self-start text-[13px] text-[var(--color-primary-cornell-red)] hover:underline"
+          >
+            <ChevronDown aria-hidden className="size-[11px]" strokeWidth={2.5} />
+            Show all {options.length}
+          </button>
+        ) : null}
+        {!q && showAll && options.length > collapseAfter ? (
+          <button
+            type="button"
+            onClick={() => setShowAll(false)}
+            className="inline-flex cursor-pointer items-center gap-1 self-start text-[13px] text-[var(--color-primary-cornell-red)] hover:underline"
+          >
+            <ChevronDown aria-hidden className="size-[11px] rotate-180" strokeWidth={2.5} />
+            Show fewer
+          </button>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-5">

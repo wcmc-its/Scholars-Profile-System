@@ -28,6 +28,23 @@ import type {
   CenterMembersResult,
 } from "@/lib/api/centers";
 import { HOME_INSTITUTION_CODE, institutionCodeForName, institutionDisplayName } from "@/lib/institutions";
+import { RosterToolbar } from "@/components/shared/roster-toolbar";
+import {
+  isRosterSort,
+  matchesRosterQuery,
+  normalizeRosterQuery,
+  rankRoster,
+  type RosterSort,
+} from "@/lib/roster-sort";
+
+/** Unit Page v2 — mirror the roster toolbar's sort (only when not the default)
+ *  and name query into the address bar without a navigation. */
+function syncToolbarParams(params: URLSearchParams, sort: RosterSort, q: string) {
+  params.delete("sort");
+  params.delete("q");
+  if (sort !== "last") params.set("sort", sort);
+  if (q) params.set("q", q);
+}
 
 export function CenterMembersClient({
   result,
@@ -35,6 +52,7 @@ export function CenterMembersClient({
   centerCode,
   programPagesEnabled = false,
   singleProgram = false,
+  initialSort = "last",
 }: {
   result: CenterMembersResult;
   centerSlug: string;
@@ -51,6 +69,10 @@ export function CenterMembersClient({
    *  facet auto-hides (one option) and the lone section header is suppressed,
    *  since it would just echo the page title. */
   singleProgram?: boolean;
+  /** Unit Page v2 — the roster sort from `?sort=` (parsed server-side). The
+   *  flat roster's SSR page is already ranked by it; the grouped roster sorts
+   *  each program section in the browser. */
+  initialSort?: RosterSort;
 }) {
   if (result.mode === "grouped") {
     return (
@@ -60,10 +82,18 @@ export function CenterMembersClient({
         centerSlug={centerSlug}
         programPagesEnabled={programPagesEnabled}
         singleProgram={singleProgram}
+        initialSort={initialSort}
       />
     );
   }
-  return <FlatMembers result={result} centerSlug={centerSlug} centerCode={centerCode} />;
+  return (
+    <FlatMembers
+      result={result}
+      centerSlug={centerSlug}
+      centerCode={centerCode}
+      initialSort={initialSort}
+    />
+  );
 }
 
 /**
@@ -74,16 +104,17 @@ export function CenterMembersClient({
  */
 const PROGRAM_PAGE_EXCLUDED_CODES: ReadonlySet<string> = new Set(["ZY"]);
 
-/** Research/Clinical pill rendered after a member's role tag in the roster. */
+/** Research/Clinical pill rendered after a member's name in the roster
+ *  (Unit Page v2: 11px/15px, 1px 6px, 3px radius, Apollo tint tokens). */
 function MembershipBadge({ type }: { type: CenterMembershipType | null }) {
   if (!type) return null;
   const research = type === "research";
   return (
     <span
-      className={`inline-flex items-center rounded-[3px] border px-[6px] text-[11px] font-medium leading-[1.4] ${
+      className={`inline-flex items-center whitespace-nowrap rounded-[3px] border px-[6px] py-px text-[11px] leading-[15px] ${
         research
-          ? "border-[#c7d6e2] bg-[#eef3f7] text-[#2c4f6e]"
-          : "border-[#e6cdd0] bg-[#f7eef0] text-[var(--color-primary-cornell-red)]"
+          ? "border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate"
+          : "border-apollo-red-tint-border bg-apollo-red-tint text-[var(--color-primary-cornell-red)]"
       }`}
     >
       {research ? "Research" : "Clinical"}
@@ -96,7 +127,7 @@ function MembershipBadge({ type }: { type: CenterMembershipType | null }) {
  *  member never shows both. */
 function MembershipRoleBadge({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center rounded-[3px] border border-[#d8d8d8] bg-[#f4f4f4] px-[6px] text-[11px] font-medium leading-[1.4] text-[#4a4a4a]">
+    <span className="inline-flex items-center whitespace-nowrap rounded-[3px] border border-apollo-border-strong bg-apollo-surface-2 px-[6px] py-px text-[11px] leading-[15px] text-apollo-ink-2">
       {label}
     </span>
   );
@@ -132,14 +163,35 @@ function GroupedRoster({
   centerSlug,
   programPagesEnabled,
   singleProgram = false,
+  initialSort = "last",
 }: {
   groups: CenterMemberGroup[];
   total: number;
   centerSlug: string;
   programPagesEnabled: boolean;
   singleProgram?: boolean;
+  initialSort?: RosterSort;
 }) {
   const [appointment, setAppointment] = useState<RoleCategory>("All");
+  // Unit Page v2 roster toolbar. Every member is already on the page, so the
+  // name filter and sort run in the browser (no debounce needed).
+  const [sort, setSort] = useState<RosterSort>(initialSort);
+  const [nameQ, setNameQ] = useState("");
+  const q = normalizeRosterQuery(nameQ);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const seeded = normalizeRosterQuery(params.get("q"));
+    if (seeded) setNameQ(seeded);
+    // The program page renders this roster without reading `?sort=` server-side.
+    const seededSort = params.get("sort");
+    if (isRosterSort(seededSort)) setSort(seededSort);
+  }, []);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    syncToolbarParams(params, sort, q);
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [sort, q]);
   const [selPrograms, setSelPrograms] = useState<ReadonlySet<string>>(new Set());
   const [selTypes, setSelTypes] = useState<ReadonlySet<string>>(new Set());
   const [selDepts, setSelDepts] = useState<ReadonlySet<string>>(new Set());
@@ -180,10 +232,12 @@ function GroupedRoster({
   const methodValues = (m: RowWithProgram): string[] =>
     (m.methodFamilies ?? []).map((f) => f.value);
 
-  // Appointment (role) is the outer filter; the sidebar facets compose on top.
+  // Appointment (role) and the name/title query are the outer filters; the
+  // sidebar facets compose on top (mock order: appointment, query, facets).
   const base = useMemo(
-    () => filterByRoleCategory(allRows, appointment),
-    [allRows, appointment],
+    () =>
+      filterByRoleCategory(allRows, appointment).filter((m) => matchesRosterQuery(m, q)),
+    [allRows, appointment, q],
   );
 
   // A row passes every selected facet EXCEPT the named one (so a facet's own
@@ -297,16 +351,21 @@ function GroupedRoster({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, allRows, selPrograms, selTypes, selDepts, selRanks, selInsts]);
 
-  // Re-group the surviving rows under their program headers (original order).
+  // Re-group the surviving rows under their program headers. Sections keep the
+  // fixed program (sortOrder, label) order — they don't jump when the sort
+  // changes; rows are ranked by the toolbar sort WITHIN each section.
   const sections = useMemo(
     () =>
       programOrder
         .map((label) => ({
           label,
-          members: finalRows.filter((m) => m.programLabel === label),
+          members: rankRoster(
+            finalRows.filter((m) => m.programLabel === label),
+            { sort },
+          ),
         }))
         .filter((s) => s.members.length > 0),
-    [finalRows, programOrder],
+    [finalRows, programOrder, sort],
   );
 
   const makeToggle =
@@ -338,28 +397,41 @@ function GroupedRoster({
     setSelMethods(new Set());
     setSelRanks(new Set());
     setSelInsts(new Set());
+    // Mock "Clear all" also resets the name filter (the sort is a view choice).
+    setNameQ("");
   };
+  // Empty-state "Clear filters": the sidebar facets AND the Appointment chip.
+  const clearEverything = () => {
+    clearAll();
+    setAppointment("All");
+  };
+  // Unit Page v2 — a program header shows the program's TOTAL size (not the
+  // facet-narrowed count), so the number stays stable while filtering.
+  const programSize = useMemo(
+    () => new Map(groups.map((g) => [g.label, g.members.length])),
+    [groups],
+  );
+  // A member listed in several programs appears once per section; count each
+  // scholar once. With no filter active the denominator is the whole roster.
+  const shown = useMemo(() => new Set(finalRows.map((m) => m.cwid)).size, [finalRows]);
+  const ofTotal = anySelected || appointment !== "All" || q !== "" ? shown : total;
 
   return (
-    <div className="mt-6 flex flex-col gap-8 md:flex-row">
-      <aside className="md:w-[200px] md:shrink-0">
-        <div className="md:sticky md:top-[76px] md:max-h-[calc(100vh-76px)] md:overflow-y-auto">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Filter
-            </span>
-            {anySelected && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="cursor-pointer text-[12px] font-medium text-[var(--color-primary-cornell-red)] hover:underline"
-              >
-                Clear
-              </button>
-            )}
-          </div>
+    <div className="mt-5 flex flex-col gap-8 pt-2 md:flex-row md:flex-wrap md:items-start md:gap-x-14">
+      <aside className="md:w-[200px] md:shrink-0 md:grow-0">
+        <div className="flex flex-col gap-[22px] md:sticky md:top-[76px] md:max-h-[calc(100vh-76px)] md:overflow-y-auto">
+          {anySelected && (
+            <button
+              type="button"
+              onClick={clearAll}
+              className="cursor-pointer self-start text-[12px] font-medium text-[var(--color-primary-cornell-red)] hover:underline"
+            >
+              Clear
+            </button>
+          )}
           {programOptions.length >= 2 && (
             <RosterFacet
+              variant="unit"
               title="Program"
               options={programOptions}
               selected={selPrograms}
@@ -371,6 +443,7 @@ function GroupedRoster({
               anything. Mirrors the Program facet's ≥2 guard. */}
           {typeOptions.length >= 2 && (
             <RosterFacet
+              variant="unit"
               title="Membership type"
               options={typeOptions}
               selected={selTypes}
@@ -382,6 +455,7 @@ function GroupedRoster({
               `methodOptions` is then empty. */}
           {methodOptions.length > 0 && (
             <RosterFacet
+              variant="unit"
               title="Methods & tools"
               options={methodOptions}
               selected={selMethods}
@@ -395,6 +469,7 @@ function GroupedRoster({
           {/* #1570 — "Organizational unit" relabeled to "Department" per Cancer
               Center feedback. */}
           <RosterFacet
+            variant="unit"
             title="Department"
             options={deptOptions}
             selected={selDepts}
@@ -407,6 +482,7 @@ function GroupedRoster({
               a one-option facet can't filter anything. Mirrors the ≥2 guards above. */}
           {rankOptions.length >= 2 && (
             <RosterFacet
+              variant="unit"
               title="Professorial rank"
               options={rankOptions}
               selected={selRanks}
@@ -417,6 +493,7 @@ function GroupedRoster({
               rank, under the same ≥2-options guard. */}
           {instOptions.length >= 2 && (
             <RosterFacet
+              variant="unit"
               title="Institution"
               options={instOptions}
               selected={selInsts}
@@ -426,20 +503,33 @@ function GroupedRoster({
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span className="min-w-[72px] shrink-0 text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
-            Appointment
-          </span>
+      <div className="min-w-0 md:flex-[1_1_520px]">
+        <RosterToolbar query={nameQ} onQueryChange={setNameQ} sort={sort} onSortChange={setSort} />
+        <div className="mt-[14px]">
           <RoleChipRow faculty={allRows} active={appointment} onChange={setAppointment} />
         </div>
 
+        <div className="mt-4 text-[13px] text-muted-foreground">
+          {shown > 0
+            ? `Showing 1–${shown.toLocaleString()} of ${ofTotal.toLocaleString()} ${
+                ofTotal === 1 ? "scholar" : "scholars"
+              }`
+            : null}
+        </div>
+
         {sections.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No members match these filters.
+          <p className="mt-5 border-t border-apollo-border py-6 text-[14px] text-muted-foreground">
+            No scholars match these filters.{" "}
+            <button
+              type="button"
+              onClick={clearEverything}
+              className="cursor-pointer text-apollo-slate hover:underline"
+            >
+              Clear filters
+            </button>
           </p>
         ) : (
-          <div className="flex flex-col gap-8">
+          <div className="flex flex-col">
             {sections.map((g) => {
               // #1105 — link the section header to the dedicated program page
               // when the flag is on and the program is page-eligible (has a code,
@@ -449,16 +539,16 @@ function GroupedRoster({
                 programPagesEnabled &&
                 !!code &&
                 !PROGRAM_PAGE_EXCLUDED_CODES.has(code);
+              const size = programSize.get(g.label) ?? g.members.length;
               return (
-              <section key={g.label}>
+              <section key={g.label} className="mt-2">
                 {!hideHeaders && (
-                  <div className="mb-3 flex items-baseline justify-between border-b border-border pb-2">
-                    <h2 className="text-[12px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  <div className="flex items-baseline justify-between gap-4 whitespace-nowrap border-b border-apollo-border pb-[10px] text-muted-foreground">
+                    <h2 className="text-[12px] font-normal uppercase tracking-[0.14em] text-muted-foreground">
                       {linked ? (
                         <a
                           href={`/centers/${centerSlug}/programs/${code}`}
-                          className="hover:underline"
-                          style={{ textDecoration: "none" }}
+                          className="text-muted-foreground no-underline hover:text-apollo-slate hover:underline"
                         >
                           {g.label}
                         </a>
@@ -466,8 +556,8 @@ function GroupedRoster({
                         g.label
                       )}
                     </h2>
-                    <span className="text-[11px] text-muted-foreground">
-                      {g.members.length} {g.members.length === 1 ? "member" : "members"}
+                    <span className="text-[12px]">
+                      {size.toLocaleString()} {size === 1 ? "member" : "members"}
                     </span>
                   </div>
                 )}
@@ -478,6 +568,8 @@ function GroupedRoster({
                       hit={m}
                       trailingBadge={trailingBadgeFor(m)}
                       methodChips={m.topMethods}
+                      meshChips={m.topMesh}
+                      activeAppointment={appointment}
                     />
                   ))}
                 </div>
@@ -509,17 +601,26 @@ function FlatMembers({
   result,
   centerSlug,
   centerCode,
+  initialSort = "last",
 }: {
   result: Extract<CenterMembersResult, { mode: "flat" }>;
   centerSlug: string;
   centerCode?: string;
+  initialSort?: RosterSort;
 }) {
   const { hits, total, page, pageSize, roleCategoryCounts } = result;
   const [activeCategory, setActiveCategory] = useState<RoleCategory>("All");
+  // Unit Page v2 roster toolbar — same contract as `DepartmentFacultyClient`:
+  // `nameQ` is the live input, `q` its normalised value debounced 250ms.
+  const [sort, setSort] = useState<RosterSort>(initialSort);
+  const [nameQ, setNameQ] = useState("");
+  const [q, setQ] = useState("");
   const [fetchPage, setFetchPage] = useState(1); // 1-based, like the SSR `page`
-  const [filtered, setFiltered] = useState<{ hits: CenterMemberHit[]; total: number } | null>(
-    null,
-  );
+  const [filtered, setFiltered] = useState<{
+    hits: CenterMemberHit[];
+    total: number;
+    roleCategoryCounts?: Record<string, number>;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   // Distinct from an empty result: a failed type-filter fetch (network / 5xx)
   // must not read as "no members match" — the API returning [] and the request
@@ -529,7 +630,10 @@ function FlatMembers({
   // (same chip + page, so nothing else in the dep list changes).
   const [retryNonce, setRetryNonce] = useState(0);
 
-  const isFiltered = Boolean(centerCode) && activeCategory !== "All";
+  // A chip, a name query, or a sort other than the one the SSR page was ranked
+  // by moves the roster onto the server-filtered view.
+  const isFiltered =
+    Boolean(centerCode) && (activeCategory !== "All" || q !== "" || sort !== initialSort);
 
   // #2533/#2537 — seed the chip from a `?type=` deep-link param (arrival path);
   // when `centerCode` is present this now also puts the roster into the
@@ -538,22 +642,63 @@ function FlatMembers({
   // too — the same #991 pattern the department client's deep-link seed uses.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    let seededFilteredView = false;
     const type = params.get("type");
     if (type && (ROLE_CATEGORIES as string[]).includes(type)) {
       setActiveCategory(type as RoleCategory);
-      if (centerCode) {
-        const pageParam = Number.parseInt(params.get("page") ?? "1", 10);
-        if (Number.isFinite(pageParam) && pageParam > 1) setFetchPage(pageParam);
-      }
+      seededFilteredView = true;
+    }
+    // Unit Page v2 — a shared `?q=` link reopens with the name filter applied.
+    const seededQ = normalizeRosterQuery(params.get("q"));
+    if (seededQ && centerCode) {
+      setNameQ(seededQ);
+      setQ(seededQ);
+      seededFilteredView = true;
+    }
+    if (seededFilteredView && centerCode) {
+      const pageParam = Number.parseInt(params.get("page") ?? "1", 10);
+      if (Number.isFinite(pageParam) && pageParam > 1) setFetchPage(pageParam);
     }
     // mount-only; centerCode is stable for a given render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch the type-filtered roster whenever the chip or page changes. "All" (or
-  // no `centerCode`) clears the filtered state so the SSR roster renders.
+  // Debounce the name input into `q` (250ms); a new query starts at page 1.
   useEffect(() => {
-    if (!centerCode || activeCategory === "All") {
+    const next = normalizeRosterQuery(nameQ);
+    if (next === q) return;
+    const t = setTimeout(() => {
+      setQ(next);
+      setFetchPage(1);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [nameQ, q]);
+
+  // Mirror chip + sort + query + page into the URL (same contract as the
+  // department client): the filtered view writes its own `fetchPage`; the
+  // unfiltered view reflects the SSR `page` prop, never a stale `?page=`/`?type=`
+  // left behind by a filtered view the user has since cleared.
+  useEffect(() => {
+    if (!centerCode) return;
+    const params = new URLSearchParams(window.location.search);
+    syncToolbarParams(params, sort, q);
+    params.delete("type");
+    if (activeCategory !== "All") params.set("type", activeCategory);
+    params.delete("page");
+    if (isFiltered) {
+      if (fetchPage > 1) params.set("page", String(fetchPage));
+    } else if (page > 1) {
+      params.set("page", String(page));
+    }
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [centerCode, sort, q, activeCategory, isFiltered, fetchPage, page]);
+
+  // Fetch the filtered roster whenever the chip, sort, query or page changes.
+  // Nothing active (or no `centerCode`) clears the filtered state so the SSR
+  // roster renders.
+  useEffect(() => {
+    if (!isFiltered) {
       setFiltered(null);
       setError(false);
       setLoading(false);
@@ -563,16 +708,28 @@ function FlatMembers({
     setLoading(true);
     setError(false);
     const params = new URLSearchParams();
-    params.set("type", activeCategory);
+    if (activeCategory !== "All") params.set("type", activeCategory);
+    if (sort !== "last") params.set("sort", sort);
+    if (q) params.set("q", q);
     params.set("page", String(Math.max(0, fetchPage - 1)));
     fetch(`/api/units/center/${centerCode}/members?${params.toString()}`, {
       signal: controller.signal,
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((data: { hits: CenterMemberHit[]; total: number }) => {
-        setFiltered({ hits: data.hits, total: data.total });
-        setLoading(false);
-      })
+      .then(
+        (data: {
+          hits: CenterMemberHit[];
+          total: number;
+          roleCategoryCounts?: Record<string, number>;
+        }) => {
+          setFiltered({
+            hits: data.hits,
+            total: data.total,
+            roleCategoryCounts: data.roleCategoryCounts,
+          });
+          setLoading(false);
+        },
+      )
       .catch((err) => {
         if (err?.name === "AbortError") return;
         // Keep the previous `filtered` (don't overwrite with an empty result —
@@ -582,13 +739,24 @@ function FlatMembers({
         setLoading(false);
       });
     return () => controller.abort();
-  }, [centerCode, activeCategory, fetchPage, retryNonce]);
+  }, [isFiltered, centerCode, activeCategory, sort, q, fetchPage, retryNonce]);
 
-  // Changing the chip resets to the first filtered page.
+  // Changing the chip or the sort resets to the first filtered page.
   const handleCategoryChange = useCallback((cat: RoleCategory) => {
     setActiveCategory(cat);
     setFetchPage(1);
   }, []);
+  const handleSortChange = useCallback((next: RosterSort) => {
+    setSort(next);
+    setFetchPage(1);
+  }, []);
+  // Empty-state "Clear filters": the chip and the name filter.
+  const clearFilters = () => {
+    setActiveCategory("All");
+    setNameQ("");
+    setQ("");
+    setFetchPage(1);
+  };
 
   // Pagination URL builder — the unfiltered ("All") case navigates (SSR,
   // cacheable links); preserves the page (when >1) and the active chip (when
@@ -597,11 +765,18 @@ function FlatMembers({
     const qs = new URLSearchParams();
     if (p > 1) qs.set("page", String(p));
     if (activeCategory !== "All") qs.set("type", activeCategory);
-    const q = qs.toString();
-    return q ? `/centers/${centerSlug}?${q}` : `/centers/${centerSlug}`;
+    // Unit Page v2 — the SSR page ranks by `?sort=`, so paging keeps the order.
+    if (sort !== "last") qs.set("sort", sort);
+    const search = qs.toString();
+    return search ? `/centers/${centerSlug}?${search}` : `/centers/${centerSlug}`;
   };
 
   const baseHits = isFiltered ? (filtered?.hits ?? []) : hits;
+  const queryCounts = q !== "" && isFiltered ? filtered?.roleCategoryCounts : undefined;
+  const chipCounts = queryCounts ?? roleCategoryCounts;
+  const chipTotal = queryCounts
+    ? Object.values(queryCounts).reduce((a, b) => a + b, 0)
+    : total;
   const renderedTotal = isFiltered ? (filtered?.total ?? 0) : total;
   const currentPage = isFiltered ? fetchPage : page;
   // Client-side fallback (no `centerCode`) mirrors the old page-only filter.
@@ -626,7 +801,7 @@ function FlatMembers({
   const end = Math.min(currentPage * pageSize, renderedTotal);
 
   const pagination = (
-    <div className="mt-8">
+    <div className="flex justify-center pt-6">
       <Pagination>
         <PaginationContent>
           <PaginationItem>
@@ -706,23 +881,33 @@ function FlatMembers({
   );
 
   return (
-    <>
-      <div className="mb-4 text-sm text-muted-foreground">
-        {isFiltered && loading
-          ? "Loading…"
-          : `Showing ${start}–${end} of ${renderedTotal.toLocaleString()} members`}
-      </div>
-      <div className="mb-6">
-        {/* #2235 — chip counts stay WHOLE-CENTER (`result.roleCategoryCounts`,
-            computed server-side over every active member) regardless of the
-            active chip, matching the department client's whole-scope posture. */}
+    <div className="mt-5 pt-2">
+      <RosterToolbar
+        query={nameQ}
+        onQueryChange={setNameQ}
+        sort={sort}
+        onSortChange={handleSortChange}
+      />
+      {/* #2235 — chip counts stay WHOLE-CENTER (`result.roleCategoryCounts`,
+          computed server-side over every active member) regardless of the
+          active chip or sort, matching the department client's whole-scope
+          posture. A name query narrows them to the route's counts over the
+          matching members (before the chip). */}
+      <div className="mt-[14px]">
         <RoleChipRow
           faculty={baseHits}
-          roleCategoryCounts={roleCategoryCounts}
-          totalCount={total}
+          roleCategoryCounts={chipCounts}
+          totalCount={chipTotal}
           active={activeCategory}
           onChange={handleCategoryChange}
         />
+      </div>
+      <div className="mt-4 text-[13px] text-muted-foreground">
+        {isFiltered && loading
+          ? "Loading…"
+          : `Showing ${start}–${end} of ${renderedTotal.toLocaleString()} ${
+              renderedTotal === 1 ? "scholar" : "scholars"
+            }`}
       </div>
       {isFiltered && error ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
@@ -741,15 +926,24 @@ function FlatMembers({
       ) : isFiltered && loading && filtered === null ? (
         <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
       ) : visible.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          No members match these filters.
+        <p className="mt-5 border-t border-apollo-border py-6 text-[14px] text-muted-foreground">
+          No scholars match these filters.{" "}
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="cursor-pointer text-apollo-slate hover:underline"
+          >
+            Clear filters
+          </button>
         </p>
       ) : (
-        <div className="flex flex-col">
+        <div className="mt-2 flex flex-col">
           {visible.map((hit) => (
             <PersonRow
               key={hit.cwid}
               hit={hit}
+              meshChips={hit.topMesh}
+              activeAppointment={activeCategory}
               trailingBadge={
                 hit.membershipRoleLabel ? (
                   <MembershipRoleBadge label={hit.membershipRoleLabel} />
@@ -760,6 +954,6 @@ function FlatMembers({
         </div>
       )}
       {totalPages > 1 && pagination}
-    </>
+    </div>
   );
 }

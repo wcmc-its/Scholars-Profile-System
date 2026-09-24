@@ -16,7 +16,11 @@ const {
   mockPublicationTopicGroupBy,
   mockGrantFindMany,
   mockSuppressionFindMany,
+  mockMeshSearch,
+  mockPublicationAuthorGroupBy,
 } = vi.hoisted(() => ({
+  mockPublicationAuthorGroupBy: vi.fn(),
+  mockMeshSearch: vi.fn(),
   mockCenterMembershipFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockCenterProgramFindMany: vi.fn(),
@@ -31,9 +35,16 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: mockScholarFindMany },
     centerProgram: { findMany: mockCenterProgramFindMany },
     publicationTopic: { groupBy: mockPublicationTopicGroupBy },
+    publicationAuthor: { groupBy: mockPublicationAuthorGroupBy },
     grant: { findMany: mockGrantFindMany },
     suppression: { findMany: mockSuppressionFindMany },
   },
+}));
+
+// Unit Page v2 TOPICS chips — people-index lookup, mocked (no OpenSearch).
+vi.mock("@/lib/search", () => ({
+  PEOPLE_INDEX: "scholars-people",
+  searchClient: () => ({ search: mockMeshSearch }),
 }));
 
 import { getCenterMembers } from "@/lib/api/centers";
@@ -60,7 +71,9 @@ beforeEach(() => {
   mockCenterProgramFindMany.mockResolvedValue([]);
   mockPublicationTopicGroupBy.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
+  mockPublicationAuthorGroupBy.mockResolvedValue([]);
   mockSuppressionFindMany.mockResolvedValue([]);
+  mockMeshSearch.mockResolvedValue({ body: { hits: { hits: [] } } });
 });
 
 describe("getCenterMembers — whole-center roleCategoryCounts (#2235)", () => {
@@ -174,5 +187,94 @@ describe("getCenterMembers — CHPC fellows — vocabulary membershipRoleLabel (
     const byId = new Map(result.hits.map((h) => [h.cwid, h]));
     expect(byId.get("fellow")?.membershipRoleLabel).toBe("Core Faculty Fellow");
     expect(byId.get("researcher")?.membershipRoleLabel).toBeNull();
+  });
+});
+
+describe("getCenterMembers — TOPICS (MeSH) chips, Unit Page v2", () => {
+  it("attaches `topMesh` after the cached read; an OpenSearch failure keeps the roster", async () => {
+    const rows = [scholarRow("tst0001", "full_time_faculty"), scholarRow("tst0002", "full_time_faculty")];
+    mockCenterMembershipFindMany.mockResolvedValue(rows.map((r) => ({ cwid: r.cwid, ...ACTIVE })));
+    mockScholarFindMany.mockResolvedValue(rows);
+    mockMeshSearch.mockResolvedValue({
+      body: {
+        hits: { hits: [{ _id: "tst0001", _source: { topMeshTerms: [{ ui: "D000001", label: "Alpha" }] } }] },
+      },
+    });
+
+    const ok = await getCenterMembers("TESTCTR", {});
+    if (ok.mode !== "flat") throw new Error("expected flat");
+    expect(mockMeshSearch).toHaveBeenCalledTimes(1);
+    const byCwid = new Map(ok.hits.map((h) => [h.cwid, h]));
+    expect(byCwid.get("tst0001")?.topMesh).toEqual([{ ui: "D000001", label: "Alpha" }]);
+    expect(byCwid.get("tst0002")).not.toHaveProperty("topMesh");
+
+    mockMeshSearch.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const degraded = await getCenterMembers("TESTCTR", {});
+    if (degraded.mode !== "flat") throw new Error("expected flat");
+    expect(degraded.hits).toHaveLength(2);
+    expect(degraded.hits.every((h) => !("topMesh" in h))).toBe(true);
+    warn.mockRestore();
+  });
+});
+
+describe("getCenterMembers — flat roster count sorts, Unit Page v2", () => {
+  // 25 members (two pages). Surname order is p000…p024; the counts put the
+  // surname-LAST member first, so a sort applied per page (or not at all)
+  // would leave it on page 2.
+  const rows = Array.from({ length: 25 }, (_, i) =>
+    scholarRow(`p${String(i).padStart(3, "0")}`, "full_time_faculty"),
+  );
+  const PUBS: Record<string, number> = { p024: 50, p010: 30, p003: 10 };
+  const GRANTS: Record<string, number> = { p020: 3, p001: 2 };
+
+  beforeEach(() => {
+    mockCenterMembershipFindMany.mockResolvedValue(rows.map((r) => ({ cwid: r.cwid, ...ACTIVE })));
+    mockScholarFindMany.mockResolvedValue(rows);
+    mockPublicationAuthorGroupBy.mockImplementation(
+      (args: { where: { cwid: { in: string[] } } }) =>
+        Promise.resolve(
+          args.where.cwid.in
+            .filter((c) => c in PUBS)
+            .map((cwid) => ({ cwid, _count: { _all: PUBS[cwid] } })),
+        ),
+    );
+    // `loadRosterCounts("center")` reads active grant ROWS (for #160
+    // suppression), one row per grant.
+    mockGrantFindMany.mockImplementation((args: { where: { cwid: { in: string[] } } }) =>
+      Promise.resolve(
+        args.where.cwid.in.flatMap((cwid) =>
+          Array.from({ length: GRANTS[cwid] ?? 0 }, (_, i) => ({
+            cwid,
+            externalId: `${cwid}-g${i}`,
+            id: `${cwid}-g${i}`,
+          })),
+        ),
+      ),
+    );
+  });
+
+  it("'pubs' ranks the WHOLE roster by the displayed pub count before paging", async () => {
+    const result = await getCenterMembers("SORTCTR", { page: 0, sort: "pubs" });
+    if (result.mode !== "flat") throw new Error("expected flat");
+    expect(result.total).toBe(25);
+    expect(result.hits.slice(0, 3).map((h) => h.cwid)).toEqual(["p024", "p010", "p003"]);
+    expect(result.hits.slice(0, 3).map((h) => h.pubCount)).toEqual([50, 30, 10]);
+    // Ties (0 pubs) fall back to surname order.
+    expect(result.hits[3].cwid).toBe("p000");
+  });
+
+  it("'grants' ranks by the displayed grant count", async () => {
+    const result = await getCenterMembers("SORTCTR", { page: 0, sort: "grants" });
+    if (result.mode !== "flat") throw new Error("expected flat");
+    expect(result.hits.slice(0, 2).map((h) => h.cwid)).toEqual(["p020", "p001"]);
+    expect(result.hits.slice(0, 2).map((h) => h.grantCount)).toEqual([3, 2]);
+  });
+
+  it("the default surname sort leaves the top-pubs member on page 2", async () => {
+    const page0 = await getCenterMembers("SORTCTR", { page: 0 });
+    if (page0.mode !== "flat") throw new Error("expected flat");
+    expect(page0.hits[0].cwid).toBe("p000");
+    expect(page0.hits.map((h) => h.cwid)).not.toContain("p024");
   });
 });

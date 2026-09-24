@@ -99,14 +99,14 @@ describe("DepartmentFacultyClient — role-category chip survives pagination (#2
     window.history.replaceState(null, "", "/departments/medicine?type=Full-time+faculty");
     renderClient({ total: 2, page: 1 });
     const chip = screen.getByRole("button", { name: /Full-time faculty/ });
-    expect(chip.className).toContain("bg-[var(--color-accent-slate)]");
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("ignores an invalid ?type= value (falls back to All)", () => {
     window.history.replaceState(null, "", "/departments/medicine?type=not-a-real-category");
     renderClient({ total: 2, page: 1 });
     const allChip = screen.getByRole("button", { name: /^All/ });
-    expect(allChip.className).toContain("bg-[var(--color-accent-slate)]");
+    expect(allChip.getAttribute("aria-pressed")).toBe("true");
   });
 });
 

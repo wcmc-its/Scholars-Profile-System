@@ -44,6 +44,7 @@ vi.mock("@/lib/db", () => ({
     centerMembership: { findMany: membershipFindMany },
     centerProgram: { findMany: vi.fn(async () => []) },
     publicationTopic: { groupBy: vi.fn(async () => []) },
+    publicationAuthor: { groupBy: vi.fn(async () => []) },
     grant: { findMany: vi.fn(async () => []) },
     suppression: { findFirst: suppressionFindFirst, findMany: suppressionFindMany },
   },

@@ -2,9 +2,9 @@
  * Embedded leader card used by Department, Division, and Center pages.
  *
  * Generalizes the original ChairCard with a parameterized role label
- * ("Chair" | "Chief" | "Director"). Visual treatment is unchanged from
- * the dept-page hero spec: 52px avatar, tight padding, uppercase eyebrow,
- * underline-on-hover name link to the scholar profile.
+ * ("Chair" | "Chief" | "Director"). Unit Page v2 treatment: the whole card
+ * links to the scholar profile (40px headshot, warm page fill, surface-2 hover),
+ * except for an external leader or an abbreviation-expanded role (see below).
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { AbbrTooltip } from "@/components/ui/abbr-tooltip";
@@ -62,28 +62,35 @@ export function LeaderCard({
    *  (the caller bakes it into `role` instead, if it should apply). */
   expansion?: string | null;
   /** Optional override for the wrapper's top margin / max width, so a
-   *  caller (e.g. a 2-column leadership grid) can replace `mt-6` and
+   *  caller (e.g. a 2-column leadership grid) can replace `mt-[22px]` and
    *  `max-w-[460px]` without affecting other callers. */
   className?: string;
 }) {
   const displayRole = expansion ? role : formatLeadershipTitle(role, interim);
   const abbrWord = expansion ? (role.split(" ")[0] ?? role) : "";
   const abbrRest = expansion ? role.slice(abbrWord.length) : "";
-  return (
-    <div
-      className={cn(
-        "mt-6 flex max-w-[460px] items-center gap-[14px] rounded-md border border-border bg-background px-4 py-[14px]",
-        className,
-      )}
-    >
+  // Unit Page v2 — the WHOLE card is the profile link. Two carve-outs keep the
+  // card a plain <div> with only the name linked (the pre-v2 treatment):
+  //   - an external leader (slug null) has no profile to link to;
+  //   - a role with an `expansion` renders a focusable <abbr> tooltip in the
+  //     eyebrow, which must not nest inside an <a> (interactive-in-interactive).
+  const cardLinked = !!leader.slug && !expansion;
+  const shellClass = cn(
+    "mt-[22px] flex w-full max-w-[460px] items-center gap-[14px] rounded-[8px] border border-apollo-border bg-apollo-page p-4 text-foreground",
+    cardLinked &&
+      "no-underline transition-colors duration-[120ms] ease-out hover:border-apollo-border-strong hover:bg-apollo-surface-2 hover:no-underline",
+    className,
+  );
+  const body = (
+    <>
       <HeadshotAvatar
-        size="md"
+        size="roster"
         cwid={leader.cwid}
         preferredName={leader.preferredName}
         identityImageEndpoint={leader.identityImageEndpoint}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="mb-[3px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+      <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+        <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
           {/* #1570 — "COE" is the one eyebrow that isn't self-evident; expand it on
               hover/focus (#2558 — sourced from `expansion`, not a hardcoded
               constant). Every other role renders as plain text, unchanged. */}
@@ -95,27 +102,32 @@ export function LeaderCard({
           ) : (
             displayRole
           )}
-        </div>
-        {leader.slug ? (
+        </span>
+        {leader.slug && !cardLinked ? (
           <a
             href={profilePath(leader.slug)}
-            className="text-[16px] font-medium leading-[1.2] hover:underline"
-            style={{ textDecoration: "none" }}
+            className="text-[16px] leading-[22px] text-foreground no-underline hover:text-apollo-slate hover:underline"
           >
             {leader.preferredName}
           </a>
         ) : (
-          // External leader (not a WCM scholar) — no profile to link to.
-          <span className="text-[16px] font-medium leading-[1.2]">
-            {leader.preferredName}
-          </span>
+          // Card-linked leader (the card is the link), or an external leader
+          // (not a WCM scholar) — no profile to link to.
+          <span className="text-[16px] leading-[22px]">{leader.preferredName}</span>
         )}
         {leader.primaryTitle && (
-          <div className="text-[13px] leading-[1.4] text-muted-foreground">
+          <span className="text-[13px] leading-[1.4] text-muted-foreground">
             {leader.primaryTitle}
-          </div>
+          </span>
         )}
-      </div>
-    </div>
+      </span>
+    </>
+  );
+  return cardLinked ? (
+    <a href={profilePath(leader.slug!)} className={shellClass}>
+      {body}
+    </a>
+  ) : (
+    <div className={shellClass}>{body}</div>
   );
 }
