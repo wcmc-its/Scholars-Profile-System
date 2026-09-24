@@ -30,7 +30,7 @@
 import { tokenizeWithSpans } from "@/etl/news/names";
 import { LEADERSHIP_TIER, computeProminence } from "@/lib/api/prominence";
 import { formatPublishedName } from "@/lib/postnominal";
-import { FLAG_REPEAT_DAYS, findPossibleRepeat } from "@/lib/edit/clip-repeats";
+import { FLAG_REPEAT_DAYS, GROUP_WINDOW_DAYS, findPossibleRepeat } from "@/lib/edit/clip-repeats";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { NewsMentionStatus } from "@/lib/generated/prisma/enums";
@@ -69,7 +69,14 @@ export type NewsQueueRow = {
    *  whose headline shares most of its words (`findPossibleRepeat`) — a
    *  syndicated copy or re-airing the ETL could not safely drop. Advisory; null
    *  when none, and always null for newsroom rows. */
-  possibleRepeatOf: { title: string; url: string; status: string } | null;
+  possibleRepeatOf: { id: string; title: string; url: string; status: string } | null;
+  /** Media highlights only: the other copies of this story (rows whose
+   *  `duplicate_of` is this row), shown on the lead's card and decided with it.
+   *  Empty for a single-copy story and for newsroom rows. */
+  placements: { id: string; outlet: string | null; url: string; publishedAt: string | null }[];
+  /** Media highlights only: set when this row is a copy of a story whose lead
+   *  is NOT in this list (already decided, or on another tab). */
+  leadOf: { id: string; title: string; url: string; status: string } | null;
   /** The prose name string the ETL matched — "the name being matched against". */
   detectedName: string | null;
   likelihood: string | null;
@@ -332,6 +339,7 @@ export async function loadNewsQueue(
       matchBasis: true,
       contextSnippet: true,
       outlet: true,
+      duplicateOf: true,
       showOnProfile: true,
       enteredByCwid: true,
       source: true,
@@ -376,7 +384,7 @@ export async function loadNewsQueue(
   // Clips: every other clip for these scholars in the window, any status, so a
   // pending copy of an already-approved (or rejected) story is flagged too.
   const dated = rows.flatMap((r) => (r.publishedAt ? [r.publishedAt.getTime()] : []));
-  const windowMs = FLAG_REPEAT_DAYS * 86_400_000;
+  const windowMs = Math.max(FLAG_REPEAT_DAYS, GROUP_WINDOW_DAYS) * 86_400_000;
   const clipPeers =
     kind === "clips" && dated.length > 0
       ? await client.newsMention.findMany({
@@ -388,14 +396,48 @@ export async function loadNewsQueue(
               lte: new Date(Math.max(...dated) + windowMs),
             },
           },
-          select: { id: true, cwid: true, url: true, title: true, publishedAt: true, status: true },
+          select: {
+            id: true,
+            cwid: true,
+            url: true,
+            title: true,
+            publishedAt: true,
+            status: true,
+            duplicateOf: true,
+          },
         })
       : [];
+
+  // Story grouping: a copy whose lead is in this list rides on the lead's card
+  // (and is not listed on its own); a copy whose lead is elsewhere says so.
+  const listed = new Set(rows.map((r) => r.id));
+  const placementsOf = new Map<string, typeof rows>();
+  for (const r of rows) {
+    if (r.duplicateOf && listed.has(r.duplicateOf)) {
+      placementsOf.set(r.duplicateOf, [...(placementsOf.get(r.duplicateOf) ?? []), r]);
+    }
+  }
+  const outsideLeadIds = [
+    ...new Set(rows.flatMap((r) => (r.duplicateOf && !listed.has(r.duplicateOf) ? [r.duplicateOf] : []))),
+  ];
+  const outsideLeads = new Map(
+    (outsideLeadIds.length
+      ? await client.newsMention.findMany({
+          where: { id: { in: outsideLeadIds } },
+          select: { id: true, title: true, url: true, status: true },
+        })
+      : []
+    ).map((l) => [l.id, l]),
+  );
+  /** Two rows are already one story (lead ↔ copy, or copies of one lead). */
+  const sameStory = (a: { id: string; duplicateOf: string | null }, b: { id: string; duplicateOf: string | null }) =>
+    a.duplicateOf === b.id || b.duplicateOf === a.id || (a.duplicateOf !== null && a.duplicateOf === b.duplicateOf);
 
   // Group by detected-name line. A NULL sourceRef is its own group keyed by id,
   // never lumped with other NULLs (which would falsely mark rows as competing).
   const groups = new Map<string, typeof rows>();
   for (const r of rows) {
+    if (r.duplicateOf && listed.has(r.duplicateOf)) continue; // on its lead's card
     const key = r.sourceRef ?? `id:${r.id}`;
     const bucket = groups.get(key);
     if (bucket) bucket.push(r);
@@ -435,8 +477,21 @@ export async function loadNewsQueue(
           publishedAt: r.publishedAt ? r.publishedAt.toISOString().slice(0, 10) : null,
           outlet: r.outlet,
           possibleRepeatOf: (() => {
-            const p = findPossibleRepeat(r, clipPeers);
-            return p ? { title: p.title, url: p.url, status: p.status } : null;
+            const p = findPossibleRepeat(
+              r,
+              clipPeers.filter((o) => !sameStory(r, o)),
+            );
+            return p ? { id: p.id, title: p.title, url: p.url, status: p.status } : null;
+          })(),
+          placements: (placementsOf.get(r.id) ?? []).map((c) => ({
+            id: c.id,
+            outlet: c.outlet,
+            url: c.url,
+            publishedAt: c.publishedAt ? c.publishedAt.toISOString().slice(0, 10) : null,
+          })),
+          leadOf: (() => {
+            const l = r.duplicateOf ? outsideLeads.get(r.duplicateOf) : undefined;
+            return l ? { id: l.id, title: l.title, url: l.url, status: l.status } : null;
           })(),
           detectedName: r.detectedName,
           likelihood: r.likelihood,
