@@ -167,6 +167,7 @@ function fakeCtx(cwid: string, roleCategory: string | null) {
     highlights: null,
     technologies: [],
     news: [],
+    mediaHighlights: [],
     datasets: [],
   };
 }

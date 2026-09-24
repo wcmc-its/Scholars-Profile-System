@@ -115,6 +115,7 @@ const ctx: EditContext = {
   // below exercises the populated case.
   technologies: [],
   news: [],
+  mediaHighlights: [],
   // DATA_SHARING_SECTION — empty by default (loader returns [] unless the flag
   // is on AND the scholar has deposits); a dedicated describe block below
   // exercises the populated case.

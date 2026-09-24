@@ -281,6 +281,9 @@ export type EditContextNews = {
   showOnProfile: boolean;
   /** How it was attached: VIVO (article link) | NAME (queue-confirmed) | CURATOR. */
   source: string;
+  /** Press outlet for a Media Highlights clip (etl/news/clips.ts); null for a
+   *  newsroom article. */
+  outlet: string | null;
 };
 
 /**
@@ -680,6 +683,12 @@ export type EditContext = {
    * unless `NEWS_MENTIONS_SECTION` is on.
    */
   news: ReadonlyArray<EditContextNews>;
+  /**
+   * The scholar's PUBLISHED Media Highlights clips (`outlet` set) for the /edit
+   * "Media highlights" card — the profile's split, so a clip never shows under
+   * News mentions. Empty unless `MEDIA_HIGHLIGHTS_SECTION` is on.
+   */
+  mediaHighlights: ReadonlyArray<EditContextNews>;
   /**
    * The scholar's dataset deposits for the interactive /edit "Datasets" card
    * (data-sharing spec, #2348). All author positions (display scope). Empty
@@ -1209,12 +1218,16 @@ export async function loadEditContext(
         }))
       : [];
 
-  // News mentions — the interactive /edit card. Loaded for every caller (public
-  // info like publications/technologies). PUBLISHED rows only (pending prose
-  // name-matches live in the comms queue, never on the profile); hidden ones
-  // included so the scholar can un-hide. Dark unless NEWS_MENTIONS_SECTION is on.
-  const news: EditContextNews[] =
-    process.env.NEWS_MENTIONS_SECTION === "on"
+  // News mentions + Media Highlights — the two interactive /edit cards. Loaded
+  // for every caller (public info like publications/technologies). PUBLISHED
+  // rows only (pending rows live in the review queues, never on the profile);
+  // hidden ones included so the scholar can un-hide. One read, split on
+  // `outlet` exactly as the profile does (lib/api/profile.ts); each half is dark
+  // unless its own section flag is on.
+  const newsOn = process.env.NEWS_MENTIONS_SECTION === "on";
+  const clipsOn = process.env.MEDIA_HIGHLIGHTS_SECTION === "on";
+  const mentions: EditContextNews[] =
+    newsOn || clipsOn
       ? (
           await client.newsMention.findMany({
             where: { cwid, status: "published" },
@@ -1225,6 +1238,7 @@ export async function loadEditContext(
               publishedAt: true,
               showOnProfile: true,
               source: true,
+              outlet: true,
             },
             orderBy: [{ publishedAt: "desc" }],
           })
@@ -1235,8 +1249,11 @@ export async function loadEditContext(
           publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
           showOnProfile: n.showOnProfile,
           source: n.source,
+          outlet: n.outlet,
         }))
       : [];
+  const news = newsOn ? mentions.filter((n) => n.outlet === null) : [];
+  const mediaHighlights = clipsOn ? mentions.filter((n) => n.outlet !== null) : [];
 
   // Dataset deposits — the interactive /edit "Datasets" card (data-sharing
   // spec, #2348). Loaded for every caller; only queried when
@@ -2005,6 +2022,7 @@ export async function loadEditContext(
       coiDisclosures,
       technologies,
       news,
+      mediaHighlights,
       datasets,
       mentees,
       manualMentees: manualMenteeRows,
@@ -2188,6 +2206,7 @@ export async function loadEditContext(
     coiDisclosures,
     technologies,
     news,
+    mediaHighlights,
     datasets,
     mentees,
     manualMentees: manualMenteeRows,
