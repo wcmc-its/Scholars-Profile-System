@@ -66,7 +66,7 @@ Funding works the same way — hide your row on a grant (it doesn't affect the a
 
 ## Clinical research and trials
 
-If you run or participate in clinical trials, they appear in a **Clinical research** section on your public profile — one line per trial, with your role (PI, Co-I, Sub-I), title, phase, sponsor, and current accrual status; a linked NCT number goes straight to its `clinicaltrials.gov` listing, and completed/closed trials collapse under a separate count so open studies aren't buried. This is sourced entirely from **OnCore** (WCM's clinical trial management system), refreshed nightly — not from ReCiter, so it doesn't go through publication attribution at all.
+If you run or participate in clinical trials, they appear in a **Clinical research** section on your public profile — one line per trial you lead as principal investigator (co-investigator roles aren't included yet), with title, phase, sponsor, and current accrual status; a linked NCT number goes straight to its `clinicaltrials.gov` listing, and completed/closed trials collapse under a separate count so open studies aren't buried. Suspended trials aren't shown. Trials come from **OnCore** (WCM's clinical trial management system), covering studies opened to accrual since April 2019, with trial details from `clinicaltrials.gov`; the profile refreshes weekly — not from ReCiter, so it doesn't go through publication attribution at all.
 
 **There's no hide/edit control for this in `/edit`.** A wrong or missing trial is corrected directly at the OnCore source, not routed through Request a change. Contact your OnCore study team or research administration.
 
