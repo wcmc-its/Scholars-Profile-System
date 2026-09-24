@@ -43,10 +43,10 @@ export function BrowseByMethodSection({ data }: { data: HomeMethodCategories }) 
             event="home_method_category_click"
             slug={c.slug}
             aria-label={`${c.label}, ${c.familyCount} method families`}
-            className="group border-apollo-border bg-apollo-surface hover:border-apollo-border-strong block rounded-[var(--apollo-radius-card)] border px-[18px] py-4 shadow-[var(--apollo-shadow-card)] transition-colors"
+            className="group border-apollo-border bg-apollo-surface hover:border-apollo-border-strong focus-visible:border-apollo-border-strong hover:shadow-[0_2px_4px_rgba(34,30,28,.06),0_4px_12px_rgba(34,30,28,.06)] focus-visible:shadow-[0_2px_4px_rgba(34,30,28,.06),0_4px_12px_rgba(34,30,28,.06)] block rounded-[var(--apollo-radius-card)] border px-[18px] py-4 shadow-[var(--apollo-shadow-card)] transition-[border-color,box-shadow] duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]"
           >
             <div className="flex items-start justify-between gap-3">
-              <span className="text-base font-medium text-foreground group-hover:underline">
+              <span className="text-base font-medium text-foreground transition-colors duration-[120ms] ease-out group-hover:text-apollo-slate group-focus-visible:text-apollo-slate">
                 {c.label}
               </span>
               <span className="shrink-0 tabular-nums text-sm text-muted-foreground">

@@ -22,7 +22,7 @@ describe("BrowseAllResearchAreasGrid filter", () => {
     const { container } = render(<BrowseAllResearchAreasGrid items={items} />);
     const box = screen.getByRole("searchbox", { name: "Filter research areas" });
     fireEvent.change(box, { target: { value: "CARDIO" } });
-    const names = [...container.querySelectorAll("li a")].map((a) => a.textContent);
+    const names = [...container.querySelectorAll("li a > span:first-child")].map((a) => a.textContent);
     expect(names).toEqual(["Cardiovascular Disease"]);
     fireEvent.change(box, { target: { value: "zzz" } });
     expect(container.querySelectorAll("li a")).toHaveLength(0);

@@ -284,7 +284,7 @@ function PaperRow({
           handleClick();
           open(pmid);
         }}
-        className="text-foreground text-left text-[15px] leading-[22px] text-pretty hover:underline"
+        className="text-foreground hover:text-apollo-slate hover:decoration-apollo-slate text-left text-[15px] leading-[22px] font-medium text-pretty decoration-1 underline-offset-[3px] transition-colors duration-[120ms] ease-out hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]"
         dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(stripTrailingPeriod(title)) }}
       />
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[13px] text-zinc-500">
@@ -353,13 +353,13 @@ function SpotlightCardButton({
       onClick={onSelect}
       aria-pressed={active}
       className={[
-        "flex h-full min-w-0 flex-col gap-1.5 rounded-[10px] border px-3.5 py-3 text-left transition-colors",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary-cornell-red)]",
+        "flex h-full min-w-0 flex-col gap-1.5 rounded-[10px] border px-3.5 py-3 text-left transition-colors duration-[120ms] ease-out",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]",
         // Active = the rail tint + a "Showing" label; the detail pane earns the
         // visual weight, these cards are navigation.
         active
           ? "border-apollo-rail-border bg-apollo-rail"
-          : "border-apollo-border bg-apollo-surface hover:border-apollo-border-strong shadow-[var(--apollo-shadow-card)]",
+          : "border-apollo-border bg-apollo-surface hover:border-apollo-border-strong focus-visible:border-apollo-border-strong shadow-[var(--apollo-shadow-card)]",
       ].join(" ")}
     >
       <div className="line-clamp-2 min-h-[30px] text-[10.5px] leading-[15px] font-semibold tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase">
