@@ -94,6 +94,20 @@ function decodeBody(p: Part): string {
   }
 }
 
+/**
+ * SES records SPF/DKIM/DMARC only in the `Authentication-Results: amazonses.com;`
+ * header it prepends (there are no X-SES-SPF/DKIM-Verdict headers). splitPart
+ * keeps the FIRST occurrence, which is SES's; a relay's own header further down
+ * (e.g. Microsoft's `dkim=none`) is ignored, and any other first header reads as
+ * all-none rather than being trusted.
+ */
+export function sesAuthVerdict(header: string | undefined): string {
+  const ses = header !== undefined && /^amazonses\.com\s*;/i.test(header) ? header : "";
+  return (["spf", "dkim", "dmarc"] as const)
+    .map((k) => `${k}=${new RegExp(`\\b${k}=([a-z]+)`, "i").exec(ses)?.[1].toLowerCase() ?? "none"}`)
+    .join(" ");
+}
+
 /** Walk the MIME tree; return the first text/plain and text/html bodies. */
 export function readEmail(raw: string): {
   from: string;
@@ -102,8 +116,9 @@ export function readEmail(raw: string): {
   date: string | null;
   virusVerdict: string | null;
   spamVerdict: string | null;
-  /** SPF/DKIM verdicts SES stamps; logged so the first real deliveries show
-   *  which survive the list server before the sender check is tightened. */
+  /** SPF/DKIM/DMARC verdicts from SES's Authentication-Results header; logged so
+   *  the first real deliveries show which survive the list server before the
+   *  sender check is tightened. */
   authVerdict: string;
   plain: string | null;
   html: string | null;
@@ -134,7 +149,7 @@ export function readEmail(raw: string): {
     date: top.headers.get("date") ?? null,
     virusVerdict: top.headers.get("x-ses-virus-verdict") ?? null,
     spamVerdict: top.headers.get("x-ses-spam-verdict") ?? null,
-    authVerdict: `spf=${top.headers.get("x-ses-spf-verdict") ?? "none"} dkim=${top.headers.get("x-ses-dkim-verdict") ?? "none"}`,
+    authVerdict: sesAuthVerdict(top.headers.get("authentication-results")),
     plain,
     html,
   };
