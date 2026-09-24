@@ -187,7 +187,7 @@ export default async function EditReportsIndexPage({
       ? buildProgramUnit(meta, await loadReportAccessPopoverProps(MENTORED_PUBS_REPORT, session))
       : null;
   // Reports 8 (Article counts: unit administrators + grants) and 9
-  // (Top clinical journal publications: grants) ride a second pseudo-unit.
+  // (Top clinical and high-impact journal publications: grants) ride a second pseudo-unit.
   const [canArticleCount, highImpactScopes] = await Promise.all([
     canViewArticleCountReport(session),
     getReportScopes(session, HIGH_IMPACT_PUBS_REPORT),

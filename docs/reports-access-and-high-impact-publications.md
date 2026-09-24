@@ -1,4 +1,4 @@
-# Report access grants and the Top clinical journal publications report
+# Report access grants and the Top clinical and high-impact journal publications report
 
 **Status:** Live in both environments. Shipped in #2748 (grants for reports 8 and 9, report 9
 itself), #2750 (report 9's per-person Summary, the shared download button) and #2754 (body-only
@@ -6,8 +6,8 @@ loading skeleton). No env flag: a report is reachable wherever the app image is 
 viewer passes its gate.
 
 This doc answers two questions: **who can open a report under `/edit/reports`**, and **what report 9
-(Top clinical journal publications) counts and exports**. Report 7's own sources and rules are in
-[`mentored-publications-report.md`](./mentored-publications-report.md).
+(Top clinical and high-impact journal publications) counts and exports**. Report 7's own sources
+and rules are in [`mentored-publications-report.md`](./mentored-publications-report.md).
 
 ## Who can open which report
 
@@ -19,7 +19,7 @@ Every report is one entry in `lib/edit/report-registry.ts`, rendered by the sing
 | 1–6 (unit reports) | `unit` | Owners and Curators of the unit the report is opened for, plus superusers and comms stewards |
 | 7 Mentored publications | `person` on `mentored-publications` | A `report_access` row (scoped by program), plus superusers and comms stewards |
 | 8 Article counts | `admin` | Any unit administrator (`canViewUsage`), comms stewards, **or** an `article-count` row |
-| 9 Top clinical journal publications | `person` on `high-impact-publications` | A `report_access` row, plus superusers and comms stewards |
+| 9 Top clinical and high-impact journal publications | `person` on `high-impact-publications` | A `report_access` row, plus superusers and comms stewards |
 
 A viewer who fails a `person` or `admin` gate gets a 404: the report reads as unbuilt to someone it
 was never granted to. A unit-gate failure shows the visible 403 page.
@@ -45,7 +45,7 @@ the grantee's directory name (`grantee_name`, stored because the app runtime can
 
 Grantee CWIDs live in the table, never in this repo.
 
-## Report 9 — Top clinical journal publications
+## Report 9 — Top clinical and high-impact journal publications
 
 `/edit/reports/9` redirects to `/edit/reports/high-impact-publications` (the slug is renameable from
 the report's pencil, like every report). It was built for the yearly request for nominees for the

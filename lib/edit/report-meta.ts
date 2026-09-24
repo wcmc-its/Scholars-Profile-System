@@ -147,7 +147,7 @@ export const REPORT_META_DEFAULTS: Record<
   },
   "9": {
     slug: "high-impact-publications",
-    name: "Top clinical journal publications",
+    name: "Top clinical and high-impact journal publications",
     summary:
       "Articles in top-tier journals (JAMA, Lancet, NEJM, JCO, Sci Transl Med, Nature, Blood, Circulation, Science, Cell) with impact factor, WCM first/last authors, Entrez date and NIH citations. Access is granted per person.",
     descriptionHtml: null,

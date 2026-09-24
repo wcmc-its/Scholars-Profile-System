@@ -1,7 +1,8 @@
 /**
- * Report 9 — "Top clinical journal publications" body: a filter rail (years, journal
- * families, the Profiles roster's person-type / unit facets, article type,
- * author position; plain GET params, `AutoSubmitForm` like reports 7 and 8)
+ * Report 9 — "Top clinical and high-impact journal publications" body: a
+ * filter rail (years, journal families, the Profiles roster's person-type /
+ * unit facets, article type, author position; plain GET params,
+ * `AutoSubmitForm` like reports 7 and 8)
  * beside Summary (one row per person, `summarizePeople`) / Publications
  * tabs with the `.xlsx` button at the right of the tab row
  * (`/api/edit/reports/high-impact-publications`, same query string). Loaders,
