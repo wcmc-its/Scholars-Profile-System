@@ -137,7 +137,8 @@ export default function DocsPage() {
             <li>
               <em>Where your data comes from.</em> Authoritative source systems: PubMed, Scopus,
               OpenAlex, the WCM Web Directory, the Enterprise Directory, ASMS, InfoEd, NIH RePORTER,
-              NYP, the Graduate School, the WCM Research news site, and the COI system. On top of
+              NYP, the Graduate School, the WCM Research news site, External Affairs&apos; press
+              digest, and the COI system. On top of
               those sit two in-house layers. ReCiter decides which publications are yours. ReciterAI
               derives your research areas, the Impact score, and your synopses.
             </li>
@@ -643,6 +644,18 @@ export default function DocsPage() {
                 <td>
                   Hide one you&apos;d rather not show, or use &ldquo;Not me&rdquo; to remove a wrong
                   attribution; article text itself is corrected at the news site
+                </td>
+              </tr>
+              <tr>
+                <td>Media highlights</td>
+                <td>
+                  WCM External Affairs&apos; &ldquo;WCM in the News&rdquo; press digest. Each
+                  clip is reviewed before it appears on a profile
+                </td>
+                <td>Nightly</td>
+                <td>
+                  Hide one you&apos;d rather not show, or use &ldquo;Not me&rdquo; to remove a wrong
+                  attribution; the story itself is corrected by its outlet
                 </td>
               </tr>
               <tr>

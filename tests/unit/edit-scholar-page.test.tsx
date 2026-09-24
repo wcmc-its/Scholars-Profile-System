@@ -153,6 +153,7 @@ const fakeCtx = (cwid: string) => ({
   highlights: null,
   technologies: [],
   news: [],
+  mediaHighlights: [],
   datasets: [],
 });
 

@@ -28,6 +28,8 @@ export type NewsEditCardProps = {
   mode: "self" | "superuser";
   scholarName: string;
   news: ReadonlyArray<EditContextNews>;
+  /** "clips" = the Media highlights panel: press clips, outlet shown. */
+  variant?: "news" | "clips";
 };
 
 /** ISO YYYY-MM-DD → "July 16, 2026" in UTC (deterministic). */
@@ -41,7 +43,8 @@ function formatDate(iso: string | null): string | null {
   });
 }
 
-export function NewsEditCard({ mode, scholarName, news }: NewsEditCardProps) {
+export function NewsEditCard({ mode, scholarName, news, variant = "news" }: NewsEditCardProps) {
+  const clips = variant === "clips";
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -73,12 +76,18 @@ export function NewsEditCard({ mode, scholarName, news }: NewsEditCardProps) {
 
   return (
     <EditPanel
-      slot="news-panel"
-      heading="News mentions"
-      description={`WCM Research news articles that mention ${who}, scraped from the newsroom. Hide one you'd rather not show on the profile, or use "Not me" to remove a wrong attribution.`}
+      slot={clips ? "media-highlights-panel" : "news-panel"}
+      heading={clips ? "Media highlights" : "News mentions"}
+      description={
+        clips
+          ? `Press coverage that mentions ${who}, from External Affairs' "WCM in the News" digest and reviewed before it appears. Hide one you'd rather not show on the profile, or use "Not me" to remove a wrong attribution.`
+          : `WCM Research news articles that mention ${who}, scraped from the newsroom. Hide one you'd rather not show on the profile, or use "Not me" to remove a wrong attribution.`
+      }
     >
       {news.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No news mentions on file.</p>
+        <p className="text-muted-foreground text-sm">
+          {clips ? "No media highlights on file." : "No news mentions on file."}
+        </p>
       ) : (
         <ul className="divide-apollo-border divide-y" data-slot="news-list">
           {news.map((n) => {
@@ -100,6 +109,7 @@ export function NewsEditCard({ mode, scholarName, news }: NewsEditCardProps) {
                     {n.title}
                   </a>
                   <p className="text-muted-foreground text-xs">
+                    {clips && n.outlet ? `${n.outlet} · ` : ""}
                     {date ?? "Undated"}
                     {!n.showOnProfile ? " · Hidden from profile" : ""}
                   </p>

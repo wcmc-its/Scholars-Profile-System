@@ -89,6 +89,7 @@ type AttrKey =
   | "funding"
   | "technologies"
   | "news"
+  | "media-highlights"
   | "datasets"
   | "grant-recs"
   | "biosketch"
@@ -152,6 +153,11 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // scholar, scraped by etl/news. Interactive (hide / "Not me"), like publications;
   // appears only when the scholar has ≥1 published mention (loader-gated).
   { key: "news", label: "News mentions", modes: ["self", "superuser"] },
+  // Media highlights (MEDIA_HIGHLIGHTS_SECTION) — press clips from the External
+  // Affairs digest (etl/news/clips.ts), approved in /edit/media-highlights-queue.
+  // Same hide / "Not me" card as News mentions; appears only when the scholar
+  // has ≥1 approved clip (loader-gated).
+  { key: "media-highlights", label: "Media highlights", modes: ["self", "superuser"] },
   // Datasets (data-sharing spec, DATA_SHARING_SECTION, #2348) — dataset deposits
   // sourced from public repositories by etl/data-sharing. Interactive (hide/show),
   // like publications; appears only when the scholar has ≥1 deposit (loader-gated).
@@ -351,6 +357,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // them, so that sub-view keeps nesting under Funding, not under this flat item.
   "technologies",
   "news",
+  "media-highlights",
   "datasets",
   "mentees",
   "mentee-suggestions",
@@ -378,6 +385,7 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   // "sourced": WCM feed populates it, but the scholar can curate (hide / "Not me"),
   // exactly like publications/funding — not "readonly" (CTL) or "owned" (honors).
   news: "sourced",
+  "media-highlights": "sourced",
   // "sourced": etl/data-sharing feeds it, scholar can hide own row — like publications/news.
   datasets: "sourced",
   "reporter-profile": "readonly",
@@ -439,6 +447,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   // and its nested "reporter-profile" sub-view so that nesting survives.
   "technologies",
   "news",
+  "media-highlights",
   "datasets",
   "mentees",
   "mentee-suggestions",
@@ -469,6 +478,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   funding: { group: RAIL_V2_WCM_GROUP },
   technologies: { group: RAIL_V2_WCM_GROUP },
   news: { group: RAIL_V2_WCM_GROUP },
+  "media-highlights": { group: RAIL_V2_WCM_GROUP },
   datasets: { group: RAIL_V2_WCM_GROUP },
   "reporter-profile": { group: RAIL_V2_WCM_GROUP },
   mentees: { group: RAIL_V2_WCM_GROUP },
@@ -525,6 +535,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // sub-view) so that sub-view keeps nesting under Funding.
   "technologies",
   "news",
+  "media-highlights",
   "datasets",
   "grant-recs",
   "biosketch",
@@ -654,6 +665,8 @@ export function visibleAttrKeys(
   hasMenteeSuggestions = false,
   orcidTabEnabled = false,
   profileLinksEnabled = false,
+  // Last on purpose: callers and tests pass these positionally.
+  hasMediaHighlights = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -702,6 +715,8 @@ export function visibleAttrKeys(
       // (loader-gated on NEWS_MENTIONS_SECTION). Empty ⇒ dropped from the rail and
       // the valid-attr set, so `?attr=news` canonicalizes away.
       .filter((a) => a.key !== "news" || hasNews)
+      // Media highlights — same rule, on approved clips (MEDIA_HIGHLIGHTS_SECTION).
+      .filter((a) => a.key !== "media-highlights" || hasMediaHighlights)
       // Datasets appear only when the scholar has ≥1 deposit (loader-gated on
       // DATA_SHARING_SECTION or the scholar's showDatasets opt-in). Empty ⇒
       // dropped from the rail and the valid-attr set, so `?attr=datasets`
@@ -776,6 +791,7 @@ export function EditPage({
   // News mentions — same gate: the loader populates `ctx.news` only when
   // NEWS_MENTIONS_SECTION is on AND there is ≥1 published mention.
   const hasNews = ctx.news.length > 0;
+  const hasMediaHighlights = ctx.mediaHighlights.length > 0;
   // Datasets — same gate: the loader populates `ctx.datasets` only when
   // (DATA_SHARING_SECTION is on OR the scholar's own showDatasets opt-in is
   // set) AND there is ≥1 deposit.
@@ -807,6 +823,7 @@ export function EditPage({
     .filter((a) => a.key !== "cv" || showCv)
     .filter((a) => a.key !== "technologies" || hasTechnologies)
     .filter((a) => a.key !== "news" || hasNews)
+    .filter((a) => a.key !== "media-highlights" || hasMediaHighlights)
     .filter((a) => a.key !== "datasets" || hasDatasets);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
@@ -1372,6 +1389,17 @@ function renderPanel(
       // intro copy for a third-person editor.
       return (
         <NewsEditCard cwid={cwid} mode={voiceMode} scholarName={scholarName} news={ctx.news} />
+      );
+    case "media-highlights":
+      // Approved press clips — the same card, clip copy and outlet shown.
+      return (
+        <NewsEditCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          news={ctx.mediaHighlights}
+          variant="clips"
+        />
       );
     case "datasets":
       // Interactive "Datasets" — the loader populates `ctx.datasets` only when

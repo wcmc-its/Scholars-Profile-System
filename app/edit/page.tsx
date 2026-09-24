@@ -241,6 +241,9 @@ export default async function EditSelfPage({
     // flag (tab, write, suggestion share one kill switch) or #2699 profile links.
     isOrcidSuggestionEnabled(),
     isProfileLinksEnabled(),
+    // Media highlights is valid only when the scholar has ≥1 approved clip (the
+    // loader gates the array on MEDIA_HIGHLIGHTS_SECTION). Last positional arg.
+    ctx.mediaHighlights.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
