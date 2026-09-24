@@ -35,11 +35,11 @@ const SECTIONS: ReadonlyArray<NavSection> = [
   { id: "highlights", label: "Highlights" },
   { id: "publications", label: "Publications" },
   { id: "funding", label: "Funding" },
-  { id: "honors", label: "Honors & Distinctions" },
+  { id: "honors", label: "Honors & distinctions" },
   { id: "clinical-research", label: "Clinical research" },
   { id: "technologies", label: "Available technologies" },
   { id: "news", label: "News mentions" },
-  { id: "media-highlights", label: "Media Highlights" },
+  { id: "media-highlights", label: "Media highlights" },
   { id: "mentoring", label: "Mentoring" },
   { id: "external-relationships", label: "External relationships" },
 ];

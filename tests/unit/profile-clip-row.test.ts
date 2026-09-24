@@ -1,4 +1,4 @@
-/** A Media Highlights clip never publishes its digest bullet as an excerpt. */
+/** A Media highlights clip never publishes its digest bullet as an excerpt. */
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));

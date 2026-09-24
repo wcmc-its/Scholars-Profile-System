@@ -677,7 +677,7 @@ export async function ProfileView({ slug }: { slug: string }) {
           {honors.length > 0 ? (
             <Section
               id="honors"
-              title="Honors & Distinctions"
+              title="Honors & distinctions"
               headingLg
               count={{
                 value: honorCount,
@@ -783,7 +783,7 @@ export async function ProfileView({ slug }: { slug: string }) {
           {profile.mediaHighlights.length > 0 ? (
             <Section
               id="media-highlights"
-              title="Media Highlights"
+              title="Media highlights"
               headingLg
               count={{
                 value: profile.mediaHighlights.length,

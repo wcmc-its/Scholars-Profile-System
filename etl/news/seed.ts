@@ -48,7 +48,7 @@ export type ScrapedArticle = {
    */
   captionText: string;
   /**
-   * Press outlet — set only by etl/news/clips.ts (Media Highlights), whose urls
+   * Press outlet — set only by etl/news/clips.ts (Media highlights), whose urls
    * are off-site and never pass through validateArticles. Absent for newsroom
    * stories, which is what keeps them in the News section.
    */

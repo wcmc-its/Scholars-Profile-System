@@ -1,6 +1,6 @@
 import type { ProfilePayload } from "@/lib/api/profile";
 
-/** A Media Highlights clip adds its press outlet; a newsroom story has none. */
+/** A Media highlights clip adds its press outlet; a newsroom story has none. */
 type NewsMention = ProfilePayload["news"][number] & { outlet?: string };
 
 /** Most scholars have a handful of mentions; the rest collapse into a <details>. */

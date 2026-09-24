@@ -1,7 +1,7 @@
 /**
  * #1760 — profile ordering for `honor` rows.
  *
- * Covers the render contract the "Honors & Distinctions" section relies on: one
+ * Covers the render contract the "Honors & distinctions" section relies on: one
  * flat list, year DESC, unknown years last, and `[]` for `[]` so the section can
  * omit itself.
  *

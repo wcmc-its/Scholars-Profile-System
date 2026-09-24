@@ -38,9 +38,9 @@ The left rail has four groups: **Yours to edit** (fully yours), **From WCM recor
 
 ## Add an Honor or Distinction
 
-**`/edit` → Honors & Distinctions.** For academy memberships, investigatorships, and prizes — nothing WCM's feeds carry. Click **Add an honor**, fill in the award and year; these show only on your public profile.
+**`/edit` → Honors & distinctions.** For academy memberships, investigatorships, and prizes — nothing WCM's feeds carry. Click **Add an honor**, fill in the award and year; these show only on your public profile.
 
-![Honors and Distinctions list with an existing entry and an Add an honor button](images/scholar-honors.png)
+![Honors and distinctions list with an existing entry and an Add an honor button](images/scholar-honors.png)
 
 ## Publications: hide one, or flag it as not yours
 

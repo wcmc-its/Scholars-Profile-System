@@ -62,10 +62,10 @@ export type NewsQueueRow = {
   articleTitle: string;
   articleUrl: string;
   publishedAt: string | null;
-  /** Press outlet when this is a Media Highlights clip (etl/news/clips.ts);
+  /** Press outlet when this is a Media highlights clip (etl/news/clips.ts);
    *  null for a newsroom story. Tells the reviewer which section it lands in. */
   outlet: string | null;
-  /** Media Highlights only: another clip for the same scholar within a week
+  /** Media highlights only: another clip for the same scholar within a week
    *  whose headline shares most of its words (`findPossibleRepeat`) — a
    *  syndicated copy or re-airing the ETL could not safely drop. Advisory; null
    *  when none, and always null for newsroom rows. */
@@ -221,7 +221,7 @@ export function isNewsQueueEnabled(): boolean {
 }
 
 /**
- * Which queue a mention belongs to. A Media Highlights clip (etl/news/clips.ts)
+ * Which queue a mention belongs to. A Media highlights clip (etl/news/clips.ts)
  * is the only row with `outlet` set, so the split is that column alone:
  * `/edit/news-queue` reviews newsroom mentions, `/edit/media-highlights-queue`
  * reviews press clips. They publish to different profile sections.
