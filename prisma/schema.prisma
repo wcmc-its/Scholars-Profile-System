@@ -2519,13 +2519,18 @@ model ReportAccess {
 /// `app/api/edit/report-meta/[n]` (`updatedBy` is the REAL actor cwid, never
 /// the impersonation target).
 model ReportMeta {
-  reportKey       String   @id @map("report_key") @db.VarChar(64)
-  slug            String   @unique @db.VarChar(64)
-  name            String   @db.VarChar(120)
-  summary         String   @db.VarChar(500)
-  descriptionHtml String?  @map("description_html") @db.Text
-  updatedBy       String   @map("updated_by") @db.VarChar(32)
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  reportKey       String    @id @map("report_key") @db.VarChar(64)
+  slug            String    @unique @db.VarChar(64)
+  name            String    @db.VarChar(120)
+  summary         String    @db.VarChar(500)
+  descriptionHtml String?   @map("description_html") @db.Text
+  /// Request record (who asked for the report, when, and the memo), edited
+  /// in "Edit details" and shown to report editors only, never on the report.
+  requestedBy     String?   @map("requested_by") @db.VarChar(200)
+  requestedOn     DateTime? @map("requested_on") @db.Date
+  requestMemo     String?   @map("request_memo") @db.Text
+  updatedBy       String    @map("updated_by") @db.VarChar(32)
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@map("report_meta")
 }

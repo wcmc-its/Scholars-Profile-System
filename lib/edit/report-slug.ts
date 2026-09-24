@@ -1,6 +1,6 @@
 /**
  * The report slug rule (`report_meta.slug`, `lib/edit/report-meta.ts`) —
- * on its own so the `"use client"` editor (`report-meta-editor.tsx`) can
+ * on its own so the `"use client"` editor (`report-details-sheet.tsx`) can
  * validate as the user types WITHOUT importing `report-meta.ts`, which reads
  * `@/lib/db` and would drag the mariadb driver into the client bundle (the
  * `manageable-units.ts` trap in CLAUDE.md; broke the Next build on `fs`/`net`

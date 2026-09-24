@@ -26,6 +26,15 @@
  *     optimistic overlay — a grant list is short and a round-trip is
  *     instant).
  *
+ * Two presentations, `variant`: `"icon"` (the default — the `Users` glyph and
+ * the table above, on the index rows) and `"badge"` (the report page header,
+ * `ReportHeader`): a pill naming the default audience plus "+ N others" for
+ * the grant rows, opening a read-only list. The badge never edits; its
+ * "Manage access" opens the "Edit details" sheet (`report-details-sheet.tsx`)
+ * through {@link openReportDetails}, where Add / Remove live. The badge reads
+ * its rows straight from props, so a `router.refresh()` after the sheet
+ * changes a grant re-renders it with the new list.
+ *
  * Why the grant carries `name`: the popover is the only place a grantee's
  * name is ever in hand. The people picker returns the directory name at
  * grant time; the runtime cannot reach LDAP (#443) and the Medical Education
@@ -59,8 +68,12 @@ export type ReportAccessPopoverRow = {
   grantedAt: string;
 };
 
+/** How the popover presents: the index row's icon (default) or the report
+ *  header's audience pill. */
+export type ReportAccessVariant = "icon" | "badge";
+
 /** Unit-gated report: static rule + a link to the administrators page. */
-export type ReportAccessPopoverUnitProps = { mode: "unit" };
+export type ReportAccessPopoverUnitProps = { mode: "unit"; variant?: ReportAccessVariant };
 
 /** Row-gated report: the grant list, and the manage controls when the
  *  viewer may change it. */
@@ -76,19 +89,40 @@ export type ReportAccessPopoverPersonProps = {
   canManage: boolean;
   /** Who else can always run it — defaults to superusers and comms stewards. */
   note?: string;
+  /** The badge's default-audience label ("All unit administrators" for
+   *  report 8); defaults to {@link PERSON_AUDIENCE}. */
+  audience?: string;
+  variant?: ReportAccessVariant;
 };
 
 /** Administrator-gated report (report 8): static rule, any unit administrator. */
-export type ReportAccessPopoverAdminProps = { mode: "admin" };
+export type ReportAccessPopoverAdminProps = { mode: "admin"; variant?: ReportAccessVariant };
 
 export type ReportAccessPopoverProps =
   | ReportAccessPopoverUnitProps
   | ReportAccessPopoverPersonProps
   | ReportAccessPopoverAdminProps;
 
+/** The badge's default-audience labels. */
+export const UNIT_AUDIENCE = "Unit owners and curators";
+export const ADMIN_AUDIENCE = "All unit administrators";
+export const PERSON_AUDIENCE = "Superusers and comms stewards";
+const UNIT_RULE =
+  "Owners and Curators of the unit this report is opened for can run it, plus superusers and comms stewards.";
+const ADMIN_RULE =
+  "Every unit administrator — an Owner or Curator of any unit — can run it, plus superusers and comms stewards.";
+const PERSON_RULE = "Superusers and comms stewards can always run this report.";
+
+/** The window event the badge's "Manage access" fires and the "Edit details"
+ *  sheet listens for — the two are separate islands in the server header. */
+export const REPORT_DETAILS_OPEN_EVENT = "report-details-open";
+export function openReportDetails(): void {
+  window.dispatchEvent(new Event(REPORT_DETAILS_OPEN_EVENT));
+}
+
 const GENERIC_ERROR = "That didn't save. Try again.";
 
-function errorMessage(code: string | undefined): string {
+export function errorMessage(code: string | undefined): string {
   switch (code) {
     case "invalid_cwid":
       return "Pick a person from the directory.";
@@ -101,7 +135,7 @@ function errorMessage(code: string | undefined): string {
   }
 }
 
-function formatDate(iso: string): string {
+export function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
@@ -127,6 +161,7 @@ function Trigger() {
 const CONTENT_CLASS = "w-[34rem] max-w-[calc(100vw-2rem)] text-sm";
 
 export function ReportAccessPopover(props: ReportAccessPopoverProps) {
+  if (props.variant === "badge") return <AccessBadge {...props} />;
   if (props.mode === "unit" || props.mode === "admin") {
     return (
       <Popover>
@@ -149,21 +184,27 @@ export function ReportAccessPopover(props: ReportAccessPopoverProps) {
   return <PersonAccess {...props} />;
 }
 
-function PersonAccess({ reportKey, initialRows, scopeOptions, canManage, note }: ReportAccessPopoverPersonProps) {
-  // A report with one scope (the wildcard) has nothing to pick or show.
-  const scoped = scopeOptions.length > 1;
+/**
+ * A row-granted report's grant list plus its Add / Remove round-trip — POST
+ * `/api/edit/report-access`, then the rows the route answers with (server
+ * truth, no optimistic overlay). Shared by the index popover and the "Edit
+ * details" sheet; `onChange` runs after each successful write (the sheet
+ * refreshes the page so the header badge re-reads the list).
+ */
+export function useReportAccessRows(
+  reportKey: string,
+  initialRows: ReadonlyArray<ReportAccessPopoverRow>,
+  onChange?: () => void,
+) {
   const [rows, setRows] = React.useState<ReadonlyArray<ReportAccessPopoverRow>>(initialRows);
-  const [person, setPerson] = React.useState<DirectoryValue | null>(null);
-  const [scope, setScope] = React.useState(scopeOptions[0]?.[0] ?? "*");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const labelFor = React.useMemo(() => new Map(scopeOptions), [scopeOptions]);
 
   async function post(
     op: "grant" | "revoke",
     scopeKey: string,
     target: { cwid: string; name?: string },
-  ): Promise<void> {
+  ): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
@@ -179,16 +220,29 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage, note }:
       };
       if (!res.ok || data.ok !== true || !Array.isArray(data.rows)) {
         setError(errorMessage(data.error));
-        return;
+        return false;
       }
       setRows(data.rows);
-      if (op === "grant") setPerson(null);
+      onChange?.();
+      return true;
     } catch {
       setError(GENERIC_ERROR);
+      return false;
     } finally {
       setBusy(false);
     }
   }
+
+  return { rows, busy, error, post };
+}
+
+function PersonAccess({ reportKey, initialRows, scopeOptions, canManage, note }: ReportAccessPopoverPersonProps) {
+  // A report with one scope (the wildcard) has nothing to pick or show.
+  const scoped = scopeOptions.length > 1;
+  const { rows, busy, error, post } = useReportAccessRows(reportKey, initialRows);
+  const [person, setPerson] = React.useState<DirectoryValue | null>(null);
+  const [scope, setScope] = React.useState(scopeOptions[0]?.[0] ?? "*");
+  const labelFor = React.useMemo(() => new Map(scopeOptions), [scopeOptions]);
 
   return (
     <Popover>
@@ -250,7 +304,9 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage, note }:
             onSubmit={(e) => {
               e.preventDefault();
               if (!person) return;
-              void post("grant", scope, { cwid: person.cwid, name: person.name });
+              void post("grant", scope, { cwid: person.cwid, name: person.name }).then((ok) => {
+                if (ok) setPerson(null);
+              });
             }}
           >
             {/* One row: the person picker takes the slack, program + Add sit
@@ -292,6 +348,112 @@ function PersonAccess({ reportKey, initialRows, scopeOptions, canManage, note }:
               </p>
             )}
           </form>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Two initials for a grantee's avatar: first + last word of the name, or the
+ *  first two letters when the name is one word (a bare CWID). */
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
+  return `${words[0]![0]}${words[words.length - 1]![0]}`.toUpperCase();
+}
+
+/** The report header's access pill: the default audience, "+ N others" for the
+ *  grant rows, and a read-only list (the mockup's "Who can open this report").
+ *  "Manage access" (a manager only) opens the "Edit details" sheet; a unit
+ *  report links to the administrators page instead, since its access IS the
+ *  unit's Owner / Curator grants. */
+function AccessBadge(props: ReportAccessPopoverProps) {
+  const [audience, rule, rows, labelFor, canManage] =
+    props.mode === "person"
+      ? [
+          props.audience ?? PERSON_AUDIENCE,
+          props.note ?? PERSON_RULE,
+          props.initialRows,
+          new Map(props.scopeOptions.length > 1 ? props.scopeOptions : []),
+          props.canManage,
+        ]
+      : props.mode === "admin"
+        ? [ADMIN_AUDIENCE, ADMIN_RULE, [], new Map<string, string>(), false]
+        : [UNIT_AUDIENCE, UNIT_RULE, [], new Map<string, string>(), false];
+  const others = rows.length;
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Who can run this report: ${audience}${others > 0 ? ` and ${others} other${others === 1 ? "" : "s"}` : ""}`}
+          data-testid="report-access-trigger"
+          className="text-apollo-slate bg-apollo-slate-tint border-apollo-slate-tint-border hover:border-apollo-slate inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[13px] whitespace-nowrap"
+        >
+          <Users size={14} aria-hidden />
+          <span>{audience}</span>
+          {others > 0 && <span className="font-semibold">+ {others} other{others === 1 ? "" : "s"}</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] p-0 text-sm" data-testid="report-access-popover">
+        <div className="px-4 pt-3.5 pb-2.5 font-semibold">Who can open this report</div>
+        <ul className="border-apollo-border border-t">
+          <li className="border-apollo-border flex items-center gap-2.5 border-b px-4 py-2.5 last:border-b-0">
+            <span className="bg-apollo-slate-tint text-apollo-slate grid size-[30px] shrink-0 place-items-center rounded-full">
+              <Users size={15} aria-hidden />
+            </span>
+            <span className="min-w-0">
+              <span className="block">{audience}</span>
+              <span className="text-muted-foreground block text-xs">{rule}</span>
+            </span>
+          </li>
+          {rows.map((r) => {
+            const program = labelFor.get(r.scopeKey);
+            return (
+              <li
+                key={`${r.scopeKey}:${r.cwid}`}
+                className="border-apollo-border flex items-center gap-2.5 border-b px-4 py-2.5 last:border-b-0"
+                data-testid={`report-access-row-${r.scopeKey}-${r.cwid}`}
+              >
+                <span
+                  aria-hidden
+                  className="bg-apollo-surface-2 border-apollo-border-strong grid size-[30px] shrink-0 place-items-center rounded-full border text-xs font-semibold"
+                >
+                  {initials(r.name)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block">{r.name}</span>
+                  <span className="text-muted-foreground block text-xs">
+                    {program ? `${program} · ` : ""}added {formatDate(r.grantedAt)}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        {(canManage || props.mode === "unit") && (
+          <div className="border-apollo-border bg-apollo-surface-2 border-t px-4 py-2.5">
+            {canManage ? (
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                className="px-0"
+                onClick={() => {
+                  setOpen(false);
+                  openReportDetails();
+                }}
+              >
+                Manage access
+              </Button>
+            ) : (
+              <Link href="/edit/administrators" className="text-apollo-maroon text-xs underline-offset-2 hover:underline">
+                Manage unit administrators
+              </Link>
+            )}
+          </div>
         )}
       </PopoverContent>
     </Popover>

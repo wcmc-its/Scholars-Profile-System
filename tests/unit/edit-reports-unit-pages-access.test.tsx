@@ -1,8 +1,7 @@
 /**
  * `app/edit/reports/[report]/page.tsx`, one page × six unit-gated slugs —
- * every unit-gated report hands `ReportHeader` the "Who can run this report"
- * popover as its `access` node, in the `"unit"` mode (the static
- * Owner/Curator rule, no fetch).
+ * every unit-gated report hands `ReportHeader` the access badge's props as
+ * `access`, in the `"unit"` mode (the static Owner/Curator rule, no fetch).
  *
  * The wiring is one prop on one JSX line and nothing else on the page depends
  * on it, so without this file a page that DROPS the prop passes every gate:
@@ -10,10 +9,10 @@
  * warning, and `edit-reports-core-pages.test.tsx` mocks `ReportHeader` to an
  * h1 that never reads `access`. Each report is mutation-tested here on its
  * own (the registry's `gate` is per entry, so one slug passing says nothing
- * about the others): the popover is mocked to a marker, `ReportHeader` to a
- * pass-through that renders `access`, and the assertion reads BOTH the
- * header's `access` prop (element of the popover's type, `mode: "unit"`)
- * and the marker the render produced.
+ * about the others): `ReportHeader` is mocked to a pass-through that renders
+ * the popover marker from `access`, and the assertion reads BOTH the
+ * header's `access` prop (`{ mode: "unit" }`) and the marker the render
+ * produced.
  *
  * These are async Server Components, so each test awaits the page and then
  * renders the returned tree. Every loader is mocked to its empty state —
@@ -48,12 +47,12 @@ const {
       children,
     }: {
       n: string;
-      access?: React.ReactNode;
+      access?: { mode: string };
       children?: React.ReactNode;
     }) => (
       <>
         <h1 data-testid="report-header">Report {n}</h1>
-        {access}
+        {access && <span data-testid="report-access-popover" data-mode={access.mode} />}
         {children}
       </>
     ),
@@ -144,21 +143,18 @@ beforeEach(() => {
 });
 
 describe.each(REPORTS)("/edit/reports/%s — heading row", (n, slug) => {
-  it(`hands ReportHeader n="${n}" the unit-mode "Who can run this report" popover as \`access\``, async () => {
+  it(`hands ReportHeader n="${n}" the unit-mode access badge props as \`access\``, async () => {
     const result = await page(slug);
     render(result as React.ReactElement);
 
-    // The prop itself: an element of the popover's type in "unit" mode —
-    // the assertion a dropped `access=` or a wrong `mode` fails.
+    // The prop itself: the badge props in "unit" mode — the assertion a
+    // dropped `access=` or a wrong `mode` fails.
     expect(mockReportHeader).toHaveBeenCalledTimes(1);
     const props = mockReportHeader.mock.calls[0]![0];
     expect(props.n).toBe(n);
-    const access = props.access as React.ReactElement<{ mode: string }>;
-    expect(access?.type).toBe(mockPopover);
-    expect(access.props).toEqual({ mode: "unit" });
+    expect(props.access).toEqual({ mode: "unit" });
 
     // And it actually rendered inside the page, once, with that mode.
-    expect(mockPopover).toHaveBeenCalledTimes(1);
     const root = screen.getByTestId("page-under-test");
     const marker = screen.getByTestId("report-access-popover");
     expect(root.contains(marker)).toBe(true);

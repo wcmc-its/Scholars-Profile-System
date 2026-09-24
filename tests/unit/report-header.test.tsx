@@ -1,32 +1,37 @@
 /**
- * `components/edit/report-header.tsx` — the shared `<h1>` block of every
- * `/edit/reports/[n]` page. An async Server Component: each test awaits the
- * element and renders it. Protects: the numbered label from `report_meta`;
- * the pencil (`ReportMetaEditor`, mocked to a marker) for a superuser ONLY
- * and with the loaded meta as props; the page's "Who can run this report"
- * node (`access`) placed in the heading row between the h1 and the pencil,
- * and nothing extra when it is omitted; the page's subtitle (`children`)
- * rendered between the h1 and the disclosure; the "About this report"
- * `<details>` rendered closed (no `open` attribute) with the sanitized HTML
- * inside when a description exists, and not at all when it is null; a
- * hostile stored body is re-sanitized on read. Assertions are scoped to the
- * rendered container, never `document.body`.
+ * `components/edit/report-header.tsx` — the shared header of every
+ * `/edit/reports/[report]` page. An async Server Component: each test awaits
+ * the element and renders it. Protects: the "Report N" eyebrow and the plain
+ * name from `report_meta` as the h1; the access badge (`ReportAccessPopover`,
+ * mocked to a marker) handed the page's props with `variant="badge"`, in the
+ * heading row; "Edit details" (`ReportDetailsSheet`, mocked) for a superuser
+ * with the meta and the request record, for a comms steward who manages a
+ * row-granted report's grants (no request record), and for no one else; the
+ * page's subtitle (`children`) then the "About this report" `<details>`
+ * (closed, sanitized HTML inside) when a description exists and not at all
+ * when it is null; a hostile stored body is re-sanitized on read. Assertions
+ * are scoped to the rendered container, never `document.body`.
  */
 import { cleanup, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   mockReportMetaFor: vi.fn(),
-  mockEditor: vi.fn((props: { n: string; meta: { name: string } }) => (
-    <span data-testid="report-meta-edit" data-n={props.n} data-name={props.meta.name} />
+  mockLoadRequest: vi.fn(),
+  mockSheet: vi.fn((props: { n: string; canEditMeta: boolean }) => (
+    <span data-testid="details-sheet" data-n={props.n} data-edit-meta={String(props.canEditMeta)} />
+  )),
+  mockBadge: vi.fn((props: { mode: string; variant?: string }) => (
+    <span data-testid="badge" data-mode={props.mode} data-variant={props.variant} />
   )),
 }));
 
 vi.mock("@/lib/edit/report-meta", () => ({
   reportMetaFor: h.mockReportMetaFor,
-  reportLabel: (m: { key: string; name: string }) => `${m.key}. ${m.name}`,
+  loadReportRequestRecord: h.mockLoadRequest,
 }));
-vi.mock("@/components/edit/report-meta-editor", () => ({ ReportMetaEditor: h.mockEditor }));
+vi.mock("@/components/edit/report-details-sheet", () => ({ ReportDetailsSheet: h.mockSheet }));
+vi.mock("@/components/edit/report-access-popover", () => ({ ReportAccessPopover: h.mockBadge }));
 
 import { ReportHeader } from "@/components/edit/report-header";
 
@@ -41,6 +46,16 @@ const META = {
   descriptionHtml: "<p>Joined to <strong>JIF</strong>.</p><ul><li>one</li></ul>",
 };
 
+const REQUEST = { requestedBy: "Radiology", requestedOn: "2026-09-01", requestMemo: "Quarterly", updatedAt: null };
+
+const PERSON_ACCESS = {
+  mode: "person" as const,
+  reportKey: "high-impact-publications",
+  initialRows: [],
+  scopeOptions: [["*", "All"] as const],
+  canManage: true,
+};
+
 async function renderHeader(props: Parameters<typeof ReportHeader>[0]) {
   const el = await ReportHeader(props);
   const { container } = render(el);
@@ -50,24 +65,53 @@ async function renderHeader(props: Parameters<typeof ReportHeader>[0]) {
 beforeEach(() => {
   vi.clearAllMocks();
   h.mockReportMetaFor.mockResolvedValue(META);
+  h.mockLoadRequest.mockResolvedValue(REQUEST);
 });
 afterEach(cleanup);
 
 describe("ReportHeader", () => {
-  it("renders the numbered label from report_meta as the h1", async () => {
+  it("the eyebrow names the report number; the h1 is the plain name from report_meta", async () => {
     const q = await renderHeader({ n: "3", session: PLAIN });
     expect(h.mockReportMetaFor).toHaveBeenCalledWith("3");
-    expect(q.getByRole("heading", { level: 1 }).textContent).toBe("3. Publications");
+    expect(q.getByRole("heading", { level: 1 }).textContent).toBe("Publications");
+    expect(q.getByText("Report 3")).toBeTruthy();
   });
 
-  it("superuser → the pencil, handed the loaded meta", async () => {
+  it("access props → the badge variant in the heading row, before the subtitle", async () => {
+    const q = await renderHeader({
+      n: "3",
+      session: PLAIN,
+      access: { mode: "unit" },
+      children: <p data-testid="subtitle">Subtitle</p>,
+    });
+    const h1 = q.getByRole("heading", { level: 1 });
+    const wrap = q.getByTestId("report-header-access");
+    const badge = q.getByTestId("badge");
+    expect(wrap.contains(badge)).toBe(true);
+    expect(badge.getAttribute("data-mode")).toBe("unit");
+    expect(badge.getAttribute("data-variant")).toBe("badge");
+    expect(wrap.parentElement).toBe(h1.parentElement);
+    expect(
+      wrap.compareDocumentPosition(q.getByTestId("subtitle")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("no access → no badge, no Edit details", async () => {
     const q = await renderHeader({ n: "3", session: SUPERUSER });
-    const pencil = q.getByTestId("report-meta-edit");
-    expect(pencil.getAttribute("data-n")).toBe("3");
-    expect(pencil.getAttribute("data-name")).toBe("Publications");
-    expect(h.mockEditor).toHaveBeenCalledWith(
+    expect(q.queryByTestId("report-header-access")).toBeNull();
+    expect(q.queryByTestId("details-sheet")).toBeNull();
+  });
+
+  it("superuser → Edit details with the meta and the request record", async () => {
+    const q = await renderHeader({ n: "3", session: SUPERUSER, access: { mode: "unit" } });
+    expect(q.getByTestId("details-sheet").getAttribute("data-edit-meta")).toBe("true");
+    expect(h.mockLoadRequest).toHaveBeenCalledWith("3");
+    expect(h.mockSheet).toHaveBeenCalledWith(
       expect.objectContaining({
         n: "3",
+        canEditMeta: true,
+        request: REQUEST,
+        access: { mode: "unit" },
         meta: {
           slug: META.slug,
           name: META.name,
@@ -79,38 +123,19 @@ describe("ReportHeader", () => {
     );
   });
 
-  it("non-superuser → no pencil", async () => {
-    const q = await renderHeader({ n: "3", session: PLAIN });
-    expect(q.queryByTestId("report-meta-edit")).toBeNull();
-    expect(h.mockEditor).not.toHaveBeenCalled();
+  it("a comms steward managing a row-granted report → the sheet for access only; the request record is never read", async () => {
+    const q = await renderHeader({ n: "9", session: PLAIN, access: PERSON_ACCESS });
+    expect(q.getByTestId("details-sheet").getAttribute("data-edit-meta")).toBe("false");
+    expect(h.mockLoadRequest).not.toHaveBeenCalled();
+    expect(h.mockSheet).toHaveBeenCalledWith(expect.objectContaining({ request: null }), undefined);
   });
 
-  it("access node → rendered in the heading row, after the h1 and before the pencil", async () => {
-    const q = await renderHeader({
-      n: "3",
-      session: SUPERUSER,
-      access: <button type="button" data-testid="access-stub" />,
-      children: <p data-testid="subtitle">Subtitle</p>,
-    });
-    const h1 = q.getByRole("heading", { level: 1 });
-    const wrap = q.getByTestId("report-header-access");
-    const stub = q.getByTestId("access-stub");
-    expect(wrap.contains(stub)).toBe(true);
-    // Same flex row as the h1 (the pencil's row), not down with the subtitle.
-    expect(wrap.parentElement).toBe(h1.parentElement);
-    const pencil = q.getByTestId("report-meta-edit");
-    expect(h1.compareDocumentPosition(wrap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(wrap.compareDocumentPosition(pencil) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(
-      wrap.compareDocumentPosition(q.getByTestId("subtitle")) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it("no access node → nothing extra in the heading row", async () => {
-    const q = await renderHeader({ n: "3", session: PLAIN });
-    expect(q.queryByTestId("report-header-access")).toBeNull();
-    const h1 = q.getByRole("heading", { level: 1 });
-    expect(h1.parentElement?.children).toHaveLength(1);
+  it("a viewer who can neither edit nor manage → no sheet, no request record read", async () => {
+    const q = await renderHeader({ n: "9", session: PLAIN, access: { ...PERSON_ACCESS, canManage: false } });
+    expect(q.queryByTestId("details-sheet")).toBeNull();
+    const unit = await renderHeader({ n: "3", session: PLAIN, access: { mode: "unit" } });
+    expect(unit.queryByTestId("details-sheet")).toBeNull();
+    expect(h.mockLoadRequest).not.toHaveBeenCalled();
   });
 
   it("description present → a CLOSED <details> with the HTML inside, after the children", async () => {
@@ -125,27 +150,12 @@ describe("ReportHeader", () => {
     expect(details.querySelector("summary")?.textContent).toBe("About this report");
     expect(details.querySelector("strong")?.textContent).toBe("JIF");
     expect(details.querySelector("ul > li")?.textContent).toBe("one");
-    // Order: h1, then the page's subtitle, then the disclosure.
     const h1 = q.getByRole("heading", { level: 1 });
     const subtitle = q.getByTestId("subtitle");
     expect(h1.compareDocumentPosition(subtitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(
       subtitle.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-  });
-
-  it("the subtitle + disclosure sit in one wrapper that hides while the pencil's form is open (has-[data-report-meta-open])", async () => {
-    const q = await renderHeader({
-      n: "3",
-      session: PLAIN,
-      children: <p data-testid="subtitle">Every publication with a confirmed author.</p>,
-    });
-    const rendered = q.getByTestId("report-header-rendered");
-    expect(rendered.contains(q.getByTestId("subtitle"))).toBe(true);
-    expect(rendered.contains(q.getByTestId("report-description"))).toBe(true);
-    expect(rendered.className).toContain("group-has-[[data-report-meta-open]]/report-header:hidden");
-    // …and the group the variant keys on is the header's own root.
-    expect(rendered.closest(".group\\/report-header")).not.toBeNull();
   });
 
   it("description null → no <details> at all; children still render", async () => {

@@ -4,7 +4,7 @@
  * each numbered report (`/edit/reports/{1..7}`), moved out of the hardcoded
  * `ALL_REPORTS` / `PROGRAM_UNIT` literals in `app/edit/reports/page.tsx` and
  * the per-page `<h1>` / `metadata.title` strings so a superuser can edit them
- * in place (`components/edit/report-meta-editor.tsx` →
+ * in place ("Edit details", `components/edit/report-details-sheet.tsx` →
  * `app/api/edit/report-meta/[n]`).
  *
  * `REPORT_META_DEFAULTS` is the FALLBACK for a report with no row — the
@@ -199,6 +199,35 @@ export async function reportMetaFor(key: ReportKey): Promise<ReportMeta> {
   // Map type can't say so.
   if (!meta) throw new Error(`report_meta: no entry for report ${key}`);
   return meta;
+}
+
+/** Cap on `requestedBy` (the `report_meta.requested_by` column width). */
+export const REPORT_REQUESTED_BY_MAX = 200;
+/** Cap on `requestMemo` (a TEXT column; the cap keeps a paste bounded). */
+export const REPORT_REQUEST_MEMO_MAX = 5000;
+
+/** Who asked for a report, when, and what was asked (`requested_on` as
+ *  `YYYY-MM-DD`), plus when the row was last saved. Report editors only: the
+ *  header loads it for a superuser and hands it to the "Edit details" sheet;
+ *  nothing renders it on the report. All null for a report with no row. */
+export type ReportRequestRecord = {
+  requestedBy: string | null;
+  requestedOn: string | null;
+  requestMemo: string | null;
+  updatedAt: string | null;
+};
+
+export async function loadReportRequestRecord(key: ReportKey): Promise<ReportRequestRecord> {
+  const row = await db.read.reportMeta.findUnique({
+    where: { reportKey: key },
+    select: { requestedBy: true, requestedOn: true, requestMemo: true, updatedAt: true },
+  });
+  return {
+    requestedBy: row?.requestedBy ?? null,
+    requestedOn: row?.requestedOn ? row.requestedOn.toISOString().slice(0, 10) : null,
+    requestMemo: row?.requestMemo ?? null,
+    updatedAt: row?.updatedAt ? row.updatedAt.toISOString() : null,
+  };
 }
 
 /** The numbered label the index cards and page `<h1>`s show — `"3. Publications"`. */

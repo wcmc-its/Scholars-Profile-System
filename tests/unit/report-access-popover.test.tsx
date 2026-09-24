@@ -234,3 +234,70 @@ describe("ReportAccessPopover — person mode, canManage=true", () => {
     expect(within(content).getByRole("alert").textContent).toContain("That didn't save. Try again.");
   });
 });
+
+describe("ReportAccessPopover — badge variant (report page header)", () => {
+  it("person mode: the default audience plus '+ N others', and a read-only list with program and added date", () => {
+    render(
+      <ReportAccessPopover
+        mode="person"
+        variant="badge"
+        reportKey="mentored-publications"
+        initialRows={[ROW, NEW_ROW]}
+        scopeOptions={SCOPES}
+        canManage={false}
+      />,
+    );
+    const trigger = screen.getByTestId("report-access-trigger");
+    expect(trigger.textContent).toBe("Superusers and comms stewards+ 2 others");
+    const content = within(open());
+    expect(content.getByText("Who can open this report")).toBeTruthy();
+    expect(content.getByTestId("report-access-row-md-usr0001").textContent).toContain("Curated Name");
+    expect(content.getByTestId("report-access-row-md-usr0001").textContent).toContain("MD · added Sep 18, 2026");
+    expect(content.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(content.queryByRole("button", { name: "Manage access" })).toBeNull();
+  });
+
+  it("an audience override names report 8's default; no rows → no '+ others'", () => {
+    render(
+      <ReportAccessPopover
+        mode="person"
+        variant="badge"
+        audience="All unit administrators"
+        reportKey="article-count"
+        initialRows={[]}
+        scopeOptions={[["*", "All"]]}
+        canManage={false}
+      />,
+    );
+    expect(screen.getByTestId("report-access-trigger").textContent).toBe("All unit administrators");
+  });
+
+  it("a manager's 'Manage access' closes the popover and fires the sheet's open event", () => {
+    const heard = vi.fn();
+    window.addEventListener("report-details-open", heard);
+    render(
+      <ReportAccessPopover
+        mode="person"
+        variant="badge"
+        reportKey="mentored-publications"
+        initialRows={[ROW]}
+        scopeOptions={SCOPES}
+        canManage
+      />,
+    );
+    const content = within(open());
+    fireEvent.click(content.getByRole("button", { name: "Manage access" }));
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("report-access-popover")).toBeNull();
+    window.removeEventListener("report-details-open", heard);
+  });
+
+  it("unit mode: unit owners and curators, linking to the administrators page", () => {
+    render(<ReportAccessPopover mode="unit" variant="badge" />);
+    expect(screen.getByTestId("report-access-trigger").textContent).toBe("Unit owners and curators");
+    const content = within(open());
+    expect(content.getByRole("link", { name: "Manage unit administrators" }).getAttribute("href")).toBe(
+      "/edit/administrators",
+    );
+  });
+});

@@ -178,15 +178,16 @@ function findByTestId(node: unknown, testId: string): El | null {
   return null;
 }
 
-/** The popover element the page hands `ReportHeader` as `access`. The mocked
- *  header is opaque to the walk (its `access` is a prop, not a child), so it
- *  is read off the header's props directly. */
-function accessPopover(result: unknown): El {
+/** The access-badge props the page hands `ReportHeader` as `access` (the
+ *  header renders the badge from them). Read off the mocked header's props;
+ *  wrapped as `{ props }` so the assertions read like the element they used
+ *  to be. */
+function accessPopover(result: unknown): { props: Record<string, unknown> } {
   const header = findByType(result, h.mockReportHeader);
   expect(header).not.toBeNull();
-  const access = asEl(header!.props.access);
-  expect(access.type).toBe(h.mockPopover);
-  return access;
+  const access = header!.props.access as Record<string, unknown> | undefined;
+  expect(access).toBeTruthy();
+  return { props: access! };
 }
 
 beforeEach(() => {

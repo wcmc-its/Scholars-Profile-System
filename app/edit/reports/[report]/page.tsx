@@ -41,22 +41,21 @@
  *
  * Order, unchanged from the seven pages: session → SSO redirect FIRST (before
  * any DB read) → number/slug resolution → the gate → the console tab counts
- * → `ConsoleShell` → "← All reports" → `ReportHeader` (h1, popover, pencil,
- * the body's `subtitle`, the "About this report" disclosure) → the body's
- * `main`. `force-dynamic`, noindex, like every `/edit/*` console page.
+ * → `ConsoleShell` → "← All reports" → `ReportHeader` (eyebrow, h1, access
+ * badge, "Edit details", the body's `subtitle`, the "About this report"
+ * disclosure) → the body's `main`. `force-dynamic`, noindex, like every `/edit/*` console page.
  *
  * Loading: no route `loading.tsx` (it replaced the whole page, top bar
  * included, since the shell needs the session). The body streams under
  * `Suspense` with `ReportBodySkeleton`, so only the report area shimmers.
  */
-import type * as React from "react";
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { ReportAccessPopover } from "@/components/edit/report-access-popover";
+import { ADMIN_AUDIENCE, type ReportAccessPopoverProps } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -157,7 +156,7 @@ export default async function EditReportPage({
   // body's own loads all run in ONE `Promise.all` below — report 7's page
   // ran its four reads concurrently before this refactor; a serial chain
   // here would be a latency regression on the heaviest report.
-  let loadAccess: () => Promise<React.ReactNode>;
+  let loadAccess: () => Promise<ReportAccessPopoverProps>;
   let render: () => Promise<ReportRender>;
 
   if (def.gate === "unit") {
@@ -192,16 +191,15 @@ export default async function EditReportPage({
       kind === "center"
         ? `/edit/reports?center=${encodeURIComponent(code)}`
         : `/edit/reports?center=${encodeURIComponent(code)}&kind=${kind}`;
-    loadAccess = async () => <ReportAccessPopover mode="unit" />;
+    loadAccess = async () => ({ mode: "unit" });
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
   } else if (def.gate === "admin") {
     if (!(await canViewArticleCountReport(session))) notFound();
     back = "/edit/reports";
-    loadAccess = async () => (
-      <ReportAccessPopover
-        {...await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)}
-      />
-    );
+    loadAccess = async () => ({
+      ...(await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)),
+      audience: ADMIN_AUDIENCE,
+    });
     render = () => def.render({ n, session, searchParams: sp, basePath });
   } else {
     // Row-based gate: an empty scope set reads as an unbuilt route, the same
@@ -215,9 +213,7 @@ export default async function EditReportPage({
     // can run the report to anyone who can; only Add / Remove ride
     // `canManage`.
     back = "/edit/reports";
-    loadAccess = async () => (
-      <ReportAccessPopover {...await loadReportAccessPopoverProps(def.accessKey, session)} />
-    );
+    loadAccess = () => loadReportAccessPopoverProps(def.accessKey, session);
     render = () => def.render({ n, scopes, session, searchParams: sp, basePath });
   }
 
