@@ -312,7 +312,12 @@ export function clipToArticle(c: Clip): ScrapedArticle {
   return {
     url: c.url,
     title: c.title,
-    excerpt: c.summary ? c.summary.slice(0, 2000) : null,
+    // External Affairs asked that the digest's summary line ("• Dr. X comments
+    // on …") never be shown: it is their internal blurb, not the outlet's text.
+    // It is still read for matching (bodyText/tags) and quoted to reviewers in
+    // the queue's context snippet, but never stored as the public excerpt.
+    // reconcile() refreshes excerpt, so a re-read nulls it on older clip rows.
+    excerpt: null,
     thumbnailUrl: null,
     publishedAt: c.publishedAt,
     cwids: [],

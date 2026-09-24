@@ -121,6 +121,9 @@ describe("helpers", () => {
     const a = clipToArticle(EXPECTED[0]);
     expect(a.outlet).toBe("The Example Bazaar");
     expect(a.tags).toEqual(["Jane Roe"]);
+    // The digest blurb feeds matching but is never the public excerpt.
+    expect(a.excerpt).toBeNull();
+    expect(a.bodyText).toBe(EXPECTED[0].summary);
     expect(a.cwids).toEqual([]);
   });
 
