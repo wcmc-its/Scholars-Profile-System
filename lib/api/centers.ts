@@ -58,7 +58,7 @@ import {
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
-import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import { enabledExternalMemberSources } from "@/lib/edit/external-member-sources";
 import {
   buildExternalMemberHit,
   loadExternalMembersByCuid,
@@ -477,17 +477,19 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   // query above never sees them (no double-count risk). Add active
   // `source: "cornell-ithaca"` memberships so the hero count agrees with the
   // roster's rendered length (`getCenterMembersUncached`, #2235/#2237).
-  const cornellMemberCount = isCornellDirectoryMembersEnabled()
-    ? await (async () => {
-        const rows = await prisma.centerMembership.findMany({
-          where: { centerCode: center.code, source: "cornell-ithaca" },
-          select: { startDate: true, endDate: true },
-        });
-        const today = todayIso();
-        return rows.filter((r) => isCenterMembershipActive(r.startDate, r.endDate, today))
-          .length;
-      })()
-    : 0;
+  // Also CTSC feed people with no SPS profile (`ctsc-feed-external`).
+  const cornellMemberCount = await (async () => {
+    const externalSources = enabledExternalMemberSources();
+    const rows = await prisma.centerMembership.findMany({
+      where: { centerCode: center.code },
+      select: { source: true, startDate: true, endDate: true },
+    });
+    const today = todayIso();
+    return rows.filter(
+      (r) =>
+        externalSources.includes(r.source) && isCenterMembershipActive(r.startDate, r.endDate, today),
+    ).length;
+  })();
   const scholarCount =
     countRows.filter((s) => isPubliclyDisplayed(s.roleCategory)).length + cornellMemberCount;
 
@@ -675,9 +677,10 @@ async function getCenterMembersUncached(
   // them further than presence — `isCenterMembershipActive` above already
   // ran on their row, same as a WCM row's).
   let cornellHits: CenterMemberHit[] = [];
-  if (isCornellDirectoryMembersEnabled()) {
+  {
+    const externalSources = enabledExternalMemberSources();
     const cornellCwids = activeMemberships
-      .filter((m) => m.source === "cornell-ithaca")
+      .filter((m) => externalSources.includes(m.source))
       .map((m) => m.cwid);
     if (cornellCwids.length > 0) {
       const externalByCuid = await loadExternalMembersByCuid(cornellCwids);
@@ -993,9 +996,10 @@ export async function getCenterMembersByType(
   // `groupToRawValues`'s filter to place it in. Built the same way as the
   // flat SSR roster's Cornell branch (`getCenterMembersUncached`).
   let cornellHits: CenterMemberHit[] = [];
-  if (roleGroup === "Affiliated faculty" && isCornellDirectoryMembersEnabled()) {
+  if (roleGroup === "Affiliated faculty") {
+    const externalSources = enabledExternalMemberSources();
     const cornellCwids = activeMemberships
-      .filter((m) => m.source === "cornell-ithaca")
+      .filter((m) => externalSources.includes(m.source))
       .map((m) => m.cwid);
     if (cornellCwids.length > 0) {
       const externalByCuid = await loadExternalMembersByCuid(cornellCwids);

@@ -337,6 +337,15 @@ export class EtlStack extends Stack {
         secretName: `scholars/${env}/reciter-api`,
         keys: ["RECITER_API_BASE_URL", "RECITER_API_KEY"],
       },
+      {
+        // etl:ctsc-roster — the CTSC investigators-and-trainees feed (the one
+        // the ReCiter Institutional Client reads). The URL is an internal
+        // hostname, so it travels in the secret with the token rather than in
+        // this public repo.
+        constructId: "EtlSecretCtsc",
+        secretName: `scholars/${env}/etl/ctsc`,
+        keys: ["CTSC_FEED_URL", "CTSC_FEED_TOKEN"],
+      },
     ];
     const perSourceSecrets = credentialedSources.map((src) =>
       secretsmanager.Secret.fromSecretNameV2(this, src.constructId, src.secretName),
@@ -365,6 +374,9 @@ export class EtlStack extends Stack {
     ];
     const LDAP_SECRET_IDS = ["EtlSecretEd"];
     const RECITER_API_SECRET_IDS = ["EtlSecretReciterApi"];
+    // CTSC roster: the feed token plus the ED bind (it resolves CWIDs/emails in
+    // ED). Its own def so the feed token rides no other step.
+    const CTSC_SECRET_IDS = ["EtlSecretEd", "EtlSecretCtsc"];
     const secretArnsFor = (ids: string[]): string[] =>
       ids.map((id) => {
         const e = perSourceByConstructId.get(id);
@@ -997,6 +1009,7 @@ export class EtlStack extends Stack {
     // RECITER_API_SCRIPTS below). Isolating the key on its own def keeps it off
     // every other cadence step and off the web tier.
     const reciterApiUnit = makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+    const ctscUnit = makeEtlTaskUnit("Ctsc", "ctsc", CTSC_SECRET_IDS);
     // Both envs' reciter-api secrets point at the SAME ReCiter, so one Identity
     // table: a live staging OrcidPush would write staging's (test-edited)
     // scholar.orcid into it, and prod's Identity pull would import it. Staging
@@ -1160,6 +1173,7 @@ export class EtlStack extends Stack {
     // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
     // it is not listed; listing it would change nothing.
     const RECITER_API_SCRIPTS = new Set(["etl:orcid-push"]);
+    const CTSC_SCRIPTS = new Set(["etl:ctsc-roster"]);
     const taskUnitFor = (
       npmScript: string,
     ): { taskDefinition: ecs.FargateTaskDefinition; container: ecs.ContainerDefinition } =>
@@ -1169,7 +1183,9 @@ export class EtlStack extends Stack {
           ? sourcesUnit
           : RECITER_API_SCRIPTS.has(npmScript)
             ? reciterApiUnit
-            : baseUnit;
+            : CTSC_SCRIPTS.has(npmScript)
+              ? ctscUnit
+              : baseUnit;
 
     // ------------------------------------------------------------------
     // SNS topic. No subscriptions in this PR; B23 wires PagerDuty.
@@ -1470,6 +1486,10 @@ export class EtlStack extends Stack {
       // it must NOT abort the nightly. Writes are enabled by
       // SELF_EDIT_ED_ADMINS_IMPORT="on" in baseEnvironment (else dry-run).
       { id: "EdAdmins", npmScript: "etl:ed:admins", external: true, tier: "continue" },
+      // CTSC roster → the `ctsc` center (etl/ctsc-roster). After Ed so the
+      // scholar set it links against is tonight's. tier:"continue": a missed
+      // night leaves last night's roster, and the step refuses a short feed.
+      { id: "CtscRoster", npmScript: "etl:ctsc-roster", external: true, tier: "continue" },
       // #1679 — tier:"continue", NOT "abort". etl:reciter's source-volume guard
       // (lib/etl-guard.ts) REFUSES to write on a >20% source-row drop, so a
       // guard refusal leaves the publication table at its last-good rows —

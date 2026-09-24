@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { PersonRow } from "@/components/department/person-row";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
 
@@ -168,6 +168,24 @@ describe("PersonRow", () => {
     });
   });
 
+  describe("external CTSC feed member (no SPS profile)", () => {
+    const ctscHit: DepartmentFacultyHit = {
+      ...baseHit,
+      cwid: "ctsc:42",
+      preferredName: "Grace Hopper",
+      slug: "",
+      isExternal: true,
+      externalInstitution: "Hospital for Special Surgery",
+    };
+
+    it("renders a plain name with no link and the feed institution badge", () => {
+      const { container } = render(<PersonRow hit={ctscHit} />);
+      expect(screen.queryByRole("link", { name: "Grace Hopper" })).toBeNull();
+      expect(within(container).getByText("Grace Hopper")).toBeTruthy();
+      expect(within(container).getByText("Hospital for Special Surgery")).toBeTruthy();
+    });
+  });
+
   describe("external (Cornell) member", () => {
     const externalHit: DepartmentFacultyHit = {
       ...baseHit,
@@ -176,6 +194,7 @@ describe("PersonRow", () => {
       slug: "",
       isExternal: true,
       externalProfileUrl: "https://www.cornell.edu/search/sso/people.cfm?netid=ab123",
+      externalInstitution: "Cornell University",
     };
 
     it("links out to the Cornell directory in a new tab instead of a WCM profile", () => {

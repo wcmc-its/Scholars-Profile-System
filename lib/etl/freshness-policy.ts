@@ -122,6 +122,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // writes source "ED-Admins" (etl/ed-admins/index.ts) — a continue-tier failure
   // is invisible to the ExecutionsFailed alarm, so freshness is its only net.
   "ED-Admins": { cadence: "nightly" },
+  // Deployed nightly step CtscRoster (tier:"continue") — freshness is its only net.
+  "CTSC-Roster": { cadence: "nightly" },
   ReCiter: { cadence: "nightly" },
   // PubMed competing-interest statements backfill — runs right after ReCiter.
   "ReCiter-COI-Statements": { cadence: "nightly" },

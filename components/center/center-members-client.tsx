@@ -27,7 +27,7 @@ import type {
   CenterMembershipType,
   CenterMembersResult,
 } from "@/lib/api/centers";
-import { institutionDisplayName } from "@/lib/institutions";
+import { HOME_INSTITUTION_CODE, institutionDisplayName } from "@/lib/institutions";
 
 export function CenterMembersClient({
   result,
@@ -166,10 +166,11 @@ function GroupedRoster({
 
   const deptKey = (m: RowWithProgram) => m.departmentName || NO_DEPT;
   const rankKey = (m: RowWithProgram) => m.professorialRank || NO_RANK;
-  // A Cornell (Ithaca) external member (#2519) has no Scholar row, so no
-  // `primaryOrgCode`; bucket it under the map's `Cornell` code instead.
+  // An external member (#2519 Cornell, CTSC feed) has no Scholar row, so no
+  // `primaryOrgCode`; bucket it by its institution name (unmapped strings
+  // display as-is), or WCM when the feed lists WCM itself.
   const instKey = (m: RowWithProgram) =>
-    m.isExternal ? "Cornell" : m.primaryOrgCode || NO_INST;
+    m.isExternal ? m.externalInstitution ?? HOME_INSTITUTION_CODE : m.primaryOrgCode || NO_INST;
   const typeKey = (m: RowWithProgram): string => m.membershipType ?? "";
   // #962 — the family overlay-key values a member belongs to (facet membership).
   const methodValues = (m: RowWithProgram): string[] =>

@@ -86,7 +86,7 @@ import {
   type UnitRef,
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
-import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import { enabledExternalMemberSources } from "@/lib/edit/external-member-sources";
 import { loadExternalMembersByCuid } from "@/lib/api/external-members";
 import type { ExternalMember, PrismaClient } from "@/lib/generated/prisma/client";
 
@@ -918,13 +918,14 @@ export async function loadUnitEditContext(
   // `Scholar` row at all (see `lib/api/external-members.ts`'s header), so its
   // name/title come from `ExternalMember` instead of the `nameMap` built in
   // step 5. One batched query for every such cwid across the whole roster —
-  // gated on `isCornellDirectoryMembersEnabled()`, mirroring the public
+  // gated on `enabledExternalMemberSources()`, mirroring the public
   // roster union (`lib/api/centers.ts`), so the flag-off path never queries
   // `ExternalMember` and stays byte-identical to today.
   let externalByCuid = new Map<string, ExternalMember>();
-  if (hasRoster && isCornellDirectoryMembersEnabled()) {
+  if (hasRoster) {
+    const externalSources = enabledExternalMemberSources();
     const cornellCwids = rosterRows
-      .filter((r) => r.source === "cornell-ithaca")
+      .filter((r) => externalSources.includes(r.source))
       .map((r) => r.cwid);
     if (cornellCwids.length > 0) {
       externalByCuid = await loadExternalMembersByCuid(cornellCwids);

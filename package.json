@@ -44,6 +44,7 @@
     "etl:ed:probe-divisions": "tsx etl/ed/probe-divisions.ts",
     "etl:ed:admins": "tsx etl/ed-admins/index.ts",
     "etl:ed:admins:probe": "tsx etl/ed-admins/probe.ts",
+    "etl:ctsc-roster": "tsx etl/ctsc-roster/index.ts",
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
     "etl:reciter:probe-nih": "tsx etl/reciter/probe-nih-cols.ts",
     "etl:reciter": "tsx etl/reciter/index.ts",

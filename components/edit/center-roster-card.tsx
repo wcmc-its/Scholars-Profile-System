@@ -87,6 +87,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { DiseaseCodeOption, RosterDiseaseRow } from "@/lib/api/unit-edit-context";
 import { MEMBER_ROLE_KEY, deriveMembershipType } from "@/lib/org-unit-roles";
+import { CTSC_EXTERNAL_SOURCE, externalSourceLabel } from "@/lib/edit/external-member-sources";
 
 export type RosterMember = {
   cwid: string;
@@ -108,6 +109,9 @@ export type RosterMember = {
    *  `"external"` (#2519) is a Cornell (Ithaca) directory member with no WCM
    *  profile at all — never "departed" or "unknown", it never had one. */
   scholarState?: "active" | "departed" | "unknown" | "external";
+  /** Membership source (`manual-ui`, `cornell-ithaca`, `ctsc-feed`, …). Optional
+   *  for fixtures that predate it; the context always sends it. */
+  source?: string;
   /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
    *  picture, `[]`/absent for a non-center roster or a member with none.
    *  Optional for the same reason `scholarState` is: existing fixtures/callers
@@ -1432,9 +1436,13 @@ export function CenterRosterCard({
                               variant="outline"
                               className="border-apollo-border rounded-full"
                               data-testid={`roster-scholar-state-${m.cwid}`}
-                              title="Cornell University (Ithaca) directory member — no WCM profile"
+                              title={
+                                m.source === CTSC_EXTERNAL_SOURCE
+                                  ? "From the CTSC feed — no SPS profile. Changes here are overwritten by the nightly sync."
+                                  : "Cornell University (Ithaca) directory member — no WCM profile"
+                              }
                             >
-                              Cornell University
+                              {externalSourceLabel(m.source ?? "")}
                             </Badge>
                           )}
                         </div>

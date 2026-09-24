@@ -4127,3 +4127,24 @@ model SponsorMatchSubmission {
   @@map("sponsor_match_submission")
 }
 
+
+/// One CTSC feed record whose CWID CTSC should fix at the source, rebuilt each
+/// night by `etl/ctsc-roster`. Shown on the CTSC center's /edit page ("Feed
+/// CWID issues") so the CTSC team can correct their system; a corrected record
+/// drops off on the next sync. `suggestedCwid` is what ED resolved from the
+/// record's emails (null when nothing resolved unambiguously).
+model CtscFeedIssue {
+  primaryKey    Int      @id @map("primary_key")
+  name          String   @db.VarChar(255)
+  institution   String?  @db.VarChar(255)
+  feedCwid      String?  @map("feed_cwid") @db.VarChar(64)
+  /// See `CtscIssueReason` in `etl/ctsc-roster/resolve.ts`.
+  reason        String   @db.VarChar(32)
+  suggestedCwid String?  @map("suggested_cwid") @db.VarChar(32)
+  suggestedName String?  @map("suggested_name") @db.VarChar(255)
+  matchedEmail  String?  @map("matched_email") @db.VarChar(255)
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  @@index([reason])
+  @@map("ctsc_feed_issue")
+}

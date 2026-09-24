@@ -56,8 +56,13 @@ export function cornellDirectoryUrl(netid: string): string {
  *  client-bundle trap in CLAUDE.md). */
 export type ExternalMemberHit = DepartmentFacultyHit & {
   isExternal: true;
-  externalProfileUrl: string;
+  externalProfileUrl?: string;
+  externalInstitution?: string;
 };
+
+/** The CTSC feed lists WCM itself under this string; absence-as-default, so a
+ *  WCM-affiliated external gets no institution badge. */
+const CTSC_WCM_INSTITUTION = /weill cornell/i;
 
 /**
  * Project one `ExternalMember` row into a roster hit. `cwid` carries the
@@ -84,6 +89,10 @@ export function buildExternalMemberHit(m: ExternalMember): ExternalMemberHit {
     pubCount: 0,
     grantCount: 0,
     isExternal: true,
-    externalProfileUrl: cornellDirectoryUrl(m.cuid),
+    ...(m.source === "ctsc-feed"
+      ? m.affiliation && !CTSC_WCM_INSTITUTION.test(m.affiliation)
+        ? { externalInstitution: m.affiliation }
+        : {}
+      : { externalProfileUrl: cornellDirectoryUrl(m.cuid), externalInstitution: "Cornell University" }),
   };
 }

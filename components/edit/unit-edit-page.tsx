@@ -36,6 +36,10 @@ import { UnitFacultyExportCard } from "@/components/edit/unit-faculty-export-car
 import { UnitRosterCard } from "@/components/edit/unit-roster-card";
 import { UnitNameCard } from "@/components/edit/unit-name-card";
 import { UnitSlugCard } from "@/components/edit/unit-slug-card";
+import { CtscFeedIssuesPanel } from "@/components/edit/ctsc-feed-issues-panel";
+
+/** The CTSC center's code (created in /edit; `etl/ctsc-roster` writes to it). */
+const CTSC_CENTER_CODE = "ctsc";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
 import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
@@ -51,7 +55,8 @@ type AttrKey =
   | "name"
   | "slug"
   | "center-type"
-  | "retire";
+  | "retire"
+  | "feed-issues";
 
 type AttrDef = {
   key: AttrKey;
@@ -135,6 +140,12 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
     visible: (ctx) => ctx.unit.unitType === "center" && isSuperuser(ctx.actorRole),
   },
   { key: "retire", label: "Retire unit", visible: (ctx) => isSuperuser(ctx.actorRole) },
+  // CTSC only: records in the CTSC feed whose CWID CTSC should fix (etl/ctsc-roster).
+  {
+    key: "feed-issues",
+    label: "Feed CWID issues",
+    visible: (ctx) => ctx.unit.unitType === "center" && ctx.unit.code === CTSC_CENTER_CODE,
+  },
 ];
 
 const DEFAULT_ATTR: AttrKey = "description";
@@ -268,6 +279,8 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
           actorCwid={ctx.actorCwid}
         />
       );
+    case "feed-issues":
+      return <CtscFeedIssuesPanel />;
     case "roster":
       // A center gets the rich #552 §6.1 table (Member/Type/Program/Diseases/
       // Status); a manual division gets the simple add/remove list (PR-7c).

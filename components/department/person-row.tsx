@@ -75,7 +75,10 @@ export function PersonRow({
               enum. The fallback keeps older payloads working — and now that the
               predicate fails closed, an unrecognized label de-links rather than
               leaks. */}
-          {hit.isExternal ? (
+          {hit.isExternal && !hit.externalProfileUrl ? (
+            // A CTSC feed person with no SPS profile: plain name, no link.
+            <span style={{ color: "var(--color-text-primary)" }}>{hit.preferredName}</span>
+          ) : hit.isExternal ? (
             // #2519 — a Cornell (Ithaca) external member has no WCM profile
             // (no slug, no Scholar row): link out to the Cornell directory
             // instead, and skip `PersonPopover` (it has no WCM data to show).
@@ -107,9 +110,9 @@ export function PersonRow({
             const label = formatRoleCategory(hit.roleCategory);
             return label ? <RoleTag role={label} /> : null;
           })()}
-          {hit.isExternal && (
+          {hit.isExternal && hit.externalInstitution && (
             <Badge variant="outline" className="rounded-full">
-              Cornell University
+              {hit.externalInstitution}
             </Badge>
           )}
           {institution && (

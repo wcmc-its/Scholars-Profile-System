@@ -789,7 +789,7 @@ export async function fetchPersonNamesByCwid(
 /** RFC 4515 LDAP filter escaping. CWIDs are alphanumeric in practice, but
  *  hardening anyway in case ED ever returns a CWID with a hyphen or other
  *  reserved character. */
-function escapeLdapFilter(s: string): string {
+export function escapeLdapFilter(s: string): string {
   return s.replace(/[\\*()\0]/g, (c) => {
     switch (c) {
       case "\\":

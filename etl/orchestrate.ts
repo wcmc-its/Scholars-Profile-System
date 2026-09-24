@@ -81,6 +81,7 @@ async function main() {
     // safe in the chain even before #443 LDAP routing lands. (Deployed Step
     // Function nightly wiring is held pending OQ-4.)
     ["ED-Admins", "etl/ed-admins/index.ts"],
+    ["CTSC-Roster", "etl/ctsc-roster/index.ts"],
     ["RePORTER", "etl/reporter/index.ts"],
     ["NSF", "etl/nsf/index.ts"],
     ["Gates", "etl/gates/index.ts"],
