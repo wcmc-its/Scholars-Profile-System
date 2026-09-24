@@ -67,7 +67,7 @@ function NavLinks({
       {nav.map((g) => (
         <div key={g.group || "_top"} className="mb-4 last:mb-0">
           {g.group ? (
-            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1.5 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
               {g.group}
             </div>
           ) : null}
@@ -134,7 +134,7 @@ export function DocsMobileNav({ nav }: { nav: NavGroup[] }) {
           className="flex w-full items-center gap-2 px-6 py-2.5 text-left text-sm focus:outline-none focus-visible:bg-[#f6f7f9]"
           aria-label="Jump to section"
         >
-          <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          <span className="shrink-0 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
             On this page
           </span>
           <span className="min-w-0 flex-1 truncate font-semibold text-[#7d1c1c]">{activeLabel}</span>
