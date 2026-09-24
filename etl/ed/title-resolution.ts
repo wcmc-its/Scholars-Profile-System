@@ -1,7 +1,7 @@
 /**
  * ED ETL — the title-resolution post-pass.
  *
- * Runs AFTER the leader assignments are written, because two of the four tiers
+ * Runs AFTER the leader assignments are written, because two of the tiers
  * (`chief`, `centerHead`) are `OrgUnitRoleAssignment` rows this same run
  * produces. The scholar upsert earlier in the run writes the ED value into
  * `Scholar.primaryTitle` as a seed and the raw tiers into
@@ -23,13 +23,13 @@
  * on a title nobody can reach.
  *
  * COST. One `findMany` over ~8,800 narrow scholar rows, three small
- * assignment/unit reads, one `field_override` read, then an update ONLY where
- * the resolved value differs from what is stored — steady state is ~80
- * updates. No per-scholar round trip.
+ * assignment/unit reads, one current-appointment read, one `field_override`
+ * read, then an update ONLY where the resolved value differs from what is
+ * stored — steady state is ~80 updates. No per-scholar round trip.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { CENTER_ENTITY_TYPE } from "@/lib/org-unit-roles";
-import { isCancerCenterHead, loadCancerCenterCodes } from "@/lib/edit/title-picker";
+import { isCenterDirector, loadCurrentAppointmentTitles } from "@/lib/edit/title-picker";
 import {
   ambiguousUnitNames,
   formatUnitLeadershipTitle,
@@ -39,7 +39,13 @@ import {
 /** The Prisma surface this pass needs — base client or interactive tx. */
 type TitleResolutionClient = Pick<
   PrismaClient,
-  "scholar" | "orgUnitRoleAssignment" | "division" | "center" | "centerProgram" | "fieldOverride"
+  | "scholar"
+  | "orgUnitRoleAssignment"
+  | "division"
+  | "center"
+  | "centerProgram"
+  | "fieldOverride"
+  | "appointment"
 >;
 
 export type TitleResolutionResult = {
@@ -76,9 +82,15 @@ export async function resolveScholarTitles(
   ]);
   const overrides = new Map(overrideRows.map((o) => [o.entityId, o.value]));
 
-  const { chiefTitles, centerTitles } = opts.applyDerivedTiers
-    ? await loadLeadershipTitles(client)
-    : { chiefTitles: new Map<string, string>(), centerTitles: new Map<string, string>() };
+  const [{ chiefTitles, centerTitles }, appointmentTitles] = opts.applyDerivedTiers
+    ? await Promise.all([loadLeadershipTitles(client), loadCurrentAppointmentTitles(client)])
+    : [
+        {
+          chiefTitles: new Map<string, string>(),
+          centerTitles: new Map<string, string>(),
+        },
+        new Map<string, string[]>(),
+      ];
 
   const byTier: Record<string, number> = {};
   let updated = 0;
@@ -91,6 +103,7 @@ export async function resolveScholarTitles(
     const resolved = resolveScholarTitle({
       override: overrides.get(s.cwid) ?? null,
       workingTitle: opts.applyDerivedTiers ? s.workingTitle : null,
+      appointmentTitles: appointmentTitles.get(s.cwid) ?? [],
       chiefTitle: chiefTitles.get(s.cwid) ?? null,
       centerHeadTitle: centerTitles.get(s.cwid) ?? null,
       edPrimaryTitle: s.edPrimaryTitle,
@@ -141,7 +154,7 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
   chiefTitles: Map<string, string>;
   centerTitles: Map<string, string>;
 }> {
-  const [divAssignments, centerAssignments, divisions, centers, cancerCenterCodes] = await Promise.all([
+  const [divAssignments, centerAssignments, divisions, centers] = await Promise.all([
     client.orgUnitRoleAssignment.findMany({
       where: { entityType: "division", role: { roleGroup: "leadership", profileTitle: true } },
       select: {
@@ -169,7 +182,6 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
       select: { code: true, name: true, department: { select: { name: true } } },
     }),
     client.center.findMany({ select: { code: true, name: true, officialName: true } }),
-    loadCancerCenterCodes(client),
   ]);
 
   // Ambiguity is computed from the whole unit table, not from the units that
@@ -200,7 +212,7 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
 
   const centerTitles = new Map<string, string>();
   for (const a of centerAssignments) {
-    if (centerTitles.has(a.cwid) || !isCancerCenterHead(a, cancerCenterCodes)) continue;
+    if (centerTitles.has(a.cwid) || !isCenterDirector(a)) continue;
     const name = centerNameByCode.get(a.entityId);
     if (!name) continue;
     centerTitles.set(

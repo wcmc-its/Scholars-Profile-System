@@ -31,6 +31,8 @@ function fakeClient(opts: {
   centerAssignments?: { cwid: string; entityId: string; label: string; interim?: boolean }[];
   divisions?: { code: string; name: string; department: { name: string } | null }[];
   centers?: { code: string; name: string; officialName: string | null }[];
+  /** Current ED appointment titles. */
+  appointments?: { cwid: string; title: string }[];
   overrides?: { entityId: string; value: string }[];
   /** Centers with a CenterProgram taxonomy, i.e. "the Cancer Center". */
   cancerCenterCodes?: string[];
@@ -61,6 +63,7 @@ function fakeClient(opts: {
     },
     division: { findMany: vi.fn(async () => opts.divisions ?? []) },
     center: { findMany: vi.fn(async () => opts.centers ?? []) },
+    appointment: { findMany: vi.fn(async () => opts.appointments ?? []) },
     centerProgram: {
       findMany: vi.fn(async () =>
         (opts.cancerCenterCodes ?? ["CTR-CANCER"]).map((centerCode) => ({ centerCode })),
@@ -174,10 +177,11 @@ describe("resolveScholarTitles — derived tiers", () => {
     ]);
   });
 
-  it("ignores every center role except the Cancer Center's Director", async () => {
+  it("titles every center's Director, but never an associate or co-director", async () => {
     // 2026-09-23 prod: "Associate Director, Cornell Health Policy Center"
-    // replaced "Professor of Population Health Sciences". Only the head of the
-    // Cancer Center (the center with a program taxonomy) outranks the ED title.
+    // replaced "Professor of Population Health Sciences" (#2735). On the EA
+    // ladder (2026-09-24) any center's DIRECTOR outranks a plain academic
+    // title; associate and co-directors still never title their holder.
     const { client, updates } = fakeClient({
       scholars: [
         { cwid: "sch0020", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
@@ -195,7 +199,42 @@ describe("resolveScholarTitles — derived tiers", () => {
       ],
     });
     await resolveScholarTitles(client as never, { applyDerivedTiers: true });
-    expect(updates).toEqual([]);
+    expect(updates).toEqual([{ cwid: "sch0020", primaryTitle: "Director, Example Policy Center" }]);
+  });
+
+  it("any tracked center's director (5) outranks a division chief (6)", async () => {
+    // Every center in the table is school-wide (prod probe 2026-09-24), so the
+    // Policy Center's director ranks alongside the Cancer Center's.
+    const { client, updates } = fakeClient({
+      scholars: [
+        { cwid: "dir1", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
+      ],
+      divisionAssignments: [{ cwid: "dir1", entityId: "DIV-SLEEP", label: "Chief" }],
+      centerAssignments: [{ cwid: "dir1", entityId: "CTR-POLICY", label: "Director" }],
+      divisions: DIVISIONS,
+      centers: [{ code: "CTR-POLICY", name: "Example Policy Center", officialName: null }],
+    });
+    await resolveScholarTitles(client as never, { applyDerivedTiers: true });
+    expect(updates).toEqual([{ cwid: "dir1", primaryTitle: "Director, Example Policy Center" }]);
+  });
+
+  it("an endowed or chair APPOINTMENT title outranks the ED primary title", async () => {
+    const { client, updates } = fakeClient({
+      scholars: [
+        { cwid: "endw", primaryTitle: "Professor of Medicine", edPrimaryTitle: "Professor of Medicine", workingTitle: null },
+        { cwid: "chr1", primaryTitle: "Professor of Medicine", edPrimaryTitle: "Professor of Medicine", workingTitle: null },
+      ],
+      appointments: [
+        { cwid: "endw", title: "Professor of Medicine" },
+        { cwid: "endw", title: "Gale and Ira Drukier Professor of Children's Health" },
+        { cwid: "chr1", title: "Sanford I. Weill Chair of Medicine" },
+      ],
+    });
+    await resolveScholarTitles(client as never, { applyDerivedTiers: true });
+    expect(updates).toEqual([
+      { cwid: "endw", primaryTitle: "Gale and Ira Drukier Professor of Children's Health" },
+      { cwid: "chr1", primaryTitle: "Sanford I. Weill Chair of Medicine" },
+    ]);
   });
 
   it("contributes no title when the assignment's unit has vanished", async () => {

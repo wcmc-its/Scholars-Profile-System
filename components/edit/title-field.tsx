@@ -49,12 +49,13 @@ const WORKING_TITLE_HELP =
 
 const TIER_SOURCE: Record<TitleTier, string> = {
   working: "Working title · Web Directory",
+  appointment: "Appointment title · Enterprise Directory",
+  centerHead: "Center director · Org unit leadership",
   chief: "Division chief · Org unit leadership",
-  centerHead: "Center head · Org unit leadership",
   primary: "Primary title · Enterprise Directory",
 };
 
-/** The tier a title string belongs to — the first match in precedence order. */
+/** The tier a title string belongs to — the first match in rank order. */
 function tierOf(options: TitleOption[], title: string | null): TitleTier | "" {
   if (!title) return "";
   return options.find((o) => o.value === title)?.tier ?? "";
@@ -97,7 +98,7 @@ function DisplayedPill() {
 
 export type TitleFieldProps = {
   cwid: string;
-  /** Every tier, in precedence order; `value: null` = does not apply. */
+  /** Every tier, highest rank first; `value: null` = does not apply. */
   options: TitleOption[];
   /** What is displayed today. */
   current: string | null;
