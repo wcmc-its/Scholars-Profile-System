@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { classifyLeadership, loadDataQualityRoster } from "@/lib/api/data-quality";
+import { classifyLeadership, loadDataQualityRoster, loadScholarCard } from "@/lib/api/data-quality";
 
 type AnyMock = ReturnType<typeof vi.fn>;
 type LoaderClient = Parameters<typeof loadDataQualityRoster>[1];
@@ -364,12 +364,25 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     expect(JSON.stringify(clause.OR[1].OR)).toContain('"contains":"Lecturer"');
   });
 
-  it("builds a tag-stripped overview excerpt, override winning", async () => {
-    const { client } = fakeClient({
-      scholars: [{ cwid: "x1", overview: "<p>Seed &nbsp;text</p>" }],
+  it("the scholar card builds a tag-stripped overview excerpt, override winning, email via the gate", async () => {
+    const scholar = {
+      cwid: "x1", preferredName: "X One", slug: "x-one", status: "active", hasHeadshot: true,
+      email: "x1@med.cornell.edu", emailVisibility: "none", roleCategory: "full_time_faculty",
+      overview: "<p>Seed &nbsp;text</p>",
+    };
+    const client = (override: string | null) => ({
+      scholar: { findFirst: vi.fn(async () => scholar) },
+      fieldOverride: { findFirst: vi.fn(async () => (override === null ? null : { value: override })) },
+      overviewProvenance: { findUnique: vi.fn(async () => null) },
+      appointment: { findMany: vi.fn(async () => []) },
     });
-    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(entries[0].overviewExcerpt).toBe("Seed text");
+    const gate = vi.fn((email: string | null, vis: string | null) => (vis === "none" ? null : email));
+    const seed = await loadScholarCard("x1", client(null) as never, gate);
+    expect(seed?.overviewExcerpt).toBe("Seed text");
+    expect(seed?.email).toBeNull();
+    expect(gate).toHaveBeenCalledWith("x1@med.cornell.edu", "none");
+    const edited = await loadScholarCard("x1", client("<b>Edited</b>") as never, gate);
+    expect(edited?.overviewExcerpt).toBe("Edited");
   });
 
   it("a name/CWID search ORs preferredName/fullName/cwid as its own AND clause", async () => {

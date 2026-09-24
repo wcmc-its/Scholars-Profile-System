@@ -31,7 +31,6 @@ import { ProfilesRoster } from "@/components/edit/profiles-roster";
 import {
   loadDataQualityFacets,
   loadDataQualityRoster,
-  loadRosterTitles,
   parseDataQualityParams,
 } from "@/lib/api/data-quality";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
@@ -104,11 +103,6 @@ export default async function EditScholarsPage({
     ),
     loadDataQualityFacets(db.read),
   ]);
-  // Hover-card titles for just this page's rows.
-  const titles = await loadRosterTitles(
-    roster.entries.map((e) => e.cwid),
-    db.read,
-  );
 
   // Narrow the org-unit filter dropdowns to the viewer's own scope. Without this
   // a curator is offered every department in the institution and any pick but
@@ -169,7 +163,6 @@ export default async function EditScholarsPage({
         includeStudents={params.includeStudents}
         hiddenOnly={params.hiddenOnly}
         ranks={params.ranks}
-        titles={titles}
         page={params.page}
         pageSize={PAGE_SIZE}
         canImpersonate={impersonationEnabled() && session.isSuperuser}

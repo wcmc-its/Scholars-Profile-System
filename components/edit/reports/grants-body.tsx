@@ -23,6 +23,7 @@ import {
 } from "@/lib/edit/cancer-center-grants-report";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
 import { fundingRoleLabel } from "@/lib/funding-roles";
+import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 
 const ASOF_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -91,7 +92,11 @@ export async function renderGrantsReport({ code, searchParams }: UnitReportProps
               <tbody>
                 {grants.map((g, i) => (
                   <tr key={`${g.cwid}-${i}`} className="border-apollo-border border-b align-top">
-                    <td className="py-1.5 pr-2">{g.piName}</td>
+                    <td className="py-1.5 pr-2">
+                      <ScholarHoverCard cwid={g.cwid}>
+                        <span className="hover:underline">{g.piName}</span>
+                      </ScholarHoverCard>
+                    </td>
                     <td className="py-1.5 pr-2">{g.title}</td>
                     <td className="py-1.5 pr-2">{g.sponsor}</td>
                     <td className="py-1.5 pr-2">{fundingRoleLabel(g.role)}</td>

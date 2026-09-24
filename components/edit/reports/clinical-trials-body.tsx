@@ -15,6 +15,7 @@
 import { loadClinicalTrialsReport } from "@/lib/center-collaboration/clinical-trials-report";
 import { db } from "@/lib/db";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
+import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 
 /** ClinicalTrials.gov study page for an NCT id — same URL form as the public
  *  profile's `ctgovUrl` (`components/profile/clinical-trials-section.tsx`);
@@ -60,7 +61,11 @@ export async function renderClinicalTrialsReport({ code }: UnitReportProps): Pro
                   key={`${row.cwid}-${row.protocolNumber}`}
                   className="border-apollo-border border-b align-top last:border-b-0"
                 >
-                  <td className="px-4 py-3 whitespace-nowrap">{row.personName}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <ScholarHoverCard cwid={row.cwid}>
+                      <span className="hover:underline">{row.personName}</span>
+                    </ScholarHoverCard>
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap">{row.role}</td>
                   <td className="px-4 py-3">{row.title}</td>
                   <td className="px-4 py-3 whitespace-nowrap">

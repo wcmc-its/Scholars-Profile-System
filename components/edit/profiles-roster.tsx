@@ -31,7 +31,7 @@ import {
   ProfilesFiltersSheet,
   ProfilesSearch,
 } from "@/components/edit/profiles-filters";
-import { RosterScholarCell, type RosterCardTitle } from "@/components/edit/roster-hover-card";
+import { RosterScholarCell } from "@/components/edit/scholar-hover-card";
 import { ViewAsButton } from "@/components/edit/view-as-button";
 import { formatRoleCategory } from "@/lib/role-display";
 import type {
@@ -60,8 +60,6 @@ export type ProfilesRosterProps = {
   includeStudents: boolean;
   hiddenOnly: boolean;
   ranks: RankFilter[];
-  /** Current appointments per cwid, for this page's hover cards. */
-  titles: Record<string, RosterCardTitle[]>;
   page: number;
   pageSize: number;
   /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729). */
@@ -146,7 +144,6 @@ export function ProfilesRoster({
   includeStudents,
   hiddenOnly,
   ranks,
-  titles,
   page,
   pageSize,
   canImpersonate,
@@ -266,23 +263,11 @@ export function ProfilesRoster({
                         <RosterScholarCell
                           cwid={e.cwid}
                           name={e.name}
-                          slug={e.slug}
                           editHref={e.editHref}
                           hasHeadshot={e.headshot === "present"}
                           isVisible={e.isVisible}
                           leadership={e.leadership}
                           subtitle={[e.title, e.unit].filter(Boolean).join(" · ") || null}
-                          personType={formatRoleCategory(e.roleCategory)}
-                          titles={titles[e.cwid] ?? []}
-                          hasOverview={e.hasOverview}
-                          overviewLabel={
-                            e.overviewUpdatedAt
-                              ? `Edited ${formatDate(e.overviewUpdatedAt)}`
-                              : e.overviewState === "imported"
-                                ? "Imported"
-                                : null
-                          }
-                          overviewExcerpt={e.overviewExcerpt ?? null}
                         />
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatRoleCategory(e.roleCategory) ?? "—"}</td>

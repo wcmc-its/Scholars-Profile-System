@@ -44,7 +44,6 @@ vi.mock("@/lib/api/data-quality", async (importActual) => {
     ...actual, // keep the real parseDataQualityParams so param threading is exercised
     loadDataQualityRoster: mockLoadDataQualityRoster,
     loadDataQualityFacets: mockLoadDataQualityFacets,
-    loadRosterTitles: async () => ({}),
   };
 });
 vi.mock("@/components/edit/profiles-roster", () => ({ ProfilesRoster: mockRoster }));
@@ -456,7 +455,6 @@ describe("ProfilesRoster — row name links to the editor", () => {
         includeStudents={false}
         hiddenOnly={false}
         ranks={[]}
-        titles={{}}
         page={0}
         pageSize={100}
         canImpersonate={false}
@@ -540,25 +538,35 @@ describe("ProfilesRoster — row name links to the editor", () => {
     expect(screen.getByText("abc1001").className).toContain("font-mono");
   });
 
-  it("the hover card carries titles (primary marked), the overview excerpt and a public link", async () => {
-    await renderRoster({
-      entries: [{ ...ROW, roleCategory: "full_time_faculty", overviewExcerpt: "Studies things." }],
-      titles: {
-        abc1001: [
-          { title: "Professor of Medicine", organization: "Medicine", isPrimary: true },
-          { title: "Professor of Surgery", organization: "Surgery", isPrimary: false },
-        ],
-      },
-    });
-    // Radix opens the card on trigger focus as well as hover (jsdom has no hover).
-    fireEvent.focus(screen.getByTestId("roster-name-abc1001").closest("div")!.parentElement!);
-    const card = await screen.findByTestId("roster-card-abc1001", {}, { timeout: 2000 });
-    expect(card.textContent).toContain("Full-time faculty");
-    expect(card.textContent).toContain("Professor of MedicinePrimary");
-    expect(card.textContent).toContain("Surgery");
-    expect(card.textContent).toContain("Studies things.");
-    expect(card.textContent).toContain("Edited");
-    expect(card.querySelector('a[href="/abc"]')?.textContent).toBe("Public profile");
+  it("the hover card fetches the card: email, titles (primary marked), overview excerpt, public link", async () => {
+    const card = {
+      cwid: "abc1001", name: "A Scholar", slug: "abc", isVisible: true, hasHeadshot: true,
+      email: "abc1001@med.cornell.edu", personType: "Full-time faculty",
+      titles: [
+        { title: "Professor of Medicine", organization: "Medicine", isPrimary: true },
+        { title: "Professor of Surgery", organization: "Surgery", isPrimary: false },
+      ],
+      hasOverview: true, overviewUpdatedAt: "2026-06-18T12:00:00.000Z", overviewExcerpt: "Studies things.",
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(card), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await renderRoster();
+      // Radix opens the card on trigger focus as well as hover (jsdom has no hover).
+      fireEvent.focus(screen.getByTestId("roster-name-abc1001").closest("div")!.parentElement!);
+      const el = await screen.findByTestId("scholar-card-email-abc1001", {}, { timeout: 2000 });
+      expect(fetchMock).toHaveBeenCalledWith("/api/edit/scholar-card/abc1001");
+      expect(el.getAttribute("href")).toBe("mailto:abc1001@med.cornell.edu");
+      const body = screen.getByTestId("scholar-card-abc1001");
+      expect(body.textContent).toContain("Full-time faculty");
+      expect(body.textContent).toContain("Professor of MedicinePrimary");
+      expect(body.textContent).toContain("Surgery");
+      expect(body.textContent).toContain("Studies things.");
+      expect(body.textContent).toContain("Edited Jun 18, 2026");
+      expect(body.querySelector('a[href="/abc"]')?.textContent).toBe("Public profile");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("the name link still navigates on touch (Radix trigger cancels touchstart)", async () => {
