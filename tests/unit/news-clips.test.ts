@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  readEmail,
   clipMentionRows,
   clipToArticle,
   doctorNames,
@@ -121,6 +122,26 @@ describe("helpers", () => {
     expect(a.outlet).toBe("The Example Bazaar");
     expect(a.tags).toEqual(["Jane Roe"]);
     expect(a.cwids).toEqual([]);
+  });
+
+  it("readEmail takes the auth verdict from SES's Authentication-Results, not a relay's", () => {
+    const raw = [
+      "Authentication-Results: amazonses.com;",
+      " spf=pass (spfCheck: domain of example.org designates 192.0.2.1 as permitted sender);",
+      " dkim=pass header.i=@example.org;",
+      " dmarc=pass header.from=example.org;",
+      "From: a@example.org",
+      "authentication-results: dkim=none (message not signed)",
+      "Subject: x",
+      "",
+      "body",
+    ].join("\r\n");
+    expect(readEmail(raw).authVerdict).toBe("spf=pass dkim=pass dmarc=pass");
+    expect(readEmail("Subject: x\r\n\r\nbody").authVerdict).toBe("spf=none dkim=none dmarc=none");
+    // A first header that is not SES's is never read as a pass.
+    expect(readEmail("Authentication-Results: evil.example; spf=pass\r\n\r\nb").authVerdict).toBe(
+      "spf=none dkim=none dmarc=none",
+    );
   });
 });
 
