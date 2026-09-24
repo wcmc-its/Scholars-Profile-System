@@ -146,7 +146,7 @@ describe("loadNewsQueue — history shows every source", () => {
     expect(calls[0].where).toEqual({ status: "published", outlet: null });
   });
 
-  it("splits newsroom mentions from Media Highlights clips on outlet", async () => {
+  it("splits newsroom mentions from Media highlights clips on outlet", async () => {
     const { client: c, calls } = client([]);
     await loadNewsQueue(c, "pending", "clips");
     expect(calls[0].where).toEqual({ status: "pending", outlet: { not: null } });

@@ -1,4 +1,4 @@
-# Media Highlights — press clips on profiles
+# Media highlights — press clips on profiles
 
 **Status:** Live in both environments as of 2026-09-23/24. Built in #2740 (mail intake, clip parser,
 profile section) and #2756 (separate review queue). `MEDIA_HIGHLIGHTS_SECTION` is `on` in both envs
@@ -6,7 +6,7 @@ profile section) and #2756 (separate review queue). `MEDIA_HIGHLIGHTS_SECTION` i
 2026-09-23 with the `ClipsNightly` and `FundingDigestWeekly` steps. Clips only appear on a profile
 after review, so a profile's section stays empty until comms approves clips for that scholar.
 
-This doc answers **where a profile's "Media Highlights" come from, who approves them, and what to
+This doc answers **where a profile's "Media highlights" come from, who approves them, and what to
 check when they stop arriving.** Newsroom stories (the separate "News mentions" section) are covered
 in [`2026-07-18-news-mentions-plan.md`](./2026-07-18-news-mentions-plan.md).
 
@@ -32,7 +32,7 @@ in [`2026-07-18-news-mentions-plan.md`](./2026-07-18-news-mentions-plan.md).
 5. **Review.** Comms approves or rejects clips at **`/edit/media-highlights-queue`**, separate from the
    newsroom queue at `/edit/news-queue`. Same reviewers (superusers and comms stewards), same component
    and decision API, filtered to rows with an `outlet`.
-6. **Profile.** Approved clips render in the profile's **Media Highlights** section
+6. **Profile.** Approved clips render in the profile's **Media highlights** section
    (`lib/api/profile.ts` `mediaHighlights`, `components/profile/profile-view.tsx`), with the outlet
    shown. Clips never appear in the News mentions section. The scholar's existing "hide News" section
    switch hides both.
@@ -79,7 +79,7 @@ security group live, per [`data-population-runbook.md`](./data-population-runboo
 forwarded digest by hand: `npm run etl:news-clips -- <file.eml>`.
 
 **One-time setup** of the inbound mail stack (DNS delegation, activating the rule set, list
-subscriptions) is in [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md), section "Media Highlights inbound mail".
+subscriptions) is in [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md), section "Media highlights inbound mail".
 
 ## Known issues and open items
 

@@ -283,7 +283,7 @@ export function AdminSubnav({
         show: (superuserSurfaces || newsTab) && isMediaHighlightsQueueEnabled(),
         id: "media-highlights-queue",
         href: "/edit/media-highlights-queue",
-        label: "Media Highlights",
+        label: "Media highlights",
       },
       // Always visible to superusers — the slug namespace exists regardless of the
       // slug-request flag.

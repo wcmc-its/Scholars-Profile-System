@@ -774,7 +774,7 @@ export type ProfilePayload = {
     /** Absolute thumbnail URL under the WCM origin; null when none. */
     thumbnailUrl: string | null;
   }>;
-  /** Media Highlights — press clips from the External Affairs "WCM in the News"
+  /** Media highlights — press clips from the External Affairs "WCM in the News"
    *  digest (etl/news/clips.ts): news_mention rows with `outlet` set, published
    *  only after comms review. Same row shape as `news` plus the outlet. Dark
    *  unless MEDIA_HIGHLIGHTS_SECTION is on; `news` never carries these rows. */
@@ -839,8 +839,8 @@ export type ProfilePayload = {
  * This function returns ALL appointments with `isActive` annotated; the UI
  * decides how to present them.
  */
-/** A published news_mention row as the profile renders it (News and Media Highlights). */
-/** A Media Highlights clip as the profile shows it: headline, outlet, date — NO
+/** A published news_mention row as the profile renders it (News and Media highlights). */
+/** A Media highlights clip as the profile shows it: headline, outlet, date — NO
  *  excerpt. A clip's text is the digest's "• Dr. X" bullet: usually just the
  *  scholar's own name, occasionally a one-line summary of unknown authorship
  *  (the digest is a Muck Rack newsletter). It still drives matching and shows to

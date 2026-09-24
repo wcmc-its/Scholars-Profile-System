@@ -1,5 +1,5 @@
 /**
- * "WCM in the News" media clips → news_mention (Media Highlights).
+ * "WCM in the News" media clips → news_mention (Media highlights).
  *
  * Run via `npm run etl:news-clips`; wired into the nightly chain as ClipsNightly
  * in cdk/lib/etl-stack.ts. External Affairs mails the curated daily digest to
