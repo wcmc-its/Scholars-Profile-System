@@ -14,7 +14,7 @@ Where the method's output actually lives and runs:
 
 | Concern | Location |
 |---|---|
-| **Master list** (full schema: `id`, `area`, `label`, `mesh`, `wcm_pubs_2023_present`, `replaces`, `notes`) | [`data/suggested-searches.json`](../data/suggested-searches.json) — 162 chips across 63 research areas. The source of record; diff future refreshes against it (Appendix B). |
+| **Master list** (full schema: `id`, `area`, `label`, `mesh`, `wcm_pubs_2023_present`, `replaces`, `notes`) | [`data/suggested-searches.json`](../data/suggested-searches.json) — 157 chips across 63 research areas. The source of record; diff future refreshes against it (Appendix B). |
 | **Runtime pool** (the lay-term `label` strings only) | [`lib/hero-search-suggestions.ts`](../lib/hero-search-suggestions.ts) → `HERO_SEARCH_SUGGESTIONS`. A lean projection of the master's `label` column, kept apart from the metadata so the homepage client bundle ships only the strings. |
 | **Sampler** | `sampleHeroSuggestions(n)` in the same file — a uniform Fisher–Yates draw over the **whole** pool (no length filter), so each page load shows a broad range of terms. |
 | **Render** | [`components/home/try-suggestions-chips.tsx`](../components/home/try-suggestions-chips.tsx) — client-only sampling on mount (avoids ISR cache freeze), routes each chip to `/search?q=<label>`. |
@@ -35,9 +35,9 @@ Paste the output as the body of `HERO_SEARCH_SUGGESTIONS`, then run
 `npx vitest run tests/unit/hero-search-suggestions.test.ts`.
 
 **2026 swap.** This replaced the previous pool of generic department / topic / subtopic *entity
-names* with the 162 specific lay-term chips below. The earlier "balanced length" constraint
+names* with the 157 specific lay-term chips below. The earlier "balanced length" constraint
 (12–22 chars, issue #214) was removed because it hid ~60% of the curated terms — including the
-punchiest demos ("Sepsis", "Melanoma", "Long COVID", "Radiomics") and the longer descriptive ones.
+punchiest demos ("Sepsis", "Melanoma", "Frailty", "Radiomics") and the longer descriptive ones.
 
 > **Validation status:** per Section 8, each `label` should be confirmed against the live Scholars
 > index before it is leaned on as a marketing demo. The depth proxy (`wcm_pubs_2023_present`) is
@@ -272,7 +272,7 @@ you screened out and why.
 - **Affiliation string:** `"Weill Cornell"[Affiliation]` (PubMed MCP `search_articles`)
 - **Recency window:** 2023–present (`date_from=2023`)
 - **Depth floor used:** ~50 recent affiliated papers (soft)
-- **Result:** 162 chips across 63 research areas; ~15 candidates screened out as thin.
+- **Result:** 157 chips across 63 research areas; ~15 candidates screened out as thin.
 - **Generic chips retired:** Gynecologic Oncology → Ovarian cancer; Emergency Medicine → Sepsis;
   Pharmacology → Drug repurposing. Implementation Science kept (already a clean, high-volume chip).
 - **Master files:** `wcm_scholars_suggested_searches.csv` / `.json` (same schema as Section 7).
