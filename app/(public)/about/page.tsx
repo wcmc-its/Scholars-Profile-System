@@ -138,8 +138,8 @@ export default function DocsPage() {
             <li>
               <em>Where your data comes from.</em> 25 authoritative sources, among them
               the Enterprise Directory, the WCM Web Directory, ASMS, InfoEd, Jenzabar, OnCore, the
-              Conflicts-of-Interest system, PubMed, Scopus, NIH RePORTER, the WCM Newsroom, and
-              External Affairs&apos; press digest (the full list is in{" "}
+              External Relationships / COI system, PubMed, Scopus, NIH RePORTER, the WCM Newsroom,
+              and Muck Rack (the full list is in{" "}
               <Link href="#provenance" className={LINK}>
                 Where your data comes from
               </Link>
@@ -274,7 +274,7 @@ export default function DocsPage() {
           systems: InfoEd, WCM&apos;s grants system of record for active and recent awards across all
           sponsors, and NIH RePORTER, which backfills NIH grants InfoEd never held (those from a
           prior institution and older WCM history); for NIH-funded work, RePORTER also supplies
-          the abstract text and the NIH-portfolio link. Disclosures come from the Conflicts-of-Interest system, and a NewYork-Presbyterian
+          the abstract text and the NIH-portfolio link. Disclosures come from the External Relationships / COI system in the Weill Research Gateway, and a NewYork-Presbyterian
           position from the Enterprise Directory&apos;s NYP record. Your research areas, the Impact numbers, and the synopses are computed by
           ReciterAI.
         </p>
@@ -467,9 +467,10 @@ export default function DocsPage() {
           Your Edit my profile page is the front door. It lets you edit your overview, hide or
           restore records, and submit a data correction through Request a change, which routes to
           the office that handles the field or sends you to the tool where you fix it yourself.
-          Filter the table to see what you can fix. <em>Nightly</em> runs overnight,{" "}
-          <em>weekly</em> on Sundays, and <em>occasional</em> means someone runs an export by hand,
-          so that data is only as current as its last export.
+          Most data can also be hidden from view on your profile, so a wrong record need not stay
+          up while it is corrected. Filter the table to see what you can fix. Fields refresh nightly
+          unless marked: <em>weekly</em> runs on Sundays, and <em>occasional</em> means someone runs
+          an export by hand, so that data is only as current as its last export.
         </p>
         <FieldTable />
         <p>A few less obvious behaviors the table explains:</p>
@@ -1198,7 +1199,7 @@ export default function DocsPage() {
             { term: "OpenAlex", def: "An open catalog of scholarly works. Like Scopus, it is a source for publications that are not in PubMed, which a curator can add in Publication Manager; such a paper is labeled “Source: OpenAlex” and carries a DOI rather than a PMID. It is not used for citation counts or for author disambiguation." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies NIH abstract text and the portfolio link, and adds NIH awards InfoEd never held. NSF and Gates Foundation abstracts come from those funders’ public records." },
             { term: "Grant roles (PI, MPI, Co-I)", def: (<>Your role on an award, as recorded in InfoEd. PI is the principal investigator. MPI marks an NIH <a href={NIH_MPI} className={LINK}>multiple-principal-investigator</a> award, where two or more investigators hold principal-investigator standing equally; NIH names one of them the contact PI for correspondence only, which carries no seniority. Co-I is a co-investigator, Sub-PI leads a subaward, and KP is other key personnel. MPI is not a lesser form of PI, and it is not the same as co-PI, which is an NSF term not used on NIH awards. Corrections go to Sponsored Research through Request a change. A grant shown “via NIH RePORTER” always lists the role as PI and is corrected through NIH, not Sponsored Research.</>) },
-            { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Enterprise Innovation (Center for Technology Licensing) portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from Enterprise Innovation and refreshed weekly." },
+            { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Center for Technology Licensing portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from the Center for Technology Licensing and refreshed weekly." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
             { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Scholars is the SOR for the institutional data it curates directly (center membership, unit and division metadata, and manually-created division rosters), and that set may grow; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },
             { term: "Roles (Superuser / Owner / Curator)", def: "Unit-scoped permissions for curating centers, divisions, and departments. Superuser is global and can grant any role; an Owner acts on one unit and can grant Owner or Curator on it; a Curator acts on one unit and grants nothing. Every edit is audit-logged." },

@@ -38,17 +38,17 @@ const WCM: Source[] = [
   { name: "Enterprise Directory", data: "Name, degrees, titles, appointments, department, email, NYP positions, postdoc supervisors", cad: "nightly" },
   { name: "Web Directory", data: "Photo, shown live; where you edit your name and email", cad: "live" },
   { name: "ASMS", data: "Education and training", cad: "nightly" },
-  { name: "InfoEd", data: "Grants and grant roles", cad: "nightly" },
-  { name: "Conflicts-of-Interest system", data: "Disclosures, managed in the Weill Research Gateway", cad: "nightly" },
+  { name: "InfoEd (Weill Research Gateway)", data: "Grants and grant roles", cad: "nightly" },
+  { name: "External Relationships / COI (WRG)", data: "Disclosures, which you manage in the Weill Research Gateway", cad: "nightly" },
   { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts", cad: "nightly" },
   { name: "ReciterAI", data: "Research areas, Impact, synopses, methods, core facilities, Spotlight", cad: "nightly" },
   { name: "OnCore", data: "Which clinical trials you are on", cad: "occasional" },
   { name: "Jenzabar", data: "PhD thesis advisees, Graduate School appointments", cad: "nightly" },
   { name: "Medical Education rosters", data: "MD scholarly-project, MD-PhD and early-career mentees", cad: "occasional" },
   { name: "POPS physician directory", data: "Board certifications, specialties, clinical expertise", cad: "weekly" },
-  { name: "Enterprise Innovation", data: "Available technologies", cad: "weekly" },
+  { name: "Center for Technology Licensing", data: "Available technologies", cad: "weekly" },
   { name: "WCM Newsroom", data: "News mentions", cad: "weekly" },
-  { name: "External Affairs digest", data: "Media highlights", cad: "nightly" },
+  { name: "Muck Rack", data: "Media highlights, as curated by Faculty Affairs", cad: "nightly" },
   { name: "WCM Identity", data: "ORCID iD", cad: "nightly" },
 ];
 
@@ -80,8 +80,8 @@ const SCHOLARS_EDITS = [
 
 type Tag =
   | "Yours to edit"
-  | "You · Web Directory"
-  | "You · Research Gateway"
+  | "Yours · Web Directory"
+  | "Yours · Research Gateway"
   | "You request · admin approves"
   | "Request a change"
   | "Unit curator"
@@ -102,10 +102,10 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     id: "g-contact",
     label: "Name, photo & contact",
     rows: [
-      { field: "Name", detail: "Your preferred name", source: "Enterprise Directory", cadence: "Nightly", tag: "You · Web Directory", how: <>Change Preferred Name in the {WebDir}. It appears the next day.</> },
+      { field: "Name", detail: "Your preferred name", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change Preferred Name in the {WebDir}. It appears the next day.</> },
       { field: "Degrees after your name", source: "Enterprise Directory, from ASMS", cadence: "Nightly", tag: "Request a change", how: "Routes to the Office of Faculty Affairs." },
-      { field: "Photo", source: "Web Directory", cadence: "Live", tag: "You · Web Directory", how: <>Add, change or remove it in the {WebDir}. It shows right away.</> },
-      { field: "Email and who can see it", source: "Enterprise Directory", cadence: "Nightly", tag: "You · Web Directory", how: <>Change the address or its &ldquo;Publish to&rdquo; setting in the {WebDir}.</> },
+      { field: "Photo", source: "Web Directory", cadence: "Live", tag: "Yours · Web Directory", how: <>Add, change or remove it in the {WebDir}. It shows right away.</> },
+      { field: "Email and who can see it", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change the address or its &ldquo;Publish to&rdquo; setting in the {WebDir}.</> },
       { field: "ORCID iD", source: "Scholars, synced with WCM Identity", cadence: "On save", tag: "Yours to edit", how: "Confirm or enter it under Identifiers & profiles." },
       { field: "Profile links", detail: "LinkedIn, X, Bluesky, Google Scholar, ResearchGate", source: "Scholars", cadence: "On save", tag: "Yours to edit", how: "Add or remove them under Identifiers & profiles." },
     ],
@@ -117,7 +117,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
       { field: "Titles and appointments", detail: "Primary and working titles", source: "Enterprise Directory", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support, who fix the sync or escalate to Faculty Affairs. You can hide a row meanwhile." },
       { field: "Displayed title", detail: "Which of your titles appears under your name", source: "Scholars, chosen from your titles", cadence: "Nightly", tag: "Request a change", how: "Name the title you want. Routes to ITS Support." },
       { field: "Department and division", source: "Enterprise Directory", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support." },
-      { field: "Chair and chief titles", detail: "Shown under your title", source: "Enterprise Directory", cadence: "Nightly", tag: "Request a change", how: "Use “A chair role has ended.” Routes to ITS Support." },
+      { field: "Chair and chief titles", detail: "Shown under your title", source: "Enterprise Directory", cadence: "Nightly", tag: "Unit curator", how: "A chief role is inferred from HR data; the unit’s Owner can override it. For a chair role that has ended, use Request a change." },
       { field: "Past appointments", detail: "Earlier ranks", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours to edit", how: "Hide or show each one on your edit page. Report a wrong rank with Request a change." },
       { field: "Graduate School appointment", source: "Jenzabar", cadence: "Occasional", tag: "Request a change", how: "Routes to ITS Support." },
       { field: "Institution", detail: "Shown only when it isn’t WCM", source: "Enterprise Directory", cadence: "Nightly", tag: "At the source", how: "No in-app route. The faculty record has to change." },
@@ -141,7 +141,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
       { field: "Trial details", detail: "Phase, summary, conditions, enrollment", source: "ClinicalTrials.gov", cadence: "Weekly", tag: "At the source", how: "The study team updates the registration." },
       { field: "Board certifications, specialties, expertise", detail: "Used in search and CV export", source: "POPS physician directory", cadence: "Weekly", tag: "At the source", how: "Update your weillcornell.org physician profile." },
       { field: "Clinical profile link", detail: "Link to weillcornell.org", source: "Enterprise Directory", cadence: "Nightly", tag: "At the source", how: "Follows your directory entry and NYP clinical affiliation." },
-      { field: "Hospital position", detail: "NewYork-Presbyterian titles", source: "Enterprise Directory, NYP record", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support. You can hide it meanwhile." },
+      { field: "Hospital position", detail: "NewYork-Presbyterian titles", source: "NYP, by way of the Enterprise Directory", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support. You can hide it meanwhile." },
     ],
   },
   {
@@ -149,7 +149,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     label: "Education & honors",
     rows: [
       { field: "Education and training", source: "ASMS", cadence: "Nightly", tag: "Request a change", how: "Routes to the Office of Faculty Affairs. You can hide an entry or the graduation years." },
-      { field: "Honors and distinctions", detail: "Not endowed chairs, which come through your title", source: "Scholars", cadence: "On save", tag: "Yours to edit", how: "Add, edit or remove them on your edit page." },
+      { field: "Honors and distinctions", detail: "Not endowed chairs, which come through your title", source: "Scholars, curated by the Office of the Research Dean", cadence: "On save", tag: "Yours to edit", how: "Add, edit or remove them on your edit page." },
     ],
   },
   {
@@ -225,18 +225,18 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     id: "g-funding",
     label: "Funding & disclosures",
     rows: [
-      { field: "Grants", detail: "Title, sponsor, dates, award number", source: "InfoEd", cadence: "Nightly", tag: "Request a change", how: "Routes to Sponsored Research (OSRA). You can hide a grant." },
-      { field: "Your role on a grant", detail: "PI, MPI, Co-I, Key Personnel", source: "InfoEd", cadence: "Nightly", tag: "Request a change", how: "Routes to OSRA." },
+      { field: "Grants", detail: "Title, sponsor, dates, award number", source: "InfoEd (Weill Research Gateway)", cadence: "Nightly", tag: "Request a change", how: "Routes to Sponsored Research (OSRA). You can hide a grant." },
+      { field: "Your role on a grant", detail: "PI, MPI, Co-I, Key Personnel", source: "InfoEd (Weill Research Gateway)", cadence: "Nightly", tag: "Request a change", how: "Routes to OSRA." },
       { field: "NIH grants from before WCM", source: "NIH RePORTER", cadence: "Weekly", tag: "At the source", how: "Remove a wrong match with Not me on your edit page. Details are fixed at NIH." },
       { field: "Grant abstracts", source: "NIH RePORTER, NSF, Gates Foundation", cadence: "Weekly", tag: "At the source", how: "From the funder’s public record." },
       { field: "Papers linked to a grant", source: "NIH RePORTER", cadence: "Weekly", tag: "At the source", how: "Hide a paper that isn’t yours." },
-      { field: "Available technologies", source: "Enterprise Innovation", cadence: "Weekly", tag: "At the source", how: "Ask Enterprise Innovation to correct the listing." },
+      { field: "Available technologies", source: "Center for Technology Licensing", cadence: "Weekly", tag: "At the source", how: "Ask the Center for Technology Licensing to correct the listing." },
       {
         field: "Disclosures",
         detail: "Shown as External relationships",
-        source: "Conflicts-of-Interest system",
+        source: "External Relationships / COI (WRG)",
         cadence: "Nightly",
-        tag: "You · Research Gateway",
+        tag: "Yours · Research Gateway",
         how: (
           <>
             Update it in the{" "}
@@ -254,7 +254,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     label: "News & media",
     rows: [
       { field: "News mentions", source: "WCM Newsroom", cadence: "Weekly", tag: "Yours to edit", how: "Hide one or mark “Not me.” Name matches are reviewed first." },
-      { field: "Media highlights", source: "External Affairs digest", cadence: "Nightly", tag: "Yours to edit", how: "Hide one or mark “Not me.” Each clip is reviewed first." },
+      { field: "Media highlights", source: "Muck Rack, as curated by Faculty Affairs", cadence: "Nightly", tag: "Yours to edit", how: "Hide one or mark “Not me.” Each clip is reviewed first." },
     ],
   },
   {
@@ -283,21 +283,55 @@ const fixOf = (tag: Tag): Exclude<Fix, "all"> =>
       ? "others"
       : "source";
 
+/** Green = you act, slate = someone acts on your request, neutral = nobody here can. */
+const GREEN_OUTLINE = "border-[#a9d3c0] bg-[var(--apollo-surface)] text-[var(--apollo-green)]";
+const SLATE = "border-[#d5dfeb] bg-[#eaf0f7] text-[#2f4a6d]";
 const TAG_STYLE: Record<Tag, string> = {
-  "Yours to edit": "bg-[var(--apollo-green-tint)] text-[var(--apollo-green)] border-transparent",
-  "You · Web Directory": "bg-[var(--apollo-surface)] text-[var(--apollo-ink)] border-[var(--apollo-border-strong)]",
-  "You · Research Gateway": "bg-[var(--apollo-surface)] text-[var(--apollo-ink)] border-[var(--apollo-border-strong)]",
-  "You request · admin approves": "bg-[var(--apollo-surface)] text-[var(--apollo-ink)] border-[var(--apollo-border-strong)]",
-  "Request a change": "bg-[var(--apollo-surface)] text-[var(--apollo-ink)] border-[var(--apollo-border-strong)]",
-  "Unit curator": "bg-[var(--apollo-surface)] text-[var(--apollo-ink)] border-[var(--apollo-border-strong)]",
-  "At the source": "bg-[var(--apollo-lock-bg)] text-[var(--apollo-ink)] border-[var(--apollo-border-strong)]",
-  "Not editable": "bg-[var(--apollo-surface-2)] text-[var(--apollo-ink-2)] border-transparent",
+  "Yours to edit": "border-transparent bg-[var(--apollo-green-tint)] text-[var(--apollo-green)]",
+  "Yours · Web Directory": GREEN_OUTLINE,
+  "Yours · Research Gateway": GREEN_OUTLINE,
+  "You request · admin approves": GREEN_OUTLINE,
+  "Request a change": SLATE,
+  "Unit curator": SLATE,
+  "At the source": "border-[var(--apollo-border-strong)] bg-[var(--apollo-lock-bg)] text-[var(--apollo-ink)]",
+  "Not editable": "border-dashed border-[var(--apollo-border-strong)] bg-transparent text-[var(--apollo-ink-2)]",
+};
+
+/** Tags that name another tool link straight to it. */
+const TAG_HREF: Partial<Record<Tag, string>> = {
+  "Yours · Web Directory": WEB_DIR,
+  "Yours · Research Gateway": WRG,
 };
 
 function PencilIcon() {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
       <path d="M4 20h4L19 9l-4-4L4 16v4Z" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />
+    </svg>
+  );
+}
+
+function BanIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m5.6 5.6 12.8 12.8" />
+    </svg>
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true">
+      <path d="M7 17 17 7M8 7h9v9" />
     </svg>
   );
 }
@@ -311,17 +345,11 @@ function LockIcon() {
   );
 }
 
-/** Nightly is the default, so it recedes; every other schedule gets a pill. */
+/** Nightly is the default ("All sources refresh nightly unless marked"), so only other schedules get a pill. */
 function CadencePill({ cad }: { cad: string }) {
-  const quiet = cad.toLowerCase() === "nightly";
+  if (cad.toLowerCase() === "nightly") return null;
   return (
-    <span
-      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 text-xs leading-[18px] ${
-        quiet
-          ? "border-transparent text-muted-foreground"
-          : "border-[var(--apollo-border-strong)] bg-[var(--apollo-surface-2)] font-medium text-[var(--apollo-ink)]"
-      }`}
-    >
+    <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface-2)] px-2 text-xs font-medium leading-[18px] text-[var(--apollo-ink)]">
       {cad}
     </span>
   );
@@ -371,10 +399,15 @@ export function SystemContext() {
   return (
     <div className="mt-6 flex flex-col gap-3.5">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-baseline gap-2">
-          <span className="text-lg font-semibold">System context</span>
-          <span className="text-sm tabular-nums text-[var(--apollo-ink-2)]">
-            {all.length} sources feed Scholars
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-baseline gap-2">
+            <span className="text-lg font-semibold">System sources</span>
+            <span className="text-sm tabular-nums text-[var(--apollo-ink-2)]">
+              {all.length} sources feed Scholars
+            </span>
+          </div>
+          <span className="text-sm text-[var(--apollo-ink-2)]">
+            All sources refresh nightly unless marked.
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto" role="group" aria-label="Highlight sources by refresh schedule">
@@ -400,7 +433,7 @@ export function SystemContext() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] p-4 shadow-[var(--apollo-shadow-card)] sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto_220px] lg:gap-0">
+      <div className="grid grid-cols-1 gap-3 rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] p-4 shadow-[var(--apollo-shadow-card)] sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto_220px] lg:gap-0 bg-[var(--apollo-page)]">
         <div className="flex flex-col gap-4">
           <SourceGroup label="WCM source systems" sources={WCM} cad={cad} />
           <SourceGroup label="Outside sources" sources={EXT} cad={cad} />
@@ -456,6 +489,28 @@ export function SystemContext() {
         schedule.
       </div>
     </div>
+  );
+}
+
+function TagPill({ tag }: { tag: Tag }) {
+  const href = TAG_HREF[tag];
+  const cls = `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-px text-xs font-medium no-underline ${TAG_STYLE[tag]}`;
+  const body = (
+    <>
+      {tag === "At the source" && <LockIcon />}
+      {tag === "Not editable" && <BanIcon />}
+      {(tag === "Request a change" || tag === "Unit curator") && <SendIcon />}
+      {tag.startsWith("You") && <PencilIcon />}
+      {tag}
+      {href && <ExternalIcon />}
+    </>
+  );
+  return href ? (
+    <a href={href} className={`${cls} hover:underline`}>
+      {body}
+    </a>
+  ) : (
+    <span className={cls}>{body}</span>
   );
 }
 
@@ -543,13 +598,7 @@ export function FieldTable() {
                   {r.source}
                 </span>
                 <div role="cell" className="flex min-w-0 flex-col items-start gap-1">
-                  <span
-                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-px text-xs font-medium ${TAG_STYLE[r.tag]}`}
-                  >
-                    {r.tag === "At the source" && <LockIcon />}
-                    {r.tag === "Yours to edit" && <PencilIcon />}
-                    {r.tag}
-                  </span>
+                  <TagPill tag={r.tag} />
                   <span className="text-[13px] text-[var(--apollo-ink-2)]">{r.how}</span>
                 </div>
               </div>
