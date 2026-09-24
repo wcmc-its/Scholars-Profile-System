@@ -230,6 +230,41 @@ describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () 
     expect(mockHasAnyReportAccess).toHaveBeenCalledWith("self01");
   });
 
+  const unit = (kind: string, code: string) => ({
+    kind,
+    code,
+    name: code,
+    role: "curator",
+    href: `/edit/${kind}/${code}`,
+  });
+  const units = (over: Record<string, unknown[]>) => {
+    const u = { departments: [], divisions: [], centers: [], cores: [], institutions: [], ...over };
+    return { ...u, total: Object.values(u).flat().length };
+  };
+
+  it("no self-profile + ONE unit grant → redirect straight to that unit instead of 404", async () => {
+    mockLoadEditContext.mockResolvedValue(null);
+    mockLoadManageableUnits.mockResolvedValue(units({ centers: [unit("center", "meyer_cancer_center")] }));
+    // Unit wins over report access — the unit is the primary job.
+    mockHasAnyReportAccess.mockResolvedValue(true);
+    await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow(
+      "__REDIRECT__:/edit/center/meyer_cancer_center",
+    );
+    expect(mockLoadManageableUnits).toHaveBeenCalledWith("self01", expect.anything());
+    expect(mockNotFound).not.toHaveBeenCalled();
+  });
+
+  it("no self-profile + SEVERAL unit grants → redirect to the /edit/units index", async () => {
+    mockLoadEditContext.mockResolvedValue(null);
+    mockLoadManageableUnits.mockResolvedValue(
+      units({ centers: [unit("center", "c1")], divisions: [unit("division", "d1")] }),
+    );
+    await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow(
+      "__REDIRECT__:/edit/units",
+    );
+    expect(mockNotFound).not.toHaveBeenCalled();
+  });
+
   it("no self-profile + a report_access row → redirect to /edit/reports instead of 404", async () => {
     mockLoadEditContext.mockResolvedValue(null);
     mockHasAnyReportAccess.mockResolvedValue(true);
