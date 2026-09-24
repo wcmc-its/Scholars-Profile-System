@@ -78,20 +78,23 @@ export function BrowseAllResearchAreasGrid({ items }: { items: ParentTopic[] }) 
             <div key={ci}>
               {/* Header repeats per column only where columns sit side by side. */}
               <div
-                className={`border-apollo-border-strong text-muted-foreground justify-between border-b pb-2 text-xs ${ci === 0 ? "flex" : "hidden sm:flex"} ${ci === 2 ? "sm:hidden lg:flex" : ""}`}
+                className={`border-apollo-border-strong text-muted-foreground justify-between border-b px-2 pb-2 text-xs ${ci === 0 ? "flex" : "hidden sm:flex"} ${ci === 2 ? "sm:hidden lg:flex" : ""}`}
               >
                 <span>Research area</span>
                 <span>Publications</span>
               </div>
               <ul className="divide-apollo-border divide-y">
                 {col.map((t) => (
-                  <li key={t.slug} className="flex items-baseline justify-between gap-4 py-2.5">
-                    <a href={`/topics/${t.slug}`} className="text-foreground text-[15px] hover:text-[var(--color-accent-slate)] hover:underline">
-                      {t.name}
+                  <li key={t.slug}>
+                    <a
+                      href={`/topics/${t.slug}`}
+                      className="text-foreground hover:bg-apollo-surface-2 hover:text-apollo-slate focus-visible:bg-apollo-surface-2 focus-visible:text-apollo-slate flex items-baseline justify-between gap-4 px-2 py-2.5 text-[15px] transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--apollo-ring)]"
+                    >
+                      <span>{t.name}</span>
+                      <span className="text-muted-foreground shrink-0 text-[13px] tabular-nums">
+                        {t.publicationCount.toLocaleString()}
+                      </span>
                     </a>
-                    <span className="text-muted-foreground shrink-0 text-[13px] tabular-nums">
-                      {t.publicationCount.toLocaleString()}
-                    </span>
                   </li>
                 ))}
               </ul>
