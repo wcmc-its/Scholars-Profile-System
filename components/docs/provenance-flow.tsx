@@ -66,28 +66,30 @@ function Step() {
 
 function ColHead({ children }: { children: React.ReactNode }) {
   return (
-    <div className={`text-[11px] font-bold uppercase tracking-wider ${ACCENT}`}>{children}</div>
+    <div className="text-[13px] font-semibold text-[var(--apollo-ink-2)]">{children}</div>
   );
 }
 
 function Source({ what, from }: { what: string; from: string }) {
   return (
     <div className={CARD}>
-      <span className="block text-[15px] font-semibold">{what}</span>
-      <span className="mt-0.5 block text-[13px] text-muted-foreground">{from}</span>
+      <span className="block text-[15px] font-medium">{what}</span>
+      <span className="mt-0.5 block text-[13px] text-[var(--apollo-ink-2)]">{from}</span>
     </div>
   );
 }
 
 const SOURCES: { what: string; from: string }[] = [
-  { what: "Name, photo, title, appointments", from: "Directory" },
-  { what: "Primary department, education", from: "ASMS" },
-  { what: "Publications", from: "PubMed, Scopus, OpenAlex" },
-  { what: "Funding", from: "InfoEd, NIH RePORTER" },
-  { what: "Clinical research", from: "OnCore" },
-  { what: "Available technologies", from: "Center for Technology Licensing" },
-  { what: "Disclosures, hospital position", from: "COI system, NewYork-Presbyterian" },
-  { what: "News mentions", from: "WCM Research news site" },
+  { what: "Name, titles, appointments, department", from: "Enterprise Directory" },
+  { what: "Photo", from: "Web Directory, shown live" },
+  { what: "Education, degrees", from: "ASMS" },
+  { what: "Publications", from: "PubMed, Scopus, OpenAlex, Web of Science" },
+  { what: "Funding", from: "InfoEd, NIH RePORTER, NSF, Gates Foundation" },
+  { what: "Clinical trials, specialties", from: "OnCore, ClinicalTrials.gov, weillcornell.org" },
+  { what: "Mentoring", from: "Jenzabar, Medical Education, Enterprise Directory" },
+  { what: "Available technologies", from: "Enterprise Innovation" },
+  { what: "Disclosures", from: "Conflicts-of-Interest system" },
+  { what: "News and media", from: "WCM Newsroom, External Affairs" },
 ];
 
 /**
@@ -102,7 +104,7 @@ const COMPUTED: { name: string; does: string }[] = [
   },
   {
     name: "ReciterAI",
-    does: "Works out your research areas, the Impact score, and your synopses. These are not hand-edited.",
+    does: "Works out your research areas, each paper's Impact score and synopsis, and your methods and tools. These are not hand-edited.",
   },
 ];
 
@@ -118,14 +120,17 @@ const SURFACES = [
  * The manual layer, merged over ETL data at read time (FieldOverride + Suppression),
  * plus the records Scholars is itself the system of record for. Honors belong here
  * rather than upstream: `Honor.source` defaults to CURATOR and carries an
- * `enteredByCwid`, so they are entered here and approved via the honors queue.
+ * `enteredByCwid`, so they are entered here. Self and curator entries publish on
+ * save; only the seeded import waits in the honors queue.
  */
 const SCHOLARS_OWNED = [
   "Your overview text",
   "Your Selected highlights",
   "Honors and distinctions, on your profile only",
   "Positions the directory omits, on your profile only",
-  "Anything you have hidden. Hiding affects your profile, not search.",
+  "Mentees you add",
+  "Your ORCID iD and profile links",
+  "Anything you have hidden, which also leaves search under your name",
   "Center membership, kept by center administrators",
 ];
 
@@ -148,8 +153,8 @@ export function ProvenanceFlow() {
           <ColHead>Attribution, topics, and scores</ColHead>
           {COMPUTED.map((c) => (
             <div key={c.name} className={`${CARD} bg-[#f6f7f9]`}>
-              <span className={`block text-[15px] font-semibold ${ACCENT}`}>{c.name}</span>
-              <span className="mt-0.5 block text-[13px] text-muted-foreground">{c.does}</span>
+              <span className={`block text-[15px] font-medium ${ACCENT}`}>{c.name}</span>
+              <span className="mt-0.5 block text-[13px] text-[var(--apollo-ink-2)]">{c.does}</span>
             </div>
           ))}
         </div>
@@ -160,14 +165,14 @@ export function ProvenanceFlow() {
         <div className="grid content-start gap-2.5">
           <ColHead>Where it appears</ColHead>
           <div className={`${CARD} bg-[#fafbfc]`}>
-            <span className="block text-[15px] font-semibold">Your profile page</span>
-            <span className="mt-0.5 block text-[13px] text-muted-foreground">
-              Rebuilt nightly from everything on the left. Scholars holds a copy, not the original.
+            <span className="block text-[15px] font-medium">Your profile page</span>
+            <span className="mt-0.5 block text-[13px] text-[var(--apollo-ink-2)]">
+              Refreshed from everything on the left, most of it nightly. Scholars holds a copy, not the original.
             </span>
           </div>
           <div className={`${CARD} bg-[#fafbfc]`}>
-            <span className="block text-[15px] font-semibold">And across the rest of the site</span>
-            <ul className="!mt-1.5 !ml-4 text-[13px] text-muted-foreground">
+            <span className="block text-[15px] font-medium">And across the rest of the site</span>
+            <ul className="!mt-1.5 !ml-4 text-[13px] text-[var(--apollo-ink-2)]">
               {SURFACES.map((s) => (
                 <li key={s}>{s}</li>
               ))}
@@ -199,7 +204,7 @@ export function ProvenanceFlow() {
           </svg>
           <span className="text-sm font-semibold">Stored in Scholars, and merged in on top</span>
         </div>
-        <ul className="!mt-2 !ml-4 grid gap-y-1 text-[13px] text-muted-foreground sm:grid-cols-2 sm:gap-x-8">
+        <ul className="!mt-2 !ml-4 grid gap-y-1 text-[13px] text-[var(--apollo-ink-2)] sm:grid-cols-2 sm:gap-x-8">
           {SCHOLARS_OWNED.map((item) => (
             <li key={item}>{item}</li>
           ))}
@@ -222,8 +227,9 @@ export function ProvenanceFlow() {
         <p className="!mt-0 text-sm">
           <strong className={ACCENT}>Corrections go back to the first column, not to Scholars.</strong>{" "}
           Editing the copy does not work: the next refresh overwrites it. Request a change on your
-          profile and it routes to the office that owns that field. The only exception is the blue
-          box, which Scholars owns and you edit here directly.
+          profile and it routes to the office that owns that field, or sends you to the tool where
+          you fix it yourself, such as the Web Directory. The only exception is the blue box, which
+          Scholars owns and you edit here directly.
         </p>
       </div>
     </div>
