@@ -93,6 +93,8 @@ export type GroupableClip = ClipLike & {
   duplicateOf: string | null;
   creditedOutlet: string | null;
   createdAt?: Date | string;
+  /** Review status; an approved copy is preferred as a story's lead. */
+  status?: string;
 };
 
 const sameOutlet = (a: string | null, b: string | null) =>
@@ -133,7 +135,10 @@ export function assignGroups(
     byId.set(row.id, row);
   }
 
-  // A story made only of fresh rows: prefer the credited original as lead.
+  // A story made only of fresh rows picks its lead: an APPROVED copy first
+  // (the profile shows a story only when its lead is published, so a pending
+  // lead would hide an already-approved copy — the `--regroup` backfill case),
+  // then the copy from the credited original publisher, else the earliest.
   const members = new Map<string, GroupableClip[]>();
   for (const c of pool) {
     if (!freshIds.has(c.id)) continue;
@@ -143,7 +148,10 @@ export function assignGroups(
   for (const [lead, group] of members) {
     if (group.length < 2 || !freshIds.has(lead) || group.some((c) => !freshIds.has(c.id))) continue;
     const credited = group.map((c) => c.creditedOutlet).filter((x): x is string => !!x);
-    const original = group.find((c) => credited.some((x) => sameOutlet(x, c.outlet)));
+    const isOriginal = (c: GroupableClip) => credited.some((x) => sameOutlet(x, c.outlet));
+    const approved = group.filter((c) => c.status === "published");
+    const pickFrom = approved.length > 0 ? approved : group;
+    const original = pickFrom.find(isOriginal) ?? (approved.length > 0 ? approved[0] : undefined);
     if (!original || original.id === lead) continue;
     for (const c of group) c.duplicateOf = c.id === original.id ? null : original.id;
   }
