@@ -232,13 +232,13 @@ async function main(): Promise<void> {
   // 1. Active research members.
   const memberships = (await prisma.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, programCode: true, membershipType: true, startDate: true, endDate: true },
-  })) as Array<{ cwid: string; programCode: string | null; membershipType: string | null; startDate: Date | null; endDate: Date | null }>;
+    select: { cwid: true, programCode: true, membershipType: true, startDate: true, endDate: true, membershipRoleKey: true },
+  })) as Array<{ cwid: string; programCode: string | null; membershipType: string | null; startDate: Date | null; endDate: Date | null; membershipRoleKey: string | null }>;
   const anyActiveMemberCwids = new Set(
-    memberships.filter((m) => isCenterMembershipActive(m.startDate, m.endDate, today)).map((m) => m.cwid),
+    memberships.filter((m) => isCenterMembershipActive(m, today)).map((m) => m.cwid),
   );
   const activeResearch = memberships.filter(
-    (m) => m.membershipType === "research" && isCenterMembershipActive(m.startDate, m.endDate, today),
+    (m) => m.membershipType === "research" && isCenterMembershipActive(m, today),
   );
   const scholarByCwid = new Map(
     (

@@ -86,6 +86,17 @@ export const DIVISION_CHIEF_ROLE_KEY = "chief";
 export const MEMBER_ROLE_KEY = "member";
 
 /**
+ * Stable key of the membership role for faculty INVITED to join a center who
+ * have not yet completed the application (Meyer Cancer Center request,
+ * 2026-09-24 — replaces their offline Excel tracker). Backend-only, like an
+ * expired membership: `isCenterMembershipActive` treats it as NOT active, so an
+ * invitee never reaches the public roster, counts, search, or NCI reporting
+ * (it also derives `membershipType` NULL). Promote the row to `research` /
+ * `clinical` when the application completes.
+ */
+export const INVITED_ROLE_KEY = "invited";
+
+/**
  * Stable key of the core-staff role (plan `2026-09-06-core-staff-role-plan.md`,
  * Phase 2). DESCRIPTIVE, not authorization: a staff member is *evidence* for the
  * co-author signal, and must not thereby gain edit rights on the core. That is
@@ -283,6 +294,15 @@ export const DEFAULT_ORG_UNIT_ROLES: Readonly<
       scope: "unit",
       singleHolder: false,
       sortOrder: 30,
+      profileTitle: false,
+    },
+    {
+      key: INVITED_ROLE_KEY,
+      label: "Invited",
+      group: "membership",
+      scope: "unit",
+      singleHolder: false,
+      sortOrder: 40,
       profileTitle: false,
     },
   ],
