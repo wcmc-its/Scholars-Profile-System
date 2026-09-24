@@ -135,8 +135,6 @@ function client(rows: Row[], people: Record<string, Person> = {}, omitCwids: str
     },
     grant: { groupBy: async () => [] },
     orgUnitRoleAssignment: { findMany: async () => [] },
-    centerProgram: { findMany: async () => [] },
-    center: { findMany: async () => [] },
   };
   return { client: c as unknown as Parameters<typeof loadNewsQueue>[0], calls, scholarCwids };
 }

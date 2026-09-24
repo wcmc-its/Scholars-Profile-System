@@ -67,7 +67,6 @@ export type DataQualityClient = Pick<
   | "divisionMembership"
   | "overviewProvenance"
   | "orgUnitRoleAssignment"
-  | "centerProgram"
 >;
 
 /** A single org-unit filter (department / division / center / institution);
@@ -612,7 +611,7 @@ async function computeDataQualityEntries(
       primaryTitle: s.primaryTitle ?? null,
       chairLabel,
       isChief,
-      centerDirector: centerDirectors.get(s.cwid) ?? null,
+      isCenterDirector: centerDirectors.has(s.cwid),
       piCount: piCount.get(s.cwid) ?? 0,
       nihPiCount: nihPiCount.get(s.cwid) ?? 0,
     });

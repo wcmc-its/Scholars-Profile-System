@@ -75,9 +75,6 @@ function fakeClient(opts: {
       findMany: vi.fn().mockResolvedValue((opts.chiefs ?? []).map((c) => ({ chiefCwid: c }))),
     },
     grant: { groupBy: grantGroupBy },
-    // Center-director reads (EA title ladder) — no directors unless a test adds one.
-    center: { findMany: vi.fn().mockResolvedValue([]) },
-    centerProgram: { findMany: vi.fn().mockResolvedValue([]) },
     coiGapCandidate: {
       groupBy: vi
         .fn()
@@ -536,13 +533,17 @@ describe("classifyLeadership — title heuristic (#1)", () => {
   it("a non-leader title falls back to the FK chair/chief/center-director tier", () => {
     expect(classifyLeadership("Professor", "Chair", false)).toEqual({ tier: 4, label: "Chair" });
     expect(classifyLeadership("Professor", null, true)).toEqual({ tier: 6, label: "Chief" });
-    expect(classifyLeadership("Professor", null, false, "institutional")).toEqual({
+    // Every tracked center is school-wide: its director is rank 5.
+    expect(classifyLeadership("Professor", null, false, true)).toEqual({
       tier: 5,
       label: "Center Director",
     });
-    expect(classifyLeadership("Professor", null, false, "unit")).toEqual({
-      tier: 10,
-      label: "Center Director",
+  });
+
+  it("Vice Chair sits between Assoc/Asst Vice Provost (8) and endowed (9)", () => {
+    expect(classifyLeadership("Vice Chair of Clinical Operations", null, false)).toEqual({
+      tier: 8.5,
+      label: "Vice Chair",
     });
   });
 
@@ -554,8 +555,8 @@ describe("classifyLeadership — title heuristic (#1)", () => {
       tier: 3,
       label: "Senior Associate Dean",
     });
-    // An institutional center director (5) outranks a division chief (6).
-    expect(classifyLeadership("Professor", null, true, "institutional")).toEqual({
+    // A center director (5) outranks a division chief (6).
+    expect(classifyLeadership("Professor", null, true, true)).toEqual({
       tier: 5,
       label: "Center Director",
     });

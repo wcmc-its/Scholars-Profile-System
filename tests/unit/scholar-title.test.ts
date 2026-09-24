@@ -37,7 +37,7 @@ describe("resolveScholarTitle — precedence", () => {
     });
   });
 
-  it("falls to chief, then center head, then primary", () => {
+  it("falls to center head (5), then chief (6), then primary", () => {
     expect(
       resolveScholarTitle({
         ...NONE,
@@ -46,16 +46,16 @@ describe("resolveScholarTitle — precedence", () => {
         centerHeadTitle: "Director, Example Cancer Center",
         edPrimaryTitle: "Professor of Clinical Medicine",
       }).tier,
-    ).toBe("chief");
+    ).toBe("centerHead");
 
     expect(
       resolveScholarTitle({
         ...NONE,
         override: null,
-        centerHeadTitle: "Director, Example Cancer Center",
+        chiefTitle: "Chief, Sleep Neurology",
         edPrimaryTitle: "Professor of Clinical Medicine",
       }).tier,
-    ).toBe("centerHead");
+    ).toBe("chief");
 
     expect(
       resolveScholarTitle({
@@ -87,7 +87,8 @@ describe("rankTitleText — the EA ladder (2026-09-24)", () => {
     ["Chair of Medicine", 4],
     ["Sanford I. Weill Chair of Medicine", 4],
     ["Chairman, Department of Surgery", 4],
-    ["Vice Chair for Research", 13], // not a department chair, and no rank
+    ["Vice Chair for Research", 8.5], // EA: "between 8 and 9"
+    ["Vice Chairman of Radiology for Lower Manhattan", 8.5],
     ["Chief of Cardiology", 6],
     ["Chief, Sleep Neurology", 6],
     ["Associate Dean for Research", 7],
@@ -108,14 +109,14 @@ describe("rankTitleText — the EA ladder (2026-09-24)", () => {
     ["Postdoctoral Associate", 12],
     ["Director of Example Center and Professor of Medicine", 10], // not endowed
     ["Anne Example, M.D. Assistant Professor of Otolaryngology", 9], // comma in a name
-    ["Vice Chair for Research and Professor of Medicine", 12], // an office, not a name
+    ["Vice Chair for Research and Professor of Medicine", 8.5], // an office, not a name
     ["Professor Emeritus of Medicine", 12],
     ["Dean Emeritus", 13],
     ["Attending Physician", 13],
     [null, 13],
     ["   ", 13],
   ];
-  it.each(cases)("%s → %i", (title, rank) => {
+  it.each(cases)("%s → %s", (title, rank) => {
     expect(rankTitleText(title)).toBe(rank);
   });
 });
@@ -145,15 +146,49 @@ describe("resolveScholarTitle — rank, not source", () => {
     ).toBe("Chief, Sleep Neurology");
   });
 
-  it("an institutional center director beats a chief; a unit-based one does not", () => {
-    const base = {
+  it("a center director (role, always school-wide) beats a chief", () => {
+    expect(
+      resolveScholarTitle({
+        ...NONE,
+        override: null,
+        chiefTitle: "Chief, Sleep Neurology",
+        centerHeadTitle: "Director, Example Cancer Center",
+      }).tier,
+    ).toBe("centerHead");
+  });
+
+  it("a director title known only as TEXT is unit-based (10) and loses to a chief", () => {
+    expect(
+      resolveScholarTitle({
+        ...NONE,
+        override: null,
+        workingTitle: "Director of the Example Research Institute",
+        chiefTitle: "Chief, Sleep Neurology",
+      }).tier,
+    ).toBe("chief");
+  });
+
+  it("a working title wording the SAME directorship keeps the person's wording", () => {
+    const r = resolveScholarTitle({
       ...NONE,
       override: null,
+      workingTitle: "Meyer Cancer Center Director",
       chiefTitle: "Chief, Sleep Neurology",
-      centerHeadTitle: "Director, Example Cancer Center",
-    };
-    expect(resolveScholarTitle({ ...base, centerHeadInstitutional: true }).tier).toBe("centerHead");
-    expect(resolveScholarTitle({ ...base, centerHeadInstitutional: false }).tier).toBe("chief");
+      centerHeadTitle: "Director, Sandra and Edward Meyer Cancer Center",
+      edPrimaryTitle: "Professor",
+    });
+    expect(r).toMatchObject({ tier: "working", value: "Meyer Cancer Center Director" });
+  });
+
+  it("a working title naming a DIFFERENT center does not borrow the role's rank", () => {
+    expect(
+      resolveScholarTitle({
+        ...NONE,
+        override: null,
+        workingTitle: "Director, Example Aging Center",
+        centerHeadTitle: "Director, Sandra and Edward Meyer Cancer Center",
+      }).tier,
+    ).toBe("centerHead");
   });
 
   it("a plain academic appointment never displaces the ED primary title", () => {

@@ -29,11 +29,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { CENTER_ENTITY_TYPE } from "@/lib/org-unit-roles";
-import {
-  isCenterDirector,
-  loadCurrentAppointmentTitles,
-  loadInstitutionalCenterCodes,
-} from "@/lib/edit/title-picker";
+import { isCenterDirector, loadCurrentAppointmentTitles } from "@/lib/edit/title-picker";
 import {
   ambiguousUnitNames,
   formatUnitLeadershipTitle,
@@ -91,7 +87,7 @@ export async function resolveScholarTitles(
     : [
         {
           chiefTitles: new Map<string, string>(),
-          centerTitles: new Map<string, CenterTitle>(),
+          centerTitles: new Map<string, string>(),
         },
         new Map<string, string[]>(),
       ];
@@ -109,8 +105,7 @@ export async function resolveScholarTitles(
       workingTitle: opts.applyDerivedTiers ? s.workingTitle : null,
       appointmentTitles: appointmentTitles.get(s.cwid) ?? [],
       chiefTitle: chiefTitles.get(s.cwid) ?? null,
-      centerHeadTitle: centerTitles.get(s.cwid)?.title ?? null,
-      centerHeadInstitutional: centerTitles.get(s.cwid)?.institutional ?? false,
+      centerHeadTitle: centerTitles.get(s.cwid) ?? null,
       edPrimaryTitle: s.edPrimaryTitle,
     });
 
@@ -142,8 +137,6 @@ export async function resolveScholarTitles(
   return { scanned: scholars.length, updated, byTier, skippedNullResolution };
 }
 
-type CenterTitle = { title: string; institutional: boolean };
-
 /**
  * Build cwid → formatted title for the division-chief and center-head tiers.
  *
@@ -159,9 +152,9 @@ type CenterTitle = { title: string; institutional: boolean };
  */
 async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
   chiefTitles: Map<string, string>;
-  centerTitles: Map<string, CenterTitle>;
+  centerTitles: Map<string, string>;
 }> {
-  const [divAssignments, centerAssignments, divisions, centers, institutionalCenters] = await Promise.all([
+  const [divAssignments, centerAssignments, divisions, centers] = await Promise.all([
     client.orgUnitRoleAssignment.findMany({
       where: { entityType: "division", role: { roleGroup: "leadership", profileTitle: true } },
       select: {
@@ -189,7 +182,6 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
       select: { code: true, name: true, department: { select: { name: true } } },
     }),
     client.center.findMany({ select: { code: true, name: true, officialName: true } }),
-    loadInstitutionalCenterCodes(client),
   ]);
 
   // Ambiguity is computed from the whole unit table, not from the units that
@@ -218,26 +210,21 @@ async function loadLeadershipTitles(client: TitleResolutionClient): Promise<{
     );
   }
 
-  const centerTitles = new Map<string, CenterTitle>();
+  const centerTitles = new Map<string, string>();
   for (const a of centerAssignments) {
-    if (!isCenterDirector(a)) continue;
-    const institutional = institutionalCenters.has(a.entityId);
-    // Keep the first directorship, unless a later one is institutional and
-    // the kept one is not — rank 5 beats rank 10.
-    const kept = centerTitles.get(a.cwid);
-    if (kept && (kept.institutional || !institutional)) continue;
+    if (centerTitles.has(a.cwid) || !isCenterDirector(a)) continue;
     const name = centerNameByCode.get(a.entityId);
     if (!name) continue;
-    centerTitles.set(a.cwid, {
+    centerTitles.set(
+      a.cwid,
       // Centers are institution-wide, so their names do not collide the way
       // two departments' divisions do — no qualifier tier for them.
-      title: formatUnitLeadershipTitle({
+      formatUnitLeadershipTitle({
         roleLabel: a.role.label,
         interim: a.interim,
         unitName: name,
       }),
-      institutional,
-    });
+    );
   }
 
   return { chiefTitles, centerTitles };

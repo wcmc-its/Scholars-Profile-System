@@ -20,7 +20,6 @@
  * import, so it loads under vitest with a fake client — matching `data-quality.ts`.
  */
 import { PI_ROLES } from "@/lib/funding-roles";
-import { loadInstitutionalCenterCodes } from "@/lib/edit/title-picker";
 import {
   CENTER_ENTITY_TYPE,
   DEPARTMENT_CHAIR_ROLE_KEY,
@@ -32,37 +31,26 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { rankTitleText, TITLE_RANK } from "@/lib/scholar-title";
 
 /** The Prisma surface `computeProminence` reads — a `db.read` client satisfies it. */
-export type ProminenceClient = Pick<
-  PrismaClient,
-  "scholar" | "grant" | "orgUnitRoleAssignment" | "centerProgram" | "center"
->;
+export type ProminenceClient = Pick<PrismaClient, "scholar" | "grant" | "orgUnitRoleAssignment">;
 
 /**
- * cwid → center-director standing, institutional winning over unit-based.
- * `cwids` bounds the read (`computeProminence`); omit it for a whole-roster
- * load (`data-quality.ts`).
+ * cwids that direct a center. Every tracked center is school-wide, so each is
+ * an Institutional Center Director (rank 5). `cwids` bounds the read
+ * (`computeProminence`); omit it for a whole-roster load (`data-quality.ts`).
  */
 export async function loadCenterDirectors(
-  client: Pick<PrismaClient, "orgUnitRoleAssignment" | "centerProgram" | "center">,
+  client: Pick<PrismaClient, "orgUnitRoleAssignment">,
   cwids?: readonly string[],
-): Promise<Map<string, CenterDirectorKind>> {
-  const [rows, institutional] = await Promise.all([
-    client.orgUnitRoleAssignment.findMany({
-      where: {
-        entityType: CENTER_ENTITY_TYPE,
-        roleKey: DIRECTOR_ROLE_KEY,
-        ...(cwids ? { cwid: { in: [...cwids] } } : {}),
-      },
-      select: { cwid: true, entityId: true },
-    }),
-    loadInstitutionalCenterCodes(client),
-  ]);
-  const out = new Map<string, CenterDirectorKind>();
-  for (const r of rows) {
-    if (institutional.has(r.entityId)) out.set(r.cwid, "institutional");
-    else if (!out.has(r.cwid)) out.set(r.cwid, "unit");
-  }
-  return out;
+): Promise<Set<string>> {
+  const rows = await client.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: CENTER_ENTITY_TYPE,
+      roleKey: DIRECTOR_ROLE_KEY,
+      ...(cwids ? { cwid: { in: [...cwids] } } : {}),
+    },
+    select: { cwid: true },
+  });
+  return new Set(rows.map((r) => r.cwid));
 }
 
 /** Prominence weights — kept here so they're easy to tune in one place.
@@ -120,10 +108,6 @@ function deaneryLabel(title: string): string | null {
   return null;
 }
 
-/** Center-director standing for {@link classifyLeadership}; see
- *  `loadInstitutionalCenterCodes` for what makes a center institutional. */
-export type CenterDirectorKind = "institutional" | "unit" | null;
-
 /**
  * Classify a scholar's leadership tier + display label from their title + the
  * FK role flags: the best (lowest) of the title's ladder rank and each role's.
@@ -141,7 +125,7 @@ export function classifyLeadership(
   title: string | null,
   chairLabel: string | null,
   isChief: boolean,
-  centerDirector: CenterDirectorKind = null,
+  isCenterDirector = false,
 ): { tier: number; label: string | null } {
   const t = (title ?? "").trim();
   const active = t !== "" && !TITLE_EMERITUS.test(t);
@@ -154,14 +138,10 @@ export function classifyLeadership(
   ];
   if (textRank === TITLE_RANK.chair) candidates[0][1] = "Chair";
   if (textRank === TITLE_RANK.divisionChief) candidates[0][1] = "Chief";
+  if (textRank === TITLE_RANK.viceChair) candidates[0][1] = "Vice Chair";
   if (chairLabel) candidates.push([TITLE_RANK.chair, chairLabel]);
-  if (centerDirector) {
-    candidates.push([
-      centerDirector === "institutional"
-        ? TITLE_RANK.institutionalCenterDirector
-        : TITLE_RANK.unitCenterDirector,
-      "Center Director",
-    ]);
+  if (isCenterDirector) {
+    candidates.push([TITLE_RANK.institutionalCenterDirector, "Center Director"]);
   }
   if (isChief) candidates.push([TITLE_RANK.divisionChief, "Chief"]);
   // Stable: on a tie the title text (listed first) keeps its own label.
@@ -180,8 +160,8 @@ export type ProminenceInputs = {
    *  a department leader. See `classifyLeadership` on why this is not a boolean. */
   chairLabel: string | null;
   isChief: boolean;
-  /** Director of a center, if any. Defaults to none. */
-  centerDirector?: CenterDirectorKind;
+  /** Directs a center (always school-wide, rank 5). Defaults to false. */
+  isCenterDirector?: boolean;
   piCount: number | null;
   nihPiCount: number | null;
 };
@@ -215,7 +195,7 @@ export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
     input.primaryTitle,
     input.chairLabel,
     input.isChief,
-    input.centerDirector ?? null,
+    input.isCenterDirector ?? false,
   );
   return { prominence, leadershipTier: tier, leadershipLabel: label };
 }
@@ -307,7 +287,7 @@ export async function computeProminence(
         primaryTitle: s.primaryTitle ?? null,
         chairLabel: chairLabelByCwid.get(s.cwid) ?? null,
         isChief: chiefs.has(s.cwid),
-        centerDirector: centerDirectors.get(s.cwid) ?? null,
+        isCenterDirector: centerDirectors.has(s.cwid),
         piCount: piCount.get(s.cwid) ?? 0,
         nihPiCount: nihPiCount.get(s.cwid) ?? 0,
       }),

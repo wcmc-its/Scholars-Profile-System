@@ -30,7 +30,7 @@ function fakeClient(opts: {
   divisionAssignments?: { cwid: string; entityId: string; label: string; interim?: boolean }[];
   centerAssignments?: { cwid: string; entityId: string; label: string; interim?: boolean }[];
   divisions?: { code: string; name: string; department: { name: string } | null }[];
-  centers?: { code: string; name: string; officialName: string | null; centerType?: string }[];
+  centers?: { code: string; name: string; officialName: string | null }[];
   /** Current ED appointment titles. */
   appointments?: { cwid: string; title: string }[];
   overrides?: { entityId: string; value: string }[];
@@ -62,13 +62,7 @@ function fakeClient(opts: {
       }),
     },
     division: { findMany: vi.fn(async () => opts.divisions ?? []) },
-    center: {
-      findMany: vi.fn(async (args?: { where?: { centerType?: string } }) =>
-        (opts.centers ?? []).filter(
-          (c) => !args?.where?.centerType || c.centerType === args.where.centerType,
-        ),
-      ),
-    },
+    center: { findMany: vi.fn(async () => opts.centers ?? []) },
     appointment: { findMany: vi.fn(async () => opts.appointments ?? []) },
     centerProgram: {
       findMany: vi.fn(async () =>
@@ -208,48 +202,20 @@ describe("resolveScholarTitles — derived tiers", () => {
     expect(updates).toEqual([{ cwid: "sch0020", primaryTitle: "Director, Example Policy Center" }]);
   });
 
-  it("an institutional center director (5) outranks a chief (6); a unit-based one (10) does not", async () => {
+  it("any tracked center's director (5) outranks a division chief (6)", async () => {
+    // Every center in the table is school-wide (prod probe 2026-09-24), so the
+    // Policy Center's director ranks alongside the Cancer Center's.
     const { client, updates } = fakeClient({
       scholars: [
-        { cwid: "inst", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
-        { cwid: "unit", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
+        { cwid: "dir1", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
       ],
-      divisionAssignments: [
-        { cwid: "inst", entityId: "DIV-SLEEP", label: "Chief" },
-        { cwid: "unit", entityId: "DIV-SLEEP", label: "Chief" },
-      ],
-      centerAssignments: [
-        { cwid: "inst", entityId: "CTR-CANCER", label: "Director" },
-        { cwid: "unit", entityId: "CTR-POLICY", label: "Director" },
-      ],
+      divisionAssignments: [{ cwid: "dir1", entityId: "DIV-SLEEP", label: "Chief" }],
+      centerAssignments: [{ cwid: "dir1", entityId: "CTR-POLICY", label: "Director" }],
       divisions: DIVISIONS,
-      centers: [
-        { code: "CTR-CANCER", name: "Example Cancer Center", officialName: null },
-        { code: "CTR-POLICY", name: "Example Policy Center", officialName: null },
-      ],
+      centers: [{ code: "CTR-POLICY", name: "Example Policy Center", officialName: null }],
     });
     await resolveScholarTitles(client as never, { applyDerivedTiers: true });
-    expect(updates).toEqual([
-      { cwid: "inst", primaryTitle: "Director, Example Cancer Center" },
-      { cwid: "unit", primaryTitle: "Chief, Sleep Neurology" },
-    ]);
-  });
-
-  it("an `institute`-typed center counts as institutional", async () => {
-    const { client, updates } = fakeClient({
-      scholars: [
-        { cwid: "ins1", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
-      ],
-      divisionAssignments: [{ cwid: "ins1", entityId: "DIV-SLEEP", label: "Chief" }],
-      centerAssignments: [{ cwid: "ins1", entityId: "INST-X", label: "Director" }],
-      divisions: DIVISIONS,
-      centers: [
-        { code: "INST-X", name: "Example Institute", officialName: null, centerType: "institute" },
-      ],
-      cancerCenterCodes: [],
-    });
-    await resolveScholarTitles(client as never, { applyDerivedTiers: true });
-    expect(updates).toEqual([{ cwid: "ins1", primaryTitle: "Director, Example Institute" }]);
+    expect(updates).toEqual([{ cwid: "dir1", primaryTitle: "Director, Example Policy Center" }]);
   });
 
   it("an endowed or chair APPOINTMENT title outranks the ED primary title", async () => {

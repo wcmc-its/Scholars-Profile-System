@@ -50,28 +50,14 @@ export function isTitleResolutionEnabled(): boolean {
 }
 
 /**
- * Center directors title their holder on the EA ladder (2026-09-24): an
- * INSTITUTIONAL center's director ranks 5, above division chief; any other
- * center's director ranks 10, above a plain academic title. This supersedes
- * #2735's Cancer-Center-only rule. Associate directors still never count —
- * that was the #2735 demotion ("Associate Director, … Center" over
- * "Professor of …"). Matched on the role KEY (labels are editable); interim
- * directors count.
- *
- * "Institutional" is data-driven, no center code hardcoded: a center with a
- * `CenterProgram` taxonomy (the Cancer Center, the same test as
- * `resolveReportsCenterCode`) or `centerType = "institute"`.
+ * Center directors title their holder on the EA ladder (2026-09-24). Every
+ * center in the `center` table is school-wide — none sits under a department
+ * (prod probe 2026-09-24, 12 centers) — so its Director ranks 5, Institutional
+ * Center / Institute Director, above division chief. This supersedes #2735's
+ * Cancer-Center-only rule. A director title that exists only as TEXT (a
+ * department's own center, or one we do not track) is unit-based, rank 10 —
+ * see `rankTitleText`.
  */
-export async function loadInstitutionalCenterCodes(
-  client: Pick<PrismaClient, "centerProgram" | "center">,
-): Promise<Set<string>> {
-  const [programs, institutes] = await Promise.all([
-    client.centerProgram.findMany({ select: { centerCode: true }, distinct: ["centerCode"] }),
-    client.center.findMany({ where: { centerType: "institute" }, select: { code: true } }),
-  ]);
-  return new Set([...programs.map((r) => r.centerCode), ...institutes.map((c) => c.code)]);
-}
-
 /** Director only — co- and associate directors do not title their holder
  *  (#2735, kept on the ladder: its ranks name "Director"). */
 export function isCenterDirector(a: { role: { key: string } }): boolean {
@@ -144,7 +130,7 @@ export async function loadTitlePickerState(
   });
   if (!scholar) return null;
 
-  const [assignments, overrideRows, institutionalCenters, appointmentTitles] = await Promise.all([
+  const [assignments, overrideRows, appointmentTitles] = await Promise.all([
     client.orgUnitRoleAssignment.findMany({
       where: {
         cwid,
@@ -167,17 +153,13 @@ export async function loadTitlePickerState(
       },
       select: { fieldName: true, value: true, actorCwid: true, updatedAt: true },
     }),
-    loadInstitutionalCenterCodes(client),
     loadCurrentAppointmentTitles(client, [cwid]),
   ]);
 
   const divAssignment = assignments.find((a) => a.entityType === "division");
-  // An institutional directorship outranks a unit-based one, so prefer it.
-  const centerDirectorships = assignments.filter(
+  const centerAssignment = assignments.find(
     (a) => a.entityType === CENTER_ENTITY_TYPE && isCenterDirector(a),
   );
-  const centerAssignment =
-    centerDirectorships.find((a) => institutionalCenters.has(a.entityId)) ?? centerDirectorships[0];
 
   let chiefTitle: string | null = null;
   if (divAssignment) {
@@ -224,8 +206,6 @@ export async function loadTitlePickerState(
       appointmentTitles: appointmentTitles.get(cwid) ?? [],
       chiefTitle,
       centerHeadTitle,
-      centerHeadInstitutional:
-        centerAssignment !== undefined && institutionalCenters.has(centerAssignment.entityId),
       edPrimaryTitle: scholar.edPrimaryTitle,
     }),
     current: scholar.primaryTitle,

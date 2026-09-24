@@ -43,6 +43,9 @@ export const TITLE_RANK = {
   divisionChief: 6,
   associateDean: 7,
   associateViceProvost: 8,
+  /** Not on the original list; EA slotted it "between 8 and 9" (2026-09-24).
+   *  Fractional so ranks 1–12 keep the list's own numbering. */
+  viceChair: 8.5,
   endowed: 9,
   unitCenterDirector: 10,
   unitProgramDirector: 11,
@@ -102,6 +105,7 @@ export function rankTitleText(title: string | null | undefined): number {
     if (/\bchief of\b|\bdivision chief\b|^(?:interim |acting )?chief,/i.test(t)) {
       return TITLE_RANK.divisionChief;
     }
+    if (/\bvice[- ]chair(?:man|woman|person)?\b/i.test(t)) return TITLE_RANK.viceChair;
   }
   if (isEndowed(t)) return TITLE_RANK.endowed;
   if (!EMERITUS.test(t) && isDirectorOf(t, /\b(?:center|centre|institute)\b/i)) {
@@ -173,10 +177,9 @@ export type TitleInputs = {
   appointmentTitles?: readonly string[];
   /** Pre-formatted, e.g. "Chief, Cardiology (Medicine)" — see {@link formatUnitLeadershipTitle}. */
   chiefTitle: string | null;
-  /** Pre-formatted, e.g. "Director, Example Cancer Center". */
+  /** Pre-formatted, e.g. "Director, Example Cancer Center". Every tracked
+   *  center is school-wide, so this is always rank 5. */
   centerHeadTitle: string | null;
-  /** True when the center is institution-wide (rank 5), else unit-based (10). */
-  centerHeadInstitutional?: boolean;
   /** ED `weillCornellEduPrimaryTitle`, annotation-stripped. */
   edPrimaryTitle: string | null;
 };
@@ -188,15 +191,24 @@ export type TitleInputs = {
  */
 export function buildTitleOptions(inputs: TitleInputs): TitleOption[] {
   const appointment = bestRanked(inputs.appointmentTitles ?? []);
+  const centerHead = blankToNull(inputs.centerHeadTitle);
+  const working = ranked(inputs.workingTitle);
+  // A working title that words the SAME directorship the role confers
+  // ("Meyer Cancer Center Director") keeps the person's own wording: it takes
+  // the role's rank, and the working tier wins the tie. Text alone can only
+  // say "some center" (rank 10); the role knows it is a tracked one (5).
+  if (
+    centerHead !== null &&
+    working[0] !== null &&
+    working[1] === TITLE_RANK.unitCenterDirector &&
+    sharesUnitName(working[0], centerHead)
+  ) {
+    working[1] = TITLE_RANK.institutionalCenterDirector;
+  }
   const byTier: Record<TitleTier, [string | null, number]> = {
-    working: ranked(inputs.workingTitle),
+    working,
     appointment: appointment,
-    centerHead: [
-      blankToNull(inputs.centerHeadTitle),
-      inputs.centerHeadInstitutional
-        ? TITLE_RANK.institutionalCenterDirector
-        : TITLE_RANK.unitCenterDirector,
-    ],
+    centerHead: [centerHead, TITLE_RANK.institutionalCenterDirector],
     chief: [blankToNull(inputs.chiefTitle), TITLE_RANK.divisionChief],
     primary: ranked(inputs.edPrimaryTitle),
   };
@@ -211,6 +223,33 @@ export function buildTitleOptions(inputs: TitleInputs): TitleOption[] {
       a.rank - b.rank ||
       TITLE_TIERS.indexOf(a.tier) - TITLE_TIERS.indexOf(b.tier),
   );
+}
+
+/** Generic words that do not identify a unit. */
+const UNIT_FILLER = new Set([
+  "director",
+  "center",
+  "centre",
+  "institute",
+  "research",
+  "interim",
+  "acting",
+  "the",
+  "and",
+  "for",
+  "of",
+  "disease",
+  "health",
+]);
+
+/** Do two titles name the same unit? True when they share a distinctive word
+ *  ("Meyer", "Drukier", "Appel") — enough to tell one center's director
+ *  wording from another's without a curated alias list. */
+function sharesUnitName(a: string, b: string): boolean {
+  const words = (s: string) =>
+    new Set((s.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => !UNIT_FILLER.has(w)));
+  const bw = words(b);
+  return [...words(a)].some((w) => bw.has(w));
 }
 
 function ranked(title: string | null): [string | null, number] {
