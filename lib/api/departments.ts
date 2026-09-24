@@ -395,6 +395,9 @@ export type DepartmentFacultyHit = {
    *  component needs to import `lib/api/external-members.ts` (which pulls in
    *  `@/lib/db` at module scope). */
   externalProfileUrl?: string;
+  /** Institution badge for an external member ("Cornell University", or a CTSC
+   *  feed institution). Absent ⇒ no badge. */
+  externalInstitution?: string;
 };
 
 export type DepartmentFacultyResult = {

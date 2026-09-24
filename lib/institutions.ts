@@ -52,6 +52,11 @@ export function institutionName(code: string): string {
   return INSTITUTIONS[code] ?? code;
 }
 
+/** Code for a display name, when the map has one ("Cornell University" → "Cornell"). */
+export function institutionCodeForName(name: string): string | undefined {
+  return Object.keys(INSTITUTIONS).find((k) => INSTITUTIONS[k] === name);
+}
+
 /** ED `weillCornellEduPrimaryOrganization` code for the home institution. */
 export const HOME_INSTITUTION_CODE = "WCMC";
 

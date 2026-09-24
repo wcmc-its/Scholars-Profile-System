@@ -59,6 +59,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Sets which staff may edit the profiles in their department, division or center.",
     origin: "external", // WCM Enterprise Directory (LDAP)
   },
+  "CTSC-Roster": {
+    label: "CTSC Roster",
+    description:
+      "Clinical & Translational Science Center investigators and trainees; not used for publications.",
+    origin: "external", // CTSC investigators-and-trainees feed
+  },
   ReCiter: {
     label: "Publications",
     description: "Journal articles on each profile, with authors, journal, year and DOI.",

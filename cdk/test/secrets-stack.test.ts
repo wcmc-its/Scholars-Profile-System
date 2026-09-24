@@ -27,6 +27,8 @@ const PER_SOURCE_ETL_NAMES = [
   "dynamodb",
   "spotlight",
   "hierarchy",
+  // etl:ctsc-roster — CTSC investigators-and-trainees feed.
+  "ctsc",
 ] as const;
 
 function expectedSecrets(env: "staging" | "prod"): string[] {
@@ -68,7 +70,7 @@ describe("SecretsStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates the expected set of secrets by name (fifteen core incl. opensearch/master + session-cookie-key + faculty-review-token (#1855) + research-informatics-token (#2363) + saml/idp-cert + saml-sp/cert + db/bootstrap + db/migrate (ADR-009) + newrelic-license-key + ten per-source ETL stubs (incl. bulk-data-rule, 2026-08-14) + reciter-api (#746) + EdgeStack origin shared secret + on-call Teams webhook)", () => {
+    it("creates the expected set of secrets by name (fifteen core incl. opensearch/master + session-cookie-key + faculty-review-token (#1855) + research-informatics-token (#2363) + saml/idp-cert + saml-sp/cert + db/bootstrap + db/migrate (ADR-009) + newrelic-license-key + eleven per-source ETL stubs (incl. bulk-data-rule, 2026-08-14; ctsc) + reciter-api (#746) + EdgeStack origin shared secret + on-call Teams webhook)", () => {
       template.resourceCountIs(
         "AWS::SecretsManager::Secret",
         EXPECTED_SECRET_COUNT,

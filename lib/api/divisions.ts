@@ -415,6 +415,7 @@ export type DivisionFacultyResult = {
     isExternal?: true;
     /** #2519 — present only when `isExternal` is true. */
     externalProfileUrl?: string;
+    externalInstitution?: string;
   }>;
   total: number;
   /** Whole-scope role-category counts for the role-chip-row. (#17) */

@@ -58,7 +58,10 @@ import {
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
-import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import {
+  CORNELL_EXTERNAL_SOURCE,
+  enabledExternalMemberSources,
+} from "@/lib/edit/external-member-sources";
 import {
   buildExternalMemberHit,
   loadExternalMembersByCuid,
@@ -479,17 +482,18 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   // query above never sees them (no double-count risk). Add active
   // `source: "cornell-ithaca"` memberships so the hero count agrees with the
   // roster's rendered length (`getCenterMembersUncached`, #2235/#2237).
-  const cornellMemberCount = isCornellDirectoryMembersEnabled()
-    ? await (async () => {
-        const rows = await prisma.centerMembership.findMany({
-          where: { centerCode: center.code, source: "cornell-ithaca" },
-          select: { startDate: true, endDate: true, membershipRoleKey: true },
-        });
-        const today = todayIso();
-        return rows.filter((r) => isCenterMembershipActive(r, today))
-          .length;
-      })()
-    : 0;
+  // Also CTSC feed people with no SPS profile (`ctsc-feed-external`).
+  const cornellMemberCount = await (async () => {
+    const externalSources = enabledExternalMemberSources();
+    const rows = await prisma.centerMembership.findMany({
+      where: { centerCode: center.code },
+      select: { source: true, startDate: true, endDate: true, membershipRoleKey: true },
+    });
+    const today = todayIso();
+    return rows.filter(
+      (r) => externalSources.includes(r.source) && isCenterMembershipActive(r, today),
+    ).length;
+  })();
   const scholarCount =
     countRows.filter((s) => isPubliclyDisplayed(s.roleCategory)).length + cornellMemberCount;
 
@@ -677,9 +681,10 @@ async function getCenterMembersUncached(
   // them further than presence — `isCenterMembershipActive` above already
   // ran on their row, same as a WCM row's).
   let cornellHits: CenterMemberHit[] = [];
-  if (isCornellDirectoryMembersEnabled()) {
+  {
+    const externalSources = enabledExternalMemberSources();
     const cornellCwids = activeMemberships
-      .filter((m) => m.source === "cornell-ithaca")
+      .filter((m) => externalSources.includes(m.source))
       .map((m) => m.cwid);
     if (cornellCwids.length > 0) {
       const externalByCuid = await loadExternalMembersByCuid(cornellCwids);
@@ -786,9 +791,12 @@ async function getCenterMembersUncached(
     if (label === null) continue;
     roleCategoryCounts[label] = (roleCategoryCounts[label] ?? 0) + 1;
   }
-  if (cornellHits.length > 0) {
+  // Only Cornell externals are faculty; a CTSC plain name (trainees, staff,
+  // outside investigators) has no known role and sits in no role chip.
+  const cornellFacultyCount = cornellHits.filter((h) => h.externalProfileUrl).length;
+  if (cornellFacultyCount > 0) {
     roleCategoryCounts["Affiliated faculty"] =
-      (roleCategoryCounts["Affiliated faculty"] ?? 0) + cornellHits.length;
+      (roleCategoryCounts["Affiliated faculty"] ?? 0) + cornellFacultyCount;
   }
 
   // Is this a programmed center with at least one active programmed member?
@@ -995,9 +1003,10 @@ export async function getCenterMembersByType(
   // `groupToRawValues`'s filter to place it in. Built the same way as the
   // flat SSR roster's Cornell branch (`getCenterMembersUncached`).
   let cornellHits: CenterMemberHit[] = [];
-  if (roleGroup === "Affiliated faculty" && isCornellDirectoryMembersEnabled()) {
+  if (roleGroup === "Affiliated faculty") {
+    const externalSources = enabledExternalMemberSources().filter((s) => s === CORNELL_EXTERNAL_SOURCE);
     const cornellCwids = activeMemberships
-      .filter((m) => m.source === "cornell-ithaca")
+      .filter((m) => externalSources.includes(m.source))
       .map((m) => m.cwid);
     if (cornellCwids.length > 0) {
       const externalByCuid = await loadExternalMembersByCuid(cornellCwids);

@@ -353,13 +353,14 @@ describe("EtlStack", () => {
         template.resourceCountIs("AWS::CloudWatch::Alarm", 17);
       });
 
-      it("creates seven ECS task definitions (4 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
+      it("creates eight ECS task definitions (5 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
         // #1508 split the single ETL task def into four by credential need:
-        // base / sources / ldap / reciter-api. Plus the lean #393 reconcile
+        // base / sources / ldap / reciter-api (+ ctsc, the CTSC feed token).
+        // Plus the lean #393 reconcile
         // task def + the lean #353 cdn reconcile task def + the standalone
         // bulk-data-rule task def (containerization design, 2026-08-14; not
         // a cadence step, launched only via manual run-task).
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 7);
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 8);
         template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 1);
       });
 
