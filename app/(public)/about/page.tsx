@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
-import { ProvenanceFlow } from "@/components/docs/provenance-flow";
+import { FieldTable, SystemContext } from "@/components/docs/data-provenance";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -42,7 +42,7 @@ const NAV: NavGroup[] = [
     group: "Reference",
     items: [
       { id: "provenance", label: "Where your data comes from" },
-      { id: "correct", label: "How to correct something" },
+      { id: "correct", label: "Every field, and how to fix it" },
       { id: "control", label: "What you control" },
       { id: "roles", label: "Roles & who can edit" },
       { id: "research-areas", label: "Research areas" },
@@ -60,7 +60,6 @@ const NAV: NavGroup[] = [
 
 const LINK = "text-[#7d1c1c] underline underline-offset-4 hover:no-underline";
 const PM = "https://reciter.weill.cornell.edu";
-const WEB_DIR = "https://directory.weill.cornell.edu";
 const NIH_MPI =
   "https://grants.nih.gov/grants-process/plan-to-apply/consider-your-idea-resources-and-collaborators/multiple-principal-investigators";
 
@@ -89,145 +88,6 @@ function Callout({
 }
 
 const WRG = "https://wrg.weill.cornell.edu";
-
-const WebDirLink = (
-  <a href={WEB_DIR} className={LINK}>
-    Web Directory
-  </a>
-);
-const PmLink = (
-  <a href={PM} className={LINK}>
-    Publication Manager
-  </a>
-);
-
-/**
- * The field-by-field map for #provenance: [what you see, system of record,
- * refresh, how it's corrected]. Every row was traced to the ETL, schedule
- * (cdk/lib/etl-stack.ts), flag and Request-a-change routing code on master,
- * 2026-09-24. "Occasional" = a hand-run export or import with no schedule.
- * Update a row when its ETL step, cadence or route changes.
- */
-const PROVENANCE: {
-  group: string;
-  rows: [string, string, string, React.ReactNode][];
-}[] = [
-  {
-    group: "Name, photo & contact",
-    rows: [
-      ["Name", "Enterprise Directory", "Nightly", <>Change your preferred name yourself in the {WebDirLink}</>],
-      ["Degrees after your name", "Enterprise Directory, from ASMS", "Nightly", "Request a change (routes to the Office of Faculty Affairs)"],
-      ["Photo", "Web Directory, shown live rather than copied", "Live", <>Add, change, or remove it yourself in the {WebDirLink}. It shows right away</>],
-      ["Email, and who can see it", "Enterprise Directory", "Nightly", <>Change the address or its &ldquo;Publish to&rdquo; setting yourself in the {WebDirLink}</>],
-      ["ORCID iD", "Scholars, kept in sync with WCM Identity", "On save", "Confirm or enter it yourself on Identifiers & profiles in Edit my profile"],
-      ["Profile links (LinkedIn, X, Bluesky, Google Scholar, ResearchGate)", "Scholars", "On save", "Add or remove them yourself on Identifiers & profiles"],
-    ],
-  },
-  {
-    group: "Appointments & positions",
-    rows: [
-      ["Titles and appointments", "Enterprise Directory (faculty record)", "Nightly", "Request a change (routes to ITS Support, who fix a sync problem or escalate to Faculty Affairs). You can hide an appointment meanwhile"],
-      ["Displayed title (the one under your name)", "Chosen by Scholars from your titles: a working title or leadership role can outrank your primary title", "Nightly", "Request a change and name the title you want (routes to ITS Support)"],
-      ["Department and division", "Enterprise Directory, from your primary appointment", "Nightly", "Request a change (routes to ITS Support)"],
-      ["Chair and chief titles", "Enterprise Directory", "Nightly", "Request a change if a chair role has ended (routes to ITS Support). A unit Owner or Curator can set a unit's leader"],
-      ["Past appointments (earlier ranks)", "Enterprise Directory", "Nightly", "Hide or show each one yourself. Report a wrong one with Request a change"],
-      ["Graduate School appointment", "Jenzabar (Graduate School)", "Occasional", "Request a change (routes to ITS Support)"],
-      ["Institution (shown only when it isn't WCM)", "Enterprise Directory", "Nightly", "No in-app route; it follows your faculty record"],
-      ["Whether you have a public profile (your person type)", "Enterprise Directory", "Nightly", "Follows your HR or faculty record"],
-      ["Positions the directory omits (leadership roles, positions elsewhere)", "Scholars", "On save", "Add, edit, or remove them yourself. Shown on your profile only"],
-    ],
-  },
-  {
-    group: "Center roles",
-    rows: [
-      ["Center membership", "Scholars", "On save", "The center's Owner or Curator edits the roster. You can hide the Centers card"],
-      ["Center director and program leader", "Scholars", "On save", "Set by the center's Owner or Curator"],
-    ],
-  },
-  {
-    group: "Clinical",
-    rows: [
-      ["Clinical trials (which trials, your role, status, sponsor)", "OnCore, the clinical trial management system", "Weekly, from an occasional export", "Corrected in OnCore; appears after the next export. You can hide the section"],
-      ["Trial details (phase, summary, conditions, enrollment)", "ClinicalTrials.gov", "Weekly", "The study team updates the registration"],
-      ["Board certifications, specialties, clinical expertise (used in search and CV export)", "weillcornell.org physician directory (POPS)", "Weekly", "Corrected in your weillcornell.org physician profile"],
-      ["Clinical profile link", "Enterprise Directory (a weillcornell.org address)", "Nightly", "Follows your directory entry and NYP clinical affiliation"],
-      ["Hospital position", "Enterprise Directory, NewYork-Presbyterian record", "Nightly", "Request a change (routes to ITS Support). You can hide it meanwhile"],
-    ],
-  },
-  {
-    group: "Education & honors",
-    rows: [
-      ["Education and training", "ASMS", "Nightly", "Request a change (routes to the Office of Faculty Affairs). You can hide an entry or the graduation years"],
-      ["Honors and distinctions", "Scholars", "On save", "Add, edit, or remove them yourself. Not endowed chairs, which come through your title. Shown on your profile only"],
-    ],
-  },
-  {
-    group: "Mentoring",
-    rows: [
-      ["PhD thesis advisees", "Jenzabar (Graduate School)", "Nightly", "Request a change (routes to ITS Support). You can hide one meanwhile"],
-      ["MD scholarly-project mentees (AOC, MD-PhD program, early-career)", "Medical Education rosters", "Occasional", "Request a change (routes to ITS Support). You can hide one meanwhile"],
-      ["Postdocs you supervise", "Enterprise Directory, from HR reporting lines", "Nightly", "Request a change (routes to ITS Support, who escalate to HR). You can hide one meanwhile"],
-      ["Mentees you add", "Scholars", "On save", "Add or remove them yourself under Mentees"],
-      ["Suggestions from your co-authors (full-time faculty only)", "ReCiter", "Nightly", "Private until you accept one. Accept or dismiss each yourself"],
-      ["Your postdoctoral mentor (on a postdoc's own profile)", "Enterprise Directory, from HR reporting lines", "Nightly", "Follows the HR reporting line. You can hide the card"],
-      ["Papers with each mentee", "ReCiter", "Occasional", "Follows your publication list"],
-    ],
-  },
-  {
-    group: "Publications",
-    rows: [
-      ["Which publications are yours", "ReCiter, reading PubMed", "Nightly", <>Use Not mine in Edit my profile: it leaves your profile and search at once, and the rejection goes to ReCiter so it does not come back. Or reject it in {PmLink}</>],
-      ["Publications not in PubMed", "Scopus, OpenAlex, or Web of Science, added by a library curator in ReCiter", "Nightly", "Ask the library curation team to add or remove one"],
-      ["Publication details (title, authors, journal, DOI)", "PubMed, or the outside source for a curator-added paper", "Nightly", "Request a change (routes to ITS Support); the fix is made at PubMed"],
-      ["MeSH topics (the Topics list)", "PubMed indexing, by way of ReCiter", "Nightly", "Set by NLM indexers. Hiding a paper drops its tags"],
-      ["Citation count", "Scopus, by way of ReCiter", "Nightly", "Follows Scopus"],
-      ["Citing papers", "NIH iCite", "Occasional", "Follows iCite"],
-      ["Retractions", "PubMed", "Nightly", "Retracted papers are hidden everywhere automatically"],
-      ["Selected highlights", "Scholars, from Impact scores", "Nightly", "Pick your own, or keep the automatic set"],
-      ["Datasets (off unless you turn the section on)", "ReCiter database", "Weekly", "Turn the section on, then hide a dataset or mark it Not mine"],
-    ],
-  },
-  {
-    group: "Research areas & Impact",
-    rows: [
-      ["Research areas and subareas", "ReciterAI", "Nightly", "Computed; not hand-editable. Hiding a paper removes it"],
-      ["Impact score (one per paper)", "ReciterAI", "Nightly", "Computed; not hand-editable"],
-      ["Plain-language synopsis (one per paper)", "ReciterAI", "Nightly", "Computed; not hand-editable"],
-      ["Methods and tools", "ReciterAI", "Nightly", "Computed. You can hide the section"],
-      ["Core facilities (in a publication's details)", "ReciterAI", "Nightly", "The core's Owner or Curator confirms or rejects each one"],
-      ["Home-page Spotlight", "ReciterAI", "Weekly", "Chosen by the model. Hiding a paper removes it"],
-      ["Search vocabulary (the subject terms search understands)", "NLM MeSH", "Annual", "Loaded when NLM publishes each year"],
-    ],
-  },
-  {
-    group: "Funding & disclosures",
-    rows: [
-      ["Grants", "InfoEd, all sponsors", "Nightly", "Request a change (routes to Sponsored Research, OSRA). You can hide a grant"],
-      ["Your role on a grant (PI, MPI, Co-I, Key Personnel)", "InfoEd", "Nightly", "Request a change (routes to OSRA)"],
-      ["NIH grants from before WCM", "NIH RePORTER, matched to you", "Weekly", "Remove a wrong match with Not me in Edit my profile; details are fixed at NIH"],
-      ["Grant abstracts", "NIH RePORTER, NSF, Gates Foundation", "Weekly", "From the funder's public record"],
-      ["Papers linked to a grant", "NIH RePORTER", "Weekly", "Hide a paper that isn't yours"],
-      ["Available technologies (licensable inventions)", "WCM Enterprise Innovation (Center for Technology Licensing) portfolio", "Weekly", "Ask Enterprise Innovation to correct the listing"],
-      ["Disclosures (External relationships)", "WCM Conflicts-of-Interest system", "Nightly", <>Update it yourself in the <a href={WRG} className={LINK}>Weill Research Gateway</a></>],
-    ],
-  },
-  {
-    group: "News & media",
-    rows: [
-      ["News mentions", "WCM Newsroom", "Weekly", "Hide one, or use Not me for a wrong match. Name matches are reviewed first"],
-      ["Media highlights", "WCM External Affairs' press digest", "Nightly", "Hide one, or use Not me for a wrong match. Each clip is reviewed first"],
-    ],
-  },
-  {
-    group: "Your profile page",
-    rows: [
-      ["Overview", "Scholars", "On save", "Write it yourself, or start from an AI draft"],
-      ["Custom web address", "Scholars", "On approval", "Request one on the Profile URL card; an administrator approves it"],
-      ["Profile editors", "Scholars", "On save", "Name up to 10 people to edit on your behalf"],
-      ["Whether your profile is shown", "Scholars", "On save", "Use Hide my profile on the Visibility card"],
-    ],
-  },
-];
 
 const MAIN_CLASS = [
   "min-w-0 pb-24 pt-8 text-[var(--apollo-ink)]",
@@ -276,10 +136,14 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from.</em> Authoritative source systems: PubMed, Scopus,
-              OpenAlex, the WCM Web Directory, the Enterprise Directory, ASMS, InfoEd, NIH RePORTER,
-              NYP, the Graduate School, the WCM Newsroom, External Affairs&apos; press
-              digest, and the COI system. On top of
+              <em>Where your data comes from.</em> 25 authoritative sources, among them
+              the Enterprise Directory, the WCM Web Directory, ASMS, InfoEd, Jenzabar, OnCore, the
+              Conflicts-of-Interest system, PubMed, Scopus, NIH RePORTER, the WCM Newsroom, and
+              External Affairs&apos; press digest (the full list is in{" "}
+              <Link href="#provenance" className={LINK}>
+                Where your data comes from
+              </Link>
+              ). On top of
               those sit two in-house layers. ReCiter decides which publications are yours. ReciterAI
               derives your research areas, the Impact score, and your synopses.
             </li>
@@ -405,13 +269,13 @@ export default function DocsPage() {
         <p>
           Your profile is assembled for you automatically. Your name comes from the Enterprise Directory (ED), and you change it in the WCM Web Directory; your title from the Enterprise Directory (ED), usually following your primary
           ASMS appointment, though a &ldquo;working title&rdquo; set in ED, a division-chief or center-director role, or a title a Scholars administrator picks for you on request can take its place; and your
-          primary department from ASMS, the system of record for your primary appointment. Your
+          primary department from the Enterprise Directory, following your primary appointment. Your
           publications are matched to you by ReCiter from PubMed. Your funding comes from two
           systems: InfoEd, WCM&apos;s grants system of record for active and recent awards across all
           sponsors, and NIH RePORTER, which backfills NIH grants InfoEd never held (those from a
           prior institution and older WCM history); for NIH-funded work, RePORTER also supplies
-          the abstract text and the NIH-portfolio link. Disclosures come from the COI system, and a NewYork-Presbyterian
-          position from NYP. Your research areas, the Impact numbers, and the synopses are computed by
+          the abstract text and the NIH-portfolio link. Disclosures come from the Conflicts-of-Interest system, and a NewYork-Presbyterian
+          position from the Enterprise Directory&apos;s NYP record. Your research areas, the Impact numbers, and the synopses are computed by
           ReciterAI.
         </p>
         <p>
@@ -454,11 +318,13 @@ export default function DocsPage() {
         </p>
         <p>
           <strong>What you cannot change directly</strong> are the source-of-record fields. For a
-          publication that isn&apos;t yours, hide it as a quick fix, then reject it in{" "}
+          publication that isn&apos;t yours, use Not mine on your Edit my profile page, which
+          takes it off your profile at once and sends the rejection to ReCiter so it does not come
+          back; you can also reject it in{" "}
           <a href={PM} className={LINK}>
             ReCiter Publication Manager
           </a>
-          . That corrects the attribution at the source so it does not come back. A missing
+          . A missing
           publication is added there too, by you or the library curation team, whoever gets to it
           first. Your name, department, title, funding, disclosures, and appointments are all
           corrected at their source: use Request a change. For your name and disclosures it sends you to the tool where you fix them yourself. For the rest it opens an email to the office that handles the field. Research
@@ -469,7 +335,7 @@ export default function DocsPage() {
           </Link>{" "}
           and{" "}
           <Link href="#correct" className={LINK}>
-            How to correct something
+            Every field, and how to fix it
           </Link>
           .
         </p>
@@ -589,62 +455,24 @@ export default function DocsPage() {
 
         <h2 id="provenance">Where your data comes from</h2>
         <p>
-          Nearly every part of a profile traces to a system of record. Scholars shows a copy and
-          cannot override the source; corrections made upstream appear here after the next refresh.
-          The exceptions are the things you add or choose in Scholars itself, marked
-          &ldquo;Scholars&rdquo; below.
+          Nearly every part of a profile is copied from another system. Scholars pulls from WCM
+          systems of record and outside sources on a schedule, applies the edits made in Scholars
+          itself, and publishes the result as your profile. Corrections go back to the source, not
+          to Scholars: editing the copy would not stick, because the next refresh overwrites it.
         </p>
-        <ProvenanceFlow />
-        <p className="text-[15px] text-[var(--apollo-ink-2)]">
-          In all, <span className="tabular-nums">25</span> sources feed Scholars.{" "}
-          <span className="tabular-nums">15</span> are WCM systems: the Enterprise Directory, the
-          Web Directory, ASMS, InfoEd, the Conflicts-of-Interest system, ReCiter, ReciterAI,
-          OnCore, Jenzabar, the Medical Education rosters, the weillcornell.org physician
-          directory, Enterprise Innovation, the WCM Newsroom, External Affairs&apos; press digest,
-          and WCM Identity. <span className="tabular-nums">10</span> are outside sources: PubMed,
-          Scopus, OpenAlex, Web of Science, NIH iCite, NIH RePORTER, NSF, the Gates Foundation,
-          ClinicalTrials.gov, and NLM&apos;s MeSH vocabulary.
-        </p>
+        <SystemContext />
+
+        <h2 id="correct">Every field, and how to fix it</h2>
         <p>
-          The full map, field by field. <em>Nightly</em> runs overnight. <em>Weekly</em> runs on
-          Sundays. <em>Occasional</em> means someone runs an export by hand, with no schedule, so
-          that data is only as current as its last export. <em>On save</em> takes effect as soon as
-          you save.
+          Your Edit my profile page is the front door. It lets you edit your overview, hide or
+          restore records, and submit a data correction through Request a change, which routes to
+          the office that handles the field or sends you to the tool where you fix it yourself.
+          Filter the table to see what you can fix. <em>Nightly</em> runs overnight,{" "}
+          <em>weekly</em> on Sundays, and <em>occasional</em> means someone runs an export by hand,
+          so that data is only as current as its last export.
         </p>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[640px]">
-            <thead>
-              <tr>
-                <th>What you see</th>
-                <th>System of record</th>
-                <th>Refresh</th>
-                <th>How it&apos;s corrected</th>
-              </tr>
-            </thead>
-            {PROVENANCE.map((g) => (
-              <tbody key={g.group}>
-                <tr>
-                  <th
-                    colSpan={4}
-                    scope="colgroup"
-                    className="!pt-5 !text-xs !uppercase !tracking-wide !text-[var(--apollo-ink)]"
-                  >
-                    {g.group}
-                  </th>
-                </tr>
-                {g.rows.map(([what, source, refresh, fix]) => (
-                  <tr key={what}>
-                    <td>{what}</td>
-                    <td className="!text-[13px] !text-[var(--apollo-ink-2)]">{source}</td>
-                    <td>{refresh}</td>
-                    <td>{fix}</td>
-                  </tr>
-                ))}
-              </tbody>
-            ))}
-          </table>
-        </div>
-        <p>A few less obvious behaviors the map explains:</p>
+        <FieldTable />
+        <p>A few less obvious behaviors the table explains:</p>
         <ul>
           <li>
             Most publications reach your profile because ReCiter matched them to you from PubMed. A
@@ -674,6 +502,7 @@ export default function DocsPage() {
           </li>
         </ul>
 
+
         <h3 id="disclosures" className="scroll-mt-28 lg:scroll-mt-20">
           Disclosures
         </h3>
@@ -689,152 +518,6 @@ export default function DocsPage() {
           nightly refresh. If a disclosure you have ended still shows here, use Request a change,
           which routes to ITS Support.
         </p>
-
-        <h2 id="correct">How to correct something</h2>
-        <p>
-          Your Edit my profile page is the front door. It lets you edit your overview, hide or
-          restore records, and submit a data correction through Request a change, which routes to
-          the office that owns the field or sends you to the tool where you fix it yourself. You
-          never have to figure out where to send it. The rule of thumb: if Scholars owns the field,
-          it is fixed here; otherwise the fix happens at the source and appears after the next
-          refresh.
-        </p>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[640px]">
-            <thead>
-              <tr>
-                <th>What&apos;s wrong</th>
-                <th>Where it&apos;s fixed</th>
-                <th>What to do</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>A publication that isn&apos;t yours is on your profile</td>
-                <td>ReCiter, from Edit my profile or Publication Manager</td>
-                <td>
-                  Use Not mine next to it. It leaves your profile and search right away, and the
-                  rejection goes to ReCiter so it does not return. You can also reject it in{" "}
-                  {PmLink}
-                </td>
-              </tr>
-              <tr>
-                <td>A publication that is yours is missing</td>
-                <td>ReCiter Publication Manager</td>
-                <td>
-                  Add or confirm it at{" "}
-                  <a href={PM} className={LINK}>
-                    reciter.weill.cornell.edu
-                  </a>
-                  , you or the library curation team, whoever gets there first. A paper that is not
-                  in PubMed at all is added by a library curator from an outside source such as
-                  Scopus or OpenAlex
-                </td>
-              </tr>
-              <tr>
-                <td>A wrong field on a publication (title, author order, DOI)</td>
-                <td>PubMed, or the outside source for a curator-added paper</td>
-                <td>Request a change (routes to ITS Support); the record is corrected at PubMed</td>
-              </tr>
-              <tr>
-                <td>Your preferred name, email, or photo</td>
-                <td>WCM Web Directory</td>
-                <td>Update it yourself in the {WebDirLink}. A new photo shows right away</td>
-              </tr>
-              <tr>
-                <td>Your degrees or education</td>
-                <td>ASMS</td>
-                <td>Request a change (routes to the Office of Faculty Affairs)</td>
-              </tr>
-              <tr>
-                <td>Your title, department, division, or an appointment</td>
-                <td>Enterprise Directory, from your faculty record</td>
-                <td>
-                  Request a change (routes to ITS Support, who fix a sync problem or escalate to
-                  Faculty Affairs). For your displayed title, name the title you want shown
-                </td>
-              </tr>
-              <tr>
-                <td>A postdoc or fellow academic appointment</td>
-                <td>Faculty Affairs, by way of the Enterprise Directory</td>
-                <td>
-                  Request a change, routed to ITS Support, who fix a data-sync issue or escalate a
-                  source correction to Faculty Affairs
-                </td>
-              </tr>
-              <tr>
-                <td>A Graduate School appointment, or a mentee</td>
-                <td>Jenzabar, the Medical Education rosters, or the Enterprise Directory</td>
-                <td>Request a change (routes to ITS Support). You can hide a mentee meanwhile</td>
-              </tr>
-              <tr>
-                <td>A mentee is missing</td>
-                <td>Scholars</td>
-                <td>
-                  Add them under Mentees in Edit my profile. Co-authors with a trainee-type
-                  appointment are listed there under &ldquo;From your publications&rdquo; for you to
-                  accept or dismiss.
-                </td>
-              </tr>
-              <tr>
-                <td>Your hospital position</td>
-                <td>Enterprise Directory, NewYork-Presbyterian record</td>
-                <td>Request a change (routes to ITS Support)</td>
-              </tr>
-              <tr>
-                <td>Your funding or grants</td>
-                <td>InfoEd; NIH RePORTER for NIH grants from before WCM</td>
-                <td>
-                  Request a change for an InfoEd grant (routes to Sponsored Research, OSRA). A
-                  RePORTER grant is matched to you from your publications, so remove a wrong match
-                  with Not me in Edit my profile
-                </td>
-              </tr>
-              <tr>
-                <td>A disclosure</td>
-                <td>Weill Research Gateway</td>
-                <td>
-                  Update it yourself in the{" "}
-                  <a href={WRG} className={LINK}>
-                    Weill Research Gateway
-                  </a>
-                </td>
-              </tr>
-              <tr>
-                <td>A clinical trial</td>
-                <td>OnCore</td>
-                <td>Corrected in OnCore; appears after the next export</td>
-              </tr>
-              <tr>
-                <td>A board certification or specialty</td>
-                <td>weillcornell.org physician directory</td>
-                <td>Corrected in your weillcornell.org physician profile</td>
-              </tr>
-              <tr>
-                <td>A wrong research area, Impact score, or synopsis</td>
-                <td>ReciterAI (computed)</td>
-                <td>
-                  Not hand-editable. Report a systematic error through the{" "}
-                  <Link href="/about/feedback" className={LINK}>
-                    feedback form
-                  </Link>
-                </td>
-              </tr>
-              <tr>
-                <td>A wrong or missing available technology</td>
-                <td>WCM Enterprise Innovation</td>
-                <td>Ask Enterprise Innovation to correct its portfolio; flows in on the next weekly refresh</td>
-              </tr>
-              <tr>
-                <td>Center membership</td>
-                <td>Scholars</td>
-                <td>
-                  A center Owner or Curator edits it at <code>/edit/center/[code]</code>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
 
         <h2 id="control">What you control</h2>
         <p>These are yours to do directly, on your Edit my profile page:</p>
@@ -1483,7 +1166,7 @@ export default function DocsPage() {
           Three different requests go to different places. A <em>correction</em> means something is
           wrong: a misattributed paper, a stale department, or a bad research area. Use{" "}
           <Link href="#correct" className={LINK}>
-            How to correct something
+            Every field, and how to fix it
           </Link>
           , starting on your Edit my profile page, which routes the request to the owning office for
           you. A <em>bug</em> means something is broken. Report it through the{" "}
