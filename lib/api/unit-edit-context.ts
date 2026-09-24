@@ -89,6 +89,7 @@ import type { EditSession } from "@/lib/auth/superuser";
 import { enabledExternalMemberSources } from "@/lib/edit/external-member-sources";
 import { loadExternalMembersByCuid } from "@/lib/api/external-members";
 import type { ExternalMember, PrismaClient } from "@/lib/generated/prisma/client";
+import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
 
 export type UnitActorRole = "superuser" | "owner" | "curator";
 
@@ -1023,6 +1024,20 @@ export async function loadUnitEditContext(
     if (list) list.push(a);
     else centerLeadershipByRole.set(a.roleKey, [a]);
   }
+  // A center leader with no Scholar row (staff) would otherwise show as a bare
+  // CWID in the editor; name them from ED. Fail-soft: any ED error leaves them
+  // unnamed, as before.
+  const unnamedLeaders = centerLeadershipAssignments.map((a) => a.cwid).filter((c) => !nameMap.get(c));
+  const leaderDirectory = new Map<string, { name: string; title: string | null }>();
+  if (unnamedLeaders.length > 0) {
+    try {
+      for (const p of await fetchDirectoryPeopleByCwid(unnamedLeaders)) {
+        leaderDirectory.set(p.cwid.toLowerCase(), { name: p.name, title: p.title });
+      }
+    } catch (err) {
+      console.warn("unit edit context: ED lookup for center leaders failed", err);
+    }
+  }
   const centerLeadership = centerLeadershipRolesRaw
     ? centerLeadershipRolesRaw.map((r) => ({
         key: r.key,
@@ -1031,8 +1046,8 @@ export async function loadUnitEditContext(
         sortOrder: r.sortOrder,
         holders: (centerLeadershipByRole.get(r.key) ?? []).map((a) => ({
           cwid: a.cwid,
-          name: nameMap.get(a.cwid)?.name ?? null,
-          title: nameMap.get(a.cwid)?.title ?? null,
+          name: nameMap.get(a.cwid)?.name ?? leaderDirectory.get(a.cwid.toLowerCase())?.name ?? null,
+          title: nameMap.get(a.cwid)?.title ?? leaderDirectory.get(a.cwid.toLowerCase())?.title ?? null,
           interim: a.interim,
         })),
       }))

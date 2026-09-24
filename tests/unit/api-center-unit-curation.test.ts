@@ -23,7 +23,9 @@ const {
   mockAssignmentFindFirst,
   mockAssignmentFindMany,
   mockOrgUnitRoleFindUnique,
+  mockFetchDirectoryPeopleByCwid,
 } = vi.hoisted(() => ({
+  mockFetchDirectoryPeopleByCwid: vi.fn(),
   mockCenterFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -51,6 +53,8 @@ vi.mock("@/lib/db", () => ({
     fieldOverride: { findMany: mockFieldOverrideFindMany },
   },
 }));
+
+vi.mock("@/lib/sources/ldap", () => ({ fetchDirectoryPeopleByCwid: mockFetchDirectoryPeopleByCwid }));
 
 import { getCenter } from "@/lib/api/centers";
 
@@ -123,6 +127,36 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     expect(result?.leadership).toHaveLength(1);
     expect(result?.leadership[0]?.cwid).toBe("dir0001");
     expect(result?.leadership[0]?.isInterim).toBe(false);
+  });
+
+  it("names a leader with no Scholar row from ED and renders them unlinked", async () => {
+    defaultBaselineMocks();
+    mockAssignmentFindMany.mockResolvedValue([
+      { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+      { cwid: "stf0001", roleKey: "executive_director", interim: false, role: { label: "Executive Director" } },
+    ]);
+    mockFetchDirectoryPeopleByCwid.mockResolvedValue([
+      { cwid: "stf0001", name: "Staff Leader", title: "Administrative Director", dept: null, firstName: null, lastName: null, email: null },
+    ]);
+
+    const result = await getCenter("meyer-cancer-center");
+    expect(mockFetchDirectoryPeopleByCwid).toHaveBeenCalledWith(["stf0001"]);
+    expect(result?.leadership.map((l) => [l.cwid, l.preferredName, l.slug, l.roleLabel])).toEqual([
+      ["dir0001", "Center Director", "center-director", "Director"],
+      ["stf0001", "Staff Leader", null, "Executive Director"],
+    ]);
+  });
+
+  it("drops only the non-Scholar leader's card when ED fails", async () => {
+    defaultBaselineMocks();
+    mockAssignmentFindMany.mockResolvedValue([
+      { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+      { cwid: "stf0001", roleKey: "executive_director", interim: false, role: { label: "Executive Director" } },
+    ]);
+    mockFetchDirectoryPeopleByCwid.mockRejectedValue(new Error("ldap down"));
+
+    const result = await getCenter("meyer-cancer-center");
+    expect(result?.leadership.map((l) => l.cwid)).toEqual(["dir0001"]);
   });
 
   it("a center with no assignment rows produces an empty leadership list", async () => {

@@ -16,16 +16,19 @@ export function CenterTabs({
   scholarsCount,
   publicationsCount,
   showCollaboration = false,
+  scholarsLabel = "Scholars",
 }: {
   active: TabKey;
   basePath: string;
   scholarsCount: number;
   publicationsCount: number;
   showCollaboration?: boolean;
+  /** "Members" when the count includes external (no-profile) members. */
+  scholarsLabel?: string;
 }) {
   // `count: undefined` ⇒ a countless tab (never disabled, no count badge).
   const tabs: { key: TabKey; label: string; count?: number }[] = [
-    { key: "scholars", label: "Scholars", count: scholarsCount },
+    { key: "scholars", label: scholarsLabel, count: scholarsCount },
     { key: "publications", label: "Publications", count: publicationsCount },
     ...(showCollaboration
       ? [{ key: "collaboration" as const, label: "Collaboration" }]
