@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 
 import {
-  dropHeadlineRepeats,
   findPossibleRepeat,
   headlineKey,
   headlinesSimilar,
@@ -52,37 +51,16 @@ describe("headlineKey / headlinesSimilar", () => {
   });
 });
 
-describe("dropHeadlineRepeats", () => {
-  it("drops the same headline under another url within 14 days, keeping the earliest", () => {
-    const early = clip({ url: "https://kff.example/s", publishedAt: "2026-09-18" });
-    const late = clip({ url: "https://yahoo.example/s", publishedAt: "2026-09-22" });
-    const { kept, dropped } = dropHeadlineRepeats([late, early], []);
-    expect(kept).toEqual([early]);
-    expect(dropped).toBe(1);
-  });
-
-  it("drops a repeat of a STORED clip; keeps an exact-url re-read (the upsert's update path)", () => {
-    const stored = clip({ url: "https://kff.example/s", publishedAt: "2026-09-18" });
-    const again = clip({ url: "https://kff.example/s", publishedAt: "2026-09-18" });
-    const copy = clip({ url: "https://yahoo.example/s", publishedAt: "2026-09-25" });
-    const { kept, dropped } = dropHeadlineRepeats([again, copy], [stored]);
-    expect(kept).toEqual([again]);
-    expect(dropped).toBe(1);
-  });
-
-  it("keeps: another scholar, a different headline, more than 14 days apart, or no date", () => {
-    const base = clip({ url: "https://kff.example/s" });
-    const rows = [
-      clip({ url: "https://b.example/1", cwid: "zzz9999" }),
-      clip({ url: "https://b.example/2", title: "A different story entirely" }),
-      clip({ url: "https://b.example/3", publishedAt: "2026-10-20" }),
-      { ...clip({ url: "https://b.example/4" }), publishedAt: null },
-    ];
-    expect(dropHeadlineRepeats(rows, [base]).dropped).toBe(0);
-  });
-});
-
 describe("findPossibleRepeat", () => {
+  it("flags an identical syndicated headline; never a generic column name", () => {
+    const a = clip({ id: "a", title: "Her Son Was Dying, But His Rare Cancer Made It Difficult", url: "https://cbs.example/s" });
+    const b = clip({ id: "b", title: "Her son was dying, but his rare cancer made it difficult", url: "https://yahoo.example/s" });
+    expect(findPossibleRepeat(b, [a, b])?.id).toBe("a");
+    const g1 = clip({ id: "g1", title: "At A Glance", url: "https://crains.example/1" });
+    const g2 = clip({ id: "g2", title: "At A Glance", url: "https://crains.example/2" });
+    expect(findPossibleRepeat(g2, [g1, g2])).toBeNull();
+  });
+
   it("finds a similar headline for the same scholar within 7 days, never itself", () => {
     const row = clip({ id: "1" });
     const peers = [
