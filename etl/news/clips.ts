@@ -435,6 +435,7 @@ export async function groupNewClips(cwids: readonly string[], since: Date, regro
       createdAt: true,
       duplicateOf: true,
       creditedOutlet: true,
+      status: true,
     },
   });
   const isFresh = (r: (typeof rows)[number]) =>

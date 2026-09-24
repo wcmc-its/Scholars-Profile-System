@@ -56,6 +56,16 @@ describe("assignGroups", () => {
       .toEqual(new Map([["two", "one"]]));
   });
 
+  it("an approved copy leads over an earlier pending one (the --regroup backfill case)", () => {
+    const cbs = clip({ id: "cbs", status: "pending", creditedOutlet: "KFF Health News" });
+    const yahoo = clip({ id: "yahoo", outlet: "Yahoo", publishedAt: "2026-09-22", status: "published" });
+    expect(assignGroups([cbs, yahoo], [])).toEqual(new Map([["cbs", "yahoo"]]));
+    // …even when a pending copy is from the credited original publisher.
+    const kff = clip({ id: "kff", outlet: "KFF Health News", status: "pending" });
+    const aol = clip({ id: "aol", outlet: "AOL", publishedAt: "2026-09-22", status: "published", creditedOutlet: "KFF Health News" });
+    expect(assignGroups([kff, aol], [])).toEqual(new Map([["kff", "aol"]]));
+  });
+
   it("never regroups a stored row (a reviewer's Ungroup stands)", () => {
     const a = clip({ id: "a" });
     const b = clip({ id: "b", outlet: "Yahoo" }); // stored, ungrouped on purpose
