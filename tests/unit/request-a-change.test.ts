@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MENTEE_SOURCE_SYSTEMS,
   REQUEST_A_CHANGE,
   getChangeConfig,
   resolveSelfServiceHref,
@@ -117,9 +118,13 @@ describe("operator routing decisions", () => {
     }
   });
 
-  it("non-PubMed missing publication explains it's unsupported (no route)", () => {
+  it("non-PubMed missing publication explains the curator path (no route)", () => {
     const a = issue("publications", "publication-missing-nonpubmed").action;
     expect(a.kind).toBe("explain");
+    if (a.kind === "explain") {
+      expect(a.detail).toContain("library curation team");
+      expect(a.detail).not.toContain("can't be displayed");
+    }
   });
 
   it("the 'don't want it on my profile' row POINTS at Hide, never owns a suppress path", () => {
@@ -178,13 +183,14 @@ describe("operator routing decisions", () => {
     }
   });
 
-  it("mentee corrections route to ITS support, sourced from Jenzabar or Employee Central", () => {
+  it("mentee corrections route to ITS support, sourced from all three mentee systems", () => {
     for (const id of ["mentee-not-mine", "mentee-missing", "mentee-details-wrong"]) {
       const a = issue("mentees", id).action;
       expect(a.kind).toBe("route");
       if (a.kind === "route") {
         expect(a.email).toBe("support@med.cornell.edu");
-        expect(a.sourceSystem).toBe("Jenzabar or Employee Central");
+        expect(a.sourceSystem).toBe(MENTEE_SOURCE_SYSTEMS);
+        expect(a.note).toContain("Medical Education rosters");
       }
     }
   });

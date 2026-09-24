@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/tooltip";
 
 const COPY =
-  "Mentees known from institutional source systems. This list reflects recorded mentorships and may be incomplete.";
+  "Mentees from institutional records, plus any the scholar has added. This list may be incomplete.";
 
 export function MentoringInfoTooltip() {
   return (

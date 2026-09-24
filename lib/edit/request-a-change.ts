@@ -53,6 +53,10 @@ export const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile
 /** The in-app ORCID surface (Identifiers & Profiles tab), per scholar. */
 export const ORCID_TAB_URL = "/edit/scholar/{cwid}?attr=identifiers-profiles";
 
+/** Where sourced mentees come from: PhD advisees (Jenzabar), MD / MD-PhD / ECR
+ *  roster mentees (Medical Education, via the ReCiterDB bridge) and postdocs
+ *  (Employee Central through the Enterprise Directory). Shared by /edit copy. */
+export const MENTEE_SOURCE_SYSTEMS = "Jenzabar, Medical Education rosters, or Employee Central";
 const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
 const FACULTY_AFFAIRS_EMAIL = "facultyaffairs@med.cornell.edu"; // degrees + education (ASMS)
 const OSRA_EMAIL = "osra-operations@med.cornell.edu";
@@ -476,7 +480,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         description: "Books, chapters, preprints, and journals PubMed doesn't index.",
         action: explain({
           detail:
-            "Scholars and ReCiter only index PubMed publications, so this one can't be displayed here. If it's added to PubMed later, ReCiter picks it up automatically — no action needed.",
+            "A paper PubMed doesn't index can still appear on your profile: the library curation team adds it in ReCiter from Scopus, OpenAlex, or Web of Science. Ask them to add it. If it's added to PubMed later, ReCiter picks it up automatically.",
         }),
       },
       {
@@ -585,7 +589,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
   },
   // Mentees are derived from MD/PhD/postdoc training records. There's no
   // deep-linkable owning tool, so corrections route to ITS Support, which fixes
-  // the source (Jenzabar or Employee Central). Hiding a mentee is the SEPARATE
+  // the source (Jenzabar, the Medical Education rosters, or Employee Central). Hiding a mentee is the SEPARATE
   // per-row control on the panel — not an issue type here.
   mentees: {
     heading: "What needs to change?",
@@ -596,8 +600,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
-          sourceSystem: "Jenzabar or Employee Central",
-          note: "Mentee relationships come from Jenzabar or Employee Central. Hiding the entry here won't correct the source — support will fix the record. (You can Hide it here in the meantime.)",
+          sourceSystem: MENTEE_SOURCE_SYSTEMS,
+          note: "Mentee relationships come from Jenzabar (PhD thesis advisees), the Medical Education rosters (MD scholarly-project, MD-PhD and early-career mentees), or Employee Central (postdocs). Hiding the entry here won't correct the source — support will fix the record. (You can Hide it here in the meantime.)",
         }),
       },
       {
@@ -606,8 +610,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
-          sourceSystem: "Jenzabar or Employee Central",
-          note: "Mentee relationships come from Jenzabar (MD/PhD trainees) or Employee Central (postdocs). Support can check why a relationship isn't appearing.",
+          sourceSystem: MENTEE_SOURCE_SYSTEMS,
+          note: "Mentee relationships come from Jenzabar (PhD thesis advisees), the Medical Education rosters (MD scholarly-project, MD-PhD and early-career mentees), or Employee Central (postdocs). Support can check why a relationship isn't appearing.",
         }),
       },
       {
@@ -616,8 +620,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
-          sourceSystem: "Jenzabar or Employee Central",
-          note: "These details come from Jenzabar or Employee Central and are corrected at the source.",
+          sourceSystem: MENTEE_SOURCE_SYSTEMS,
+          note: "These details come from Jenzabar (PhD thesis advisees), the Medical Education rosters (MD scholarly-project, MD-PhD and early-career mentees), or Employee Central (postdocs), and are corrected at the source.",
         }),
       },
     ],

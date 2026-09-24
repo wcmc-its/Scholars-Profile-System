@@ -9,7 +9,7 @@
  * `externalId = "{mentorCwid}:{menteeCwid}"`, owner = the mentor; the panel's
  * public-profile filter (in `profile-view.tsx`) drops a hidden mentee on the
  * next render with no nightly-rebuild lag. Corrections route to ITS Support
- * (source: Jenzabar or Employee Central) via "Request a change".
+ * (source: Jenzabar, Medical Education rosters, or Employee Central) via "Request a change".
  */
 "use client";
 
@@ -40,7 +40,7 @@ export function MenteesCard({ cwid, mode, scholarName, mentees }: MenteesCardPro
         // a sibling "Added by you" card above. "Mentees" would read as the whole
         // roster and imply this panel's hide-only verb applies to all of it.
         heading: "From training records",
-        description: `Hide a mentee to remove them from ${possessive} public profile. Hiding is display-only — it doesn't correct the underlying training record, which comes from Jenzabar or Employee Central.`,
+        description: `Hide a mentee to remove them from ${possessive} public profile. Hiding is display-only — it doesn't correct the underlying training record, which comes from Jenzabar, the Medical Education rosters, or Employee Central.`,
         empty:
           mode === "superuser"
             ? "This scholar has no recorded mentees."
