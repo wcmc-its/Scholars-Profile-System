@@ -35,21 +35,20 @@ type Cadence = "live" | "nightly" | "weekly" | "annual" | "occasional";
 type Source = { name: string; data: string; cad: Cadence };
 
 const WCM: Source[] = [
-  { name: "Enterprise Directory", data: "Name, degrees, titles, appointments, department, email, NYP positions, postdoc supervisors", cad: "nightly" },
-  { name: "Web Directory", data: "Photo, shown live; where you edit your name and email", cad: "live" },
+  { name: "Enterprise Directory", data: "Name, degrees, titles, appointments, department, NYP positions, postdoc supervisors", cad: "nightly" },
+  { name: "Web Directory", data: "Photo, shown live; email and who can see it; where you edit your name", cad: "live" },
   { name: "ASMS", data: "Education and training", cad: "nightly" },
   { name: "InfoEd (Weill Research Gateway)", data: "Grants and grant roles", cad: "nightly" },
   { name: "External Relationships / COI (WRG)", data: "Disclosures, which you manage in the Weill Research Gateway", cad: "nightly" },
-  { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts", cad: "nightly" },
+  { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts, ORCID iD", cad: "nightly" },
   { name: "ReciterAI", data: "Research areas, Impact, synopses, methods, core facilities, Spotlight", cad: "nightly" },
   { name: "OnCore", data: "Which clinical trials you are on", cad: "occasional" },
   { name: "Jenzabar", data: "PhD thesis advisees, Graduate School appointments", cad: "nightly" },
   { name: "Medical Education rosters", data: "MD scholarly-project, MD-PhD and early-career mentees", cad: "occasional" },
-  { name: "POPS physician directory", data: "Board certifications, specialties, clinical expertise", cad: "weekly" },
+  { name: "POPS physician directory / WeillCornell.org", data: "Board certifications, specialties, clinical expertise", cad: "weekly" },
   { name: "Center for Technology Licensing", data: "Available technologies", cad: "weekly" },
   { name: "WCM Newsroom", data: "News mentions", cad: "weekly" },
-  { name: "Muck Rack", data: "Media highlights, as curated by Faculty Affairs", cad: "nightly" },
-  { name: "WCM Identity", data: "ORCID iD", cad: "nightly" },
+  { name: "Muck Rack", data: "Media highlights, as curated by External Affairs", cad: "nightly" },
 ];
 
 const EXT: Source[] = [
@@ -105,8 +104,8 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
       { field: "Name", detail: "Your preferred name", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change Preferred Name in the {WebDir}. It appears the next day.</> },
       { field: "Degrees after your name", source: "Enterprise Directory, from ASMS", cadence: "Nightly", tag: "Request a change", how: "Routes to the Office of Faculty Affairs." },
       { field: "Photo", source: "Web Directory", cadence: "Live", tag: "Yours · Web Directory", how: <>Add, change or remove it in the {WebDir}. It shows right away.</> },
-      { field: "Email and who can see it", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change the address or its &ldquo;Publish to&rdquo; setting in the {WebDir}.</> },
-      { field: "ORCID iD", source: "Scholars, synced with WCM Identity", cadence: "On save", tag: "Yours to edit", how: "Confirm or enter it under Identifiers & profiles." },
+      { field: "Email and who can see it", source: "Web Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change the address or its &ldquo;Publish to&rdquo; setting in the {WebDir}.</> },
+      { field: "ORCID iD", source: "Scholars, synced with ReCiter", cadence: "On save", tag: "Yours to edit", how: "Confirm or enter it under Identifiers & profiles." },
       { field: "Profile links", detail: "LinkedIn, X, Bluesky, Google Scholar, ResearchGate", source: "Scholars", cadence: "On save", tag: "Yours to edit", how: "Add or remove them under Identifiers & profiles." },
     ],
   },
@@ -115,10 +114,10 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     label: "Appointments & positions",
     rows: [
       { field: "Titles and appointments", detail: "Primary and working titles", source: "Enterprise Directory", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support, who fix the sync or escalate to Faculty Affairs. You can hide a row meanwhile." },
-      { field: "Displayed title", detail: "Which of your titles appears under your name", source: "Scholars, chosen from your titles", cadence: "Nightly", tag: "Request a change", how: "Name the title you want. Routes to ITS Support." },
+      { field: "Displayed title", detail: "Which of your titles appears under your name", source: "Scholars, chosen from your titles", cadence: "Nightly", tag: "Request a change", how: "You may request a different primary title, but the request may or may not be honored." },
       { field: "Department and division", source: "Enterprise Directory", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support." },
       { field: "Chair and chief titles", detail: "Shown under your title", source: "Enterprise Directory", cadence: "Nightly", tag: "Unit curator", how: "A chief role is inferred from HR data; the unit’s Owner can override it. For a chair role that has ended, use Request a change." },
-      { field: "Past appointments", detail: "Earlier ranks", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours to edit", how: "Hide or show each one on your edit page. Report a wrong rank with Request a change." },
+      { field: "Past WCMC appointments", detail: "Earlier ranks", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours to edit", how: "Hide or show each one on your edit page. Report a wrong rank with Request a change." },
       { field: "Graduate School appointment", source: "Jenzabar", cadence: "Occasional", tag: "Request a change", how: "Routes to ITS Support." },
       { field: "Institution", detail: "Shown only when it isn’t WCM", source: "Enterprise Directory", cadence: "Nightly", tag: "At the source", how: "No in-app route. The faculty record has to change." },
       { field: "Whether you have a public profile", detail: "Set by your person type", source: "Enterprise Directory", cadence: "Nightly", tag: "At the source", how: "Follows your HR or faculty record." },
@@ -139,7 +138,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     rows: [
       { field: "Clinical trials", detail: "Which trials, your role, status, sponsor", source: "OnCore", cadence: "Weekly", tag: "At the source", how: "Correct it in OnCore. It appears after the next export, which is run by hand. You can hide the section." },
       { field: "Trial details", detail: "Phase, summary, conditions, enrollment", source: "ClinicalTrials.gov", cadence: "Weekly", tag: "At the source", how: "The study team updates the registration." },
-      { field: "Board certifications, specialties, expertise", detail: "Used in search and CV export", source: "POPS physician directory", cadence: "Weekly", tag: "At the source", how: "Update your weillcornell.org physician profile." },
+      { field: "Board certifications, specialties, expertise", detail: "Used in search and CV export", source: "POPS physician directory / WeillCornell.org", cadence: "Weekly", tag: "At the source", how: "Update your weillcornell.org physician profile." },
       { field: "Clinical profile link", detail: "Link to weillcornell.org", source: "Enterprise Directory", cadence: "Nightly", tag: "At the source", how: "Follows your directory entry and NYP clinical affiliation." },
       { field: "Hospital position", detail: "NewYork-Presbyterian titles", source: "NYP, by way of the Enterprise Directory", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support. You can hide it meanwhile." },
     ],
@@ -171,7 +170,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     rows: [
       {
         field: "Which papers are yours",
-        source: "ReCiter",
+        source: "ReCiter, which stores curated data from PubMed, Scopus, and OpenAlex",
         cadence: "Nightly",
         tag: "Yours to edit",
         how: (
@@ -254,7 +253,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     label: "News & media",
     rows: [
       { field: "News mentions", source: "WCM Newsroom", cadence: "Weekly", tag: "Yours to edit", how: "Hide one or mark “Not me.” Name matches are reviewed first." },
-      { field: "Media highlights", source: "Muck Rack, as curated by Faculty Affairs", cadence: "Nightly", tag: "Yours to edit", how: "Hide one or mark “Not me.” Each clip is reviewed first." },
+      { field: "Media highlights", source: "Muck Rack, as curated by External Affairs", cadence: "Nightly", tag: "Yours to edit", how: "Hide one or mark “Not me.” Each clip is reviewed first." },
     ],
   },
   {

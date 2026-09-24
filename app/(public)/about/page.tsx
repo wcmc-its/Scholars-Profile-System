@@ -136,7 +136,7 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from.</em> 25 authoritative sources, among them
+              <em>Where your data comes from.</em> 24 authoritative sources, among them
               the Enterprise Directory, the WCM Web Directory, ASMS, InfoEd, Jenzabar, OnCore, the
               External Relationships / COI system, PubMed, Scopus, NIH RePORTER, the WCM Newsroom,
               and Muck Rack (the full list is in{" "}
