@@ -21,8 +21,8 @@
  *     profile section only (and is already "on" in every env —
  *     `cdk/lib/app-stack.ts`); the underlying ETL table is fair game for an
  *     authenticated admin report regardless of the public flag's state.
- *   - Withdrawn trials are NOT dropped (the public profile drops them via
- *     `isWithdrawnTrialStatus`). An admin report is a work tool — showing the
+ *   - Withdrawn and suspended trials are NOT dropped (the public profile drops them via
+ *     `isHiddenTrialStatus`). An admin report is a work tool — showing the
  *     full set of links beats a curated subset.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";

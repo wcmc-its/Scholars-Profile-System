@@ -90,32 +90,6 @@ export function cleanNct(raw: string | null): string | null {
   return /^NCT\d+$/.test(up) ? up : null;
 }
 
-/** Lowercase, strip accents/punctuation, collapse whitespace → token list.
- *  Commas (used by "Last, First" forms) become spaces so order/format of the
- *  name doesn't matter to the match below. */
-export function nameTokens(s: string | null): string[] {
-  return (s ?? "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z,\s]/g, "")
-    .replace(/,/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-/** Heuristic PI test: the scholar's two longest name tokens (≈ first + last,
- *  order-independent, initials dropped) both appear in the trial's piName.
- *  Conservative — favours "Investigator" over a wrong "Principal Investigator". */
-export function isLikelyPi(scholarName: string | null, piName: string | null): boolean {
-  if (!piName) return false;
-  const pi = new Set(nameTokens(piName));
-  if (pi.size === 0) return false;
-  const stoks = nameTokens(scholarName).filter((t) => t.length > 1);
-  if (stoks.length < 2) return false;
-  const [t1, t2] = [...stoks].sort((a, b) => b.length - a.length);
-  return pi.has(t1) && pi.has(t2);
-}
-
 export type TrialBuild = {
   protocolNumber: string;
   nctNumber: string | null;
@@ -178,6 +152,85 @@ export async function readReciterdbTables(): Promise<{
   return { institutional, enriched };
 }
 
+/** Statuses whose OnCore CTA date is unreliable (per the clinical-research
+ *  office, 2026-09): the CTA date comes from ClinicalTrials.gov instead, or is
+ *  left null. SUSPENDED is excluded — it can still reopen. */
+export const INACTIVE_STATUSES = new Set(["IRB STUDY CLOSURE", "CLOSED TO ACCRUAL"]);
+
+/** A ClinicalTrials.gov study in the `clinical_trials_enriched` shape, plus the
+ *  ACTUAL primary completion date (null when absent or only ANTICIPATED). */
+export type CtgovStudy = EnrichedRow & { primaryCompletionActual: string | null };
+
+const CTGOV_URL = "https://clinicaltrials.gov/api/v2/studies";
+const CTGOV_FIELDS = [
+  "NCTId", "BriefTitle", "OfficialTitle", "BriefSummary", "StudyType", "Phase",
+  "Condition", "ConditionMeshTerm", "EnrollmentCount",
+  "PrimaryCompletionDate", "PrimaryCompletionDateType",
+].join(",");
+/** The subset of a v2 study we read (`fields=` limits the response to it). */
+type CtgovApiStudy = {
+  protocolSection?: {
+    identificationModule?: { nctId?: string; officialTitle?: string; briefTitle?: string };
+    statusModule?: { primaryCompletionDateStruct?: { date?: string; type?: string } };
+    descriptionModule?: { briefSummary?: string };
+    conditionsModule?: { conditions?: string[] };
+    designModule?: { studyType?: string; phases?: string[]; enrollmentInfo?: { count?: number } };
+  };
+  derivedSection?: { conditionBrowseModule?: { meshes?: Array<{ term?: string }> } };
+};
+const joinList = (xs: unknown): string | null =>
+  Array.isArray(xs) && xs.length > 0 ? xs.join("; ") : null;
+
+/** Fetch studies straight from the ClinicalTrials.gov v2 API, 100 ids per call,
+ *  so every NCT in the feed is enriched each run (reciterdb's
+ *  `clinical_trials_enriched` has no writer that adds new NCTs). `complete` is
+ *  false if any batch failed; callers then fall back to the reciterdb enriched
+ *  row per NCT and must not treat a missing study as "not on CT.gov". */
+export async function fetchCtgovStudies(
+  ncts: string[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ studies: Map<string, CtgovStudy>; complete: boolean }> {
+  const studies = new Map<string, CtgovStudy>();
+  let complete = true;
+  const ids = [...new Set(ncts)].sort();
+  for (const batch of chunks(ids, 100)) {
+    const qs = new URLSearchParams({
+      "filter.ids": batch.join(","),
+      pageSize: "100",
+      fields: CTGOV_FIELDS,
+    });
+    try {
+      const res = await fetchImpl(`${CTGOV_URL}?${qs}`, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { studies?: CtgovApiStudy[] };
+      for (const st of body.studies ?? []) {
+        const ps = st.protocolSection ?? {};
+        const nct = cleanNct(ps.identificationModule?.nctId ?? null);
+        if (!nct) continue;
+        const pc = ps.statusModule?.primaryCompletionDateStruct;
+        studies.set(nct, {
+          nctNumber: nct,
+          officialTitle: ps.identificationModule?.officialTitle ?? null,
+          briefTitle: ps.identificationModule?.briefTitle ?? null,
+          briefSummary: ps.descriptionModule?.briefSummary ?? null,
+          studyType: ps.designModule?.studyType ?? null,
+          phases: joinList(ps.designModule?.phases),
+          conditions: joinList(ps.conditionsModule?.conditions),
+          meshTerms: joinList(
+            (st.derivedSection?.conditionBrowseModule?.meshes ?? []).map((m) => m.term).filter(Boolean),
+          ),
+          enrollment: ps.designModule?.enrollmentInfo?.count ?? null,
+          primaryCompletionActual: pc?.type === "ACTUAL" ? (pc.date ?? null) : null,
+        });
+      }
+    } catch (e) {
+      complete = false;
+      console.warn(`ClinicalTrials.gov batch of ${batch.length} failed: ${(e as Error).message}`);
+    }
+  }
+  return { studies, complete };
+}
+
 /** lowercased cwid → { canonical cwid, display name }, for FK validity (only
  *  existing scholars get links) and the role heuristic. Keyed lowercase because
  *  the institutional `clinical_trials.cwid` is UPPERCASE (e.g. "BMW2002") while
@@ -196,14 +249,33 @@ export async function loadScholars(): Promise<Map<string, { cwid: string; name: 
   return m;
 }
 
-/** Join institutional + enriched, dedup to one trial per protocol, derive the
- *  per-(cwid, protocol) investigator link + role. Pure function — identical
+/** CTA date: the OnCore value, except for inactive trials, where it is the
+ *  ClinicalTrials.gov ACTUAL primary completion date (CT.gov has no
+ *  closed-to-accrual date; this is the nearest proxy) or null. If the CT.gov
+ *  fetch was incomplete we can't tell "no date" from "not fetched", so keep OnCore. */
+function ctaDate(
+  r: InstitutionalRow,
+  nct: string | null,
+  study: CtgovStudy | undefined,
+  ctgovComplete: boolean,
+): Date | null {
+  const oncore = parseLooseDate(r.firstCTADate);
+  if (!INACTIVE_STATUSES.has((r.overallCurrentStatus ?? "").trim().toUpperCase())) return oncore;
+  if (study) return parseLooseDate(study.primaryCompletionActual);
+  return nct && !ctgovComplete ? oncore : null;
+}
+
+/** Join institutional + enriched, dedup to one trial per protocol, build the
+ *  per-(cwid, protocol) link. The feed lists the active PI only, so every link is
+ *  "Principal Investigator". A live ClinicalTrials.gov study (`ctgov`) wins over
+ *  the reciterdb enriched row for the same NCT. Pure function — identical
  *  output for the direct path and the bridge. */
 export function buildTrialsAndLinks(
   institutional: InstitutionalRow[],
   enriched: EnrichedRow[],
   scholars: Map<string, { cwid: string; name: string }>,
   now: Date,
+  ctgov: { studies: Map<string, CtgovStudy>; complete: boolean } = { studies: new Map(), complete: false },
 ): { trials: TrialBuild[]; links: LinkBuild[]; stats: BuildStats } {
   const enrichedByNct = new Map<string, EnrichedRow>();
   for (const e of enriched) {
@@ -232,7 +304,8 @@ export function buildTrialsAndLinks(
     const cwid = scholar.cwid; // canonical scholar.cwid (matches the FK case)
 
     const nct = cleanNct(r.nctNumber);
-    const enrichedRow = nct ? enrichedByNct.get(nct) : undefined;
+    const study = nct ? ctgov.studies.get(nct) : undefined;
+    const enrichedRow = study ?? (nct ? enrichedByNct.get(nct) : undefined);
     if (enrichedRow) enrichedHits++;
 
     // Build the trial once (first institutional row for a protocol wins for the
@@ -258,7 +331,7 @@ export function buildTrialsAndLinks(
         briefSummary: nonEmpty(enrichedRow?.briefSummary),
         enrollment: cleanInt(enrichedRow?.enrollment ?? null),
         firstOtaDate: parseLooseDate(r.firstOTADate),
-        firstCtaDate: parseLooseDate(r.firstCTADate),
+        firstCtaDate: ctaDate(r, nct, study, ctgov.complete),
         enrichmentSource: enrichedRow ? "ClinicalTrials.gov" : null,
         enrichedAt: enrichedRow ? now : null,
         source: "reciterdb.clinical_trials",
@@ -271,7 +344,7 @@ export function buildTrialsAndLinks(
       links.set(linkKey, {
         cwid,
         protocolNumber: protocol,
-        role: isLikelyPi(scholar.name, r.piName) ? "Principal Investigator" : "Investigator",
+        role: "Principal Investigator",
         piNameRaw: nonEmpty(r.piName),
         lastRefreshedAt: now,
       });
