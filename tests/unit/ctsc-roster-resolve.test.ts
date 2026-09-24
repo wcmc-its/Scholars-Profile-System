@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCtscFeed, surnamesAgree, type CtscFeedRecord, type EdPerson } from "@/etl/ctsc-roster/resolve";
+import { parseCtscFeed, resolveCtscFeed, surnamesAgree, type CtscFeedRecord, type EdPerson } from "@/etl/ctsc-roster/resolve";
 
 const ed = (uid: string, sn: string, retired = false): [string, EdPerson] => [
   uid,
@@ -90,6 +90,24 @@ describe("resolveCtscFeed", () => {
     expect(r.linkedCwids).toEqual([]);
     expect(r.issues).toEqual([]);
     expect(r.externals[0]).toMatchObject({ cuid: "ctsc:10", affiliation: "Hospital for Special Surgery" });
+  });
+});
+
+describe("parseCtscFeed", () => {
+  it("normalizes the feed's digit-string PrimaryKey and drops unusable keys", () => {
+    const r = parseCtscFeed({
+      CTSCInvestigatorsAndTrainees: [
+        { PrimaryKey: "123", LastName: "A" },
+        { PrimaryKey: 7, LastName: "B" },
+        { PrimaryKey: "x1", LastName: "C" },
+        { LastName: "D" },
+      ],
+    });
+    expect(r.map((x) => x.PrimaryKey)).toEqual([123, 7]);
+  });
+
+  it("throws on a body without the records array", () => {
+    expect(() => parseCtscFeed({})).toThrow(/CTSCInvestigatorsAndTrainees/);
   });
 });
 

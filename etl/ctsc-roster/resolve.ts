@@ -65,6 +65,23 @@ export type CtscResolution = {
   issues: CtscIssue[];
 };
 
+/**
+ * Parse the feed body. The feed sends `PrimaryKey` as a digit STRING ("12345"),
+ * not a number — normalize it, and drop any record without a usable key.
+ */
+export function parseCtscFeed(body: unknown): CtscFeedRecord[] {
+  const records = (body as { CTSCInvestigatorsAndTrainees?: unknown })?.CTSCInvestigatorsAndTrainees;
+  if (!Array.isArray(records)) throw new Error("CTSC feed: missing CTSCInvestigatorsAndTrainees array");
+  const out: CtscFeedRecord[] = [];
+  for (const r of records as Array<Record<string, unknown>>) {
+    const raw = r?.PrimaryKey;
+    const pk = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+    if (!Number.isSafeInteger(pk)) continue;
+    out.push({ ...(r as CtscFeedRecord), PrimaryKey: pk });
+  }
+  return out;
+}
+
 export function ctscExternalKey(primaryKey: number): string {
   return `ctsc:${primaryKey}`;
 }

@@ -27,7 +27,7 @@ import { withEtlRun } from "@/lib/etl-run";
 import { escapeLdapFilter, openLdap } from "@/lib/sources/ldap";
 import { MEMBER_ROLE_KEY } from "@/lib/org-unit-roles";
 import { CTSC_EXTERNAL_SOURCE } from "@/lib/edit/external-member-sources";
-import { feedEmails, resolveCtscFeed, type CtscFeedRecord, type EdPerson } from "./resolve";
+import { feedEmails, parseCtscFeed, resolveCtscFeed, type CtscFeedRecord, type EdPerson } from "./resolve";
 
 export const CTSC_CENTER_CODE = "ctsc";
 const LINKED_SOURCE = "ctsc-feed";
@@ -42,10 +42,7 @@ async function fetchFeed(): Promise<CtscFeedRecord[]> {
   u.searchParams.set("token", token);
   const res = await fetch(u, { signal: AbortSignal.timeout(20 * 60_000) });
   if (!res.ok) throw new Error(`CTSC feed HTTP ${res.status}`);
-  const body = (await res.json()) as { CTSCInvestigatorsAndTrainees?: CtscFeedRecord[] };
-  const records = body.CTSCInvestigatorsAndTrainees;
-  if (!Array.isArray(records)) throw new Error("CTSC feed: missing CTSCInvestigatorsAndTrainees array");
-  return records.filter((r) => Number.isInteger(r?.PrimaryKey));
+  return parseCtscFeed(await res.json());
 }
 
 const first = (v: unknown): string | null =>
