@@ -156,7 +156,7 @@ export type MenteeChip = {
    * mentee WITH a real CWID who is in no source system — that chip carries a
    * real cwid and is otherwise indistinguishable from a sourced one, which is
    * exactly the case that made the /edit Mentees tab list the same person twice:
-   * once as editable, once under "Source: Jenzabar or Employee Central" with a
+   * once as editable, once under "Source: Jenzabar, Medical Education rosters, or Employee Central" with a
    * "Request a change" link pointing at a record that does not exist there.
    *
    * `false` when any source contributed, INCLUDING a hand-entered CWID that also
