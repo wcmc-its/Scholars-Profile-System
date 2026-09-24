@@ -178,6 +178,7 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: { groupBy: publicationAuthorGroupBy },
     topic: { findMany: topicFindMany },
     $queryRawUnsafe: queryRawUnsafe,
+    $queryRaw: vi.fn(async () => []),
   },
 }));
 

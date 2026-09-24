@@ -1,10 +1,10 @@
 export function BrowseHero() {
   return (
-    <section className="mb-8">
-      <h1 className="page-title text-4xl font-semibold leading-tight">
+    <section>
+      <h1 className="page-title mt-[22px] text-[44px] font-normal leading-[1.1]">
         Departments &amp; Centers
       </h1>
-      <p className="mt-3 text-base text-muted-foreground max-w-prose">
+      <p className="mt-[18px] max-w-[600px] text-[15px] leading-[23px] text-pretty text-muted-foreground">
         The institutional structure of Weill Cornell Medicine — clinical,
         basic-science, and administrative departments alongside the centers
         and institutes that span them.

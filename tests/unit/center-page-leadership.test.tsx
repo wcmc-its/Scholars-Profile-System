@@ -9,21 +9,25 @@
  * `department-page-leader-render.test.tsx` stubs heavy client children.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 
 const {
   mockGetCenter,
   mockGetCenterMembers,
   mockGetCenterPrograms,
   mockGetCenterPublicationsList,
+  mockGetCenterGrantsList,
   mockGetCenterTopResearchAreas,
   mockCenterHasPrograms,
   mockGetSpotlightCardsForCenter,
+  mockProgramPagesEnabled,
 } = vi.hoisted(() => ({
+  mockProgramPagesEnabled: vi.fn(),
   mockGetCenter: vi.fn(),
   mockGetCenterMembers: vi.fn(),
   mockGetCenterPrograms: vi.fn(),
   mockGetCenterPublicationsList: vi.fn(),
+  mockGetCenterGrantsList: vi.fn(),
   mockGetCenterTopResearchAreas: vi.fn(),
   mockCenterHasPrograms: vi.fn(),
   mockGetSpotlightCardsForCenter: vi.fn(),
@@ -34,6 +38,7 @@ vi.mock("@/lib/api/centers", () => ({
   getCenterMembers: mockGetCenterMembers,
   getCenterPrograms: mockGetCenterPrograms,
   getCenterPublicationsList: mockGetCenterPublicationsList,
+  getCenterGrantsList: mockGetCenterGrantsList,
   getCenterTopResearchAreas: mockGetCenterTopResearchAreas,
   centerHasPrograms: mockCenterHasPrograms,
 }));
@@ -41,7 +46,7 @@ vi.mock("@/lib/api/spotlight", () => ({
   getSpotlightCardsForCenter: mockGetSpotlightCardsForCenter,
 }));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
-  isCenterProgramPagesEnabled: () => false,
+  isCenterProgramPagesEnabled: () => mockProgramPagesEnabled(),
 }));
 vi.mock("@/lib/center-collaboration/flags", () => ({
   isCenterCollaborationNetworkEnabled: () => false,
@@ -59,6 +64,9 @@ vi.mock("@/components/center/center-tabs", () => ({
 }));
 vi.mock("@/components/department/dept-publications-list", () => ({
   DeptPublicationsList: () => <div data-testid="mock-pubs-list" />,
+}));
+vi.mock("@/components/department/dept-grants-list", () => ({
+  DeptGrantsList: () => <div data-testid="mock-grants-list" />,
 }));
 vi.mock("@/components/shared/spotlight", () => ({
   Spotlight: () => <div data-testid="mock-spotlight" />,
@@ -102,9 +110,11 @@ beforeEach(() => {
   mockGetCenterTopResearchAreas.mockResolvedValue([]);
   mockGetSpotlightCardsForCenter.mockResolvedValue(null);
   mockGetCenterPublicationsList.mockResolvedValue(FACULTY_PAGE);
+  mockGetCenterGrantsList.mockResolvedValue(FACULTY_PAGE);
   mockGetCenterMembers.mockResolvedValue(FACULTY_PAGE);
   mockGetCenterPrograms.mockResolvedValue([]);
   mockCenterHasPrograms.mockResolvedValue(false);
+  mockProgramPagesEnabled.mockReturnValue(false);
 });
 
 describe("CenterPage — leadership grid layout (4+ leaders only)", () => {
@@ -122,14 +132,21 @@ describe("CenterPage — leadership grid layout (4+ leaders only)", () => {
     );
     const grid = container.querySelector(".grid.sm\\:grid-cols-2");
     expect(grid).not.toBeNull();
-    // Each LeaderCard's own wrapper div carries mt-0/max-w-none (the override),
-    // not the default mt-6/max-w-[460px] — confirms the grid's direct children
-    // are the four overridden cards.
-    const cards = grid!.querySelectorAll(":scope > div.mt-0.max-w-none");
+    // Each LeaderCard's own wrapper (the whole-card profile link, Unit Page v2)
+    // carries mt-0/max-w-none (the override), not the default
+    // mt-[22px]/max-w-[460px] — confirms the grid's direct children are the
+    // four overridden cards. (Walk `children` rather than a `:scope >`
+    // selector: nwsapi expands `:scope` from the grid's own class string, and
+    // its `mt-[22px]` brackets make that an invalid selector.)
+    const children = Array.from(grid!.children);
+    expect(children.length).toBe(4);
+    const cards = children.filter(
+      (el) => el.classList.contains("mt-0") && el.classList.contains("max-w-none"),
+    );
     expect(cards.length).toBe(4);
   });
 
-  it("2 leaders: no grid wrapper — cards render stacked, keeping default mt-6/max-w-[460px]", async () => {
+  it("2 leaders: no grid wrapper — cards render stacked, keeping default mt-[22px]/max-w-[460px]", async () => {
     mockGetCenter.mockResolvedValue(
       baseDetail([leader("ldr001", "Director"), leader("ldr002", "Co-Director")]),
     );
@@ -137,7 +154,7 @@ describe("CenterPage — leadership grid layout (4+ leaders only)", () => {
       await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }),
     );
     expect(container.querySelector(".grid.sm\\:grid-cols-2")).toBeNull();
-    const cards = container.querySelectorAll("div.mt-6.max-w-\\[460px\\]");
+    const cards = container.querySelectorAll(".mt-\\[22px\\].max-w-\\[460px\\]");
     expect(cards.length).toBe(2);
   });
 
@@ -153,7 +170,7 @@ describe("CenterPage — leadership grid layout (4+ leaders only)", () => {
       await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }),
     );
     expect(container.querySelector(".grid.sm\\:grid-cols-2")).toBeNull();
-    const cards = container.querySelectorAll("div.mt-6.max-w-\\[460px\\]");
+    const cards = container.querySelectorAll(".mt-\\[22px\\].max-w-\\[460px\\]");
     expect(cards.length).toBe(3);
   });
 
@@ -163,6 +180,86 @@ describe("CenterPage — leadership grid layout (4+ leaders only)", () => {
       await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }),
     );
     expect(container.querySelector(".grid.sm\\:grid-cols-2")).toBeNull();
-    expect(container.querySelectorAll("div.mt-6.max-w-\\[460px\\]").length).toBe(0);
+    expect(container.querySelectorAll(".mt-\\[22px\\].max-w-\\[460px\\]").length).toBe(0);
+  });
+});
+
+describe("CenterPage — Unit Page v2 hero", () => {
+  it("breadcrumb reads Departments & Centers → /browse#centers", async () => {
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    render(await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }));
+    expect(
+      screen.getByRole("link", { name: "Departments & Centers" }).getAttribute("href"),
+    ).toBe("/browse#centers");
+  });
+
+  it("program chips sit in the hero with roster member counts + a 'N programs' stat", async () => {
+    mockProgramPagesEnabled.mockReturnValue(true);
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    mockGetCenterPrograms.mockResolvedValue([
+      { code: "CB", label: "Cancer Biology" },
+      { code: "CT", label: "Cancer Therapeutics" },
+    ]);
+    mockGetCenterMembers.mockResolvedValue({
+      mode: "grouped",
+      total: 3,
+      groups: [
+        { code: "CB", label: "Cancer Biology", members: [{ cwid: "a" }, { cwid: "b" }] },
+        { code: "CT", label: "Cancer Therapeutics", members: [{ cwid: "c" }] },
+      ],
+    });
+    const { container } = render(
+      await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }),
+    );
+    const section = container.querySelector("section")!;
+    const chip = screen.getByRole("link", { name: /Cancer Biology/ });
+    expect(section.contains(chip)).toBe(true);
+    expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center/programs/CB");
+    expect(chip.textContent).toContain("2");
+    expect(screen.getByRole("link", { name: "2 programs" }).getAttribute("href")).toBe(
+      "#subunits",
+    );
+    expect(screen.getByRole("link", { name: "42 scholars" }).getAttribute("href")).toBe(
+      "/centers/meyer-cancer-center#people",
+    );
+  });
+
+  it("keeps the 'Membership data pending' fallback when both counts are 0", async () => {
+    mockGetCenter.mockResolvedValue({ ...baseDetail([]), scholarCount: 0 });
+    render(await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }));
+    expect(screen.getByText("Membership data pending")).toBeTruthy();
+  });
+});
+
+
+describe("CenterPage — Grants tab", () => {
+  it("tab=grants renders the grants list and loads the requested page + sort", async () => {
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    const { container } = render(
+      await CenterPage({
+        centerSlug: "meyer-cancer-center",
+        page: 3,
+        tab: "grants",
+        sort: "end_date",
+      }),
+    );
+    expect(container.querySelector('[data-testid="mock-grants-list"]')).not.toBeNull();
+    expect(mockGetCenterGrantsList).toHaveBeenCalledWith("meyer_cancer_center", {
+      page: 2,
+      sort: "end_date",
+    });
+  });
+
+  it("scholars tab loads only the page-0 grants count", async () => {
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    const { container } = render(
+      await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }),
+    );
+    expect(container.querySelector('[data-testid="mock-grants-list"]')).toBeNull();
+    expect(mockGetCenterGrantsList).toHaveBeenCalledTimes(1);
+    expect(mockGetCenterGrantsList).toHaveBeenCalledWith("meyer_cancer_center", {
+      page: 0,
+      sort: "most_recent",
+    });
   });
 });

@@ -14,6 +14,8 @@
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
+import { attachTopMesh } from "@/lib/api/roster-mesh";
+import type { RosterMeshChip } from "@/lib/roster-row-tags";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
   buildUnitGrantCards,
@@ -25,8 +27,10 @@ import type {
   DeptListPubResult,
   DeptListGrantResult,
   PubSort,
+  PubListOpts,
   GrantSort,
 } from "@/lib/api/dept-lists";
+import { unitPublicationWhere } from "@/lib/api/unit-publication-where";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import type { LeaderRole } from "@/components/scholar/leader-card";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -37,7 +41,6 @@ import {
   isAuthorHidden,
   isUnitSuppressed,
   loadAllPublicationSuppressions,
-  loadHiddenAuthorshipCounts,
   loadUnitFieldOverrides,
   mergeUnitFields,
   resolveUnitDarkPmids,
@@ -53,13 +56,10 @@ import {
   isOrgUnitMethodsChipsEnabled,
   isOrgUnitMethodsFacetEnabled,
 } from "@/lib/profile/methods-lens-flags";
-import { extractLastNameSort } from "@/lib/name-sort";
+import { pinDivisionChiefFirst, rankRoster, type RosterSort } from "@/lib/roster-sort";
+import { loadRosterCounts } from "@/lib/api/roster-counts";
+import { loadUnitRosterIndex } from "@/lib/api/unit-roster-index";
 import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
-import {
-  buildExternalMemberHit,
-  loadExternalMembersByCuid,
-  type ExternalMemberHit,
-} from "@/lib/api/external-members";
 
 const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
@@ -410,6 +410,9 @@ export type DivisionFacultyResult = {
      *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
      *  has ≥1 public family; undefined otherwise. */
     topMethods?: MemberMethodFamily[];
+    /** Unit Page v2 — top ≤3 MeSH terms for the TOPICS chips. See
+     *  `DepartmentFacultyHit.topMesh`. */
+    topMesh?: RosterMeshChip[];
     /** #2519 — true only for a Cornell (Ithaca) external member. See
      *  `DepartmentFacultyHit.isExternal`. */
     isExternal?: true;
@@ -428,19 +431,12 @@ export type DivisionFacultyResult = {
   methodFacet?: FacetOption[];
 };
 
-async function getDivisionFacultyUncached(
-  divCode: string,
-  opts: { page?: number },
-): Promise<DivisionFacultyResult> {
-  const page = Math.max(0, opts.page ?? 0);
-
-  // #540 Phase 8 — one division-row lookup feeds `loadDivisionMemberCwids`
-  // (for `source`); the chief cwid comes from `resolveUnitLeader`'s
-  // override-over-assignment precedence, same as the division page itself.
-  const div = await prisma.division.findFirst({
-    where: { code: divCode },
-    select: { source: true },
-  });
+/**
+ * #540 Phase 8 — the division chief's cwid, by `resolveUnitLeader`'s
+ * override-over-assignment precedence (same as the division page itself).
+ * Shared by the SSR roster and the filtered route so both pin the same row.
+ */
+export async function resolveDivisionChiefCwid(divCode: string): Promise<string | null> {
   const chiefOverrides = await loadUnitFieldOverrides("division", divCode, prisma);
   const resolvedChief = await resolveUnitLeader({
     entityType: "division",
@@ -450,114 +446,58 @@ async function getDivisionFacultyUncached(
     fallbackLabel: "Chief",
     client: prisma,
   });
-  const chiefCwid = resolvedChief?.cwid ?? null;
+  return resolvedChief?.cwid ?? null;
+}
 
-  // #2519 — Cornell (Ithaca) render union. `DivisionMembership` has no
-  // active-window columns (unlike `CenterMembership`) — every row is active
-  // by presence — so this is a plain source-filtered read, no date filter.
-  // Cornell adds are only ever written to a `source: 'manual'` division (the
-  // roster route's own gate), so an ETL division never issues this query.
-  // Flag off, or no cornell rows for this division ⇒ `cornellHits` is `[]`
-  // and every branch below is byte-identical to today.
-  let cornellHits: ExternalMemberHit[] = [];
-  if (isCornellDirectoryMembersEnabled() && div?.source === "manual") {
-    const cornellRows = await prisma.divisionMembership.findMany({
-      where: { divisionCode: divCode, source: "cornell-ithaca" },
-      select: { cwid: true },
-    });
-    if (cornellRows.length > 0) {
-      const netids = cornellRows.map((r) => r.cwid);
-      const externalByCuid = await loadExternalMembersByCuid(netids);
-      cornellHits = netids
-        .map((netid) => externalByCuid.get(netid))
-        .filter((m): m is NonNullable<typeof m> => m !== undefined)
-        .map((m) => buildExternalMemberHit(m));
-    }
-  }
+async function getDivisionFacultyUncached(
+  divCode: string,
+  opts: { page?: number; sort?: RosterSort },
+): Promise<DivisionFacultyResult> {
+  const page = Math.max(0, opts.page ?? 0);
+  const sort: RosterSort = opts.sort ?? "last";
 
-  const allMemberCwids = await loadDivisionMemberCwids(divCode, {
-    source: div?.source,
-  });
-  if (allMemberCwids.length === 0 && cornellHits.length === 0) {
-    return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
-  }
+  const chiefCwid = await resolveDivisionChiefCwid(divCode);
 
-  // #2202 — apply the #536 carve HERE, at the roster call site, not inside the
-  // `cache()`d `loadDivisionMemberCwids` (see its docstring: six call sites, four
-  // of which must keep counting student-authored pubs/grants).
+  // Unit Page v2 — the cached whole-roster index: `loadDivisionMemberCwids`
+  // (LDAP + manual roster) re-carved with #536/#2202 `publicRoleWhere()` HERE,
+  // at the roster call site, not inside the `cache()`d loader (see its
+  // docstring: six call sites, four of which must keep counting
+  // student-authored pubs/grants), plus the #2519 Cornell (Ithaca) externals
+  // when the flag is on and the division is manual.
   //
-  // Carving only `where` below would NOT be enough: `total` is derived from this
-  // list, and so is the `methodFacet` member set. Leaving them on the uncarved
-  // list would overcount the total and render phantom trailing pages — a
-  // "Showing 481–500 of 590" that resolves to an empty list.
-  const memberCwids = (
-    await prisma.scholar.findMany({
-      where: {
-        cwid: { in: allMemberCwids },
-        deletedAt: null,
-        status: "active",
-        ...publicRoleWhere(),
-      },
-      select: { cwid: true },
-    })
-  ).map((r) => r.cwid);
-  const total = memberCwids.length;
-  if (total === 0 && cornellHits.length === 0) {
+  // `total` and the `methodFacet` member set derive from this SAME carved list:
+  // leaving them on an uncarved list would overcount the total and render
+  // phantom trailing pages — a "Showing 481–500 of 590" that resolves to an
+  // empty list.
+  const index = await loadUnitRosterIndex("division", divCode, {
+    withCounts: sort !== "last",
+  });
+  if (index.length === 0) {
     return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
   }
-  const memberCwidSet = new Set(memberCwids);
-  const where = {
-    cwid: { in: memberCwids },
-    deletedAt: null,
-    status: "active" as const,
-    // Redundant with the carved `memberCwids` above, and deliberately so: if a
-    // future refactor re-widens that list, the row query still cannot load a
-    // hidden identity class.
-    ...publicRoleWhere(),
-  };
+  const memberCwids = index.filter((e) => !e.externalHit).map((e) => e.cwid);
+  const total = index.length;
 
-  const roleCategoryCounts = await (async () => {
-    const rows = await prisma.scholar.groupBy({
-      by: ["roleCategory"],
-      where,
-      _count: { _all: true },
-    });
-    const out: Record<string, number> = {};
-    for (const r of rows) {
-      const label = formatRoleCategory(r.roleCategory);
-      if (label === null) continue;
-      out[label] = (out[label] ?? 0) + r._count._all;
-    }
-    return out;
-  })();
+  const roleCategoryCounts: Record<string, number> = {};
+  for (const e of index) {
+    if (e.externalHit) continue;
+    const label = formatRoleCategory(e.roleCategory);
+    if (label === null) continue;
+    roleCategoryCounts[label] = (roleCategoryCounts[label] ?? 0) + 1;
+  }
+
+  // Surname A–Z by default (WCM and Cornell members interleave, #2519), or the
+  // row's displayed pub/grant count. The chief is pinned first only under the
+  // surname sort — a count sort is an explicit ranking.
+  const ranked = pinDivisionChiefFirst(rankRoster(index, { sort }), chiefCwid, sort);
+  const slice = ranked.slice(page * FACULTY_PAGE_SIZE, (page + 1) * FACULTY_PAGE_SIZE);
 
   const includeClause = {
     department: { select: { name: true } },
     division: { select: { name: true } },
   } as const;
 
-  let chiefRow: Awaited<ReturnType<typeof prisma.scholar.findFirst>> | null = null;
-  if (chiefCwid && page === 0 && memberCwidSet.has(chiefCwid)) {
-    chiefRow = await prisma.scholar.findFirst({
-      // #2202 — `memberCwidSet` is already carved, so this can only match a
-      // displayable chief; the carve is repeated so the query is self-describing
-      // and survives a refactor of the set above.
-      where: { cwid: chiefCwid, deletedAt: null, status: "active", ...publicRoleWhere() },
-      include: includeClause,
-    });
-  }
-
-  const restWhere = chiefRow ? { ...where, NOT: { cwid: chiefRow.cwid } } : where;
-  const restTake = chiefRow ? FACULTY_PAGE_SIZE - 1 : FACULTY_PAGE_SIZE;
-  const restSkip =
-    chiefRow && page > 0 ? page * FACULTY_PAGE_SIZE - 1 : page * FACULTY_PAGE_SIZE;
-
-  // The minimal shape `buildWcmHits` reads. A `scholar.findFirst`/`findMany`
-  // call's inferred TS return type does not carry the `include`d relations
-  // (a known Prisma/TS limitation when `where`/`include` are pre-declared
-  // variables rather than inline literals) even though they ARE present at
-  // runtime — hence the `(typeof rows)[number] & RowFields` cast at each call
-  // site below, mirroring the pre-#2519 `RowWithRelations` pattern.
+  // The minimal shape `buildWcmHits` reads.
   type RowFields = {
     cwid: string;
     preferredName: string;
@@ -572,43 +512,15 @@ async function getDivisionFacultyUncached(
 
   /**
    * Pub/grant counts + top-method-family chips for a set of scholar rows.
-   * Factored out (#2519) so the Cornell-merge branch below — which needs the
-   * FULL matching set, not just the current DB page, to interleave correctly
-   * — and the original page-window path share one implementation.
+   * Counts come from `loadRosterCounts("division")` — the same numbers the
+   * index ranks a count sort on.
    */
-  async function buildWcmHits<R extends RowFields>(rows: R[]) {
+  async function buildWcmHits(rows: RowFields[]) {
     const rowCwids = rows.map((r) => r.cwid);
-    const [pubCounts, grantCounts] = await Promise.all([
-      rowCwids.length === 0
-        ? Promise.resolve([] as Array<{ cwid: string; _count: { _all: number } }>)
-        : (prisma.publicationAuthor.groupBy as unknown as (
-            args: unknown,
-          ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
-            by: ["cwid"],
-            where: { isConfirmed: true, cwid: { in: rowCwids } },
-            _count: { _all: true },
-            orderBy: { cwid: "asc" },
-          }),
-      rowCwids.length === 0
-        ? Promise.resolve([] as Array<{ cwid: string; _count: { _all: number } }>)
-        : (prisma.grant.groupBy as unknown as (
-            args: unknown,
-          ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
-            by: ["cwid"],
-            where: { cwid: { in: rowCwids }, source: { not: "RePORTER" } },
-            _count: { _all: true },
-            orderBy: { cwid: "asc" },
-          }),
-    ]);
-    // #356 — subtract each scholar's per-author hides from their pub count.
-    const hiddenCounts = await loadHiddenAuthorshipCounts(rowCwids, prisma);
-    const pubByCwid = new Map(
-      pubCounts.map((r) => [
-        r.cwid,
-        Math.max(0, r._count._all - (hiddenCounts.get(r.cwid) ?? 0)),
-      ]),
+    const { pubs: pubByCwid, grants: grantByCwid } = await loadRosterCounts(
+      "division",
+      rowCwids,
     );
-    const grantByCwid = new Map(grantCounts.map((r) => [r.cwid, r._count._all]));
 
     const rowHits = rows.map((r) => ({
       cwid: r.cwid,
@@ -618,10 +530,9 @@ async function getDivisionFacultyUncached(
       divisionName: r.division?.name ?? null,
       departmentName: r.department?.name ?? "",
       identityImageEndpoint: identityImageEndpoint(r.cwid),
-      // #974 Phase 2 — normalize to the display label (mirrors departments.ts L480 +
-      // the filtered API in unit-members.ts) so the Role chip actually matches on the
-      // division SSR view, not just after a method is selected. (roleCategoryCounts at
-      // L386 already normalizes; the hit was the lone raw outlier.)
+      // #974 Phase 2 — normalize to the display label (mirrors departments.ts +
+      // the filtered API in unit-members.ts) so the Role chip actually matches on
+      // the division SSR view, not just after a method is selected.
       roleCategory: formatRoleCategory(r.roleCategory),
       // #2202 — the label above is display-only; the #536 carve reads this.
       roleCategoryRaw: r.roleCategory,
@@ -647,77 +558,44 @@ async function getDivisionFacultyUncached(
         });
   }
 
-  // #974 Phase 2 — unit-wide "Methods & tools" facet buckets over the FULL active
-  // member set. `memberCwids` is already in hand (loaded above for the roster), so
-  // this path is cheaper than the dept path — no extra cwid query. Flag-gated:
-  // off → `aggregatePublicFamiliesForUnit` short-circuits, `methodFacet` undefined
-  // → off-path payload byte-identical, page stays CloudFront-cacheable.
+  // Hydrate only this page's WCM rows. #2202 — the carve is repeated so the
+  // row query is self-describing and survives a refactor of the index.
+  const pageWcmCwids = slice.filter((e) => !e.externalHit).map((e) => e.cwid);
+  const pageRows =
+    pageWcmCwids.length === 0
+      ? []
+      : ((await prisma.scholar.findMany({
+          where: {
+            cwid: { in: pageWcmCwids },
+            deletedAt: null,
+            status: "active",
+            ...publicRoleWhere(),
+          },
+          include: includeClause,
+        })) as unknown as RowFields[]);
+  const rowByCwid = new Map(pageRows.map((r) => [r.cwid, r]));
+  const orderedRows = pageWcmCwids
+    .map((c) => rowByCwid.get(c))
+    .filter((r): r is RowFields => r !== undefined);
+  const wcmHitByCwid = new Map(
+    (await buildWcmHits(orderedRows)).map((h) => [h.cwid, h] as const),
+  );
+  const hits: DivisionFacultyResult["hits"] = [];
+  for (const e of slice) {
+    const hit = e.externalHit ?? wcmHitByCwid.get(e.cwid);
+    if (hit) hits.push(hit);
+  }
+
+  // #974 Phase 2 — unit-wide "Methods & tools" facet buckets over the FULL carved
+  // member set. Flag-gated: off → `methodFacet` undefined → off-path payload
+  // byte-identical, page stays CloudFront-cacheable.
   const methodFacet = isOrgUnitMethodsFacetEnabled()
     ? await aggregatePublicFamiliesForUnit(memberCwids, { enabled: true })
     : undefined;
 
-  if (cornellHits.length === 0) {
-    // Byte-identical to pre-#2519 behavior: DB-level skip/take pagination,
-    // preferredName-asc DB order, no merge/re-sort.
-    const rest = await prisma.scholar.findMany({
-      where: restWhere,
-      skip: Math.max(0, restSkip),
-      take: restTake,
-      orderBy: [{ preferredName: "asc" }],
-      include: includeClause,
-    });
-    const allRows = chiefRow ? [chiefRow, ...rest] : rest;
-    const finalHits = await buildWcmHits(
-      allRows as ((typeof allRows)[number] & RowFields)[],
-    );
-    return {
-      hits: finalHits,
-      total,
-      roleCategoryCounts,
-      page,
-      pageSize: FACULTY_PAGE_SIZE,
-      methodFacet,
-    };
-  }
-
-  // #2519 — Cornell present: fetch every matching WCM row (not just this DB
-  // page) so the two sources interleave correctly by surname across page
-  // boundaries, matching the public-roster convention (`extractLastNameSort`,
-  // same helper `lib/api/centers.ts`'s flat roster uses). Only this
-  // flag-gated, Cornell-populated path pays the extra cost — every other
-  // division keeps the cheap skip/take query above untouched.
-  const allRest = await prisma.scholar.findMany({
-    where: restWhere,
-    orderBy: [{ preferredName: "asc" }],
-    include: includeClause,
-  });
-  const allRowsFull = chiefRow ? [chiefRow, ...allRest] : allRest;
-  const wcmHitsFull = await buildWcmHits(
-    allRowsFull as ((typeof allRowsFull)[number] & RowFields)[],
-  );
-
-  const chiefHit = chiefRow
-    ? wcmHitsFull.find((h) => h.cwid === chiefRow!.cwid)
-    : undefined;
-  const restHits = chiefRow
-    ? wcmHitsFull.filter((h) => h.cwid !== chiefRow!.cwid)
-    : wcmHitsFull;
-  const mergedRest = [...restHits, ...cornellHits].sort(
-    (a, b) =>
-      extractLastNameSort(a.preferredName).localeCompare(
-        extractLastNameSort(b.preferredName),
-      ) || a.preferredName.localeCompare(b.preferredName),
-  );
-  const mergedAll = chiefHit ? [chiefHit, ...mergedRest] : mergedRest;
-  const mergedTotal = mergedAll.length;
-  const pageHits = mergedAll.slice(
-    page * FACULTY_PAGE_SIZE,
-    (page + 1) * FACULTY_PAGE_SIZE,
-  );
-
   return {
-    hits: pageHits,
-    total: mergedTotal,
+    hits,
+    total,
     roleCategoryCounts,
     page,
     pageSize: FACULTY_PAGE_SIZE,
@@ -727,7 +605,7 @@ async function getDivisionFacultyUncached(
 
 async function getDivisionPublicationsListUncached(
   divCode: string,
-  opts: { page?: number; sort?: PubSort } = {},
+  opts: PubListOpts = {},
 ): Promise<DeptListPubResult> {
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
@@ -741,14 +619,16 @@ async function getDivisionPublicationsListUncached(
   // #1505/#2119 — push division membership into the page query/count via an
   // `authors: { some }` relation filter instead of materializing every distinct
   // member pmid; invert suppression (see resolveUnitDarkPmids). #356 — total
-  // and the page window are both computed over this visible set.
+  // and the page window are both computed over this visible set. `opts.area`
+  // narrows to one research area (the hero pill's "See all").
   const membership = { cwid: { in: memberCwids } };
   const suppressions = await loadAllPublicationSuppressions(prisma);
   const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
-  const visibleWhere = {
-    authors: { some: { isConfirmed: true, ...membership } },
-    ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
-  };
+  const visibleWhere = unitPublicationWhere({
+    membership,
+    darkPmids: unitDarkPmids,
+    area: opts.area,
+  });
   const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
@@ -875,17 +755,21 @@ export const getDivision = (deptSlug: string, divSlug: string) =>
     getDivisionUncached(deptSlug, divSlug),
   );
 
-export const getDivisionFaculty = (divCode: string, opts: { page?: number }) =>
-  cachedRead(`division:faculty:${divCode}:${Math.max(0, opts.page ?? 0)}`, () =>
-    getDivisionFacultyUncached(divCode, opts),
-  );
-
-export const getDivisionPublicationsList = (
+export const getDivisionFaculty = async (
   divCode: string,
-  opts: { page?: number; sort?: PubSort } = {},
-) =>
+  opts: { page?: number; sort?: RosterSort },
+): Promise<DivisionFacultyResult> => {
+  const result = await cachedRead(
+    `division:faculty:${divCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "last"}`,
+    () => getDivisionFacultyUncached(divCode, opts),
+  );
+  // TOPICS chips attach after the cached read (see lib/api/roster-mesh.ts).
+  return { ...result, hits: await attachTopMesh(result.hits) };
+};
+
+export const getDivisionPublicationsList = (divCode: string, opts: PubListOpts = {}) =>
   cachedRead(
-    `division:pubs:${divCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}`,
+    `division:pubs:${divCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}:${opts.area ?? "-"}`,
     () => getDivisionPublicationsListUncached(divCode, opts),
   );
 

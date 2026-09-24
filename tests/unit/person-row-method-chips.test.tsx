@@ -3,6 +3,8 @@
  * separate `methodChips` prop (not `hit`, which is the shared `DepartmentFacultyHit`)
  * so the dept/division/flat-roster paths stay unaffected. Asserts: labels render
  * with the exemplarTools tooltip; nothing renders when the prop is empty/omitted.
+ * Unit Page v2: the wrench row renders only in `rowTags="methods"` mode (the
+ * default row is TOPICS — see person-row.test.tsx).
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -37,6 +39,7 @@ describe("PersonRow method chips (#962)", () => {
     render(
       <PersonRow
         hit={baseHit}
+        rowTags="methods"
         methodChips={[
           { value: "sc::Deep learning", familyLabel: "Deep learning", exemplarTools: ["MONAI", "CheXpert"] },
           { value: "sc::MRI", familyLabel: "MRI", exemplarTools: [] },
@@ -54,12 +57,12 @@ describe("PersonRow method chips (#962)", () => {
   });
 
   it("renders no chips when methodChips is empty", () => {
-    render(<PersonRow hit={baseHit} methodChips={[]} />);
+    render(<PersonRow hit={baseHit} rowTags="methods" methodChips={[]} />);
     expect(screen.queryByText("Deep learning")).toBeNull();
   });
 
   it("renders no chips when methodChips is omitted", () => {
-    render(<PersonRow hit={baseHit} />);
+    render(<PersonRow hit={baseHit} rowTags="methods" />);
     expect(screen.queryByText("Deep learning")).toBeNull();
   });
 });

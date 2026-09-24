@@ -140,6 +140,7 @@ describe("reflectUnitChange", () => {
     expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
       "/browse",
       "/departments/medicine",
+      "/departments/medicine/areas/*",
     ]);
     expect(mockCfSend).not.toHaveBeenCalled();
     await flushDeferred();
@@ -157,9 +158,37 @@ describe("reflectUnitChange", () => {
       "/browse",
       "/centers/new-center",
       "/centers/old-center",
+      "/centers/new-center/areas/*",
+      "/centers/old-center/areas/*",
     ]);
     await flushDeferred();
     expect(mockCfSend).toHaveBeenCalledTimes(1);
+  });
+
+  // Unit Page v2 — the research-area views `{unit}/areas/{topic}` repeat the
+  // hero, and a CloudFront invalidation of the unit path does not cover them.
+  it("purges the area views of a division and its parent department at the edge only", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectUnitChange({
+      unitKind: "division",
+      unitSlug: "cardiology",
+      parentDeptSlug: "medicine",
+    });
+    const paths = JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths);
+    expect(paths).toContain("/departments/medicine/areas/*");
+    expect(paths).toContain("/departments/medicine/divisions/cardiology/areas/*");
+    expect(mockRevalidatePath).not.toHaveBeenCalledWith(expect.stringContaining("/areas/"));
+  });
+
+  it("does not add an area wildcard for a center program page", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectUnitChange({ unitKind: "center", unitSlug: "cancer", programCode: "CB" });
+    expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
+      "/browse",
+      "/centers/cancer",
+      "/centers/cancer/programs/CB",
+      "/centers/cancer/areas/*",
+    ]);
   });
 
   it("is dormant when no distribution id is set: no enqueue, no send", async () => {
@@ -218,6 +247,32 @@ describe("reflectVisibilityChange", () => {
 
 describe("invalidateCloudFront enqueue/mark (#353 outbox)", () => {
   // Exercised through reflectVisibilityChange, which calls invalidateCloudFront.
+  // Unit Page v2 — the research-area views `{unit}/areas/{topic}` repeat the
+  // hero, and a CloudFront invalidation of the unit path does not cover them.
+  it("purges the area views of a division and its parent department at the edge only", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectUnitChange({
+      unitKind: "division",
+      unitSlug: "cardiology",
+      parentDeptSlug: "medicine",
+    });
+    const paths = JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths);
+    expect(paths).toContain("/departments/medicine/areas/*");
+    expect(paths).toContain("/departments/medicine/divisions/cardiology/areas/*");
+    expect(mockRevalidatePath).not.toHaveBeenCalledWith(expect.stringContaining("/areas/"));
+  });
+
+  it("does not add an area wildcard for a center program page", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectUnitChange({ unitKind: "center", unitSlug: "cancer", programCode: "CB" });
+    expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
+      "/browse",
+      "/centers/cancer",
+      "/centers/cancer/programs/CB",
+      "/centers/cancer/areas/*",
+    ]);
+  });
+
   it("is dormant when no distribution id is set: no enqueue, no send", async () => {
     // beforeEach already deletes SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID.
     await reflectVisibilityChange(["jane-smith"]);

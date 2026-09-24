@@ -16,10 +16,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-const { mockGetDepartment, mockGetDepartmentFaculty, mockGetSpotlight } = vi.hoisted(() => ({
+const {
+  mockGetDepartment,
+  mockGetDepartmentFaculty,
+  mockGetSpotlight,
+  mockGetDivisionCounts,
+  mockFacultyClient,
+} = vi.hoisted(() => ({
   mockGetDepartment: vi.fn(),
   mockGetDepartmentFaculty: vi.fn(),
   mockGetSpotlight: vi.fn(),
+  mockGetDivisionCounts: vi.fn(),
+  mockFacultyClient: vi.fn(),
 }));
 
 vi.mock("@/lib/api/departments", () => ({
@@ -29,6 +37,9 @@ vi.mock("@/lib/api/departments", () => ({
 vi.mock("@/lib/api/spotlight", () => ({
   getSpotlightCardsForDepartment: mockGetSpotlight,
 }));
+vi.mock("@/lib/api/unit-members", () => ({
+  getDepartmentDivisionMemberCounts: mockGetDivisionCounts,
+}));
 vi.mock("@/lib/api/dept-lists", () => ({
   getDeptPublicationsList: vi.fn(),
   getDeptGrantsList: vi.fn(),
@@ -37,7 +48,10 @@ vi.mock("@/lib/api/dept-lists", () => ({
 // to the leader card under test, so it's stubbed exactly as
 // `tests/unit/slug-requests-page.test.tsx` stubs its own chrome components.
 vi.mock("@/components/department/department-faculty-client", () => ({
-  DepartmentFacultyClient: () => <div data-testid="mock-faculty-client" />,
+  DepartmentFacultyClient: (props: unknown) => {
+    mockFacultyClient(props);
+    return <div data-testid="mock-faculty-client" />;
+  },
 }));
 
 import { DepartmentPage } from "@/components/department/department-page";
@@ -85,6 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetDepartmentFaculty.mockResolvedValue(FACULTY);
   mockGetSpotlight.mockResolvedValue([]);
+  mockGetDivisionCounts.mockResolvedValue(new Map());
 });
 
 describe("DepartmentPage — leader card render (#2542 Phase D)", () => {
@@ -110,3 +125,66 @@ describe("DepartmentPage — leader card render (#2542 Phase D)", () => {
     expect(screen.getByText("Department Head")).toBeTruthy();
   });
 });
+
+describe("DepartmentPage — Unit Page v2 hero", () => {
+  it("breadcrumb is Home › Departments & Centers › {name} (no separate Browse crumb)", async () => {
+    mockGetDepartment.mockResolvedValue(baseDetail());
+    render(await DepartmentPage({ deptSlug: "medicine", page: 1 }));
+    const crumb = screen.getByRole("link", { name: "Departments & Centers" });
+    expect(crumb.getAttribute("href")).toBe("/browse#departments");
+    expect(screen.queryByRole("link", { name: "Browse" })).toBeNull();
+  });
+
+  it("stats are links into the page; zero stats are dropped", async () => {
+    mockGetDepartment.mockResolvedValue(baseDetail());
+    render(await DepartmentPage({ deptSlug: "medicine", page: 1 }));
+    expect(screen.getByRole("link", { name: "10 scholars" }).getAttribute("href")).toBe(
+      "/departments/medicine#people",
+    );
+    expect(screen.getByRole("link", { name: "5 publications" }).getAttribute("href")).toBe(
+      "/departments/medicine?tab=publications#people",
+    );
+    expect(screen.getByRole("link", { name: "2 active grants" }).getAttribute("href")).toBe(
+      "/departments/medicine?tab=grants#people",
+    );
+    // stats.divisions === 0 → no divisions stat.
+    expect(screen.queryByRole("link", { name: /divisions/ })).toBeNull();
+  });
+
+  it("renders division chips with PUBLIC member counts (not the ETL scholarCount), linking to the division pages", async () => {
+    mockGetDepartment.mockResolvedValue({
+      ...baseDetail(),
+      divisions: [{ code: "D1", name: "Cardiology", slug: "cardiology", scholarCount: 241 }],
+      stats: { scholars: 10, divisions: 1, publications: 5, activeGrants: 2 },
+    });
+    mockGetDivisionCounts.mockResolvedValue(new Map([["D1", 198]]));
+    const { container } = render(await DepartmentPage({ deptSlug: "medicine", page: 1 }));
+    expect(mockGetDivisionCounts).toHaveBeenCalledWith("MED");
+    expect(container.querySelector("#subunits")?.textContent).toBe("1 division");
+    const chip = screen.getByRole("link", { name: /Cardiology/ });
+    expect(chip.getAttribute("href")).toBe("/departments/medicine/divisions/cardiology");
+    expect(chip.textContent).toContain("198");
+    expect(chip.textContent).not.toContain("241");
+    // The roster's Division facet gets the same public counts.
+    const facultyProps = mockFacultyClient.mock.calls[0][0] as {
+      divisionFacet: Array<{ value: string; count: number }>;
+    };
+    expect(facultyProps.divisionFacet).toEqual([{ value: "D1", label: "Cardiology", count: 198 }]);
+    expect(screen.getByRole("link", { name: "1 division" }).getAttribute("href")).toBe(
+      "#subunits",
+    );
+  });
+
+  it("shows the curated website as a text link and keeps #people + #tab-content anchors", async () => {
+    mockGetDepartment.mockResolvedValue({
+      ...baseDetail(),
+      dept: { ...DEPT, url: "https://medicine.example.test" },
+    });
+    const { container } = render(await DepartmentPage({ deptSlug: "medicine", page: 1 }));
+    expect(
+      screen.getByRole("link", { name: "Department website" }).getAttribute("href"),
+    ).toBe("https://medicine.example.test");
+    expect(container.querySelector("#people #tab-content")).not.toBeNull();
+  });
+});
+

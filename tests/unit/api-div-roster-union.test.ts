@@ -33,7 +33,9 @@ const {
   mockFieldOverrideFindMany,
   mockOrgUnitRoleFindUnique,
   mockOrgUnitRoleAssignmentFindFirst,
+  mockMeshSearch,
 } = vi.hoisted(() => ({
+  mockMeshSearch: vi.fn(),
   mockDivisionFindFirst: vi.fn(),
   mockDivisionMembershipFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -79,6 +81,13 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// Unit Page v2 TOPICS chips — `getDivisionFaculty` reads `topMeshTerms` from
+// the people index; mock the search client (no OpenSearch in unit tests).
+vi.mock("@/lib/search", () => ({
+  PEOPLE_INDEX: "scholars-people",
+  searchClient: () => ({ search: mockMeshSearch }),
+}));
+
 import {
   getDivisionFaculty,
   getDivisionPublicationsList,
@@ -101,6 +110,7 @@ beforeEach(() => {
   mockFieldOverrideFindMany.mockResolvedValue([]);
   mockOrgUnitRoleFindUnique.mockResolvedValue(null);
   mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
+  mockMeshSearch.mockResolvedValue({ body: { hits: { hits: [] } } });
 });
 
 function routeScholarFindMany(activeCwids: ReadonlySet<string>) {
@@ -252,6 +262,122 @@ describe("getDivisionFaculty — Phase 8 roster union (#540)", () => {
       pageSize: 20,
     });
     expect(mockScholarGroupBy).not.toHaveBeenCalled();
+  });
+});
+
+describe("getDivisionFaculty — Unit Page v2 TOPICS chips", () => {
+  // Distinct cwid sets per test: the MeSH lookup is cachedRead-keyed on them.
+  it("attaches `topMesh` from ONE ids query over the page's cwids", async () => {
+    mockDivisionFindFirst.mockResolvedValue({ ...DIV_BASE, source: "manual" });
+    mockDivisionMembershipFindMany.mockResolvedValue([{ cwid: "meshdv01" }, { cwid: "meshdv02" }]);
+    mockScholarFindMany.mockImplementation(
+      routeScholarFindMany(new Set(["meshdv01", "meshdv02"])),
+    );
+    mockMeshSearch.mockResolvedValue({
+      body: {
+        hits: {
+          hits: [
+            { _id: "meshdv01", _source: { topMeshTerms: [{ ui: "D000001", label: "Alpha" }] } },
+          ],
+        },
+      },
+    });
+
+    const result = await getDivisionFaculty("CARDIO", { page: 0 });
+    expect(mockMeshSearch).toHaveBeenCalledTimes(1);
+    const req = mockMeshSearch.mock.calls[0][0] as {
+      body: { query: { ids: { values: string[] } } };
+    };
+    expect([...req.body.query.ids.values].sort()).toEqual(["meshdv01", "meshdv02"]);
+    const byCwid = new Map(result.hits.map((h) => [h.cwid, h]));
+    expect(byCwid.get("meshdv01")?.topMesh).toEqual([{ ui: "D000001", label: "Alpha" }]);
+    expect(byCwid.get("meshdv02")).not.toHaveProperty("topMesh");
+  });
+
+  it("an OpenSearch failure still returns the roster, without chips", async () => {
+    mockDivisionFindFirst.mockResolvedValue({ ...DIV_BASE, source: "manual" });
+    mockDivisionMembershipFindMany.mockResolvedValue([{ cwid: "meshdv03" }]);
+    mockScholarFindMany.mockImplementation(routeScholarFindMany(new Set(["meshdv03"])));
+    mockMeshSearch.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await getDivisionFaculty("CARDIO", { page: 0 });
+    expect(result.hits.map((h) => h.cwid)).toEqual(["meshdv03"]);
+    expect(result.hits[0]).not.toHaveProperty("topMesh");
+    warn.mockRestore();
+  });
+});
+
+describe("getDivisionFaculty — Unit Page v2 count sorts", () => {
+  // Surname order (A–Z) is Adams, Baker, Clark; the counts deliberately
+  // disagree with it so a count sort that fell back to surname would fail.
+  const NAMES: Record<string, string> = {
+    cntdv01: "Ann Adams",
+    cntdv02: "Bob Baker",
+    cntdv03: "Cal Clark",
+  };
+  const PUBS: Record<string, number> = { cntdv01: 2, cntdv02: 9, cntdv03: 5 };
+  const GRANTS: Record<string, number> = { cntdv01: 7, cntdv02: 1, cntdv03: 4 };
+
+  beforeEach(() => {
+    mockDivisionFindFirst.mockResolvedValue({ ...DIV_BASE, source: "manual" });
+    mockDivisionMembershipFindMany.mockResolvedValue(
+      Object.keys(NAMES).map((cwid) => ({ cwid })),
+    );
+    mockScholarFindMany.mockImplementation(
+      (args?: { where?: { divCode?: string; cwid?: { in?: string[] } } }) => {
+        if (args?.where?.divCode) return Promise.resolve([]);
+        return Promise.resolve(
+          (args?.where?.cwid?.in ?? [])
+            .filter((c) => c in NAMES)
+            .map((cwid) => ({
+              cwid,
+              preferredName: NAMES[cwid],
+              slug: cwid,
+              primaryTitle: null,
+              roleCategory: "full_time_faculty",
+              overview: null,
+              divCode: "CARDIO",
+              department: { name: "Department of Medicine" },
+              division: { name: "Cardiology" },
+            })),
+        );
+      },
+    );
+    const countRows =
+      (table: Record<string, number>) =>
+      (args: { where: { cwid: { in: string[] } } }) =>
+        Promise.resolve(
+          args.where.cwid.in
+            .filter((c) => c in table)
+            .map((cwid) => ({ cwid, _count: { _all: table[cwid] } })),
+        );
+    mockPublicationAuthorGroupBy.mockImplementation(countRows(PUBS));
+    mockGrantGroupBy.mockImplementation(countRows(GRANTS));
+  });
+
+  it("'pubs' ranks by the displayed pub count, descending", async () => {
+    const result = await getDivisionFaculty("CARDIO", { page: 0, sort: "pubs" });
+    expect(result.hits.map((h) => h.cwid)).toEqual(["cntdv02", "cntdv03", "cntdv01"]);
+    expect(result.hits.map((h) => h.pubCount)).toEqual([9, 5, 2]);
+  });
+
+  it("'grants' ranks by the displayed grant count, descending", async () => {
+    const result = await getDivisionFaculty("CARDIO", { page: 0, sort: "grants" });
+    expect(result.hits.map((h) => h.cwid)).toEqual(["cntdv01", "cntdv03", "cntdv02"]);
+    expect(result.hits.map((h) => h.grantCount)).toEqual([7, 4, 1]);
+  });
+
+  it("pins the chief first under the surname sort only, not a count sort", async () => {
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+      cwid: "cntdv03",
+      interim: false,
+      role: { label: "Chief" },
+    });
+    const bySurname = await getDivisionFaculty("CARDIO", { page: 0 });
+    expect(bySurname.hits.map((h) => h.cwid)).toEqual(["cntdv03", "cntdv01", "cntdv02"]);
+    const byPubs = await getDivisionFaculty("CARDIO", { page: 0, sort: "pubs" });
+    expect(byPubs.hits.map((h) => h.cwid)).toEqual(["cntdv02", "cntdv03", "cntdv01"]);
   });
 });
 

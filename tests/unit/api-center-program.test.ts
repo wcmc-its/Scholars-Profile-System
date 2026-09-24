@@ -61,6 +61,7 @@ vi.mock("@/lib/db", () => ({
       findMany: mockCenterProgramFindMany,
     },
     publicationTopic: { groupBy: mockPublicationTopicGroupBy },
+    publicationAuthor: { groupBy: vi.fn(async () => []) },
     grant: { findMany: mockGrantFindMany },
   },
 }));

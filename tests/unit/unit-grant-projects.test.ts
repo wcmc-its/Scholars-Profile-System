@@ -36,6 +36,7 @@ const {
   mockPublicationAuthorFindMany,
   mockPublicationCount,
   mockQueryRawUnsafe,
+  mockQueryRaw,
   mockFieldOverrideFindMany,
   mockOrgUnitRoleFindUnique,
   mockOrgUnitRoleAssignmentFindFirst,
@@ -57,6 +58,7 @@ const {
   mockPublicationAuthorFindMany: vi.fn(),
   mockPublicationCount: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
+  mockQueryRaw: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
   mockOrgUnitRoleFindUnique: vi.fn(),
   mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
@@ -89,6 +91,8 @@ vi.mock("@/lib/db", () => ({
     orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
     orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
     $queryRawUnsafe: mockQueryRawUnsafe,
+    // `getDepartment`'s top-research-areas COUNT(DISTINCT pmid) query.
+    $queryRaw: mockQueryRaw,
   },
 }));
 
@@ -464,7 +468,7 @@ const scholarChip = (cwid: string) => ({
   cwid,
   preferredName: cwid.toUpperCase(),
   slug: cwid,
-  roleCategory: "faculty",
+  roleCategory: "full_time_faculty",
 });
 
 /**
@@ -500,6 +504,7 @@ describe("hero stat and Grants-tab total agree by construction (#2066)", () => {
     mockAppointmentFindFirst.mockResolvedValue(null);
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockPublicationTopicCount.mockResolvedValue(0);
+    mockQueryRaw.mockResolvedValue([]);
     mockTopicFindMany.mockResolvedValue([]);
     mockDivisionFindMany.mockResolvedValue([]);
     mockScholarCount.mockResolvedValue(10);
@@ -703,6 +708,37 @@ describe("division hero stat and Grants-tab total agree by construction (#2066)"
     expect(tab.hits).toHaveLength(1);
     expect(tab.hits[0].pis.map((p) => p.cwid)).toEqual(["mpi001", "mpi002"]);
     expect(tab.hits[0].isMultiPi).toBe(true);
+  });
+
+  it("keeps a hidden-identity PI's grant but strips the chip's link + headshot (#536)", async () => {
+    // A synthetic doctoral-student PI (an F31, say). The chip lookup is only
+    // `deletedAt: null` — the grant must stay in the list and the total (#718) —
+    // so the builder itself is the link gate.
+    mockScholarFindMany.mockImplementation(
+      (args?: { where?: { divCode?: string; cwid?: { in?: string[] } } }) =>
+        Promise.resolve(
+          args?.where?.divCode
+            ? PARITY_CWIDS.map((cwid) => ({ cwid }))
+            : (args?.where?.cwid?.in ?? []).map((cwid) =>
+                cwid === "sol001"
+                  ? { ...scholarChip(cwid), roleCategory: "doctoral_student_phd" }
+                  : scholarChip(cwid),
+              ),
+        ),
+    );
+    const tab = await getDivisionGrantsList("CARDIO", { page: 0 });
+    expect(tab.total).toBe(3);
+    const hidden = tab.hits
+      .flatMap((h) => h.pis)
+      .find((p) => p.cwid === "sol001");
+    expect(hidden, "hidden PI lost its chip entirely").toBeDefined();
+    expect(hidden!.name).toBe("SOL001");
+    expect(hidden!.slug).toBeNull();
+    expect(hidden!.identityImageEndpoint).toBeNull();
+    // A public PI on the same page keeps both.
+    const shown = tab.hits.flatMap((h) => h.pis).find((p) => p.cwid === "mpi001")!;
+    expect(shown.slug).toBe("mpi001");
+    expect(shown.identityImageEndpoint).toBeTruthy();
   });
 
   it("does not give a soft-deleted scholar a chip", async () => {

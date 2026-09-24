@@ -52,6 +52,14 @@ function chipBorderClass(isFirst: boolean, isLast: boolean): string {
   return "border-zinc-300 hover:bg-zinc-50";
 }
 
+/** Unit Page v2 "spotlight" variant: first / senior authors are FEATURED (coral
+ *  border, coral-tint hover); everyone else is a plain strong-border chip. */
+function spotlightChipBorderClass(isFirst: boolean, isLast: boolean): string {
+  return isFirst || isLast
+    ? "border-apollo-coral-tint-border hover:bg-apollo-coral-tint"
+    : "border-apollo-border-strong hover:bg-apollo-page";
+}
+
 function chipRoleLabel(
   isFirst: boolean,
   isLast: boolean,
@@ -71,6 +79,7 @@ export function AuthorChipRow({
   pinnedCwids,
   pmid,
   currentProfileCwid,
+  variant = "default",
 }: {
   authors: AuthorChip[];
   /** CWIDs that must always render visibly regardless of the CHIP_CAP
@@ -86,6 +95,9 @@ export function AuthorChipRow({
   /** Scholar whose profile the chip row is rendered on, when applicable —
    *  enables PersonPopover's self-hover guard + co-pub action. */
   currentProfileCwid?: string;
+  /** "spotlight" — the Unit Page v2 Spotlight chip (28px, 13px, 20px avatar,
+   *  featured-vs-plain borders). Default keeps the site-wide chip unchanged. */
+  variant?: "default" | "spotlight";
 }) {
   if (authors.length === 0) return null;
   // A chip needs a cwid to render the headshot identity. Linked authors
@@ -146,10 +158,16 @@ export function AuthorChipRow({
   }
 
   function renderChip(a: AuthorChip, key: string) {
-    const chipClass = `inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
-      a.isFirst,
-      a.isLast,
-    )}`;
+    const spotlight = variant === "spotlight";
+    const chipClass = spotlight
+      ? `inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full border bg-white py-0 pl-[3px] pr-2.5 text-[13px] text-foreground no-underline transition-colors duration-[120ms] ease-out hover:no-underline ${spotlightChipBorderClass(
+          a.isFirst,
+          a.isLast,
+        )}`
+      : `inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
+          a.isFirst,
+          a.isLast,
+        )}`;
     const inner = (
       <>
         <HeadshotAvatar
@@ -157,6 +175,7 @@ export function AuthorChipRow({
           cwid={a.cwid!}
           preferredName={a.name}
           identityImageEndpoint={a.identityImageEndpoint ?? ""}
+          className={spotlight ? "size-5" : undefined}
         />
         <span>{a.name}</span>
       </>
@@ -202,7 +221,13 @@ export function AuthorChipRow({
   }
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+    <div
+      className={
+        variant === "spotlight"
+          ? "flex flex-wrap items-center gap-1.5"
+          : "mt-2 flex flex-wrap items-center gap-1.5"
+      }
+    >
       {visible.map((a, i) => renderChip(a, `${a.cwid}-${i}`))}
       {overflow > 0 && (
         <span className="inline-flex items-center rounded-full border border-zinc-300 bg-background px-2.5 py-0.5 text-xs text-muted-foreground">

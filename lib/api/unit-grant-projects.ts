@@ -43,6 +43,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
   grantRoleRank,
   groupGrantsByProject,
@@ -385,11 +386,17 @@ export async function buildUnitGrantCards(
       .map((cwid) => {
         const s = scholarMap.get(cwid);
         if (!s) return null;
+        // #536 — a hidden identity class (e.g. a doctoral student PI on an F31)
+        // keeps its name on the card, but ships no slug and no headshot endpoint:
+        // the scholar load above is only `deletedAt: null` (the grant must stay in
+        // the list and the total, #718), so this is the link gate. `GrantCard`
+        // re-checks `roleCategory` so a missed strip still renders unlinked.
+        const linkable = isPubliclyDisplayed(s.roleCategory);
         return {
           name: s.preferredName,
           cwid: s.cwid,
-          slug: s.slug,
-          identityImageEndpoint: identityImageEndpoint(s.cwid),
+          slug: linkable ? s.slug : null,
+          identityImageEndpoint: linkable ? identityImageEndpoint(s.cwid) : null,
           // Unread on this path — see the note on this function. The card
           // component hardcodes its own chip class.
           isFirst: false,

@@ -29,6 +29,14 @@ type DeptPublicationsListProps = {
   pageSize: number;
   sort: PubSort;
   basePath: string;
+  /**
+   * Path that paging and sort links stay on. Defaults to `basePath`; the
+   * research-area view passes `{basePath}/areas/{topic}` so they keep the
+   * area filter.
+   */
+  listBasePath?: string;
+  /** Research-area filter in effect: a removable chip linking to `clearHref`. */
+  activeArea?: { label: string; clearHref: string } | null;
 };
 
 export function DeptPublicationsList(props: DeptPublicationsListProps) {
@@ -48,16 +56,19 @@ function DeptPublicationsListInner({
   pageSize,
   sort,
   basePath,
+  listBasePath,
+  activeArea = null,
 }: DeptPublicationsListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const listPath = listBasePath ?? basePath;
 
   function setSort(next: PubSort) {
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.set("tab", "publications");
     params.set("sort", next);
     params.delete("page");
-    router.push(`${basePath}?${params.toString()}`);
+    router.push(`${listPath}?${params.toString()}`);
   }
 
   function buildHref(p: number): string {
@@ -67,23 +78,40 @@ function DeptPublicationsListInner({
     if (p === 1) params.delete("page");
     else params.set("page", String(p));
     const qs = params.toString();
-    return qs ? `${basePath}?${qs}` : basePath;
+    return qs ? `${listPath}?${qs}` : listPath;
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
 
+  const areaChip = activeArea && (
+    <div className="mb-4 flex">
+      <a
+        href={activeArea.clearHref}
+        aria-label={`Remove research area filter: ${activeArea.label}`}
+        className="border-apollo-slate text-apollo-slate bg-apollo-slate-tint hover:bg-apollo-slate-tint inline-flex min-h-[26px] max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] leading-tight no-underline hover:no-underline"
+      >
+        Research area: {activeArea.label}
+        <span aria-hidden="true">×</span>
+      </a>
+    </div>
+  );
+
   if (total === 0) {
     return (
-      <div className="py-8 text-center">
-        <p className="text-sm text-muted-foreground">No publications listed.</p>
-      </div>
+      <>
+        {areaChip}
+        <div className="py-8 text-center">
+          <p className="text-sm text-muted-foreground">No publications listed.</p>
+        </div>
+      </>
     );
   }
 
   return (
     <>
+      {areaChip}
       <div className="mb-4 flex items-center justify-between gap-4">
         <span className="text-sm text-muted-foreground">
           Showing {start.toLocaleString()}&ndash;{end.toLocaleString()} of{" "}

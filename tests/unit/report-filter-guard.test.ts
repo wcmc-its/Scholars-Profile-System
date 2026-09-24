@@ -166,8 +166,8 @@ const WHO_FILTER_ALLOWLIST: Record<string, { hits: number; reason: string }> = {
     reason: "public center page role chip: members of the center narrowed to the chip's role group",
   },
   "lib/api/unit-members.ts": {
-    hits: 6,
-    reason: "public unit page role chip (#2537): the unit's members narrowed to the chip's role group (3 code + 3 docblock/comment lines)",
+    hits: 2,
+    reason: "public unit page role chip (#2537): the unit's members narrowed to the chip's role group (methods-facet match + page-row re-guard)",
   },
   "lib/api/match-researchers.ts": {
     hits: 2,
