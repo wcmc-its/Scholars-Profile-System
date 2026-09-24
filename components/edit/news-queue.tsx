@@ -185,6 +185,12 @@ function decisionErrorMessage(status: number, code: string | undefined): string 
   return "We couldn't record that decision. Please try again.";
 }
 
+const REPEAT_STATUS_LABEL: Record<string, string> = {
+  pending: "also pending",
+  published: "already approved",
+  rejected: "already rejected",
+};
+
 /** The scholar identity block a reviewer weighs: name, title, department, and the
  *  match likelihood + basis for a name-detected candidate. `decidedNote` rides on
  *  the secondary line (Approved tab only — see the call site). */
@@ -242,6 +248,25 @@ function Candidate({ row, decidedNote }: { row: NewsQueueRow; decidedNote?: stri
         {[row.title, row.department, row.roleLabel].filter(Boolean).join(" · ") || "—"}
         {decidedNote ? ` · ${decidedNote}` : ""}
       </p>
+      {/* Media Highlights: a probable repeat of another clip for this scholar
+          (syndicated copy, re-airing). Advisory — the reviewer decides. */}
+      {row.possibleRepeatOf ? (
+        <p
+          className="border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber mt-1 inline-block rounded-sm border px-1.5 py-0.5 text-[11px]"
+          data-testid="news-queue-possible-repeat"
+        >
+          Possible repeat of{" "}
+          <a
+            href={row.possibleRepeatOf.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2"
+          >
+            “{row.possibleRepeatOf.title}”
+          </a>{" "}
+          ({REPEAT_STATUS_LABEL[row.possibleRepeatOf.status] ?? row.possibleRepeatOf.status})
+        </p>
+      ) : null}
       {/* Name-in-context snippet (#2578 follow-up) — the raw article text around
           the matched name, so a reviewer can judge a candidate (e.g. an
           endowed-chair false positive like the O. Wayne Isom case the basis
