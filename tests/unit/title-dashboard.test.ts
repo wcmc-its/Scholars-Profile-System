@@ -102,4 +102,14 @@ describe("filterTitleDashboard", () => {
     expect(filterTitleDashboard([chair, working, pinned], p("pinned=no"))).toEqual([chair, working]);
     expect(filterTitleDashboard([chair, working, pinned], p("reason=bogus&band=leadership"))).toHaveLength(3);
   });
+
+  it("bands a pinned row by the pin's rank, not the ladder winner's", () => {
+    const pinnedDown = row(
+      { edPrimaryTitle: "Professor of Surgery", appointmentTitles: [{ title: "Chair of Surgery" }] },
+      { override: "Professor of Surgery", roles: { chair: true } },
+    )!;
+    const p = (q: string) => parseTitleDashboardParams(new URLSearchParams(q));
+    expect(filterTitleDashboard([pinnedDown], p("band=other"))).toEqual([pinnedDown]);
+    expect(filterTitleDashboard([pinnedDown], p("band=leadership"))).toEqual([]);
+  });
 });

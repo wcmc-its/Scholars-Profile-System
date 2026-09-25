@@ -32,7 +32,7 @@ rank number.
 | 7 | Associate / Assistant Dean | Associate Dean for Education; Assistant Dean |
 | 8 | Associate / Assistant Vice Provost | Associate Vice Provost; Assistant Vice President |
 | 8.5 | Vice Chair | Vice Chair for Research |
-| 9 | Endowed / named professorship | Example Family Professor of Medicine; Chair in Example Studies |
+| 9 | Endowed title of any academic rank (incl. endowed Clinical / Research / Educational Scholars) | Example Family Professor of Medicine; Chair in Example Studies; Example Family Research Scholar in Oncology |
 | 10 | Unit-based Center / Institute Director | Director of a department's own center or an untracked institute |
 | 11 | Unit-based Program Director | Director, Residency Program |
 | 12 | Academic rank (Professor, Instructor …) | Professor of Medicine; Assistant Professor; Instructor |
@@ -45,6 +45,9 @@ the floor for everything unmatched.
 Matching is most specific first: "Associate Vice Provost" never reads as Vice Provost,
 "Senior Associate Dean" never as Associate Dean, and "Vice Dean" never as Dean. A named
 chair *in* a field ("Chair in Example Studies") is an endowed title, not a department chair.
+Endowed Clinical, Research and Educational Scholars count as endowed at any academic rank
+(External Affairs, 2026-09-25); like a professorship, the title needs a name in front of it, so a
+bare "Research Scholar" is not endowed.
 
 ## The candidate sources
 

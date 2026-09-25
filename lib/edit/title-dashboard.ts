@@ -256,7 +256,8 @@ export function filterTitleDashboard(
     if (p.pinned !== null && (r.pin !== null) !== p.pinned) return false;
     if (p.rule && winningRule(r) !== p.rule) return false;
     if (p.band) {
-      const rank = r.winner?.rank ?? TITLE_RANK.unranked;
+      // The DISPLAYED title's rank (a pin's, when pinned) — what the Rank column shows.
+      const rank = winningRank(r) ?? TITLE_RANK.unranked;
       const band = isLeadershipRank(rank) ? "leadership" : rank <= TITLE_RANK.unitCenterDirector ? "director" : "other";
       if (band !== p.band) return false;
     }
