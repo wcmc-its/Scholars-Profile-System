@@ -12,7 +12,10 @@
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
  */
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { Plus } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { AllUnitsDirectory } from "@/components/edit/all-units-directory";
 import { ManageableUnitsIndex } from "@/components/edit/manageable-units-index";
@@ -75,21 +78,40 @@ export default async function EditUnitsPage() {
       // here), unlike the others.
       unitsTab
     >
-        <h1 className="mb-1 text-xl font-bold">Org units</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Departments, divisions, and centers you can edit — their description, leadership, and (for
-          centers) roster. Select one to edit it.
-        </p>
-        <ManageableUnitsIndex
-          units={units}
-          isSuperuser={session.isSuperuser}
-          canFindAnyUnit={canSeeAllUnitsDirectory}
-        />
-        {canSeeAllUnitsDirectory && (
-          <section className="mt-10">
-            <AllUnitsDirectory units={directoryUnits} isSuperuser={session.isSuperuser} />
-          </section>
+      <div className="mb-6 flex flex-wrap items-end gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-[300px]">
+          <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
+            Org units
+          </h1>
+          <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
+            {canSeeAllUnitsDirectory
+              ? `Every department, division, center and core${
+                  session.isSuperuser ? ", including retired ones" : ""
+                }. Select a unit to edit its description, leadership and (for centers) roster.`
+              : "Departments, divisions, and centers you can edit — their description, leadership, and (for centers) roster. Select one to edit it."}
+          </p>
+        </div>
+        {/* Create a unit is superuser-only — a comms_steward edits existing units
+            but never creates (or deletes) them. */}
+        {session.isSuperuser && (
+          <Button asChild variant="apollo">
+            <Link href="/edit/unit/new" data-testid="all-units-create">
+              <Plus className="size-4" aria-hidden />
+              Create a unit
+            </Link>
+          </Button>
         )}
+      </div>
+      <ManageableUnitsIndex
+        units={units}
+        isSuperuser={session.isSuperuser}
+        canFindAnyUnit={canSeeAllUnitsDirectory}
+      />
+      {canSeeAllUnitsDirectory && (
+        <section className={units.total > 0 ? "mt-10" : undefined}>
+          <AllUnitsDirectory units={directoryUnits} heading={units.total > 0} />
+        </section>
+      )}
     </ConsoleShell>
   );
 }
