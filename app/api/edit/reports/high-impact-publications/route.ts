@@ -14,7 +14,7 @@ import {
   buildHighImpactWorkbook,
   HIGH_IMPACT_LIST_CAP,
   loadHighImpactList,
-  loadHighImpactTotal,
+  loadHighImpactTotals,
   parseHighImpactParams,
 } from "@/lib/edit/high-impact-pubs-report";
 import { getReportScopes, HIGH_IMPACT_PUBS_REPORT } from "@/lib/edit/report-access";
@@ -30,11 +30,11 @@ export async function GET(request: Request) {
 
   const params = parseHighImpactParams(new URL(request.url).searchParams);
   const generatedAt = new Date();
-  const total = await loadHighImpactTotal(params);
-  const list = total <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;
+  const { articles } = await loadHighImpactTotals(params);
+  const list = articles <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;
   const labels = params.units.length > 0 ? unitLabels(await loadDataQualityFacets(db.read)) : undefined;
-  const buffer = await buildHighImpactWorkbook(params, total, list, generatedAt, labels);
-  const filename = `Top clinical and high-impact journal publications ${params.from}-${params.to} ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
+  const buffer = await buildHighImpactWorkbook(params, articles, list, generatedAt, labels);
+  const filename = `Top clinical and high-impact journal publications ${params.basis === "fy" ? `FY${params.from}-FY${params.to}` : `${params.from}-${params.to}`} ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
 
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,
