@@ -3,11 +3,12 @@
  * scoped to any particular unit's grants, so zero reportable units for them
  * is an empty roster, not a nonexistent route. Everyone else with zero
  * reportable units still 404s. Scoped narrowly to this one behavior, not a
- * full page test suite — the page's other paths (?center=, 1 unit, 2+ units)
- * are unchanged by this fix. Also home to the program row's "Who can run
- * this report" props (the grant rows via `listReportAccess`, read only when
- * the row is shown; `canManage` per session; unit rows get the unit rule),
- * since this is the scaffold that already drives the program row.
+ * full page test suite — the page's other paths (?center=, 1 unit, 2+ units,
+ * the URL filters) live in `edit-reports-index-page-mode.test.tsx`. Also home to each
+ * row's access text (`accessText`, computed on the server from the grant rows
+ * via `listReportAccess`, read only when the row is shown; the rows
+ * themselves never reach the client; unit rows get the unit rule), since this
+ * is the scaffold that already drives the program row.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -50,7 +51,6 @@ vi.mock("@/lib/edit/cancer-center-reports", () => ({
 }));
 vi.mock("@/components/edit/reports-index", () => ({
   ReportsIndex: mockReportsIndex,
-  SingleUnitReportsTable: () => null,
 }));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: ({ children }: { children: React.ReactNode }) => children,
@@ -151,13 +151,12 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     const result = await EditReportsIndexPage({ searchParams: sp() });
     expect(mockNotFound).not.toHaveBeenCalled();
     const index = findByType(result, mockReportsIndex);
-    const units = index!.props.units as Array<{ kind: string; code: string; reports: Array<{ n: number; slug: string; access: unknown }> }>;
+    const units = index!.props.units as Array<{ kind: string; code: string; reports: Array<{ n: number; slug: string; accessText: string }> }>;
     expect(units.map((u) => u.kind)).toEqual(["institution"]);
     expect(units[0].reports.map((r) => r.n)).toEqual([8]);
     expect(units[0].reports[0].slug).toBe("article-count");
-    expect(units[0].reports[0].access).toEqual(
-      expect.objectContaining({ mode: "person", reportKey: "article-count", note: "admins note" }),
-    );
+    // The report header's audience for report 8, not the person-mode default.
+    expect(units[0].reports[0].accessText).toBe("All unit administrators");
   });
 
   it("a report 9 grant holder with zero unit grants → the institution row with report 9 alone", async () => {
@@ -168,14 +167,12 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     const units = findByType(result, mockReportsIndex)!.props.units as Array<{
       kind: string;
       editHref: string;
-      reports: Array<{ n: number; access: unknown }>;
+      reports: Array<{ n: number; accessText: string }>;
     }>;
     expect(units.map((u) => u.kind)).toEqual(["institution"]);
     expect(units[0].reports.map((r) => r.n)).toEqual([9]);
     expect(units[0].editHref).toBe("/edit/reports/high-impact-publications");
-    expect(units[0].reports[0].access).toEqual(
-      expect.objectContaining({ mode: "person", reportKey: "high-impact-publications", canManage: false }),
-    );
+    expect(units[0].reports[0].accessText).toBe("Superusers and comms stewards");
   });
 
   it("scoped Owner/Curator with zero grants → still 404s", async () => {
@@ -184,13 +181,12 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(mockReportsIndex).not.toHaveBeenCalled();
   });
 
-  it("a report_access holder with zero unit grants → the index with the program row alone (bands), no 404", async () => {
+  it("a report_access holder with zero unit grants → the index with the program row alone, no 404", async () => {
     mockGetEditSession.mockResolvedValue(CURATOR);
     mockGetReportScopes.mockResolvedValue(new Set(["md"]));
     const result = await EditReportsIndexPage({ searchParams: sp() });
     expect(mockNotFound).not.toHaveBeenCalled();
     const index = findByType(result, mockReportsIndex);
-    expect(index?.props.mode).toBe("bands");
     expect(index?.props.units).toEqual([
       expect.objectContaining({ kind: "program", reports: [expect.objectContaining({ n: 7 })] }),
     ]);
@@ -201,7 +197,6 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     const result = await EditReportsIndexPage({ searchParams: sp() });
     const index = findByType(result, mockReportsIndex);
-    expect(index?.props.mode).toBe("table");
     expect((index?.props.units as Array<{ kind: string }>).map((u) => u.kind)).toEqual(["program"]);
   });
 
@@ -216,9 +211,9 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
       {
         n: 7,
         slug: "mentored-publications",
-        label: "7. Mentored publications",
+        name: "Mentored publications",
         description: expect.stringContaining("Access is granted per person."),
-        access: expect.objectContaining({ mode: "person" }),
+        accessText: "Superusers and comms stewards",
       },
     ]);
 
@@ -240,14 +235,14 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
         n: 7,
         // The row's slug too, so the index links straight to the renamed address.
         slug: "mentee-co-publications",
-        label: "7. Mentee co-publications",
+        name: "Mentee co-publications",
         description: "Edited blurb.",
-        access: expect.objectContaining({ mode: "person" }),
+        accessText: "Superusers and comms stewards",
       },
     ]);
   });
 
-  it("the program row's popover props: the grant rows (ISO dates), the shared scope options, canManage per session; unit rows get the unit rule; no read when the row is hidden", async () => {
+  it("each row's access reaches the client as TEXT only — '+ N others' for the grant rows, never the rows themselves; unit rows get the unit rule; no read when the row is hidden", async () => {
     // Hidden (no scopes) → `listReportAccess` is never read.
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     await EditReportsIndexPage({ searchParams: sp() });
@@ -271,18 +266,13 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(mockListReportAccess).toHaveBeenCalledTimes(1);
     expect(mockListReportAccess).toHaveBeenCalledWith("mentored-publications");
     const holderUnits = findByType(holder, mockReportsIndex)!.props.units as Array<{
-      reports: Array<{ access: unknown }>;
+      reports: Array<Record<string, unknown>>;
     }>;
-    expect(holderUnits[0].reports[0].access).toEqual({
-      mode: "person",
-      reportKey: "mentored-publications",
-      initialRows: [{ ...row, grantedAt: "2026-09-18T12:00:00.000Z" }],
-      scopeOptions: [
-        ["*", "All programs"],
-        ["md", "AOC"],
-      ],
-      canManage: false,
-    });
+    expect(holderUnits[0].reports[0].accessText).toBe("Superusers and comms stewards + 1 other");
+    expect(holderUnits[0].reports[0]).not.toHaveProperty("access");
+    // Nothing of the grantee — cwid, name, grantor — is in the client props.
+    const payload = JSON.stringify(holderUnits);
+    for (const leaked of ["usr0001", "Holder Person", "adm0001"]) expect(payload).not.toContain(leaked);
 
     // A superuser with a unit too: canManage=true on the program row; the
     // unit's own reports carry the unit rule.
@@ -295,13 +285,22 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     const superuser = await EditReportsIndexPage({ searchParams: sp() });
     const units = findByType(superuser, mockReportsIndex)!.props.units as Array<{
       kind: string;
-      reports: Array<{ n: number; access: unknown }>;
+      reports: Array<{ n: number; accessText: string }>;
     }>;
-    expect(units.map((u) => u.kind)).toEqual(["center", "center", "program"]);
-    expect(units[0].reports.map((r) => r.access)).toEqual(Array(6).fill({ mode: "unit" }));
-    expect(units[2].reports[0].access).toEqual(
-      expect.objectContaining({ mode: "person", canManage: true }),
-    );
+    // Pseudo-units lead the list (Institution-wide, then Mentoring programs).
+    expect(units.map((u) => u.kind)).toEqual(["program", "center", "center"]);
+    expect(units[1].reports.map((r) => r.accessText)).toEqual(Array(6).fill("Unit owners and curators"));
+    expect(units[0].reports[0].accessText).toBe("Superusers and comms stewards + 1 other");
+  });
+
+  it("group order: Institution-wide, then Mentoring programs, then units", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockGetReportScopes.mockResolvedValue(new Set(["*"]));
+    mockCanViewArticleCount.mockResolvedValue(true);
+    mockLoadReportableUnits.mockResolvedValue([{ code: "a", name: "A", kind: "center", centerType: "center" }]);
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    const units = findByType(result, mockReportsIndex)!.props.units as Array<{ kind: string }>;
+    expect(units.map((u) => u.kind)).toEqual(["institution", "program", "center"]);
   });
 
   it("superuser with no report grant sees no program row when scopes are empty", async () => {

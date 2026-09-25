@@ -55,7 +55,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { ADMIN_AUDIENCE, type ReportAccessPopoverProps } from "@/components/edit/report-access-popover";
+import type { ReportAccessPopoverProps } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -73,6 +73,7 @@ import {
   getReportScopes,
 } from "@/lib/edit/report-access";
 import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
+import { ADMIN_AUDIENCE } from "@/lib/edit/report-access-summary";
 import {
   isReportKey,
   loadReportMeta,

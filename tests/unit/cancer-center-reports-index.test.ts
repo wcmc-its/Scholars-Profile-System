@@ -228,7 +228,14 @@ describe("loadReportableUnitsForActor", () => {
 function fakeLivenessDb(
   opts: {
     collab?: Array<{ centerCode: string; _count: { _all: number }; _max: { lastRefreshedAt: Date | null } }>;
-    funding?: Array<{ centerCode: string; _count: { _all: number }; _max: { lastRefreshedAt: Date | null } }>;
+    /** (centerCode, reportingCycle, cancerRelevantPercentSource) groups. */
+    funding?: Array<{
+      centerCode: string;
+      reportingCycle: string;
+      cancerRelevantPercentSource: string;
+      _count: { _all: number };
+      _max: { lastRefreshedAt: Date | null };
+    }>;
     /** Centers to give exactly one active, visible member — backs
      *  `countActiveCenterMembersByCode`'s real query shape rather than
      *  re-deriving its own groupBy (loadReportLiveness reuses that helper). */
@@ -258,6 +265,16 @@ function fakeLivenessDb(
   };
 }
 
+function fundingGroup(
+  centerCode: string,
+  reportingCycle: string,
+  cancerRelevantPercentSource: string,
+  count: number,
+  lastRefreshedAt: Date | null,
+) {
+  return { centerCode, reportingCycle, cancerRelevantPercentSource, _count: { _all: count }, _max: { lastRefreshedAt } };
+}
+
 describe("loadReportLiveness", () => {
   it("returns an empty map with no queries for an empty unit list", async () => {
     const db = fakeLivenessDb();
@@ -270,7 +287,6 @@ describe("loadReportLiveness", () => {
     const d1 = new Date("2026-08-11T00:00:00Z");
     const db = fakeLivenessDb({
       collab: [{ centerCode: "meyer", _count: { _all: 3 }, _max: { lastRefreshedAt: d1 } }],
-      funding: [{ centerCode: "meyer", _count: { _all: 0 }, _max: { lastRefreshedAt: null } }],
       activeMemberCenterCodes: ["meyer"],
     });
     const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
@@ -280,7 +296,7 @@ describe("loadReportLiveness", () => {
     expect(meyer?.lastRefreshedAt).toEqual(d1);
     expect(meyer?.perReport).toEqual([
       { n: 1, live: true, lastRefreshedAt: d1 },
-      { n: 2, live: false, lastRefreshedAt: null },
+      { n: 2, live: false, lastRefreshedAt: null, reportingCycle: null, toReview: 0 },
       { n: 3, live: true, lastRefreshedAt: null },
       { n: 4, live: true, lastRefreshedAt: null },
       { n: 5, live: true, lastRefreshedAt: null },
@@ -294,7 +310,7 @@ describe("loadReportLiveness", () => {
     expect(result.get("empty_center")).toEqual({
       perReport: [
         { n: 1, live: false, lastRefreshedAt: null },
-        { n: 2, live: false, lastRefreshedAt: null },
+        { n: 2, live: false, lastRefreshedAt: null, reportingCycle: null, toReview: 0 },
         { n: 3, live: false, lastRefreshedAt: null },
         { n: 4, live: false, lastRefreshedAt: null },
         { n: 5, live: false, lastRefreshedAt: null },
@@ -311,10 +327,63 @@ describe("loadReportLiveness", () => {
     const newer = new Date("2026-08-12T00:00:00Z");
     const db = fakeLivenessDb({
       collab: [{ centerCode: "c1", _count: { _all: 1 }, _max: { lastRefreshedAt: older } }],
-      funding: [{ centerCode: "c1", _count: { _all: 1 }, _max: { lastRefreshedAt: newer } }],
+      funding: [fundingGroup("c1", "osra-2026-07-14", "llm", 1, newer)],
     });
     const result = await loadReportLiveness([{ code: "c1", kind: "center" }], db as never);
     expect(result.get("c1")?.lastRefreshedAt).toEqual(newer);
+  });
+
+  it("report 2 carries the LATEST cycle and that cycle's rows no human has reviewed yet", async () => {
+    const d = (s: string) => new Date(`${s}T00:00:00Z`);
+    const db = fakeLivenessDb({
+      // In the order the database returns them (`reportingCycle desc`).
+      funding: [
+        fundingGroup("meyer", "osra-2026-07-14", "llm", 50, d("2026-07-14")),
+        fundingGroup("meyer", "osra-2026-07-14", "human", 30, d("2026-07-20")),
+        // Any source other than 'human' is still awaiting review.
+        fundingGroup("meyer", "osra-2026-07-14", "import", 8, d("2026-07-14")),
+        // An older cycle's unreviewed rows never count toward today's review.
+        fundingGroup("meyer", "osra-2026-01-10", "llm", 40, d("2026-01-10")),
+      ],
+    });
+    const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
+    expect(result.get("meyer")?.perReport[1]).toEqual({
+      n: 2,
+      live: true,
+      lastRefreshedAt: d("2026-07-20"),
+      reportingCycle: "osra-2026-07-14",
+      toReview: 58,
+    });
+    // One grouping serves all three signals.
+    expect(db.cancerCenterFundingAward.groupBy).toHaveBeenCalledTimes(1);
+    expect(db.cancerCenterFundingAward.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ by: ["centerCode", "reportingCycle", "cancerRelevantPercentSource"] }),
+    );
+  });
+
+  it("the latest cycle is the DATABASE's first under reportingCycle desc, as the NCI 2A route resolves it", async () => {
+    // MySQL's case-insensitive collation puts `Osra-…` above `fytd…`; a JS
+    // string compare would pick `fytd…` (lowercase sorts after uppercase), and
+    // the index would then label and count a cycle the report doesn't open on.
+    const db = fakeLivenessDb({
+      funding: [
+        fundingGroup("meyer", "Osra-2026-01-10", "llm", 5, null),
+        fundingGroup("meyer", "fytd26-2026-07-14", "llm", 9, null),
+      ],
+    });
+    const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
+    expect(result.get("meyer")?.perReport[1]).toMatchObject({ reportingCycle: "Osra-2026-01-10", toReview: 5 });
+    expect(db.cancerCenterFundingAward.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { reportingCycle: "desc" } }),
+    );
+  });
+
+  it("a fully reviewed latest cycle reports toReview 0", async () => {
+    const db = fakeLivenessDb({
+      funding: [fundingGroup("meyer", "osra-2026-07-14", "human", 12, new Date("2026-07-14T00:00:00Z"))],
+    });
+    const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
+    expect(result.get("meyer")?.perReport[1]).toMatchObject({ live: true, toReview: 0 });
   });
 
   it("a department only carries reports 3 & 6 — no reports 1/2/4/5 entries at all", async () => {

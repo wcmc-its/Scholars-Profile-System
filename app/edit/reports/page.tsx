@@ -26,51 +26,51 @@
  * per KIND does not. Each card's name and blurb come from `report_meta`
  * (`lib/edit/report-meta.ts`, superuser-editable), read once per request.
  *
- * Reports IA redesign (2026-08-14): `?center=` now addresses one of
- * POTENTIALLY SEVERAL reportable units, not just "the second center once one
- * exists." With `?center=` given, behavior is unchanged (today's single-unit
- * list) for a center; an accompanying `?kind=department|division` addresses a
- * department/division instead (2026-08-16), and `?kind=core` a core facility
- * by its core id (2026-09-06). Without `?center=`: 0 reportable
- * units → 404 for a scoped Owner/Curator/comms_steward, but an empty index
- * for a superuser (Gap 5, 2026-08-14 handoff — a superuser isn't scoped to
- * any grants, so an empty roster isn't "this route doesn't exist"); exactly
- * 1 → the same single-unit list, resolved automatically (unchanged end-user
- * behavior); 2+ → the cross-unit index (`ReportsIndex`), scoped to the actor
- * (org-wide for a superuser/comms_steward, else their own `UnitAdmin`
- * grants) — a table with a filter rail for a superuser/comms_steward (`2a`,
- * no unit-count minimum, #2455), otherwise every unit banded inline on one
- * page (`1a`).
+ * Reports IA redesign (2026-08-14): `?center=` addresses one of POTENTIALLY
+ * SEVERAL reportable units; an accompanying `?kind=department|division|core`
+ * addresses a department/division/core (by its core id) instead. Without
+ * `?center=`: 0 reportable units → 404 for a scoped Owner/Curator/
+ * comms_steward, but an empty index for a superuser (Gap 5, 2026-08-14 — a
+ * superuser isn't scoped to any grants, so an empty roster isn't "this route
+ * doesn't exist"); otherwise every reportable unit, scoped to the actor
+ * (org-wide for a superuser/comms_steward, else their own `UnitAdmin` grants).
+ *
+ * Reports Index redesign (2026-09-25): whatever the unit set, it renders as
+ * ONE list grouped by unit (`ReportsIndex`) — Institution-wide and Mentoring
+ * programs first, then the units. A `?center=` view is that list with one
+ * unit group. The search / scope / In progress filters ride the URL (`q`,
+ * `scope`, `review=1`) so a shared link reproduces the view.
  *
  * Program reports (`/edit/reports/7`, Mentored publications) are NOT
  * unit-scoped — their gate is a `report_access` row (`getReportScopes`,
- * `lib/edit/report-access.ts`). A holder gets one extra "Program reports"
- * card under whichever unit view above they'd otherwise see (superuser /
- * comms_steward always; a plain holder with zero reportable units gets the
- * card alone instead of the 404). The unit-scoped rendering is untouched.
+ * `lib/edit/report-access.ts`); reports 8/9 likewise. A holder gets the
+ * pseudo-unit group in whichever list they land on (a plain holder with zero
+ * reportable units gets it alone instead of the 404).
  *
- * Every report row also carries "Who can run this report"
- * (`ReportAccessPopover`, rendered by `ReportsIndex`): this page builds each
- * report's popover PROPS (`ReportsIndexReport.access`) — the static unit rule
- * for reports 1–6; for report 7 the grant rows (`listReportAccess`, read once
- * per request and only when the program row is shown), the shared scope
- * options and `canManageReportAccess` — exactly what `/edit/reports/7` hands
- * its own header, so the two never disagree.
+ * Each row states who can open the report as plain text: this page builds
+ * each report's access props — the static unit rule for reports 1–6, the
+ * grant rows for 7/8/9 (`loadReportAccessPopoverProps`), exactly what the
+ * report's own header gets — and hands the client only their one-line
+ * `accessSummary(...).text` (`ReportsIndexReport.accessText`, the header
+ * badge's own string source), so the two never disagree and the grantee list
+ * behind "+ N others" stays on the server. Access is managed from the report
+ * page's Edit details sheet, not here.
  */
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import type { ReportAccessPopoverPersonProps } from "@/components/edit/report-access-popover";
+import type {
+  ReportAccessPopoverPersonProps,
+  ReportAccessPopoverProps,
+} from "@/components/edit/report-access-popover";
 import {
   ReportsIndex,
-  SingleUnitReportsTable,
   type ReportsIndexReport,
   type ReportsIndexUnit,
 } from "@/components/edit/reports-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
-import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import {
   loadReportLiveness,
@@ -81,7 +81,6 @@ import {
   type ReportLiveness,
   type ReportNumber,
   type ReportableUnitKind,
-  type ReportsContext,
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
@@ -93,7 +92,9 @@ import {
   MENTORED_PUBS_REPORT,
 } from "@/lib/edit/report-access";
 import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
-import { loadReportMeta, reportLabel, type ReportKey, type ReportMeta } from "@/lib/edit/report-meta";
+import { accessSummary, ADMIN_AUDIENCE } from "@/lib/edit/report-access-summary";
+import { parseReportsIndexScope } from "@/lib/edit/reports-index-scope";
+import { loadReportMeta, type ReportKey, type ReportMeta } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -110,7 +111,7 @@ type ReportDef = ReportsIndexReport & { n: ReportNumber };
 
 /** The per-request report catalog — `all` is every report this console can
  *  show (reports 1–6, the full catalog, not a per-kind one); `byKind[kind]`
- *  is what `ReportsIndex`/`SingleUnitReportsTable` render for a unit of that
+ *  is what `ReportsIndex` renders for a unit of that
  *  kind, resolved from `REPORT_NUMBERS_BY_KIND` (`lib/edit/cancer-center-
  *  reports.ts`) so the two lists can never drift. Department/division/core
  *  show only Publications + NIH-funded pubs — no dead card that 404s/empty-
@@ -124,22 +125,21 @@ type ReportCatalog = {
 
 /** One index card off the loaded meta: the numbered label + the one-line
  *  summary + the report's current slug (the row's link target,
- *  `/edit/reports/<slug>`) + the report's "Who can run this report" popover
- *  props. `meta` always has every key (`loadReportMeta` merges defaults).
+ *  `/edit/reports/<slug>`) + who can open it, as text (never the props). `meta` always has every key (`loadReportMeta` merges defaults).
  *  Generic in `n` so the same helper serves the unit catalog (`ReportNumber`,
  *  1–6) and the program pseudo-unit's report 7. */
 function catalogEntry<N extends ReportsIndexReport["n"]>(
   meta: Map<ReportKey, ReportMeta>,
   n: N,
-  access: ReportsIndexReport["access"],
+  access: ReportAccessPopoverProps,
 ): ReportsIndexReport & { n: N } {
   const m = meta.get(String(n) as ReportKey);
   if (!m) throw new Error(`report_meta: no entry for report ${n}`);
-  return { n, slug: m.slug, label: reportLabel(m), description: m.summary, access };
+  return { n, slug: m.slug, name: m.name, description: m.summary, accessText: accessSummary(access).text };
 }
 
 function buildCatalog(meta: Map<ReportKey, ReportMeta>): ReportCatalog {
-  // Reports 1–6 are unit-gated: the popover states the Owner/Curator rule.
+  // Reports 1–6 are unit-gated: the Owner/Curator rule.
   const all: readonly ReportDef[] = ([1, 2, 3, 4, 5, 6] as const).map((n) =>
     catalogEntry(meta, n, { mode: "unit" }),
   );
@@ -163,7 +163,7 @@ function parseKind(raw: string | undefined): ReportableUnitKind {
 export default async function EditReportsIndexPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ center?: string; kind?: string }>;
+  searchParams?: Promise<{ center?: string; kind?: string; q?: string; scope?: string; review?: string }>;
 }) {
   const session = await getEffectiveEditSession();
   if (!session) {
@@ -195,11 +195,12 @@ export default async function EditReportsIndexPage({
   const institutionReports = [
     ...(canArticleCount
       ? [
-          catalogEntry(
-            meta,
-            8,
-            await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE),
-          ),
+          // The report header's own props for report 8 (`[report]/page.tsx`),
+          // audience included, so the row and the badge say the same thing.
+          catalogEntry(meta, 8, {
+            ...(await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)),
+            audience: ADMIN_AUDIENCE,
+          }),
         ]
       : []),
     ...(highImpactScopes.size > 0
@@ -207,15 +208,18 @@ export default async function EditReportsIndexPage({
       : []),
   ];
   const institutionUnit = institutionReports.length > 0 ? buildInstitutionUnit(institutionReports) : null;
-  const extraUnits = [programUnit, institutionUnit].filter((u): u is ReportsIndexUnit => u !== null);
+  // Group order on the index: Institution-wide, then Mentoring programs, then units.
+  const extraUnits = [institutionUnit, programUnit].filter((u): u is ReportsIndexUnit => u !== null);
 
-  const { center, kind: kindParam } = (await searchParams) ?? {};
-  const kind = parseKind(kindParam);
+  const params = (await searchParams) ?? {};
+  const { center, kind: kindParam } = params;
+  let baseUnits: ReadonlyArray<{ code: string; kind: ReportableUnitKind; name: string }>;
   if (center) {
-    // Unchanged for a center: an explicit `?center=` always addresses exactly
-    // one unit, validated against the CenterProgram taxonomy gate. A
-    // department/division `?center=` has no equivalent taxonomy to validate
-    // against — `loadReportsContext` below is the real existence/authz gate.
+    // An explicit `?center=` addresses exactly one unit, validated against the
+    // CenterProgram taxonomy gate for a center. A department/division/core has
+    // no taxonomy to validate against — `loadReportsContext` is the real
+    // existence/authz gate for every kind.
+    const kind = parseKind(kindParam);
     const code = kind === "center" ? await resolveReportsCenterCode(db.read, center) : center;
     const ctx = await loadReportsContext(code, session, db.read, kind);
     if (ctx === null)
@@ -224,108 +228,58 @@ export default async function EditReportsIndexPage({
           <ForbiddenEditPage variant="unit" targetEntity={code} />
         </ConsoleShell>
       );
-    return (
-      <SingleUnitReports
-        ctx={ctx}
-        code={code}
-        kind={kind}
-        perReport={await loadSingleUnitPerReport(code, kind, catalog)}
-        extraUnits={extraUnits}
-        catalog={catalog}
-        {...shell}
-      />
-    );
-  }
-
-  const reportableUnits = await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
-  // Gap 5 (2026-08-14 handoff): a superuser isn't scoped to any particular
-  // unit's grants, so zero reportable units for them isn't "this route doesn't
-  // exist" the way it is for a scoped Owner/Curator/comms_steward with no
-  // grants at all — it's an empty roster. Fall through to the bands view below,
-  // which renders gracefully on an empty `units` array; everyone else still 404s.
-  if (reportableUnits.length === 0 && !session.isSuperuser) {
-    // A `report_access` holder or an administrator with no unit grant at
-    // all still has somewhere to go: the pseudo-unit rows alone, not the 404.
-    if (extraUnits.length === 0) notFound();
-    return (
-      <ConsoleShell active="reports" reportsTab {...shell}>
-        <h1 className="mb-1 text-xl font-bold">Reports</h1>
-        <p className="text-muted-foreground text-sm">
-          Advisory only: every report reads precomputed data; nothing here writes to the roster.
-        </p>
-        <div className="apollo-card mt-5">
-          <ReportsIndex units={extraUnits} mode="bands" />
-        </div>
-      </ConsoleShell>
-    );
-  }
-
-  if (reportableUnits.length === 1) {
-    const unit = reportableUnits[0];
-    const ctx = await loadReportsContext(unit.code, session, db.read, unit.kind);
-    if (ctx === null)
-      return (
-        <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
-          <ForbiddenEditPage variant="unit" targetEntity={unit.code} />
-        </ConsoleShell>
-      );
-    return (
-      <SingleUnitReports
-        ctx={ctx}
-        code={unit.code}
-        kind={unit.kind}
-        perReport={await loadSingleUnitPerReport(unit.code, unit.kind, catalog)}
-        extraUnits={extraUnits}
-        catalog={catalog}
-        {...shell}
-      />
-    );
+    baseUnits = [{ code, kind, name: ctx.unit.name }];
+  } else {
+    baseUnits = await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
+    // Gap 5: zero reportable units is an empty roster for a superuser, a 404
+    // for everyone else — unless a pseudo-unit (report 7/8/9) gives them
+    // somewhere to go.
+    if (baseUnits.length === 0 && !session.isSuperuser && extraUnits.length === 0) notFound();
   }
 
   const liveness = await loadReportLiveness(
-    reportableUnits.map((u) => ({ code: u.code, kind: u.kind })),
+    baseUnits.map((u) => ({ code: u.code, kind: u.kind })),
     db.read,
   );
-  const units: ReportsIndexUnit[] = reportableUnits.map((u) => {
-    const l = liveness.get(u.code);
-    const reports = catalog.byKind[u.kind];
-    return {
-      code: u.code,
-      kind: u.kind,
-      name: u.name,
-      centerType: u.kind === "center" ? u.centerType : null,
-      editHref: unitEditHref(u.kind, u.code),
-      liveCount: l?.liveCount ?? 0,
-      totalCount: l?.totalCount ?? reports.length,
-      lastRefreshedAt: l?.lastRefreshedAt?.toISOString() ?? null,
-      reports,
-      perReport: serializePerReport(l, reports),
-    };
-  });
-  units.push(...extraUnits);
-  // 2a (table + filter rail) for a superuser/comms_steward at any unit count
-  // ≥2 — no size threshold; 1a (every unit banded inline) for everyone else.
-  const mode = session.isSuperuser || session.isCommsSteward ? "table" : "bands";
+  const units: ReportsIndexUnit[] = [
+    ...extraUnits,
+    ...baseUnits.map((u) => {
+      const reports = catalog.byKind[u.kind];
+      return {
+        code: u.code,
+        kind: u.kind,
+        name: u.name,
+        editHref: unitEditHref(u.kind, u.code),
+        reports,
+        perReport: serializePerReport(liveness.get(u.code), reports),
+      };
+    }),
+  ];
 
   return (
     <ConsoleShell active="reports" reportsTab {...shell}>
       <h1 className="mb-1 text-xl font-bold">Reports</h1>
-      <p className="text-muted-foreground text-sm">
-        Advisory only: every report reads precomputed data; nothing here writes to the roster.
+      <p className="text-muted-foreground max-w-[680px] text-sm">
+        Reports you can open, grouped by the unit they cover. Every report reads precomputed data; nothing
+        here changes a roster.
       </p>
-      {/* ConsoleShell owns only the chrome — content supplies its own surface
-          (R1/the Apollo Surface Language "the page is never white"). Without
-          this, the list floats directly on --apollo-page with no card. */}
-      <div className="apollo-card mt-5">
-        <ReportsIndex units={units} mode={mode} />
-      </div>
+      <ReportsIndex
+        units={units}
+        // A global viewer sees every department/division/core: off under
+        // "All" (their own segments show them). Not for an explicit
+        // `?center=` — that one unit is what they asked for.
+        hideUnderAll={(session.isSuperuser || session.isCommsSteward) && !center}
+        initialQuery={typeof params.q === "string" ? params.q : ""}
+        initialScope={parseReportsIndexScope(params.scope)}
+        initialReview={params.review === "1"}
+      />
     </ConsoleShell>
   );
 }
 
 /** The person-granted Mentored publications report as a one-report
  *  pseudo-unit, so it rides the same list (and filter rail) as every unit —
- *  never a card floating under the table. Not tied to an org unit; access is
+ *  never a card floating under the list. Not tied to an org unit; access is
  *  a `report_access` row. Rendered only when `getReportScopes` is non-empty.
  *  Its label/blurb come from `report_meta` like every other card; `access`
  *  is `loadReportAccessPopoverProps`'s result. */
@@ -338,13 +292,9 @@ function buildProgramUnit(
     code: "mentoring-programs",
     kind: "program",
     name: "Mentoring programs",
-    centerType: null,
     // The report's own canonical address (its current slug) — a program has
     // no profile to edit, and `ReportsIndex` never renders this for one.
     editHref: `/edit/reports/${report.slug}`,
-    liveCount: 1,
-    totalCount: 1,
-    lastRefreshedAt: null,
     reports: [report],
     perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
   };
@@ -356,103 +306,25 @@ function buildInstitutionUnit(reports: ReportsIndexReport[]): ReportsIndexUnit {
     code: "institution",
     kind: "institution",
     name: "Institution-wide",
-    centerType: null,
     editHref: `/edit/reports/${reports[0].slug}`,
-    liveCount: reports.length,
-    totalCount: reports.length,
-    lastRefreshedAt: null,
     reports,
     perReport: reports.map((r) => ({ n: r.n, live: true, lastRefreshedAt: null })),
   };
 }
 
-type SerializedPerReport = ReadonlyArray<{
-  n: ReportNumber;
-  live: boolean;
-  lastRefreshedAt: string | null;
-}>;
-
-/** ISO-string serialization shared by the multi-unit index and the
- *  single-unit table below — a unit/code with no liveness row at all (the
- *  Map lookup missed) degrades to "nothing live," not a missing entry.
+/** ISO-string serialization for the client list — a unit/code with no
+ *  liveness row at all (the Map lookup missed) degrades to "no data yet," not
+ *  a missing entry. Report 2's cycle and review count pass through.
  *  `reports` is the unit's OWN catalog (varies by kind) — the fallback when
  *  liveness is missing pads exactly that list, never a fixed six. */
 function serializePerReport(
   liveness: ReportLiveness | undefined,
   reports: readonly ReportDef[],
-): SerializedPerReport {
+): ReportsIndexUnit["perReport"] {
   return (
     liveness?.perReport.map((r) => ({
-      n: r.n,
-      live: r.live,
+      ...r,
       lastRefreshedAt: r.lastRefreshedAt?.toISOString() ?? null,
     })) ?? reports.map((r) => ({ n: r.n, live: false, lastRefreshedAt: null }))
-  );
-}
-
-/** `3a` — an actor with exactly one reportable unit (the common case today).
- *  Per-report liveness for one unit, plain-serialized for the client table. */
-async function loadSingleUnitPerReport(
-  code: string,
-  kind: ReportableUnitKind,
-  catalog: ReportCatalog,
-): Promise<SerializedPerReport> {
-  const liveness = (await loadReportLiveness([{ code, kind }], db.read)).get(code);
-  return serializePerReport(liveness, catalog.byKind[kind]);
-}
-
-/** `3a` — same `Report | Focus | Last refreshed` table `1a`'s bands use per
- *  unit, just without the band header (this page's own `<h1>` already names
- *  the unit) — matches the actual mockup (`Reports IA.dc.html`), which was
- *  never a plain list. Shared between the explicit `?center=` path and the
- *  single-reportable-unit default so neither duplicates the JSX. */
-function SingleUnitReports({
-  ctx,
-  code,
-  kind,
-  perReport,
-  extraUnits,
-  catalog,
-  session,
-  pendingSlugRequests,
-  pendingHonors,
-}: {
-  ctx: ReportsContext;
-  code: string;
-  kind: ReportableUnitKind;
-  perReport: SerializedPerReport;
-  /** The pseudo-units this viewer may see (program, institution) — their
-   *  reports join this unit's rows (an href never carries the unit). */
-  extraUnits: ReportsIndexUnit[];
-  /** This request's report catalog (`buildCatalog`). */
-  catalog: ReportCatalog;
-  session: EditSession;
-  pendingSlugRequests: number | null;
-  pendingHonors: number | null;
-}) {
-  return (
-    <ConsoleShell
-      active="reports"
-      session={session}
-      pendingSlugRequests={pendingSlugRequests}
-      pendingHonors={pendingHonors}
-      reportsTab
-    >
-      <h1 className="mb-1 text-xl font-bold">{ctx.unit.name} reports</h1>
-      <p className="text-muted-foreground mb-6 text-sm">
-        Advisory only: every report reads precomputed data; nothing here writes to the roster.
-      </p>
-      {/* ConsoleShell owns only the chrome — content supplies its own surface
-          (R1/the Apollo Surface Language "the page is never white"). Without
-          this, the table floats directly on --apollo-page with no card. */}
-      <div className="apollo-card">
-        <SingleUnitReportsTable
-          unitCode={code}
-          unitKind={kind}
-          perReport={[...perReport, ...extraUnits.flatMap((u) => u.perReport)]}
-          reports={[...catalog.byKind[kind], ...extraUnits.flatMap((u) => u.reports)]}
-        />
-      </div>
-    </ConsoleShell>
   );
 }

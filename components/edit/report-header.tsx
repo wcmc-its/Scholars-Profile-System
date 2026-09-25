@@ -3,9 +3,8 @@
  * redesign, 2026-09-24): a "Report N" eyebrow; the report's name from
  * `report_meta` (`lib/edit/report-meta.ts`) as the `<h1>`; beside it the
  * access badge — the default audience plus "+ N others" for hand-added
- * grantees, opening "Who can open this report" (`ReportAccessPopover`,
- * `variant="badge"`; the page hands over its props, since only it knows the
- * gate); the page's own dynamic subtitle (`children`); when the report has a
+ * grantees, opening "Who can open this report" (`ReportAccessPopover`; the
+ * page hands over its props, since only it knows the gate); the page's own dynamic subtitle (`children`); when the report has a
  * description, a closed-by-default "About this report" disclosure; and, at
  * the right, "Edit details" (`ReportDetailsSheet`, a client island) for a
  * superuser, or "Manage access" for a comms steward who can change a
@@ -56,7 +55,7 @@ export async function ReportHeader({ n, session, access, children }: ReportHeade
           <h1 className="m-0 text-[26px] font-bold tracking-[-0.01em]">{meta.name}</h1>
           {access && (
             <span className="inline-flex" data-testid="report-header-access">
-              <ReportAccessPopover {...access} variant="badge" />
+              <ReportAccessPopover {...access} />
             </span>
           )}
         </div>
