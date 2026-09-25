@@ -31,8 +31,9 @@ import type { NewsMentionStatus } from "@/lib/generated/prisma/enums";
  *  away for a while without letting a stale bar rewrite yesterday's work. */
 export const NEWS_UNDO_WINDOW_MS = 15 * 60 * 1000;
 
-/** Most decision ids one undo call accepts ("Approve all" / a bulk bar). */
-export const NEWS_UNDO_MAX_DECISIONS = 100;
+/** Most decision ids one undo call accepts ("Approve all" / a bulk bar). Lives
+ *  in a client-safe module so the queues can cap a bulk action to it. */
+export { NEWS_UNDO_MAX_DECISIONS } from "@/lib/edit/news-undo-limit";
 
 /** The columns a decision stamps; see prisma/schema.prisma `NewsMention`. */
 export type DecisionStamp = {

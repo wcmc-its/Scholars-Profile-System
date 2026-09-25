@@ -242,7 +242,7 @@ export function DecisionStatusBar({
 }
 
 /** Look a CWID up for the override preview. `null` name = could not check. */
-async function lookupScholar(
+export async function lookupScholar(
   cwid: string,
 ): Promise<{ found: true; name: string | null } | { found: false }> {
   try {
