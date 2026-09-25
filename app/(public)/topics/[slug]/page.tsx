@@ -115,7 +115,7 @@ export default async function TopicPage({
       {/* Hero */}
       <section className="mb-10">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          RESEARCH AREA
+          Research area
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {topic.label}

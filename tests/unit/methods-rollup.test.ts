@@ -16,6 +16,7 @@ const {
   mockScholarFamilyGroupBy,
   mockScholarFamilyFindMany,
   mockPublicationFindMany,
+  mockPublicationCount,
   mockSuppressionOverlayFindMany,
   mockSensitivityOverlayFindMany,
   mockLoadPublicationSuppressions,
@@ -27,6 +28,7 @@ const {
   mockScholarFamilyGroupBy: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
   mockPublicationFindMany: vi.fn(),
+  mockPublicationCount: vi.fn(),
   mockSuppressionOverlayFindMany: vi.fn(),
   mockSensitivityOverlayFindMany: vi.fn(),
   mockLoadPublicationSuppressions: vi.fn(),
@@ -42,7 +44,9 @@ vi.mock("@/lib/db", () => ({
       groupBy: mockScholarFamilyGroupBy,
       findMany: mockScholarFamilyFindMany,
     },
-    publication: { findMany: mockPublicationFindMany },
+    publication: { findMany: mockPublicationFindMany, count: mockPublicationCount },
+    // getFamilyPublications batches its page query + counts in one transaction.
+    $transaction: (ops: Promise<unknown>[]) => Promise.all(ops),
     familySuppressionOverlay: { findMany: mockSuppressionOverlayFindMany },
     familySensitivityOverlay: { findMany: mockSensitivityOverlayFindMany },
   },
@@ -68,6 +72,7 @@ vi.mock("@/lib/api/topics", () => ({
 import {
   getSupercategoryRollup,
   getSupercategoryHubEntries,
+  getFamilyPublications,
 } from "@/lib/api/methods";
 
 const SC = "imaging_image_analysis";
@@ -287,6 +292,78 @@ describe("getSupercategoryHubEntries", () => {
     expect(e.families).toEqual([
       { familyId: "fam_0001", familyLabel: "Deep learning", scholarCount: 3 },
       { familyId: "fam_0002", familyLabel: "MRI", scholarCount: 2 },
+    ]);
+  });
+});
+
+/** A publication row as `PUB_SELECT` returns it (no abstract column). */
+const pubRow = (pmid: string) => ({
+  pmid,
+  title: `Paper ${pmid}`,
+  journal: "Nature",
+  year: 2025,
+  publicationType: "Journal Article",
+  citationCount: 1,
+  pubmedUrl: null,
+  doi: null,
+  pmcid: null,
+  impactScore: null,
+  dateAddedToEntrez: null,
+});
+
+/** True for the #1881 `loadPmidsWithAbstract` probe: pmid-only select + abstract predicate. */
+const isAbstractProbe = (args: {
+  select?: Record<string, unknown>;
+  where?: Record<string, unknown>;
+}) => Object.keys(args.select ?? {}).join() === "pmid" && Array.isArray(args.where?.NOT);
+
+describe("#1881 — method feeds carry hasAbstract for the lazy Abstract link", () => {
+  beforeEach(() => {
+    mockSuppressionOverlayFindMany.mockResolvedValue([]);
+  });
+
+  it("getFamilyPublications marks only the pmids the abstract probe returns, never selecting the text", async () => {
+    wireScholarFamilyFindMany({
+      pmidRows: [{ familyLabel: "MRI", pmids: ["5", "6"] }],
+      exemplarRows: [],
+    });
+    mockPublicationCount.mockResolvedValue(2);
+    mockPublicationFindMany.mockImplementation((args: Parameters<typeof isAbstractProbe>[0]) =>
+      Promise.resolve(isAbstractProbe(args) ? [{ pmid: "5" }] : [pubRow("5"), pubRow("6")]),
+    );
+
+    const out = await getFamilyPublications(SC, "MRI", { sort: "newest" });
+
+    expect(out!.hits.map((h) => [h.pmid, h.hasAbstract])).toEqual([
+      ["5", true],
+      ["6", false],
+    ]);
+    // The text itself is never shipped: `abstract` stays null on every hit.
+    expect(out!.hits.every((h) => h.abstract === null)).toBe(true);
+    const probe = mockPublicationFindMany.mock.calls.find((c) => isAbstractProbe(c[0]));
+    expect(probe, "the abstract probe must run").toBeDefined();
+    expect(probe![0].select).toEqual({ pmid: true });
+    expect(new Set(probe![0].where.pmid.in)).toEqual(new Set(["5", "6"]));
+    // No query selects the @db.Text column.
+    for (const [args] of mockPublicationFindMany.mock.calls) {
+      expect(args.select?.abstract).toBeUndefined();
+    }
+  });
+
+  it("getSupercategoryRollup's All-work rows carry hasAbstract too", async () => {
+    wireScholarFamilyFindMany({
+      memberRows: [member("MRI", "fam_0002", "bbb2001", 3, "full_time_faculty")],
+      pmidRows: [{ familyLabel: "MRI", pmids: ["5", "6"] }],
+      exemplarRows: [],
+    });
+    mockPublicationFindMany.mockImplementation((args: Parameters<typeof isAbstractProbe>[0]) =>
+      Promise.resolve(isAbstractProbe(args) ? [{ pmid: "6" }] : [pubRow("5"), pubRow("6")]),
+    );
+
+    const { allWorkPubs } = await getSupercategoryRollup(SC);
+    expect(allWorkPubs.map((h) => [h.pmid, h.hasAbstract])).toEqual([
+      ["5", false],
+      ["6", true],
     ]);
   });
 });

@@ -9,7 +9,7 @@ test.describe("Topic detail page Layout B", () => {
       test.skip(true, `Local DB does not have topic slug "${TEST_TOPIC_SLUG}"`);
       return;
     }
-    await expect(page.getByText("RESEARCH AREA", { exact: true })).toBeVisible();
+    await expect(page.getByText("Research area", { exact: true })).toBeVisible();
     await expect(page.locator("h1")).toBeVisible();
     // TopScholarsChipRow and Spotlight are conditionally rendered (sparse-state policy).
     // If they render, assert their structure; otherwise pass silently.

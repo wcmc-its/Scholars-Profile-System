@@ -136,7 +136,7 @@ export default async function SupercategoryPage({
 
       <section className="mb-10">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          RESEARCH METHODS
+          Method category
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {sc.label}
@@ -155,6 +155,8 @@ export default async function SupercategoryPage({
               topicLabel={sc.label}
               enablePopover
               contextMethods
+              heading="Scholars using this"
+              info="Full-time faculty whose publications ReCiterAI associates with the methods in this category, ranked by how many of those publications they have. Curators do not handpick this list."
             />
           </div>
         )}

@@ -117,7 +117,11 @@ export default async function FamilyPage({
             doi: p.doi,
             authors: p.authors,
           })),
-          totalCount: representativePubs.length,
+          // The family's real distinct research-article total: the same value the
+          // feed's default (research-articles-only) view shows as its denominator
+          // (`totalResearchOnly`), so "View all N publications" matches the feed.
+          // Not `representativePubs.length`, which is just the 3 cards shown.
+          totalCount: distinctPmidTotal,
           viewAllHref: "#publications",
         }
       : null;
@@ -166,7 +170,7 @@ export default async function FamilyPage({
 
       <section className="mb-10">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          METHOD
+          Method
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {resolved.familyLabel}
@@ -201,6 +205,8 @@ export default async function FamilyPage({
               topicLabel={resolved.familyLabel}
               enablePopover
               contextMethods
+              heading="Scholars using this"
+              info="Full-time faculty whose publications ReCiterAI associates with this method, ranked by how many of those publications they have. Curators do not handpick this list."
             />
           </div>
         )}
