@@ -72,6 +72,17 @@ function getDevelopmentAllowlist(): string[] {
   ];
 }
 
+/**
+ * The development CWIDs that can be ENUMERATED: the interim allowlist only
+ * (the ED group's member list cannot be read, `lib/auth/global-roles.ts`).
+ * `[]` when the role is disabled. Used by the functional-roles import
+ * (`lib/edit/functional-roles.server.ts`); mirrors `listCommsStewardCwids`.
+ */
+export function listDevelopmentAllowlistCwids(): string[] {
+  if (!isDevelopmentEnabled()) return [];
+  return getDevelopmentAllowlist();
+}
+
 /** One structured log line for a directory-side failure of the development check. */
 function logCheckFailed(cwid: string, reason: string): void {
   console.warn(

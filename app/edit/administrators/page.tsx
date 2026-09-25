@@ -27,6 +27,12 @@ import {
   loadOwnerManagedUnitScope,
 } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
+import type { FunctionalRoleRow, FunctionalRoleScopeOptions } from "@/lib/edit/functional-roles";
+import {
+  canManageFunctionalRoles,
+  functionalRoleScopeOptions,
+  listFunctionalRoles,
+} from "@/lib/edit/functional-roles.server";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -36,6 +42,31 @@ export const metadata = {
   title: "Administrators — Scholars Console",
   robots: { index: false, follow: false },
 };
+
+/**
+ * The Functional roles tab's data, or `undefined` to leave the tab out. A
+ * failed read (e.g. `functional_role_grant` not yet applied in this env)
+ * degrades to no tab rather than failing the whole page: the org-unit roster
+ * is the page's job and must not depend on the newer table.
+ */
+async function loadFunctionalRolesTab(): Promise<
+  { rows: FunctionalRoleRow[]; scopeOptions: FunctionalRoleScopeOptions } | undefined
+> {
+  try {
+    return {
+      rows: await listFunctionalRoles(db.read),
+      scopeOptions: functionalRoleScopeOptions(),
+    };
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "functional_roles_load_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return undefined;
+  }
+}
 
 export default async function AdministratorsPage() {
   const session = await getEffectiveEditSession();
@@ -78,10 +109,12 @@ export default async function AdministratorsPage() {
     }
   }
 
-  // Parallelized: the roster load and the core catalog are independent reads.
-  const [{ entries, nameResolutionDegraded }, allCores] = await Promise.all([
+  // Parallelized: the roster load, the core catalog and (superuser only) the
+  // functional-role registry are independent reads.
+  const [{ entries, nameResolutionDegraded }, allCores, functionalRoles] = await Promise.all([
     loadUnitAdministratorRoster({ scope }, db.read),
     getCoreList(db.read),
+    canManageFunctionalRoles(session) ? loadFunctionalRolesTab() : Promise.resolve(undefined),
   ]);
 
   // The "URL requests" admin tab + pending-count pill; `null` when the
@@ -139,6 +172,7 @@ export default async function AdministratorsPage() {
           nameResolutionDegraded={nameResolutionDegraded}
           canImpersonate={impersonationEnabled() && session.isSuperuser}
           allCores={allCores}
+          functionalRoles={functionalRoles}
         />
     </ConsoleShell>
   );
