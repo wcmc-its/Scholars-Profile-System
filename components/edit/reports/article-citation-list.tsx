@@ -13,11 +13,13 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { useShowMore } from "@/components/edit/reports/report-show-more";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Button } from "@/components/ui/button";
 
 export type CitationRow = {
   key: string;
+  /** The PubMed title, inline markup kept (rendered through `PubTitle`). */
   title: string;
   /** The title's link (PubMed), or null for a non-PubMed record. */
   href: string | null;
@@ -111,10 +113,10 @@ export function ArticleCitationList({
                   rel="noreferrer"
                   className="text-foreground hover:text-apollo-maroon text-[15px] leading-[1.4] font-semibold break-words"
                 >
-                  {c.title}
+                  <PubTitle value={c.title} />
                 </a>
               ) : (
-                <span className="text-foreground text-[15px] leading-[1.4] font-semibold break-words">{c.title}</span>
+                <PubTitle value={c.title} className="text-foreground text-[15px] leading-[1.4] font-semibold break-words" />
               )}
               {c.authors.length > 0 && (
                 <p className="text-apollo-ink-2 text-sm leading-[1.45] break-words">
@@ -134,7 +136,7 @@ export function ArticleCitationList({
               )}
               {(c.journal || c.source) && (
                 <p className="text-muted-foreground text-sm">
-                  {c.journal && <em className="text-apollo-ink-2 italic">{c.journal}</em>}
+                  <PubJournal value={c.journal} className="text-apollo-ink-2 italic" />
                   {c.journal && c.source ? ". " : ""}
                   {c.source && `${c.source}.`}
                 </p>

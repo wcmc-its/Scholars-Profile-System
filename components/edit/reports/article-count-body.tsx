@@ -69,7 +69,7 @@ import {
   type ArticleRow,
 } from "@/lib/edit/article-count-report";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
-import { cn, htmlToPlainText } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 const RADIO = "flex cursor-pointer items-center gap-2 text-sm";
 const RADIO_BOX = "size-4 accent-[var(--color-primary-cornell-red)]";
@@ -416,7 +416,7 @@ export function citationAuthors(a: Pick<ArticleRow, "authors" | "matches">): Cit
 function toCitationRow(a: ArticleRow): CitationRow {
   return {
     key: a.pmid,
-    title: htmlToPlainText(a.title ?? "", Number.POSITIVE_INFINITY).replace(/\.+$/, "").trim(),
+    title: (a.title ?? "").trim().replace(/\.+$/, ""),
     href: a.id.href,
     authors: citationAuthors(a),
     journal: a.journal,
