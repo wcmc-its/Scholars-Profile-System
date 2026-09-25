@@ -12,9 +12,11 @@
  *   contested       two or more candidates rank 1–8.5 (EA's coin flips);
  *   leadershipLost  a leadership or director candidate (rank ≤ 10) lost to a
  *                   lower-ranked KIND of title — the pre-#2804 BMRI pattern;
- *   mismatch        a role and the title text disagree (a chair/chief role
- *                   with no chair/chief text, or chair/chief text with no
- *                   role). Dean-family text has no role source to confirm it
+ *   mismatch        a role and the title text disagree: a department-chair
+ *                   role with no chair text (chairs have no title tier of
+ *                   their own, so the chair goes unshown), or chair/chief
+ *                   text with no role. A chief role with no chief text is
+ *                   NOT one — the chief tier titles them from the role. Dean-family text has no role source to confirm it
  *                   against, so it is never a mismatch — review those by rank.
  *
  * Computed per request from `loadTitleCandidates`, the SAME function the ED
@@ -24,6 +26,7 @@
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadTitleCandidates, type TitleResolutionClient, type TitleCandidates } from "@/etl/ed/title-resolution";
 import { isTitleResolutionEnabled } from "@/lib/edit/title-picker";
+import { DEPARTMENT_CHAIR_ROLE_KEY } from "@/lib/org-unit-roles";
 import {
   rankTitleText,
   resolveFromOptions,
@@ -82,7 +85,7 @@ export type TitleDashboardRow = {
  * when no reason holds (the scholar is not listed).
  */
 export function classifyTitleRow(
-  c: Pick<TitleCandidates, "cwid" | "primaryTitle" | "override" | "options">,
+  c: Pick<TitleCandidates, "cwid" | "primaryTitle" | "override" | "options" | "texts">,
   roles: TitleRoles,
   name: string,
 ): TitleDashboardRow | null {
@@ -91,18 +94,17 @@ export function classifyTitleRow(
   const runnerUp = present.find((o) => o.value !== winner?.value) ?? null;
   const pin = resolveFromOptions(c.options, c.override).overridden ? c.override!.trim() : null;
 
-  // Role vs text. The chief / centerHead tiers are the ROLE's own formatted
-  // title, so "text" here means the ED-sourced tiers only.
-  const text = present.filter((o) => o.tier === "working" || o.tier === "primary" || o.tier === "appointment");
-  const hasText = (rank: number) => text.some((o) => o.rank === rank);
+  // Role vs text, over EVERY raw title string: the options keep only the
+  // best appointment, which would hide a Dean's second office as Chair.
+  const textRanks = c.texts.map((t) => ({ title: t.title, rank: rankTitleText(t.title, t.department) }));
+  const hasText = (rank: number) => textRanks.some((t) => t.rank === rank);
   const mismatchNotes: string[] = [];
   if (roles.chair && !hasText(TITLE_RANK.chair)) mismatchNotes.push("Chair role, no Chair title");
-  if (!roles.chair && text.some((o) => o.rank === TITLE_RANK.chair && !/director/i.test(o.value!))) {
+  if (!roles.chair && textRanks.some((t) => t.rank === TITLE_RANK.chair && !/director/i.test(t.title))) {
     // A director title naming its own department ranks as Chair by design
     // (BMRI, #2804) — it has no chair role and is not a mismatch.
     mismatchNotes.push("Chair title, no Chair role");
   }
-  if (roles.chief && !hasText(TITLE_RANK.divisionChief)) mismatchNotes.push("Chief role, no Chief title");
   if (!roles.chief && hasText(TITLE_RANK.divisionChief)) mismatchNotes.push("Chief title, no Chief role");
 
   const reasons: TitleReason[] = [];
@@ -145,7 +147,8 @@ type DashboardClient = TitleResolutionClient & Pick<PrismaClient, "scholar">;
 export async function loadTitleDashboard(client: DashboardClient): Promise<TitleDashboardRow[]> {
   const [candidates, chairRows, chiefRows, centerRows] = await Promise.all([
     loadTitleCandidates(client, { applyDerivedTiers: isTitleResolutionEnabled() }),
-    roleCwids(client, "department"),
+    // Chairs only: an administrative department's head holds `director`.
+    roleCwids(client, "department", DEPARTMENT_CHAIR_ROLE_KEY),
     roleCwids(client, "division"),
     roleCwids(client, "center", "director"),
   ]);

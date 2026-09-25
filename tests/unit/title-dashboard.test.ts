@@ -22,8 +22,12 @@ function row(inputs: Partial<TitleInputs>, opts: { override?: string; roles?: Pa
     edPrimaryTitle: null,
     ...inputs,
   });
+  const texts = [inputs.workingTitle, inputs.edPrimaryTitle]
+    .filter((t): t is string => Boolean(t))
+    .map((title) => ({ title }))
+    .concat(inputs.appointmentTitles ?? []);
   return classifyTitleRow(
-    { cwid: "abc1234", primaryTitle: options[0]?.value ?? null, override: opts.override ?? null, options },
+    { cwid: "abc1234", primaryTitle: options[0]?.value ?? null, override: opts.override ?? null, options, texts },
     { ...NO_ROLES, ...opts.roles },
     "Test Person",
   );
@@ -75,11 +79,25 @@ describe("classifyTitleRow", () => {
     expect(row(inputs, { override: "", roles: { chair: true } })?.pin).toBeNull();
   });
 
-  it("flags a chief role with no chief text, and chair text with no role", () => {
-    expect(row({ edPrimaryTitle: "Professor of Medicine", chiefTitle: "Chief, Cardiology" }, { roles: { chief: true } })?.mismatchNotes).toEqual([
-      "Chief role, no Chief title",
-    ]);
+  it("flags chair text with no role, and a chair role with no chair text", () => {
     expect(row({ edPrimaryTitle: "Chair of Medicine" })?.mismatchNotes).toEqual(["Chair title, no Chair role"]);
+    expect(row({ edPrimaryTitle: "Professor of Medicine" }, { roles: { chair: true } })?.mismatchNotes).toEqual([
+      "Chair role, no Chair title",
+    ]);
+  });
+
+  it("does not flag a chief role without chief text: the chief tier titles them", () => {
+    const r = row({ edPrimaryTitle: "Professor of Medicine", chiefTitle: "Chief, Cardiology" }, { roles: { chief: true } });
+    expect(r?.mismatchNotes).toEqual([]);
+  });
+
+  it("finds a chair's text in a NON-best appointment (a Dean who is also Chair)", () => {
+    const r = row(
+      { edPrimaryTitle: "Professor of Medicine", appointmentTitles: [{ title: "Dean of the Medical College" }, { title: "Chair of Medicine" }] },
+      { roles: { chair: true } },
+    );
+    expect(r?.winner?.value).toBe("Dean of the Medical College");
+    expect(r?.mismatchNotes).toEqual([]);
   });
 
   it("does not call a director of their own department (BMRI) a mismatch", () => {
