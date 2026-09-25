@@ -124,6 +124,8 @@ export async function loadNci2aReport(
       annualProjectDirectCosts: projectDc,
       cancerRelevantPercent: pct,
       cancerRelevantPercentSource: a.cancerRelevantPercentSource === "human" ? "human" : "llm",
+      cancerRelevantPercentAi:
+        a.cancerRelevantPercentAi != null ? Number(a.cancerRelevantPercentAi) : null,
       cancerRelevantRationale: a.cancerRelevantRationale,
       cancerRelevantAnnualProjectDc: relevantRaw != null ? round2(relevantRaw) : null,
       isPeerReviewed: a.isPeerReviewed,

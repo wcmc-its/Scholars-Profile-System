@@ -23,8 +23,11 @@ import {
   nci2aStatTiles,
   nci2aStats,
   nci2aStatus,
+  bulkAcceptTargets,
+  NCI2A_ACCEPT_CAP,
   parseNci2aParams,
   reviewProgress,
+  statusPillLabel,
   sortQuery,
   type Nci2aAward,
 } from "@/lib/edit/nci-2a-report";
@@ -42,6 +45,8 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     projectEndDate: "2028-12-31",
     annualProjectDirectCosts: dc,
     cancerRelevantPercentSource: "llm",
+    // The AI original defaults to the fixture's percent (so a human row is Confirmed).
+    cancerRelevantPercentAi: pct,
     cancerRelevantRationale: null,
     cancerRelevantAnnualProjectDc: pct == null ? null : (dc * pct) / 100,
     isPeerReviewed: true,
@@ -93,6 +98,24 @@ describe("nci2aStatus", () => {
     expect(nci2aStatus(B)).toBe("confirmed");
     expect(nci2aStatus(A)).toBe("ai");
     expect(nci2aStatus(C)).toBe("not-inferred");
+  });
+
+  it("human + a different AI value → corrected; equal or no AI value → confirmed", () => {
+    const corrected = { ...B, cancerRelevantPercentAi: 60 };
+    expect(nci2aStatus(corrected)).toBe("corrected");
+    expect(statusPillLabel(corrected)).toBe("Corrected · AI said 60%");
+    expect(nci2aStatus({ ...B, cancerRelevantPercentAi: 100 })).toBe("confirmed");
+    expect(nci2aStatus({ ...B, cancerRelevantPercentAi: null })).toBe("confirmed");
+    expect(statusPillLabel(B)).toBe("Confirmed");
+    expect(statusPillLabel(A)).toBe("AI-suggested");
+    expect(statusPillLabel(C)).toBe("Not inferred");
+    // An llm row whose AI value differs (shouldn't happen) is still just AI-suggested.
+    expect(nci2aStatus({ ...A, cancerRelevantPercentAi: 10 })).toBe("ai");
+  });
+
+  it("a corrected row is reviewed: out of Needs review", () => {
+    const corrected = { ...B, cancerRelevantPercentAi: 60 };
+    expect(filterNci2a([A, corrected, C], params()).counts).toEqual({ all: 3, needs: 2, done: 1 });
   });
 });
 
@@ -191,8 +214,41 @@ describe("numbers", () => {
     ).toBe("$2.5M");
   });
 
-  it("progress counts confirmed rows of the whole cycle", () => {
-    expect(reviewProgress(ALL)).toEqual({ reviewed: 1, total: 3, pending: 2, pct: 33 });
+  it("progress counts reviewed rows of those with an AI value, cycle-wide", () => {
+    // C has no AI value (not inferred), so it is out of the denominator.
+    // needsReview counts every row still to review, the not-inferred C included.
+    expect(reviewProgress(ALL)).toEqual({
+      reviewed: 1,
+      total: 2,
+      pending: 1,
+      needsReview: 2,
+      pct: 50,
+    });
+    // A corrected row counts as reviewed; a human value on a row with no AI value doesn't count.
+    const corrected = {
+      ...A,
+      cancerRelevantPercentSource: "human" as const,
+      cancerRelevantPercent: 10,
+    };
+    const humanNoAi = {
+      ...C,
+      cancerRelevantPercentSource: "human" as const,
+      cancerRelevantPercent: 5,
+    };
+    expect(reviewProgress([corrected, B, humanNoAi])).toEqual({
+      reviewed: 2,
+      total: 2,
+      pending: 0,
+      needsReview: 0,
+      pct: 100,
+    });
+    // Every AI row reviewed, one not-inferred left: progress is 100% but the
+    // review link still has a row to point at.
+    expect(reviewProgress([corrected, B, C])).toMatchObject({
+      pending: 0,
+      needsReview: 1,
+      pct: 100,
+    });
     expect(reviewProgress([]).pct).toBe(100);
   });
 
@@ -228,6 +284,17 @@ describe("nci2aCsv", () => {
       "Confirmed",
       "Needs review",
     ]);
+    const corrected = nci2aCsv([{ ...B, cancerRelevantPercentAi: 60 }]).split("\n")[1];
+    expect(corrected.split(",")[col + 1]).toBe("Corrected");
+  });
+
+  it("bulk Accept targets the AI-suggested rows shown, in order, capped", () => {
+    expect(bulkAcceptTargets(ALL).map((a) => a.id)).toEqual(["1"]);
+    const many = Array.from({ length: 60 }, (_, i) => award({ id: String(i) }));
+    expect(NCI2A_ACCEPT_CAP).toBe(50);
+    expect(bulkAcceptTargets([B, ...many]).map((a) => a.id)).toEqual(
+      many.slice(0, 50).map((a) => a.id),
+    );
   });
 
   it("an award with no allocation still gets its line; a split repeats program lines only", () => {
@@ -289,7 +356,7 @@ describe("a filtered download says so", () => {
 });
 
 describe("applyNci2aWrite", () => {
-  it("shows the written percent as Confirmed with its dollars, until the server row has it", () => {
+  it("shows the written percent as reviewed with its dollars, until the server row has it", () => {
     const a = award({ id: "1", cancerRelevantPercent: 40, annualProjectDirectCosts: 1000 });
     const split = {
       ...a,
@@ -298,13 +365,18 @@ describe("applyNci2aWrite", () => {
         { ...a.allocations[0], id: "b", programCode: "CT", programPercent: 40 },
       ],
     };
+    expect(nci2aStatus(applyNci2aWrite(split, 40))).toBe("confirmed");
     const w = applyNci2aWrite(split, 37.5);
-    expect(nci2aStatus(w)).toBe("confirmed");
+    expect(nci2aStatus(w)).toBe("corrected");
     expect(w.cancerRelevantPercent).toBe(37.5);
     expect(w.cancerRelevantAnnualProjectDc).toBe(375);
     expect(w.allocations.map((al) => al.annualProgramDirectCosts)).toEqual([225, 150]);
     expect(nci2aWriteLanded(a, 65)).toBe(false);
     expect(nci2aWriteLanded({ ...a, cancerRelevantPercentSource: "human" }, 40)).toBe(true);
+    // The AI original survives the write: a different value reads as Corrected.
+    const c = applyNci2aWrite(a, 65);
+    expect(c.cancerRelevantPercentAi).toBe(40);
+    expect(nci2aStatus(c)).toBe("corrected");
   });
 });
 

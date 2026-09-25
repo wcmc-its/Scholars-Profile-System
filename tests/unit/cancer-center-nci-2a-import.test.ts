@@ -456,6 +456,39 @@ describe("applyPlan", () => {
     expect(counts.percentSkippedInferenceFailed).toBe(0);
   });
 
+  it("writes the AI original alongside a created row's llm percent", async () => {
+    const { db, created } = makeDb({});
+    await applyPlan(db, PLAN, RUN, emptyCounts());
+    const data = (created[0] as { data: Record<string, unknown> }).data;
+    expect(data.cancerRelevantPercentAi).toBe(90);
+    expect(data.cancerRelevantPercentSource).toBe("llm");
+  });
+
+  it("refreshes the AI original with the percent on an unreviewed row", async () => {
+    const { db, updated } = makeDb({
+      "12345": { id: "award-1", cancerRelevantPercent: 40, cancerRelevantPercentSource: "llm", allocations: [] },
+    });
+    await applyPlan(db, PLAN, RUN, emptyCounts());
+    expect(updated[0].data.cancerRelevantPercentAi).toBe(90);
+  });
+
+  it("never touches the AI original (or the percent) of a human-sourced row", async () => {
+    const { db, updated } = makeDb({
+      "12345": { id: "award-1", cancerRelevantPercent: 40, cancerRelevantPercentSource: "human", allocations: [] },
+    });
+    await applyPlan(db, PLAN, RUN, emptyCounts());
+    expect(updated[0].data).not.toHaveProperty("cancerRelevantPercentAi");
+    expect(updated[0].data).not.toHaveProperty("cancerRelevantPercent");
+  });
+
+  it("keeps the prior AI original when this cycle's inference fails", async () => {
+    const { db, updated } = makeDb({
+      "12345": { id: "award-1", cancerRelevantPercent: 75, cancerRelevantPercentSource: "llm", allocations: [] },
+    });
+    await applyPlan(db, { ...PLAN, cancerRelevantPercent: null, cancerRelevantRationale: null }, RUN, emptyCounts());
+    expect(updated[0].data).not.toHaveProperty("cancerRelevantPercentAi");
+  });
+
   it("--dry-run writes nothing", async () => {
     const { db, created, updated } = makeDb({});
     const counts = emptyCounts();
