@@ -373,5 +373,51 @@ describe("NewsApprovalQueue", () => {
         cwid: "zzz9009",
       });
     });
+
+    it("Approve all clears the staged override of the group it decided (keyed by group, not story)", async () => {
+      directory(true);
+      render(
+        <NewsApprovalQueue pending={[lab1, lab2]} approved={[]} rejected={[]} counts={COUNTS} />,
+      );
+      fireEvent.click(screen.getByTestId("news-queue-override-a-open"));
+      fireEvent.change(screen.getByTestId("news-queue-override-a-input"), {
+        target: { value: "zzz9009" },
+      });
+      fireEvent.click(screen.getByTestId("news-queue-override-a-apply"));
+      await screen.findByTestId("news-override-pill");
+      fireEvent.click(screen.getByRole("button", { name: "Approve all" }));
+      await screen.findByTestId("news-queue-toast");
+      // The refresh is mocked, so the decided group still renders: a stale
+      // override would still show its pill (and re-send its cwid next time).
+      await waitFor(() => expect(screen.queryByTestId("news-override-pill")).toBeNull());
+    });
+
+    it("a failed Approve all step keeps that group's override", async () => {
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("/api/edit/scholar-card/")) {
+          return new Response(JSON.stringify({ cwid: "zzz9009", name: "Quinn Fictional" }), {
+            status: 200,
+          });
+        }
+        const body = JSON.parse(init!.body as string) as { id: string };
+        return body.id === "b1"
+          ? new Response(JSON.stringify({ ok: false, error: "write_failed" }), { status: 500 })
+          : new Response(JSON.stringify({ ok: true, decisionId: "dec-1" }), { status: 200 });
+      });
+      render(
+        <NewsApprovalQueue pending={[lab1, lab2]} approved={[]} rejected={[]} counts={COUNTS} />,
+      );
+      fireEvent.click(screen.getByTestId("news-queue-override-b-open"));
+      fireEvent.change(screen.getByTestId("news-queue-override-b-input"), {
+        target: { value: "zzz9009" },
+      });
+      fireEvent.click(screen.getByTestId("news-queue-override-b-apply"));
+      await screen.findByTestId("news-override-pill");
+      fireEvent.click(screen.getByRole("button", { name: "Approve all" }));
+      await screen.findByRole("alert");
+      // a1 saved first, b1 failed: b's override is still staged for a retry.
+      expect(screen.getByTestId("news-queue-toast").textContent).toContain("Saved 1 of 2");
+      expect(screen.getByTestId("news-override-pill")).toBeTruthy();
+    });
   });
 });

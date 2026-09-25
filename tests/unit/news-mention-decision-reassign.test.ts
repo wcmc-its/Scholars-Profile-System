@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       create: vi.fn(),
     },
   },
@@ -285,5 +286,146 @@ describe("naming the row's own scholar", () => {
     expect(await res.json()).toMatchObject({ status: "published" });
     expect(h.tx.scholar.findFirst).not.toHaveBeenCalled();
     expect(h.tx.newsMention.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("never overrides a rejection on the target's own row", () => {
+  it("409s rejected_by_scholar when the scholar said 'not me' themselves, writing nothing", async () => {
+    h.tx.newsMention.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id
+        ? { ...PENDING }
+        : {
+            ...PENDING,
+            id: "news-2",
+            cwid: "zzz9001",
+            status: "rejected",
+            enteredByCwid: "zzz9001",
+          },
+    );
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "rejected_by_scholar", field: "cwid" });
+    expect(h.tx.newsMention.update).not.toHaveBeenCalled();
+    expect(h.tx.newsMention.create).not.toHaveBeenCalled();
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("409s target_rejected for a row someone else rejected, writing nothing", async () => {
+    h.tx.newsMention.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id
+        ? { ...PENDING }
+        : {
+            ...PENDING,
+            id: "news-2",
+            cwid: "zzz9001",
+            status: "rejected",
+            enteredByCwid: "cms2002",
+          },
+    );
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "target_rejected" });
+    expect(h.tx.newsMention.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("approve_hidden onto a row already published for the target", () => {
+  it("applies the hide (stamped, so Undo puts it back)", async () => {
+    h.tx.newsMention.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id
+        ? { ...PENDING }
+        : { ...PENDING, id: "news-2", cwid: "zzz9001", status: "published", showOnProfile: true },
+    );
+    const res = await POST(
+      request({ id: "news-1", decision: "approve_hidden", cwid: "zzz9001" }) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(h.tx.newsMention.update).toHaveBeenCalledWith({
+      where: { id: "news-2" },
+      data: expect.objectContaining({
+        showOnProfile: false,
+        decisionId: "req-9",
+        prevStatus: "published",
+        prevShowOnProfile: true,
+      }),
+    });
+    expect(h.tx.newsMention.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("reassigning a Media highlights lead with copies", () => {
+  it("rejects each copy with the original AND credits each to the named scholar, grouped", async () => {
+    const lead = { ...PENDING, outlet: "Invented Gazette", sourceRef: null };
+    const copy = {
+      ...PENDING,
+      id: "news-c1",
+      url: "https://paper.example.org/syndicated",
+      outlet: "Invented Daily",
+      sourceRef: null,
+    };
+    h.tx.newsMention.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id ? { ...lead } : null,
+    );
+    h.tx.newsMention.findMany.mockResolvedValue([copy]);
+    let n = 0;
+    h.tx.newsMention.create.mockImplementation(async ({ data }: never) => ({
+      id: `new-${++n}`,
+      detectedName: null,
+      sourceRef: null,
+      ...(data as object),
+    }));
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(h.tx.newsMention.update).toHaveBeenCalledWith({
+      where: { id: "news-c1" },
+      data: expect.objectContaining({ status: "rejected", decisionId: "req-9" }),
+    });
+    expect(h.tx.newsMention.create).toHaveBeenCalledTimes(2);
+    const [first, second] = h.tx.newsMention.create.mock.calls.map(
+      (c) => (c[0] as { data: Record<string, unknown> }).data,
+    );
+    expect(first).toMatchObject({ cwid: "zzz9001", url: URL_, status: "published" });
+    expect(first).not.toHaveProperty("duplicateOf");
+    expect(second).toMatchObject({
+      cwid: "zzz9001",
+      url: copy.url,
+      outlet: "Invented Daily",
+      status: "published",
+      duplicateOf: "new-1",
+      decisionId: "req-9",
+    });
+  });
+});
+
+describe("undo stays all or nothing", () => {
+  it("re-stamping a row invalidates the earlier decision on every row it wrote", async () => {
+    h.tx.newsMention.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id ? { ...PENDING, decisionId: "old-1" } : null,
+    );
+    h.tx.newsMention.findMany.mockResolvedValue([
+      { ...PENDING, id: "news-3", cwid: "def2002", decisionId: "old-2" },
+    ]);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(h.tx.newsMention.updateMany).toHaveBeenCalledTimes(1);
+    const arg = h.tx.newsMention.updateMany.mock.calls[0][0] as {
+      where: { decisionId: { in: string[] } };
+      data: Record<string, unknown>;
+    };
+    expect(arg.where.decisionId.in.sort()).toEqual(["old-1", "old-2"]);
+    expect(arg.data).toMatchObject({ decisionId: null, prevStatus: null });
+  });
+
+  it("a fresh row carries no earlier decision, so nothing is invalidated", async () => {
+    await POST(request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never);
+    expect(h.tx.newsMention.updateMany).not.toHaveBeenCalled();
   });
 });

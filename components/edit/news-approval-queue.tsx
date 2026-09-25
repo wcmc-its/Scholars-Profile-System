@@ -270,8 +270,10 @@ export function NewsApprovalQueue({
 
   /** Run decisions sequentially (each is its own transaction + audit row), then
    *  refresh once so the rows move to their new tab. Stops at the first failure;
-   *  whatever did save can still be undone from the status bar. */
-  async function run(key: string, steps: DecisionStep[], done: string) {
+   *  whatever did save can still be undone from the status bar. `groupKeys[i]`
+   *  is the pending group step i decides (Approve all spans several groups, and
+   *  overrides are keyed by GROUP, not by story); it defaults to `key`. */
+  async function run(key: string, steps: DecisionStep[], done: string, groupKeys?: string[]) {
     setError(null);
     setToast(null);
     setBusyKey(key);
@@ -291,9 +293,12 @@ export function NewsApprovalQueue({
       setToast({ text: `Saved ${saved} of ${steps.length} decisions.`, decisionIds });
     if (saved > 0) {
       // A decided group leaves Pending, so its staged override goes with it.
+      // Only the groups whose step actually saved: a failed one stays pending,
+      // override and all.
+      const decided = steps.slice(0, saved).map((_, i) => groupKeys?.[i] ?? key);
       setOverrides((o) => {
         const next = { ...o };
-        delete next[key];
+        for (const k of decided) delete next[k];
         return next;
       });
       startTransition(() => router.refresh());
@@ -627,7 +632,7 @@ function FilterRail({
   );
 }
 
-type RunFn = (key: string, steps: DecisionStep[], done: string) => void;
+type RunFn = (key: string, steps: DecisionStep[], done: string, groupKeys?: string[]) => void;
 
 /** The step a pending group's Approve / Hide sends: the chosen row, or — with a
  *  "Wrong person?" override — any of the group's rows plus the replacement CWID
@@ -671,12 +676,14 @@ function StoryCard({
   const busy = busyKey !== null;
   // "Approve all": every waiting mention that can be approved right now — a
   // contested name only once a scholar has been picked (or overridden) for it.
-  const ready =
+  const readyPairs =
     tab === "pending"
-      ? story.groups
-          .map((g) => approveStep(g, chosenRow(g), overrides[g.key], "approve"))
-          .filter((st): st is DecisionStep => st !== null)
+      ? story.groups.flatMap((g) => {
+          const st = approveStep(g, chosenRow(g), overrides[g.key], "approve");
+          return st ? [{ key: g.key, step: st }] : [];
+        })
       : [];
+  const ready = readyPairs.map((p) => p.step);
   const multi = tab === "pending" && story.groups.length > 1;
   return (
     <article
@@ -712,6 +719,7 @@ function StoryCard({
                   story.key,
                   ready,
                   `Approved ${ready.length} mention${ready.length === 1 ? "" : "s"} in “${story.title}”.`,
+                  readyPairs.map((p) => p.key),
                 )
               }
               className="border-apollo-slate text-apollo-slate hover:bg-apollo-slate-tint hover:text-apollo-slate h-[30px] text-[13px]"

@@ -64,6 +64,8 @@
  * `decisionId` plus its pre-decision status / visibility / `enteredByCwid`
  * (lib/edit/news-decision.ts). POST /api/edit/news-mention/undo restores them.
  * The response returns `decisionId` so the queue's status bar can offer Undo.
+ * A row this decision re-stamps invalidates the decision that stamped it before,
+ * on every row that decision wrote, so no undo can ever be partial.
  *
  * WRONG PERSON — REASSIGN (`cwid` on an approve / approve_hidden). The reviewer
  * says the story names someone the matcher did not propose. The original row is
@@ -72,11 +74,17 @@
  * The mention is credited to the named scholar instead:
  *   - the CWID must be a live `scholar` row (`deletedAt: null`), else 422
  *     `unknown_cwid` and nothing is written;
- *   - if that scholar already has a row for the article (e.g. they were one of
- *     the contested candidates), that row is approved; if it is already
- *     published, it is left as it is;
+ *   - if that scholar already has a PENDING row for the article (e.g. they were
+ *     one of the contested candidates), that row is approved; if it is already
+ *     published, it stays published (and `approve_hidden` hides it);
+ *   - if that row is REJECTED, nothing is written: 409 `rejected_by_scholar`
+ *     when the scholar rejected it themselves ("not me" — never overridden from
+ *     the queue), else 409 `target_rejected`;
  *   - otherwise a new `source: "CURATOR"` row is created with the article
  *     metadata copied and no name-match provenance.
+ * A Media highlights lead's pending copies (`duplicate_of`) move with it: each
+ * is rejected with the original and credited to the named scholar the same
+ * way, a created copy pointing at the scholar's row for the lead.
  * The pending siblings of a contested name are swept to rejected exactly as an
  * approve would (none of them was the right person), a sibling already
  * published is the same `already_decided` 409, and only a PENDING row can be
@@ -88,7 +96,12 @@ import { type NextRequest, NextResponse } from "next/server";
 import { isCwid } from "@/lib/cwid";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import { reflectOwners, stampFor, stampForCreated } from "@/lib/edit/news-decision";
+import {
+  invalidateDecisions,
+  reflectOwners,
+  stampFor,
+  stampForCreated,
+} from "@/lib/edit/news-decision";
 import { isNewsQueueEnabled } from "@/lib/edit/news-queue";
 import { editError, editOk, readEditRequest } from "@/lib/edit/request";
 
@@ -107,6 +120,7 @@ type StoredRow = {
   sourceRef: string | null;
   showOnProfile: boolean;
   enteredByCwid?: string | null;
+  decisionId?: string | null;
   /** Set on a Media highlights clip; only a clip can have copies. */
   outlet?: string | null;
   creditedOutlet?: string | null;
@@ -212,9 +226,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (taken) return { kind: "already_decided" as const };
       }
 
+      // Media highlights story grouping: the other copies of this story
+      // (`duplicate_of` = this row) take the same decision, each audited. Only
+      // undecided copies (pending; or rejected when approving) are touched. A
+      // reassign's copies follow the original row: they are rejected, and the
+      // named scholar is credited with each of them too (below).
+      const copyApproving = approving && !target;
+      const copies = !row.outlet
+        ? []
+        : ((await tx.newsMention.findMany({
+            where: {
+              duplicateOf: row.id,
+              status: copyApproving ? { in: ["pending", "rejected"] } : "pending",
+            },
+          })) as StoredRow[]);
+
+      // The rows the named scholar already has for the article (and for each
+      // copy), read BEFORE any write so a refusal writes nothing. A rejected one
+      // is never silently flipped to published: it may be the scholar's own
+      // "not me" (POST /api/edit/news-mention `reject`), which a reviewer must
+      // never override, or a rejection someone made on purpose.
+      const targetRows = new Map<string, StoredRow | null>();
+      if (target) {
+        for (const source of [row, ...copies]) {
+          const existing = (await tx.newsMention.findUnique({
+            where: { cwid_url: { cwid: target, url: source.url } },
+          })) as StoredRow | null;
+          if (existing && existing.status === "rejected") {
+            if (existing.enteredByCwid === target) return { kind: "rejected_by_scholar" as const };
+            return { kind: "target_rejected" as const };
+          }
+          targetRows.set(source.id, existing);
+        }
+      }
+
+      // Undo is all or nothing (lib/edit/news-decision.ts): a row this decision
+      // re-stamps drops out of whatever decision stamped it before, so that
+      // earlier decision is invalidated on every row it wrote.
+      const overwritten = new Set<string | null | undefined>();
+
       // A reassign REJECTS the original row (see WRONG PERSON above).
       const nextStatus = approving && !target ? "published" : "rejected";
       const hideThis = hide && !target;
+      overwritten.add(row.decisionId);
       const updated = (await tx.newsMention.update({
         where: { id: mentionId },
         data: {
@@ -238,24 +292,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ts,
       });
 
-      // Approving a contested detected-name rejects its siblings atomically. The
-      // un-reject path (case 2) lands here unchanged: still-PENDING siblings are
-      // rejected, and siblings already rejected are left alone — re-writing a
-      // terminal row would emit an audit row that says nothing.
-      // Media highlights story grouping: the other copies of this story
-      // (`duplicate_of` = this row) take the same decision, each audited. Only
-      // undecided copies (pending; or rejected when approving) are touched. A
-      // reassign's copies follow the original row: they are rejected.
-      const copyApproving = approving && !target;
-      const copies = !row.outlet
-        ? []
-        : ((await tx.newsMention.findMany({
-            where: {
-              duplicateOf: row.id,
-              status: copyApproving ? { in: ["pending", "rejected"] } : "pending",
-            },
-          })) as StoredRow[]);
       for (const copy of copies) {
+        overwritten.add(copy.decisionId);
         const after = (await tx.newsMention.update({
           where: { id: copy.id },
           data: {
@@ -274,11 +312,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           action: "news_mention_update",
           fieldsChanged: hideThis ? ["status", "showOnProfile"] : ["status"],
           beforeValues: snapshot(copy),
-          afterValues: snapshot(after),
+          afterValues: target ? { ...snapshot(after), reassignedTo: target } : snapshot(after),
           ts,
         });
       }
 
+      // Approving a contested detected-name rejects its siblings atomically. The
+      // un-reject path (case 2) lands here unchanged: still-PENDING siblings are
+      // rejected, and siblings already rejected are left alone — re-writing a
+      // terminal row would emit an audit row that says nothing.
       let siblingsRejected = 0;
       const affectedCwids = new Set<string>([row.cwid]);
       if (approving && row.sourceRef) {
@@ -292,6 +334,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           },
         })) as StoredRow[];
         for (const sibling of siblings) {
+          overwritten.add(sibling.decisionId);
           const after = (await tx.newsMention.update({
             where: { id: sibling.id },
             data: {
@@ -317,17 +360,41 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
 
-      // Credit the named scholar.
-      let reassigned: { cwid: string; name: string } | null = null;
-      if (target && targetScholar) {
-        affectedCwids.add(target);
-        const existing = (await tx.newsMention.findUnique({
-          where: { cwid_url: { cwid: target, url: row.url } },
-        })) as StoredRow | null;
+      /** Credit the named scholar with one article (the lead, or a copy) and
+       *  return their row's id. `leadId` is the target's row for the lead, which
+       *  a CREATED copy row points at so the story stays grouped for them. */
+      const credit = async (source: StoredRow, leadId: string | null): Promise<string> => {
+        const existing = targetRows.get(source.id) ?? null;
         if (existing && existing.status === "published") {
-          // Already credited to them (e.g. VIVO-linked): nothing to change.
-          reassigned = { cwid: target, name: targetScholar.preferredName };
-        } else if (existing) {
+          // Already credited to them (e.g. VIVO-linked). Approve-but-hide still
+          // hides it: the reviewer asked for the mention not to show.
+          if (hide && existing.showOnProfile) {
+            overwritten.add(existing.decisionId);
+            const after = (await tx.newsMention.update({
+              where: { id: existing.id },
+              data: {
+                showOnProfile: false,
+                enteredByCwid: realCwid,
+                ...stampFor(existing, decisionId, ts),
+              },
+            })) as StoredRow;
+            await appendAuditRow(tx, {
+              actorCwid: realCwid,
+              impersonatedCwid,
+              targetEntityType: "news_mention",
+              requestId,
+              targetEntityId: existing.id,
+              action: "news_mention_update",
+              fieldsChanged: ["showOnProfile"],
+              beforeValues: snapshot(existing),
+              afterValues: { ...snapshot(after), reassignedFrom: source.id },
+              ts,
+            });
+          }
+          return existing.id;
+        }
+        if (existing) {
+          overwritten.add(existing.decisionId);
           const after = (await tx.newsMention.update({
             where: { id: existing.id },
             data: {
@@ -346,44 +413,59 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             action: "news_mention_update",
             fieldsChanged: hide ? ["status", "showOnProfile"] : ["status"],
             beforeValues: snapshot(existing),
-            afterValues: { ...snapshot(after), reassignedFrom: row.id },
+            afterValues: { ...snapshot(after), reassignedFrom: source.id },
             ts,
           });
-          reassigned = { cwid: target, name: targetScholar.preferredName };
-        } else {
-          const created = (await tx.newsMention.create({
-            data: {
-              cwid: target,
-              url: row.url,
-              title: row.title,
-              publishedAt: row.publishedAt ?? null,
-              excerpt: row.excerpt ?? null,
-              thumbnailUrl: row.thumbnailUrl ?? null,
-              outlet: row.outlet ?? null,
-              creditedOutlet: row.creditedOutlet ?? null,
-              status: "published",
-              // A human named this scholar; no name-match provenance applies.
-              source: "CURATOR",
-              showOnProfile: !hide,
-              enteredByCwid: realCwid,
-              ...stampForCreated(decisionId, ts),
-            },
-          })) as StoredRow;
-          await appendAuditRow(tx, {
-            actorCwid: realCwid,
-            impersonatedCwid,
-            targetEntityType: "news_mention",
-            requestId,
-            targetEntityId: created.id,
-            action: "news_mention_update",
-            fieldsChanged: ["cwid", "status", "showOnProfile"],
-            beforeValues: null,
-            afterValues: { ...snapshot(created), source: "CURATOR", reassignedFrom: row.id },
-            ts,
-          });
-          reassigned = { cwid: target, name: targetScholar.preferredName };
+          return existing.id;
         }
+        const created = (await tx.newsMention.create({
+          data: {
+            cwid: target as string,
+            url: source.url,
+            title: source.title,
+            publishedAt: source.publishedAt ?? null,
+            excerpt: source.excerpt ?? null,
+            thumbnailUrl: source.thumbnailUrl ?? null,
+            outlet: source.outlet ?? null,
+            creditedOutlet: source.creditedOutlet ?? null,
+            ...(leadId ? { duplicateOf: leadId } : {}),
+            status: "published",
+            // A human named this scholar; no name-match provenance applies.
+            source: "CURATOR",
+            showOnProfile: !hide,
+            enteredByCwid: realCwid,
+            ...stampForCreated(decisionId, ts),
+          },
+        })) as StoredRow;
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "news_mention",
+          requestId,
+          targetEntityId: created.id,
+          action: "news_mention_update",
+          fieldsChanged: ["cwid", "status", "showOnProfile"],
+          beforeValues: null,
+          afterValues: { ...snapshot(created), source: "CURATOR", reassignedFrom: source.id },
+          ts,
+        });
+        return created.id;
+      };
+
+      // Credit the named scholar.
+      let reassigned: { cwid: string; name: string } | null = null;
+      if (target && targetScholar) {
+        affectedCwids.add(target);
+        const leadId = await credit(row, null);
+        // The copies the original row carried go to the named scholar too, as
+        // copies of their row for the lead: the whole story moves, not just the
+        // lead's placement.
+        for (const copy of copies) await credit(copy, leadId);
+        reassigned = { cwid: target, name: targetScholar.preferredName };
       }
+
+      overwritten.delete(decisionId);
+      await invalidateDecisions(tx, overwritten);
 
       return {
         kind: "ok" as const,
@@ -399,6 +481,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (result.kind === "not_pending") return editError(409, "not_pending", "id");
     if (result.kind === "already_decided") return editError(409, "already_decided", "id");
     if (result.kind === "unknown_cwid") return editError(422, "unknown_cwid", "cwid");
+    if (result.kind === "rejected_by_scholar") {
+      return editError(409, "rejected_by_scholar", "cwid");
+    }
+    if (result.kind === "target_rejected") return editError(409, "target_rejected", "cwid");
 
     // Post-commit, per owner. An approval that skips this simply doesn't appear on
     // the profile, which reads as "the approval didn't work". Failures here cannot

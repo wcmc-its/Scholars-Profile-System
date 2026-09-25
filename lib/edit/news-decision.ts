@@ -15,8 +15,10 @@
  *
  * Why any later /edit write clears the stamp: undo must never overwrite a newer
  * human decision. POST /api/edit/news-mention (hide / show / "not me") spreads
- * {@link CLEARED_DECISION_STAMP}, and undo refuses a decision whose rows no
- * longer all carry its id.
+ * {@link CLEARED_DECISION_STAMP}, and both it and a later decision call
+ * {@link invalidateDecisions} so the OTHER rows of the overwritten decision lose
+ * their stamp too. A decision is therefore undoable only while every row it
+ * wrote still carries its id; undo refuses one with no stamped rows left.
  *
  * Server-only: it imports the revalidation helpers. Never import it from a
  * client component.
@@ -67,6 +69,38 @@ export function stampFor(
 /** The stamp for a row this decision CREATES: undo deletes it. */
 export function stampForCreated(decisionId: string, at: Date): DecisionStamp {
   return { ...CLEARED_DECISION_STAMP, decisionId, decisionAt: at };
+}
+
+/** The minimal transaction surface {@link invalidateDecisions} needs. */
+type StampClearer = {
+  newsMention: {
+    updateMany: (args: {
+      where: { decisionId: { in: string[] } };
+      data: DecisionStamp;
+    }) => Promise<{ count: number }>;
+  };
+};
+
+/**
+ * Make earlier decisions un-undoable AS A WHOLE. Undo is all or nothing, so
+ * when a later write overwrites or clears the stamp on ONE row of a decision,
+ * the decision's other rows must lose theirs too — otherwise an undo would
+ * still restore those and leave this row as the newer write set it: a partial
+ * undo. Call it, in the same transaction, with the decision ids the rows being
+ * rewritten carried BEFORE this write (never the id being stamped now).
+ */
+export async function invalidateDecisions(
+  tx: StampClearer,
+  ids: Iterable<string | null | undefined>,
+): Promise<void> {
+  const list = [
+    ...new Set([...ids].filter((id): id is string => typeof id === "string" && id !== "")),
+  ];
+  if (list.length === 0) return;
+  await tx.newsMention.updateMany({
+    where: { decisionId: { in: list } },
+    data: CLEARED_DECISION_STAMP,
+  });
 }
 
 /** Reflect each owner's profile page post-commit — the only surface these rows

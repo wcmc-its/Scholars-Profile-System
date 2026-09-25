@@ -3605,11 +3605,15 @@ model NewsMention {
   showOnProfile  Boolean           @default(true) @map("show_on_profile")
   /// The actor who last changed status/visibility via /edit; null for ETL writes.
   enteredByCwid  String?           @map("entered_by_cwid") @db.VarChar(32)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
   /// Undo for the review queues (lib/edit/news-decision.ts). The request id of
   /// the last POST /api/edit/news-mention/decision that wrote this row; every row
   /// one decision touched (the row, its copies, the swept siblings, a reassign's
-  /// new row) shares it. Cleared by undo and by any later /edit write to the row,
-  /// so an undo can never overwrite a newer human decision. Null otherwise.
+  /// new row) shares it. Cleared by undo, and on EVERY row of the decision by any
+  /// later /edit write to one of them, so an undo is all or nothing and never
+  /// overwrites a newer human decision. Null otherwise.
   decisionId        String?            @map("decision_id") @db.VarChar(64)
   /// When that decision was made; undo is refused after a short window.
   decisionAt        DateTime?          @map("decision_at")
@@ -3621,8 +3625,6 @@ model NewsMention {
   /// `enteredByCwid` before that decision — restoring it hands an untouched row
   /// back to the ETL exactly as it was.
   prevEnteredByCwid String?            @map("prev_entered_by_cwid") @db.VarChar(32)
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 

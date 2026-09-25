@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
   authorizeOverviewWrite: vi.fn(),
   findUnique: vi.fn(),
   update: vi.fn(),
+  txFindUnique: vi.fn(),
+  updateMany: vi.fn(),
 }));
 
 vi.mock("@/lib/edit/request", async (importOriginal) => ({
@@ -29,7 +31,9 @@ vi.mock("@/lib/db", () => ({
     read: { newsMention: { findUnique: h.findUnique } },
     write: {
       $transaction: vi.fn(async (fn: (t: unknown) => unknown) =>
-        fn({ newsMention: { update: h.update } }),
+        fn({
+          newsMention: { update: h.update, findUnique: h.txFindUnique, updateMany: h.updateMany },
+        }),
       ),
     },
   },
@@ -50,6 +54,8 @@ beforeEach(() => {
     },
   });
   h.authorizeOverviewWrite.mockResolvedValue({ ok: true });
+  h.txFindUnique.mockResolvedValue({ decisionId: null });
+  h.updateMany.mockResolvedValue({ count: 0 });
   h.findUnique.mockResolvedValue({
     id: "news-1",
     cwid: "abc1001",
@@ -89,5 +95,28 @@ describe("profile news write", () => {
         prevEnteredByCwid: null,
       }),
     });
+  });
+
+  it("invalidates the whole earlier decision, not just this row (undo stays all-or-nothing)", async () => {
+    h.txFindUnique.mockResolvedValue({ decisionId: "dec-1" });
+    const res = await POST(
+      new Request("http://x/api/edit/news-mention", { method: "POST" }) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(h.updateMany).toHaveBeenCalledWith({
+      where: { decisionId: { in: ["dec-1"] } },
+      data: {
+        decisionId: null,
+        decisionAt: null,
+        prevStatus: null,
+        prevShowOnProfile: null,
+        prevEnteredByCwid: null,
+      },
+    });
+  });
+
+  it("writes no invalidation when the row carries no stamp", async () => {
+    await POST(new Request("http://x/api/edit/news-mention", { method: "POST" }) as never);
+    expect(h.updateMany).not.toHaveBeenCalled();
   });
 });
