@@ -660,12 +660,13 @@ export function CancerCenterCollabReportCard({ centerCode, centerName }: CancerC
         <div className="flex flex-wrap items-center gap-3">
           <MeshLogicModal />
           {/* Bulk export policy: the whole-report CSV is offered only at or
-              under the cap (the route refuses above it). Per-person CSVs stay. */}
+              under the cap (the route refuses above it). Per-person CSVs stay.
+              Stays visible while loading / on error, like the rest of the header. */}
           {state && state.rows.length > state.exportCap ? (
             <p className="text-xs text-muted-foreground">
               Full-report CSV isn&apos;t offered above {state.exportCap} people; use each person&apos;s CSV link.
             </p>
-          ) : state ? (
+          ) : (
             <Button asChild variant="apollo" size="sm">
               {/* Plain `<a download>` — no JS/blob dance, the browser handles the
                   download off the route's `Content-Disposition` header. */}
@@ -677,7 +678,7 @@ export function CancerCenterCollabReportCard({ centerCode, centerName }: CancerC
                 Download full report (CSV)
               </a>
             </Button>
-          ) : null}
+          )}
         </div>
       </div>
       <div className="border-apollo-amber-tint-border bg-apollo-amber-tint rounded-md border px-4 py-3.5">

@@ -179,6 +179,16 @@ describe("CancerCenterCollabReportCard", () => {
     expect(within(removeSection).getByLabelText(/Download R Removeperson's papers/)).toBeTruthy();
   });
 
+  it("keeps the whole-report CSV in the header when the report fails to load", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    const { container } = render(
+      <CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />,
+    );
+    const card = within(container);
+    await waitFor(() => expect(card.getByText(/Failed to load/)).toBeTruthy());
+    expect(card.getByLabelText("Download full report (CSV)")).toBeTruthy();
+  });
+
   it("the mesh-logic modal says the taxonomy hasn't been generated when it is empty, not '0 descriptors'", async () => {
     mockFetch({ taxonomy: { topics: [], totalRelevant: 0, ruleCount: 165, meshRelease: "MeSH 2026" } });
     render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);

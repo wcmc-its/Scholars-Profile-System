@@ -134,14 +134,7 @@ export async function GET(
   });
   if (candidates.length === 0) return csvResponse([], center.code, cwidParam);
   if (!cwidParam && candidates.length > SCHOLAR_EXPORT_CAP) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "export_cap_exceeded",
-        message: `The full-report CSV is only available for ${SCHOLAR_EXPORT_CAP} people or fewer (this report has ${candidates.length}). Download individual people's CSVs instead.`,
-      },
-      { status: 422 },
-    );
+    return editError(422, "export_cap_exceeded");
   }
   const cwids = candidates.map((c) => c.cwid);
 

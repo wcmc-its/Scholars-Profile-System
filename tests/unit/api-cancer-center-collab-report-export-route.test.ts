@@ -185,8 +185,8 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
     const res = await GET(get("http://localhost/x"), params());
     expect(res.status).toBe(422);
     const body = await res.json();
-    expect(body).toMatchObject({ ok: false, error: "export_cap_exceeded" });
-    expect(body.message).toContain(`${SCHOLAR_EXPORT_CAP} people or fewer`);
+    // Same `{ ok, error }` shape as every other error path (editError).
+    expect(body).toEqual({ ok: false, error: "export_cap_exceeded" });
     expect(mockAuthorFindMany).not.toHaveBeenCalled();
   });
 
