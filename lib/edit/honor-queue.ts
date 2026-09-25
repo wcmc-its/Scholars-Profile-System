@@ -23,6 +23,12 @@
  * (#1762 — the Research Dean's office self-serves; see `lib/auth/honors-curator.ts`).
  */
 import { toCsv } from "@/lib/csv";
+import {
+  HONOR_LIST_SCHEDULE_LABEL,
+  HONOR_LISTS,
+  honorListHost,
+  isHonorListRunActive,
+} from "@/lib/honors/lists";
 import { formatPublishedName } from "@/lib/postnominal";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -78,6 +84,9 @@ export type HonorQueueRow = {
   /** Competing claims on the same roster line — see the module note. Empty for
    *  an ordinary unambiguous row. */
   competingCwids: string[];
+  /** What a scraped match rests on ("Name and institution match: listed at …"),
+   *  for the candidate's evidence column. Null on seeded and hand-entered rows. */
+  evidence: string | null;
 };
 
 /** One roster line's worth of candidates. A group of 1 is the normal case. */
@@ -275,6 +284,7 @@ export async function loadHonorQueue(
       decidedAt: true,
       rejectionReason: true,
       supersededById: true,
+      evidence: true,
     },
   });
   if (rows.length === 0) return [];
@@ -354,6 +364,7 @@ export async function loadHonorQueue(
           rejectionReason: r.rejectionReason ?? (r.supersededById ? SUPERSEDED_REASON : null),
           superseded: Boolean(r.supersededById),
           competingCwids: contested ? cwids.filter((c) => c !== r.cwid) : [],
+          evidence: r.evidence ?? null,
         };
       }),
     });
@@ -487,11 +498,10 @@ export function buildHonorCsv(rows: ReadonlyArray<HonorQueueRow & { status: stri
 }
 
 /**
- * `etl_run.source` values that load honor rosters into `honor` start with this.
- * Today that is only the operator-run seed import (`HonorsSeed-Import`, from
- * `etl/honors/import-honors-seed.ts`); there is no scheduled scraper yet. A
- * future per-list scraper should record its runs under a name starting "Honors"
- * so the Sources tab picks them up.
+ * `etl_run.source` values that load honor rosters into `honor` start with this:
+ * the operator-run seed import (`HonorsSeed-Import`) and the scheduled
+ * honors-list scraper's all-lists run (`HonorsLists`). Per-list scraper runs
+ * are in `honor_list_run` (see `HonorListStatus`).
  */
 const HONOR_RUN_SOURCE_PREFIX = "Honors";
 
@@ -526,11 +536,105 @@ export type HonorSource = {
   rejected: number;
 };
 
+/** One `honor_list_run` row as the Sources tab shows it. */
+export type HonorListRunView = {
+  id: string;
+  /** The stored status, except a queued/running row past the stale window reads
+   *  `stalled` (the job never started or died without finishing). */
+  status: "queued" | "running" | "success" | "partial" | "failed" | "stalled";
+  trigger: string;
+  createdAt: string;
+  finishedAt: string | null;
+  onListTotal: number | null;
+  matched: number | null;
+  newCandidates: number | null;
+  errorMessage: string | null;
+};
+
+/** A list the scheduled scraper reads (`lib/honors/lists.ts`) and its runs. */
+export type HonorListStatus = {
+  id: string;
+  honorName: string;
+  organization: string;
+  rosterUrl: string;
+  host: string;
+  schedule: string;
+  /** The most recent run in any state, or null when the list has never run. */
+  latest: HonorListRunView | null;
+  /** The most recent FINISHED run — its counts stay on screen while a new run
+   *  is queued or running. Null when none has finished. */
+  lastFinished: HonorListRunView | null;
+  /** A run is queued or running now: Run now is disabled. */
+  active: boolean;
+};
+
 export type HonorSourcesSummary = {
   sources: HonorSource[];
   /** Newest first; at most 10. Empty when no honors load has been recorded. */
   runs: HonorSourceRun[];
+  /** Every scraped list, in registry order, with its latest runs. */
+  lists: HonorListStatus[];
 };
+
+/** Run rows read for the Sources tab: plenty for a few lists' latest runs. */
+const LIST_RUNS_READ = 200;
+
+type ListRunRow = {
+  id: string;
+  listId: string;
+  trigger: string;
+  status: string;
+  createdAt: Date;
+  finishedAt: Date | null;
+  onListTotal: number | null;
+  matched: number | null;
+  newCandidates: number | null;
+  errorMessage: string | null;
+};
+
+function listRunView(r: ListRunRow, now: number): HonorListRunView {
+  const stored = r.status as HonorListRunView["status"];
+  const status =
+    (stored === "queued" || stored === "running") && !isHonorListRunActive(r, now)
+      ? "stalled"
+      : stored;
+  return {
+    id: r.id,
+    status,
+    trigger: r.trigger,
+    createdAt: r.createdAt.toISOString(),
+    finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+    onListTotal: r.onListTotal,
+    matched: r.matched,
+    newCandidates: r.newCandidates,
+    errorMessage: r.errorMessage,
+  };
+}
+
+/** Each registry list with its latest and last-finished run (runs newest first). */
+export function buildListStatuses(
+  runs: readonly ListRunRow[],
+  now: number = Date.now(),
+): HonorListStatus[] {
+  return HONOR_LISTS.map((l) => {
+    const mine = runs.filter((r) => r.listId === l.id);
+    const latest = mine[0] ?? null;
+    const finished =
+      mine.find((r) => r.status === "success" || r.status === "partial" || r.status === "failed") ??
+      null;
+    return {
+      id: l.id,
+      honorName: l.honorName,
+      organization: l.organization,
+      rosterUrl: l.rosterUrl,
+      host: honorListHost(l),
+      schedule: HONOR_LIST_SCHEDULE_LABEL,
+      latest: latest ? listRunView(latest, now) : null,
+      lastFinished: finished ? listRunView(finished, now) : null,
+      active: latest ? isHonorListRunActive(latest, now) : false,
+    };
+  });
+}
 
 /** The roster a `sourceRef` belongs to — see `HonorSource.key`. */
 export function rosterKey(sourceRef: string): string {
@@ -552,13 +656,13 @@ function rosterHost(key: string): string | null {
 /**
  * The Sources tab: every honor list the queue's fed rows came from, with how
  * many lines each matched and where those stand, plus the recorded honors-load
- * runs. Read-only: nothing in the console can trigger a load. Hand-entered
+ * runs, plus each scraped list's latest runs. Hand-entered
  * (`CURATOR`) and self-asserted (`SELF`) rows carry no roster and are excluded.
  */
 export async function loadHonorSources(
-  client: Pick<PrismaClient, "honor" | "etlRun">,
+  client: Pick<PrismaClient, "honor" | "etlRun" | "honorListRun">,
 ): Promise<HonorSourcesSummary> {
-  const [rows, runs] = await Promise.all([
+  const [rows, runs, listRuns] = await Promise.all([
     client.honor.findMany({
       where: { sourceRef: { not: null }, source: { notIn: ["CURATOR", "SELF"] } },
       select: { name: true, organization: true, status: true, sourceRef: true },
@@ -573,6 +677,22 @@ export async function loadHonorSources(
         completedAt: true,
         status: true,
         rowsProcessed: true,
+        errorMessage: true,
+      },
+    }),
+    client.honorListRun.findMany({
+      orderBy: { createdAt: "desc" },
+      take: LIST_RUNS_READ,
+      select: {
+        id: true,
+        listId: true,
+        trigger: true,
+        status: true,
+        createdAt: true,
+        finishedAt: true,
+        onListTotal: true,
+        matched: true,
+        newCandidates: true,
         errorMessage: true,
       },
     }),
@@ -636,5 +756,6 @@ export async function loadHonorSources(
       rowsProcessed: r.rowsProcessed,
       errorMessage: r.errorMessage,
     })),
+    lists: buildListStatuses(listRuns),
   };
 }

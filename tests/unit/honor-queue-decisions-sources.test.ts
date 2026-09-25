@@ -6,11 +6,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildListStatuses,
   loadHonorQueue,
   loadHonorSources,
   rosterKey,
   SUPERSEDED_REASON,
 } from "@/lib/edit/honor-queue";
+import { HONOR_LISTS, HONOR_LIST_RUN_STALE_MS } from "@/lib/honors/lists";
 
 const T0 = new Date("2026-07-17T00:00:00Z");
 
@@ -140,11 +142,14 @@ describe("rosterKey", () => {
 });
 
 describe("loadHonorSources", () => {
-  function sourcesClient(rows: unknown[], runs: unknown[]) {
-    const calls: { honor?: unknown; etlRun?: unknown } = {};
+  function sourcesClient(rows: unknown[], runs: unknown[], listRuns: unknown[] = []) {
+    const calls: { honor?: unknown; etlRun?: unknown; honorListRun?: unknown } = {};
     const client = {
       honor: { findMany: async (args: unknown) => ((calls.honor = args), rows) },
       etlRun: { findMany: async (args: unknown) => ((calls.etlRun = args), runs) },
+      honorListRun: {
+        findMany: async (args: unknown) => ((calls.honorListRun = args), listRuns),
+      },
     } as unknown as Parameters<typeof loadHonorSources>[0];
     return { client, calls };
   }
@@ -249,5 +254,81 @@ describe("loadHonorSources", () => {
         errorMessage: "invented failure",
       },
     ]);
+  });
+});
+
+describe("buildListStatuses — the Sources tab's per-list runs", () => {
+  const NOW = Date.parse("2026-09-25T12:00:00Z");
+  const LIST = HONOR_LISTS[0].id;
+  function listRun(over: Record<string, unknown>) {
+    return {
+      id: "r",
+      listId: LIST,
+      trigger: "schedule",
+      status: "success",
+      createdAt: new Date(NOW - 60_000),
+      finishedAt: new Date(NOW - 30_000),
+      onListTotal: 100,
+      matched: 3,
+      newCandidates: 1,
+      errorMessage: null,
+      ...over,
+    };
+  }
+
+  it("covers every registry list, in registry order, never-run lists included", () => {
+    const out = buildListStatuses([], NOW);
+    expect(out.map((l) => l.id)).toEqual(HONOR_LISTS.map((l) => l.id));
+    expect(out.every((l) => l.latest === null && !l.active)).toBe(true);
+    expect(out[0].schedule).toBe("Weekly");
+  });
+
+  it("latest is the newest run; lastFinished skips a queued/running one", () => {
+    const [l] = buildListStatuses(
+      [
+        listRun({ id: "new", status: "queued", finishedAt: null, onListTotal: null }),
+        listRun({ id: "old", createdAt: new Date(NOW - 86_400_000) }),
+      ],
+      NOW,
+    );
+    expect(l.latest?.id).toBe("new");
+    expect(l.latest?.status).toBe("queued");
+    expect(l.active).toBe(true);
+    expect(l.lastFinished?.id).toBe("old");
+    expect(l.lastFinished?.onListTotal).toBe(100);
+  });
+
+  it("a queued/running row past the stale window reads stalled and is not active", () => {
+    const [l] = buildListStatuses(
+      [
+        listRun({
+          status: "running",
+          finishedAt: null,
+          createdAt: new Date(NOW - HONOR_LIST_RUN_STALE_MS - 1000),
+        }),
+      ],
+      NOW,
+    );
+    expect(l.latest?.status).toBe("stalled");
+    expect(l.active).toBe(false);
+  });
+
+  it("loadHonorSources reads the run log newest first and attaches the lists", async () => {
+    const calls: Record<string, unknown> = {};
+    const client = {
+      honor: { findMany: async () => [] },
+      etlRun: { findMany: async () => [] },
+      honorListRun: {
+        findMany: async (args: unknown) => (
+          (calls.args = args),
+          [listRun({ id: "x", status: "failed", errorMessage: "HTTP 403 on https://example.org" })]
+        ),
+      },
+    } as unknown as Parameters<typeof loadHonorSources>[0];
+    const summary = await loadHonorSources(client);
+    expect(calls.args).toMatchObject({ orderBy: { createdAt: "desc" } });
+    const first = summary.lists.find((l) => l.id === LIST);
+    expect(first?.latest?.status).toBe("failed");
+    expect(first?.latest?.errorMessage).toBe("HTTP 403 on https://example.org");
   });
 });

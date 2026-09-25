@@ -309,12 +309,53 @@ model Honor {
   /// same roster line was approved: that approved row's id. Undoing the approval
   /// restores exactly these rows to pending.
   supersededById  String?       @map("superseded_by_id") @db.VarChar(64)
+  /// What a scraped match rests on, for the queue's evidence column ("Name and
+  /// institution match: listed at …"). Written by the honors-list scraper
+  /// (etl/honors/scrape-lists.ts); NULL on seeded and hand-entered rows.
+  evidence        String?       @db.VarChar(255)
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
 
   @@index([cwid, status, showOnProfile])
   @@index([supersededById])
   @@map("honor")
+}
+
+/// One honors-list scrape of one list (etl/honors/scrape-lists.ts): the Sources
+/// tab's per-list "Last run". A Run now request writes the row as `queued`
+/// before the job starts; the job claims it (`running`) and finishes it as
+/// `success` | `partial` | `failed`. Counts are NULL until the run finishes.
+/// A run log, not curated data: losing it loses history, never a decision.
+model HonorListRun {
+  id              String    @id @default(uuid()) @db.VarChar(64)
+  /// `HONOR_LISTS[].id` in lib/honors/lists.ts.
+  listId          String    @map("list_id") @db.VarChar(64)
+  /// `schedule` | `manual`.
+  trigger         String    @db.VarChar(16)
+  /// Who pressed Run now (the real actor); NULL for a scheduled run.
+  requestedByCwid String?   @map("requested_by_cwid") @db.VarChar(32)
+  /// `queued` | `running` | `success` | `partial` | `failed`.
+  status          String    @db.VarChar(16)
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  /// Entries read from the roster.
+  onListTotal     Int?      @map("on_list_total")
+  /// Entries matched to at least one Weill Cornell scholar.
+  matched         Int?
+  /// New pending `honor` rows this run created.
+  newCandidates   Int?      @map("new_candidates")
+  errorMessage    String?   @map("error_message") @db.VarChar(1024)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  /// The one-in-flight-per-list lock: set to `listId` while the run is
+  /// `queued` or `running`, NULL once it ends (any end state, including a stale
+  /// row expired as "did not finish"). UNIQUE, and MySQL admits any number of
+  /// NULLs, so at most ONE active run per list can exist: a second insert gets
+  /// P2002, which Run now answers 409 and the scheduled run skips.
+  /// See `lib/honors/run-lock.ts`.
+  activeListId    String?   @unique @map("active_list_id") @db.VarChar(64)
+
+  @@index([listId, createdAt])
+  @@map("honor_list_run")
 }
 
 /// No NAMED_CHAIR member, deliberately: ED already ingests endowed titles into

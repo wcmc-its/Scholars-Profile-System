@@ -290,6 +290,14 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Deployed weekly step (cdk/lib/etl-stack.ts FundingDigestWeekly, tier:"continue")
   // that writes source "FundingDigest" (etl/opportunities/funding-digest.ts).
   FundingDigest: { cadence: "weekly" },
+  // Honors-list scraper (etl/honors/scrape-lists.ts), its own weekly machine
+  // `scholars-honors-<env>` (cdk/lib/etl-stack.ts HonorsStateMachine), both envs.
+  // Writes source "HonorsLists" on an ALL-lists run only (the schedule); a
+  // single-list Run now does not refresh it. A run where some lists fail still
+  // succeeds (each list's failure is on its honor_list_run row and the queue's
+  // Sources tab), so this detects the schedule dying or every list failing,
+  // not one list quietly failing.
+  HonorsLists: { cadence: "weekly" },
   // Monthly cadence. Spotlight is the one source whose producer is OUTSIDE this
   // repo: ReciterAI publishes the artifact and SPS only loads what it finds, so
   // the SLA here has to track the PRODUCER's schedule, not our loader's. That

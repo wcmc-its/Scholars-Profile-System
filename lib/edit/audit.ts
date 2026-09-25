@@ -275,7 +275,17 @@ export type AuditAction =
   /** a functional role assignment deleted (a manual revoke, or the import
    *  dropping an imported row its source no longer lists); `beforeValues`
    *  carries the deleted row. */
-  | "functional_role_revoke";
+  | "functional_role_revoke"
+  /** an honors curator (or superuser) pressed Run now on the honors queue's
+   *  Sources tab (`POST /api/edit/honor/sources/run`, `HONORS_RUN_NOW`), which
+   *  queued a scrape of one public honor list. `targetEntityType='honor_list'`,
+   *  `targetEntityId` is the list id (`lib/honors/lists.ts`); `afterValues`
+   *  carries `{ runId, listId, status: "queued", trigger }`. The scrape itself
+   *  is machine-run and NOT audited (same posture as every ETL ingest); what it
+   *  proposes lands as `pending`, and each curator decision on it is audited as
+   *  `honor_update`. Requires the `scholars_audit` ENUMs be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "honor_list_run";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -369,7 +379,10 @@ export type AuditEntityType =
    *  `targetEntityId` is `"{role}:{cwid}:{source}"`. Requires the
    *  `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
-  | "functional_role";
+  | "functional_role"
+  /** a public honor list the honors-list scraper reads (`lib/honors/lists.ts`);
+   *  `targetEntityId` is the list id. Only `honor_list_run` uses it. */
+  | "honor_list";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
