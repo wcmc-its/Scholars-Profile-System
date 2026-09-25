@@ -13,6 +13,7 @@ import {
   type GrantSort,
 } from "@/lib/api/dept-lists";
 import { officialUnitName } from "@/lib/org-unit-names";
+import { isOrgUnitMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
@@ -111,6 +112,11 @@ export async function DepartmentPage({
     (activeTab === "scholars"
       ? await getDepartmentFaculty(detail.dept.code, { page: pageIdx, sort: rosterSort })
       : null);
+  // Unit Page v2 — the hero's division chips filter the roster in place only
+  // when the roster offers a Division facet, which rides the org-unit facet
+  // flag (`DepartmentFacultyClient` gates it on `methodFacet !== undefined`,
+  // i.e. this same flag). Flag off ⇒ the chips link the division pages.
+  const divisionChipsFilter = isOrgUnitMethodsFacetEnabled();
   // Pill counts = the preview's visible total (the same number as the card's
   // blurb, its "See all" and the filtered tab), re-sorted by it.
   const researchAreas = applyAreaPreviewCounts(detail.topResearchAreas, areaPreviews);
@@ -216,14 +222,21 @@ export async function DepartmentPage({
           />
         )}
 
+        {/* Unit Page v2 — a division chip filters the roster's Division facet
+            in place (href `?div=<code>#people` for other tabs / new-tab clicks,
+            filtered client-side on mount — JS-off lands unfiltered) when that
+            facet exists; otherwise it links the division page as before. */}
         <UnitSubunitChips
           noun={["division", "divisions"]}
           ariaLabel="Divisions"
           chips={detail.divisions.map((d) => ({
             key: d.code,
             label: d.name,
-            href: `/departments/${detail.dept.slug}/divisions/${d.slug}`,
+            href: divisionChipsFilter
+              ? `${basePath}?div=${encodeURIComponent(d.code)}#people`
+              : `/departments/${detail.dept.slug}/divisions/${d.slug}`,
             count: divisionCounts.get(d.code) ?? 0,
+            filter: divisionChipsFilter ? { param: "div" as const, value: d.code } : undefined,
           }))}
         />
 
@@ -267,8 +280,8 @@ export async function DepartmentPage({
           {activeTab === "scholars" && facultyData && (
             // Scholars tab body — Unit Page v2: no bordered card; the facet
             // aside + roster sit directly under the tabs. The hero's division
-            // chips still link out to the first-class division pages; the
-            // Division facet filters the roster in place.
+            // chips drive the Division facet in place; a single selected
+            // division shows a link to its first-class page under the facet.
             <DepartmentFacultyClient
               faculty={facultyData.hits}
               total={facultyData.total}
@@ -282,6 +295,7 @@ export async function DepartmentPage({
                 value: d.code,
                 label: d.name,
                 count: divisionCounts.get(d.code) ?? 0,
+                href: `/departments/${detail.dept.slug}/divisions/${d.slug}`,
               }))}
               unitKind="department"
               unitCode={detail.dept.code}

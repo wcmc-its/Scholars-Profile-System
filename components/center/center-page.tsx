@@ -276,12 +276,23 @@ export async function CenterPage({
         <UnitSubunitChips
           noun={["program", "programs"]}
           ariaLabel="Programs"
-          chips={programs.map((p) => ({
-            key: p.code,
-            label: p.label,
-            href: `/centers/${detail.slug}/programs/${p.code}`,
-            count: programMemberCount.get(p.code) ?? null,
-          }))}
+          chips={programs.map((p) => {
+            // Unit Page v2 — a chip filters the grouped roster's Program facet
+            // in place (href `?program=<code>#people` for other tabs / new-tab
+            // clicks, filtered client-side on mount — JS-off lands unfiltered)
+            // when the roster has that program's section; otherwise it links
+            // the program page as before.
+            const inPlace = programMemberCount.has(p.code);
+            return {
+              key: p.code,
+              label: p.label,
+              href: inPlace
+                ? `${basePath}?program=${encodeURIComponent(p.code)}#people`
+                : `/centers/${detail.slug}/programs/${p.code}`,
+              count: programMemberCount.get(p.code) ?? null,
+              filter: inPlace ? { param: "program" as const, value: p.code } : undefined,
+            };
+          })}
         />
 
         <UnitResearchAreas

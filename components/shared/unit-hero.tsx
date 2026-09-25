@@ -2,7 +2,8 @@
  * Shared hero building blocks for the department + center pages ("Unit Page
  * v2" mock): the subunit chip row (divisions / programs), the top-research-area
  * pill row, and the dashed-divider stats line. Server Components — pure markup
- * (the research-area pill's hover preview is its own client island).
+ * (the research-area pill's hover preview and the subunit chip row are their
+ * own client islands).
  *
  * The division page keeps its own hero (it is not part of the v2 mock).
  */
@@ -10,24 +11,25 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { AreaPreviewPill } from "@/components/shared/area-preview-pill";
 import type { UnitAreaPreviews } from "@/lib/api/unit-area-previews";
+import {
+  UnitSubunitChipRow,
+  type SubunitChipView,
+} from "@/components/shared/unit-subunit-chip-row";
 
 /** 11px / 0.14em muted uppercase section label used inside the hero. */
 export const UNIT_HERO_LABEL_CLASS =
   "text-[11px] uppercase tracking-[0.14em] text-muted-foreground";
 
-export type UnitSubunitChip = {
-  key: string;
-  label: string;
-  href: string;
-  /** Scholar count shown after the name; omitted when unknown. */
-  count?: number | null;
-};
+export type UnitSubunitChip = SubunitChipView;
 
 /**
- * "{N} DIVISIONS" / "{N} PROGRAMS" + a row of slate-outline chips. The chips
- * stay LINKS to the first-class division / program pages (the mock's
- * filter-in-place buttons are a pending product decision), restyled per the
- * mock: 26px, 12.5px, slate border, muted tabular count, slate-tint hover.
+ * "{N} DIVISIONS" / "{N} PROGRAMS" + a row of slate-outline chips (26px,
+ * 12.5px, slate border, muted tabular count, slate-tint hover). A chip with a
+ * `filter` narrows the roster below in place (the mock's pick()) and keeps a
+ * real `?div=<code>#people` href (other tabs / new-tab clicks; filtered by the
+ * roster's client seed, so JS-off lands unfiltered); a chip without one links the
+ * first-class division / program page. The chip row is a small client island
+ * (`UnitSubunitChipRow`); this wrapper stays a Server Component.
  */
 export function UnitSubunitChips({
   noun,
@@ -45,22 +47,7 @@ export function UnitSubunitChips({
       <div id="subunits" className={cn("mt-7 scroll-mt-16", UNIT_HERO_LABEL_CLASS)}>
         {chips.length} {chips.length === 1 ? noun[0] : noun[1]}
       </div>
-      <div className="mt-3 flex flex-wrap gap-[6px]">
-        {chips.map((c) => (
-          <a
-            key={c.key}
-            href={c.href}
-            className="border-apollo-slate text-apollo-slate hover:bg-apollo-slate-tint inline-flex min-h-[26px] max-w-full items-center gap-1.5 rounded-full border bg-white px-2.5 py-1 text-[12.5px] leading-tight no-underline transition-colors duration-[120ms] ease-out hover:no-underline"
-          >
-            {c.label}
-            {typeof c.count === "number" && (
-              <span className="text-muted-foreground whitespace-nowrap tabular-nums">
-                {c.count.toLocaleString()}
-              </span>
-            )}
-          </a>
-        ))}
-      </div>
+      <UnitSubunitChipRow chips={chips} />
     </nav>
   );
 }

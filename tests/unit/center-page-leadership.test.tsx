@@ -231,7 +231,10 @@ describe("CenterPage — Unit Page v2 hero", () => {
     const section = container.querySelector("section")!;
     const chip = screen.getByRole("link", { name: /Cancer Biology/ });
     expect(section.contains(chip)).toBe(true);
-    expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center/programs/CB");
+    // Unit Page v2 — the chip filters the grouped roster in place; its href
+    // (other tabs / new-tab clicks) lands on the roster, which seeds the
+    // Program facet from `?program=` on its client mount.
+    expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center?program=CB#people");
     expect(chip.textContent).toContain("2");
     expect(screen.getByRole("link", { name: "2 programs" }).getAttribute("href")).toBe(
       "#subunits",
@@ -239,6 +242,24 @@ describe("CenterPage — Unit Page v2 hero", () => {
     expect(screen.getByRole("link", { name: "42 scholars" }).getAttribute("href")).toBe(
       "/centers/meyer-cancer-center#people",
     );
+  });
+
+  it("program chips fall back to the program page when the roster has no such section", async () => {
+    mockProgramPagesEnabled.mockReturnValue(true);
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    mockGetCenterPrograms.mockResolvedValue([{ code: "CB", label: "Cancer Biology" }]);
+    mockGetCenterMembers.mockResolvedValue({
+      mode: "flat",
+      hits: [],
+      total: 0,
+      page: 1,
+      pageSize: 20,
+      roleCategoryCounts: {},
+    });
+    render(await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }));
+    expect(
+      screen.getByRole("link", { name: /Cancer Biology/ }).getAttribute("href"),
+    ).toBe("/centers/meyer-cancer-center/programs/CB");
   });
 
   it("keeps the 'Membership data pending' fallback when both counts are 0", async () => {

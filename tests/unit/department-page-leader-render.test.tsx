@@ -169,11 +169,55 @@ describe("DepartmentPage — Unit Page v2 hero", () => {
     const facultyProps = mockFacultyClient.mock.calls[0][0] as {
       divisionFacet: Array<{ value: string; count: number }>;
     };
-    expect(facultyProps.divisionFacet).toEqual([{ value: "D1", label: "Cardiology", count: 198 }]);
+    expect(facultyProps.divisionFacet).toEqual([
+      {
+        value: "D1",
+        label: "Cardiology",
+        count: 198,
+        href: "/departments/medicine/divisions/cardiology",
+      },
+    ]);
     expect(screen.getByRole("link", { name: "1 division" }).getAttribute("href")).toBe(
       "#subunits",
     );
   });
+
+  // Page-level contract: a division chip filters in place EXACTLY when the
+  // roster offers the Division facet. `DepartmentFacultyClient` shows that facet
+  // only while `methodFacet !== undefined`, which the real `getDepartmentFaculty`
+  // sets iff `isOrgUnitMethodsFacetEnabled()` — the mock below mirrors that
+  // gating, so a page that decided the chip's mode from any other signal fails.
+  it.each([
+    ["on", "/departments/medicine?div=D1#people"],
+    ["off", "/departments/medicine/divisions/cardiology"],
+  ])(
+    "ORG_UNIT_METHODS_FACET=%s: chip filters in place iff the roster gets a methodFacet",
+    async (flag, href) => {
+      vi.stubEnv("METHODS_LENS_ENABLED", "on");
+      vi.stubEnv("ORG_UNIT_METHODS_FACET", flag);
+      try {
+        mockGetDepartmentFaculty.mockImplementation(async () => ({
+          ...FACULTY,
+          methodFacet: process.env.ORG_UNIT_METHODS_FACET === "on" ? [] : undefined,
+        }));
+        mockGetDepartment.mockResolvedValue({
+          ...baseDetail(),
+          divisions: [{ code: "D1", name: "Cardiology", slug: "cardiology", scholarCount: 241 }],
+          stats: { scholars: 10, divisions: 1, publications: 5, activeGrants: 2 },
+        });
+        mockGetDivisionCounts.mockResolvedValue(new Map([["D1", 198]]));
+        render(await DepartmentPage({ deptSlug: "medicine", page: 1 }));
+        const chipHref = screen.getByRole("link", { name: /Cardiology/ }).getAttribute("href");
+        expect(chipHref).toBe(href);
+        const { methodFacet } = mockFacultyClient.mock.calls[0][0] as {
+          methodFacet?: unknown[];
+        };
+        expect(chipHref!.includes("?div=")).toBe(methodFacet !== undefined);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 
   it("shows the curated website as a text link and keeps #people + #tab-content anchors", async () => {
     mockGetDepartment.mockResolvedValue({
