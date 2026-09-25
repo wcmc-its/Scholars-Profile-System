@@ -294,7 +294,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         for (const sibling of siblings) {
           const after = (await tx.newsMention.update({
             where: { id: sibling.id },
-            data: { status: "rejected", enteredByCwid: realCwid, ...stampFor(sibling, decisionId, ts) },
+            data: {
+              status: "rejected",
+              enteredByCwid: realCwid,
+              ...stampFor(sibling, decisionId, ts),
+            },
           })) as StoredRow;
           await appendAuditRow(tx, {
             actorCwid: realCwid,
@@ -314,7 +318,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       // Credit the named scholar.
-      let reassigned: { cwid: string; name: string; id: string; created: boolean } | null = null;
+      let reassigned: { cwid: string; name: string } | null = null;
       if (target && targetScholar) {
         affectedCwids.add(target);
         const existing = (await tx.newsMention.findUnique({
@@ -322,7 +326,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         })) as StoredRow | null;
         if (existing && existing.status === "published") {
           // Already credited to them (e.g. VIVO-linked): nothing to change.
-          reassigned = { cwid: target, name: targetScholar.preferredName, id: existing.id, created: false };
+          reassigned = { cwid: target, name: targetScholar.preferredName };
         } else if (existing) {
           const after = (await tx.newsMention.update({
             where: { id: existing.id },
@@ -345,7 +349,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             afterValues: { ...snapshot(after), reassignedFrom: row.id },
             ts,
           });
-          reassigned = { cwid: target, name: targetScholar.preferredName, id: existing.id, created: false };
+          reassigned = { cwid: target, name: targetScholar.preferredName };
         } else {
           const created = (await tx.newsMention.create({
             data: {
@@ -377,7 +381,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             afterValues: { ...snapshot(created), source: "CURATOR", reassignedFrom: row.id },
             ts,
           });
-          reassigned = { cwid: target, name: targetScholar.preferredName, id: created.id, created: true };
+          reassigned = { cwid: target, name: targetScholar.preferredName };
         }
       }
 
@@ -406,9 +410,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       showOnProfile: result.showOnProfile,
       siblingsRejected: result.siblingsRejected,
       decisionId,
-      ...(result.reassigned
-        ? { reassignedTo: { cwid: result.reassigned.cwid, name: result.reassigned.name } }
-        : {}),
+      ...(result.reassigned ? { reassignedTo: result.reassigned } : {}),
     });
   } catch {
     return editError(500, "write_failed");

@@ -93,7 +93,9 @@ beforeEach(() => {
 
 describe("reassign to a scholar with no row for the article", () => {
   it("rejects the original row and creates a CURATOR row for the named scholar", async () => {
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: " ZZZ9001 " }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: " ZZZ9001 " }) as never,
+    );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       ok: true,
@@ -147,8 +149,14 @@ describe("reassign to a scholar with no row for the article", () => {
     const calls = h.appendAuditRow.mock.calls.map((c) => c[1]);
     expect(calls).toHaveLength(2);
     for (const c of calls) expect(c).toMatchObject({ action: "news_mention_update" });
-    expect(calls[0]).toMatchObject({ targetEntityId: "news-1", afterValues: { reassignedTo: "zzz9001" } });
-    expect(calls[1]).toMatchObject({ targetEntityId: "news-new", afterValues: { reassignedFrom: "news-1" } });
+    expect(calls[0]).toMatchObject({
+      targetEntityId: "news-1",
+      afterValues: { reassignedTo: "zzz9001" },
+    });
+    expect(calls[1]).toMatchObject({
+      targetEntityId: "news-new",
+      afterValues: { reassignedFrom: "news-1" },
+    });
     expect(new Set(calls.map((c) => c.ts.getTime())).size).toBe(1);
   });
 
@@ -166,12 +174,18 @@ describe("reassign to a scholar who already has a row for the article", () => {
       where.id ? { ...PENDING } : theirs,
     );
     h.tx.newsMention.findMany.mockResolvedValue([{ ...PENDING, id: "news-3", cwid: "def2002" }]);
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
     expect(res.status).toBe(200);
     expect(h.tx.newsMention.create).not.toHaveBeenCalled();
     expect(h.tx.newsMention.update).toHaveBeenCalledWith({
       where: { id: "news-2" },
-      data: expect.objectContaining({ status: "published", decisionId: "req-9", prevStatus: "pending" }),
+      data: expect.objectContaining({
+        status: "published",
+        decisionId: "req-9",
+        prevStatus: "pending",
+      }),
     });
     expect(h.tx.newsMention.update).toHaveBeenCalledWith({
       where: { id: "news-3" },
@@ -185,9 +199,13 @@ describe("reassign to a scholar who already has a row for the article", () => {
 
   it("leaves an already-published row for them untouched", async () => {
     h.tx.newsMention.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
-      where.id ? { ...PENDING } : { ...PENDING, id: "news-2", cwid: "zzz9001", status: "published" },
+      where.id
+        ? { ...PENDING }
+        : { ...PENDING, id: "news-2", cwid: "zzz9001", status: "published" },
     );
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
     expect(res.status).toBe(200);
     expect(h.tx.newsMention.create).not.toHaveBeenCalled();
     expect(h.tx.newsMention.update).toHaveBeenCalledTimes(1);
@@ -197,7 +215,9 @@ describe("reassign to a scholar who already has a row for the article", () => {
 describe("refusals write nothing", () => {
   it("422s a CWID with no live scholar row", async () => {
     h.tx.scholar.findFirst.mockResolvedValue(null);
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ ok: false, error: "unknown_cwid", field: "cwid" });
     expect(h.tx.newsMention.update).not.toHaveBeenCalled();
@@ -206,7 +226,9 @@ describe("refusals write nothing", () => {
   });
 
   it("400s a malformed CWID before touching the DB", async () => {
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: "12; drop" }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "12; drop" }) as never,
+    );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "invalid_cwid" });
     expect(h.tx.newsMention.findUnique).not.toHaveBeenCalled();
@@ -221,14 +243,18 @@ describe("refusals write nothing", () => {
     h.tx.newsMention.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
       where.id ? { ...PENDING, status: "rejected" } : null,
     );
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "not_pending" });
   });
 
   it("409s when another candidate already won the name", async () => {
     h.tx.newsMention.findFirst.mockResolvedValue({ id: "news-4" });
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "zzz9001" }) as never,
+    );
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "already_decided" });
     expect(h.tx.newsMention.findFirst).toHaveBeenCalledWith({
@@ -252,7 +278,9 @@ describe("refusals write nothing", () => {
 
 describe("naming the row's own scholar", () => {
   it("is a plain approval — no create, no directory lookup", async () => {
-    const res = await POST(request({ id: "news-1", decision: "approve", cwid: "abc1001" }) as never);
+    const res = await POST(
+      request({ id: "news-1", decision: "approve", cwid: "abc1001" }) as never,
+    );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: "published" });
     expect(h.tx.scholar.findFirst).not.toHaveBeenCalled();

@@ -108,7 +108,13 @@ describe("restoring", () => {
   it("deletes a row the decision created (a reassign) and restores the original", async () => {
     h.tx.newsMention.findMany.mockResolvedValue([
       row({ status: "rejected", showOnProfile: true }),
-      row({ id: "news-new", cwid: "zzz9001", prevStatus: null, prevShowOnProfile: null, showOnProfile: true }),
+      row({
+        id: "news-new",
+        cwid: "zzz9001",
+        prevStatus: null,
+        prevShowOnProfile: null,
+        showOnProfile: true,
+      }),
     ]);
     const res = await POST(request({ decisionIds: ["req-1"] }) as never);
     expect(res.status).toBe(200);
@@ -124,7 +130,10 @@ describe("restoring", () => {
   });
 
   it("undoes several decisions in one call (Approve all)", async () => {
-    h.tx.newsMention.findMany.mockResolvedValue([row(), row({ id: "news-2", decisionId: "req-2" })]);
+    h.tx.newsMention.findMany.mockResolvedValue([
+      row(),
+      row({ id: "news-2", decisionId: "req-2" }),
+    ]);
     const res = await POST(request({ decisionIds: ["req-1", "req-2", "req-1"] }) as never);
     expect(res.status).toBe(200);
     expect(h.tx.newsMention.findMany).toHaveBeenCalledWith({
@@ -180,7 +189,10 @@ describe("refusals write nothing", () => {
 
   it("keeps the steward / superuser gate and the flag", async () => {
     let res = await POST(
-      request({ decisionIds: ["req-1"] }, { cwid: "sch1", isSuperuser: false, isCommsSteward: false }) as never,
+      request(
+        { decisionIds: ["req-1"] },
+        { cwid: "sch1", isSuperuser: false, isCommsSteward: false },
+      ) as never,
     );
     expect(res.status).toBe(403);
     process.env.NEWS_APPROVAL_QUEUE = "off";

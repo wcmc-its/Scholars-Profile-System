@@ -3,7 +3,8 @@
  * Pins: one card per story; "Approve all" approves each waiting mention; a
  * contested name blocks Approve / Hide until a scholar is picked, then posts the
  * picked row; Hide posts `approve_hidden`; the filter rail and search narrow the
- * list; the contested banner's "Show only these". All people are invented.
+ * list; the contested banner's "Show only these"; the status bar's Undo; and the
+ * "Wrong person? Enter CWID" override. All people are invented.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -227,5 +228,150 @@ describe("NewsApprovalQueue", () => {
     expect(screen.getByTestId("news-queue-blast-d1").textContent).toBe(
       "Rejects 1 other candidate matched to this name.",
     );
+  });
+
+  describe("Undo in the status bar", () => {
+    /** The decision route answers with a decision id per call; undo answers ok. */
+    function routeFetch(undoStatus = 200, undoError?: string) {
+      let n = 0;
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url === "/api/edit/news-mention/undo") {
+          return new Response(
+            JSON.stringify(undoError ? { ok: false, error: undoError } : { ok: true, restored: 1 }),
+            { status: undoStatus },
+          );
+        }
+        n += 1;
+        return new Response(JSON.stringify({ ok: true, decisionId: `dec-${n}` }), { status: 200 });
+      });
+    }
+
+    it("sends every decision id the last click made, then says so", async () => {
+      routeFetch();
+      render(
+        <NewsApprovalQueue pending={[lab1, lab2]} approved={[]} rejected={[]} counts={COUNTS} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Approve all" }));
+      const undo = await screen.findByTestId("news-queue-toast-undo");
+      refresh.mockClear();
+      fireEvent.click(undo);
+      await waitFor(() =>
+        expect(screen.getByTestId("news-queue-toast").textContent).toContain("Undone"),
+      );
+      const undoCall = fetchMock.mock.calls.find((c) => c[0] === "/api/edit/news-mention/undo")!;
+      expect(JSON.parse((undoCall[1] as RequestInit).body as string)).toEqual({
+        decisionIds: ["dec-1", "dec-2"],
+      });
+      expect(refresh).toHaveBeenCalled();
+      // Once undone there is nothing left to take back.
+      expect(screen.queryByTestId("news-queue-toast-undo")).toBeNull();
+    });
+
+    it("explains a refused undo", async () => {
+      routeFetch(409, "undo_expired");
+      render(<NewsApprovalQueue pending={[lab1]} approved={[]} rejected={[]} counts={COUNTS} />);
+      fireEvent.click(screen.getByTestId("news-queue-approve-a"));
+      fireEvent.click(await screen.findByTestId("news-queue-toast-undo"));
+      expect((await screen.findByRole("alert")).textContent).toContain("too late to undo");
+    });
+
+    it("offers no Undo when the route returned no decision id", async () => {
+      render(<NewsApprovalQueue pending={[lab1]} approved={[]} rejected={[]} counts={COUNTS} />);
+      fireEvent.click(screen.getByTestId("news-queue-approve-a"));
+      await screen.findByTestId("news-queue-toast");
+      expect(screen.queryByTestId("news-queue-toast-undo")).toBeNull();
+    });
+  });
+
+  describe("Wrong person? Enter CWID", () => {
+    function directory(found: boolean) {
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.startsWith("/api/edit/scholar-card/")) {
+          return found
+            ? new Response(JSON.stringify({ cwid: "zzz9009", name: "Quinn Fictional" }), {
+                status: 200,
+              })
+            : new Response("Not found", { status: 404 });
+        }
+        return new Response(JSON.stringify({ ok: true, decisionId: "dec-1" }), { status: 200 });
+      });
+    }
+
+    it("checks the CWID, shows the override, and approves for that scholar", async () => {
+      directory(true);
+      render(<NewsApprovalQueue pending={[lab1]} approved={[]} rejected={[]} counts={COUNTS} />);
+      fireEvent.click(screen.getByTestId("news-queue-override-a-open"));
+      fireEvent.change(screen.getByTestId("news-queue-override-a-input"), {
+        target: { value: " ZZZ9009 " },
+      });
+      fireEvent.click(screen.getByTestId("news-queue-override-a-apply"));
+      const pill = await screen.findByTestId("news-override-pill");
+      expect(pill.textContent).toBe("Override · was zzz1001");
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/scholar-card/zzz9009");
+      const mention = screen.getByTestId("news-queue-group-a");
+      expect(within(mention).getByText("Quinn Fictional")).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("news-queue-approve-a"));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+        id: "a1",
+        decision: "approve",
+        cwid: "zzz9009",
+      });
+      expect((await screen.findByTestId("news-queue-toast")).textContent).toContain(
+        "for Quinn Fictional, not Ivy Invented",
+      );
+    });
+
+    it("refuses a CWID the directory does not know, and stages nothing", async () => {
+      directory(false);
+      render(<NewsApprovalQueue pending={[lab1]} approved={[]} rejected={[]} counts={COUNTS} />);
+      fireEvent.click(screen.getByTestId("news-queue-override-a-open"));
+      fireEvent.change(screen.getByTestId("news-queue-override-a-input"), {
+        target: { value: "zzz9009" },
+      });
+      fireEvent.click(screen.getByTestId("news-queue-override-a-apply"));
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "No scholar with CWID zzz9009",
+      );
+      expect(screen.queryByTestId("news-override-pill")).toBeNull();
+    });
+
+    it("a malformed CWID cannot be applied", () => {
+      render(<NewsApprovalQueue pending={[lab1]} approved={[]} rejected={[]} counts={COUNTS} />);
+      fireEvent.click(screen.getByTestId("news-queue-override-a-open"));
+      fireEvent.change(screen.getByTestId("news-queue-override-a-input"), {
+        target: { value: "1 bad" },
+      });
+      expect(
+        (screen.getByTestId("news-queue-override-a-apply") as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("on a contested name, the override unblocks Approve without a pick", async () => {
+      directory(true);
+      render(
+        <NewsApprovalQueue pending={[contested]} approved={[]} rejected={[]} counts={COUNTS} />,
+      );
+      const key = contested.key;
+      fireEvent.click(screen.getByTestId(`news-queue-override-${key}-open`));
+      fireEvent.change(screen.getByTestId(`news-queue-override-${key}-input`), {
+        target: { value: "zzz9009" },
+      });
+      fireEvent.click(screen.getByTestId(`news-queue-override-${key}-apply`));
+      await screen.findByTestId("news-override-pill");
+      // The candidate radios go away: none of them is the person.
+      expect(screen.queryByTestId(`news-queue-contested-${key}`)).toBeNull();
+      const approve = screen.getByTestId(`news-queue-approve-${key}`) as HTMLButtonElement;
+      expect(approve.disabled).toBe(false);
+      fireEvent.click(approve);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+        id: "d1",
+        decision: "approve",
+        cwid: "zzz9009",
+      });
+    });
   });
 });

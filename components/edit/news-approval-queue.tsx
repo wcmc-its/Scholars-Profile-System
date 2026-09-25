@@ -25,6 +25,12 @@
  *   - A contested name is ONE row with a radio pick; Approve / Hide stay disabled
  *     until a scholar is picked.
  *   - An amber banner counts the contested names, with a "Show only these".
+ *   - "Wrong person? Enter CWID" on a pending row stages a replacement scholar
+ *     (checked against the directory); Approve / Hide then send it as `cwid` and
+ *     the route credits that scholar instead (see the decision route's WRONG
+ *     PERSON note).
+ *   - The status bar after a decision offers Undo (POST
+ *     /api/edit/news-mention/undo with the returned decision ids).
  *
  * Scraped article prose is rendered as React text nodes, never as HTML.
  */
@@ -34,6 +40,17 @@ import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { FiltersSheet } from "@/components/edit/filters-sheet";
+import {
+  DecisionStatusBar,
+  MATCH_BASIS,
+  OverridePill,
+  WrongPersonControl,
+  highlightName,
+  postDecision,
+  postUndo,
+  type DecisionStep,
+  type ScholarOverride,
+} from "@/components/edit/news-review-shared";
 import { Button } from "@/components/ui/button";
 import { NEWS_HISTORY_LIMIT, sortNewsQueueGroups } from "@/lib/edit/news-queue";
 import type {
@@ -56,35 +73,10 @@ const SORT_OPTIONS: ReadonlyArray<readonly [NewsApprovalSort, string]> = [
   ["people", "Most scholars"],
 ];
 
-/** How the ETL found the name, in reviewer language (#2578), as the "via" pill.
- *  TAG is the newsroom's own attribution (slate); prose is neutral; the two
- *  weak bases (caption-only, endowed-title-only) are amber — look twice. */
-const BASIS: Readonly<
-  Record<string, { label: string; hint: string; tone: "slate" | "neutral" | "amber" }>
-> = {
-  TAG: {
-    label: "Newsroom tag",
-    hint: "The newsroom's own story tags name this scholar — attribution by the article's authors.",
-    tone: "slate",
-  },
-  BODY: {
-    label: "Name in text",
-    hint: "Named in the article prose; no newsroom tag.",
-    tone: "neutral",
-  },
-  CAPTION: {
-    label: "Photo caption",
-    hint: "Named only in a photo's alt text, nowhere in the prose.",
-    tone: "amber",
-  },
-  TITLE: {
-    label: "Endowed title only",
-    hint:
-      "Named only inside an endowed-chair or memorial phrase (e.g. “the … Professor of…”). " +
-      "The story is usually about the chair's holder, not the person it is named for.",
-    tone: "amber",
-  },
-};
+/** The match-basis wording, shared with the Media highlights queue. TAG is the
+ *  newsroom's own attribution (slate); prose is neutral; the two weak bases
+ *  (caption-only, endowed-title-only) are amber — look twice. */
+const BASIS = MATCH_BASIS;
 const BASIS_ORDER = ["TAG", "BODY", "CAPTION", "TITLE"];
 const UNKNOWN = "__unknown__";
 
@@ -100,43 +92,6 @@ const LIKELIHOOD_BADGE_CLASS: Readonly<Record<string, string>> = {
   MEDIUM: "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber",
   LOW: "border-apollo-red-tint-border bg-apollo-red-tint text-destructive",
 };
-
-/** A decision failure in reviewer language — the two 409s are both actionable. */
-function decisionErrorMessage(status: number, code: string | undefined): string {
-  if (status === 409 && code === "already_decided") {
-    return (
-      "Another scholar is already approved for this story — a mention can only be credited " +
-      "to one person. Remove their approval first, on that scholar's own edit page, then " +
-      "approve this one."
-    );
-  }
-  if (status === 409 && code === "not_pending") {
-    return "That mention has already been decided by someone else. Refresh the page to see where it landed.";
-  }
-  return "We couldn't record that decision. Please try again.";
-}
-
-/** The snippet with the detected name marked at `ranges` — React nodes, never HTML. */
-function highlightName(snippet: string, ranges: [number, number][]): ReactNode {
-  if (ranges.length === 0) return snippet;
-  const out: ReactNode[] = [];
-  let at = 0;
-  for (const [start, end] of ranges) {
-    if (start < at || end > snippet.length || start >= end) continue;
-    if (start > at) out.push(snippet.slice(at, start));
-    out.push(
-      <mark
-        key={start}
-        className="bg-apollo-amber-tint text-foreground rounded-[3px] px-0.5 font-semibold"
-      >
-        {snippet.slice(start, end)}
-      </mark>,
-    );
-    at = end;
-  }
-  if (at < snippet.length) out.push(snippet.slice(at));
-  return out;
-}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Undated";
@@ -245,8 +200,12 @@ export function NewsApprovalQueue({
   /** Contested group key → the candidate row id picked. */
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  /** Pending group key → the "Wrong person?" replacement scholar staged for it. */
+  const [overrides, setOverrides] = useState<Record<string, ScholarOverride>>({});
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  /** The status bar: what just happened, and the decision ids Undo would send. */
+  const [toast, setToast] = useState<{ text: string; decisionIds: string[] } | null>(null);
+  const [undoing, setUndoing] = useState(false);
 
   const q = query.trim().toLowerCase();
   const tabGroups = tab === "pending" ? pending : tab === "approved" ? approved : rejected;
@@ -309,48 +268,52 @@ export function NewsApprovalQueue({
     setError(null);
   }
 
-  /** POST one decision; true when it saved. Never refreshes by itself. */
-  async function post(
-    id: string,
-    decision: "approve" | "approve_hidden" | "reject",
-  ): Promise<boolean> {
-    try {
-      const res = await fetch("/api/edit/news-mention/decision", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id, decision }),
-      });
-      if (!res.ok) {
-        // `.catch` because a 500 can arrive as non-JSON.
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(decisionErrorMessage(res.status, data?.error));
-        return false;
-      }
-      return true;
-    } catch {
-      setError("We couldn't record that decision. Please try again.");
-      return false;
-    }
-  }
-
   /** Run decisions sequentially (each is its own transaction + audit row), then
-   *  refresh once so the rows move to their new tab. */
-  async function run(
-    key: string,
-    steps: Array<[string, "approve" | "approve_hidden" | "reject"]>,
-    done: string,
-  ) {
+   *  refresh once so the rows move to their new tab. Stops at the first failure;
+   *  whatever did save can still be undone from the status bar. */
+  async function run(key: string, steps: DecisionStep[], done: string) {
     setError(null);
     setToast(null);
     setBusyKey(key);
+    const decisionIds: string[] = [];
     let saved = 0;
-    for (const [id, decision] of steps) {
-      if (!(await post(id, decision))) break;
+    for (const step of steps) {
+      const result = await postDecision(step);
+      if (!result.ok) {
+        setError(result.message);
+        break;
+      }
+      if (result.decisionId) decisionIds.push(result.decisionId);
       saved += 1;
     }
-    if (saved === steps.length) setToast(done);
-    if (saved > 0) startTransition(() => router.refresh());
+    if (saved === steps.length) setToast({ text: done, decisionIds });
+    else if (saved > 0)
+      setToast({ text: `Saved ${saved} of ${steps.length} decisions.`, decisionIds });
+    if (saved > 0) {
+      // A decided group leaves Pending, so its staged override goes with it.
+      setOverrides((o) => {
+        const next = { ...o };
+        delete next[key];
+        return next;
+      });
+      startTransition(() => router.refresh());
+    }
     setBusyKey(null);
+  }
+
+  /** The status bar's Undo: take back every decision the last click made. */
+  async function undo() {
+    if (!toast || toast.decisionIds.length === 0) return;
+    setError(null);
+    setUndoing(true);
+    const result = await postUndo(toast.decisionIds);
+    setUndoing(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setToast({ text: "Undone. The decision was taken back.", decisionIds: [] });
+    startTransition(() => router.refresh());
   }
 
   async function setVisibility(row: NewsQueueRow, action: "hide" | "show") {
@@ -534,20 +497,14 @@ export function NewsApprovalQueue({
             </p>
           ) : null}
           {toast ? (
-            <div
-              className="bg-apollo-bar flex items-center gap-3 rounded-[10px] px-3.5 py-2.5 text-[13.5px] text-white"
-              role="status"
-              data-testid="news-queue-toast"
-            >
-              <span className="flex-1">{toast}</span>
-              <button
-                type="button"
-                onClick={() => setToast(null)}
-                className="rounded-md border border-white/35 px-2.5 py-0.5 text-[13px]"
-              >
-                Dismiss
-              </button>
-            </div>
+            <DecisionStatusBar
+              text={toast.text}
+              canUndo={toast.decisionIds.length > 0}
+              undoing={undoing}
+              onUndo={() => void undo()}
+              onDismiss={() => setToast(null)}
+              testId="news-queue-toast"
+            />
           ) : null}
 
           {stories.length === 0 ? (
@@ -570,7 +527,16 @@ export function NewsApprovalQueue({
                 picks={picks}
                 pendingBySourceRef={pendingBySourceRef}
                 chosenRow={chosenRow}
+                overrides={overrides}
                 onPick={(groupKey, rowId) => setPicks((p) => ({ ...p, [groupKey]: rowId }))}
+                onOverride={(groupKey, o) =>
+                  setOverrides((prev) => {
+                    const next = { ...prev };
+                    if (o) next[groupKey] = o;
+                    else delete next[groupKey];
+                    return next;
+                  })
+                }
                 onRun={run}
                 onVisibility={setVisibility}
               />
@@ -661,11 +627,21 @@ function FilterRail({
   );
 }
 
-type RunFn = (
-  key: string,
-  steps: Array<[string, "approve" | "approve_hidden" | "reject"]>,
-  done: string,
-) => void;
+type RunFn = (key: string, steps: DecisionStep[], done: string) => void;
+
+/** The step a pending group's Approve / Hide sends: the chosen row, or — with a
+ *  "Wrong person?" override — any of the group's rows plus the replacement CWID
+ *  (the route rejects the whole contested name and credits the override). Null
+ *  while a contested name has neither a pick nor an override. */
+function approveStep(
+  g: NewsQueueGroup,
+  chosen: NewsQueueRow | null,
+  override: ScholarOverride | undefined,
+  decision: "approve" | "approve_hidden",
+): DecisionStep | null {
+  if (override) return { id: (chosen ?? g.rows[0]).id, decision, cwid: override.cwid };
+  return chosen ? { id: chosen.id, decision } : null;
+}
 
 function StoryCard({
   story,
@@ -674,7 +650,9 @@ function StoryCard({
   picks,
   pendingBySourceRef,
   chosenRow,
+  overrides,
   onPick,
+  onOverride,
   onRun,
   onVisibility,
 }: {
@@ -684,16 +662,20 @@ function StoryCard({
   picks: Record<string, string>;
   pendingBySourceRef: Map<string, number>;
   chosenRow: (g: NewsQueueGroup) => NewsQueueRow | null;
+  overrides: Record<string, ScholarOverride>;
   onPick: (groupKey: string, rowId: string) => void;
+  onOverride: (groupKey: string, o: ScholarOverride | null) => void;
   onRun: RunFn;
   onVisibility: (row: NewsQueueRow, action: "hide" | "show") => void;
 }) {
   const busy = busyKey !== null;
   // "Approve all": every waiting mention that can be approved right now — a
-  // contested name only once a scholar has been picked for it.
+  // contested name only once a scholar has been picked (or overridden) for it.
   const ready =
     tab === "pending"
-      ? story.groups.map(chosenRow).filter((r): r is NewsQueueRow => r !== null)
+      ? story.groups
+          .map((g) => approveStep(g, chosenRow(g), overrides[g.key], "approve"))
+          .filter((st): st is DecisionStep => st !== null)
       : [];
   const multi = tab === "pending" && story.groups.length > 1;
   return (
@@ -728,7 +710,7 @@ function StoryCard({
               onClick={() =>
                 onRun(
                   story.key,
-                  ready.map((r) => [r.id, "approve"]),
+                  ready,
                   `Approved ${ready.length} mention${ready.length === 1 ? "" : "s"} in “${story.title}”.`,
                 )
               }
@@ -749,7 +731,9 @@ function StoryCard({
               busy={busy}
               pick={picks[g.key] ?? null}
               chosen={chosenRow(g)}
+              override={overrides[g.key] ?? null}
               onPick={onPick}
+              onOverride={onOverride}
               onRun={onRun}
             />
           ))
@@ -775,6 +759,7 @@ function StoryCard({
 function Identity({
   row,
   displayName,
+  override,
   roleLine,
   showPills,
   note,
@@ -782,13 +767,15 @@ function Identity({
 }: {
   row: NewsQueueRow;
   displayName?: string;
+  /** A staged "Wrong person?" replacement: shown instead of the row's scholar. */
+  override?: { name: string; cwid: string; was: string | null } | null;
   roleLine: string;
   showPills: boolean;
   note?: string | null;
   children?: ReactNode;
 }) {
   const basis = row.matchBasis ? BASIS[row.matchBasis] : undefined;
-  const name = displayName ?? row.scholarName;
+  const name = override?.name ?? displayName ?? row.scholarName;
   return (
     <div className="flex min-w-0 items-start gap-3">
       <div
@@ -799,7 +786,13 @@ function Identity({
       </div>
       <div className="flex min-w-0 flex-col gap-[3px]">
         <div className="flex flex-wrap items-center gap-2">
-          {displayName === undefined && row.slug ? (
+          {override ? (
+            <>
+              <span className="text-[14.5px] font-semibold">{name}</span>
+              <span className="text-muted-foreground font-mono text-[12.5px]">{override.cwid}</span>
+              <OverridePill was={override.was} />
+            </>
+          ) : displayName === undefined && row.slug ? (
             <a
               href={`/${row.slug}`}
               target="_blank"
@@ -811,7 +804,7 @@ function Identity({
           ) : (
             <span className="text-[14.5px] font-semibold">{name}</span>
           )}
-          {displayName === undefined ? (
+          {!override && displayName === undefined ? (
             <span className="text-muted-foreground font-mono text-[12.5px]">{row.cwid}</span>
           ) : null}
           {row.source === "VIVO" ? (
@@ -871,7 +864,9 @@ function PendingMention({
   busy,
   pick,
   chosen,
+  override,
   onPick,
+  onOverride,
   onRun,
 }: {
   group: NewsQueueGroup;
@@ -879,13 +874,45 @@ function PendingMention({
   busy: boolean;
   pick: string | null;
   chosen: NewsQueueRow | null;
+  override: ScholarOverride | null;
   onPick: (groupKey: string, rowId: string) => void;
+  onOverride: (groupKey: string, o: ScholarOverride | null) => void;
   onRun: RunFn;
 }) {
   const head = group.rows[0];
-  const blocked = chosen === null;
-  const who = chosen?.scholarName ?? group.detectedName ?? head.scholarName;
-  const identity = group.contested ? (
+  const approve = approveStep(group, chosen, override ?? undefined, "approve");
+  const hideStep = approveStep(group, chosen, override ?? undefined, "approve_hidden");
+  const blocked = approve === null;
+  const matched = chosen?.scholarName ?? group.detectedName ?? head.scholarName;
+  const who = override ? (override.name ?? override.cwid) : matched;
+  const wrongPerson = (
+    <WrongPersonControl
+      override={override}
+      disabled={busy}
+      onApply={(o) => onOverride(group.key, o)}
+      onClear={() => onOverride(group.key, null)}
+      testId={`news-queue-override-${group.key}`}
+    />
+  );
+  const identity = override ? (
+    // The reviewer named someone else: show them, and drop the candidate pick.
+    <Identity
+      row={chosen ?? head}
+      override={{
+        name: override.name ?? "Unverified CWID",
+        cwid: override.cwid,
+        was: chosen?.cwid ?? (group.contested ? null : head.cwid),
+      }}
+      roleLine={
+        override.name
+          ? "Manual override"
+          : "Manual override · will be checked against the directory on save"
+      }
+      showPills
+    >
+      {wrongPerson}
+    </Identity>
+  ) : group.contested ? (
     <Identity
       row={chosen ?? head}
       displayName={
@@ -896,6 +923,7 @@ function PendingMention({
       }
       showPills
     >
+      {wrongPerson}
       <div
         className="bg-apollo-amber-tint border-apollo-amber-tint-border mt-1.5 flex flex-col gap-1.5 rounded-lg border px-2.5 py-2"
         role="radiogroup"
@@ -926,8 +954,13 @@ function PendingMention({
       </div>
     </Identity>
   ) : (
-    <Identity row={head} roleLine={roleLineOf(head)} showPills />
+    <Identity row={head} roleLine={roleLineOf(head)} showPills>
+      {wrongPerson}
+    </Identity>
   );
+  const approvedText = override
+    ? `Approved “${story.title}” for ${who}, not ${matched}.`
+    : `Approved ${who} in “${story.title}”.`;
   return (
     <div
       className="border-apollo-border bg-apollo-surface flex flex-col gap-3 border-t px-4 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-4 sm:px-5"
@@ -939,14 +972,12 @@ function PendingMention({
           size="sm"
           disabled={busy || blocked}
           title={blocked ? "Pick which scholar first" : undefined}
-          onClick={() =>
-            chosen &&
-            onRun(group.key, [[chosen.id, "approve"]], `Approved ${who} in “${story.title}”.`)
-          }
+          onClick={() => approve && onRun(group.key, [approve], approvedText)}
           className={cn(
             "h-[30px] text-[13px] text-white",
             blocked ? "bg-apollo-border-strong" : "bg-apollo-slate hover:bg-apollo-slate/90",
           )}
+          data-testid={`news-queue-approve-${group.key}`}
         >
           Approve
         </Button>
@@ -959,10 +990,7 @@ function PendingMention({
           disabled={busy || blocked}
           title="Approve, but keep it off the profile"
           aria-label={`Approve “${story.title}” for ${who} but hide it from their profile`}
-          onClick={() =>
-            chosen &&
-            onRun(group.key, [[chosen.id, "approve_hidden"]], `Approved and hidden: ${who}.`)
-          }
+          onClick={() => hideStep && onRun(group.key, [hideStep], `Approved and hidden: ${who}.`)}
           className="border-apollo-border-strong h-[30px] text-[13px] font-normal"
           data-testid={
             chosen
@@ -979,10 +1007,10 @@ function PendingMention({
           onClick={() =>
             onRun(
               group.key,
-              group.rows.map((r) => [r.id, "reject"]),
+              group.rows.map((r) => ({ id: r.id, decision: "reject" })),
               group.contested
                 ? `Rejected every match for “${group.detectedName ?? head.scholarName}”.`
-                : `Rejected ${who} in “${story.title}”.`,
+                : `Rejected ${matched} in “${story.title}”.`,
             )
           }
           className="text-destructive hover:bg-apollo-red-tint hover:text-destructive h-[30px] text-[13px] font-normal"
@@ -1060,7 +1088,7 @@ function DecidedMention({
             onClick={() =>
               onRun(
                 row.id,
-                [[row.id, "approve"]],
+                [{ id: row.id, decision: "approve" }],
                 `Approved ${row.scholarName} in “${row.articleTitle}”.`,
               )
             }
