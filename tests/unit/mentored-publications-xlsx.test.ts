@@ -49,6 +49,7 @@ const REPORT: MentoredPublicationsReport = {
   allPubsLoaded: null,
   droppedUnresolved: 0,
   droppedNoCwid: 0,
+  droppedNoCwidMentees: [],
   publications: [],
   summary: [
     {
@@ -133,6 +134,38 @@ function rowValues(ws: ExcelJS.Worksheet, n: number): unknown[] {
 }
 
 describe("buildMentoredPublicationsWorkbook", () => {
+  it("Query & Assumptions states every page filter: 'All' when unset, the selection (mentors by name and CWID) when set", async () => {
+    const items = async (report: typeof REPORT) => {
+      const ws = (await load(await buildMentoredPublicationsWorkbook(report))).getWorksheet(ASSUMPTIONS_SHEET)!;
+      const out = new Map<string, unknown>();
+      ws.eachRow((row, n) => {
+        if (n > 1) out.set(String(row.getCell(1).value), row.getCell(2).value);
+      });
+      return out;
+    };
+    const unset = await items(REPORT);
+    expect(unset.get("In window filter (per publication)")).toBe("All");
+    expect(unset.get("Author position filter")).toBe("All");
+    expect(unset.get("Publication years filter")).toBe("All");
+    expect(unset.get("Mentor filter")).toBe("All");
+    expect(unset.get("Learners shown")).toBe("All, including learners with no publications");
+    const set = await items({
+      ...REPORT,
+      facets: {
+        window: ["yes", "unknown"],
+        position: ["first"],
+        pubYears: [2023, 2024],
+        mentors: [{ cwid: "men0001", name: "Zed Mentor" }],
+        withPubs: true,
+      },
+    });
+    expect(set.get("In window filter (per publication)")).toBe("In window, Window unknown");
+    expect(set.get("Author position filter")).toBe("First author");
+    expect(set.get("Publication years filter")).toBe("2023, 2024");
+    expect(set.get("Mentor filter")).toBe("Zed Mentor (men0001)");
+    expect(set.get("Learners shown")).toBe("Only learners with at least one publication");
+  });
+
   it("returns a Buffer with the three sheets, in order", async () => {
     const buffer = await buildMentoredPublicationsWorkbook(REPORT);
     expect(Buffer.isBuffer(buffer)).toBe(true);

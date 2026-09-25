@@ -6,8 +6,16 @@
  * URL vocabulary (`PERSON_FILTER_PARAMS`): repeated `type` (raw roleCategory)
  * and repeated `unit` (`dept:CODE` / `div:CODE` / `center:CODE` / `inst:CODE`).
  * A selection is: role_category IN types AND (any selected unit matches), units
- * OR'd together. dept / div / institution are scholar columns; a center is its
- * CURRENT members (`isCurrentCenterMembership` / `currentCenterMembershipSql`).
+ * OR'd together, AND (when a pasted CWID list is applied) cwid IN the list.
+ * dept / institution are scholar columns; a division is its scholar column PLUS
+ * its hand-added members (`division_membership`, counted when the division's
+ * `source = 'manual'` — the same union `loadDivisionMemberCwids` gives a
+ * division's own page and report 3); a center is its CURRENT members
+ * (`isCurrentCenterMembership` / `currentCenterMembershipSql`).
+ *
+ * The CWID list (`list`, report 8) is stored (`report_cwid_list`) and resolved
+ * by the caller; the builders take the resolved CWIDs (`listCwids`: undefined /
+ * null = no list, [] = a list that matches nobody → match nothing).
  *
  * ONE rule for undecodable units, every consumer: a unit filter is present iff
  * any `unit` value was given (`unitValues`, raw) — both builders key on that and
@@ -24,11 +32,14 @@
  */
 import type { DataQualityFacets } from "@/lib/api/data-quality";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
-import { Prisma } from "@/lib/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
 import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 
 /** Reserved URL param names. A report must not reuse them for anything else. */
-export const PERSON_FILTER_PARAMS = { type: "type", unit: "unit" } as const;
+export const PERSON_FILTER_PARAMS = { type: "type", unit: "unit", list: "list" } as const;
+
+/** A stored CWID list's id (`report_cwid_list.id`) as the URL carries it. */
+export const CWID_LIST_ID_PATTERN = /^[A-Za-z0-9_-]{6,32}$/;
 
 export type UnitKind = EditRosterUnitFilter["kind"];
 
@@ -37,18 +48,23 @@ export const PERSON_TYPE_COLUMN = { sql: "role_category", prisma: "roleCategory"
 
 /**
  * Unit kind → URL prefix + scholar column (SQL / Prisma). `center` has no
- * scholar column: it resolves through `center_membership`. Order is the OR
- * order both builders emit.
+ * scholar column: it resolves through `center_membership`. `roster`: the kind
+ * ALSO matches its hand-added members (`division_membership` of a
+ * `source = 'manual'` division). Order is the OR order both builders emit.
  */
 export const UNIT_KINDS = {
-  department: { prefix: "dept", sql: "dept_code", prisma: "deptCode" },
-  division: { prefix: "div", sql: "div_code", prisma: "divCode" },
-  institution: { prefix: "inst", sql: "primary_org_code", prisma: "primaryOrgCode" },
-  center: { prefix: "center", sql: null, prisma: null },
+  department: { prefix: "dept", sql: "dept_code", prisma: "deptCode", roster: false },
+  division: { prefix: "div", sql: "div_code", prisma: "divCode", roster: true },
+  institution: { prefix: "inst", sql: "primary_org_code", prisma: "primaryOrgCode", roster: false },
+  center: { prefix: "center", sql: null, prisma: null, roster: false },
 } as const satisfies Record<
   UnitKind,
-  { prefix: string; sql: string | null; prisma: keyof Prisma.ScholarWhereInput | null }
+  { prefix: string; sql: string | null; prisma: keyof Prisma.ScholarWhereInput | null; roster: boolean }
 >;
+
+/** `division.source` value whose `division_membership` rows count as members
+ *  (`loadDivisionMemberCwids`, `lib/api/divisions.ts`). */
+export const MANUAL_DIVISION_SOURCE = "manual";
 
 const KIND_ORDER = Object.keys(UNIT_KINDS) as UnitKind[];
 
@@ -70,6 +86,15 @@ export type PersonFilter = {
   unitValues: string[];
   /** The decodable subset of `unitValues`. */
   units: EditRosterUnitFilter[];
+  /** A stored CWID list's id (`list`), or null. A malformed id is kept (the
+   *  caller's resolver finds no list → match nothing, never everyone). */
+  listId: string | null;
+};
+
+/** The builders' input: the selection plus the resolved CWID list. */
+export type PersonFilterInput = Pick<PersonFilter, "types" | "unitValues"> & {
+  /** The applied CWID list's CWIDs; undefined / null = no list. */
+  listCwids?: readonly string[] | null;
 };
 
 /** The decodable subset of raw `unit` values, in order. */
@@ -95,7 +120,29 @@ export function parsePersonFilter(
     types: clean(PERSON_FILTER_PARAMS.type),
     unitValues,
     units: decodeUnitValues(unitValues),
+    listId: clean(PERSON_FILTER_PARAMS.list)[0] ?? null,
   };
+}
+
+/** The manual-roster members of the selected divisions — what the Prisma
+ *  builder (`personFilterWhere`) needs to match `div:` like `personFilterSql`
+ *  does. [] when no division is selected (no query). */
+export async function loadSelectedDivisionRosterCwids(
+  client: Pick<PrismaClient, "division" | "divisionMembership">,
+  unitValues: readonly string[],
+): Promise<string[]> {
+  const codes = unitCodes(decodeUnitValues(unitValues), "division");
+  if (codes.length === 0) return [];
+  const manual = await client.division.findMany({
+    where: { code: { in: codes }, source: MANUAL_DIVISION_SOURCE },
+    select: { code: true },
+  });
+  if (manual.length === 0) return [];
+  const rows = await client.divisionMembership.findMany({
+    where: { divisionCode: { in: manual.map((d) => d.code) } },
+    select: { cwid: true },
+  });
+  return [...new Set(rows.map((r) => r.cwid))];
 }
 
 /** Codes of one kind, in selection order. */
@@ -170,10 +217,11 @@ export function currentCenterMembershipSql(alias: string, today: string): Prisma
 // resolves (e.g. an empty center) → match nothing, on both sides.
 // ---------------------------------------------------------------------------
 
-/** `AND role_category IN (…) AND (unit OR group)` for a raw-SQL report. Undecodable-only
- *  units match nothing (`AND 1 = 0`). `aliases.scholar` is the `scholar` table alias. */
+/** `AND role_category IN (…) AND (unit OR group) AND cwid IN (list)` for a raw-SQL
+ *  report. Undecodable-only units, or an empty list, match nothing (`AND 1 = 0`).
+ *  `aliases.scholar` is the `scholar` table alias. */
 export function personFilterSql(
-  f: Pick<PersonFilter, "types" | "unitValues">,
+  f: PersonFilterInput,
   aliases: { scholar: string; centerMembership?: string },
   today: string = utcToday(),
 ): Prisma.Sql {
@@ -190,7 +238,13 @@ export function personFilterSql(
       const codes = unitCodes(units, kind);
       if (codes.length === 0) continue;
       const column = UNIT_KINDS[kind].sql;
-      if (column) {
+      if (column && UNIT_KINDS[kind].roster) {
+        // The column OR the hand-added roster of a manual division.
+        ors.push(Prisma.sql`(${col(column)} IN (${Prisma.join(codes)}) OR ${col("cwid")} IN (SELECT pf_dm.cwid FROM division_membership pf_dm
+         JOIN division pf_d ON pf_d.code = pf_dm.division_code
+         WHERE pf_dm.division_code IN (${Prisma.join(codes)})
+           AND pf_d.source = ${Prisma.raw(`'${MANUAL_DIVISION_SOURCE}'`)}))`);
+      } else if (column) {
         ors.push(Prisma.sql`${col(column)} IN (${Prisma.join(codes)})`);
       } else {
         const cm = aliases.centerMembership ?? "cm";
@@ -201,21 +255,31 @@ export function personFilterSql(
     }
     parts.push(ors.length > 0 ? Prisma.sql`AND (${Prisma.join(ors, " OR ")})` : Prisma.sql`AND 1 = 0`);
   }
+  if (f.listCwids) {
+    parts.push(
+      f.listCwids.length > 0 ? Prisma.sql`AND ${col("cwid")} IN (${Prisma.join([...f.listCwids])})` : Prisma.sql`AND 1 = 0`,
+    );
+  }
   return parts.length > 0 ? Prisma.join(parts, " ") : Prisma.empty;
 }
 
 /**
  * Prisma form for the rosters. `centerMemberCwids` = the current members of
- * the selected centers (resolved by the caller with `isCurrentCenterMembership`).
+ * the selected centers (resolved by the caller with `isCurrentCenterMembership`);
+ * `divisionRosterCwids` = the hand-added members of the selected divisions
+ * (`loadSelectedDivisionRosterCwids`).
  * Returns the roleCategory filter (undefined = none; the caller owns the
- * include-hidden fallback) and the unit OR clause (undefined = no `unit` given;
- * `{ cwid: { in: [] } }` = match nothing).
+ * include-hidden fallback), the unit OR clause (undefined = no `unit` given;
+ * `{ cwid: { in: [] } }` = match nothing) and the CWID-list clause (undefined =
+ * no list).
  */
 export function personFilterWhere(
-  f: Pick<PersonFilter, "types" | "unitValues">,
+  f: PersonFilterInput,
   centerMemberCwids: readonly string[],
-): { roleCategory?: { in: string[] }; unit?: Prisma.ScholarWhereInput } {
-  const out: { roleCategory?: { in: string[] }; unit?: Prisma.ScholarWhereInput } = {};
+  divisionRosterCwids: readonly string[] = [],
+): { roleCategory?: { in: string[] }; unit?: Prisma.ScholarWhereInput; list?: Prisma.ScholarWhereInput } {
+  const out: { roleCategory?: { in: string[] }; unit?: Prisma.ScholarWhereInput; list?: Prisma.ScholarWhereInput } =
+    {};
   const types = f.types.filter(Boolean);
   if (types.length > 0) out.roleCategory = { in: [...types] };
   if (f.unitValues.length > 0) {
@@ -226,11 +290,15 @@ export function personFilterWhere(
       if (field) {
         const codes = unitCodes(units, kind);
         if (codes.length > 0) ors.push({ [field]: { in: codes } });
+        if (codes.length > 0 && UNIT_KINDS[kind].roster && divisionRosterCwids.length > 0) {
+          ors.push({ cwid: { in: [...divisionRosterCwids] } });
+        }
       } else if (unitCodes(units, kind).length > 0 && centerMemberCwids.length > 0) {
         ors.push({ cwid: { in: [...centerMemberCwids] } });
       }
     }
     out.unit = ors.length > 0 ? { OR: ors } : { cwid: { in: [] } };
   }
+  if (f.listCwids) out.list = { cwid: { in: [...f.listCwids] } };
   return out;
 }

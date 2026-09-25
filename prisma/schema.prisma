@@ -2535,6 +2535,19 @@ model ReportMeta {
   @@map("report_meta")
 }
 
+/// A pasted CWID list for report 8's "CWID list" filter (`list=<id>` in the
+/// report URL; `lib/edit/cwid-list.ts`). Immutable once created: the app only
+/// inserts, so a shared link keeps meaning the same people. `cwids` is a JSON
+/// array of lowercase CWIDs (deduplicated, at most `CWID_LIST_MAX`).
+model ReportCwidList {
+  id        String   @id @db.VarChar(32)
+  cwids     Json
+  createdBy String   @map("created_by") @db.VarChar(32)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("report_cwid_list")
+}
+
 /// Scholar-assigned proxy editor grant (scholar-proxy-spec.md / #779, ADR-005
 /// Amendment 3). One row per (scholarCwid, proxyCwid): a scholar names a specific
 /// individual to edit THEIR profile on their behalf, scoped to exactly what the

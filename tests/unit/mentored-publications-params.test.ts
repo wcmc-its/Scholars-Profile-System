@@ -7,12 +7,33 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
 
-import { mentoredPubsQueryString, parseMentoredPubsParams } from "@/lib/edit/mentored-publications-params";
+import {
+  gradYearsLabel,
+  hasMentoredPubsFacets,
+  isGappyYearSelection,
+  MENTORED_PUBS_DEFAULT_PARAMS,
+  mentoredPubsQueryString,
+  parseMentoredPubsParams,
+  type MentoredPubsParams,
+} from "@/lib/edit/mentored-publications-params";
 
-const DEFAULTS = { years: null, types: null, tail: 1, pubs: "mentored", view: "summary" } as const;
+const DEFAULTS = MENTORED_PUBS_DEFAULT_PARAMS;
 
 describe("parseMentoredPubsParams", () => {
-  it("defaults: no years (null), no types (null), tail 1, mentored set, summary view", () => {
+  it("defaults: no years (null), no types (null), tail 1, mentored set, summary view, no facets, no q", () => {
+    expect(DEFAULTS).toEqual({
+      years: null,
+      types: null,
+      tail: 1,
+      pubs: "mentored",
+      view: "summary",
+      window: [],
+      position: [],
+      pubYears: [],
+      mentors: [],
+      withPubs: false,
+      q: "",
+    });
     expect(parseMentoredPubsParams({})).toEqual({ ok: true, value: DEFAULTS });
     expect(parseMentoredPubsParams(new URLSearchParams(""))).toEqual({ ok: true, value: DEFAULTS });
   });
@@ -154,16 +175,18 @@ describe("parseMentoredPubsParams", () => {
 
 describe("mentoredPubsQueryString", () => {
   it("round-trips through the parser", () => {
-    const cases = [
+    const cases: MentoredPubsParams[] = [
       {
+        ...DEFAULTS,
         years: [2024, 2025],
         types: ["aoc" as const],
         tail: 2,
         pubs: "mentored" as const,
         view: "summary" as const,
       },
-      { years: [], types: null, tail: 0, pubs: "all" as const, view: "publications" as const },
+      { ...DEFAULTS, years: [], types: null, tail: 0, pubs: "all" as const, view: "publications" as const },
       {
+        ...DEFAULTS,
         years: null,
         types: ["aoc" as const, "ecr" as const, "thesis" as const, "likely" as const],
         tail: 1,
@@ -171,11 +194,24 @@ describe("mentoredPubsQueryString", () => {
         view: "summary" as const,
       },
       {
+        ...DEFAULTS,
         years: [2025, null],
         types: ["possible" as const],
         tail: 1,
         pubs: "mentored" as const,
         view: "summary" as const,
+      },
+      {
+        ...DEFAULTS,
+        years: [2026],
+        types: ["aoc" as const],
+        window: ["yes", "unknown"],
+        position: ["first"],
+        pubYears: [2023, 2024],
+        mentors: ["abc1001", "xyz2002"],
+        withPubs: true,
+        view: "publications",
+        q: "smith",
       },
     ];
     for (const value of cases) {
@@ -202,5 +238,127 @@ describe("mentoredPubsQueryString", () => {
         view: "publications",
       }),
     ).toBe("years=all&mtype=aoc&tail=1&pubs=all&view=publications");
+  });
+});
+
+describe("the redesign's params (2026-09-24)", () => {
+  it("an old link carries none of them: every facet empty, and its query string is unchanged", () => {
+    const old = parseMentoredPubsParams({ years: "2025,2026", mtype: "aoc", tail: "1", pubs: "mentored" });
+    expect(old).toEqual({
+      ok: true,
+      value: { ...DEFAULTS, years: [2025, 2026], types: ["aoc"] },
+    });
+    expect(hasMentoredPubsFacets(old.ok ? old.value : DEFAULTS)).toBe(false);
+    expect(mentoredPubsQueryString(old.ok ? old.value : DEFAULTS)).toBe(
+      "years=2025%2C2026&mtype=aoc&tail=1&pubs=mentored",
+    );
+  });
+
+  it("the range fields fold into the years list; `years` wins when both are present; from/to swap", () => {
+    expect(parseMentoredPubsParams({ grad_from: "2024", grad_to: "2026" })).toMatchObject({
+      ok: true,
+      value: { years: [2024, 2025, 2026] },
+    });
+    expect(parseMentoredPubsParams({ grad_from: "2026", grad_to: "2024", grad_unknown: "1" })).toMatchObject({
+      ok: true,
+      value: { years: [2024, 2025, 2026, null] },
+    });
+    // One end blank ("None") → that single year.
+    expect(parseMentoredPubsParams({ grad_from: "", grad_to: "2025" })).toMatchObject({
+      ok: true,
+      value: { years: [2025] },
+    });
+    // Both blank + unknown → only learners with no graduation year.
+    expect(parseMentoredPubsParams({ grad_from: "", grad_to: "", grad_unknown: "1" })).toMatchObject({
+      ok: true,
+      value: { years: [null] },
+    });
+    // Nothing chosen → absent (the caller's default).
+    expect(parseMentoredPubsParams({ grad_from: "", grad_to: "" })).toMatchObject({ ok: true, value: { years: null } });
+    expect(parseMentoredPubsParams({ years: "2019", grad_from: "2024", grad_to: "2026" })).toMatchObject({
+      ok: true,
+      value: { years: [2019] },
+    });
+    expect(parseMentoredPubsParams({ grad_from: "20x4", grad_to: "2026" })).toEqual({
+      ok: false,
+      error: "invalid_years",
+    });
+    // The range is never written back — every link speaks `years=`.
+    const r = parseMentoredPubsParams({ grad_from: "2025", grad_to: "2026", grad_unknown: "1" });
+    expect(mentoredPubsQueryString(r.ok ? r.value : DEFAULTS)).toBe("years=2025%2C2026%2Cunknown&tail=1&pubs=mentored");
+  });
+
+  it("window / position: fixed vocabularies, comma or repeated, in display order; anything else is an error", () => {
+    expect(parseMentoredPubsParams({ window: ["unknown", "YES"], position: "last,first" })).toMatchObject({
+      ok: true,
+      value: { window: ["yes", "unknown"], position: ["first", "last"] },
+    });
+    expect(parseMentoredPubsParams({ window: "maybe" })).toEqual({ ok: false, error: "invalid_window" });
+    expect(parseMentoredPubsParams({ position: "any" })).toEqual({ ok: false, error: "invalid_position" });
+  });
+
+  it("pubyear: four-digit years, sorted; mentor: CWID-shaped tokens, lower-cased and sorted; withpubs: 1", () => {
+    expect(
+      parseMentoredPubsParams({ pubyear: "2024,2021", mentor: ["XYZ2002", "abc1001"], withpubs: "1" }),
+    ).toMatchObject({
+      ok: true,
+      value: { pubYears: [2021, 2024], mentors: ["abc1001", "xyz2002"], withPubs: true },
+    });
+    expect(parseMentoredPubsParams({ withpubs: "0" })).toMatchObject({ ok: true, value: { withPubs: false } });
+    expect(parseMentoredPubsParams({ pubyear: "24" })).toEqual({ ok: false, error: "invalid_pubyear" });
+    expect(parseMentoredPubsParams({ mentor: "a b" })).toEqual({ ok: false, error: "invalid_mentor" });
+  });
+
+  it("q is free text, trimmed, never an error", () => {
+    expect(parseMentoredPubsParams({ q: "  Smith, J " })).toMatchObject({ ok: true, value: { q: "Smith, J" } });
+  });
+
+  it("gradYearsLabel reads a range, a list, unknown and all", () => {
+    expect(gradYearsLabel([])).toBe("All years");
+    expect(gradYearsLabel([2026, 2027, null])).toBe("2026–2027 + unknown");
+    expect(gradYearsLabel([2025])).toBe("2025");
+    expect(gradYearsLabel([2019, 2027])).toBe("2019, 2027");
+    expect(gradYearsLabel([null])).toBe("No graduation year");
+  });
+
+  it("gradYearsLabel with choices: a gap is a year that EXISTS and isn't picked, not a missing whole number", () => {
+    // No class graduated in 2020: 2019 + 2021 is the range 2019–2021.
+    expect(gradYearsLabel([2019, 2021], [2023, 2021, 2019, null])).toBe("2019–2021");
+    expect(gradYearsLabel([2019, 2021, null], [2021, 2019])).toBe("2019–2021 + unknown");
+    // 2020 exists and is skipped: listed.
+    expect(gradYearsLabel([2019, 2021], [2021, 2020, 2019])).toBe("2019, 2021");
+    expect(isGappyYearSelection([2019, 2021], [2021, 2019])).toBe(false);
+    expect(isGappyYearSelection([2019, 2021], [2021, 2020, 2019])).toBe(true);
+    expect(isGappyYearSelection([2019, 2021])).toBe(true);
+    expect(isGappyYearSelection([2019], [2021, 2020, 2019])).toBe(false);
+  });
+
+  it("grad_exact: a gappy list is kept exactly while the selects still span it; moving either select widens to the range", () => {
+    // Untouched: another control changed, the form resubmits the same list.
+    expect(parseMentoredPubsParams({ grad_from: "2019", grad_to: "2027", grad_exact: "2019,2027" })).toMatchObject({
+      ok: true,
+      value: { years: [2019, 2027] },
+    });
+    expect(
+      parseMentoredPubsParams({ grad_from: "2019", grad_to: "2027", grad_exact: "2027,2019", grad_unknown: "1" }),
+    ).toMatchObject({ ok: true, value: { years: [2019, 2027, null] } });
+    // Touched: the range wins.
+    const widened = parseMentoredPubsParams({ grad_from: "2020", grad_to: "2027", grad_exact: "2019,2027" });
+    expect(widened.ok && widened.value.years).toEqual([2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027]);
+    const toMoved = parseMentoredPubsParams({ grad_from: "2019", grad_to: "2021", grad_exact: "2019,2027" });
+    expect(toMoved.ok && toMoved.value.years).toEqual([2019, 2020, 2021]);
+    expect(parseMentoredPubsParams({ grad_from: "", grad_to: "", grad_exact: "2019,2027" })).toMatchObject({
+      ok: true,
+      value: { years: null },
+    });
+    // `years` still wins; a malformed token is an error.
+    expect(parseMentoredPubsParams({ years: "2024", grad_from: "2019", grad_to: "2027", grad_exact: "2019,2027" })).toMatchObject({
+      ok: true,
+      value: { years: [2024] },
+    });
+    expect(parseMentoredPubsParams({ grad_from: "2019", grad_to: "2027", grad_exact: "2019,x" })).toEqual({
+      ok: false,
+      error: "invalid_years",
+    });
   });
 });

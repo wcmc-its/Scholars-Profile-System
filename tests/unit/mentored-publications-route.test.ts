@@ -230,3 +230,50 @@ describe("response", () => {
     });
   });
 });
+
+describe("the rail's post-load facets (2026-09-24)", () => {
+  const withRows = () =>
+    h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
+      summary: [
+        {
+          gradYear: 2026, entryYear: 2022, entryYearSource: "bridge", cwid: "stu0001", firstName: "Ada",
+          lastName: "Learner", program: "MD",
+          mentors: [{ cwid: "men0001", name: "Zed Mentor", mentorship: { program: "md", source: "roster", tier: "confirmed" } }],
+          pubsInWindow: 1, withMentorInWindow: 1, pubsAllTime: 2, highImpactInWindow: 0, firstAuthorInWindow: 1,
+        },
+      ],
+      detail: [
+        { learnerCwid: "stu0001", mentorCwid: "men0001", paperMentors: [], withMentor: true, pmid: "1", year: 2025,
+          inWindow: true, learnerAuthorPosition: 1, authorCount: 3, jif: null },
+        { learnerCwid: "stu0001", mentorCwid: "men0001", paperMentors: [], withMentor: true, pmid: "2", year: 2019,
+          inWindow: false, learnerAuthorPosition: 2, authorCount: 3, jif: null },
+      ],
+      publications: [],
+      generatedAt: GENERATED,
+      filters: { ...args },
+      allPubsLoaded: null,
+      droppedUnresolved: 0,
+      droppedNoCwid: 0,
+      droppedNoCwidMentees: [],
+    }));
+
+  it("the workbook is built from the narrowed report (same as the page), the facets stated on it", async () => {
+    withRows();
+    const res = await GET(req("?years=2026&window=yes&q=ada&view=publications"));
+    expect(res.status).toBe(200);
+    const built = h.mockBuild.mock.calls[0][0];
+    expect(built.detail.map((d: { pmid: string }) => d.pmid)).toEqual(["1"]);
+    expect(built.summary[0]).toMatchObject({ pubsAllTime: 1, pubsInWindow: 1 });
+    expect(built.facets).toMatchObject({ window: ["yes"], position: [], mentors: [] });
+  });
+
+  it("no facet → the loader's report reaches the builder untouched; a malformed facet 400s", async () => {
+    withRows();
+    await GET(req("?years=2026"));
+    expect(h.mockBuild.mock.calls[0][0]).toBe(await h.mockLoadReport.mock.results[0].value);
+    const bad = await GET(req("?position=any"));
+    expect(bad.status).toBe(400);
+    expect(await bad.text()).toBe("invalid_position");
+  });
+});
+

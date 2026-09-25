@@ -251,6 +251,8 @@ describe("ReportAccessPopover — badge variant (report page header)", () => {
     expect(trigger.textContent).toBe("Superusers and comms stewards+ 2 others");
     const content = within(open());
     expect(content.getByText("Who can open this report")).toBeTruthy();
+    // The audience is the row's title; the line under it doesn't repeat it.
+    expect(content.getByText("Always have access.")).toBeTruthy();
     expect(content.getByTestId("report-access-row-md-usr0001").textContent).toContain("Curated Name");
     expect(content.getByTestId("report-access-row-md-usr0001").textContent).toContain("MD · added Sep 18, 2026");
     expect(content.queryByRole("button", { name: "Remove" })).toBeNull();
