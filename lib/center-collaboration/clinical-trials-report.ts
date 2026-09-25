@@ -40,6 +40,8 @@ export type ClinicalTrialsReportClient = Pick<
 export type ClinicalTrialsReportRow = {
   cwid: string;
   personName: string;
+  /** `Scholar.primaryDepartment`; null when unknown. */
+  department: string | null;
   /** 'Principal Investigator' | 'Investigator' — raw `PersonClinicalTrial.role`. */
   role: string;
   protocolNumber: string;
@@ -84,10 +86,11 @@ export async function loadClinicalTrialsReport(
 
   const scholars = await client.scholar.findMany({
     where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
-    select: { cwid: true, preferredName: true },
+    select: { cwid: true, preferredName: true, primaryDepartment: true },
   });
   if (scholars.length === 0) return [];
   const nameByCwid = new Map(scholars.map((s) => [s.cwid, s.preferredName]));
+  const deptByCwid = new Map(scholars.map((s) => [s.cwid, s.primaryDepartment ?? null]));
 
   const links = await client.personClinicalTrial.findMany({
     where: { cwid: { in: [...nameByCwid.keys()] } },
@@ -97,6 +100,7 @@ export async function loadClinicalTrialsReport(
   const rows: ClinicalTrialsReportRow[] = links.map((link) => ({
     cwid: link.cwid,
     personName: nameByCwid.get(link.cwid) ?? link.cwid,
+    department: deptByCwid.get(link.cwid) ?? null,
     role: link.role,
     protocolNumber: link.protocolNumber,
     nctNumber: link.trial.nctNumber,
