@@ -145,6 +145,9 @@ export type SlugRegistryOptions = {
   limit?: number;
   /** Page offset (default 0). */
   offset?: number;
+  /** `requested` only: leave out `pending` rows (the Profile URLs page lists
+   *  those in its review queue, so its registry tab is decided requests). */
+  decidedOnly?: boolean;
 };
 
 /** The Prisma surface the registry needs — a client or tx satisfies it. */
@@ -374,9 +377,10 @@ async function loadRequested(
   client: SlugRegistryClient,
 ): Promise<SlugRegistryResult<RequestedSlugRow>> {
   const q = normalizeQuery(opts.query);
-  const where = q
-    ? { OR: [{ requestedSlug: { contains: q } }, { cwid: { contains: q } }] }
-    : {};
+  const where = {
+    ...(q ? { OR: [{ requestedSlug: { contains: q } }, { cwid: { contains: q } }] } : {}),
+    ...(opts.decidedOnly ? { status: { not: "pending" as const } } : {}),
+  };
   try {
     const [rows, total] = await Promise.all([
       client.slugRequest.findMany({
@@ -442,6 +446,94 @@ export async function loadSlugRegistry(
     case "requested":
       return loadRequested(opts, client);
   }
+}
+
+/**
+ * Every segment's match count for one query — the Profile URLs page's tab
+ * counts. Each is the segment loader's own `total` (one row fetched), so a
+ * count can never disagree with the tab it labels. `requested` counts decided
+ * requests only, like that tab; it is left out when the slug-request feature
+ * is off (its tab is hidden).
+ */
+export async function countSlugRegistrySegments(
+  query: string,
+  client: SlugRegistryClient,
+  opts: { requested: boolean },
+): Promise<Partial<Record<SlugRegistrySegment, number>>> {
+  const segments = SLUG_REGISTRY_SEGMENTS.filter((s) => s !== "requested" || opts.requested);
+  const totals = await Promise.all(
+    segments.map((segment) =>
+      loadSlugRegistry({ segment, query, limit: 1, decidedOnly: segment === "requested" }, client).then(
+        (r) => r.total,
+      ),
+    ),
+  );
+  return Object.fromEntries(segments.map((s, i) => [s, totals[i]]));
+}
+
+/** Display extras for one page of registry rows — what the row shapes above
+ *  do not carry. Keyed by CWID / slug; a key missing = unknown. */
+export type SlugRegistryExtras = {
+  /** Name + primary department per CWID on the page. */
+  people: Record<string, { name: string | null; department: string | null }>;
+  /** CWIDs on the page whose slug is pinned by an override. */
+  pinned: string[];
+  /** `collisions`: each row's base slug (the `-N` stripped) → its live
+   *  holder, or `null` when the base is free. */
+  baseHolders: Record<string, { cwid: string; name: string | null } | null>;
+};
+
+/**
+ * Load the extras for one page of `segment` rows: three small `IN` reads over
+ * at most one page of CWIDs / slugs. Read-only, like the rest of the registry.
+ */
+export async function loadSlugRegistryExtras(
+  segment: SlugRegistrySegment,
+  rows: ReadonlyArray<SlugRegistryRow>,
+  client: SlugRegistryClient,
+): Promise<SlugRegistryExtras> {
+  const extras: SlugRegistryExtras = { people: {}, pinned: [], baseHolders: {} };
+  const cwids =
+    segment === "active" || segment === "collisions"
+      ? (rows as ActiveSlugRow[]).map((r) => r.cwid)
+      : segment === "override"
+        ? (rows as OverrideSlugRow[]).map((r) => r.pinnedForCwid)
+        : segment === "requested"
+          ? (rows as RequestedSlugRow[]).map((r) => r.forCwid)
+          : [];
+  const bases =
+    segment === "collisions" ? [...new Set((rows as ActiveSlugRow[]).map((r) => r.slug.replace(/-\d+$/, "")))] : [];
+  if (cwids.length === 0 && bases.length === 0) return extras;
+
+  const [people, overrides, holders] = await Promise.all([
+    cwids.length
+      ? client.scholar.findMany({
+          where: { cwid: { in: cwids } },
+          select: { cwid: true, preferredName: true, fullName: true, primaryDepartment: true },
+        })
+      : [],
+    segment === "active" || segment === "collisions"
+      ? client.fieldOverride.findMany({
+          where: { entityType: "scholar", fieldName: "slug", entityId: { in: cwids } },
+          select: { entityId: true },
+        })
+      : [],
+    bases.length
+      ? client.scholar.findMany({
+          where: { slug: { in: bases }, deletedAt: null, status: "active" },
+          select: { cwid: true, slug: true, preferredName: true, fullName: true },
+        })
+      : [],
+  ]);
+  for (const p of people) {
+    extras.people[p.cwid] = { name: p.preferredName ?? p.fullName ?? null, department: p.primaryDepartment ?? null };
+  }
+  extras.pinned = overrides.map((o) => o.entityId);
+  for (const b of bases) {
+    const h = holders.find((x) => x.slug === b);
+    extras.baseHolders[b] = h ? { cwid: h.cwid, name: h.preferredName ?? h.fullName ?? null } : null;
+  }
+  return extras;
 }
 
 // ---------------------------------------------------------------------------

@@ -166,6 +166,24 @@ export async function loadSlugRequestQueue(
   );
 }
 
+/** When the most recent request was decided (ISO), or `null` when none has
+ *  been — the Profile URLs queue's empty state ("Last decided …"). Tolerates
+ *  an absent `slug_request` table (dev DB drift), like the registry. */
+export async function loadLastSlugDecision(
+  client: Pick<PrismaClient, "slugRequest">,
+): Promise<string | null> {
+  try {
+    const last = await client.slugRequest.findFirst({
+      where: { decidedAt: { not: null } },
+      orderBy: { decidedAt: "desc" },
+      select: { decidedAt: true },
+    });
+    return last?.decidedAt ? last.decidedAt.toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Count pending slug requests — the rail pending-count pill (U3 + roster). */
 export function countPendingSlugRequests(
   client: Pick<PrismaClient, "slugRequest">,
