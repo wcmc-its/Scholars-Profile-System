@@ -22,7 +22,7 @@ import {
 import { toCsv } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 
-import { isWeekend, niceCeil, shortDay } from "./usage-format";
+import { type ChartDay, isWeekend, niceCeil, shortDay } from "./usage-format";
 
 /** The header's "Range" dropdown: Last 7 / 30 / 90 days, Since launch, or a
  *  custom from/to. The choice lives in the URL (`?range=`, plus `from`/`to`
@@ -47,6 +47,18 @@ export function UsageRangePicker({
   const [customOpen, setCustomOpen] = useState(current === "custom");
   const [from, setFrom] = useState(since);
   const [to, setTo] = useState(until);
+  // A same-route `router.push` re-renders this island with new props rather
+  // than remounting it, so the seeded state above would go stale. Re-seed it
+  // whenever the resolved range changes (React's adjust-state-during-render
+  // pattern: no effect, no flash of the old values).
+  const rangeKey = `${current}|${since}|${until}`;
+  const [seededFor, setSeededFor] = useState(rangeKey);
+  if (seededFor !== rangeKey) {
+    setSeededFor(rangeKey);
+    setCustomOpen(current === "custom");
+    setFrom(since);
+    setTo(until);
+  }
   const label =
     current === "custom"
       ? `${shortDay(since)} – ${shortDay(until)}`
@@ -150,10 +162,12 @@ export function UsageRangePicker({
 }
 
 /** Profile pageviews by day — flex bars, weekends lighter, hover (or tap) a bar
- *  for its exact count in the header line. */
-export function PageviewsChart({ data }: { data: { day: string; views: number }[] }) {
+ *  for its exact count in the header line. A `null` day (no rollup row) keeps
+ *  its slot on the axis but draws no bar: a gap, not a zero. */
+export function PageviewsChart({ data }: { data: ChartDay[] }) {
   const [hover, setHover] = useState<number | null>(null);
-  const top = niceCeil(Math.max(...data.map((d) => d.views), 1));
+  const top = niceCeil(Math.max(...data.map((d) => d.views ?? 0), 1));
+  const gaps = data.filter((d) => d.views === null).length;
   const ticks = [0, top / 2, top];
   const hd = hover === null ? null : data[hover];
   // Label every `stride`-th day (every 4th for a month, wider for longer
@@ -171,7 +185,9 @@ export function PageviewsChart({ data }: { data: { day: string; views: number }[
         <h2 className="text-[17px] font-semibold">Profile pageviews by day</h2>
         <span className="text-muted-foreground text-[13px]" aria-live="polite">
           {hd
-            ? `${shortDay(hd.day)}: ${hd.views.toLocaleString()} pageviews`
+            ? hd.views === null
+              ? `${shortDay(hd.day)}: no data`
+              : `${shortDay(hd.day)}: ${hd.views.toLocaleString()} pageviews`
             : "Hover a bar for the exact count"}
         </span>
       </div>
@@ -202,28 +218,31 @@ export function PageviewsChart({ data }: { data: { day: string; views: number }[
             <div
               className={cn("absolute inset-0 flex items-end", gap)}
               role="img"
-              aria-label={`Profile pageviews per day, ${data.length} days`}
+              aria-label={`Profile pageviews per day, ${data.length} days${gaps ? `, ${gaps} with no data` : ""}`}
               onMouseLeave={() => setHover(null)}
             >
               {data.map((d, i) => (
                 <div
                   key={d.day}
-                  title={`${shortDay(d.day)}: ${d.views.toLocaleString()}`}
+                  title={`${shortDay(d.day)}: ${d.views === null ? "no data" : d.views.toLocaleString()}`}
                   className="flex h-full flex-1 items-end"
                   onMouseEnter={() => setHover(i)}
                   onClick={() => setHover(i)}
+                  data-gap={d.views === null || undefined}
                 >
-                  <div
-                    className={cn(
-                      "w-full rounded-t-[3px]",
-                      hover === i
-                        ? "bg-apollo-bar"
-                        : isWeekend(d.day)
-                          ? "bg-apollo-slate/45"
-                          : "bg-apollo-slate",
-                    )}
-                    style={{ height: `${(d.views / top) * 100}%`, minHeight: d.views ? 2 : 0 }}
-                  />
+                  {d.views === null ? null : (
+                    <div
+                      className={cn(
+                        "w-full rounded-t-[3px]",
+                        hover === i
+                          ? "bg-apollo-bar"
+                          : isWeekend(d.day)
+                            ? "bg-apollo-slate/45"
+                            : "bg-apollo-slate",
+                      )}
+                      style={{ height: `${(d.views / top) * 100}%`, minHeight: d.views ? 2 : 0 }}
+                    />
+                  )}
                 </div>
               ))}
             </div>

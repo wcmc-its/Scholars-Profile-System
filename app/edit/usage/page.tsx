@@ -43,7 +43,7 @@ import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-qu
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { cn } from "@/lib/utils";
 
-import { monthLabel, pctLabel, shortDay } from "./usage-format";
+import { fillDayGaps, monthLabel, pctLabel, shortDay } from "./usage-format";
 import {
   PageviewsChart,
   RankTable,
@@ -367,7 +367,7 @@ function UsageBody({
           </p>
         </section>
       ) : (
-        <PageviewsChart data={summary.pageviewsByDay} />
+        <PageviewsChart data={fillDayGaps(summary.pageviewsByDay, summary.since, summary.until)} />
       )}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] items-start gap-5">

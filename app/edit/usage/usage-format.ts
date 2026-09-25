@@ -42,3 +42,37 @@ export function pctLabel(share: number): string {
   if (share > 0 && share < 0.0001) return "<0.01%";
   return `${(share * 100).toFixed(share < 0.01 ? 2 : 1)}%`;
 }
+
+/** One chart slot: a day's pageviews, or `null` when the rollup has no row for it. */
+export type ChartDay = { day: string; views: number | null };
+
+/**
+ * Lays the rollup's rows on a continuous day axis from `since` through `until`
+ * (inclusive), so a day with no rollup row is a `null` slot that the chart
+ * draws as a gap, not a zero and not a silently dropped day. Falls back to the
+ * data's own first/last day when a bound is missing or malformed.
+ */
+export function fillDayGaps(
+  days: ReadonlyArray<{ day: string; views: number }>,
+  since?: string,
+  until?: string,
+): ChartDay[] {
+  if (days.length === 0) return [];
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  const start = since && iso.test(since) ? since : days[0].day;
+  const end = until && iso.test(until) ? until : days[days.length - 1].day;
+  const byDay = new Map(days.map((d) => [d.day, d.views]));
+  const out: ChartDay[] = [];
+  const DAY_MS = 86_400_000;
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  // Bounded walk: a bad bound can't spin (at most ~3 years of slots).
+  for (
+    let t = Date.parse(`${start}T00:00:00Z`);
+    Number.isFinite(t) && t <= endMs && out.length < 1100;
+    t += DAY_MS
+  ) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    out.push({ day, views: byDay.get(day) ?? null });
+  }
+  return out.length > 0 ? out : days.map((d) => ({ ...d }));
+}

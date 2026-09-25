@@ -51,8 +51,15 @@ vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { read: { scholar: { findMany: h.mockFindMany } }, write: {} } }));
 
 import EditUsagePage from "@/app/edit/usage/page";
-import { isWeekend, monthLabel, niceCeil, pctLabel, shortDay } from "@/app/edit/usage/usage-format";
-import { PageviewsChart } from "@/app/edit/usage/usage-widgets";
+import {
+  fillDayGaps,
+  isWeekend,
+  monthLabel,
+  niceCeil,
+  pctLabel,
+  shortDay,
+} from "@/app/edit/usage/usage-format";
+import { PageviewsChart, UsageRangePicker } from "@/app/edit/usage/usage-widgets";
 
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 
@@ -271,6 +278,116 @@ describe("PageviewsChart", () => {
     expect(labelled(90)).toBe(8); // stride 12: i = 0, 12, ..., 84
     document.body.innerHTML = "";
     expect(labelled(7)).toBe(7);
+  });
+});
+
+describe("PageviewsChart gaps", () => {
+  it("draws a day with no rollup row as an empty slot, not a zero bar", () => {
+    const { getByTestId, getByText } = render(
+      <PageviewsChart
+        data={[
+          { day: "2026-08-26", views: 120 },
+          { day: "2026-08-27", views: null },
+          { day: "2026-08-28", views: 0 },
+        ]}
+      />,
+    );
+    const chart = getByTestId("usage-pageviews-chart");
+    const slots = [...(chart.querySelector('[role="img"]')?.children ?? [])];
+    expect(slots).toHaveLength(3);
+    expect(slots[1].getAttribute("data-gap")).toBe("true");
+    expect(slots[1].children).toHaveLength(0); // no bar at all
+    expect(slots[2].getAttribute("data-gap")).toBeNull();
+    expect(slots[2].children).toHaveLength(1); // a real zero keeps its (0-height) bar
+    expect(chart.querySelector('[role="img"]')?.getAttribute("aria-label")).toContain(
+      "1 with no data",
+    );
+    fireEvent.mouseEnter(slots[1]);
+    expect(getByText("Aug 27: no data")).toBeTruthy();
+  });
+
+  it("the page lays the requested window on the axis, gaps included", async () => {
+    h.mockLoadUsage.mockResolvedValue({
+      ...SUMMARY,
+      since: "2026-08-25",
+      until: "2026-08-31",
+    });
+    const root = await renderPage();
+    const slots = [
+      ...(root.getByTestId("usage-pageviews-chart").querySelector('[role="img"]')?.children ?? []),
+    ];
+    // 7 window days; the fixture has rows for Aug 26-29 only.
+    expect(slots).toHaveLength(7);
+    expect(slots.filter((s) => s.getAttribute("data-gap") === "true")).toHaveLength(3);
+  });
+});
+
+describe("UsageRangePicker", () => {
+  it("re-seeds the custom inputs and panel when the range props change (same-route push)", () => {
+    const { rerender, getByTestId } = render(
+      <UsageRangePicker
+        current="custom"
+        since="2026-08-01"
+        until="2026-08-15"
+        maxDate="2026-09-24"
+      />,
+    );
+    fireEvent.click(getByTestId("usage-range-trigger"));
+    let form = within(within(document.body).getByTestId("usage-range-custom"));
+    expect((form.getByLabelText("From") as HTMLInputElement).value).toBe("2026-08-01");
+    // A half-typed edit, then the page re-renders with a new resolved range.
+    fireEvent.change(form.getByLabelText("From"), { target: { value: "2026-07-10" } });
+    rerender(
+      <UsageRangePicker
+        current="custom"
+        since="2026-09-01"
+        until="2026-09-10"
+        maxDate="2026-09-24"
+      />,
+    );
+    form = within(within(document.body).getByTestId("usage-range-custom"));
+    expect((form.getByLabelText("From") as HTMLInputElement).value).toBe("2026-09-01");
+    expect((form.getByLabelText("To") as HTMLInputElement).value).toBe("2026-09-10");
+    // Switching to a preset closes the custom panel it had open.
+    rerender(
+      <UsageRangePicker current="30" since="2026-08-26" until="2026-09-24" maxDate="2026-09-24" />,
+    );
+    expect(within(document.body).queryByTestId("usage-range-custom")).toBeNull();
+  });
+});
+
+describe("fillDayGaps", () => {
+  it("fills missing days in the window with null and keeps real zeros", () => {
+    expect(
+      fillDayGaps(
+        [
+          { day: "2026-08-27", views: 5 },
+          { day: "2026-08-29", views: 0 },
+        ],
+        "2026-08-26",
+        "2026-08-30",
+      ),
+    ).toEqual([
+      { day: "2026-08-26", views: null },
+      { day: "2026-08-27", views: 5 },
+      { day: "2026-08-28", views: null },
+      { day: "2026-08-29", views: 0 },
+      { day: "2026-08-30", views: null },
+    ]);
+  });
+
+  it("falls back to the data's own span without bounds, and is empty for no data", () => {
+    expect(
+      fillDayGaps([
+        { day: "2026-08-31", views: 1 },
+        { day: "2026-09-02", views: 2 },
+      ]),
+    ).toEqual([
+      { day: "2026-08-31", views: 1 },
+      { day: "2026-09-01", views: null },
+      { day: "2026-09-02", views: 2 },
+    ]);
+    expect(fillDayGaps([], "2026-08-01", "2026-08-05")).toEqual([]);
   });
 });
 
