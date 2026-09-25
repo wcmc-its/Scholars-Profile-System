@@ -201,6 +201,13 @@ describe("report 9 body", () => {
     expect(boxes("high-impact-institution")).toEqual(["inst:GONE"]);
   });
 
+  it("a unit repeated in the URL lists once, so one untick clears it", async () => {
+    const q = await renderBody({ unit: ["dept:GONE", "dept:GONE"] });
+    const form = q.getAllByTestId("high-impact-filters")[0] as HTMLFormElement;
+    const boxes = within(form).getByTestId("high-impact-department").querySelectorAll('input[value="dept:GONE"]');
+    expect(boxes).toHaveLength(1);
+  });
+
   it("the partial-year footnote shows only when the window includes the year in progress", async () => {
     const y = new Date().getFullYear();
     const note = () => q.getAllByRole("note")[0].textContent;

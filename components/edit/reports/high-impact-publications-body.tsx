@@ -104,8 +104,9 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
   );
   const groupOf = (u: string) =>
     u.startsWith("center:") ? "center" : u.startsWith("inst:") ? "inst" : "dept";
+  // Deduped: a hand-typed `unit=X&unit=X` must render one checkbox, not two.
   const unknownUnits = (group: string): RailOption[] =>
-    params.units
+    [...new Set(params.units)]
       .filter((u) => !known.has(u) && groupOf(u) === group)
       .map((u) => ({ value: u, label: labels.get(u) ?? u, count: 0 }));
   const unitOptions: RailOption[] = [
