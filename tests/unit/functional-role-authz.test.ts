@@ -37,14 +37,21 @@ import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isDeveloper } from "@/lib/auth/development";
 import { hasAnyReportAccess, loadReportScopesForCwid } from "@/lib/edit/report-access";
 
-type GrantRow = { role: string; cwid: string; scopes: string[] };
+type GrantRow = { role: string; cwid: string; scopes: string[]; source?: string };
 
-/** The registry as a list; `findMany({ where: { role, cwid } })` filters it. */
+/** The registry as a list; `findMany({ where: { role, cwid, source? } })`
+ *  filters it the way MySQL would. A row with no `source` is "manual". */
 function registry(rows: GrantRow[]) {
-  h.frgFindMany.mockImplementation(async ({ where }: { where: { role: string; cwid: string } }) =>
-    rows
-      .filter((r) => r.role === where.role && r.cwid === where.cwid)
-      .map((r) => ({ scopes: r.scopes })),
+  h.frgFindMany.mockImplementation(
+    async ({ where }: { where: { role: string; cwid: string; source?: string } }) =>
+      rows
+        .filter(
+          (r) =>
+            r.role === where.role &&
+            r.cwid === where.cwid &&
+            (where.source === undefined || (r.source ?? "manual") === where.source),
+        )
+        .map((r) => ({ scopes: r.scopes })),
   );
 }
 
@@ -121,7 +128,9 @@ describe("FUNCTIONAL_ROLES_AUTHZ on: External Affairs", () => {
   it("the cwid is matched case-insensitively (the registry stores lowercase)", async () => {
     expect(await isCommsSteward("FAKE001")).toBe(true);
     expect(h.frgFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { role: "external_affairs", cwid: "fake001" } }),
+      expect.objectContaining({
+        where: { role: "external_affairs", cwid: "fake001", source: "manual" },
+      }),
     );
   });
 
@@ -220,5 +229,64 @@ describe("FUNCTIONAL_ROLES_AUTHZ on: Reporting", () => {
     expect([...(await loadReportScopesForCwid("fake010", "article-count"))]).toEqual(["*"]);
     h.reportAccessFindMany.mockResolvedValue([]);
     expect(await hasAnyReportAccess("fake010")).toBe(false);
+  });
+});
+
+describe("FUNCTIONAL_ROLES_AUTHZ on: imported rows never admit", () => {
+  // An imported row mirrors a source (report_access, an allowlist) that is
+  // reconciled only when a superuser re-runs the import. If it admitted, a
+  // revoke at the source would not take effect until then.
+  beforeEach(() => {
+    vi.stubEnv("FUNCTIONAL_ROLES_AUTHZ", "on");
+  });
+
+  it("the gate query asks for manual rows only", async () => {
+    await registryHasAnyReporting("fake011");
+    expect(h.frgFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { role: "reporting", cwid: "fake011", source: "manual" } }),
+    );
+  });
+
+  it("a report_access revoke takes effect with a stale imported Reporting row left behind", async () => {
+    // The Reports popover deleted the report_access row; the import has not
+    // re-run, so the imported mirror row is still there.
+    h.reportAccessFindMany.mockResolvedValue([]);
+    registry([
+      { role: "reporting", cwid: "fake012", scopes: ["article-count"], source: "report_access" },
+    ]);
+    expect([...(await loadReportScopesForCwid("fake012", "article-count"))]).toEqual([]);
+    expect(await hasAnyReportAccess("fake012")).toBe(false);
+    expect([...(await registryReportScopes("fake012", "article-count"))]).toEqual([]);
+  });
+
+  it("an allowlist removal takes effect with a stale imported External Affairs row left behind", async () => {
+    // Allowlists are empty (beforeEach) and the directory says no; only the
+    // imported "allowlist" mirror row remains.
+    registry([
+      {
+        role: "external_affairs",
+        cwid: "fake013",
+        scopes: ["communications", "development"],
+        source: "allowlist",
+      },
+    ]);
+    expect(await isCommsSteward("fake013")).toBe(false);
+    expect(await isDeveloper("fake013")).toBe(false);
+  });
+
+  it("a manual row beside an imported one still admits, from its own scopes only", async () => {
+    registry([
+      { role: "reporting", cwid: "fake014", scopes: ["*"], source: "report_access" },
+      {
+        role: "reporting",
+        cwid: "fake014",
+        scopes: ["mentored-publications:md"],
+        source: "manual",
+      },
+    ]);
+    expect([...(await loadReportScopesForCwid("fake014", "mentored-publications"))]).toEqual([
+      "md",
+    ]);
+    expect([...(await loadReportScopesForCwid("fake014", "article-count"))]).toEqual([]);
   });
 });

@@ -16,11 +16,12 @@
  *
  * Authorization: while `FUNCTIONAL_ROLES_AUTHZ` is not "on" (the default in
  * every env), no gate reads `functional_role_grant` and the table is a
- * registry only. When it is "on", a grant ADDS access: External Affairs with
+ * registry only. When it is "on", a manual grant ADDS access: External Affairs with
  * Communications admits `isCommsSteward`, with Development admits
  * `isDeveloper`, and a Reporting grant admits the report gate per scope. The
  * existing sources (ED groups, allowlists, `report_access`) keep working
- * either way.
+ * either way. Imported rows (`report_access`, `allowlist`) never admit: they
+ * only mirror a source that already does, and would outlive a revoke there.
  */
 
 export const FUNCTIONAL_ROLES = ["external_affairs", "reporting"] as const;

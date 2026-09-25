@@ -12,8 +12,10 @@
  *     `SCHOLARS_DEVELOPMENT_ALLOWLIST`);
  *   - Reporting = `report_access` rows.
  * Those keep working. With `FUNCTIONAL_ROLES_AUTHZ` "on" the gates ALSO admit
- * a registry grant (additive, `lib/auth/functional-role-authz.ts`); while it
- * is off, a manual row here records an assignment and grants nothing.
+ * a MANUAL registry grant (additive, `lib/auth/functional-role-authz.ts`);
+ * imported rows never admit anyone (they would outlive a revoke at their
+ * source until the next import). While the flag is off, a manual row here
+ * records an assignment and grants nothing.
  *
  * What the import can see. `report_access` is a table, so every holder is
  * imported (one Reporting row per person, scopes = the reports they hold).

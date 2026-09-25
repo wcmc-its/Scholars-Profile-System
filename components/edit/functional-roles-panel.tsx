@@ -11,8 +11,10 @@
  * re-runs the reconcile.
  *
  * The copy follows `FUNCTIONAL_ROLES_AUTHZ` (`authzEnabled`): off, the
- * registry is tracking-only and says so; on, a row here also grants access,
- * in addition to the existing sources. The parity line lists current holders
+ * registry is tracking-only and says so; on, a row granted here also grants
+ * access, in addition to the existing sources. Imported rows never do: they
+ * only mirror access their source already gives (see
+ * `lib/auth/functional-role-authz.ts`). The parity line lists current holders
  * by the existing gates that the registry does not cover yet.
  */
 "use client";
@@ -60,9 +62,10 @@ import { cn } from "@/lib/utils";
 export const FUNCTIONAL_ROLES_TRACKING_NOTE =
   "Recorded here for tracking. Access itself still comes from the Web Directory groups and each report's own access list.";
 
-/** The note while `FUNCTIONAL_ROLES_AUTHZ` is on: rows grant access too. */
+/** The note while `FUNCTIONAL_ROLES_AUTHZ` is on: rows granted here grant
+ *  access too; imported rows only mirror their source. */
 export const FUNCTIONAL_ROLES_AUTHZ_NOTE =
-  "Assignments here grant access, in addition to the Web Directory groups and each report's own access list.";
+  "Assignments here grant access, in addition to the Web Directory groups and each report's own access list. Imported rows only mirror those sources; revoke access at the source.";
 
 export function functionalRolesNote(authzEnabled: boolean): string {
   return authzEnabled ? FUNCTIONAL_ROLES_AUTHZ_NOTE : FUNCTIONAL_ROLES_TRACKING_NOTE;

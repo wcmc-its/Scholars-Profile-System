@@ -11,8 +11,15 @@
  *     `external_affairs` grant carrying the Development function;
  *   - the report gate (`loadReportScopesForCwid` / `hasAnyReportAccess`,
  *     `lib/edit/report-access.ts`) also admits a `reporting` grant, per scope.
- * Every source counts (manual rows and imported ones alike): an imported row
- * mirrors a source that already grants the same access.
+ * Only `source = "manual"` rows count (rows granted on the Administrators
+ * page). An imported row (`report_access`, `allowlist`) mirrors a source that
+ * already grants the same access through its own path, so it adds nothing
+ * there; and it is refreshed only when a superuser re-runs "Import from
+ * sources" and is read-only on the page. Counting it would keep a revoked
+ * person admitted (a `report_access` revoke from the Reports popover, a cwid
+ * dropped from an allowlist) until the next import. The parity check
+ * (`parityGaps`) still counts every source: it asks what the registry
+ * RECORDS, not what it admits.
  *
  * While the flag is not exactly "on", nothing here touches the database.
  * Fail-closed: a failed read (the table missing in an env, a DB error) is
@@ -48,10 +55,14 @@ function logReadFailed(check: string, err: unknown): void {
   );
 }
 
-/** Every scope list `cwid` holds for `role`, across sources. */
+/** The source whose rows the gates count. Imported rows are excluded; see
+ *  the module comment. */
+export const AUTHZ_SOURCE = "manual";
+
+/** Every scope list `cwid` holds for `role` from a manual grant. */
 async function registryScopes(role: string, cwid: string): Promise<string[][]> {
   const rows = await db.read.functionalRoleGrant.findMany({
-    where: { role, cwid: cwid.toLowerCase() },
+    where: { role, cwid: cwid.toLowerCase(), source: AUTHZ_SOURCE },
     select: { scopes: true },
   });
   return rows.map((r) => scopesFromJson(r.scopes));
