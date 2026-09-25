@@ -6,9 +6,15 @@
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
  * and stay operator-restricted).
  *
- * Also carries a "Service health" section (uptime tiles + a monthly trend
- * since launch), read from CloudWatch via lib/api/service-health.ts —
- * independent of the Athena data above, with its own fail-soft.
+ * Also carries service health (uptime + alarm-firing KPI tiles and a monthly
+ * "Uptime since launch" card), read from CloudWatch via
+ * lib/api/service-health.ts — independent of the Athena data above, with its
+ * own fail-soft.
+ *
+ * Layout (2026-09 page revision): header, a four-tile KPI row, the pageviews
+ * chart card, Top profiles + Top search terms side by side, three Traffic
+ * sources cards, then the uptime card. The interactive bits (chart hover, Show
+ * all, client-side CSV, the uptime ⓘ) are client islands in ./usage-widgets.
  *
  * Audience: a **superuser** or **any unit administrator** (owner/curator) —
  * `canViewUsage`. Global view for everyone (no per-unit scoping). Re-checked on
@@ -16,7 +22,6 @@
  * to an "unavailable" notice per section if its own data source errors
  * (mirrors the /edit/activity pattern).
  */
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
@@ -26,18 +31,17 @@ import {
   type ServiceHealthSummary,
   loadServiceHealth,
 } from "@/lib/api/service-health";
-import {
-  type DayViews,
-  type ProfileViews,
-  type UsageSummary,
-  loadUsageSummary,
-} from "@/lib/api/usage-summary";
+import { type NamedCount, type UsageSummary, loadUsageSummary } from "@/lib/api/usage-summary";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { canViewUsage } from "@/lib/edit/usage-access";
+import { cn } from "@/lib/utils";
+
+import { monthLabel, pctLabel, shortDay } from "./usage-format";
+import { PageviewsChart, RankTable, UptimeInfoButton, type RankRow } from "./usage-widgets";
 
 export const dynamic = "force-dynamic";
 
@@ -46,370 +50,340 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-const thClass = "px-3 py-2 font-medium";
-const tdClass = "px-3 py-2";
+const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] border";
 
-/** A generic 2-column count table (label, count). */
-function CountTable({
-  caption,
-  headers,
+/** One headline number: uppercase label, big value, muted sub-line. */
+function KpiTile({
+  label,
+  value,
+  sub,
+  testId,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  testId?: string;
+}) {
+  return (
+    <div className={cn(cardClass, "flex flex-col gap-1 px-[18px] py-4")}>
+      <span className="text-muted-foreground text-xs font-medium tracking-[.1em] uppercase">
+        {label}
+      </span>
+      <span className="text-3xl font-semibold tracking-[-.01em] tabular-nums" data-testid={testId}>
+        {value}
+      </span>
+      <span className="text-muted-foreground text-[13px]">{sub}</span>
+    </div>
+  );
+}
+
+/** Headline row: pageviews + busiest day (Athena rollup), uptime + alarm
+ *  firings (CloudWatch). Each pair fails soft on its own source. */
+function KpiRow({
+  summary,
+  health,
+}: {
+  summary: UsageSummary | null;
+  health: ServiceHealthSummary | null;
+}) {
+  const days = summary?.pageviewsByDay ?? [];
+  const peak = days.reduce<(typeof days)[number] | null>(
+    (a, b) => (a === null || b.views > a.views ? b : a),
+    null,
+  );
+  const perDay = summary ? Math.round(summary.totalPageviews / Math.max(1, days.length)) : 0;
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3.5">
+      {summary ? (
+        <>
+          <KpiTile
+            label="Profile pageviews"
+            value={summary.totalPageviews.toLocaleString()}
+            sub={`about ${perDay.toLocaleString()} a day`}
+            testId="usage-total-pageviews"
+          />
+          <KpiTile
+            label="Busiest day"
+            value={peak ? peak.views.toLocaleString() : "—"}
+            sub={peak ? shortDay(peak.day) : "no pageviews recorded"}
+            testId="usage-busiest-day"
+          />
+        </>
+      ) : null}
+      {health ? (
+        <>
+          <KpiTile
+            label="Uptime"
+            value={`${health.uptimePercent.toFixed(2)}%`}
+            sub={`last ${health.windowDays} days`}
+            testId="service-health-uptime"
+          />
+          <KpiTile
+            label="Availability alarms"
+            value={health.alarmFirings.toLocaleString()}
+            sub={`fired in last ${health.windowDays} days`}
+            testId="service-health-alarm-firings"
+          />
+        </>
+      ) : (
+        <div
+          className={cn(
+            cardClass,
+            "text-muted-foreground flex items-center px-[18px] py-4 text-sm",
+          )}
+          data-testid="service-health-unavailable"
+        >
+          Service health stats unavailable.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Slate ramp for the stacked traffic-source bars — one hue, stepped lighter
+ *  by rank; the long tail shares the neutral border tone. */
+const SPLIT_COLORS = [
+  "bg-apollo-slate",
+  "bg-apollo-slate/70",
+  "bg-apollo-slate/45",
+  "bg-apollo-slate/25",
+  "bg-apollo-border-strong",
+];
+
+function capitalize(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/** One traffic-source card: a stacked share bar over a label / hits / % list. */
+function SplitCard({
+  title,
   rows,
   emptyLabel,
 }: {
-  caption: string;
-  headers: [string, string];
-  rows: ReadonlyArray<[string, number]>;
+  title: string;
+  rows: NamedCount[];
   emptyLabel: string;
 }) {
+  const sum = rows.reduce((a, r) => a + r.hits, 0);
+  const color = (i: number) => SPLIT_COLORS[Math.min(i, SPLIT_COLORS.length - 1)];
   return (
-    <section className="mt-8">
-      <h2 className="text-base font-semibold">{caption}</h2>
-      <div className="border-apollo-border bg-apollo-surface mt-2 overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass}>{headers[0]}</th>
-              <th className={`${thClass} text-right`}>{headers[1]}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td className={`${tdClass} text-muted-foreground`} colSpan={2}>
-                  {emptyLabel}
-                </td>
-              </tr>
-            ) : (
-              rows.map(([label, count], i) => (
-                <tr key={`${label}-${i}`} className="border-apollo-border border-b">
-                  <td className={`${tdClass} break-words`}>{label || "—"}</td>
-                  <td className={`${tdClass} text-right tabular-nums`}>{count.toLocaleString()}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-/** Pageviews-by-day as a server-rendered SVG bar graph (no chart lib). Bars
- *  carry a <title> for hover tooltips; y-gridlines + sparse x date labels give
- *  scale. `currentColor` (set via text-muted-foreground on the svg) draws the
- *  axes; the bars fill with the brand maroon CSS var. */
-function PageviewsChart({ data, windowDays }: { data: DayViews[]; windowDays: number }) {
-  if (data.length === 0) {
-    return (
-      <p className="text-muted-foreground mt-2" data-testid="usage-pageviews-empty">
-        No profile pageviews recorded in the last {windowDays} days.
-      </p>
-    );
-  }
-  const W = 900;
-  const H = 240;
-  const padL = 48;
-  const padR = 8;
-  const padT = 12;
-  const padB = 26;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-  const max = Math.max(...data.map((d) => d.views), 1);
-  const slot = plotW / data.length;
-  const barW = Math.max(1, slot * 0.72);
-  const labelEvery = Math.ceil(data.length / 8);
-
-  return (
-    <div className="mt-3 overflow-x-auto">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="text-muted-foreground h-60 w-full min-w-[560px]"
-        role="img"
-        aria-label={`Profile pageviews per day over the last ${windowDays} days`}
-      >
-        {[0, 0.5, 1].map((f) => {
-          const y = padT + plotH * (1 - f);
-          return (
-            <g key={f}>
-              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="currentColor" strokeOpacity={0.15} />
-              <text x={padL - 6} y={y + 3} textAnchor="end" fontSize={10} fill="currentColor" fillOpacity={0.7}>
-                {Math.round(max * f).toLocaleString()}
-              </text>
-            </g>
-          );
-        })}
-        {data.map((d, i) => {
-          const h = (d.views / max) * plotH;
-          const x = padL + i * slot + (slot - barW) / 2;
-          return (
-            <rect
-              key={d.day}
-              x={x}
-              y={padT + plotH - h}
-              width={barW}
-              height={h}
-              rx={1}
-              style={{ fill: "var(--apollo-maroon)" }}
-            >
-              <title>
-                {d.day}: {d.views.toLocaleString()} views
-              </title>
-            </rect>
-          );
-        })}
-        {data.map((d, i) =>
-          i % labelEvery === 0 || i === data.length - 1 ? (
-            <text
-              key={d.day}
-              x={padL + i * slot + slot / 2}
-              y={H - 8}
-              textAnchor="middle"
-              fontSize={9}
-              fill="currentColor"
-              fillOpacity={0.7}
-            >
-              {d.day.slice(5)}
-            </text>
-          ) : null,
-        )}
-      </svg>
-    </div>
-  );
-}
-
-/** Top profiles by pageview — the vanity slug links to the live profile page. */
-function TopProfilesTable({ profiles }: { profiles: ProfileViews[] }) {
-  return (
-    <section className="mt-8">
-      <h2 className="text-base font-semibold">Top profiles</h2>
-      <div className="border-apollo-border bg-apollo-surface mt-2 overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass}>Profile</th>
-              <th className={`${thClass} text-right`}>Views</th>
-            </tr>
-          </thead>
-          <tbody>
-            {profiles.length === 0 ? (
-              <tr>
-                <td className={`${tdClass} text-muted-foreground`} colSpan={2}>
-                  No profile views in the window.
-                </td>
-              </tr>
-            ) : (
-              profiles.map((p, i) => (
-                <tr key={`${p.slug}-${i}`} className="border-apollo-border border-b">
-                  <td className={tdClass}>
-                    <Link
-                      href={`/${encodeURIComponent(p.slug)}`}
-                      className="text-apollo-slate hover:underline"
-                    >
-                      /{p.slug}
-                    </Link>
-                  </td>
-                  <td className={`${tdClass} text-right tabular-nums`}>
-                    {p.views.toLocaleString()}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-/** Two stat tiles: 30-day uptime % and availability-alarm firings in the same
- *  window. Reuses CountTable's bordered-box chrome (border-apollo-border /
- *  bg-apollo-surface) but for one prominent number rather than a table --
- *  the shortest idiom for this shape of data. */
-function ServiceHealthTiles({ summary }: { summary: ServiceHealthSummary }) {
-  return (
-    <div className="mt-3 grid gap-4 sm:grid-cols-2">
-      <div className="border-apollo-border bg-apollo-surface rounded-md border p-4">
-        <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Uptime (last {summary.windowDays} days)
-        </div>
-        <div className="mt-1 text-3xl font-bold tabular-nums" data-testid="service-health-uptime">
-          {summary.uptimePercent.toFixed(2)}%
-        </div>
-      </div>
-      <div className="border-apollo-border bg-apollo-surface rounded-md border p-4">
-        <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Availability-alarm firings (last {summary.windowDays} days)
-        </div>
-        <div
-          className="mt-1 text-3xl font-bold tabular-nums"
-          data-testid="service-health-alarm-firings"
-        >
-          {summary.alarmFirings.toLocaleString()}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Monthly availability since launch, cloned from PageviewsChart's
- *  server-rendered SVG-bar approach (no chart lib). The y-axis is pinned to a
- *  narrow band -- 100% down to whichever is lower of 99% or the worst month,
- *  rounded down -- rather than 0-100%, so a fractional-percent 5xx blip stays
- *  visible; the band is spelled out in the caption below so the compression
- *  can't read as misleading. A month under the 1,000-request low-traffic
- *  floor renders as a lighter bar (its number alone can't be trusted as a
- *  real signal) and says so in its hover title + request count. */
-function ServiceHealthTrendChart({ monthly }: { monthly: MonthlyAvailability[] }) {
-  if (monthly.length === 0) {
-    return (
-      <p className="text-muted-foreground mt-2" data-testid="service-health-trend-empty">
-        No availability history yet.
-      </p>
-    );
-  }
-  const W = 900;
-  const H = 220;
-  const padL = 48;
-  const padR = 8;
-  const padT = 12;
-  const padB = 26;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-  const worst = Math.min(...monthly.map((m) => m.availabilityPercent));
-  const yMin = Math.min(99, Math.floor(worst * 10) / 10);
-  const yMax = 100;
-  const band = yMax - yMin || 1;
-  const slot = plotW / monthly.length;
-  const barW = Math.max(1, slot * 0.6);
-
-  return (
-    <div className="mt-3 overflow-x-auto">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="text-muted-foreground h-56 w-full min-w-[480px]"
-        role="img"
-        aria-label={`Monthly availability since July 2026; y-axis ${yMin}% to ${yMax}%`}
-      >
-        {[0, 0.5, 1].map((f) => {
-          const y = padT + plotH * (1 - f);
-          const val = yMin + band * f;
-          return (
-            <g key={f}>
-              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="currentColor" strokeOpacity={0.15} />
-              <text x={padL - 6} y={y + 3} textAnchor="end" fontSize={10} fill="currentColor" fillOpacity={0.7}>
-                {val.toFixed(1)}%
-              </text>
-            </g>
-          );
-        })}
-        {monthly.map((m, i) => {
-          const clamped = Math.max(yMin, Math.min(yMax, m.availabilityPercent));
-          const h = ((clamped - yMin) / band) * plotH;
-          const x = padL + i * slot + (slot - barW) / 2;
-          return (
-            <rect
-              key={m.month}
-              x={x}
-              y={padT + plotH - h}
-              width={barW}
-              height={h}
-              rx={1}
-              fillOpacity={m.lowTraffic ? 0.35 : 1}
-              style={{ fill: m.lowTraffic ? "currentColor" : "var(--apollo-maroon)" }}
-            >
-              <title>
-                {m.month}: {m.availabilityPercent.toFixed(3)}% availability,{" "}
-                {m.totalRequests.toLocaleString()} requests
-                {m.lowTraffic ? " (low traffic -- under 1,000 requests)" : ""}
-              </title>
-            </rect>
-          );
-        })}
-        {monthly.map((m, i) => (
-          <text
-            key={m.month}
-            x={padL + i * slot + slot / 2}
-            y={H - 8}
-            textAnchor="middle"
-            fontSize={9}
-            fill="currentColor"
-            fillOpacity={0.7}
+    <div className={cn(cardClass, "flex min-w-0 flex-col gap-3 px-[18px] py-4")}>
+      <h3 className="text-muted-foreground text-xs font-medium tracking-[.1em] uppercase">
+        {title}
+      </h3>
+      {rows.length === 0 || sum === 0 ? (
+        <p className="text-muted-foreground text-sm">{emptyLabel}</p>
+      ) : (
+        <>
+          <div
+            className="bg-apollo-surface-2 flex h-2 gap-0.5 overflow-hidden rounded-full"
+            aria-hidden="true"
           >
-            {m.month}
-          </text>
-        ))}
-      </svg>
-      <p className="text-muted-foreground mt-1 text-xs">
-        Y-axis spans {yMin}%–{yMax}% (not 0–100%) so small dips stay visible. Lighter bars mark a
-        month under 1,000 requests — too little traffic for the percentage to be a reliable signal.
-      </p>
+            {rows.map((r, i) => (
+              <div
+                key={`${r.label}-${i}`}
+                className={color(i)}
+                style={{ width: `${(r.hits / sum) * 100}%` }}
+              />
+            ))}
+          </div>
+          <ul className="flex flex-col">
+            {rows.map((r, i) => (
+              <li
+                key={`${r.label}-${i}`}
+                className="border-apollo-border grid grid-cols-[10px_minmax(0,1fr)_auto_48px] items-center gap-2.5 border-t py-1.5 text-[13.5px]"
+              >
+                <span className={cn("size-2 rounded-[2px]", color(i))} aria-hidden="true" />
+                <span className="truncate" title={r.label}>
+                  {r.label || "—"}
+                </span>
+                <span className="tabular-nums">{r.hits.toLocaleString()}</span>
+                <span className="text-muted-foreground text-right text-[12.5px] tabular-nums">
+                  {pctLabel(r.hits / sum)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
 
-/** The whole Service health section: two tiles + the monthly trend. `summary`
- *  is `null` only when loadServiceHealth threw (CloudWatch error) -- that
- *  failure is scoped to this section alone; the rest of the page (or the
- *  Usage dashboard above it) renders normally regardless. */
-function ServiceHealthSection({ summary }: { summary: ServiceHealthSummary | null }) {
+function TrafficSources({ summary }: { summary: UsageSummary }) {
+  // Every request carries a device class, so the device split's total is the
+  // all-requests total (geo covers the same population, as a fallback).
+  const totalHits =
+    summary.device.reduce((a, r) => a + r.hits, 0) || summary.geo.reduce((a, r) => a + r.hits, 0);
   return (
-    <section className="mt-8">
-      <h2 className="text-base font-semibold">Service health</h2>
-      {summary === null ? (
-        <p className="text-muted-foreground mt-2" data-testid="service-health-unavailable">
-          Service health stats unavailable.
+    <section className="flex flex-col gap-3" data-testid="usage-traffic-sources">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-[17px] font-semibold">Traffic sources</h2>
+        <span className="text-muted-foreground text-[13px]">
+          All requests ({totalHits.toLocaleString()} hits), not just profile pageviews.
+        </span>
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] items-start gap-5">
+        <SplitCard title="Referrers" rows={summary.referrers} emptyLabel="No referrer data." />
+        <SplitCard title="Geography" rows={summary.geo} emptyLabel="No geo data." />
+        <SplitCard
+          title="Device"
+          rows={summary.device.map((r) => ({ ...r, label: capitalize(r.label) }))}
+          emptyLabel="No device data."
+        />
+      </div>
+    </section>
+  );
+}
+
+/** Monthly availability since launch as horizontal bars. The scale is pinned
+ *  to a narrow band -- 100% down to whichever is lower of 99% or the worst
+ *  month, rounded down -- rather than 0-100%, so a fractional-percent 5xx
+ *  blip stays visible; the caption spells the band out. A month under the
+ *  1,000-request low-traffic floor renders lighter (its number alone can't be
+ *  trusted as a real signal) and says so in its hover title. */
+function UptimeCard({ monthly }: { monthly: MonthlyAvailability[] }) {
+  const worst = Math.min(...monthly.map((m) => m.availabilityPercent), 100);
+  const yMin = Math.min(99, Math.floor(worst * 10) / 10);
+  const band = 100 - yMin || 1;
+  return (
+    <section
+      className={cn(cardClass, "flex flex-col gap-3.5 px-4 py-[18px] sm:px-[22px]")}
+      data-testid="service-health-trend"
+    >
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-[17px] font-semibold">Uptime since launch</h2>
+        <UptimeInfoButton />
+        <span className="text-muted-foreground text-[13px]">July 2026 onward</span>
+      </div>
+      {monthly.length === 0 ? (
+        <p className="text-muted-foreground text-sm" data-testid="service-health-trend-empty">
+          No availability history yet.
         </p>
       ) : (
         <>
-          <ServiceHealthTiles summary={summary} />
-          <h3 className="mt-6 text-sm font-semibold">Uptime since launch (July 2026)</h3>
-          <ServiceHealthTrendChart monthly={summary.monthly} />
+          <ul className="flex flex-col gap-2.5">
+            {monthly.map((m) => {
+              const clamped = Math.max(yMin, Math.min(100, m.availabilityPercent));
+              return (
+                <li
+                  key={m.month}
+                  className="grid grid-cols-[72px_minmax(0,1fr)_64px] items-center gap-3.5 text-[13.5px]"
+                  title={`${monthLabel(m.month)}: ${m.availabilityPercent.toFixed(3)}% availability, ${m.totalRequests.toLocaleString()} requests${m.lowTraffic ? " (low traffic, under 1,000 requests)" : ""}`}
+                >
+                  <span className="text-muted-foreground">{monthLabel(m.month)}</span>
+                  <div className="bg-apollo-surface-2 h-2.5 overflow-hidden rounded-full">
+                    <div
+                      className={cn(
+                        "h-full rounded-full",
+                        m.lowTraffic ? "bg-apollo-slate/35" : "bg-apollo-slate",
+                      )}
+                      style={{ width: `${((clamped - yMin) / band) * 100}%` }}
+                      data-low-traffic={m.lowTraffic ? "true" : undefined}
+                    />
+                  </div>
+                  <span className="text-right font-medium tabular-nums">
+                    {m.availabilityPercent.toFixed(2)}%
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="text-muted-foreground text-[12.5px] leading-normal">
+            Bars span {yMin}%–100%, not 0–100%, so small dips stay visible. A lighter bar marks a
+            month under 1,000 requests, too little traffic for the percentage to be reliable.
+          </p>
         </>
       )}
     </section>
   );
 }
 
-function UsageBody({ summary }: { summary: UsageSummary }) {
+/** Slug -> { cwid, name } for the top-profiles list, so rows read as names
+ *  (with the shared hover card) instead of raw slugs. Fail-soft: a lookup
+ *  error leaves every row on its slug. */
+async function resolveProfileNames(
+  slugs: string[],
+): Promise<Map<string, { cwid: string; name: string }>> {
+  const out = new Map<string, { cwid: string; name: string }>();
+  if (slugs.length === 0) return out;
+  try {
+    const rows = await db.read.scholar.findMany({
+      where: { slug: { in: slugs }, deletedAt: null },
+      select: { slug: true, cwid: true, preferredName: true },
+    });
+    for (const r of rows) out.set(r.slug, { cwid: r.cwid, name: r.preferredName });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "usage_profile_names_failed",
+        path: "/edit/usage",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+  return out;
+}
+
+function UsageBody({
+  summary,
+  names,
+}: {
+  summary: UsageSummary;
+  names: Map<string, { cwid: string; name: string }>;
+}) {
+  const profileRows: RankRow[] = summary.topProfiles.map((p) => {
+    const hit = names.get(p.slug);
+    return {
+      label: hit?.name ?? `/${p.slug}`,
+      count: p.views,
+      href: `/${encodeURIComponent(p.slug)}`,
+      cwid: hit?.cwid,
+      tip: `/${p.slug}`,
+      csvExtra: p.slug,
+    };
+  });
+  const termRows: RankRow[] = summary.searchTerms.map((t) => ({
+    label: t.term,
+    count: t.searches,
+  }));
+
   return (
     <>
-      <p className="text-muted-foreground mt-2">
-        Site-wide usage over the last {summary.windowDays} days —{" "}
-        <strong>{summary.totalPageviews.toLocaleString()}</strong> profile pageviews. From the
-        nightly CloudFront rollup; refreshes about once a day.
-      </p>
+      {summary.pageviewsByDay.length === 0 ? (
+        <section className={cn(cardClass, "px-[22px] py-5")}>
+          <h2 className="text-[17px] font-semibold">Profile pageviews by day</h2>
+          <p className="text-muted-foreground mt-2 text-sm" data-testid="usage-pageviews-empty">
+            No profile pageviews recorded in the last {summary.windowDays} days.
+          </p>
+        </section>
+      ) : (
+        <PageviewsChart data={summary.pageviewsByDay} />
+      )}
 
-      <section className="mt-8">
-        <h2 className="text-base font-semibold">Pageviews by day</h2>
-        <PageviewsChart data={summary.pageviewsByDay} windowDays={summary.windowDays} />
-      </section>
-      <TopProfilesTable profiles={summary.topProfiles} />
-      <CountTable
-        caption="Top search terms"
-        headers={["Term", "Searches"]}
-        rows={summary.searchTerms.map((r) => [r.term, r.searches])}
-        emptyLabel="No searches in the window."
-      />
-      <div className="grid gap-x-8 md:grid-cols-3">
-        <CountTable
-          caption="Referrers"
-          headers={["Source", "Hits"]}
-          rows={summary.referrers.map((r) => [r.label, r.hits])}
-          emptyLabel="No referrer data."
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] items-start gap-5">
+        <RankTable
+          testId="usage-top-profiles"
+          title="Top profiles"
+          unit="Views"
+          labelHeader="Profile"
+          extraHeader="Slug"
+          csvName="usage-top-profiles"
+          rows={profileRows}
+          emptyLabel="No profile views in the window."
         />
-        <CountTable
-          caption="Geography"
-          headers={["Region", "Hits"]}
-          rows={summary.geo.map((r) => [r.label, r.hits])}
-          emptyLabel="No geo data."
-        />
-        <CountTable
-          caption="Device"
-          headers={["Class", "Hits"]}
-          rows={summary.device.map((r) => [r.label, r.hits])}
-          emptyLabel="No device data."
+        <RankTable
+          testId="usage-top-search-terms"
+          title="Top search terms"
+          unit="Searches"
+          labelHeader="Term"
+          csvName="usage-top-search-terms"
+          rows={termRows}
+          emptyLabel="No searches in the window."
         />
       </div>
+
+      <TrafficSources summary={summary} />
     </>
   );
 }
@@ -460,8 +434,8 @@ export default async function EditUsagePage() {
   }
 
   // Independent data source (CloudWatch, not the Athena rollup above) with
-  // its own fail-soft: a CloudWatch error only blanks the Service health
-  // section, never the rest of the page.
+  // its own fail-soft: a CloudWatch error only blanks the service-health
+  // tiles + uptime card, never the rest of the page.
   let serviceHealth: ServiceHealthSummary | null = null;
   try {
     serviceHealth = await loadServiceHealth();
@@ -475,6 +449,13 @@ export default async function EditUsagePage() {
     );
   }
 
+  const names = summary
+    ? await resolveProfileNames(summary.topProfiles.map((p) => p.slug))
+    : new Map<string, { cwid: string; name: string }>();
+  const days = summary?.pageviewsByDay ?? [];
+  const rangeSpan =
+    days.length > 0 ? `${shortDay(days[0].day)} – ${shortDay(days[days.length - 1].day)}` : null;
+
   return (
     <ConsoleShell
       active="usage"
@@ -486,16 +467,30 @@ export default async function EditUsagePage() {
       // holder), which implies `ConsoleShell`'s own `loadConsoleTabs`
       // derivation is already true for both.
     >
-      <h1 className="mb-1 text-xl font-bold">Usage</h1>
-      {unavailable ? (
-        <p className="text-muted-foreground mt-8" data-testid="edit-usage-unavailable">
-          Usage data is temporarily unavailable. Please try again later or contact ITS Support if
-          this persists.
-        </p>
-      ) : (
-        <UsageBody summary={summary!} />
-      )}
-      <ServiceHealthSection summary={serviceHealth} />
+      <div className="flex flex-col gap-7">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-[30px] leading-tight font-semibold tracking-[-.01em]">Usage</h1>
+          <p className="text-muted-foreground text-[14.5px] leading-normal">
+            {rangeSpan
+              ? `Site-wide usage, ${rangeSpan}.`
+              : `Site-wide usage over the last ${summary?.windowDays ?? 30} days.`}{" "}
+            From the nightly CloudFront rollup; refreshes about once a day.
+          </p>
+        </div>
+
+        <KpiRow summary={summary} health={serviceHealth} />
+
+        {unavailable ? (
+          <p className="text-muted-foreground" data-testid="edit-usage-unavailable">
+            Usage data is temporarily unavailable. Please try again later or contact ITS Support if
+            this persists.
+          </p>
+        ) : (
+          <UsageBody summary={summary!} names={names} />
+        )}
+
+        {serviceHealth ? <UptimeCard monthly={serviceHealth.monthly} /> : null}
+      </div>
     </ConsoleShell>
   );
 }
