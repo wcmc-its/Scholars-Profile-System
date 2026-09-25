@@ -533,7 +533,14 @@ type FundingGroup = {
 
 /** Folds the (center, cycle, source) funding groups into one summary per
  *  center: total rows, newest refresh, the latest cycle, and that cycle's rows
- *  whose cancer-relevant percent no human has set yet. */
+ *  whose cancer-relevant percent no human has set yet.
+ *
+ *  `rows` MUST arrive ordered `reportingCycle desc` BY THE DATABASE: the first
+ *  cycle seen per center is its latest. That is the NCI 2A route's own
+ *  resolution (`findFirst … orderBy reportingCycle desc`), so the index's
+ *  "Cycle …" label and review count describe the cycle the report opens on.
+ *  A JS string compare would not: MySQL's collation is case-insensitive, so
+ *  e.g. `Osra-…` vs `fytd…` sort differently in the two. */
 function summarizeFunding(
   rows: ReadonlyArray<FundingGroup>,
 ): Map<string, { count: number; lastRefreshedAt: Date | null; latestCycle: string | null; toReview: number }> {
@@ -546,8 +553,7 @@ function summarizeFunding(
     cur.count += r._count._all;
     const at = r._max.lastRefreshedAt;
     if (at && (!cur.lastRefreshedAt || at > cur.lastRefreshedAt)) cur.lastRefreshedAt = at;
-    if (r._count._all > 0 && (cur.latestCycle === null || r.reportingCycle > cur.latestCycle))
-      cur.latestCycle = r.reportingCycle;
+    if (r._count._all > 0 && cur.latestCycle === null) cur.latestCycle = r.reportingCycle;
     out.set(r.centerCode, cur);
   }
   for (const r of rows) {
@@ -617,12 +623,15 @@ export async function loadReportLiveness(
           })
         : Promise.resolve([]),
       centerCodes.length > 0
-        ? // One grouping serves liveness, the latest cycle and the review count:
-          // `reportingCycle` sorts lexicographically by design (`osra-YYYY-MM-DD`,
-          // the same `desc` the NCI 2A route resolves "latest" with).
+        ? // One grouping serves liveness, the latest cycle and the review count.
+          // "Latest" is whatever MySQL sorts first under `reportingCycle desc`
+          // — the same ordering the NCI 2A route resolves it with. Nothing
+          // enforces a cycle format (`osra-YYYY-MM-DD`, `FYTD26-2026-07-14`),
+          // so this is only chronological while one prefix is in use.
           db.cancerCenterFundingAward.groupBy({
             by: ["centerCode", "reportingCycle", "cancerRelevantPercentSource"],
             where: { centerCode: { in: centerCodes } },
+            orderBy: { reportingCycle: "desc" },
             _count: { _all: true },
             _max: { lastRefreshedAt: true },
           })

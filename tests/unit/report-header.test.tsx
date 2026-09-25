@@ -3,8 +3,7 @@
  * `/edit/reports/[report]` page. An async Server Component: each test awaits
  * the element and renders it. Protects: the "Report N" eyebrow and the plain
  * name from `report_meta` as the h1; the access badge (`ReportAccessPopover`,
- * mocked to a marker) handed the page's props with `variant="badge"`, in the
- * heading row; "Edit details" (`ReportDetailsSheet`, mocked) for a superuser
+ * mocked to a marker) handed the page's props, in the heading row; "Edit details" (`ReportDetailsSheet`, mocked) for a superuser
  * with the meta and the request record, for a comms steward who manages a
  * row-granted report's grants (no request record), and for no one else; the
  * page's subtitle (`children`) then the "About this report" `<details>`
@@ -21,9 +20,7 @@ const h = vi.hoisted(() => ({
   mockSheet: vi.fn((props: { n: string; canEditMeta: boolean }) => (
     <span data-testid="details-sheet" data-n={props.n} data-edit-meta={String(props.canEditMeta)} />
   )),
-  mockBadge: vi.fn((props: { mode: string; variant?: string }) => (
-    <span data-testid="badge" data-mode={props.mode} data-variant={props.variant} />
-  )),
+  mockBadge: vi.fn((props: { mode: string }) => <span data-testid="badge" data-mode={props.mode} />),
 }));
 
 vi.mock("@/lib/edit/report-meta", () => ({
@@ -77,7 +74,7 @@ describe("ReportHeader", () => {
     expect(q.getByText("Report 3")).toBeTruthy();
   });
 
-  it("access props → the badge variant in the heading row, before the subtitle", async () => {
+  it("access props → the badge in the heading row, before the subtitle", async () => {
     const q = await renderHeader({
       n: "3",
       session: PLAIN,
@@ -89,7 +86,6 @@ describe("ReportHeader", () => {
     const badge = q.getByTestId("badge");
     expect(wrap.contains(badge)).toBe(true);
     expect(badge.getAttribute("data-mode")).toBe("unit");
-    expect(badge.getAttribute("data-variant")).toBe("badge");
     expect(wrap.parentElement).toBe(h1.parentElement);
     expect(
       wrap.compareDocumentPosition(q.getByTestId("subtitle")) & Node.DOCUMENT_POSITION_FOLLOWING,

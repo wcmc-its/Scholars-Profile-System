@@ -336,13 +336,14 @@ describe("loadReportLiveness", () => {
   it("report 2 carries the LATEST cycle and that cycle's rows no human has reviewed yet", async () => {
     const d = (s: string) => new Date(`${s}T00:00:00Z`);
     const db = fakeLivenessDb({
+      // In the order the database returns them (`reportingCycle desc`).
       funding: [
-        // An older cycle's unreviewed rows never count toward today's review.
-        fundingGroup("meyer", "osra-2026-01-10", "llm", 40, d("2026-01-10")),
         fundingGroup("meyer", "osra-2026-07-14", "llm", 50, d("2026-07-14")),
         fundingGroup("meyer", "osra-2026-07-14", "human", 30, d("2026-07-20")),
         // Any source other than 'human' is still awaiting review.
         fundingGroup("meyer", "osra-2026-07-14", "import", 8, d("2026-07-14")),
+        // An older cycle's unreviewed rows never count toward today's review.
+        fundingGroup("meyer", "osra-2026-01-10", "llm", 40, d("2026-01-10")),
       ],
     });
     const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
@@ -357,6 +358,23 @@ describe("loadReportLiveness", () => {
     expect(db.cancerCenterFundingAward.groupBy).toHaveBeenCalledTimes(1);
     expect(db.cancerCenterFundingAward.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({ by: ["centerCode", "reportingCycle", "cancerRelevantPercentSource"] }),
+    );
+  });
+
+  it("the latest cycle is the DATABASE's first under reportingCycle desc, as the NCI 2A route resolves it", async () => {
+    // MySQL's case-insensitive collation puts `Osra-…` above `fytd…`; a JS
+    // string compare would pick `fytd…` (lowercase sorts after uppercase), and
+    // the index would then label and count a cycle the report doesn't open on.
+    const db = fakeLivenessDb({
+      funding: [
+        fundingGroup("meyer", "Osra-2026-01-10", "llm", 5, null),
+        fundingGroup("meyer", "fytd26-2026-07-14", "llm", 9, null),
+      ],
+    });
+    const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
+    expect(result.get("meyer")?.perReport[1]).toMatchObject({ reportingCycle: "Osra-2026-01-10", toReview: 5 });
+    expect(db.cancerCenterFundingAward.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { reportingCycle: "desc" } }),
     );
   });
 

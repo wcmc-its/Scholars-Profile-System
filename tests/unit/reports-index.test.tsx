@@ -2,14 +2,16 @@
  * `components/edit/reports-index.tsx` — the Reports Index redesign
  * (2026-09-25): one list grouped by unit for every viewer, whole-row link
  * cards, a search box, scope segments with counts, the NCI 2A "In progress"
- * toggle, and the filters mirrored into the URL. Access is plain text from the
- * REAL `accessSummary` (not mocked) — the same string the report header badge
- * shows — and no access popover renders on the index.
+ * toggle, and the filters mirrored into the URL. Access is plain text: the
+ * fixtures compute it with the REAL `accessSummary` (not mocked), as the page
+ * does on the server — the same string the report header badge shows — and no
+ * access popover renders on the index.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, within } from "@testing-library/react";
 
 import type { ReportAccessPopoverProps } from "@/components/edit/report-access-popover";
+import { accessSummary } from "@/lib/edit/report-access-summary";
 import {
   dataLabel,
   ReportsIndex,
@@ -54,7 +56,7 @@ const report = (
   slug: name.toLowerCase().replace(/\s+/g, "-"),
   name,
   description,
-  access,
+  accessText: accessSummary(access).text,
 });
 
 const INSTITUTION: ReportsIndexUnit = {
@@ -182,6 +184,10 @@ describe("ReportsIndex — grouped list", () => {
     const row = within(container).getByTestId("reports-index-row-meyer-4");
     expect(row.tagName).toBe("DIV");
     expect(row.getAttribute("aria-disabled")).toBe("true");
+    // A disabled link: aria-disabled means nothing on a role-less div.
+    expect(row.getAttribute("role")).toBe("link");
+    expect(row.hasAttribute("href")).toBe(false);
+    expect(row.hasAttribute("tabindex")).toBe(false);
     expect(row.querySelector("a")).toBeNull();
     expect(within(row).getByTestId("reports-index-data").textContent).toBe("No data yet");
     expect(row.textContent).not.toContain("In progress");
@@ -315,6 +321,13 @@ describe("ReportsIndex — scope segments", () => {
     });
     expect(groupNames(container)).toEqual(["Surgery"]);
   });
+
+  it("global viewer with ONLY departments / divisions / cores: All shows them rather than opening on 'No reports match'", () => {
+    const { container } = render(<ReportsIndex units={[SURGERY]} hideUnderAll />);
+    expect(within(container).queryByTestId("reports-index-empty")).toBeNull();
+    expect(groupNames(container)).toEqual(["Surgery"]);
+    expect(seg(container, "all")?.textContent).toBe("All 2");
+  });
 });
 
 describe("ReportsIndex — In progress (NCI 2A review)", () => {
@@ -344,6 +357,17 @@ describe("ReportsIndex — In progress (NCI 2A review)", () => {
     const { container } = render(<ReportsIndex units={[reviewed]} />);
     expect(within(container).queryByTestId("reports-index-review-pill-meyer")).toBeNull();
     expect(within(container).getByTestId("reports-index-review").textContent).toBe("In progress 0");
+  });
+
+  it("no toggle for an NCI 2A report with no data yet (no 'In progress 0' beside 'No data yet')", () => {
+    const noImport: ReportsIndexUnit = {
+      ...MEYER,
+      perReport: MEYER.perReport.map((p) =>
+        p.n === 2 ? { n: 2, live: false, lastRefreshedAt: null, reportingCycle: null, toReview: 0 } : p,
+      ),
+    };
+    const { container } = render(<ReportsIndex units={[noImport]} />);
+    expect(within(container).queryByTestId("reports-index-review")).toBeNull();
   });
 
   it("no toggle at all for a viewer with no NCI 2A report", () => {

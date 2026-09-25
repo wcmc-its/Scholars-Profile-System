@@ -47,18 +47,23 @@
  * pseudo-unit group in whichever list they land on (a plain holder with zero
  * reportable units gets it alone instead of the 404).
  *
- * Each row states who can open the report as plain text (`accessSummary`,
- * the report header badge's own string source): this page builds each
- * report's access PROPS (`ReportsIndexReport.access`) — the static unit rule
- * for reports 1–6, the grant rows for 7/8/9 (`loadReportAccessPopoverProps`),
- * exactly what the report's own header gets, so the two never disagree.
- * Access is managed from the report page's Edit details sheet, not here.
+ * Each row states who can open the report as plain text: this page builds
+ * each report's access props — the static unit rule for reports 1–6, the
+ * grant rows for 7/8/9 (`loadReportAccessPopoverProps`), exactly what the
+ * report's own header gets — and hands the client only their one-line
+ * `accessSummary(...).text` (`ReportsIndexReport.accessText`, the header
+ * badge's own string source), so the two never disagree and the grantee list
+ * behind "+ N others" stays on the server. Access is managed from the report
+ * page's Edit details sheet, not here.
  */
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import type { ReportAccessPopoverPersonProps } from "@/components/edit/report-access-popover";
+import type {
+  ReportAccessPopoverPersonProps,
+  ReportAccessPopoverProps,
+} from "@/components/edit/report-access-popover";
 import {
   ReportsIndex,
   type ReportsIndexReport,
@@ -87,6 +92,7 @@ import {
   MENTORED_PUBS_REPORT,
 } from "@/lib/edit/report-access";
 import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
+import { accessSummary, ADMIN_AUDIENCE } from "@/lib/edit/report-access-summary";
 import { parseReportsIndexScope } from "@/lib/edit/reports-index-scope";
 import { loadReportMeta, type ReportKey, type ReportMeta } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -119,22 +125,21 @@ type ReportCatalog = {
 
 /** One index card off the loaded meta: the numbered label + the one-line
  *  summary + the report's current slug (the row's link target,
- *  `/edit/reports/<slug>`) + the report's "Who can run this report" popover
- *  props. `meta` always has every key (`loadReportMeta` merges defaults).
+ *  `/edit/reports/<slug>`) + who can open it, as text (never the props). `meta` always has every key (`loadReportMeta` merges defaults).
  *  Generic in `n` so the same helper serves the unit catalog (`ReportNumber`,
  *  1–6) and the program pseudo-unit's report 7. */
 function catalogEntry<N extends ReportsIndexReport["n"]>(
   meta: Map<ReportKey, ReportMeta>,
   n: N,
-  access: ReportsIndexReport["access"],
+  access: ReportAccessPopoverProps,
 ): ReportsIndexReport & { n: N } {
   const m = meta.get(String(n) as ReportKey);
   if (!m) throw new Error(`report_meta: no entry for report ${n}`);
-  return { n, slug: m.slug, name: m.name, description: m.summary, access };
+  return { n, slug: m.slug, name: m.name, description: m.summary, accessText: accessSummary(access).text };
 }
 
 function buildCatalog(meta: Map<ReportKey, ReportMeta>): ReportCatalog {
-  // Reports 1–6 are unit-gated: the popover states the Owner/Curator rule.
+  // Reports 1–6 are unit-gated: the Owner/Curator rule.
   const all: readonly ReportDef[] = ([1, 2, 3, 4, 5, 6] as const).map((n) =>
     catalogEntry(meta, n, { mode: "unit" }),
   );
@@ -190,11 +195,12 @@ export default async function EditReportsIndexPage({
   const institutionReports = [
     ...(canArticleCount
       ? [
-          catalogEntry(
-            meta,
-            8,
-            await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE),
-          ),
+          // The report header's own props for report 8 (`[report]/page.tsx`),
+          // audience included, so the row and the badge say the same thing.
+          catalogEntry(meta, 8, {
+            ...(await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)),
+            audience: ADMIN_AUDIENCE,
+          }),
         ]
       : []),
     ...(highImpactScopes.size > 0

@@ -1,44 +1,22 @@
 /**
- * `components/edit/report-access-popover.tsx` — the "Who can run this report"
- * popover. Unit mode is static text + a link (no fetch, no controls); person
- * mode renders the grant rows it is handed, shows Remove / Add only when
- * `canManage`, POSTs a grant WITH the picked person's name, and re-renders
- * from the row list the route answers with (server truth, no optimistic
- * overlay).
+ * `components/edit/report-access-popover.tsx` — the report header's access
+ * badge ("Who can open this report"): the default audience plus "+ N others",
+ * a read-only list, and "Manage access" for a manager, which opens the Edit
+ * details sheet. It never edits. Also `useReportAccessRows`, the sheet's
+ * Add / Remove round-trip (server truth, no optimistic overlay), and
+ * `accessSummary`, the one string source the index row shares.
  *
  * Radix Popover portals its content to `document.body`, so the trigger is
  * clicked and the content is then found through `screen`, scoped by the
- * component's own testids — never `document.body` at large. The people
- * picker is mocked to a button that fires `onChange` with a fixed
- * `DirectoryValue`, so the test exercises the popover's wiring, not the
- * typeahead's debounce / fetch (covered in its own suite).
+ * component's own testids — never `document.body` at large.
  */
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import type { DirectoryValue } from "@/components/edit/directory-people-typeahead";
-
-const PICKED: DirectoryValue = { cwid: "stf0001", name: "Staff Person", title: "Program Coordinator" };
-
-vi.mock("@/components/edit/directory-people-typeahead", () => ({
-  DirectoryPeopleTypeahead: ({
-    value,
-    onChange,
-    idPrefix,
-  }: {
-    value: DirectoryValue | null;
-    onChange: (v: DirectoryValue | null) => void;
-    idPrefix?: string;
-  }) => (
-    <button type="button" data-testid={`${idPrefix}-typeahead-stub`} onClick={() => onChange(PICKED)}>
-      {value ? `picked:${value.cwid}` : "pick"}
-    </button>
-  ),
-}));
 
 import {
   accessSummary,
   ReportAccessPopover,
+  useReportAccessRows,
   type ReportAccessPopoverRow,
 } from "@/components/edit/report-access-popover";
 
@@ -53,9 +31,9 @@ const ROW: ReportAccessPopoverRow = {
 };
 const NEW_ROW: ReportAccessPopoverRow = {
   ...ROW,
-  cwid: PICKED.cwid,
-  granteeName: PICKED.name,
-  name: PICKED.name,
+  cwid: "stf0001",
+  granteeName: "Staff Person",
+  name: "Staff Person",
   scopeKey: "*",
 };
 const SCOPES: ReadonlyArray<readonly [string, string]> = [
@@ -85,166 +63,75 @@ function open(): HTMLElement {
   return screen.getByTestId("report-access-popover");
 }
 
-describe("ReportAccessPopover — unit mode", () => {
-  it("opens to the unit rule and an administrators link; no Add, no typeahead, no fetch", () => {
-    render(<ReportAccessPopover mode="unit" />);
-    expect(screen.queryByTestId("report-access-popover")).toBeNull();
-    const content = open();
-    expect(content.textContent).toContain(
-      "Owners and Curators of the unit this report is opened for can run it, plus superusers and comms stewards.",
-    );
-    const link = within(content).getByRole("link", { name: "Manage unit administrators" });
-    expect(link.getAttribute("href")).toBe("/edit/administrators");
-    expect(within(content).queryByTestId("report-access-add-form")).toBeNull();
-    expect(within(content).queryByTestId("report-access-typeahead-stub")).toBeNull();
-    expect(within(content).queryByRole("button", { name: /Add|Remove/ })).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("the trigger carries the shared accessible name", () => {
-    render(<ReportAccessPopover mode="unit" />);
-    expect(screen.getByRole("button", { name: "Who can run this report" })).toBeTruthy();
-  });
-});
-
-describe("ReportAccessPopover — person mode, canManage=false", () => {
-  it("lists each row by resolved name + cwid + program + grantor, with no Remove or Add", () => {
+describe("ReportAccessPopover — the badge is its only presentation", () => {
+  it("a manager with grant rows still gets the read-only badge: no add form, no Remove, no picker", () => {
     render(
       <ReportAccessPopover
         mode="person"
         reportKey="mentored-publications"
         initialRows={[ROW]}
         scopeOptions={SCOPES}
-        canManage={false}
-      />,
-    );
-    const content = open();
-    expect(content.textContent).toContain("Superusers and comms stewards can always run this report.");
-    const row = within(content).getByTestId("report-access-row-md-usr0001");
-    expect(row.textContent).toContain("Curated Name");
-    expect(row.textContent).toContain("usr0001");
-    expect(row.textContent).toContain("MD");
-    expect(row.textContent).toContain("adm0001");
-    expect(within(content).queryByRole("button", { name: "Remove" })).toBeNull();
-    expect(within(content).queryByRole("button", { name: "Add" })).toBeNull();
-    expect(within(content).queryByTestId("report-access-add-form")).toBeNull();
-    expect(within(content).queryByTestId("report-access-empty")).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("renders the empty state with no rows", () => {
-    render(
-      <ReportAccessPopover
-        mode="person"
-        reportKey="mentored-publications"
-        initialRows={[]}
-        scopeOptions={SCOPES}
-        canManage={false}
-      />,
-    );
-    const content = open();
-    expect(within(content).getByTestId("report-access-empty").textContent).toContain("No one else yet.");
-  });
-});
-
-describe("ReportAccessPopover — person mode, canManage=true", () => {
-  function renderManaged(rows: ReadonlyArray<ReportAccessPopoverRow>) {
-    return render(
-      <ReportAccessPopover
-        mode="person"
-        reportKey="mentored-publications"
-        initialRows={rows}
-        scopeOptions={SCOPES}
         canManage
       />,
     );
-  }
-
-  it("shows a Remove per row and the add form; Add is disabled until a person is picked", () => {
-    renderManaged([ROW]);
-    const content = open();
-    expect(within(content).getByRole("button", { name: "Remove" })).toBeTruthy();
-    expect(within(content).getByTestId("report-access-add-form")).toBeTruthy();
-    expect(within(content).getByTestId("report-access-typeahead-stub")).toBeTruthy();
-    expect((within(content).getByRole("button", { name: "Add" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("report-access-trigger").textContent).toBe("Superusers and comms stewards+ 1 other");
+    const content = within(open());
+    expect(content.queryByTestId("report-access-add-form")).toBeNull();
+    expect(content.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(content.queryByRole("button", { name: "Add" })).toBeNull();
+    expect(content.getByRole("button", { name: "Manage access" })).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
+});
 
-  it("picking a person + Add POSTs the grant WITH name and re-renders from the returned rows", async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, { ok: true, op: "grant", changed: true, rows: [ROW, NEW_ROW] }),
-    );
-    renderManaged([ROW]);
-    const content = open();
-    fireEvent.click(within(content).getByTestId("report-access-typeahead-stub"));
-    expect(within(content).getByTestId("report-access-typeahead-stub").textContent).toBe("picked:stf0001");
-    fireEvent.change(within(content).getByTestId("report-access-scope"), { target: { value: "*" } });
-    const add = within(content).getByRole("button", { name: "Add" }) as HTMLButtonElement;
-    expect(add.disabled).toBe(false);
-    fireEvent.click(add);
-
-    await waitFor(() => expect(within(content).queryByTestId("report-access-row-*-stf0001")).not.toBeNull());
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/edit/report-access");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toEqual({
+describe("useReportAccessRows — the Edit details sheet's Add / Remove round-trip", () => {
+  it("a successful write re-renders from the rows the route answers with and calls onChange", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { ok: true, rows: [ROW, NEW_ROW] }));
+    const onChange = vi.fn();
+    const { result } = renderHook(() => useReportAccessRows("mentored-publications", [ROW], onChange));
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.post("grant", "*", { cwid: "stf0001", name: "Staff Person" });
+    });
+    expect(ok).toBe(true);
+    expect(result.current.rows).toEqual([ROW, NEW_ROW]);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({
       op: "grant",
       reportKey: "mentored-publications",
       scopeKey: "*",
       cwid: "stf0001",
       name: "Staff Person",
     });
-    // The new row renders the server's resolved name, and the picker is cleared.
-    expect(within(content).getByTestId("report-access-row-*-stf0001").textContent).toContain("Staff Person");
-    expect(within(content).getByTestId("report-access-typeahead-stub").textContent).toBe("pick");
   });
 
-  it("Remove POSTs a revoke for that row's scope + cwid, with no name", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { ok: true, op: "revoke", changed: true, rows: [] }));
-    renderManaged([ROW]);
-    const content = open();
-    fireEvent.click(within(content).getByRole("button", { name: "Remove" }));
-    await waitFor(() => expect(within(content).queryByTestId("report-access-empty")).not.toBeNull());
-    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({
-      op: "revoke",
-      reportKey: "mentored-publications",
-      scopeKey: "md",
-      cwid: "usr0001",
-    });
-  });
-
-  it("a rejected write renders the mapped alert and keeps the list as it was", async () => {
+  it("a rejected write maps the error code and keeps the rows as they were", async () => {
     fetchMock.mockResolvedValue(jsonResponse(403, { ok: false, error: "not_comms_steward" }));
-    renderManaged([ROW]);
-    const content = open();
-    fireEvent.click(within(content).getByTestId("report-access-typeahead-stub"));
-    fireEvent.click(within(content).getByRole("button", { name: "Add" }));
-    await waitFor(() => expect(within(content).queryByRole("alert")).not.toBeNull());
-    expect(within(content).getByTestId("report-access-error").textContent).toContain(
-      "Only a superuser or comms steward",
-    );
-    expect(within(content).getByTestId("report-access-row-md-usr0001")).toBeTruthy();
-    // The pick is kept so the operator can retry without re-searching.
-    expect(within(content).getByTestId("report-access-typeahead-stub").textContent).toBe("picked:stf0001");
+    const onChange = vi.fn();
+    const { result } = renderHook(() => useReportAccessRows("mentored-publications", [ROW], onChange));
+    await act(async () => {
+      await result.current.post("revoke", "md", { cwid: "usr0001" });
+    });
+    expect(result.current.error).toContain("Only a superuser or comms steward");
+    expect(result.current.rows).toEqual([ROW]);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("a network failure renders the generic alert", async () => {
+  it("a network failure sets the generic error", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
-    renderManaged([]);
-    const content = open();
-    fireEvent.click(within(content).getByTestId("report-access-typeahead-stub"));
-    fireEvent.click(within(content).getByRole("button", { name: "Add" }));
-    await waitFor(() => expect(within(content).queryByRole("alert")).not.toBeNull());
-    expect(within(content).getByRole("alert").textContent).toContain("That didn't save. Try again.");
+    const { result } = renderHook(() => useReportAccessRows("mentored-publications", []));
+    await act(async () => {
+      await result.current.post("grant", "*", { cwid: "stf0001" });
+    });
+    expect(result.current.error).toBe("That didn't save. Try again.");
   });
 });
 
-describe("ReportAccessPopover — badge variant (report page header)", () => {
+describe("ReportAccessPopover — the report header badge", () => {
   it("person mode: the default audience plus '+ N others', and a read-only list with program and added date", () => {
     render(
       <ReportAccessPopover
         mode="person"
-        variant="badge"
         reportKey="mentored-publications"
         initialRows={[ROW, NEW_ROW]}
         scopeOptions={SCOPES}
@@ -267,7 +154,6 @@ describe("ReportAccessPopover — badge variant (report page header)", () => {
     render(
       <ReportAccessPopover
         mode="person"
-        variant="badge"
         audience="All unit administrators"
         reportKey="article-count"
         initialRows={[]}
@@ -284,7 +170,6 @@ describe("ReportAccessPopover — badge variant (report page header)", () => {
     render(
       <ReportAccessPopover
         mode="person"
-        variant="badge"
         reportKey="mentored-publications"
         initialRows={[ROW]}
         scopeOptions={SCOPES}
@@ -299,7 +184,7 @@ describe("ReportAccessPopover — badge variant (report page header)", () => {
   });
 
   it("unit mode: unit owners and curators, linking to the administrators page", () => {
-    render(<ReportAccessPopover mode="unit" variant="badge" />);
+    render(<ReportAccessPopover mode="unit" />);
     expect(screen.getByTestId("report-access-trigger").textContent).toBe("Unit owners and curators");
     const content = within(open());
     expect(content.getByRole("link", { name: "Manage unit administrators" }).getAttribute("href")).toBe(
@@ -310,14 +195,7 @@ describe("ReportAccessPopover — badge variant (report page header)", () => {
 
 describe("accessSummary — the one string source for the header badge and the index row", () => {
   const person = (rows: ReportAccessPopoverRow[], audience?: string) =>
-    accessSummary({
-      mode: "person",
-      reportKey: "mentored-publications",
-      initialRows: rows,
-      scopeOptions: SCOPES,
-      canManage: false,
-      audience,
-    });
+    accessSummary({ mode: "person", initialRows: rows, audience });
 
   it("keeps the #2791 audience wording per mode", () => {
     expect(accessSummary({ mode: "unit" }).text).toBe("Unit owners and curators");
@@ -336,7 +214,6 @@ describe("accessSummary — the one string source for the header badge and the i
     const { container } = render(
       <ReportAccessPopover
         mode="person"
-        variant="badge"
         reportKey="mentored-publications"
         initialRows={[ROW]}
         scopeOptions={SCOPES}

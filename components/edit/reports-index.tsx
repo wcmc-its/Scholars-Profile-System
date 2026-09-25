@@ -13,8 +13,10 @@
  * reports 8/9, `program`: report 7) have no org unit behind them.
  *
  * A row is a whole-row link card: '#N', name, summary, a meta line (who can
- * open it, as plain text from `accessSummary` — the same string source as the
- * report header's badge — and the data label) and a chevron. A report with no
+ * open it, as plain text the page computes with `accessSummary` — the same
+ * string source as the report header's badge, so only the string, never the
+ * grant rows behind "+ N others", reaches the client — and the data label)
+ * and a chevron. A report with no
  * data yet stays listed as a muted, non-link row reading "No data yet", so a
  * unit's report count never varies night to night and a broken ETL is visible.
  * "In progress" means NCI Table 2A has rows left to review, nothing else.
@@ -25,7 +27,8 @@
  * `review=1`) with `history.replaceState`, so a shared link reproduces the
  * view. A global viewer (superuser / comms steward) sees every department,
  * division and core; those stay off under "All" (their own segments show
- * them) unless a search is typed, which reaches every unit.
+ * them) unless a search is typed, which reaches every unit — or unless they
+ * are ALL there is, when hiding them would open on an empty list.
  */
 "use client";
 
@@ -33,10 +36,6 @@ import * as React from "react";
 import Link from "next/link";
 import { ChevronRight, Users } from "lucide-react";
 
-import {
-  accessSummary,
-  type ReportAccessPopoverProps,
-} from "@/components/edit/report-access-popover";
 import {
   REPORTS_INDEX_SCOPES as SCOPES,
   type ReportsIndexScope,
@@ -64,8 +63,9 @@ export type ReportsIndexReport = {
   /** The bare report name (`report_meta.name`); the row prints '#N' apart. */
   name: string;
   description: string;
-  /** Who can open it — rendered here only as `accessSummary(access).text`. */
-  access: ReportAccessPopoverProps;
+  /** Who can open it: `accessSummary(access).text`
+   *  (`lib/edit/report-access-summary.ts`), computed on the server. */
+  accessText: string;
 };
 
 export type ReportsIndexPerReport = {
@@ -167,7 +167,13 @@ export function ReportsIndex({
   const rows = React.useMemo(() => buildRows(units), [units]);
   const kindsPresent = React.useMemo(() => new Set<string>(units.map((u) => u.kind)), [units]);
   const segments = SCOPES.filter(([k]) => !OPTIONAL_SCOPES.has(k) || kindsPresent.has(k));
-  const hasReviewable = rows.some((r) => r.report.n === 2);
+  // Only a report with an NCI 2A import can have rows to review; a "No data
+  // yet" 2A row would show a meaningless "In progress 0".
+  const hasReviewable = rows.some((r) => r.report.n === 2 && r.live);
+  // Hiding departments / divisions / cores under "All" only makes sense beside
+  // something else to show: a global viewer whose rows are all of those kinds
+  // would otherwise open on "No reports match" with no filter to clear.
+  const hide = hideUnderAll && rows.some((r) => !OPTIONAL_SCOPES.has(r.unit.kind));
   const reviewCount = rows.filter((r) => r.toReview > 0).length;
 
   const [query, setQuery] = React.useState(initialQuery);
@@ -192,7 +198,7 @@ export function ReportsIndex({
   const q = query.trim().toLowerCase();
   const inScope = (r: Row, k: ReportsIndexScope) => {
     const kind = r.unit.kind;
-    if (k === "all") return !(hideUnderAll && OPTIONAL_SCOPES.has(kind)) || q !== "";
+    if (k === "all") return !(hide && OPTIONAL_SCOPES.has(kind)) || q !== "";
     return kind === k;
   };
   const matched = rows.filter(
@@ -362,7 +368,7 @@ function ReportRow({ row }: { row: Row }) {
         <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-[13px]">
           <span className="inline-flex items-center gap-[5px]" data-testid="reports-index-access">
             <Users size={13} aria-hidden className="shrink-0" />
-            {accessSummary(report.access).text}
+            {report.accessText}
           </span>
           <span className="whitespace-nowrap" data-testid="reports-index-data">
             {data}
@@ -390,7 +396,9 @@ function ReportRow({ row }: { row: Row }) {
       {body}
     </Link>
   ) : (
-    <div className={grid} aria-disabled="true" data-testid={testId}>
+    // A disabled link (the WAI-ARIA pattern): announced as an unavailable link,
+    // not focusable, no href.
+    <div className={grid} role="link" aria-disabled="true" data-testid={testId}>
       {body}
     </div>
   );
