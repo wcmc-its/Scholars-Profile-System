@@ -1,7 +1,9 @@
 /**
- * Unit-roster CSV export (#1102) — the flag gate, the membership status
- * derivation, and the CSV builder for the `/edit/{center,division}/[code]/export`
- * roster download.
+ * Center roster export (#1102) — the flag gate, the membership status
+ * derivation, and the row projection for the `/edit/center/[code]/export`
+ * roster download. The route serializes those rows as an .xlsx workbook via
+ * `lib/edit/unit-roster-xlsx.ts` (kept out of this module so exceljs never
+ * reaches the client bundle — see the GUARDRAIL below).
  *
  * The roster itself is loaded by `loadUnitEditContext` (the SAME read the Members
  * tab renders), so the unit CODE — not a query param — is the authorization
@@ -37,14 +39,13 @@
  * constructs `prisma` at module scope — `loadRosterFacultyMeta` takes its client
  * as a parameter for exactly this reason.
  */
-import { toCsv, type CsvCell } from "@/lib/csv";
 import type { UnitEditContext } from "@/lib/api/unit-edit-context";
 import { institutionDisplayName } from "@/lib/institutions";
 import { exportEmailCell } from "@/lib/profile/email-visibility-flags";
 
 /**
- * Whether the per-unit roster CSV export is enabled (off by default). When off
- * the route 404s and the Members-tab "Export CSV" control is hidden — mirroring
+ * Whether the per-unit roster export is enabled (off by default). When off
+ * the route 404s and the Members-tab "Export .xlsx" control is hidden — mirroring
  * `isDataQualityDashboardEnabled` / `isOrgUnitCreateSuperuserOnly`.
  */
 export function isUnitRosterExportEnabled(): boolean {
@@ -56,7 +57,7 @@ export type RosterStatus = "active" | "pending" | "inactive";
 /**
  * The membership status, mirroring `statusOf` in `center-roster-card.tsx`
  * (#552 §3.3 active filter, inclusive boundaries, nulls open). Kept in lock-step
- * with the UI so the CSV `status` column matches the table badge exactly.
+ * with the UI so the export's `status` column matches the table badge exactly.
  */
 export function rosterStatusOf(
   member: { startDate: string | null; endDate: string | null },
@@ -67,7 +68,7 @@ export function rosterStatusOf(
   return "active";
 }
 
-/** Column order — the CSV header row + the per-row projection key order (#1102).
+/** Column order — the export's header row + the per-row projection key order (#1102).
  *  `email`/`role_category`/`department`/`division` are the faculty block; they
  *  come through EMPTY when the caller supplies no `facultyByCwid`, so the header
  *  row is stable either way (a consumer's column indices never shift under them).
@@ -75,7 +76,7 @@ export function rosterStatusOf(
  *  the faculty join, so it is present even with no `facultyByCwid`. `institution`
  *  (faculty block, ED primary organization) was appended LAST, after it, so
  *  existing consumer indices did not shift. */
-export const ROSTER_CSV_HEADERS = [
+export const ROSTER_EXPORT_HEADERS = [
   "cwid",
   "name",
   "title",
@@ -107,7 +108,7 @@ export type RosterFacultyMeta = {
   institution: string | null;
 };
 
-export type BuildRosterCsvOptions = {
+export type BuildRosterExportOptions = {
   /** Today as `YYYY-MM-DD` (injectable for tests / determinism). */
   today: string;
   /** When true, drop pending + inactive rows (the `?activeOnly=1` mode). */
@@ -124,23 +125,24 @@ function emailCellFor(meta: RosterFacultyMeta | undefined): string {
 }
 
 /**
- * Serialize a unit's roster to CSV. `program_label` is resolved from the
+ * Project a center's roster to export rows, in `ROSTER_EXPORT_HEADERS` order
+ * (header row NOT included). `program_label` is resolved from the
  * center's program taxonomy (`ctx.programs`); a manual division has no program /
  * type taxonomy, so those columns come through empty. Pending + inactive members
  * are included by default (the dropped/lapsed-member visibility the Members tab
  * also exposes); `activeOnly` honors the dashboard-style narrowing.
  */
-export function buildUnitRosterCsv(
+export function buildUnitRosterRows(
   ctx: UnitEditContext,
-  options: BuildRosterCsvOptions,
-): string {
+  options: BuildRosterExportOptions,
+): string[][] {
   const { today, activeOnly = false, facultyByCwid } = options;
   const roster = ctx.roster ?? [];
   const programLabel = new Map<string, string>(
     (ctx.programs ?? []).map((p) => [p.code, p.label]),
   );
 
-  const body: CsvCell[][] = [];
+  const body: string[][] = [];
   for (const m of roster) {
     const status = rosterStatusOf(m, today);
     if (activeOnly && status !== "active") continue;
@@ -164,12 +166,12 @@ export function buildUnitRosterCsv(
       // cannot express, since that one reads membership DATES. A row can be
       // status=active AND scholar_state=departed: someone left and nobody
       // closed out their membership. That pair is the audit this column exists
-      // for, and it is why filtering the CSV on `status` alone misses them.
+      // for, and it is why filtering the export on `status` alone misses them.
       m.scholarState,
       meta?.institution ?? "",
     ]);
   }
-  return toCsv(ROSTER_CSV_HEADERS, body);
+  return body;
 }
 
 /** The narrow Prisma surface `loadRosterFacultyMeta` reads — `db.read` satisfies
@@ -226,10 +228,10 @@ export async function loadRosterFacultyMeta(
   return out;
 }
 
-/** Count of rows the CSV body will contain under the given options (for logging). */
-export function countRosterCsvRows(
+/** Count of rows the export body will contain under the given options (for logging). */
+export function countRosterExportRows(
   ctx: UnitEditContext,
-  options: BuildRosterCsvOptions,
+  options: BuildRosterExportOptions,
 ): number {
   const { today, activeOnly = false } = options;
   const roster = ctx.roster ?? [];

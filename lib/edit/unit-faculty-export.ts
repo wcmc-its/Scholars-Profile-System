@@ -28,7 +28,7 @@ import { toCsv, type CsvCell } from "@/lib/csv";
 import { institutionDisplayName } from "@/lib/institutions";
 import { exportEmailCell } from "@/lib/profile/email-visibility-flags";
 
-/** The faculty-export columns. Distinct from `ROSTER_CSV_HEADERS` (center).
+/** The faculty-export columns. Distinct from `ROSTER_EXPORT_HEADERS` (center).
  *  `email`, then `institution`, were each appended LAST so a consumer's existing
  *  column indices don't shift. */
 export const FACULTY_CSV_HEADERS = [

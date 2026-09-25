@@ -1,6 +1,6 @@
 /**
- * GET /edit/center/[code]/export — CSV download of a center's FULL roster
- * (#1102). The Members-tab "Export CSV" affordance points here.
+ * GET /edit/center/[code]/export — .xlsx download of a center's FULL roster
+ * (#1102). The Members-tab "Export .xlsx" affordance points here.
  *
  * The unit CODE in the path is the authorization boundary — NEVER a query param.
  * The route re-derives the actor's effective role by calling `loadUnitEditContext`
@@ -9,24 +9,28 @@
  * they're not a superuser), which we map to 404.
  *
  * Gate order (mirrors `/edit/data-quality/export`): flag off → 404 · no session →
- * 401 · no edit context (can't edit / no such center) → 404 · else a `text/csv`
+ * 401 · no edit context (can't edit / no such center) → 404 · else an .xlsx
  * attachment, `force-dynamic`, `no-store`.
  *
- * Columns + status derivation live in `lib/edit/unit-roster-export.ts`; the
- * `status` column matches the Members-tab badge exactly. `?activeOnly=1` drops
- * pending + inactive rows. NO email column (#847).
+ * Columns + status derivation live in `lib/edit/unit-roster-export.ts`, the
+ * workbook in `lib/edit/unit-roster-xlsx.ts`; the `status` column matches the
+ * Members-tab badge exactly. `?activeOnly=1` drops pending + inactive rows.
+ * The email column is the #1102 carve-out from #847 (see the lib header), and
+ * the file is exempt from SCHOLAR_EXPORT_CAP for the same reason: a unit admin
+ * downloading their own roster. The move from CSV to .xlsx changed the format
+ * only (More Reports plan, D1).
  */
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
-  buildUnitRosterCsv,
-  countRosterCsvRows,
+  countRosterExportRows,
   isUnitRosterExportEnabled,
   loadRosterFacultyMeta,
   type RosterFacultyClient,
 } from "@/lib/edit/unit-roster-export";
+import { buildUnitRosterXlsx } from "@/lib/edit/unit-roster-xlsx";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +74,7 @@ export async function GET(
   );
   const options = { today, activeOnly, facultyByCwid };
 
-  const rows = countRosterCsvRows(ctx, options);
+  const rows = countRosterExportRows(ctx, options);
 
   console.log(
     JSON.stringify({
@@ -89,13 +93,13 @@ export async function GET(
     }),
   );
 
-  const csv = buildUnitRosterCsv(ctx, options);
+  const xlsx = await buildUnitRosterXlsx(ctx, options);
   const date = today;
-  return new NextResponse(csv, {
+  return new NextResponse(new Uint8Array(xlsx), {
     status: 200,
     headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="center-${code}-roster-${date}.csv"`,
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="center-${code}-roster-${date}.xlsx"`,
       "Cache-Control": "no-store",
     },
   });
