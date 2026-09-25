@@ -54,6 +54,26 @@ export const TITLE_RANK = {
   unranked: 13,
 } as const;
 
+/** The rubric's wording per rank — what `/edit/reports/display-titles` and
+ *  `docs/title-hierarchy.md` show (a test pins the doc to this and
+ *  {@link TITLE_RANK}). */
+export const TITLE_RANK_LABEL: Record<keyof typeof TITLE_RANK, string> = {
+  deanProvost: "Dean / Provost / President",
+  viceProvostDean: "Vice Provost / Vice Dean / Vice President",
+  seniorAssociateDean: "Senior Associate Dean",
+  chair: "Department Chair",
+  institutionalCenterDirector: "Institutional Center / Institute Director",
+  divisionChief: "Division Chief",
+  associateDean: "Associate / Assistant Dean",
+  associateViceProvost: "Associate / Assistant Vice Provost",
+  viceChair: "Vice Chair",
+  endowed: "Endowed / named professorship",
+  unitCenterDirector: "Unit-based Center / Institute Director",
+  unitProgramDirector: "Unit-based Program Director",
+  academic: "Academic rank (Professor, Instructor …)",
+  unranked: "Anything else",
+};
+
 const EMERITUS = /\bemerit(?:us|a|i)\b/i;
 /** Words that qualify an academic rank without making it a named (endowed) one. */
 const RANK_WORDS = new Set([
