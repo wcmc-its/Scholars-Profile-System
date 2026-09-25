@@ -82,6 +82,9 @@ export const MENTORED_PUBS_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string
  *  a grant is the wildcard alone. */
 export const ARTICLE_COUNT_REPORT = "article-count";
 export const HIGH_IMPACT_PUBS_REPORT = "high-impact-publications";
+/** Report 10 (Display titles): superuser / comms_steward always; a grant
+ *  lets someone else VIEW it (setting a title stays superuser / comms_steward). */
+export const DISPLAY_TITLES_REPORT = "display-titles";
 export const WHOLE_REPORT_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string]> = [[ALL_SCOPES, "Whole report"]];
 
 /** Every grantable `reportKey` → the `[scopeKey, label]` pairs it accepts.
@@ -90,6 +93,7 @@ export const REPORT_ACCESS_SCOPE_OPTIONS: Readonly<Record<string, ReadonlyArray<
   [MENTORED_PUBS_REPORT]: MENTORED_PUBS_SCOPE_OPTIONS,
   [ARTICLE_COUNT_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
   [HIGH_IMPACT_PUBS_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
+  [DISPLAY_TITLES_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
 };
 
 /** Whether `cwid` holds a grant on ANY report — the `/edit` landing and the
