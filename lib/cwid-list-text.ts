@@ -8,6 +8,15 @@
  * every run of characters that cannot appear in a CWID, lowercased, and
  * deduplicated in first-seen order. A token that is not CWID-shaped
  * (`CWID_PATTERN`, `lib/cwid.ts`) is reported, never stored.
+ *
+ * "CWID-shaped" is deliberately loose: a letter then 2–31 letters or digits,
+ * with NO digit required, because legacy all-letter (name-derived) CWIDs
+ * exist and must be accepted. So any word of 3+ letters passes here — a
+ * pasted surname or a header like "cwid" is kept as an entry. That is safe:
+ * the report resolves each entry against active scholars, and the rail lists
+ * every entry that matched no one as "not found" (it never calls the entries
+ * valid CWIDs). Only tokens the pattern rejects (too short, digit-first) are
+ * skipped here.
  */
 import { CWID_PATTERN } from "@/lib/cwid";
 

@@ -106,16 +106,21 @@ every filter never brings the default back; "Reset to defaults" goes to the bare
 
 The People group's "CWID list" section takes pasted CWIDs with any separator (`parseCwidText`,
 `lib/cwid-list-text.ts`): lowercased, deduplicated, anything not CWID-shaped is named and skipped.
+"CWID-shaped" is `CWID_PATTERN` (`lib/cwid.ts`: a letter then 2–31 letters or digits). It requires no
+digit, because legacy all-letter CWIDs exist, so any word of three or more letters (a surname, a
+"cwid" header) is kept as an entry. The rail therefore counts "entries", not CWIDs, and every entry
+that matches no active scholar is listed as not found.
 "Apply list" stores it through `POST /api/edit/reports/article-count/cwid-list` (gate:
 `canViewArticleCountReport`; at most 5,000 CWIDs; not audited) in `report_cwid_list` (`id`, `cwids`
 JSON, `created_by`, `created_at`). Rows are insert-only, so a shared link keeps meaning the same
-people. The URL carries `list=<id>`. The rail shows how many CWIDs matched an active scholar and lists
-the ones that did not; an unknown id matches no one. List contents live in the table, never in this
+people. The URL carries `list=<id>`. The rail shows how many entries matched an active scholar and
+lists the ones that did not ("not found"); an unknown id matches no one. List contents live in the table, never in this
 repo.
 
 ### Page
 
-- **Rail:** Years (calendar / fiscal / date added, with Last 30 / 60 / 90 days quick picks), Person
+- **Rail:** Years (calendar / fiscal / date added; the From / To dates apply on Enter, "Apply dates"
+  or leaving the field, never per keystroke, and the Last 30 / 60 / 90 days quick picks apply at once), Person
   type, Department / division, Centers, Institution, CWID list, Article type, Journal Impact Factor
   (Any / ≥ 3 / ≥ 5 / ≥ 10, or an exact minimum), Author position. Filters apply automatically; the
   numbers beside options count active people, not articles. Below `lg` the rail opens from a
@@ -123,8 +128,10 @@ repo.
 - **Headline:** the distinct-article total, Download .xlsx and its note, removable chips for every
   filter (the year window is a fixed chip).
 - **By year:** a bar per year; the in-progress calendar or fiscal year is badged YTD. Selecting a year
-  opens the Articles tab for that year, with a removable "Year" chip.
-- **Articles (N):** one citation per article (matching scholars in bold, with the scholar hover card),
+  opens the Articles tab for that year, with a removable "Year" chip. The download still covers the
+  whole window, and its note says so while a year is picked.
+- **Articles (N):** one citation per article (matching scholars in bold, with the scholar hover card;
+  a matching scholar whose author position is unknown, rank 0, is listed on a "WCM authors:" line),
   sorted Newest first, by Journal Impact Factor or Journal A–Z, 25 at a time. Above 5,000 articles
   (`ARTICLE_LIST_CAP`, the download's limit too) the list is replaced by a prompt to narrow the
   filters, with two common combinations (first or last author with JIF ≥ 10; full-time faculty as last

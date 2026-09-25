@@ -3,7 +3,8 @@
 /**
  * Report 8's Articles tab list (reports redesign): one citation per counted
  * article — title (PubMed link), authors with the matching scholars in bold
- * (each in `ScholarHoverCard`), journal and volume / issue / pages, then the
+ * (each in `ScholarHoverCard`), journal and volume / issue / pages, a "WCM
+ * authors:" line for matching scholars the byline could not place, then the
  * article type, impact factor, PMID and DOI. Sorted client-side (Newest
  * first / Journal Impact Factor / Journal A–Z) and paged "Show 25 more"
  * (`useShowMore`). The body loads the rows only at or under the list cap;
@@ -26,6 +27,9 @@ export type CitationRow = {
   /** Author tokens as shown; a `cwid` marks a matching scholar (bold). "…"
    *  stands for authors left out of a long list. */
   authors: { text: string; cwid?: string }[];
+  /** Matching scholars the author list does not place (no known author
+   *  rank): shown on a "WCM authors:" line so none goes missing. */
+  otherScholars: { cwid: string; name: string }[];
   journal: string | null;
   /** `2024;12(3):1-9`. */
   source: string | null;
@@ -139,6 +143,19 @@ export function ArticleCitationList({
                   <PubJournal value={c.journal} className="text-apollo-ink-2 italic" />
                   {c.journal && c.source ? ". " : ""}
                   {c.source && `${c.source}.`}
+                </p>
+              )}
+              {c.otherScholars.length > 0 && (
+                <p className="text-apollo-ink-2 text-sm break-words" data-testid="article-other-scholars">
+                  <span className="text-muted-foreground">WCM authors: </span>
+                  {c.otherScholars.map((o, i) => (
+                    <span key={o.cwid}>
+                      <ScholarHoverCard cwid={o.cwid}>
+                        <strong className="text-foreground font-bold">{o.name}</strong>
+                      </ScholarHoverCard>
+                      {i < c.otherScholars.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
                 </p>
               )}
               <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">

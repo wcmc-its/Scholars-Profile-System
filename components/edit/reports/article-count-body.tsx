@@ -26,6 +26,7 @@ import { Download, X } from "lucide-react";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
+import { AddedDateField } from "@/components/edit/reports/added-date-field";
 import { ArticleCitationList, type CitationRow } from "@/components/edit/reports/article-citation-list";
 import { CwidListField, type AppliedCwidList } from "@/components/edit/reports/cwid-list-field";
 import { JifField } from "@/components/edit/reports/jif-field";
@@ -179,7 +180,7 @@ function Rail({ basePath, params, choices, labels, applied, resetHref, href, tod
     ? "None"
     : !applied.found
       ? "List not found"
-      : `${applied.count.toLocaleString()} CWID${applied.count === 1 ? "" : "s"}`;
+      : `${applied.count.toLocaleString()} ${applied.count === 1 ? "entry" : "entries"}`;
 
   return (
     <ReportRail
@@ -212,25 +213,13 @@ function Rail({ basePath, params, choices, labels, applied, resetHref, href, tod
           </fieldset>
           {params.added ? (
             <>
-              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
-                <span className="text-muted-foreground text-[13px]">From</span>
-                <input
-                  type="date"
-                  name="added_from"
-                  defaultValue={params.added.from}
-                  max={today}
-                  aria-label="Added to PubMed from"
-                  className={FIELD}
-                />
-                <span className="text-muted-foreground text-[13px]">To</span>
-                <input
-                  type="date"
-                  name="added_to"
-                  defaultValue={params.added.to}
-                  aria-label="Added to PubMed to"
-                  className={FIELD}
-                />
-              </div>
+              {/* Keyed on the window: a quick pick (a client navigation) resets it. */}
+              <AddedDateField
+                key={`${params.added.from}|${params.added.to}`}
+                from={params.added.from}
+                to={params.added.to}
+                max={today}
+              />
               <div className="flex flex-wrap gap-1.5" data-testid="added-quick-picks">
                 {ADDED_QUICK_PICKS.map((days) => {
                   const from = shiftIsoDate(today, -days);
@@ -413,12 +402,32 @@ export function citationAuthors(a: Pick<ArticleRow, "authors" | "matches">): Cit
   return out;
 }
 
+/** Matching scholars the byline does not carry: a match with no known author
+ *  rank (the rank-0 "unknown" sentinel, #2227), a rank past the author list,
+ *  or a second match on an already-placed rank. The citation lists them on a
+ *  "WCM authors:" line so every matching scholar shows. One per CWID. */
+export function unplacedScholars(
+  a: Pick<ArticleRow, "authors" | "matches">,
+  placed: CitationRow["authors"] = citationAuthors(a),
+): CitationRow["otherScholars"] {
+  const seen = new Set(placed.flatMap((t) => (t.cwid ? [t.cwid] : [])));
+  const out: CitationRow["otherScholars"] = [];
+  for (const m of a.matches) {
+    if (seen.has(m.cwid)) continue;
+    seen.add(m.cwid);
+    out.push({ cwid: m.cwid, name: m.name.trim() || m.cwid });
+  }
+  return out;
+}
+
 function toCitationRow(a: ArticleRow): CitationRow {
+  const authors = citationAuthors(a);
   return {
     key: a.pmid,
     title: (a.title ?? "").trim().replace(/\.+$/, ""),
     href: a.id.href,
-    authors: citationAuthors(a),
+    authors,
+    otherScholars: unplacedScholars(a, authors),
     journal: a.journal,
     source: a.source,
     type: a.articleType,
@@ -554,7 +563,7 @@ export async function renderArticleCountReport({
   if (applied)
     chips.push({
       group: "CWID list",
-      value: applied.found ? `${applied.count.toLocaleString()} CWIDs` : "not found",
+      value: applied.found ? `${applied.count.toLocaleString()} ${applied.count === 1 ? "entry" : "entries"}` : "not found",
       removeHref: href({ ...params, list: null, listData: null }),
     });
   for (const a of params.atypes)
@@ -646,6 +655,8 @@ export async function renderArticleCountReport({
                     {downloadOver
                       ? `Includes the Criteria sheet. The article list is left out above ${ARTICLE_LIST_CAP.toLocaleString()} articles; narrow the filters to include it.`
                       : "Includes the Criteria sheet and the article list with matching scholars."}
+                    {yearPick !== null &&
+                      ` The download covers every year in the window, not just ${yearLabel(params, yearPick)}.`}
                   </p>
                 </div>
               }

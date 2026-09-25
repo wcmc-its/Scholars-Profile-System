@@ -56,6 +56,10 @@ describe("parseCwidText", () => {
     });
     expect(parseCwidText("  \n ")).toEqual({ cwids: [], invalid: [] });
   });
+
+  it("no digit is required (legacy all-letter CWIDs), so any 3+ letter word is kept as an entry", () => {
+    expect(parseCwidText("smith, cwid, ab, 9abc")).toEqual({ cwids: ["smith", "cwid"], invalid: ["ab", "9abc"] });
+  });
 });
 
 describe("createCwidList", () => {
@@ -88,6 +92,23 @@ describe("POST /api/edit/reports/article-count/cwid-list", () => {
     expect(body).toMatchObject({ ok: true, count: 2 });
     expect(h.create).toHaveBeenCalledWith({
       data: { id: body.id, cwids: ["abc1234", "def5678"], createdBy: "usr0001" },
+    });
+  });
+
+  it('while "View as" is live, the gate reads the target but created_by is the real user', async () => {
+    h.mockGetEffectiveEditSession.mockResolvedValue({ cwid: "tgt0001", isSuperuser: false, isCommsSteward: false });
+    h.mockGetSession.mockResolvedValue({
+      cwid: "usr0001",
+      iat: 0,
+      exp: 0,
+      impersonating: { targetCwid: "tgt0001", startedAt: 0 },
+    });
+    h.mockImpersonationActive.mockReturnValue(true);
+    const res = await POST(post({ text: "abc1234" }));
+    expect(res.status).toBe(200);
+    expect(h.canView).toHaveBeenCalledWith(expect.objectContaining({ cwid: "tgt0001" }));
+    expect(h.create).toHaveBeenCalledWith({
+      data: { id: (await res.json()).id, cwids: ["abc1234"], createdBy: "usr0001" },
     });
   });
 

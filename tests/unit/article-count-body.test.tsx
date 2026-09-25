@@ -24,7 +24,7 @@ vi.mock("@/lib/edit/article-count-report", async (orig) => ({
   loadArticleList: h.list,
 }));
 
-import { citationAuthors, renderArticleCountReport } from "@/components/edit/reports/article-count-body";
+import { citationAuthors, renderArticleCountReport, unplacedScholars } from "@/components/edit/reports/article-count-body";
 
 const FACETS = {
   roleCategories: [{ value: "postdoc", label: "Postdoc", count: 3 }],
@@ -207,6 +207,25 @@ describe("report 8 body — results card", () => {
     expect(back.searchParams.has("year")).toBe(false);
   });
 
+  it("Articles tab: a matching scholar with no known author rank is listed on a WCM authors line", async () => {
+    h.list.mockResolvedValue([
+      {
+        ...ARTICLE,
+        matches: [
+          { cwid: "abc1234", name: "Test Person", rank: 2 },
+          { cwid: "zzz0001", name: "Rankless Person", rank: 0 },
+        ],
+      },
+    ]);
+    const { body } = await renderBody({ f: "1", from: "2024", to: "2025", tab: "articles" });
+    const row = body.getByTestId("article-row");
+    const line = within(row).getByTestId("article-other-scholars");
+    expect(line.textContent).toBe("WCM authors: Rankless Person");
+    expect(within(line).getByText("Rankless Person").tagName).toBe("STRONG");
+    // The ranked match stays in the byline, not repeated on the line.
+    expect(line.textContent).not.toContain("Test Person");
+  });
+
   it("Articles tab above the cap: no list load, the panel and its two combinations; the download note turns amber", async () => {
     h.counts.mockResolvedValue({ rows: [{ year: 2024, count: 6000 }], total: 6000 });
     const { body } = await renderBody({ f: "1", from: "2024", to: "2024", tab: "articles" });
@@ -220,6 +239,16 @@ describe("report 8 body — results card", () => {
     const note = body.getByTestId("article-count-download-note");
     expect(note.className).toContain("text-apollo-amber");
     expect(note.textContent).toContain("left out above 5,000 articles");
+  });
+
+  it("a year pick narrows the list, and the download note says the download still covers every year", async () => {
+    const picked = await renderBody({ f: "1", from: "2024", to: "2025", tab: "articles", year: "2024" });
+    expect(picked.body.getByTestId("article-count-download-note").textContent).toContain(
+      "The download covers every year in the window, not just 2024.",
+    );
+    picked.unmount();
+    const all = await renderBody({ f: "1", from: "2024", to: "2025", tab: "articles" });
+    expect(all.body.getByTestId("article-count-download-note").textContent).not.toContain("every year in the window");
   });
 
   it("the download link carries the canonical query and the marker, never the view params", async () => {
@@ -275,15 +304,53 @@ describe("report 8 body — unit default, date added, CWID list", () => {
     expect(body.getByTestId("article-count-chips").textContent).toContain("Added to PubMed:Jun 26 – Sep 24, 2026");
   });
 
+  it("date-added mode: typing a date does not submit the rail form; Apply dates does", async () => {
+    const submitted: FormData[] = [];
+    HTMLFormElement.prototype.requestSubmit = vi.fn(function (this: HTMLFormElement) {
+      submitted.push(new FormData(this));
+    });
+    const { body } = await renderBody({ f: "1", basis: "added", added_from: "2026-06-26", added_to: "2026-09-24" });
+    const years = within(body.getByTestId("article-count-rail-panel")).getByTestId("rail-years");
+    fireEvent.change(within(years).getByLabelText("Added to PubMed from"), { target: { value: "2026-01-02" } });
+    fireEvent.change(within(years).getByLabelText("Added to PubMed to"), { target: { value: "2026-02-01" } });
+    expect(submitted).toHaveLength(0);
+    fireEvent.click(within(years).getByRole("button", { name: "Apply dates" }));
+    expect(submitted.map((f) => [f.get("basis"), f.get("added_from"), f.get("added_to")])).toEqual([
+      ["added", "2026-01-02", "2026-02-01"],
+    ]);
+  });
+
   it("an applied CWID list: counts in the rail, the list id rides the form, a removable chip", async () => {
     h.cwidList.mockResolvedValue({ id: "AbCdEf123456", found: true, cwids: ["aaa1111", "bbb2222"], unmatched: ["bbb2222"] });
     const { body } = await renderBody({ f: "1", list: "AbCdEf123456" });
     const panel = body.getByTestId("article-count-rail-panel");
-    expect(within(panel).getByTestId("cwid-list-counts").textContent).toBe("2 CWIDs · 1 matched · 1 not found");
+    expect(within(panel).getByTestId("cwid-list-counts").textContent).toBe("2 entries · 1 matched · 1 not found");
     expect(within(panel).getByTestId("cwid-list-unmatched").textContent).toBe("bbb2222");
     expect(new FormData(within(panel).getByTestId("article-count-filters") as HTMLFormElement).get("list")).toBe("AbCdEf123456");
-    const chip = hrefOf(within(body.getByTestId("article-count-chips")).getByRole("link", { name: "Remove CWID list: 2 CWIDs" }));
+    const chip = hrefOf(within(body.getByTestId("article-count-chips")).getByRole("link", { name: "Remove CWID list: 2 entries" }));
     expect(chip.searchParams.has("list")).toBe(false);
+  });
+});
+
+describe("unplacedScholars", () => {
+  it("rank-0 and out-of-range matches (and a second match on a placed rank), once per CWID; placed ones never", () => {
+    expect(
+      unplacedScholars({
+        authors: ["A", "B"],
+        matches: [
+          { cwid: "x", name: "X Person", rank: 2 },
+          { cwid: "u", name: "U Person", rank: 0 },
+          { cwid: "u", name: "U Person", rank: 0 },
+          { cwid: "o", name: "", rank: 9 },
+          { cwid: "d", name: "D Person", rank: 2 },
+        ],
+      }),
+    ).toEqual([
+      // Two matches on rank 2: the byline carries one (the later), the other is listed.
+      { cwid: "x", name: "X Person" },
+      { cwid: "u", name: "U Person" },
+      { cwid: "o", name: "o" },
+    ]);
   });
 });
 

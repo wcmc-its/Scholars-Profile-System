@@ -4,6 +4,8 @@
  *   never does; a selection past the collapse stays rendered (so it submits).
  * - `JifField`: a segment submits once with the new hidden `jif`; the exact
  *   box submits on Enter / blur, never per keystroke.
+ * - `AddedDateField`: typing a date never submits; Apply, Enter or focus
+ *   leaving the field submits the new hidden `added_from` / `added_to` once.
  * - `CwidListField`: the paste is parsed live (non-CWIDs named, skipped);
  *   Apply stores the list and submits `list=<id>`; Remove submits without it.
  * Assertions are scoped to each render's container.
@@ -12,6 +14,7 @@ import { act, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
+import { AddedDateField } from "@/components/edit/reports/added-date-field";
 import { CwidListField } from "@/components/edit/reports/cwid-list-field";
 import { JifField } from "@/components/edit/reports/jif-field";
 import { ReportFacetList } from "@/components/edit/reports/report-facet-list";
@@ -74,6 +77,50 @@ describe("JifField", () => {
   });
 });
 
+describe("AddedDateField", () => {
+  const field = () => {
+    const { container } = inForm(
+      <>
+        <AddedDateField from="2026-06-26" to="2026-09-24" max="2026-09-24" />
+        <button type="button">elsewhere</button>
+      </>,
+    );
+    const q = within(container);
+    return { q, from: q.getByTestId("added-from"), to: q.getByTestId("added-to") };
+  };
+
+  it("typing a date never submits; Apply submits the new window once", () => {
+    const { q, from, to } = field();
+    fireEvent.change(from, { target: { value: "2026-01-01" } });
+    fireEvent.change(from, { target: { value: "2026-01-02" } });
+    fireEvent.change(to, { target: { value: "2026-02-01" } });
+    // Moving between From, To and Apply is still editing.
+    fireEvent.blur(from, { relatedTarget: to });
+    fireEvent.blur(to, { relatedTarget: q.getByRole("button", { name: "Apply dates" }) });
+    expect(submitted).toHaveLength(0);
+    fireEvent.click(q.getByRole("button", { name: "Apply dates" }));
+    expect(submitted.map((f) => [f.get("added_from"), f.get("added_to")])).toEqual([["2026-01-02", "2026-02-01"]]);
+    // Nothing changed since: Apply again is a no-op.
+    fireEvent.click(q.getByRole("button", { name: "Apply dates" }));
+    expect(submitted).toHaveLength(1);
+  });
+
+  it("Enter commits; focus leaving the field commits; an unchanged blur does not", () => {
+    const { q, from, to } = field();
+    fireEvent.blur(from, { relatedTarget: q.getByRole("button", { name: "elsewhere" }) });
+    expect(submitted).toHaveLength(0);
+    fireEvent.change(from, { target: { value: "2026-03-01" } });
+    fireEvent.keyDown(from, { key: "Enter" });
+    expect(submitted.map((f) => f.get("added_from"))).toEqual(["2026-03-01"]);
+    fireEvent.change(to, { target: { value: "2026-04-01" } });
+    fireEvent.blur(to, { relatedTarget: q.getByRole("button", { name: "elsewhere" }) });
+    expect(submitted.map((f) => [f.get("added_from"), f.get("added_to")])).toEqual([
+      ["2026-03-01", "2026-09-24"],
+      ["2026-03-01", "2026-04-01"],
+    ]);
+  });
+});
+
 describe("CwidListField", () => {
   it("parses the paste live, applies the valid CWIDs, then submits list=<id>", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, id: "NewList12345", count: 2 }) });
@@ -82,7 +129,7 @@ describe("CwidListField", () => {
     const q = within(container);
     fireEvent.change(q.getByRole("textbox", { name: "CWIDs" }), { target: { value: "ABC1234, def5678\n12" } });
     expect(submitted).toHaveLength(0);
-    expect(q.getByTestId("cwid-list-parsed").textContent).toBe("2 CWIDs · 1 skipped (not CWIDs): 12");
+    expect(q.getByTestId("cwid-list-parsed").textContent).toBe("2 entries to look up · 1 skipped (not CWID-shaped): 12");
     await act(async () => {
       fireEvent.click(q.getByRole("button", { name: "Apply list" }));
     });
@@ -93,7 +140,7 @@ describe("CwidListField", () => {
   it("Remove list submits without the list", () => {
     const { container } = inForm(<CwidListField applied={{ id: "Old123456789", found: true, count: 3, unmatched: [] }} />);
     const q = within(container);
-    expect(q.getByTestId("cwid-list-counts").textContent).toBe("3 CWIDs · 3 matched");
+    expect(q.getByTestId("cwid-list-counts").textContent).toBe("3 entries · 3 matched");
     fireEvent.click(q.getByRole("button", { name: "Remove list" }));
     expect(submitted).toHaveLength(1);
     expect(submitted[0].has("list")).toBe(false);

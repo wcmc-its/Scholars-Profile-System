@@ -11,6 +11,11 @@
  * filter. The applied id rides a hidden `list` input, so every other filter
  * change keeps it.
  *
+ * The copy says "entries" and "not found", never "N CWIDs": the shape check
+ * lets any 3+ character word through (legacy all-letter CWIDs exist), so a
+ * pasted name like "smith" is looked up, not vouched for, and shows among
+ * the ones "Not found among active scholars".
+ *
  * The textarea's `change` stops here (the body's `AutoSubmitForm` submits on
  * every bubbling change); the submit runs in the effect AFTER React wrote the
  * new hidden value. Parsing is `parseCwidText` (`lib/cwid-list-text.ts`), the
@@ -86,7 +91,7 @@ export function CwidListField({ applied }: { applied: AppliedCwidList | null }) 
         <>
           {applied.found ? (
             <p data-testid="cwid-list-counts">
-              {applied.count.toLocaleString()} CWID{applied.count === 1 ? "" : "s"} ·{" "}
+              {applied.count.toLocaleString()} {applied.count === 1 ? "entry" : "entries"} ·{" "}
               {matched.toLocaleString()} matched
               {applied.unmatched.length > 0 && ` · ${applied.unmatched.length.toLocaleString()} not found`}
             </p>
@@ -132,9 +137,9 @@ export function CwidListField({ applied }: { applied: AppliedCwidList | null }) 
           />
           {text.trim() && (
             <p className="text-muted-foreground text-[13px]" data-testid="cwid-list-parsed">
-              {parsed.cwids.length.toLocaleString()} CWID{parsed.cwids.length === 1 ? "" : "s"}
+              {parsed.cwids.length.toLocaleString()} {parsed.cwids.length === 1 ? "entry" : "entries"} to look up
               {parsed.invalid.length > 0 &&
-                ` · ${parsed.invalid.length.toLocaleString()} skipped (not CWIDs): ${parsed.invalid.slice(0, 10).join(", ")}${parsed.invalid.length > 10 ? ", …" : ""}`}
+                ` · ${parsed.invalid.length.toLocaleString()} skipped (not CWID-shaped): ${parsed.invalid.slice(0, 10).join(", ")}${parsed.invalid.length > 10 ? ", …" : ""}`}
             </p>
           )}
           {tooMany && (
