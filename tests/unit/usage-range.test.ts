@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  USAGE_HISTORY_START,
   USAGE_LAUNCH_DATE,
   addDays,
   isRealIsoDate,
@@ -67,6 +68,26 @@ describe("resolveUsageRange", () => {
     expect(
       resolveUsageRange({ range: "custom", from: "2026-10-01", to: "2026-10-05" }, TODAY),
     ).toMatchObject({ since: "2026-09-24", until: "2026-09-24", days: 1 });
+  });
+
+  it("floors a custom range at the first day the rollup can hold", () => {
+    expect(USAGE_HISTORY_START).toBe("2026-05-22");
+    // An early From would otherwise fill the chart axis with pre-launch nulls.
+    expect(
+      resolveUsageRange({ range: "custom", from: "2020-01-01", to: "2026-09-24" }, TODAY),
+    ).toMatchObject({ since: USAGE_HISTORY_START, until: "2026-09-24", days: 126 });
+    // Backwards and early: swapped, then floored.
+    expect(
+      resolveUsageRange({ range: "custom", from: "2026-08-15", to: "1999-01-01" }, TODAY),
+    ).toMatchObject({ since: USAGE_HISTORY_START, until: "2026-08-15" });
+    // Entirely before the floor collapses to the floor day.
+    expect(
+      resolveUsageRange({ range: "custom", from: "2025-01-01", to: "2025-02-01" }, TODAY),
+    ).toMatchObject({ since: USAGE_HISTORY_START, until: USAGE_HISTORY_START, days: 1 });
+    // A clock before the floor keeps the yesterday clamp.
+    expect(
+      resolveUsageRange({ range: "custom", from: "2020-01-01", to: "2026-05-01" }, "2026-05-10"),
+    ).toMatchObject({ since: "2026-05-09", until: "2026-05-09", days: 1 });
   });
 
   it("rejects a malformed or impossible custom date (SQL-injection shape included)", () => {

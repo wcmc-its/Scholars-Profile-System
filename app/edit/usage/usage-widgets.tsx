@@ -14,6 +14,7 @@ import { ChevronDownIcon, ChevronUpIcon, DownloadIcon, InfoIcon } from "lucide-r
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  USAGE_HISTORY_START,
   USAGE_RANGE_OPTIONS,
   type UsageRangeKey,
   isRealIsoDate,
@@ -131,6 +132,7 @@ export function UsageRangePicker({
                 <input
                   type="date"
                   value={from}
+                  min={USAGE_HISTORY_START}
                   max={maxDate}
                   onChange={(e) => setFrom(e.target.value)}
                   className="border-apollo-border-strong text-foreground h-8 rounded-md border px-2 text-[13px]"
@@ -141,6 +143,7 @@ export function UsageRangePicker({
                 <input
                   type="date"
                   value={to}
+                  min={USAGE_HISTORY_START}
                   max={maxDate}
                   onChange={(e) => setTo(e.target.value)}
                   className="border-apollo-border-strong text-foreground h-8 rounded-md border px-2 text-[13px]"

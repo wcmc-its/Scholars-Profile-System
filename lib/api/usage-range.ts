@@ -8,14 +8,20 @@
  * Every window ends YESTERDAY: the nightly rollup rolls the previous UTC day,
  * so today never has a partition yet. "Last N days" is therefore the N complete
  * days before today. A malformed or unknown param falls back to the default
- * (last 30 days) rather than erroring; a custom range is clamped to end no
- * later than yesterday and swapped if given backwards.
+ * (last 30 days) rather than erroring; a custom range is swapped if given
+ * backwards and clamped to [USAGE_HISTORY_START, yesterday].
  */
 
 /** The site's public launch (first full month of production traffic). Mirrors
  *  `LAUNCH_MONTH_START` in lib/api/service-health.ts, which starts the uptime
  *  trend at the same month. */
 export const USAGE_LAUNCH_DATE = "2026-07-01";
+
+/** The earliest day the rollup can hold: the `daily_usage` table's partition
+ *  projection starts here (`projection.dt.range` in cdk/lib/analytics-stack.ts,
+ *  the first CloudFront log day). A custom range is floored to it, so an early
+ *  From date can't fill the chart axis with days that can never have data. */
+export const USAGE_HISTORY_START = "2026-05-22";
 
 export type UsageRangeKey = "7" | "30" | "90" | "launch" | "custom";
 
@@ -107,6 +113,11 @@ export function resolveUsageRange(
     if (from && to && isRealIsoDate(from) && isRealIsoDate(to)) {
       let [a, b] = from <= to ? [from, to] : [to, from];
       if (b > yesterday) b = yesterday;
+      // Floor both ends at the first day the rollup can hold. A clock before
+      // that (a test, a misconfigured host) keeps the yesterday clamp winning.
+      const floor = USAGE_HISTORY_START <= yesterday ? USAGE_HISTORY_START : yesterday;
+      if (a < floor) a = floor;
+      if (b < floor) b = floor;
       if (a > b) a = b;
       return build("custom", a, b);
     }

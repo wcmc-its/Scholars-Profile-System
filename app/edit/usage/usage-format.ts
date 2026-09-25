@@ -46,11 +46,19 @@ export function pctLabel(share: number): string {
 /** One chart slot: a day's pageviews, or `null` when the rollup has no row for it. */
 export type ChartDay = { day: string; views: number | null };
 
+/** Upper bound on chart slots: a bad bound can't spin (about three years). */
+const MAX_CHART_SLOTS = 1100;
+
 /**
  * Lays the rollup's rows on a continuous day axis from `since` through `until`
  * (inclusive), so a day with no rollup row is a `null` slot that the chart
  * draws as a gap, not a zero and not a silently dropped day. Falls back to the
  * data's own first/last day when a bound is missing or malformed.
+ *
+ * Never drops a real row: the axis always spans every row, and when the
+ * requested window is longer than `MAX_CHART_SLOTS` it is trimmed to the
+ * data's own span first (leading/trailing empty days go, rows stay). If even
+ * the data span is too long to fill, the rows come back unfilled.
  */
 export function fillDayGaps(
   days: ReadonlyArray<{ day: string; views: number }>,
@@ -58,21 +66,31 @@ export function fillDayGaps(
   until?: string,
 ): ChartDay[] {
   if (days.length === 0) return [];
+  const DAY_MS = 86_400_000;
   const iso = /^\d{4}-\d{2}-\d{2}$/;
-  const start = since && iso.test(since) ? since : days[0].day;
-  const end = until && iso.test(until) ? until : days[days.length - 1].day;
+  const ms = (d: string) => Date.parse(`${d}T00:00:00Z`);
+  const sorted = days.map((d) => d.day).sort();
+  const firstRow = sorted[0];
+  const lastRow = sorted[sorted.length - 1];
+  const valid = (d: string | undefined): d is string =>
+    !!d && iso.test(d) && Number.isFinite(ms(d));
+  // The axis always covers every row, even one outside the requested window.
+  let start = valid(since) && since < firstRow ? since : firstRow;
+  let end = valid(until) && until > lastRow ? until : lastRow;
+  const slots = (a: string, b: string) => Math.round((ms(b) - ms(a)) / DAY_MS) + 1;
+  if (slots(start, end) > MAX_CHART_SLOTS) {
+    start = firstRow;
+    end = lastRow;
+  }
+  if (!Number.isFinite(ms(start)) || !Number.isFinite(ms(end))) {
+    return days.map((d) => ({ ...d }));
+  }
+  if (slots(start, end) > MAX_CHART_SLOTS) return days.map((d) => ({ ...d }));
   const byDay = new Map(days.map((d) => [d.day, d.views]));
   const out: ChartDay[] = [];
-  const DAY_MS = 86_400_000;
-  const endMs = Date.parse(`${end}T00:00:00Z`);
-  // Bounded walk: a bad bound can't spin (at most ~3 years of slots).
-  for (
-    let t = Date.parse(`${start}T00:00:00Z`);
-    Number.isFinite(t) && t <= endMs && out.length < 1100;
-    t += DAY_MS
-  ) {
+  for (let t = ms(start); t <= ms(end); t += DAY_MS) {
     const day = new Date(t).toISOString().slice(0, 10);
     out.push({ day, views: byDay.get(day) ?? null });
   }
-  return out.length > 0 ? out : days.map((d) => ({ ...d }));
+  return out;
 }

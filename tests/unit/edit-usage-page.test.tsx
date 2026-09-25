@@ -391,6 +391,55 @@ describe("fillDayGaps", () => {
   });
 });
 
+describe("fillDayGaps slot cap", () => {
+  it("never drops real rows when the window is longer than the slot cap", () => {
+    const rows = [
+      { day: "2026-07-01", views: 10 },
+      { day: "2026-09-24", views: 20 },
+    ];
+    const out = fillDayGaps(rows, "2020-01-01", "2026-09-24");
+    // Trimmed to the data span, not a capped run of pre-data nulls.
+    expect(out[0]).toEqual({ day: "2026-07-01", views: 10 });
+    expect(out[out.length - 1]).toEqual({ day: "2026-09-24", views: 20 });
+    expect(out).toHaveLength(86);
+    expect(out.filter((d) => d.views !== null)).toHaveLength(2);
+  });
+
+  it("returns the rows unfilled when even the data span exceeds the cap", () => {
+    const rows = [
+      { day: "2020-01-01", views: 1 },
+      { day: "2026-09-24", views: 2 },
+    ];
+    expect(fillDayGaps(rows, "2020-01-01", "2026-09-24")).toEqual(rows);
+  });
+
+  it("widens the axis to cover a row outside the requested window", () => {
+    const out = fillDayGaps([{ day: "2026-08-24", views: 3 }], "2026-08-25", "2026-08-26");
+    expect(out.map((d) => d.day)).toEqual(["2026-08-24", "2026-08-25", "2026-08-26"]);
+    expect(out[0].views).toBe(3);
+  });
+});
+
+describe("UsageRangePicker date floor", () => {
+  it("sets min= on both custom date inputs", () => {
+    const { getByTestId } = render(
+      <UsageRangePicker
+        current="custom"
+        since="2026-08-01"
+        until="2026-08-15"
+        maxDate="2026-09-24"
+      />,
+    );
+    fireEvent.click(getByTestId("usage-range-trigger"));
+    const form = within(within(document.body).getByTestId("usage-range-custom"));
+    for (const name of ["From", "To"]) {
+      const input = form.getByLabelText(name) as HTMLInputElement;
+      expect(input.min).toBe("2026-05-22");
+      expect(input.max).toBe("2026-09-24");
+    }
+  });
+});
+
 describe("usage-format helpers", () => {
   it("formats days, months, shares and nice ceilings", () => {
     expect(shortDay("2026-09-03")).toBe("Sep 3");
