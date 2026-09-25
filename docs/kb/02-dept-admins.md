@@ -41,7 +41,7 @@ Open your unit from **Org units** (`/edit/units`) or go straight to `/edit/<depa
 
 **Members** lists everyone shown on the unit's public page. Search by name to **Add member**, set optional start/end dates per person, or **Remove** someone. **Export** downloads the current roster (an .xlsx file for a center, a CSV for a department or division). Listing someone here does **not** grant them edit access — that's a separate step (below).
 
-![Members screen: add-member search, a roster table with start/end dates and Remove, and an Export CSV link](images/unit-roster.png)
+![Members screen: add-member search, a roster table with start/end dates and Remove, and an Export link](images/unit-roster.png)
 
 ## Grant or revoke access
 

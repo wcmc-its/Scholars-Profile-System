@@ -10,11 +10,11 @@
  * gate. Start/End still drive the derived Active / Pending / Inactive status
  * (the #552 §3.3 active filter, inclusive boundaries, nulls open).
  *
- * Dates: a compact "Start → End" range (`MemberDateRange`) sits under the
- * Program name (or under the Member name/title when the center has no
- * programs, so the range is never dropped) instead of two always-visible
- * date-input columns — the 2026-08-12 mockup redesign reclaims that width for
- * the Diseases column + filter bar. Clicking the range opens a small popover
+ * Dates: a compact label ("Since Mar 2021", "Mar 2021 – Jun 2026", "Ended
+ * Jun 2026", "No start date") plus an "Edit dates" link (`MemberDateRange`)
+ * sits under the Program name (or under the Member name/title when the center
+ * has no programs, so the range is never dropped) instead of two
+ * always-visible date-input columns. "Edit dates" opens a small popover
  * with the same two `<input type=date>` fields as before, same
  * `onStartChange`/`onEndChange` validation (End < Start blocked client-side).
  * Remove rides along as a discreet text link right beside the date range —
@@ -64,8 +64,13 @@
  * tabs: a free-text search (name or CWID), a disease multi-select, Program
  * (a center with a program taxonomy only), a confidence tier, and a "Has
  * diseases to review" toggle whose count is the members matching every other
- * filter who have at least one undecided row. "Clear all filters" resets
- * them. The result pages 25 at a time ("Show 25 more").
+ * filter who have at least one undecided row. With the toggle on, a member
+ * whose last undecided row the curator just decided STAYS listed (and on the
+ * current page) until the toggle is flipped or the filters are cleared, so a
+ * decision never makes a row vanish or collapses paging. The toggle also
+ * narrows the disease multi-select's option counts, like every other filter.
+ * "Clear all filters" resets them. The result pages 25 at a time ("Show 25
+ * more").
  */
 "use client";
 
@@ -189,12 +194,19 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** ISO `YYYY-MM-DD` -> `MM/DD/YYYY` for the compact date-range display;
- *  `null` -> an em dash, matching the mockup's open-start/open-end rows. */
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  const [y, m, d] = iso.split("-");
-  return `${m}/${d}/${y}`;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** ISO `YYYY-MM-DD` -> "Mar 2021" (the mockup's month-year precision; the
+ *  popover still edits the exact day). */
+function formatMonth(iso: string): string {
+  const [y, m] = iso.split("-");
+  return `${MONTHS[Number(m) - 1] ?? m} ${y}`;
+}
+
+/** The mockup's one-line dates label. */
+export function datesLabel(startDate: string | null, endDate: string | null): string {
+  if (endDate) return startDate ? `${formatMonth(startDate)} – ${formatMonth(endDate)}` : `Ended ${formatMonth(endDate)}`;
+  return startDate ? `Since ${formatMonth(startDate)}` : "No start date";
 }
 
 /**
@@ -277,10 +289,11 @@ function DiseaseCell({
   );
 }
 
-/** The folded date range (mockup redesign) — a compact "Start → End" trigger
- *  that opens a popover with the two original date inputs. Same testids
- *  (`roster-start-*` / `roster-end-*`) as the pre-redesign always-visible
- *  inputs so the write path (`onStartChange`/`onEndChange`) is untouched. */
+/** The folded date range (mockup redesign) — a dates label plus an "Edit
+ *  dates" trigger that opens a popover with the two original date inputs.
+ *  Same testids (`roster-start-*` / `roster-end-*`) as the pre-redesign
+ *  always-visible inputs so the write path (`onStartChange`/`onEndChange`)
+ *  is untouched. */
 function MemberDateRange({
   member,
   onStartChange,
@@ -292,17 +305,24 @@ function MemberDateRange({
   onEndChange: (value: string) => void;
   needsCloseOut: boolean;
 }) {
+  const hasDates = member.startDate !== null || member.endDate !== null;
   return (
     <Popover>
+      <span
+        className={`text-xs whitespace-nowrap ${
+          needsCloseOut ? "text-apollo-amber font-semibold" : hasDates ? "text-foreground" : "text-muted-foreground"
+        }`}
+        data-testid={`roster-dates-label-${member.cwid}`}
+      >
+        {datesLabel(member.startDate, member.endDate)}
+      </span>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`text-xs hover:underline ${
-            needsCloseOut ? "text-apollo-amber font-semibold" : "text-muted-foreground"
-          }`}
+          className="text-apollo-slate text-xs whitespace-nowrap hover:underline"
           data-testid={`roster-dates-trigger-${member.cwid}`}
         >
-          {formatDate(member.startDate)} → {formatDate(member.endDate)}
+          Edit dates
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -390,6 +410,11 @@ export function CenterRosterCard({
   const [confidenceFilter, setConfidenceFilter] = React.useState<ConfidenceFilter>("any");
   const [programFilter, setProgramFilter] = React.useState("");
   const [needsReviewOnly, setNeedsReviewOnly] = React.useState(false);
+  // Members decided while "Has diseases to review" is on: they stay listed so
+  // a decision doesn't pull the row out from under the curator (or reset
+  // paging). Cleared whenever the toggle flips or the filters are cleared.
+  const [reviewedHere, setReviewedHere] = React.useState<ReadonlySet<string>>(() => new Set());
+  const tabRefs = React.useRef<Partial<Record<RosterFilter, HTMLButtonElement | null>>>({});
   // Free-text search — case-insensitive substring match against name OR cwid.
   const [freeText, setFreeText] = React.useState("");
 
@@ -418,7 +443,20 @@ export function CenterRosterCard({
     setConfidenceFilter("any");
     setProgramFilter("");
     setNeedsReviewOnly(false);
+    setReviewedHere(new Set());
     setFreeText("");
+  }
+
+  function toggleNeedsReviewOnly() {
+    setNeedsReviewOnly((v) => !v);
+    setReviewedHere(new Set());
+  }
+
+  /** "Review and set end dates": select Left WCM and bring its tab into view
+   *  (the tab strip scrolls sideways on a phone). */
+  function jumpToDeparted() {
+    setFilter("departed");
+    tabRefs.current.departed?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }
 
   async function post(body: Record<string, unknown>): Promise<boolean> {
@@ -513,6 +551,9 @@ export function CenterRosterCard({
     const member = members.find((m) => m.cwid === cwid);
     const prevRow = member?.diseases?.find((d) => d.diseaseCode === diseaseCode);
     if (!prevRow && decision !== "confirmed") return;
+    if (needsReviewOnly && pendingDiseaseRows(member?.diseases).length > 0) {
+      setReviewedHere((s) => (s.has(cwid) ? s : new Set([...s, cwid])));
+    }
 
     if (decision === "clear") {
       // Clearing an ordinary decision reverts the row to pending (the
@@ -661,10 +702,7 @@ export function CenterRosterCard({
         : members;
 
   // The filter-bar controls, AND-composed on top of the status tabs above.
-  // `preDiseaseFiltered` excludes the disease multi-select itself so the
-  // multi-select's OWN option counts stay meaningful as more codes are
-  // checked (an OR-widening selection, not a further narrowing one).
-  const preDiseaseFiltered = rosterFiltered.filter((m) => {
+  const matchesBarFilters = (m: RosterMember) => {
     if (confidenceFilter !== "any") {
       const hasTier = liveDiseaseRows(m.diseases).some((d) => confidenceOf(d) === confidenceFilter);
       if (!hasTier) return false;
@@ -673,7 +711,18 @@ export function CenterRosterCard({
     const q = freeText.trim().toLowerCase();
     if (q && !m.name.toLowerCase().includes(q) && !m.cwid.toLowerCase().includes(q)) return false;
     return true;
-  });
+  };
+  const matchesDiseaseFilter = (m: RosterMember) =>
+    selectedDiseaseCodes.size === 0 ||
+    liveDiseaseRows(m.diseases).some((d) => selectedDiseaseCodes.has(d.diseaseCode));
+  const hasPending = (m: RosterMember) => pendingDiseaseRows(m.diseases).length > 0;
+  // `preDiseaseFiltered` is every filter EXCEPT the disease multi-select, so
+  // the multi-select's OWN option counts stay meaningful as more codes are
+  // checked (an OR-widening selection, not a further narrowing one). The
+  // review toggle is in it, so it narrows those counts too.
+  const preDiseaseFiltered = rosterFiltered.filter(
+    (m) => matchesBarFilters(m) && (!needsReviewOnly || hasPending(m) || reviewedHere.has(m.cwid)),
+  );
 
   // Disease multi-select FILTER options: every code that appears anywhere on
   // the roster, with a count of currently-visible (pre-disease-filter)
@@ -699,20 +748,16 @@ export function CenterRosterCard({
     return !q || diseaseLabel(o.code).toLowerCase().includes(q) || o.code.toLowerCase().includes(q);
   });
 
-  const filteredBase =
-    selectedDiseaseCodes.size === 0
-      ? preDiseaseFiltered
-      : preDiseaseFiltered.filter((m) =>
-          liveDiseaseRows(m.diseases).some((d) => selectedDiseaseCodes.has(d.diseaseCode)),
-        );
+  const visible = preDiseaseFiltered.filter(matchesDiseaseFilter);
 
-  // Members (under every other filter) with at least one undecided disease —
-  // the "Has diseases to review" count and the review queue's contents.
-  const needsReviewList = filteredBase.filter((m) => pendingDiseaseRows(m.diseases).length > 0);
-  const visible = needsReviewOnly ? needsReviewList : filteredBase;
+  // Members (under every other filter, not the toggle itself) with at least
+  // one undecided disease — the "Has diseases to review" count and the
+  // review queue's contents.
+  const needsReviewList = rosterFiltered.filter((m) => matchesBarFilters(m) && matchesDiseaseFilter(m) && hasPending(m));
 
   // Page by cwid so a disease decision (which replaces the member objects)
-  // doesn't reset "Show 25 more"; only a change to WHICH members match does.
+  // doesn't reset "Show 25 more"; only a change to WHICH members match does
+  // (and with the review toggle on, `reviewedHere` keeps a decided member in).
   const visibleKey = visible.map((m) => m.cwid).join("\n");
   const visibleCwids = React.useMemo(() => (visibleKey ? visibleKey.split("\n") : []), [visibleKey]);
   const paging = useShowMore(visibleCwids, PAGE_SIZE);
@@ -820,7 +865,7 @@ export function CenterRosterCard({
             each labelled with its count. Scrolls sideways inside itself on a
             phone rather than widening the page. */}
         <div
-          className="border-apollo-border flex gap-6 overflow-x-auto border-b"
+          className="border-apollo-border flex gap-4 overflow-x-auto border-b sm:gap-6"
           role="tablist"
           aria-label="Filter members"
         >
@@ -836,9 +881,12 @@ export function CenterRosterCard({
               key={value}
               type="button"
               role="tab"
+              ref={(el) => {
+                tabRefs.current[value] = el;
+              }}
               onClick={() => setFilter(value)}
               aria-selected={filter === value}
-              className={`-mb-px shrink-0 border-b-2 pt-2 pb-2.5 text-[15px] whitespace-nowrap tabular-nums transition-colors ${
+              className={`-mb-px shrink-0 border-b-2 pt-2 pb-2.5 text-sm whitespace-nowrap sm:text-[15px] tabular-nums transition-colors ${
                 filter === value
                   ? "border-apollo-maroon text-foreground font-semibold"
                   : "text-muted-foreground hover:text-foreground border-transparent"
@@ -945,7 +993,7 @@ export function CenterRosterCard({
 
               <button
                 type="button"
-                onClick={() => setNeedsReviewOnly((v) => !v)}
+                onClick={toggleNeedsReviewOnly}
                 aria-pressed={needsReviewOnly}
                 className={`inline-flex h-[34px] items-center gap-2 rounded-full border px-3 text-sm font-medium whitespace-nowrap transition-colors ${
                   needsReviewOnly
@@ -1014,7 +1062,7 @@ export function CenterRosterCard({
               variant="outline"
               size="sm"
               className="bg-apollo-surface"
-              onClick={() => setFilter("departed")}
+              onClick={jumpToDeparted}
               data-testid="roster-needs-close-out-jump"
             >
               Review and set end dates
@@ -1071,8 +1119,8 @@ export function CenterRosterCard({
                   // it still reads Active. Amber is this UI's "needs attention"
                   // (honors-queue contested groups, all-units-directory), not red —
                   // it is a data-quality gap to fix, not a failure. Mutually
-                  // exclusive with the `opacity-50` inactive dimming by
-                  // construction, so the two never compose.
+                  // exclusive with the inactive row's page-colour background
+                  // by construction, so the two never compose.
                   const rowNeedsCloseOut = needsCloseOutOf(m);
                   // Remove is a discreet text link beside the date range, not
                   // its own always-visible column — it's a rare action and
@@ -1102,7 +1150,7 @@ export function CenterRosterCard({
                     <tr
                       key={m.cwid}
                       className={`border-apollo-border border-b ${
-                        status === "inactive" ? "opacity-50" : ""
+                        status === "inactive" ? "bg-apollo-page" : ""
                       } ${rowNeedsCloseOut ? "bg-apollo-amber-tint" : ""}`}
                       data-testid={`center-roster-row-${m.cwid}`}
                       data-needs-close-out={rowNeedsCloseOut ? "true" : undefined}
@@ -1214,7 +1262,11 @@ export function CenterRosterCard({
                           className={`rounded-full ${
                             status === "active"
                               ? "bg-apollo-green-tint text-apollo-green border-apollo-green-tint-border"
-                              : "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border"
+                              : status === "invited"
+                                ? "bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border"
+                                : status === "inactive"
+                                  ? "bg-apollo-surface-2 text-foreground border-apollo-border-strong"
+                                  : "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border"
                           }`}
                           data-testid={`roster-status-${m.cwid}`}
                         >
@@ -1249,7 +1301,7 @@ export function CenterRosterCard({
                 onClick={paging.showMore}
                 data-testid="roster-show-more"
               >
-                Show {Math.min(PAGE_SIZE, visible.length - paging.visible.length)} more
+                Show {PAGE_SIZE} more
               </Button>
             )}
           </div>
@@ -1312,6 +1364,7 @@ export function CenterRosterCard({
         diseaseOptions={diseaseOptions}
         onDecide={decideDisease}
         queue={queueState}
+        error={error}
       />
     </EditPanel>
   );

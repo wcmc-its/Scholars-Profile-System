@@ -34,7 +34,7 @@ vi.mock("@/components/edit/directory-people-typeahead", () => ({
     ),
 }));
 
-import { CenterRosterCard, type RosterMember } from "@/components/edit/center-roster-card";
+import { CenterRosterCard, datesLabel, type RosterMember } from "@/components/edit/center-roster-card";
 
 const PROGRAMS = [
   { code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
@@ -227,6 +227,46 @@ describe("CenterRosterCard — the three mutually-exclusive filters", () => {
     render(<CenterRosterCard {...base} members={members} programs={[]} />);
     expect(screen.getByTestId("roster-status-act").className).toMatch(/apollo-green/);
     expect(screen.getByTestId("roster-status-ina").className).not.toMatch(/apollo-green/);
+  });
+
+  it("an Invited badge is amber and an Inactive badge neutral (mockup ST)", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[...members, member({ cwid: "inv", membershipRoleKey: "invited" })]}
+        programs={[]}
+      />,
+    );
+    expect(within(container).getByTestId("roster-status-inv").className).toMatch(/bg-apollo-amber-tint/);
+    expect(within(container).getByTestId("roster-status-ina").className).toMatch(/bg-apollo-surface-2/);
+  });
+
+  it("an inactive row gets the page background instead of being dimmed", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    const row = within(container).getByTestId("center-roster-row-ina");
+    expect(row.className).toMatch(/bg-apollo-page/);
+    expect(row.className).not.toMatch(/opacity-50/);
+    expect(within(container).getByTestId("center-roster-row-act").className).not.toMatch(/bg-apollo-page/);
+  });
+});
+
+describe("CenterRosterCard — dates label and 'Edit dates'", () => {
+  it("formats the four mockup cases at month precision", () => {
+    expect(datesLabel("2021-03-15", null)).toBe("Since Mar 2021");
+    expect(datesLabel("2021-03-15", "2026-06-30")).toBe("Mar 2021 – Jun 2026");
+    expect(datesLabel(null, "2026-06-30")).toBe("Ended Jun 2026");
+    expect(datesLabel(null, null)).toBe("No start date");
+  });
+
+  it("renders the label beside an 'Edit dates' link that opens the date inputs", () => {
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ startDate: "2021-03-15" })]} programs={PROGRAMS} />,
+    );
+    expect(within(container).getByTestId("roster-dates-label-m1").textContent).toBe("Since Mar 2021");
+    const trigger = within(container).getByTestId("roster-dates-trigger-m1");
+    expect(trigger.textContent).toBe("Edit dates");
+    fireEvent.click(trigger);
+    expect((screen.getByTestId("roster-start-m1") as HTMLInputElement).value).toBe("2021-03-15");
   });
 });
 
@@ -431,12 +471,12 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     endDate: "2024-01-01",
   });
 
-  it("tints the row and colors the date-range trigger when the membership is still open", () => {
+  it("tints the row and colors the dates label when the membership is still open", () => {
     render(<CenterRosterCard {...base} members={[openMembership]} programs={[]} />);
     const row = screen.getByTestId("center-roster-row-open1");
     expect(row.getAttribute("data-needs-close-out")).toBe("true");
     expect(row.className).toMatch(/apollo-amber/);
-    expect(screen.getByTestId("roster-dates-trigger-open1").className).toMatch(/apollo-amber/);
+    expect(screen.getByTestId("roster-dates-label-open1").className).toMatch(/apollo-amber/);
     fireEvent.click(screen.getByTestId("roster-dates-trigger-open1"));
     expect(screen.getByTestId("roster-end-open1").className).toMatch(/apollo-amber/);
   });
@@ -446,7 +486,7 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     const row = screen.getByTestId("center-roster-row-shut1");
     expect(row.getAttribute("data-needs-close-out")).toBeNull();
     expect(row.className).not.toMatch(/apollo-amber/);
-    expect(screen.getByTestId("roster-dates-trigger-shut1").className).not.toMatch(/apollo-amber/);
+    expect(screen.getByTestId("roster-dates-label-shut1").className).not.toMatch(/apollo-amber/);
   });
 
   it("does NOT flag a still-employed member with an open membership", () => {
@@ -519,6 +559,27 @@ describe("CenterRosterCard — left-WCM banner", () => {
   });
 });
 
+describe("CenterRosterCard — left-WCM banner on a phone", () => {
+  it("'Review and set end dates' scrolls the Left WCM tab into view (the tab strip scrolls sideways)", () => {
+    // jsdom has no scrollIntoView (tests/setup.ts no-ops it on
+    // HTMLElement.prototype); record calls there and restore after.
+    const scrolled: Element[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this);
+    };
+    try {
+      const { container } = render(
+        <CenterRosterCard {...base} members={[member({ cwid: "g1", scholarState: "departed" })]} programs={[]} />,
+      );
+      fireEvent.click(within(container).getByTestId("roster-needs-close-out-jump"));
+      expect(scrolled).toEqual([within(container).getByTestId("roster-filter-departed")]);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+});
+
 describe("CenterRosterCard — Program filter", () => {
   const members = [
     member({ cwid: "ct1", name: "Therapeutics One", programCode: "CT" }),
@@ -541,7 +602,13 @@ describe("CenterRosterCard — Program filter", () => {
     expect(within(container).getByTestId("center-roster-row-cb1")).toBeTruthy();
   });
 
-  it("is absent on a center with no program taxonomy (CTSC), as are the disease controls", () => {
+  // CTSC's hidden Program / Diseases are DATA-driven, not keyed on
+  // `source: "ctsc-feed"`: `loadUnitEditContext` sends no programs and no
+  // disease rows for a center without a CenterProgram taxonomy (covered in
+  // tests/unit/unit-edit-context.test.ts, "a center with NO CenterProgram
+  // taxonomy gets an empty diseases list"). These two tests pin the card's
+  // half of that contract.
+  it("is absent on a center with no program taxonomy or disease data (CTSC's payload), as are the disease controls", () => {
     const { container } = render(
       <CenterRosterCard
         {...base}
@@ -555,6 +622,20 @@ describe("CenterRosterCard — Program filter", () => {
     expect(within(container).queryByText("Diseases")).toBeNull();
     // Remove stays offered; the server refuses it for a feed row (mapped below).
     expect(within(container).getByTestId("roster-remove-ext1")).toBeTruthy();
+  });
+
+  it("keys on the payload, not the source: a ctsc-feed row on a center WITH programs and diseases still shows them", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "ext1", scholarState: "external", source: "ctsc-feed", diseases: [diseaseRow({})] }),
+        ]}
+        programs={PROGRAMS}
+      />,
+    );
+    expect(within(container).getByTestId("roster-program-filter")).toBeTruthy();
+    expect(within(container).getByTestId("roster-disease-filter-trigger")).toBeTruthy();
   });
 
   it("a CTSC feed row's refused remove shows the nightly-sync message", async () => {
@@ -583,10 +664,11 @@ describe("CenterRosterCard — paging", () => {
     member({ cwid: `p${String(i).padStart(2, "0")}`, name: `Person ${i}` }),
   );
 
-  it("shows 25, then the rest on 'Show 5 more'", () => {
+  it("shows 25, then the rest on 'Show 25 more'", () => {
     const { container } = render(<CenterRosterCard {...base} members={many} programs={[]} />);
     expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(25);
     expect(within(container).getByTestId("roster-range-label").textContent).toBe("Showing 25 of 30 members");
+    expect(within(container).getByTestId("roster-show-more").textContent).toBe("Show 25 more");
     fireEvent.click(within(container).getByTestId("roster-show-more"));
     expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(30);
     expect(within(container).queryByTestId("roster-show-more")).toBeNull();
@@ -601,6 +683,26 @@ describe("CenterRosterCard — paging", () => {
     fireEvent.click(within(sheet()).getByTestId("disease-confirm-p29-BREAST"));
     await waitFor(() => expect(within(sheet()).getByTestId("disease-decision-p29-BREAST")).toBeTruthy());
     expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(30);
+  });
+
+  it("with 'Has diseases to review' on, finishing a member keeps them listed and keeps the page", async () => {
+    stubOk();
+    const withDiseases = many.map((m) => ({ ...m, diseases: [diseaseRow({})] }));
+    const { container } = render(<CenterRosterCard {...base} members={withDiseases} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    fireEvent.click(within(container).getByTestId("roster-show-more"));
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-p29"));
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-p29-BREAST"));
+    await waitFor(() => expect(within(sheet()).getByTestId("disease-decision-p29-BREAST")).toBeTruthy());
+    expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(30);
+    expect(within(container).getByTestId("center-roster-row-p29")).toBeTruthy();
+    // The count is live, though, and flipping the toggle drops the finished member.
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("29");
+    fireEvent.click(within(sheet()).getByTestId("disease-review-close"));
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    fireEvent.click(within(container).getByTestId("roster-show-more"));
+    expect(within(container).queryByTestId("center-roster-row-p29")).toBeNull();
   });
 });
 
@@ -801,7 +903,12 @@ describe("CenterRosterCard — disease review sheet", () => {
     );
     fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
     fireEvent.click(within(sheet()).getByTestId("disease-confirm-m1-BREAST"));
-    await waitFor(() => expect(within(container).getByText(/no longer in the current assignment list/)).toBeTruthy());
+    // The sheet is modal over the card, so the message must be IN the sheet.
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-review-error").textContent).toMatch(
+        /no longer in the current assignment list/,
+      ),
+    );
     expect(within(sheet()).getByTestId("disease-confirm-m1-BREAST")).toBeTruthy();
   });
 });
@@ -865,6 +972,29 @@ describe("CenterRosterCard — 'Has diseases to review' and the review queue", (
     fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
     expect(within(container).queryByTestId("center-roster-row-b")).toBeNull();
     expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(3);
+  });
+
+  it("the toggle narrows the disease filter's option counts too", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    const breastCount = () => {
+      fireEvent.click(within(container).getByTestId("roster-disease-filter-trigger"));
+      const text = screen.getByTestId("roster-disease-filter-option-BREAST").textContent;
+      fireEvent.keyDown(screen.getByTestId("roster-disease-filter-menu"), { key: "Escape" });
+      return text;
+    };
+    // Alpha, Bravo (confirmed), Charlie, Delta all hold BREAST.
+    expect(breastCount()).toMatch(/4$/);
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    // Bravo has nothing to review, so it drops out of the count.
+    expect(breastCount()).toMatch(/3$/);
+  });
+
+  it("the Next button truncates a long name so the footer fits a phone", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    const next = within(sheet()).getByTestId("disease-review-next");
+    expect(next.className).toMatch(/min-w-0/);
+    expect(within(next).getByText("Next: Charlie").className).toMatch(/truncate/);
   });
 
   it("the count follows the other filters", () => {

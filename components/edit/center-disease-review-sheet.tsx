@@ -17,9 +17,13 @@
  *
  * In a review queue the header shows "Review queue · i of N" and the footer
  * "Next: <name> →" (the card owns the queue; this only renders it).
+ *
+ * A failed decision's message (`error`) renders INSIDE the sheet: the sheet is
+ * modal and covers the card, so an alert in the card would go unseen.
  */
 import * as React from "react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -312,6 +316,7 @@ export function CenterDiseaseReviewSheet({
   diseaseOptions,
   onDecide,
   queue,
+  error = null,
 }: {
   /** The member under review; `null` closes the sheet. */
   member: ReviewSheetMember | null;
@@ -319,6 +324,8 @@ export function CenterDiseaseReviewSheet({
   diseaseOptions: ReadonlyArray<DiseaseCodeOption>;
   onDecide: (cwid: string, diseaseCode: string, decision: DiseaseDecisionKind) => Promise<void>;
   queue: ReviewQueueState | null;
+  /** The card's latest write error, shown in the sheet (see the docblock). */
+  error?: string | null;
 }) {
   return (
     <Sheet open={member !== null} onOpenChange={(open) => !open && onClose()}>
@@ -336,6 +343,7 @@ export function CenterDiseaseReviewSheet({
             diseaseOptions={diseaseOptions}
             onDecide={onDecide}
             queue={queue}
+            error={error}
           />
         )}
       </SheetContent>
@@ -349,12 +357,14 @@ function SheetBody({
   diseaseOptions,
   onDecide,
   queue,
+  error,
 }: {
   member: ReviewSheetMember;
   onClose: () => void;
   diseaseOptions: ReadonlyArray<DiseaseCodeOption>;
   onDecide: (cwid: string, diseaseCode: string, decision: DiseaseDecisionKind) => Promise<void>;
   queue: ReviewQueueState | null;
+  error: string | null;
 }) {
   const [busy, setBusy] = React.useState<ReadonlySet<string>>(() => new Set());
   const [expanded, setExpanded] = React.useState<string | null>(null);
@@ -417,6 +427,11 @@ function SheetBody({
       </SheetHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-2 pb-4">
+        {error && (
+          <Alert variant="destructive" className="mt-2" data-testid="disease-review-error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         {diseases.length === 0 ? (
           <p className="text-muted-foreground py-3 text-sm">No disease assignments for this member yet.</p>
         ) : (
@@ -442,13 +457,23 @@ function SheetBody({
         />
       </div>
 
-      <SheetFooter className="border-apollo-border bg-apollo-surface flex-row items-center justify-between px-6 py-3.5">
+      {/* Wraps, and the Next label truncates, so a long name can't push the
+          footer past a 390px phone. */}
+      <SheetFooter className="border-apollo-border bg-apollo-surface flex-row flex-wrap items-center justify-between gap-2 px-6 py-3.5">
         <Button type="button" variant="ghost" size="sm" onClick={onClose} data-testid="disease-review-close">
           Close
         </Button>
         {queue?.nextName && (
-          <Button type="button" variant="apollo" size="sm" onClick={queue.onNext} data-testid="disease-review-next">
-            Next: {queue.nextName} →
+          <Button
+            type="button"
+            variant="apollo"
+            size="sm"
+            className="max-w-full min-w-0 shrink"
+            onClick={queue.onNext}
+            data-testid="disease-review-next"
+          >
+            <span className="truncate">Next: {queue.nextName}</span>{" "}
+            <span aria-hidden>→</span>
           </Button>
         )}
       </SheetFooter>
