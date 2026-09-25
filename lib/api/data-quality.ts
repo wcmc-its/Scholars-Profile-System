@@ -619,6 +619,7 @@ async function computeDataQualityEntries(
       chairLabel,
       isChief,
       isCenterDirector: centerDirectors.has(s.cwid),
+      department: s.department?.name ?? null,
       piCount: piCount.get(s.cwid) ?? 0,
       nihPiCount: nihPiCount.get(s.cwid) ?? 0,
     });

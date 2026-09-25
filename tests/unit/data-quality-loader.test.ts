@@ -576,6 +576,12 @@ describe("classifyLeadership — title heuristic (#1)", () => {
     });
   });
 
+  it("a director title naming the scholar's own department sorts as Chair (BMRI)", () => {
+    const t = "Director of the Feil Family Brain and Mind Research Institute";
+    expect(classifyLeadership(t, null, false, false, "Brain and Mind Research").tier).toBe(4);
+    expect(classifyLeadership(t, null, false, false, "Neurology").tier).toBe(10);
+  });
+
   it("the best of title and FK roles wins, on the EA ladder", () => {
     // Chair (4) outranks Associate Dean (7)…
     expect(classifyLeadership("Associate Dean", "Chair", false)).toEqual({ tier: 4, label: "Chair" });

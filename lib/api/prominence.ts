@@ -126,13 +126,16 @@ export function classifyLeadership(
   chairLabel: string | null,
   isChief: boolean,
   isCenterDirector = false,
+  /** The scholar's department name — lets a director title that names it
+   *  rank as Chair (BMRI; see `rankTitleText`). */
+  department: string | null = null,
 ): { tier: number; label: string | null } {
   const t = (title ?? "").trim();
   const active = t !== "" && !TITLE_EMERITUS.test(t);
   if (active && HAS_DEAN.test(t) && !SUBDEAN_MODIFIER.test(t) && !SCHOOL_SPECIFIC_DEAN.test(t)) {
     return { tier: LEADERSHIP_TIER.dean, label: "Dean" };
   }
-  const textRank = rankTitleText(t);
+  const textRank = rankTitleText(t, department);
   const candidates: Array<[number, string | null]> = [
     [textRank, textRank <= TITLE_RANK.associateViceProvost && active ? deaneryLabel(t) : null],
   ];
@@ -162,6 +165,8 @@ export type ProminenceInputs = {
   isChief: boolean;
   /** Directs a center (always school-wide, rank 5). Defaults to false. */
   isCenterDirector?: boolean;
+  /** Department name, for the director-names-own-department rule. */
+  department?: string | null;
   piCount: number | null;
   nihPiCount: number | null;
 };
@@ -196,6 +201,7 @@ export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
     input.chairLabel,
     input.isChief,
     input.isCenterDirector ?? false,
+    input.department ?? null,
   );
   return { prominence, leadershipTier: tier, leadershipLabel: label };
 }
@@ -233,6 +239,7 @@ export async function computeProminence(
         scoredPubCount: true,
         roleCategory: true,
         primaryTitle: true,
+        department: { select: { name: true } },
       },
     }),
     // #2542 contract A — chair/director/chief come from `OrgUnitRoleAssignment`
@@ -288,6 +295,7 @@ export async function computeProminence(
         chairLabel: chairLabelByCwid.get(s.cwid) ?? null,
         isChief: chiefs.has(s.cwid),
         isCenterDirector: centerDirectors.has(s.cwid),
+        department: s.department?.name ?? null,
         piCount: piCount.get(s.cwid) ?? 0,
         nihPiCount: nihPiCount.get(s.cwid) ?? 0,
       }),

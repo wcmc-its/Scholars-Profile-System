@@ -81,7 +81,13 @@ const RANK_WORDS = new Set([
  * "Senior Associate Dean" not as Associate Dean, "Vice Dean" not as Dean.
  * Emeritus titles hold no office, so they rank as academic at best.
  */
-export function rankTitleText(title: string | null | undefined): number {
+export function rankTitleText(
+  title: string | null | undefined,
+  /** The department the title is held in, when known. A center/institute
+   *  director title that NAMES its own department heads that department, which
+   *  ranks as Chair: BMRI is a department in all but name (EA, 2026-09-25). */
+  ownDepartment?: string | null,
+): number {
   const t = blankToNull(title ?? null);
   if (t === null) return TITLE_RANK.unranked;
   if (!EMERITUS.test(t)) {
@@ -109,7 +115,9 @@ export function rankTitleText(title: string | null | undefined): number {
   }
   if (isEndowed(t)) return TITLE_RANK.endowed;
   if (!EMERITUS.test(t) && isDirectorOf(t, /\b(?:center|centre|institute)\b/i)) {
-    return TITLE_RANK.unitCenterDirector;
+    return ownDepartment && sharesUnitName(t, ownDepartment)
+      ? TITLE_RANK.chair
+      : TITLE_RANK.unitCenterDirector;
   }
   if (!EMERITUS.test(t) && isDirectorOf(t, /\bprogram\b/i)) return TITLE_RANK.unitProgramDirector;
   if (/\b(?:professor|instructor|postdoctoral associate)\b/i.test(t)) return TITLE_RANK.academic;
@@ -174,7 +182,7 @@ export type TitleInputs = {
   /** ED `weillCornellEduWorkingTitle`, annotation-stripped. */
   workingTitle: string | null;
   /** Current ED appointment titles; the best-ranked one is the candidate. */
-  appointmentTitles?: readonly string[];
+  appointmentTitles?: readonly AppointmentTitle[];
   /** Pre-formatted, e.g. "Chief, Cardiology (Medicine)" — see {@link formatUnitLeadershipTitle}. */
   chiefTitle: string | null;
   /** Pre-formatted, e.g. "Director, Example Cancer Center". Every tracked
@@ -250,19 +258,23 @@ function sharesUnitName(a: string, b: string): boolean {
   return [...words(a)].some((w) => bw.has(w));
 }
 
-function ranked(title: string | null): [string | null, number] {
+/** One current ED appointment: its title and, when the appointment's
+ *  organization is a department, that department's name. */
+export type AppointmentTitle = { title: string; department?: string | null };
+
+function ranked(title: string | null, ownDepartment?: string | null): [string | null, number] {
   const v = blankToNull(title);
-  return [v, rankTitleText(v)];
+  return [v, rankTitleText(v, ownDepartment)];
 }
 
 /** Best-ranked title among `titles`, counting only those ABOVE a plain
  *  academic rank (endowed, chair, …). The ED primary title already carries the
  *  academic rank; letting an equal-rank appointment compete would swap
  *  "Professor of Medicine" for a sibling appointment's wording on a tie. */
-function bestRanked(titles: readonly string[]): [string | null, number] {
+function bestRanked(titles: readonly AppointmentTitle[]): [string | null, number] {
   let best: [string | null, number] = [null, TITLE_RANK.academic];
   for (const t of titles) {
-    const r = ranked(t);
+    const r = ranked(t.title, t.department);
     if (r[0] !== null && r[1] < best[1]) best = r;
   }
   return best[0] === null ? [null, TITLE_RANK.unranked] : best;

@@ -28,6 +28,7 @@ import {
   buildTitleOptions,
   formatUnitLeadershipTitle,
   resolveFromOptions,
+  type AppointmentTitle,
   type TitleOption,
 } from "@/lib/scholar-title";
 
@@ -64,18 +65,29 @@ export function isCenterDirector(a: { role: { key: string } }): boolean {
   return a.role.key === DIRECTOR_ROLE_KEY;
 }
 
-/** A scholar's current ED appointment titles — the `appointment` tier's pool. */
+/** A scholar's current ED appointment titles — the `appointment` tier's pool.
+ *  Each carries its department when the appointment's `organization` names
+ *  one, which is what lets "Director of the … Brain and Mind Research
+ *  Institute" held in the department "Brain and Mind Research" rank as the
+ *  department's head (see `rankTitleText`). */
 export async function loadCurrentAppointmentTitles(
-  client: Pick<PrismaClient, "appointment">,
+  client: Pick<PrismaClient, "appointment" | "department">,
   cwids?: readonly string[],
-): Promise<Map<string, string[]>> {
-  const rows = await client.appointment.findMany({
-    where: { source: "ED", endDate: null, ...(cwids ? { cwid: { in: [...cwids] } } : {}) },
-    select: { cwid: true, title: true },
-    orderBy: [{ isPrimary: "desc" }, { id: "asc" }],
-  });
-  const out = new Map<string, string[]>();
-  for (const r of rows) out.set(r.cwid, [...(out.get(r.cwid) ?? []), r.title]);
+): Promise<Map<string, AppointmentTitle[]>> {
+  const [rows, departments] = await Promise.all([
+    client.appointment.findMany({
+      where: { source: "ED", endDate: null, ...(cwids ? { cwid: { in: [...cwids] } } : {}) },
+      select: { cwid: true, title: true, organization: true },
+      orderBy: [{ isPrimary: "desc" }, { id: "asc" }],
+    }),
+    client.department.findMany({ select: { name: true } }),
+  ]);
+  const departmentNames = new Set(departments.map((d) => d.name));
+  const out = new Map<string, AppointmentTitle[]>();
+  for (const r of rows) {
+    const department = departmentNames.has(r.organization) ? r.organization : null;
+    out.set(r.cwid, [...(out.get(r.cwid) ?? []), { title: r.title, department }]);
+  }
   return out;
 }
 
@@ -88,6 +100,7 @@ type TitlePickerClient = Pick<
   | "centerProgram"
   | "fieldOverride"
   | "appointment"
+  | "department"
 >;
 
 export type PendingTitleRequest = {
