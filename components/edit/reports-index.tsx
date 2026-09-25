@@ -1,629 +1,397 @@
 /**
- * The Reports IA redesign (2026-08-14) — `2a`/`1a`/`3a`. Widened to
- * department/division units by the org-unit publications reports plan
- * (2026-08-16): each unit now carries its OWN report catalog (`reports`,
- * `perReport`), since a center's six reports and a department/division's two
- * (Publications, NIH-funded pubs) are different lists, not one shared list
- * with some rows "not live yet" — a department never shows a card for a
- * report it structurally can't produce (`REPORT_NUMBERS_BY_KIND`,
- * `lib/edit/cancer-center-reports.ts`).
+ * `/edit/reports` — the reports index (Reports Index redesign, 2026-09-25;
+ * mockup `More Reports/Reports Index Redesign.dc.html`). One list, grouped by
+ * the unit each report covers, for every viewer: it replaced the three
+ * renderings of the Reports IA redesign (2026-08-14) — the single-unit table
+ * (`3a`), the per-unit bands (`1a`) and the superuser's filter-rail table
+ * (`2a`).
  *
- * Three renderings of the same underlying per-report data
- * (`lib/edit/cancer-center-reports.ts`'s `loadReportLiveness`), chosen by the
- * page:
- * - `mode="table"` (2a, superuser/comms_steward with 2+ units) — one row per
- *   (unit, report) pair, each unit's own report catalog flattened out so the
- *   Status column reads per-report instead of as a unit-level "N of M"
- *   rollup. Filter rail narrows by unit type (still unit-scoped) and by
- *   per-report status (Live/In progress, now row-scoped). A live row's click
- *   target is that report itself (`/edit/reports/<slug>?center=…`); a non-live row
- *   has no link. Mirrors `AllUnitsDirectory`'s contract: server-bounded list,
- *   filter in-memory, no fetch, stretched-anchor rows (R7).
- * - `mode="bands"` (1a, everyone else with >1 unit) — every unit inline on one
- *   page, each in its own band with its own report rows beneath, so a
- *   multi-unit admin never has to leave the page to see any of it.
- * - `SingleUnitReportsTable` (3a — an actor with exactly one reportable unit,
- *   the common case today) — the SAME `Report | Focus | Last refreshed`
- *   table as one band's body, just without the band header (the page's own
- *   `<h1>` already names the unit). Exported separately since it's rendered
- *   from `app/edit/reports/page.tsx` directly, not through `ReportsIndex`.
+ * Each unit carries its OWN report catalog (`reports`, `perReport`) — a
+ * center's six reports and a department/division/core's two (Publications,
+ * NIH-funded pubs) are different lists (`REPORT_NUMBERS_BY_KIND`,
+ * `lib/edit/cancer-center-reports.ts`). The pseudo-units (`institution`:
+ * reports 8/9, `program`: report 7) have no org unit behind them.
  *
- * "Live" / "In progress" (table) and "N of M reports live" (bands' per-unit
- * summary) are both real per-report data presence, not a static catalog flag
- * — a not-live report renders as muted text, not a link, wherever it appears.
+ * A row is a whole-row link card: '#N', name, summary, a meta line (who can
+ * open it, as plain text from `accessSummary` — the same string source as the
+ * report header's badge — and the data label) and a chevron. A report with no
+ * data yet stays listed as a muted, non-link row reading "No data yet", so a
+ * unit's report count never varies night to night and a broken ETL is visible.
+ * "In progress" means NCI Table 2A has rows left to review, nothing else.
+ * Access is managed from the report's own Edit details sheet, never here.
  *
- * Every report row also carries "Who can run this report"
- * (`ReportAccessPopover`) right after its label, in all three renderings:
- * the page hands each report its popover PROPS (`access`, plain data — the
- * unit rule for reports 1–6, the grant rows for report 7) and this component
- * renders the island. The row's click target is a STRETCHED anchor
- * (`after:absolute after:inset-0`) that would otherwise sit over the glyph
- * and eat its clicks, so the trigger is wrapped in a `relative z-10` span —
- * a sibling of the `Link`, never inside it, so neither the trigger's click
- * nor the (portalled) content's bubbles into a navigation.
+ * Filters (search, scope, In progress) run in memory over the props — the
+ * list is server-bounded — and are mirrored into the URL (`q`, `scope`,
+ * `review=1`) with `history.replaceState`, so a shared link reproduces the
+ * view. A global viewer (superuser / comms steward) sees every department,
+ * division and core; those stay off under "All" (their own segments show
+ * them) unless a search is typed, which reaches every unit.
  */
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
+import { ChevronRight, Users } from "lucide-react";
 
 import {
-  ReportAccessPopover,
+  accessSummary,
   type ReportAccessPopoverProps,
 } from "@/components/edit/report-access-popover";
+import {
+  REPORTS_INDEX_SCOPES as SCOPES,
+  type ReportsIndexScope,
+} from "@/lib/edit/reports-index-scope";
+import { cn } from "@/lib/utils";
 
-const TH_CLASS =
-  "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
-
-/** Mirrors `ReportableUnitKind` (`lib/edit/cancer-center-reports.ts`). Declared
- *  locally rather than imported: this is a client component, and that module
- *  pulls the server-only reports data layer. */
-export type ReportsIndexUnitKind = "center" | "department" | "division" | "core" | "program" | "institution";
-/** The pseudo-units — no org unit behind them; their reports are addressed without `?center=`. */
-const isPseudo = (k: ReportsIndexUnitKind) => k === "program" || k === "institution";
-/** `"program"` is the one pseudo-unit: the person-granted Mentored
- *  publications report (`/edit/reports/7`) rides the same list as a unit with
- *  one report, so it is filterable and sortable like every other row. */
+/** Mirrors `ReportableUnitKind` (`lib/edit/cancer-center-reports.ts`) plus the
+ *  two pseudo-units. Declared locally: this is a client component, and that
+ *  module pulls the server-only reports data layer. */
+export type ReportsIndexUnitKind =
+  | "center"
+  | "department"
+  | "division"
+  | "core"
+  | "program"
+  | "institution";
 export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+const isPseudo = (k: ReportsIndexUnitKind) => k === "program" || k === "institution";
 
 export type ReportsIndexReport = {
   n: ReportN;
-  /** The report's CURRENT `report_meta.slug` — its canonical address
-   *  (`/edit/reports/<slug>`), which the row links to directly rather than
-   *  through the number's redirect hop. The page fills it from
-   *  `loadReportMeta()`, never a constant: a superuser can rename it. */
+  /** The report's CURRENT `report_meta.slug` — its canonical address. */
   slug: string;
-  label: string;
+  /** The bare report name (`report_meta.name`); the row prints '#N' apart. */
+  name: string;
   description: string;
-  /** The "Who can run this report" popover's props — `{ mode: "unit" }` for
-   *  reports 1–6, the person variant (grant rows, scope options, `canManage`)
-   *  for report 7. Plain data, so it crosses the server/client boundary. */
+  /** Who can open it — rendered here only as `accessSummary(access).text`. */
   access: ReportAccessPopoverProps;
+};
+
+export type ReportsIndexPerReport = {
+  n: ReportN;
+  live: boolean;
+  /** ISO string (plain-serializable) or null. */
+  lastRefreshedAt: string | null;
+  /** Report 2 only: the latest import cycle, and its rows awaiting review. */
+  reportingCycle?: string | null;
+  toReview?: number;
 };
 
 export type ReportsIndexUnit = {
   code: string;
   kind: ReportsIndexUnitKind;
   name: string;
-  /** Only meaningful when `kind === "center"`; null for department/division/
-   *  core (no institute-vs-center distinction outside a center). */
-  centerType: "center" | "institute" | null;
   editHref: string;
-  liveCount: number;
-  totalCount: number;
-  /** ISO string (plain-serializable) or null — nothing live yet. */
-  lastRefreshedAt: string | null;
-  /** This unit's OWN report catalog — `REPORT_NUMBERS_BY_KIND[kind]` resolved
-   *  to labels/descriptions. A center carries all six; department/division/
-   *  core carry only Publications + NIH-funded pubs. */
   reports: ReadonlyArray<ReportsIndexReport>;
-  perReport: ReadonlyArray<{ n: ReportN; live: boolean; lastRefreshedAt: string | null }>;
+  perReport: ReadonlyArray<ReportsIndexPerReport>;
 };
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
+/** Segments that appear only when the viewer has a unit of that kind. */
+const OPTIONAL_SCOPES = new Set<string>(["department", "division", "core"]);
 
-function typeLabel(u: { kind: ReportsIndexUnitKind; centerType: "center" | "institute" | null }): string {
-  if (u.kind === "department") return "Department";
-  if (u.kind === "division") return "Division";
-  if (u.kind === "core") return "Core";
-  if (u.kind === "program") return "Program";
-  if (u.kind === "institution") return "Institution";
-  return u.centerType === "institute" ? "Institute" : "Center";
-}
-
-/** The "Who can run this report" glyph beside a row's label. `relative z-10`
- *  lifts it above the row's stretched anchor (`after:absolute after:inset-0`
- *  on the `Link`) so the trigger — not the row link — takes the click; it is
- *  rendered as the `Link`'s SIBLING so the portalled content never sits
- *  inside the anchor's React tree either. */
-function RowAccess({ access }: { access: ReportAccessPopoverProps }) {
-  return (
-    <span
-      className="relative z-10 ml-2 inline-flex align-middle"
-      data-testid="reports-index-access"
-    >
-      <ReportAccessPopover {...access} />
-    </span>
-  );
-}
-
-/** `/edit/reports/<slug>?center=<code>` — `&kind=` is only appended for a
- *  department/division/core so an existing `?center=<centerCode>` bookmark
- *  (implied `kind=center`) keeps resolving exactly as it always has. For a
- *  core, `<code>` is the core id. The slug (not the number) so the click is
- *  one navigation, not a redirect hop through `/edit/reports/N`. */
+/** `/edit/reports/<slug>?center=<code>` — `&kind=` only for a department /
+ *  division / core, so a `?center=<centerCode>` bookmark keeps resolving. A
+ *  pseudo-unit's report is not unit-scoped: no params at all. */
 function reportHref(slug: string, code: string, kind: ReportsIndexUnitKind): string {
-  // Report 7 is granted per person (`report_access`), report 8 to every
-  // administrator — neither is unit-scoped.
   if (isPseudo(kind)) return `/edit/reports/${slug}`;
   const params = new URLSearchParams({ center: code });
   if (kind !== "center") params.set("kind", kind);
   return `/edit/reports/${slug}?${params.toString()}`;
 }
 
-export function ReportsIndex({
-  units,
-  mode,
-}: {
-  units: ReadonlyArray<ReportsIndexUnit>;
-  mode: "table" | "bands";
-}) {
-  return mode === "table" ? <ReportsTable units={units} /> : <ReportsBands units={units} />;
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    // Fixed zone so the server render and hydration agree.
+    timeZone: "America/New_York",
+  });
 }
 
-type SortKey = "unit" | "status" | "refreshed";
+/** The meta line's data label. */
+export function dataLabel(n: ReportN, p: ReportsIndexPerReport | undefined): string {
+  if (!p?.live) return "No data yet";
+  if (n === 1)
+    return p.lastRefreshedAt ? `Snapshot · refreshed ${formatDate(p.lastRefreshedAt)}` : "Snapshot";
+  if (n === 2 && p.reportingCycle) return `Cycle ${p.reportingCycle}`;
+  return "Live data";
+}
 
-/** One (org unit, report) pair — the table's actual row grain. Flattened from
- *  a unit's own `reports` catalog against its `perReport` liveness, the same
- *  lookup `ReportRows` below already does per unit. */
-type FlatRow = {
-  unitCode: string;
-  unitKind: ReportsIndexUnitKind;
-  unitName: string;
-  centerType: "center" | "institute" | null;
-  reportN: ReportN;
-  reportSlug: string;
-  reportLabel: string;
-  access: ReportAccessPopoverProps;
+type Row = {
+  unit: ReportsIndexUnit;
+  report: ReportsIndexReport;
   live: boolean;
-  lastRefreshedAt: string | null;
+  data: string;
+  toReview: number;
+  haystack: string;
 };
 
-function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
-  const [query, setQuery] = React.useState("");
-  const [sort, setSort] = React.useState<SortKey>("unit");
-  const [showCenters, setShowCenters] = React.useState(true);
-  const [showInstitutes, setShowInstitutes] = React.useState(true);
-  // Default unchecked, matching the mockup's own default state for these
-  // buckets — a department/division row stays hidden until explicitly toggled
-  // on, same posture the mockup gave the (formerly always-empty) Department
-  // checkbox.
-  const [showDepartments, setShowDepartments] = React.useState(false);
-  const [showDivisions, setShowDivisions] = React.useState(false);
-  // Same default-off posture as department/division — cores are the newest
-  // reportable kind and only a handful carry any unit_admin grant at all.
-  const [showCores, setShowCores] = React.useState(false);
-  // On by default: the one program row is what a report_access holder came for.
-  const [showPrograms, setShowPrograms] = React.useState(true);
-  const [liveOnly, setLiveOnly] = React.useState(false);
-  const [noneYetOnly, setNoneYetOnly] = React.useState(false);
-
-  const rows = React.useMemo<FlatRow[]>(() => {
-    const out: FlatRow[] = [];
-    for (const u of units) {
-      const liveByN = new Map(u.perReport.map((r) => [r.n, r]));
-      for (const r of u.reports) {
-        const live = liveByN.get(r.n);
-        out.push({
-          unitCode: u.code,
-          unitKind: u.kind,
-          unitName: u.name,
-          centerType: u.centerType,
-          reportN: r.n,
-          reportSlug: r.slug,
-          reportLabel: r.label,
-          access: r.access,
-          live: live?.live ?? false,
-          lastRefreshedAt: live?.lastRefreshedAt ?? null,
-        });
-      }
-    }
-    return out;
-  }, [units]);
-
-  const counts = React.useMemo(
-    () => ({
-      centers: units.filter((u) => u.kind === "center" && u.centerType !== "institute").length,
-      institutes: units.filter((u) => u.kind === "center" && u.centerType === "institute").length,
-      departments: units.filter((u) => u.kind === "department").length,
-      divisions: units.filter((u) => u.kind === "division").length,
-      cores: units.filter((u) => u.kind === "core").length,
-      programs: units.filter((u) => isPseudo(u.kind)).length,
-      // Row-scoped (per report), not unit-scoped — a unit with 1 of 6 reports
-      // live now contributes 1 row to liveOnly and 5 to noneYet, instead of
-      // reading as "has a live report" and never surfacing in "In progress".
-      liveOnly: rows.filter((r) => r.live).length,
-      noneYet: rows.filter((r) => !r.live).length,
-    }),
-    [units, rows],
-  );
-
-  const filtered = React.useMemo(() => {
-    const trimmed = query.trim().toLowerCase();
-    const pool = rows.filter((r) => {
-      if (r.unitKind === "center" && r.centerType !== "institute" && !showCenters) return false;
-      if (r.unitKind === "center" && r.centerType === "institute" && !showInstitutes) return false;
-      if (r.unitKind === "department" && !showDepartments) return false;
-      if (r.unitKind === "division" && !showDivisions) return false;
-      if (r.unitKind === "core" && !showCores) return false;
-      if (isPseudo(r.unitKind) && !showPrograms) return false;
-      if (liveOnly && !r.live) return false;
-      if (noneYetOnly && r.live) return false;
-      if (trimmed.length === 0) return true;
-      return r.unitName.toLowerCase().includes(trimmed);
-    });
-    if (sort === "status") {
-      return [...pool].sort(
-        (a, b) =>
-          Number(b.live) - Number(a.live) ||
-          a.unitName.localeCompare(b.unitName) ||
-          a.reportLabel.localeCompare(b.reportLabel),
-      );
-    }
-    if (sort === "refreshed") {
-      return [...pool].sort((a, b) => {
-        const at = a.lastRefreshedAt ? new Date(a.lastRefreshedAt).getTime() : -Infinity;
-        const bt = b.lastRefreshedAt ? new Date(b.lastRefreshedAt).getTime() : -Infinity;
-        return bt - at || a.unitName.localeCompare(b.unitName) || a.reportLabel.localeCompare(b.reportLabel);
+function buildRows(units: ReadonlyArray<ReportsIndexUnit>): Row[] {
+  const rows: Row[] = [];
+  for (const unit of units) {
+    const byN = new Map(unit.perReport.map((p) => [p.n, p]));
+    for (const report of [...unit.reports].sort((a, b) => a.n - b.n)) {
+      const p = byN.get(report.n);
+      const live = p?.live ?? false;
+      rows.push({
+        unit,
+        report,
+        live,
+        data: dataLabel(report.n, p),
+        toReview: report.n === 2 && live ? (p?.toReview ?? 0) : 0,
+        haystack:
+          `${report.name} ${report.description} ${unit.name} #${report.n} ${report.n}`.toLowerCase(),
       });
     }
-    return [...pool].sort(
-      (a, b) => a.unitName.localeCompare(b.unitName) || a.reportLabel.localeCompare(b.reportLabel),
-    );
-  }, [
-    rows,
-    query,
-    sort,
-    showCenters,
-    showInstitutes,
-    showDepartments,
-    showDivisions,
-    showCores,
-    showPrograms,
-    liveOnly,
-    noneYetOnly,
-  ]);
+  }
+  return rows;
+}
+
+export function ReportsIndex({
+  units,
+  hideUnderAll = false,
+  initialQuery = "",
+  initialScope = "all",
+  initialReview = false,
+}: {
+  /** In display order: the page puts Institution-wide and Mentoring programs first. */
+  units: ReadonlyArray<ReportsIndexUnit>;
+  /** A global viewer: departments / divisions / cores are off under "All". */
+  hideUnderAll?: boolean;
+  initialQuery?: string;
+  initialScope?: ReportsIndexScope;
+  initialReview?: boolean;
+}) {
+  const rows = React.useMemo(() => buildRows(units), [units]);
+  const kindsPresent = React.useMemo(() => new Set<string>(units.map((u) => u.kind)), [units]);
+  const segments = SCOPES.filter(([k]) => !OPTIONAL_SCOPES.has(k) || kindsPresent.has(k));
+  const hasReviewable = rows.some((r) => r.report.n === 2);
+  const reviewCount = rows.filter((r) => r.toReview > 0).length;
+
+  const [query, setQuery] = React.useState(initialQuery);
+  const [scope, setScope] = React.useState<ReportsIndexScope>(
+    segments.some(([k]) => k === initialScope) ? initialScope : "all",
+  );
+  const [review, setReview] = React.useState(initialReview);
+
+  // Mirror the filters into the URL (the #2792 pattern: a shared link
+  // reproduces the view), keeping any other param (`?center=`, `?kind=`).
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const set = (key: string, value: string | null) =>
+      value ? params.set(key, value) : params.delete(key);
+    set("q", query.trim() || null);
+    set("scope", scope === "all" ? null : scope);
+    set("review", review ? "1" : null);
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [query, scope, review]);
+
+  const q = query.trim().toLowerCase();
+  const inScope = (r: Row, k: ReportsIndexScope) => {
+    const kind = r.unit.kind;
+    if (k === "all") return !(hideUnderAll && OPTIONAL_SCOPES.has(kind)) || q !== "";
+    return kind === k;
+  };
+  const matched = rows.filter(
+    (r) => (q === "" || r.haystack.includes(q)) && (!review || r.toReview > 0),
+  );
+  const visible = matched.filter((r) => inScope(r, scope));
+
+  const groups: Array<{ unit: ReportsIndexUnit; rows: Row[] }> = [];
+  for (const r of visible) {
+    const last = groups[groups.length - 1];
+    if (last?.unit === r.unit) last.rows.push(r);
+    else groups.push({ unit: r.unit, rows: [r] });
+  }
+
+  const clearFilters = () => {
+    setQuery("");
+    setScope("all");
+    setReview(false);
+  };
 
   return (
-    <div className="flex flex-col gap-4" data-slot="reports-index-table" data-testid="reports-index-table">
-      <div className="grid grid-cols-[220px_1fr] items-start gap-5">
-        <div className="border-apollo-rail-border bg-apollo-rail flex flex-col gap-4 rounded-xl border p-3">
-          <fieldset>
-            <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
-              Unit type
-            </legend>
-            <div className="flex flex-col gap-1">
-              <FilterCheckbox
-                checked={showCenters}
-                onChange={setShowCenters}
-                label="Center"
-                count={counts.centers}
-                testid="reports-index-filter-center"
-              />
-              <FilterCheckbox
-                checked={showInstitutes}
-                onChange={setShowInstitutes}
-                label="Institute"
-                count={counts.institutes}
-                testid="reports-index-filter-institute"
-              />
-              <FilterCheckbox
-                checked={showDepartments}
-                onChange={setShowDepartments}
-                label="Department"
-                count={counts.departments}
-                testid="reports-index-filter-department"
-              />
-              <FilterCheckbox
-                checked={showDivisions}
-                onChange={setShowDivisions}
-                label="Division"
-                count={counts.divisions}
-                testid="reports-index-filter-division"
-              />
-              <FilterCheckbox
-                checked={showCores}
-                onChange={setShowCores}
-                label="Core"
-                count={counts.cores}
-                testid="reports-index-filter-core"
-              />
-              {counts.programs > 0 && (
-                <FilterCheckbox
-                  checked={showPrograms}
-                  onChange={setShowPrograms}
-                  label="Program"
-                  count={counts.programs}
-                  testid="reports-index-filter-program"
-                />
-              )}
-            </div>
-          </fieldset>
-          <fieldset className="border-apollo-border border-t">
-            <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
-              Status
-            </legend>
-            <div className="flex flex-col gap-1">
-              <FilterCheckbox
-                checked={liveOnly}
-                onChange={(v) => {
-                  setLiveOnly(v);
-                  if (v) setNoneYetOnly(false);
-                }}
-                label="Live"
-                count={counts.liveOnly}
-                testid="reports-index-filter-has-live"
-              />
-              <FilterCheckbox
-                checked={noneYetOnly}
-                onChange={(v) => {
-                  setNoneYetOnly(v);
-                  if (v) setLiveOnly(false);
-                }}
-                label="In progress"
-                count={counts.noneYet}
-                testid="reports-index-filter-none-yet"
-              />
-            </div>
-          </fieldset>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="text"
-              value={query}
-              placeholder="Filter by unit name…"
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label="Filter units"
-              className="border-apollo-border-strong bg-apollo-surface h-9 w-70 rounded-md border px-3 text-sm"
-              data-testid="reports-index-filter-name"
-            />
-            <label className="text-muted-foreground flex items-center gap-2 text-sm">
-              Sort
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value as SortKey)}
-                className="border-apollo-border-strong text-foreground h-9 rounded-md border bg-apollo-surface px-2 text-sm"
-                data-testid="reports-index-sort"
+    <div data-testid="reports-index">
+      <div className="mt-6 flex flex-wrap items-center gap-2.5">
+        <input
+          type="search"
+          value={query}
+          placeholder="Search reports"
+          aria-label="Search reports"
+          onChange={(e) => setQuery(e.target.value)}
+          className="border-apollo-border-strong bg-apollo-surface h-9 w-full rounded-md border px-3 text-sm sm:w-72"
+          data-testid="reports-index-search"
+        />
+        <div
+          role="group"
+          aria-label="Scope"
+          className="bg-apollo-surface-2 border-apollo-border-strong flex flex-wrap gap-0.5 rounded-lg border p-[3px]"
+        >
+          {segments.map(([k, label]) => {
+            const on = scope === k;
+            return (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setScope(k)}
+                className={cn(
+                  "rounded-md px-3 py-[5px] text-sm whitespace-nowrap tabular-nums",
+                  on
+                    ? "bg-apollo-surface text-foreground font-semibold shadow-[var(--apollo-shadow-card)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                data-testid={`reports-index-scope-${k}`}
               >
-                <option value="unit">Unit</option>
-                <option value="status">Status</option>
-                <option value="refreshed">Last refreshed</option>
-              </select>
-            </label>
-            <span className="text-muted-foreground ml-auto text-sm">
-              Showing {filtered.length} of {rows.length}
-            </span>
-          </div>
-
-          {filtered.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No reports match the current filters.</p>
-          ) : (
-            <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border">
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-left text-sm" data-testid="reports-index-rows">
-                  <thead className="bg-apollo-surface-2">
-                    <tr className="border-apollo-border border-b">
-                      <th scope="col" className={`${TH_CLASS} w-60`}>
-                        Report
-                      </th>
-                      <th scope="col" className={TH_CLASS}>
-                        Org unit
-                      </th>
-                      <th scope="col" className={`${TH_CLASS} w-28`}>
-                        Type
-                      </th>
-                      <th scope="col" className={`${TH_CLASS} w-28`}>
-                        Status
-                      </th>
-                      <th scope="col" className={`${TH_CLASS} w-36 text-right`}>
-                        Last refreshed
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((r) => (
-                      <tr
-                        key={`${r.unitCode}-${r.reportN}`}
-                        className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline focus-within:-outline-offset-2 focus-within:outline-apollo-maroon relative border-t focus-within:outline-2"
-                        data-testid={`reports-index-row-${r.unitCode}-${r.reportN}`}
-                      >
-                        <td className="px-3 py-2.5 align-middle">
-                          {r.live ? (
-                            <Link
-                              href={reportHref(r.reportSlug, r.unitCode, r.unitKind)}
-                              className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
-                              data-testid={`reports-index-link-${r.unitCode}-${r.reportN}`}
-                            >
-                              {r.reportLabel}
-                            </Link>
-                          ) : (
-                            <span className="text-muted-foreground">{r.reportLabel}</span>
-                          )}
-                          <RowAccess access={r.access} />
-                        </td>
-                        <td className="px-3 py-2.5 align-middle">{r.unitName}</td>
-                        <td className="px-3 py-2.5 align-middle whitespace-nowrap">
-                          {typeLabel({ kind: r.unitKind, centerType: r.centerType })}
-                        </td>
-                        <td className="px-3 py-2.5 align-middle whitespace-nowrap">
-                          {r.live ? "Live" : "In progress"}
-                        </td>
-                        <td className="text-muted-foreground px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
-                          {formatDate(r.lastRefreshedAt)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          <p className="text-muted-foreground text-xs">Row opens the report.</p>
+                {label} {matched.filter((r) => inScope(r, k)).length}
+              </button>
+            );
+          })}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function FilterCheckbox({
-  checked,
-  onChange,
-  label,
-  count,
-  testid,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  label: string;
-  count: number;
-  testid: string;
-}) {
-  return (
-    <label className="flex cursor-pointer items-center gap-2 py-0.5 text-sm">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="accent-apollo-maroon"
-        data-testid={testid}
-      />
-      {label}
-      <span className="text-muted-foreground ml-auto text-xs tabular-nums">{count}</span>
-    </label>
-  );
-}
-
-type PerReport = ReportsIndexUnit["perReport"][number];
-
-/** One unit's report rows — shared by a band body (`ReportsBands`) and the
- *  band-less single-unit table (`SingleUnitReportsTable`). A live report is a
- *  stretched-anchor link to `/edit/reports/<slug>?center=…`; not-live renders as
- *  plain muted text, matching the "advisory, not a promise" tone of the rest
- *  of this console. `reports` is THIS unit's own catalog — see the module
- *  doc comment for why it's no longer a shared prop. */
-function ReportRows({
-  perReport,
-  reports,
-  unitCode,
-  unitKind,
-}: {
-  perReport: ReadonlyArray<PerReport>;
-  reports: ReadonlyArray<ReportsIndexReport>;
-  unitCode: string;
-  unitKind: ReportsIndexUnitKind;
-}) {
-  const liveByN = new Map(perReport.map((r) => [r.n, r]));
-  return (
-    <>
-      {reports.map((r) => {
-        const live = liveByN.get(r.n);
-        return live?.live ? (
-          <tr
-            key={r.n}
-            className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline focus-within:-outline-offset-2 focus-within:outline-apollo-maroon relative border-t focus-within:outline-2"
+        {(hasReviewable || review) && (
+          <button
+            type="button"
+            aria-pressed={review}
+            onClick={() => setReview((v) => !v)}
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium whitespace-nowrap",
+              review
+                ? "bg-apollo-amber border-apollo-amber text-white"
+                : "bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber",
+            )}
+            data-testid="reports-index-review"
           >
-            <td className="px-3 py-2.5 align-middle">
-              <Link
-                href={reportHref(r.slug, unitCode, unitKind)}
-                className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
-                data-testid={`reports-index-band-link-${unitCode}-${r.n}`}
+            In progress <span className="font-bold tabular-nums">{reviewCount}</span>
+          </button>
+        )}
+      </div>
+
+      {groups.length === 0 ? (
+        <div
+          className="bg-apollo-surface border-apollo-border text-muted-foreground mt-7 rounded-[var(--apollo-radius-card)] border p-8 text-center text-[15px]"
+          data-testid="reports-index-empty"
+        >
+          {rows.length === 0 ? (
+            "No reports to show."
+          ) : (
+            <>
+              No reports match.{" "}
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="text-apollo-slate hover:underline"
               >
-                {r.label}
-              </Link>
-              <RowAccess access={r.access} />
-            </td>
-            <td className="px-3 py-2.5 align-middle">{r.description}</td>
-            <td className="text-muted-foreground px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
-              {formatDate(live.lastRefreshedAt)}
-            </td>
-          </tr>
-        ) : (
-          <tr key={r.n} className="border-apollo-border text-muted-foreground border-t">
-            <td className="px-3 py-2.5 align-middle">
-              {r.label}
-              <RowAccess access={r.access} />
-            </td>
-            <td className="px-3 py-2.5 align-middle">Nothing live yet for this unit.</td>
-            <td className="px-3 py-2.5 text-right align-middle">—</td>
-          </tr>
-        );
-      })}
-    </>
-  );
-}
-
-const REPORT_TABLE_HEAD = (
-  <thead className="bg-apollo-surface-2">
-    <tr className="border-apollo-border border-b">
-      <th scope="col" className={`${TH_CLASS} w-60`}>
-        Report
-      </th>
-      <th scope="col" className={TH_CLASS}>
-        Focus
-      </th>
-      <th scope="col" className={`${TH_CLASS} w-36 text-right`}>
-        Last refreshed
-      </th>
-    </tr>
-  </thead>
-);
-
-function ReportsBands({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
-  return (
-    <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border" data-testid="reports-index-bands">
-      <table className="w-full border-collapse text-left text-sm">
-        {REPORT_TABLE_HEAD}
-        {units.map((u) => (
-          <tbody key={u.code} data-testid={`reports-index-band-${u.code}`}>
-            <tr className="bg-apollo-surface-2">
-              <td colSpan={2} className="border-apollo-border border-t px-3 py-2 font-semibold">
-                {u.name}
-                <span className="text-muted-foreground ml-2 text-xs font-normal">
-                  {typeLabel(u)} · {u.liveCount} of {u.totalCount} reports live
+                Clear filters
+              </button>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="mt-7 flex flex-col gap-7">
+          {groups.map(({ unit, rows: unitRows }) => (
+            <section
+              key={`${unit.kind}:${unit.code}`}
+              data-testid={`reports-index-group-${unit.code}`}
+            >
+              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-1 pb-2.5">
+                <h2 className="text-[17px] font-semibold">{unit.name}</h2>
+                <span className="text-muted-foreground text-[13px]">
+                  {unitRows.length} {unitRows.length === 1 ? "report" : "reports"}
                 </span>
-              </td>
-              <td className="border-apollo-border border-t px-3 py-2 text-right">
-                {!isPseudo(u.kind) && (
+                {!isPseudo(unit.kind) && (
                   <Link
-                    href={u.editHref}
-                    className="text-foreground relative z-10 text-xs hover:underline"
-                    data-testid={`reports-index-edit-${u.code}`}
+                    href={unit.editHref}
+                    className="text-muted-foreground hover:text-foreground ml-auto text-xs hover:underline"
+                    data-testid={`reports-index-edit-${unit.code}`}
                   >
-                    Edit {u.kind === "center" ? "center" : u.kind} profile
+                    Edit {unit.kind} profile
                   </Link>
                 )}
-              </td>
-            </tr>
-            <ReportRows perReport={u.perReport} reports={u.reports} unitCode={u.code} unitKind={u.kind} />
-          </tbody>
-        ))}
-      </table>
+              </div>
+              <div className="bg-apollo-surface border-apollo-border divide-apollo-border divide-y overflow-hidden rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
+                {unitRows.map((r) => (
+                  <ReportRow key={r.report.n} row={r} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-/** `3a` — an actor with exactly one reportable unit. Same table shape as one
- *  band's body, no band header (the page's own `<h1>` already names the
- *  unit) — replaces the old plain divided list. */
-export function SingleUnitReportsTable({
-  unitCode,
-  unitKind = "center",
-  perReport,
-  reports,
-}: {
-  unitCode: string;
-  /** Defaults to `"center"` so existing callers built before department/
-   *  division report links existed keep resolving the same URLs. */
-  unitKind?: ReportsIndexUnitKind;
-  perReport: ReadonlyArray<PerReport>;
-  reports: ReadonlyArray<ReportsIndexReport>;
-}) {
-  return (
-    <div
-      className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border"
-      data-testid="single-unit-reports-table"
+function ReportRow({ row }: { row: Row }) {
+  const { unit, report, live, data, toReview } = row;
+  const testId = `reports-index-row-${unit.code}-${report.n}`;
+  const body = (
+    <>
+      <span className="text-muted-foreground pt-0.5 font-mono text-[13px] tabular-nums">
+        #{report.n}
+      </span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <span
+            className={cn(
+              "text-base font-semibold",
+              live ? "text-apollo-slate" : "text-muted-foreground",
+            )}
+          >
+            {report.name}
+          </span>
+          {toReview > 0 && (
+            <span
+              className="text-apollo-amber bg-apollo-amber-tint border-apollo-amber-tint-border rounded-full border px-2 text-xs font-semibold whitespace-nowrap"
+              data-testid={`reports-index-review-pill-${unit.code}`}
+            >
+              In progress · {toReview} to review
+            </span>
+          )}
+        </div>
+        <div
+          className={cn(
+            "mt-[3px] text-sm leading-normal",
+            live ? "text-[#3d3833]" : "text-muted-foreground",
+          )}
+        >
+          {report.description}
+        </div>
+        <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-[13px]">
+          <span className="inline-flex items-center gap-[5px]" data-testid="reports-index-access">
+            <Users size={13} aria-hidden className="shrink-0" />
+            {accessSummary(report.access).text}
+          </span>
+          <span className="whitespace-nowrap" data-testid="reports-index-data">
+            {data}
+          </span>
+        </div>
+      </div>
+      {live ? (
+        <ChevronRight size={18} aria-hidden className="text-muted-foreground mt-0.5" />
+      ) : (
+        <span aria-hidden />
+      )}
+    </>
+  );
+  const grid =
+    "grid grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-4 py-4 sm:grid-cols-[44px_minmax(0,1fr)_auto] sm:gap-x-4 sm:px-5";
+  return live ? (
+    <Link
+      href={reportHref(report.slug, unit.code, unit.kind)}
+      className={cn(
+        grid,
+        "hover:bg-apollo-page focus-visible:outline-apollo-maroon text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
+      )}
+      data-testid={testId}
     >
-      <table className="w-full border-collapse text-left text-sm">
-        {REPORT_TABLE_HEAD}
-        <tbody>
-          <ReportRows perReport={perReport} reports={reports} unitCode={unitCode} unitKind={unitKind} />
-        </tbody>
-      </table>
+      {body}
+    </Link>
+  ) : (
+    <div className={grid} aria-disabled="true" data-testid={testId}>
+      {body}
     </div>
   );
 }

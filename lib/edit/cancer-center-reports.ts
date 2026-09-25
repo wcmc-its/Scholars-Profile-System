@@ -456,14 +456,25 @@ export const REPORT_NUMBERS_BY_KIND: Record<ReportableUnitKind, readonly ReportN
  *  `totalCount` fallback; department/division totals are 2, not this. */
 export const REPORT_CATALOG_SIZE = REPORT_NUMBERS_BY_KIND.center.length;
 
-/** Per-unit liveness, both aggregated (2a/1a's "N of M"/"Last refreshed"
- *  columns) and per-report (1a's inline band rows, each report showing its
- *  own live/refreshed state). `perReport` only carries the entries
+/** One report's liveness. Report 2 (NCI Table 2A) also carries its latest
+ *  import cycle and how many of that cycle's rows are still awaiting human
+ *  review (`cancerRelevantPercentSource` other than `'human'`) — the index's
+ *  "In progress · N to review" pill and "Cycle …" label. Absent on 1 and 3–6. */
+export type ReportLivenessEntry = {
+  n: ReportNumber;
+  live: boolean;
+  lastRefreshedAt: Date | null;
+  reportingCycle?: string | null;
+  toReview?: number;
+};
+
+/** Per-unit liveness, both aggregated ("N of M" live, newest refresh) and
+ *  per-report (each index row's own live state and data label). `perReport` only carries the entries
  *  `REPORT_NUMBERS_BY_KIND[kind]` lists — a department's `perReport` has
  *  exactly 2 entries (3, 6), never a padded-out 6 with 4 fake "not live"
  *  rows for reports it can never produce. */
 export type ReportLiveness = {
-  perReport: ReadonlyArray<{ n: ReportNumber; live: boolean; lastRefreshedAt: Date | null }>;
+  perReport: ReadonlyArray<ReportLivenessEntry>;
   liveCount: number;
   totalCount: number;
   lastRefreshedAt: Date | null;
@@ -510,6 +521,41 @@ async function loadNonCenterActiveMemberFlags(
   for (const g of deptGroups) if (g.deptCode) result.set(g.deptCode, (g._count?._all ?? 0) > 0);
   for (const g of divGroups) if (g.divCode) result.set(g.divCode, (g._count?._all ?? 0) > 0);
   return result;
+}
+
+type FundingGroup = {
+  centerCode: string;
+  reportingCycle: string;
+  cancerRelevantPercentSource: string;
+  _count: { _all: number };
+  _max: { lastRefreshedAt: Date | null };
+};
+
+/** Folds the (center, cycle, source) funding groups into one summary per
+ *  center: total rows, newest refresh, the latest cycle, and that cycle's rows
+ *  whose cancer-relevant percent no human has set yet. */
+function summarizeFunding(
+  rows: ReadonlyArray<FundingGroup>,
+): Map<string, { count: number; lastRefreshedAt: Date | null; latestCycle: string | null; toReview: number }> {
+  const out = new Map<
+    string,
+    { count: number; lastRefreshedAt: Date | null; latestCycle: string | null; toReview: number }
+  >();
+  for (const r of rows) {
+    const cur = out.get(r.centerCode) ?? { count: 0, lastRefreshedAt: null, latestCycle: null, toReview: 0 };
+    cur.count += r._count._all;
+    const at = r._max.lastRefreshedAt;
+    if (at && (!cur.lastRefreshedAt || at > cur.lastRefreshedAt)) cur.lastRefreshedAt = at;
+    if (r._count._all > 0 && (cur.latestCycle === null || r.reportingCycle > cur.latestCycle))
+      cur.latestCycle = r.reportingCycle;
+    out.set(r.centerCode, cur);
+  }
+  for (const r of rows) {
+    const cur = out.get(r.centerCode)!;
+    if (r.reportingCycle === cur.latestCycle && r.cancerRelevantPercentSource !== "human")
+      cur.toReview += r._count._all;
+  }
+  return out;
 }
 
 /**
@@ -571,8 +617,11 @@ export async function loadReportLiveness(
           })
         : Promise.resolve([]),
       centerCodes.length > 0
-        ? db.cancerCenterFundingAward.groupBy({
-            by: ["centerCode"],
+        ? // One grouping serves liveness, the latest cycle and the review count:
+          // `reportingCycle` sorts lexicographically by design (`osra-YYYY-MM-DD`,
+          // the same `desc` the NCI 2A route resolves "latest" with).
+          db.cancerCenterFundingAward.groupBy({
+            by: ["centerCode", "reportingCycle", "cancerRelevantPercentSource"],
             where: { centerCode: { in: centerCodes } },
             _count: { _all: true },
             _max: { lastRefreshedAt: true },
@@ -591,7 +640,7 @@ export async function loadReportLiveness(
     ]);
 
   const collabByCode = new Map(collabRows.map((r) => [r.centerCode, r]));
-  const fundingByCode = new Map(fundingRows.map((r) => [r.centerCode, r]));
+  const fundingByCode = summarizeFunding(fundingRows);
 
   for (const unit of units) {
     const { code, kind } = unit;
@@ -611,7 +660,14 @@ export async function loadReportLiveness(
 
     const perReport: ReportLiveness["perReport"] = numbers.map((n) => {
       if (n === 1) return { n, live: (collab?._count._all ?? 0) > 0, lastRefreshedAt: collab?._max.lastRefreshedAt ?? null };
-      if (n === 2) return { n, live: (funding?._count._all ?? 0) > 0, lastRefreshedAt: funding?._max.lastRefreshedAt ?? null };
+      if (n === 2)
+        return {
+          n,
+          live: (funding?.count ?? 0) > 0,
+          lastRefreshedAt: funding?.lastRefreshedAt ?? null,
+          reportingCycle: funding?.latestCycle ?? null,
+          toReview: funding?.toReview ?? 0,
+        };
       // 3, 4, 5, 6 — proxied by active-membership existence (center/dept/div)
       // or by real confirmed-usage presence (core).
       return { n, live: hasPublicationSource, lastRefreshedAt: null };

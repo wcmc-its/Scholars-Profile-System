@@ -1,521 +1,418 @@
 /**
- * `components/edit/reports-index.tsx` — the Reports IA redesign's cross-unit
- * index (`2a`/`1a`/`3a`, 2026-08-14), widened to department/division units by
- * the org-unit publications reports plan (2026-08-16). Table mode: filter
- * rail + sortable rows, one row per (org unit, report) pair — flattened from
- * each unit's own report catalog so Status reads per-report instead of as a
- * unit-level "N of M" rollup (2026-08-16 followup). Bands mode: every unit
- * inline with its OWN report rows (a center's six vs. a department/division's
- * two — see the component's doc comment for why `reports` moved onto each
- * unit instead of staying a shared prop). `SingleUnitReportsTable` (`3a`) is
- * the same report-row shape as one band's body, without the band header —
- * used when an actor has exactly one reportable unit, which is the common
- * case today.
- *
- * Every report row carries "Who can run this report" (`ReportAccessPopover`,
- * mocked here to a marker that echoes its props): live AND not-live rows, in
- * all three renderings, each with ITS row's `access` — and the marker sits
- * beside the row link, never inside it, lifted above the stretched anchor.
+ * `components/edit/reports-index.tsx` — the Reports Index redesign
+ * (2026-09-25): one list grouped by unit for every viewer, whole-row link
+ * cards, a search box, scope segments with counts, the NCI 2A "In progress"
+ * toggle, and the filters mirrored into the URL. Access is plain text from the
+ * REAL `accessSummary` (not mocked) — the same string the report header badge
+ * shows — and no access popover renders on the index.
  */
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, within } from "@testing-library/react";
 
 import type { ReportAccessPopoverProps } from "@/components/edit/report-access-popover";
-
-vi.mock("@/components/edit/report-access-popover", () => ({
-  ReportAccessPopover: (props: ReportAccessPopoverProps) => (
-    <span
-      data-testid="report-access-marker"
-      data-mode={props.mode}
-      data-report-key={props.mode === "person" ? props.reportKey : ""}
-      data-can-manage={props.mode === "person" ? String(props.canManage) : ""}
-      data-rows={props.mode === "person" ? String(props.initialRows.length) : ""}
-    />
-  ),
-}));
-
 import {
+  dataLabel,
   ReportsIndex,
-  SingleUnitReportsTable,
   type ReportsIndexReport,
   type ReportsIndexUnit,
 } from "@/components/edit/reports-index";
+import { parseReportsIndexScope } from "@/lib/edit/reports-index-scope";
 
 const UNIT_ACCESS = { mode: "unit" } as const;
+const grant = (cwid: string) => ({
+  reportKey: "article-count",
+  scopeKey: "*",
+  cwid,
+  granteeName: null,
+  name: cwid,
+  grantedBy: "adm0001",
+  grantedAt: "2026-09-18T12:00:00.000Z",
+});
+const ARTICLE_ACCESS: ReportAccessPopoverProps = {
+  mode: "person",
+  reportKey: "article-count",
+  initialRows: [grant("usr0001"), grant("usr0002")],
+  scopeOptions: [["*", "Whole report"]],
+  canManage: true,
+  audience: "All unit administrators",
+};
 const PROGRAM_ACCESS: ReportAccessPopoverProps = {
   mode: "person",
   reportKey: "mentored-publications",
-  initialRows: [
-    {
-      reportKey: "mentored-publications",
-      scopeKey: "md",
-      cwid: "usr0001",
-      granteeName: "Holder Person",
-      name: "Holder Person",
-      grantedBy: "adm0001",
-      grantedAt: "2026-09-18T12:00:00.000Z",
-    },
-  ],
-  scopeOptions: [
-    ["*", "All programs"],
-    ["md", "AOC"],
-  ],
-  canManage: true,
+  initialRows: [],
+  scopeOptions: [["*", "All programs"]],
+  canManage: false,
 };
 
-// Each report carries its CURRENT `report_meta.slug` (the page fills it from
-// `loadReportMeta()`); the row links to `/edit/reports/<slug>`, never the number.
-const CENTER_REPORTS: ReportsIndexReport[] = [
-  { n: 1, slug: "optimize-membership", label: "1. Optimize membership", description: "Membership recs.", access: UNIT_ACCESS },
-  { n: 2, slug: "nci-table-2a", label: "2. NCI Table 2a", description: "Funding review.", access: UNIT_ACCESS },
-  { n: 3, slug: "publications", label: "3. Publications", description: "Pubs by program.", access: UNIT_ACCESS },
-  { n: 4, slug: "grants", label: "4. Grants", description: "Active grants.", access: UNIT_ACCESS },
-  { n: 5, slug: "clinical-trials", label: "5. Clinical Trials", description: "Active trials.", access: UNIT_ACCESS },
-  {
-    n: 6,
-    slug: "nih-funded-pubs",
-    label: "6. NIH-funded pubs",
-    description: "NIH RePORTER-linked pubs.",
-    access: UNIT_ACCESS,
-  },
-];
+const report = (
+  n: ReportsIndexReport["n"],
+  name: string,
+  description: string,
+  access = UNIT_ACCESS as ReportAccessPopoverProps,
+) => ({
+  n,
+  slug: name.toLowerCase().replace(/\s+/g, "-"),
+  name,
+  description,
+  access,
+});
 
-const UNIT_REPORTS: ReportsIndexReport[] = [
-  { n: 3, slug: "publications", label: "3. Publications", description: "Pubs by member.", access: UNIT_ACCESS },
-  {
-    n: 6,
-    slug: "nih-funded-pubs",
-    label: "6. NIH-funded pubs",
-    description: "NIH RePORTER-linked pubs.",
-    access: UNIT_ACCESS,
-  },
-];
-
-function perReport(liveNs: number[], reports: ReportsIndexReport[] = CENTER_REPORTS): ReportsIndexUnit["perReport"] {
-  return reports.map((r) => ({
-    n: r.n,
-    live: liveNs.includes(r.n),
-    lastRefreshedAt: liveNs.includes(r.n) && r.n <= 2 ? "2026-08-11T00:00:00.000Z" : null,
-  }));
-}
-
-// Meyer: reports 1 & 2 live, 3-6 not live — 2 of 6.
-const MEYER: ReportsIndexUnit = {
-  code: "meyer",
-  kind: "center",
-  name: "Sandra and Edward Meyer Cancer Center",
-  centerType: "center",
-  editHref: "/edit/center/meyer",
-  liveCount: 2,
-  totalCount: 6,
-  lastRefreshedAt: "2026-08-11T00:00:00.000Z",
-  reports: CENTER_REPORTS,
-  perReport: perReport([1, 2]),
+const INSTITUTION: ReportsIndexUnit = {
+  code: "institution",
+  kind: "institution",
+  name: "Institution-wide",
+  editHref: "/edit/reports/article-counts",
+  reports: [report(8, "Article counts", "Distinct articles per year.", ARTICLE_ACCESS)],
+  perReport: [{ n: 8, live: true, lastRefreshedAt: null }],
 };
-
-// Epic: nothing live — 0 of 6.
-const EPIC: ReportsIndexUnit = {
-  code: "epic",
-  kind: "center",
-  name: "Englander Institute for Precision Medicine",
-  centerType: "institute",
-  editHref: "/edit/center/epic",
-  liveCount: 0,
-  totalCount: 6,
-  lastRefreshedAt: null,
-  reports: CENTER_REPORTS,
-  perReport: perReport([]),
-};
-
-const DEPT: ReportsIndexUnit = {
-  code: "surg",
-  kind: "department",
-  name: "Department of Surgery",
-  centerType: null,
-  editHref: "/edit/department/surg",
-  liveCount: 1,
-  totalCount: 2,
-  lastRefreshedAt: null,
-  reports: UNIT_REPORTS,
-  perReport: perReport([3], UNIT_REPORTS),
-};
-
-const DIVISION: ReportsIndexUnit = {
-  code: "n001",
-  kind: "division",
-  name: "Cardiology (Medicine)",
-  centerType: null,
-  editHref: "/edit/division/n001",
-  liveCount: 0,
-  totalCount: 2,
-  lastRefreshedAt: null,
-  reports: UNIT_REPORTS,
-  perReport: perReport([], UNIT_REPORTS),
-};
-
-// A core facility (core-reports widening, 2026-09-06) — same 2-report catalog
-// as a department/division, addressed by core ID rather than a unit code.
-const CORE: ReportsIndexUnit = {
-  code: "14",
-  kind: "core",
-  name: "Biomedical Imaging",
-  centerType: null,
-  editHref: "/edit/core/14",
-  liveCount: 2,
-  totalCount: 2,
-  lastRefreshedAt: null,
-  reports: UNIT_REPORTS,
-  perReport: perReport([3, 6], UNIT_REPORTS),
-};
-
-// The person-granted Mentored publications report as a one-report pseudo-unit
-// (2026-09-18): rides the same list as a unit so it is never a card floating
-// under the table.
-const PROGRAM: ReportsIndexUnit = {
+const PROGRAMS: ReportsIndexUnit = {
   code: "mentoring-programs",
   kind: "program",
   name: "Mentoring programs",
-  centerType: null,
   editHref: "/edit/reports/mentored-publications",
-  liveCount: 1,
-  totalCount: 1,
-  lastRefreshedAt: null,
   reports: [
-    {
-      n: 7,
-      slug: "mentored-publications",
-      label: "7. Mentored publications",
-      description: "Learner–mentor co-publications.",
-      access: PROGRAM_ACCESS,
-    },
+    report(7, "Mentored publications", "Learner and mentor co-authorship.", PROGRAM_ACCESS),
   ],
   perReport: [{ n: 7, live: true, lastRefreshedAt: null }],
 };
+const MEYER: ReportsIndexUnit = {
+  code: "meyer",
+  kind: "center",
+  name: "Meyer Cancer Center",
+  editHref: "/edit/center/meyer",
+  reports: [
+    report(1, "Optimize membership", "People to consider adding."),
+    report(2, "NCI Table 2a", "Funded projects of center members."),
+    report(3, "Publications", "Publications by current members."),
+    report(4, "Grants", "Active grants."),
+  ],
+  perReport: [
+    { n: 1, live: true, lastRefreshedAt: "2026-09-20T16:00:00.000Z" },
+    {
+      n: 2,
+      live: true,
+      lastRefreshedAt: "2026-07-14T00:00:00.000Z",
+      reportingCycle: "osra-2026-07-14",
+      toReview: 58,
+    },
+    { n: 3, live: true, lastRefreshedAt: null },
+    { n: 4, live: false, lastRefreshedAt: null },
+  ],
+};
+const SURGERY: ReportsIndexUnit = {
+  code: "surg",
+  kind: "department",
+  name: "Surgery",
+  editHref: "/edit/department/surg",
+  reports: [
+    report(3, "Publications", "Publications by current members."),
+    report(6, "NIH-funded pubs", "NIH-linked."),
+  ],
+  perReport: [
+    { n: 3, live: true, lastRefreshedAt: null },
+    { n: 6, live: true, lastRefreshedAt: null },
+  ],
+};
 
-describe("ReportsIndex — table mode (2a)", () => {
-  it("renders one row per (unit, report) pair, not one row per unit", () => {
-    render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
-    // Meyer contributes 6 rows (reports 1-6), Epic contributes 6 — 12 total.
-    for (let n = 1; n <= 6; n++) {
-      expect(screen.getByTestId(`reports-index-row-meyer-${n}`)).toBeTruthy();
-      expect(screen.getByTestId(`reports-index-row-epic-${n}`)).toBeTruthy();
-    }
-  });
+const ALL = [INSTITUTION, PROGRAMS, MEYER];
 
-  it("a live report row links to /edit/reports/<slug>?center=…; a not-live row is plain text with no link", () => {
-    render(<ReportsIndex units={[MEYER]} mode="table" />);
-    const link = screen.getByTestId("reports-index-link-meyer-1");
-    expect(link.getAttribute("href")).toBe("/edit/reports/optimize-membership?center=meyer");
-    // Report 3 is not live for Meyer — no link, just the row with label text.
-    expect(screen.queryByTestId("reports-index-link-meyer-3")).toBeNull();
-    expect(screen.getByTestId("reports-index-row-meyer-3").textContent).toContain("3. Publications");
-  });
+const replaceState = vi.spyOn(window.history, "replaceState");
+beforeEach(() => {
+  window.history.pushState(null, "", "/edit/reports");
+  replaceState.mockClear();
+});
+afterEach(() => replaceState.mockClear());
 
-  it("the Org unit column shows the unit's name as plain text (not a link)", () => {
-    render(<ReportsIndex units={[MEYER]} mode="table" />);
-    const row = screen.getByTestId("reports-index-row-meyer-1");
-    expect(row.textContent).toContain("Sandra and Edward Meyer Cancer Center");
-    // Only the Report cell is a link — no second anchor competing for the hit-target.
-    expect(within(row).getAllByRole("link")).toHaveLength(1);
-  });
+const groupNames = (c: HTMLElement) =>
+  Array.from(c.querySelectorAll("section h2")).map((h) => h.textContent);
+const rowIds = (c: HTMLElement) =>
+  Array.from(c.querySelectorAll("[data-testid^='reports-index-row-']")).map((r) =>
+    r.getAttribute("data-testid"),
+  );
 
-  it("the Status column reads Live or In progress per row", () => {
-    render(<ReportsIndex units={[MEYER]} mode="table" />);
-    expect(screen.getByTestId("reports-index-row-meyer-1").textContent).toContain("Live");
-    expect(screen.getByTestId("reports-index-row-meyer-3").textContent).toContain("In progress");
-  });
-
-  it("filters by unit name", () => {
-    render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
-    fireEvent.change(screen.getByTestId("reports-index-filter-name"), { target: { value: "Englander" } });
-    expect(screen.queryByTestId("reports-index-row-meyer-1")).toBeNull();
-    expect(screen.getByTestId("reports-index-row-epic-1")).toBeTruthy();
-  });
-
-  it("the Status filter isolates rows by their OWN live/not-live state, not the unit's aggregate", () => {
-    render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
-    fireEvent.click(screen.getByTestId("reports-index-filter-none-yet"));
-    // Meyer's not-live reports (3-6) stay visible; its live reports (1, 2) do not.
-    expect(screen.getByTestId("reports-index-row-meyer-3")).toBeTruthy();
-    expect(screen.queryByTestId("reports-index-row-meyer-1")).toBeNull();
-    // Epic is all not-live — every row stays visible.
-    expect(screen.getByTestId("reports-index-row-epic-1")).toBeTruthy();
-  });
-
-  it("the Status filter counts are row counts, not unit counts — a partially-live unit contributes to both buckets", () => {
-    render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
-    // Meyer: 2 live + 4 not-live. Epic: 0 live + 6 not-live. Live total 2, In-progress total 10.
-    expect(screen.getByTestId("reports-index-filter-has-live").closest("label")?.textContent).toContain("2");
-    expect(screen.getByTestId("reports-index-filter-none-yet").closest("label")?.textContent).toContain("10");
-  });
-
-  it("the Unit type checkboxes narrow rows to Center or Institute", () => {
-    render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
-    fireEvent.click(screen.getByTestId("reports-index-filter-institute"));
-    expect(screen.getByTestId("reports-index-row-meyer-1")).toBeTruthy();
-    expect(screen.queryByTestId("reports-index-row-epic-1")).toBeNull();
-  });
-
-  it("the Department checkbox defaults unchecked — a department unit's rows stay hidden until toggled on", () => {
-    render(<ReportsIndex units={[MEYER, DEPT]} mode="table" />);
-    expect(screen.queryByTestId("reports-index-row-surg-3")).toBeNull();
-    fireEvent.click(screen.getByTestId("reports-index-filter-department"));
-    expect(screen.getByTestId("reports-index-row-surg-3")).toBeTruthy();
-  });
-
-  it("the Division checkbox defaults unchecked — a division unit's rows stay hidden until toggled on", () => {
-    render(<ReportsIndex units={[MEYER, DIVISION]} mode="table" />);
-    expect(screen.queryByTestId("reports-index-row-n001-3")).toBeNull();
-    fireEvent.click(screen.getByTestId("reports-index-filter-division"));
-    expect(screen.getByTestId("reports-index-row-n001-3")).toBeTruthy();
-  });
-
-  it("a core is a filterable unit type of its own, defaulting unchecked like department/division", () => {
-    render(<ReportsIndex units={[MEYER, CORE]} mode="table" />);
-    // A kind with no checkbox of its own would slip past every filter and show
-    // unconditionally — this pins that cores are actually governed by the rail.
-    expect(screen.queryByTestId("reports-index-row-14-3")).toBeNull();
-    fireEvent.click(screen.getByTestId("reports-index-filter-core"));
-    expect(screen.getByTestId("reports-index-row-14-3")).toBeTruthy();
-    expect(screen.getByTestId("reports-index-row-14-6")).toBeTruthy();
-    // Reports 1/2/4/5 are center-only — a core never gets a row for them.
-    for (const n of [1, 2, 4, 5]) {
-      expect(screen.queryByTestId(`reports-index-row-14-${n}`)).toBeNull();
-    }
-  });
-
-  it("a core row is labelled Core and its live link carries &kind=core", () => {
-    render(<ReportsIndex units={[CORE]} mode="table" />);
-    fireEvent.click(screen.getByTestId("reports-index-filter-core"));
-    expect(screen.getByTestId("reports-index-row-14-3").textContent).toContain("Core");
-    // Without &kind=core the report page resolves "14" as a CENTER code.
-    expect(screen.getByTestId("reports-index-link-14-3").getAttribute("href")).toBe(
-      "/edit/reports/publications?center=14&kind=core",
+describe("ReportsIndex — grouped list", () => {
+  it("renders one section per unit, in the given order, each with an 'N reports' count", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    expect(groupNames(container)).toEqual([
+      "Institution-wide",
+      "Mentoring programs",
+      "Meyer Cancer Center",
+    ]);
+    const meyer = within(
+      container.querySelector("[data-testid='reports-index-group-meyer']") as HTMLElement,
     );
-    expect(screen.getByTestId("reports-index-link-14-6").getAttribute("href")).toBe(
-      "/edit/reports/nih-funded-pubs?center=14&kind=core",
+    expect(meyer.getByText("4 reports")).toBeTruthy();
+    const inst = within(
+      container.querySelector("[data-testid='reports-index-group-institution']") as HTMLElement,
     );
+    expect(inst.getByText("1 report")).toBeTruthy();
   });
 
-  it("the program pseudo-unit is a row like any other: shown by default, labelled Program, linking to /edit/reports/<slug> with no unit param, governed by its own checkbox", () => {
-    render(<ReportsIndex units={[MEYER, PROGRAM]} mode="table" />);
-    const row = screen.getByTestId("reports-index-row-mentoring-programs-7");
-    expect(row.textContent).toContain("Program");
-    expect(row.textContent).toContain("Mentoring programs");
-    expect(row.textContent).toContain("Live");
-    expect(screen.getByTestId("reports-index-link-mentoring-programs-7").getAttribute("href")).toBe(
+  it("a live row is ONE whole-row link carrying '#N', name, summary, meta line and chevron", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    const row = within(container).getByTestId("reports-index-row-meyer-3");
+    expect(row.tagName).toBe("A");
+    expect(row.getAttribute("href")).toBe("/edit/reports/publications?center=meyer");
+    expect(row.textContent).toContain("#3");
+    expect(row.textContent).toContain("Publications");
+    expect(row.textContent).toContain("Publications by current members.");
+    expect(within(row).getByTestId("reports-index-access").textContent).toBe(
+      "Unit owners and curators",
+    );
+    expect(within(row).getByTestId("reports-index-data").textContent).toBe("Live data");
+    expect(row.querySelector("svg.lucide-chevron-right")).not.toBeNull();
+  });
+
+  it("a pseudo-unit's row links without unit params; a department's carries &kind=", () => {
+    const { container } = render(<ReportsIndex units={[...ALL, SURGERY]} />);
+    const c = within(container);
+    expect(c.getByTestId("reports-index-row-institution-8").getAttribute("href")).toBe(
+      "/edit/reports/article-counts",
+    );
+    expect(c.getByTestId("reports-index-row-mentoring-programs-7").getAttribute("href")).toBe(
       "/edit/reports/mentored-publications",
     );
-    expect(screen.getByTestId("reports-index-filter-program").closest("label")?.textContent).toContain("1");
-    fireEvent.click(screen.getByTestId("reports-index-filter-program"));
-    expect(screen.queryByTestId("reports-index-row-mentoring-programs-7")).toBeNull();
-  });
-
-  it("no program unit → no Program checkbox at all", () => {
-    render(<ReportsIndex units={[MEYER]} mode="table" />);
-    expect(screen.queryByTestId("reports-index-filter-program")).toBeNull();
-  });
-
-  it("Unit type counts stay unit-scoped (not row-scoped) — a department with 2 reports still counts as 1 department", () => {
-    render(<ReportsIndex units={[MEYER, DEPT]} mode="table" />);
-    expect(screen.getByTestId("reports-index-filter-department").closest("label")?.textContent).toContain("1");
-  });
-
-  it("a department/division row's live link carries &kind= so it resolves to the right unit type", () => {
-    render(<ReportsIndex units={[DEPT, DIVISION]} mode="table" />);
-    fireEvent.click(screen.getByTestId("reports-index-filter-department"));
-    fireEvent.click(screen.getByTestId("reports-index-filter-division"));
-    expect(screen.getByTestId("reports-index-link-surg-3").getAttribute("href")).toBe(
-      "/edit/reports/publications?center=surg&kind=department",
+    expect(c.getByTestId("reports-index-row-surg-6").getAttribute("href")).toBe(
+      "/edit/reports/nih-funded-pubs?center=surg&kind=department",
     );
   });
 
-  it("the Status sort puts live rows first, tie-broken by unit name then report label", () => {
-    render(<ReportsIndex units={[MEYER, EPIC]} mode="table" />);
-    fireEvent.change(screen.getByTestId("reports-index-sort"), { target: { value: "status" } });
-    const rows = within(screen.getByTestId("reports-index-rows")).getAllByTestId(/^reports-index-row-/);
-    // First two rows are Meyer's live reports 1 and 2.
-    expect(rows[0].getAttribute("data-testid")).toBe("reports-index-row-meyer-1");
-    expect(rows[1].getAttribute("data-testid")).toBe("reports-index-row-meyer-2");
-  });
-});
-
-/** The `[mode, reportKey, canManage, rows]` echoed by the popover marker in `row`. */
-function accessMarker(row: HTMLElement): [string, string, string, string] {
-  const m = within(row).getByTestId("report-access-marker");
-  return [
-    m.getAttribute("data-mode") ?? "",
-    m.getAttribute("data-report-key") ?? "",
-    m.getAttribute("data-can-manage") ?? "",
-    m.getAttribute("data-rows") ?? "",
-  ];
-}
-
-describe("ReportsIndex — Who can run this report, every row", () => {
-  it("table: every (unit, report) row renders the popover with THAT row's access props — live, not-live, unit and program alike", () => {
-    render(<ReportsIndex units={[MEYER, PROGRAM]} mode="table" />);
-    for (let n = 1; n <= 6; n++) {
-      // Meyer: 1–2 live, 3–6 not — all six carry the unit rule.
-      expect(accessMarker(screen.getByTestId(`reports-index-row-meyer-${n}`))).toEqual([
-        "unit",
-        "",
-        "",
-        "",
-      ]);
-    }
-    expect(accessMarker(screen.getByTestId("reports-index-row-mentoring-programs-7"))).toEqual([
-      "person",
-      "mentored-publications",
-      "true",
-      "1",
-    ]);
-    expect(screen.getAllByTestId("report-access-marker")).toHaveLength(7);
+  it("a report with no data yet stays listed as a muted, non-link row reading 'No data yet' — never 'In progress'", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    const row = within(container).getByTestId("reports-index-row-meyer-4");
+    expect(row.tagName).toBe("DIV");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.querySelector("a")).toBeNull();
+    expect(within(row).getByTestId("reports-index-data").textContent).toBe("No data yet");
+    expect(row.textContent).not.toContain("In progress");
   });
 
-  it("table: the marker is the row link's SIBLING inside the label cell, lifted above the stretched anchor — never inside the link", () => {
-    render(<ReportsIndex units={[MEYER]} mode="table" />);
-    const link = screen.getByTestId("reports-index-link-meyer-1");
-    const wrap = within(screen.getByTestId("reports-index-row-meyer-1")).getByTestId(
-      "reports-index-access",
-    );
-    expect(link.contains(wrap)).toBe(false);
-    expect(wrap.parentElement).toBe(link.parentElement);
-    expect(wrap.className).toContain("relative");
-    expect(wrap.className).toContain("z-10");
-    expect(link.className).toContain("after:absolute");
-  });
-
-  it("bands: live and not-live rows both carry the popover, with the band's unit rule", () => {
-    render(<ReportsIndex units={[MEYER, PROGRAM]} mode="bands" />);
-    const meyer = screen.getByTestId("reports-index-band-meyer");
-    // 6 report rows; the band header row carries none.
-    expect(within(meyer).getAllByTestId("report-access-marker")).toHaveLength(6);
-    const liveRow = screen.getByTestId("reports-index-band-link-meyer-1").closest("tr")!;
-    expect(accessMarker(liveRow)).toEqual(["unit", "", "", ""]);
-    const notLiveRow = within(meyer).getByText("3. Publications").closest("tr")!;
-    expect(accessMarker(notLiveRow)).toEqual(["unit", "", "", ""]);
-    const program = screen.getByTestId("reports-index-band-mentoring-programs");
+  it("data labels: report 1 is a dated snapshot, report 2 names its cycle", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    const c = within(container);
     expect(
-      accessMarker(within(program).getByTestId("report-access-marker").closest("tr")!),
-    ).toEqual(["person", "mentored-publications", "true", "1"]);
+      within(c.getByTestId("reports-index-row-meyer-1")).getByTestId("reports-index-data")
+        .textContent,
+    ).toBe("Snapshot · refreshed Sep 20, 2026");
+    expect(
+      within(c.getByTestId("reports-index-row-meyer-2")).getByTestId("reports-index-data")
+        .textContent,
+    ).toBe("Cycle osra-2026-07-14");
   });
 
-  it("bands: the marker sits beside the band link, not inside it", () => {
-    render(<ReportsIndex units={[MEYER]} mode="bands" />);
-    const link = screen.getByTestId("reports-index-band-link-meyer-1");
-    const wrap = within(link.closest("td")!).getByTestId("reports-index-access");
-    expect(link.contains(wrap)).toBe(false);
-    expect(wrap.parentElement).toBe(link.parentElement);
-    expect(wrap.className).toContain("z-10");
+  it("access is plain text in the row: audience + '+ N others'; no popover trigger on the index", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    const c = within(container);
+    expect(
+      within(c.getByTestId("reports-index-row-institution-8")).getByTestId("reports-index-access")
+        .textContent,
+    ).toBe("All unit administrators + 2 others");
+    expect(
+      within(c.getByTestId("reports-index-row-mentoring-programs-7")).getByTestId(
+        "reports-index-access",
+      ).textContent,
+    ).toBe("Superusers and comms stewards");
+    expect(c.queryByTestId("report-access-trigger")).toBeNull();
+    expect(container.querySelector("button[aria-label='Who can run this report']")).toBeNull();
   });
 
-  it("single-unit table: every row carries the popover, live or not", () => {
-    render(
-      <SingleUnitReportsTable
-        unitCode="meyer"
-        perReport={perReport([1, 2])}
-        reports={CENTER_REPORTS}
-      />,
+  it("keeps an 'Edit <kind> profile' link on a unit group, none on a pseudo-unit", () => {
+    const { container } = render(<ReportsIndex units={[...ALL, SURGERY]} />);
+    const c = within(container);
+    expect(c.getByTestId("reports-index-edit-meyer").getAttribute("href")).toBe(
+      "/edit/center/meyer",
     );
-    const table = screen.getByTestId("single-unit-reports-table");
-    expect(within(table).getAllByTestId("report-access-marker")).toHaveLength(6);
-    expect(accessMarker(within(table).getByText("3. Publications").closest("tr")!)).toEqual([
-      "unit",
-      "",
-      "",
-      "",
-    ]);
+    expect(c.getByTestId("reports-index-edit-meyer").textContent).toBe("Edit center profile");
+    expect(c.getByTestId("reports-index-edit-surg").textContent).toBe("Edit department profile");
+    expect(c.queryByTestId("reports-index-edit-institution")).toBeNull();
+    expect(c.queryByTestId("reports-index-edit-mentoring-programs")).toBeNull();
   });
 });
 
-describe("ReportsIndex — bands mode (1a)", () => {
-  it("renders a band per unit with its own report rows beneath", () => {
-    render(<ReportsIndex units={[MEYER, EPIC]} mode="bands" />);
-    expect(screen.getByTestId("reports-index-band-meyer")).toBeTruthy();
-    expect(screen.getByTestId("reports-index-band-epic")).toBeTruthy();
+describe("ReportsIndex — search", () => {
+  const search = (container: HTMLElement, value: string) =>
+    fireEvent.change(within(container).getByTestId("reports-index-search"), { target: { value } });
+
+  it("matches the report name, summary, unit name and number", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    search(container, "grants");
+    expect(rowIds(container)).toEqual(["reports-index-row-meyer-4"]);
+    search(container, "co-authorship");
+    expect(rowIds(container)).toEqual(["reports-index-row-mentoring-programs-7"]);
+    search(container, "meyer");
+    expect(rowIds(container)).toHaveLength(4);
+    search(container, "#8");
+    expect(rowIds(container)).toEqual(["reports-index-row-institution-8"]);
   });
 
-  it("a live report row is a link to /edit/reports/<slug>; a not-live one is plain muted text", () => {
-    render(<ReportsIndex units={[MEYER]} mode="bands" />);
-    const link = screen.getByTestId("reports-index-band-link-meyer-1");
-    expect(link.getAttribute("href")).toBe("/edit/reports/optimize-membership?center=meyer");
-    // Report 3 is not live for Meyer in this fixture — no link, just text.
-    expect(screen.queryByTestId("reports-index-band-link-meyer-3")).toBeNull();
-    const band = screen.getByTestId("reports-index-band-meyer");
-    expect(within(band).getByText("3. Publications")).toBeTruthy();
-  });
-
-  it("the band header shows the unit's type, live count, and an Edit center profile link", () => {
-    render(<ReportsIndex units={[EPIC]} mode="bands" />);
-    const band = screen.getByTestId("reports-index-band-epic");
-    expect(band.textContent).toContain("Institute");
-    expect(band.textContent).toContain("0 of 6 reports live");
-    expect(screen.getByTestId("reports-index-edit-epic").getAttribute("href")).toBe("/edit/center/epic");
-  });
-
-  it("a program band lists its one report and has no profile to edit", () => {
-    render(<ReportsIndex units={[PROGRAM]} mode="bands" />);
-    expect(screen.getByTestId("reports-index-band-link-mentoring-programs-7").getAttribute("href")).toBe(
-      "/edit/reports/mentored-publications",
+  it("no match → 'No reports match.' with a Clear filters button that restores the list", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    search(container, "zzz");
+    const empty = within(container).getByTestId("reports-index-empty");
+    expect(empty.textContent).toContain("No reports match.");
+    fireEvent.click(within(empty).getByRole("button", { name: "Clear filters" }));
+    expect(rowIds(container)).toHaveLength(6);
+    expect((within(container).getByTestId("reports-index-search") as HTMLInputElement).value).toBe(
+      "",
     );
-    expect(screen.getByTestId("reports-index-band-mentoring-programs").textContent).toContain("Program · 1 of 1 reports live");
-    expect(screen.queryByTestId("reports-index-edit-mentoring-programs")).toBeNull();
   });
 
-  it("a department band only lists its own 2-report catalog, never a report 1/2/4/5 row", () => {
-    render(<ReportsIndex units={[DEPT]} mode="bands" />);
-    const band = screen.getByTestId("reports-index-band-surg");
-    expect(band.textContent).toContain("Department");
-    expect(band.textContent).toContain("1 of 2 reports live");
-    expect(within(band).getByText("3. Publications")).toBeTruthy();
-    expect(within(band).getByText("6. NIH-funded pubs")).toBeTruthy();
-    expect(within(band).queryByText(/Optimize membership|NCI Table|^4\.|^5\./)).toBeNull();
-  });
-
-  it("a department's live report link carries &kind=department", () => {
-    render(<ReportsIndex units={[DEPT]} mode="bands" />);
-    const link = screen.getByTestId("reports-index-band-link-surg-3");
-    expect(link.getAttribute("href")).toBe("/edit/reports/publications?center=surg&kind=department");
+  it("no units at all → a plain empty line, no Clear filters", () => {
+    const { container } = render(<ReportsIndex units={[]} />);
+    const empty = within(container).getByTestId("reports-index-empty");
+    expect(empty.textContent).toBe("No reports to show.");
+    expect(within(empty).queryByRole("button")).toBeNull();
   });
 });
 
-describe("SingleUnitReportsTable — 3a (exactly one reportable unit)", () => {
-  it("renders the same Report | Focus | Last refreshed table shape as a band, no band header", () => {
-    render(<SingleUnitReportsTable unitCode="meyer" perReport={perReport([1, 2])} reports={CENTER_REPORTS} />);
-    const table = screen.getByTestId("single-unit-reports-table");
-    expect(within(table).getByText("Report")).toBeTruthy();
-    expect(within(table).getByText("Focus")).toBeTruthy();
-    expect(within(table).getByText("Last refreshed")).toBeTruthy();
-    // No band header row — nothing states a unit name/live-count inside the table itself.
-    expect(within(table).queryByText(/reports live/)).toBeNull();
+describe("ReportsIndex — scope segments", () => {
+  const seg = (container: HTMLElement, k: string) =>
+    within(container).queryByTestId(`reports-index-scope-${k}`);
+
+  it("All / Institution-wide / Programs / Centers with report counts; the optional kinds only when present", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    expect(seg(container, "all")?.textContent).toBe("All 6");
+    expect(seg(container, "institution")?.textContent).toBe("Institution-wide 1");
+    expect(seg(container, "program")?.textContent).toBe("Programs 1");
+    expect(seg(container, "center")?.textContent).toBe("Centers 4");
+    expect(seg(container, "department")).toBeNull();
+    expect(seg(container, "division")).toBeNull();
+    expect(seg(container, "core")).toBeNull();
+
+    fireEvent.click(seg(container, "center")!);
+    expect(seg(container, "center")?.getAttribute("aria-pressed")).toBe("true");
+    expect(groupNames(container)).toEqual(["Meyer Cancer Center"]);
   });
 
-  it("a live report is a link to /edit/reports/<slug>?center=…; a not-live one is plain muted text", () => {
-    render(<SingleUnitReportsTable unitCode="meyer" perReport={perReport([1, 2])} reports={CENTER_REPORTS} />);
-    const link = screen.getByTestId("reports-index-band-link-meyer-1");
-    expect(link.getAttribute("href")).toBe("/edit/reports/optimize-membership?center=meyer");
-    expect(screen.queryByTestId("reports-index-band-link-meyer-3")).toBeNull();
-    const table = screen.getByTestId("single-unit-reports-table");
-    expect(within(table).getByText("3. Publications")).toBeTruthy();
+  it("counts follow the search", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    fireEvent.change(within(container).getByTestId("reports-index-search"), {
+      target: { value: "publications" },
+    });
+    expect(seg(container, "all")?.textContent).toBe("All 2");
+    expect(seg(container, "center")?.textContent).toBe("Centers 1");
+    expect(seg(container, "institution")?.textContent).toBe("Institution-wide 0");
   });
 
-  it("unitKind defaults to center — no &kind= param when omitted", () => {
-    render(<SingleUnitReportsTable unitCode="meyer" perReport={perReport([1])} reports={CENTER_REPORTS} />);
-    expect(screen.getByTestId("reports-index-band-link-meyer-1").getAttribute("href")).toBe(
-      "/edit/reports/optimize-membership?center=meyer",
+  it("scoped viewer (hideUnderAll off): departments show under All", () => {
+    const { container } = render(<ReportsIndex units={[...ALL, SURGERY]} />);
+    expect(seg(container, "department")?.textContent).toBe("Departments 2");
+    expect(groupNames(container)).toContain("Surgery");
+  });
+
+  it("global viewer: departments are off under All, shown by their own segment, and reached by search", () => {
+    const { container } = render(<ReportsIndex units={[...ALL, SURGERY]} hideUnderAll />);
+    expect(groupNames(container)).not.toContain("Surgery");
+    expect(seg(container, "all")?.textContent).toBe("All 6");
+    expect(seg(container, "department")?.textContent).toBe("Departments 2");
+
+    fireEvent.click(seg(container, "department")!);
+    expect(groupNames(container)).toEqual(["Surgery"]);
+
+    fireEvent.click(seg(container, "all")!);
+    fireEvent.change(within(container).getByTestId("reports-index-search"), {
+      target: { value: "surgery" },
+    });
+    expect(groupNames(container)).toEqual(["Surgery"]);
+  });
+});
+
+describe("ReportsIndex — In progress (NCI 2A review)", () => {
+  it("the pill reads 'In progress · N to review' on report 2 only; the toggle counts and filters to it", () => {
+    const { container } = render(<ReportsIndex units={ALL} />);
+    const c = within(container);
+    expect(c.getByTestId("reports-index-review-pill-meyer").textContent).toBe(
+      "In progress · 58 to review",
     );
+    expect(
+      within(c.getByTestId("reports-index-row-meyer-2")).getByTestId(
+        "reports-index-review-pill-meyer",
+      ),
+    ).toBeTruthy();
+    const toggle = c.getByTestId("reports-index-review");
+    expect(toggle.textContent).toBe("In progress 1");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(rowIds(container)).toEqual(["reports-index-row-meyer-2"]);
   });
 
-  it("a department's live report link carries &kind=department", () => {
-    render(
-      <SingleUnitReportsTable
-        unitCode="surg"
-        unitKind="department"
-        perReport={perReport([3], UNIT_REPORTS)}
-        reports={UNIT_REPORTS}
+  it("nothing left to review → no pill, toggle reads 0", () => {
+    const reviewed: ReportsIndexUnit = {
+      ...MEYER,
+      perReport: MEYER.perReport.map((p) => (p.n === 2 ? { ...p, toReview: 0 } : p)),
+    };
+    const { container } = render(<ReportsIndex units={[reviewed]} />);
+    expect(within(container).queryByTestId("reports-index-review-pill-meyer")).toBeNull();
+    expect(within(container).getByTestId("reports-index-review").textContent).toBe("In progress 0");
+  });
+
+  it("no toggle at all for a viewer with no NCI 2A report", () => {
+    const { container } = render(<ReportsIndex units={[INSTITUTION, SURGERY]} />);
+    expect(within(container).queryByTestId("reports-index-review")).toBeNull();
+  });
+});
+
+describe("ReportsIndex — URL params", () => {
+  it("starts from the initial filters", () => {
+    const { container } = render(
+      <ReportsIndex
+        units={ALL}
+        initialQuery="grants"
+        initialScope="center"
+        initialReview={false}
       />,
     );
-    const link = screen.getByTestId("reports-index-band-link-surg-3");
-    expect(link.getAttribute("href")).toBe("/edit/reports/publications?center=surg&kind=department");
+    expect(rowIds(container)).toEqual(["reports-index-row-meyer-4"]);
+    expect(
+      within(container).getByTestId("reports-index-scope-center").getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("an initial scope with no segment falls back to All", () => {
+    const { container } = render(<ReportsIndex units={ALL} initialScope="core" />);
+    expect(
+      within(container).getByTestId("reports-index-scope-all").getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("mirrors q / scope / review into the URL, keeping ?center=", () => {
+    window.history.pushState(null, "", "/edit/reports?center=meyer");
+    const { container } = render(<ReportsIndex units={ALL} />);
+    fireEvent.change(within(container).getByTestId("reports-index-search"), {
+      target: { value: "nci" },
+    });
+    fireEvent.click(within(container).getByTestId("reports-index-scope-center"));
+    fireEvent.click(within(container).getByTestId("reports-index-review"));
+    expect(replaceState).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "?center=meyer&q=nci&scope=center&review=1",
+    );
+    fireEvent.click(within(container).getByTestId("reports-index-scope-all"));
+    fireEvent.click(within(container).getByTestId("reports-index-review"));
+    fireEvent.change(within(container).getByTestId("reports-index-search"), {
+      target: { value: "" },
+    });
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "?center=meyer");
+  });
+
+  it("parseReportsIndexScope accepts the known segments only", () => {
+    expect(parseReportsIndexScope("department")).toBe("department");
+    expect(parseReportsIndexScope("bogus")).toBe("all");
+    expect(parseReportsIndexScope(undefined)).toBe("all");
+  });
+});
+
+describe("dataLabel", () => {
+  it("covers every state", () => {
+    expect(dataLabel(3, undefined)).toBe("No data yet");
+    expect(dataLabel(1, { n: 1, live: false, lastRefreshedAt: "2026-09-20T16:00:00.000Z" })).toBe(
+      "No data yet",
+    );
+    expect(dataLabel(1, { n: 1, live: true, lastRefreshedAt: null })).toBe("Snapshot");
+    expect(dataLabel(2, { n: 2, live: true, lastRefreshedAt: null, reportingCycle: null })).toBe(
+      "Live data",
+    );
+    expect(dataLabel(9, { n: 9, live: true, lastRefreshedAt: null })).toBe("Live data");
   });
 });

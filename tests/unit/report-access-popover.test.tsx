@@ -36,7 +36,11 @@ vi.mock("@/components/edit/directory-people-typeahead", () => ({
   ),
 }));
 
-import { ReportAccessPopover, type ReportAccessPopoverRow } from "@/components/edit/report-access-popover";
+import {
+  accessSummary,
+  ReportAccessPopover,
+  type ReportAccessPopoverRow,
+} from "@/components/edit/report-access-popover";
 
 const ROW: ReportAccessPopoverRow = {
   reportKey: "mentored-publications",
@@ -301,5 +305,46 @@ describe("ReportAccessPopover — badge variant (report page header)", () => {
     expect(content.getByRole("link", { name: "Manage unit administrators" }).getAttribute("href")).toBe(
       "/edit/administrators",
     );
+  });
+});
+
+describe("accessSummary — the one string source for the header badge and the index row", () => {
+  const person = (rows: ReportAccessPopoverRow[], audience?: string) =>
+    accessSummary({
+      mode: "person",
+      reportKey: "mentored-publications",
+      initialRows: rows,
+      scopeOptions: SCOPES,
+      canManage: false,
+      audience,
+    });
+
+  it("keeps the #2791 audience wording per mode", () => {
+    expect(accessSummary({ mode: "unit" }).text).toBe("Unit owners and curators");
+    expect(accessSummary({ mode: "admin" }).text).toBe("All unit administrators");
+    expect(person([]).text).toBe("Superusers and comms stewards");
+    expect(person([], "All unit administrators").text).toBe("All unit administrators");
+  });
+
+  it("'+ N others' for the grant rows, singular for one, null for none", () => {
+    expect(person([ROW])).toMatchObject({ others: 1, othersLabel: "+ 1 other", text: "Superusers and comms stewards + 1 other" });
+    expect(person([ROW, NEW_ROW], "All unit administrators").text).toBe("All unit administrators + 2 others");
+    expect(person([]).othersLabel).toBeNull();
+  });
+
+  it("the badge renders the same audience and others label", () => {
+    const { container } = render(
+      <ReportAccessPopover
+        mode="person"
+        variant="badge"
+        reportKey="mentored-publications"
+        initialRows={[ROW]}
+        scopeOptions={SCOPES}
+        canManage={false}
+      />,
+    );
+    const summary = person([ROW]);
+    const trigger = within(container).getByTestId("report-access-trigger");
+    expect(trigger.textContent).toBe(`${summary.audience}${summary.othersLabel}`);
   });
 });

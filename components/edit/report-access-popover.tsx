@@ -27,7 +27,8 @@
  *     instant).
  *
  * Two presentations, `variant`: `"icon"` (the default — the `Users` glyph and
- * the table above, on the index rows) and `"badge"` (the report page header,
+ * the table above; the reports index no longer renders it, 2026-09-25, it
+ * shows {@link accessSummary}'s text instead) and `"badge"` (the report page header,
  * `ReportHeader`): a pill naming the default audience plus "+ N others" for
  * the grant rows, opening a read-only list. The badge never edits; its
  * "Manage access" opens the "Edit details" sheet (`report-details-sheet.tsx`)
@@ -365,25 +366,39 @@ function initials(name: string): string {
   return `${words[0]![0]}${words[words.length - 1]![0]}`.toUpperCase();
 }
 
+/** Who can open a report, as words: the default audience, its one-line rule,
+ *  the per-person grant rows, and "+ N others" for those rows (null when there
+ *  are none). The single string source for the report header's badge and the
+ *  index row's meta line (`reports-index.tsx`), so the two never disagree.
+ *  `text` is the one-line form: "All unit administrators + 2 others". */
+export function accessSummary(props: ReportAccessPopoverProps): {
+  audience: string;
+  rule: string;
+  rows: ReadonlyArray<ReportAccessPopoverRow>;
+  others: number;
+  othersLabel: string | null;
+  text: string;
+} {
+  const [audience, rule, rows] =
+    props.mode === "person"
+      ? [props.audience ?? PERSON_AUDIENCE, props.note ?? PERSON_RULE_SHORT, props.initialRows]
+      : props.mode === "admin"
+        ? [ADMIN_AUDIENCE, ADMIN_RULE, []]
+        : [UNIT_AUDIENCE, UNIT_RULE, []];
+  const others = rows.length;
+  const othersLabel = others > 0 ? `+ ${others} other${others === 1 ? "" : "s"}` : null;
+  return { audience, rule, rows, others, othersLabel, text: othersLabel ? `${audience} ${othersLabel}` : audience };
+}
+
 /** The report header's access pill: the default audience, "+ N others" for the
  *  grant rows, and a read-only list (the mockup's "Who can open this report").
  *  "Manage access" (a manager only) opens the "Edit details" sheet; a unit
  *  report links to the administrators page instead, since its access IS the
  *  unit's Owner / Curator grants. */
 function AccessBadge(props: ReportAccessPopoverProps) {
-  const [audience, rule, rows, labelFor, canManage] =
-    props.mode === "person"
-      ? [
-          props.audience ?? PERSON_AUDIENCE,
-          props.note ?? PERSON_RULE_SHORT,
-          props.initialRows,
-          new Map(props.scopeOptions.length > 1 ? props.scopeOptions : []),
-          props.canManage,
-        ]
-      : props.mode === "admin"
-        ? [ADMIN_AUDIENCE, ADMIN_RULE, [], new Map<string, string>(), false]
-        : [UNIT_AUDIENCE, UNIT_RULE, [], new Map<string, string>(), false];
-  const others = rows.length;
+  const { audience, rule, rows, others, othersLabel } = accessSummary(props);
+  const labelFor = new Map(props.mode === "person" && props.scopeOptions.length > 1 ? props.scopeOptions : []);
+  const canManage = props.mode === "person" && props.canManage;
   const [open, setOpen] = React.useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -396,7 +411,7 @@ function AccessBadge(props: ReportAccessPopoverProps) {
         >
           <Users size={14} aria-hidden />
           <span>{audience}</span>
-          {others > 0 && <span className="font-semibold">+ {others} other{others === 1 ? "" : "s"}</span>}
+          {othersLabel && <span className="font-semibold">{othersLabel}</span>}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] p-0 text-sm" data-testid="report-access-popover">
