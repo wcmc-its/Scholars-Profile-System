@@ -99,7 +99,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "nci-table-2a",
     name: "NCI Table 2a",
     summary:
-      "NCI CCSG Data Table 2A funding review — program-code allocation and the Cancer-Relevant Percent judgment column.",
+      "NCI CCSG Data Table 2A funding review — confirm or correct the AI-suggested Cancer-Relevant Percent; Program comes from center membership.",
     descriptionHtml: null,
   },
   "3": {

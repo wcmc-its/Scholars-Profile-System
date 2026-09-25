@@ -24,6 +24,10 @@ import { Progress } from "@/components/ui/progress";
 import {
   filterNci2a,
   NCI2A_UNASSIGNED,
+  nci2aCsvFilename,
+  nci2aFiltered,
+  nci2aHref,
+  nci2aUnitQuery,
   nci2aChips,
   nci2aDownloadNote,
   nci2aQueryString,
@@ -54,11 +58,22 @@ function toSearchParams(sp: UnitReportProps["searchParams"]): URLSearchParams {
   return out;
 }
 
-/** Hidden inputs carrying the params a form doesn't own, defaults left out. */
-function Carry({ params, omit }: { params: Nci2aParams; omit: Array<keyof Nci2aParams> }) {
+/** Hidden inputs carrying the unit and the params a form doesn't own, defaults left out. */
+function Carry({
+  unitQuery,
+  params,
+  omit,
+}: {
+  unitQuery: string;
+  params: Nci2aParams;
+  omit: Array<keyof Nci2aParams>;
+}) {
   const q = new URLSearchParams(nci2aQueryString(params));
   return (
     <>
+      {[...new URLSearchParams(unitQuery).entries()].map(([k, v]) => (
+        <input key={k} type="hidden" name={k} value={v} />
+      ))}
       {[...q.entries()]
         .filter(([k]) => !omit.includes(k as keyof Nci2aParams))
         .map(([k, v]) => (
@@ -95,9 +110,10 @@ function QueryAndAssumptions({ cycle }: { cycle: string }) {
           peer-reviewing organizations.
         </li>
         <li>
-          The CSV holds the rows these filters select, one line per program, with a Review Status
-          column (Confirmed or Needs review). It is award-level NCI submission data, so it is exempt
-          from the 50-person limit on scholar exports: it names PIs but has no CWID column.
+          The CSV holds the rows these filters select (its name ends in -filtered when that is not
+          the whole cycle), one line per program, with a Review Status column (Confirmed or Needs
+          review). It is award-level NCI submission data, so it is exempt from the 50-person limit
+          on scholar exports: it names PIs but has no CWID column.
         </li>
       </ul>
     </section>
@@ -106,12 +122,14 @@ function QueryAndAssumptions({ cycle }: { cycle: string }) {
 
 export async function renderNciTable2aReport({
   code,
+  kind,
   searchParams,
   basePath,
 }: UnitReportProps): Promise<ReportRender> {
   const params = parseNci2aParams(toSearchParams(searchParams));
   const data = await loadNci2aReport(code);
-  const href = (q: string) => (q ? `${basePath}?${q}` : basePath);
+  const unitQuery = nci2aUnitQuery(code, kind);
+  const href = (q: string) => nci2aHref(basePath, unitQuery, q);
 
   if (!data.cycle || data.awards.length === 0) {
     return {
@@ -131,7 +149,8 @@ export async function renderNciTable2aReport({
   const { rows, counts } = filterNci2a(data.awards, params);
   const stats = nci2aStats(rows);
   const progress = reviewProgress(data.awards);
-  const note = nci2aDownloadNote(cycle, stats);
+  const filtered = nci2aFiltered(params);
+  const note = nci2aDownloadNote(cycle, stats, filtered);
   const chips = nci2aChips(params, data.programs);
   const narrowed = params.program !== "" || params.peer !== "" || params.q !== "";
   const sortHrefs = Object.fromEntries(
@@ -189,7 +208,7 @@ export async function renderNciTable2aReport({
             testId="nci-2a-stats"
             aside={
               <div className="flex flex-col items-start gap-2">
-                <Nci2aDownloadButton cycle={cycle} rows={rows} />
+                <Nci2aDownloadButton filename={nci2aCsvFilename(cycle, filtered)} rows={rows} />
                 <p
                   className={cn(
                     "text-[13px]",
@@ -236,7 +255,7 @@ export async function renderNciTable2aReport({
                 className="group flex flex-wrap items-center gap-3"
                 data-testid="nci-2a-filters"
               >
-                <Carry params={params} omit={["program", "peer"]} />
+                <Carry unitQuery={unitQuery} params={params} omit={["program", "peer"]} />
                 <select
                   name="program"
                   defaultValue={params.program}
@@ -277,7 +296,7 @@ export async function renderNciTable2aReport({
                 className="w-full sm:w-64"
                 data-testid="nci-2a-search"
               >
-                <Carry params={params} omit={["q"]} />
+                <Carry unitQuery={unitQuery} params={params} omit={["q"]} />
                 <input
                   type="search"
                   name="q"

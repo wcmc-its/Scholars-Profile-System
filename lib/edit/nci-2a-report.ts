@@ -117,6 +117,26 @@ export function nci2aQueryString(p: Nci2aParams, over: Partial<Nci2aParams> = {}
   return out.toString();
 }
 
+/**
+ * The unit part of the report's own links: `center=<code>`, plus `kind=` for a
+ * non-center unit. The page resolves the unit from it
+ * (`resolveNumberedReportCenterCode`); a link without it sends any actor who
+ * can see more than one unit back to the Reports index.
+ */
+export function nci2aUnitQuery(code: string, kind: string): string {
+  const u = new URLSearchParams({ center: code });
+  if (kind !== "center") u.set("kind", kind);
+  return u.toString();
+}
+
+/** A report link: the unit first, then the filter query `q`. */
+export const nci2aHref = (basePath: string, unitQuery: string, q: string) =>
+  `${basePath}?${unitQuery}${q ? `&${q}` : ""}`;
+
+/** Any filter, status included, narrows the rows (and so the CSV). */
+export const nci2aFiltered = (p: Nci2aParams) =>
+  p.status !== "all" || p.program !== "" || p.peer !== "" || p.q !== "";
+
 /** The column header's link: the same column flips direction; a new one starts at its first. */
 export function sortQuery(p: Nci2aParams, k: Nci2aSortKey): string {
   const dir = p.sort === k ? (p.dir === "asc" ? "desc" : "asc") : firstDir(k);
@@ -258,8 +278,12 @@ export function nci2aStatTiles(s: Nci2aStats): { value: string; label: string }[
 export function nci2aDownloadNote(
   cycle: string,
   s: Nci2aStats,
+  filtered = false,
 ): { text: string; pending: boolean } {
-  const head = `Cycle ${cycle} · annual figures.`;
+  const scope = filtered
+    ? ` Filtered: this file holds only the ${s.projects.toLocaleString()} ${s.projects === 1 ? "project" : "projects"} these filters select, not the whole cycle.`
+    : "";
+  const head = `Cycle ${cycle} · annual figures.${scope}`;
   if (s.needsReview === 0)
     return { text: `${head} Every percentage in this file has been reviewed.`, pending: false };
   const rows =
@@ -296,6 +320,34 @@ export function nci2aChips(p: Nci2aParams, programs: ReadonlyArray<Nci2aProgram>
   return chips;
 }
 
+// ── A save, applied locally ──────────────────────────────────────────────
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * `a` as the PATCH just wrote it: the percent, `source: "human"`, and the
+ * dollars derived from it (the same arithmetic as the loader). The table shows
+ * this until the server row catches up, so a lagged read-replica refresh can't
+ * put the old AI value (and an Accept bound to it) back on screen.
+ */
+export function applyNci2aWrite(a: Nci2aAward, pct: number): Nci2aAward {
+  const relevantRaw = a.annualProjectDirectCosts * (pct / 100);
+  return {
+    ...a,
+    cancerRelevantPercent: pct,
+    cancerRelevantPercentSource: "human",
+    cancerRelevantAnnualProjectDc: round2(relevantRaw),
+    allocations: a.allocations.map((al) => ({
+      ...al,
+      annualProgramDirectCosts: round2(relevantRaw * (al.programPercent / 100)),
+    })),
+  };
+}
+
+/** The server row already shows the write, so the local copy can go. */
+export const nci2aWriteLanded = (a: Nci2aAward, pct: number) =>
+  a.cancerRelevantPercentSource === "human" && a.cancerRelevantPercent === pct;
+
 // ── CSV ──────────────────────────────────────────────────────────────────
 
 /** RFC4180-ish quoting (titles and names may carry commas or quotes). */
@@ -321,6 +373,10 @@ export const NCI2A_CSV_HEADER = [
   "Program Percent",
   "Annual Program Direct Costs",
 ] as const;
+
+/** `-filtered` in the name whenever the file isn't the whole cycle. */
+export const nci2aCsvFilename = (cycle: string, filtered: boolean) =>
+  `nci-table-2a-${cycle}${filtered ? "-filtered" : ""}.csv`;
 
 /**
  * The NCI worksheet shape: one line per program allocation, the award columns

@@ -8,8 +8,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyNci2aWrite,
   filterNci2a,
   NCI2A_CSV_HEADER,
+  nci2aCsvFilename,
+  nci2aFiltered,
+  nci2aHref,
+  nci2aUnitQuery,
+  nci2aWriteLanded,
   nci2aChips,
   nci2aCsv,
   nci2aDownloadNote,
@@ -22,6 +28,7 @@ import {
   sortQuery,
   type Nci2aAward,
 } from "@/lib/edit/nci-2a-report";
+import { REPORT_META_DEFAULTS } from "@/lib/edit/report-meta";
 
 function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
   const pct = over.cancerRelevantPercent === undefined ? 50 : over.cancerRelevantPercent;
@@ -251,5 +258,59 @@ describe("nci2aCsv", () => {
     expect(lines[1].startsWith('"Beta, Bob"')).toBe(true);
     expect(lines[2].startsWith('"Quote, ""Q"""')).toBe(true);
     expect(lines[3]).toBe(",,,,,,,,,,,CT,40,20000");
+  });
+});
+
+describe("unit in links", () => {
+  it("every link carries center (and kind off a center) before the filters", () => {
+    expect(nci2aUnitQuery("ctsc", "center")).toBe("center=ctsc");
+    expect(nci2aUnitQuery("x y", "core")).toBe("center=x+y&kind=core");
+    expect(nci2aHref("/r", "center=ctsc", "")).toBe("/r?center=ctsc");
+    expect(nci2aHref("/r", "center=ctsc", "status=needs")).toBe("/r?center=ctsc&status=needs");
+  });
+});
+
+describe("a filtered download says so", () => {
+  it("any filter, status included, marks the file and the note", () => {
+    expect(nci2aFiltered(parseNci2aParams(new URLSearchParams()))).toBe(false);
+    expect(nci2aFiltered(parseNci2aParams(new URLSearchParams("sort=dc&dir=asc")))).toBe(false);
+    for (const q of ["status=needs", "program=CB", "peer=no", "q=lung"])
+      expect(nci2aFiltered(parseNci2aParams(new URLSearchParams(q)))).toBe(true);
+    expect(nci2aCsvFilename("osra-2026-07-14", false)).toBe("nci-table-2a-osra-2026-07-14.csv");
+    expect(nci2aCsvFilename("osra-2026-07-14", true)).toBe(
+      "nci-table-2a-osra-2026-07-14-filtered.csv",
+    );
+    const s = nci2aStats([award({ id: "1", cancerRelevantPercentSource: "human" })]);
+    expect(nci2aDownloadNote("c", s, true).text).toBe(
+      "Cycle c · annual figures. Filtered: this file holds only the 1 project these filters select, not the whole cycle. Every percentage in this file has been reviewed.",
+    );
+    expect(nci2aDownloadNote("c", s).text).not.toContain("Filtered");
+  });
+});
+
+describe("applyNci2aWrite", () => {
+  it("shows the written percent as Confirmed with its dollars, until the server row has it", () => {
+    const a = award({ id: "1", cancerRelevantPercent: 40, annualProjectDirectCosts: 1000 });
+    const split = {
+      ...a,
+      allocations: [
+        { ...a.allocations[0], programPercent: 60 },
+        { ...a.allocations[0], id: "b", programCode: "CT", programPercent: 40 },
+      ],
+    };
+    const w = applyNci2aWrite(split, 37.5);
+    expect(nci2aStatus(w)).toBe("confirmed");
+    expect(w.cancerRelevantPercent).toBe(37.5);
+    expect(w.cancerRelevantAnnualProjectDc).toBe(375);
+    expect(w.allocations.map((al) => al.annualProgramDirectCosts)).toEqual([225, 150]);
+    expect(nci2aWriteLanded(a, 65)).toBe(false);
+    expect(nci2aWriteLanded({ ...a, cancerRelevantPercentSource: "human" }, 40)).toBe(true);
+  });
+});
+
+describe("report 2 summary", () => {
+  it("no longer offers program allocation (Program is read-only)", () => {
+    expect(REPORT_META_DEFAULTS["2"].summary).not.toMatch(/allocation/i);
+    expect(REPORT_META_DEFAULTS["2"].summary).toContain("center membership");
   });
 });

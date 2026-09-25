@@ -33,6 +33,8 @@ afterEach(() => {
 
 const BASE = "/edit/reports/nci-table-2a";
 const CENTER = "meyer_cancer_center";
+/** Every body link starts with the unit, so the page can resolve it. */
+const U = `${BASE}?center=${CENTER}`;
 
 function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
   const pct = over.cancerRelevantPercent === undefined ? 50 : over.cancerRelevantPercent;
@@ -91,9 +93,10 @@ const DATA = {
   awards: [AI, DONE, NONE],
 };
 
-async function renderBody(searchParams: Record<string, string> = {}) {
+async function renderBody(searchParams: Record<string, string> = {}, kind = "center") {
   const { main } = await renderNciTable2aReport({
     code: CENTER,
+    kind,
     searchParams,
     basePath: BASE,
   } as unknown as Parameters<typeof renderNciTable2aReport>[0]);
@@ -101,8 +104,8 @@ async function renderBody(searchParams: Record<string, string> = {}) {
   return within(r.getByTestId("body"));
 }
 
-function renderTable(rows: Nci2aAward[], resetKey = "") {
-  const r = render(
+function tableEl(rows: Nci2aAward[], resetKey = "") {
+  return (
     <div data-testid="t">
       <Nci2aTable
         centerCode={CENTER}
@@ -118,8 +121,12 @@ function renderTable(rows: Nci2aAward[], resetKey = "") {
         }}
         emptyMessage="No projects match these filters."
       />
-    </div>,
+    </div>
   );
+}
+
+function renderTable(rows: Nci2aAward[], resetKey = "") {
+  const r = render(tableEl(rows, resetKey));
   return { ...r, q: within(r.getByTestId("t")) };
 }
 
@@ -144,7 +151,7 @@ describe("report 2 body", () => {
       "from the project title and funding source",
     );
     expect(within(progress).getByTestId("nci-2a-review-link").getAttribute("href")).toBe(
-      `${BASE}?status=needs`,
+      `${U}&status=needs`,
     );
     expect(within(progress).getByTestId("nci-2a-review-link").textContent).toBe(
       "Review 2 suggestions",
@@ -160,6 +167,8 @@ describe("report 2 body", () => {
     expect(q.getByTestId("nci-2a-download-note").textContent).toBe(
       "Cycle osra-2026-07-14 · annual figures. 2 rows still need review and are flagged in the file.",
     );
+    // The whole cycle: no "Filtered" marker.
+    expect(q.getByTestId("nci-2a-download-note").textContent).not.toContain("Filtered");
   });
 
   it("status segments count over the other filters and link with them kept", async () => {
@@ -167,9 +176,9 @@ describe("report 2 body", () => {
     const links = within(q.getByTestId("nci-2a-status-filter")).getAllByRole("link");
     expect(links.map((l) => l.textContent)).toEqual(["All 3", "Needs review 2", "Reviewed 1"]);
     expect(links.map((l) => l.getAttribute("href"))).toEqual([
-      `${BASE}?peer=yes`,
-      `${BASE}?status=needs&peer=yes`,
-      `${BASE}?status=done&peer=yes`,
+      `${U}&peer=yes`,
+      `${U}&status=needs&peer=yes`,
+      `${U}&status=done&peer=yes`,
     ]);
     expect(links[1].getAttribute("aria-current")).toBe("page");
     // The table and the numbers follow the status filter too.
@@ -183,6 +192,7 @@ describe("report 2 body", () => {
     const q = await renderBody({ program: "CB", q: "alpha", sort: "dc", dir: "asc" });
     const fd = new FormData(q.getByTestId("nci-2a-filters") as HTMLFormElement);
     expect(Object.fromEntries(fd)).toEqual({
+      center: CENTER,
       q: "alpha",
       sort: "dc",
       dir: "asc",
@@ -190,15 +200,46 @@ describe("report 2 body", () => {
       peer: "",
     });
     const sfd = new FormData(q.getByTestId("nci-2a-search") as HTMLFormElement);
-    expect(Object.fromEntries(sfd)).toEqual({ program: "CB", sort: "dc", dir: "asc", q: "alpha" });
+    expect(Object.fromEntries(sfd)).toEqual({
+      center: CENTER,
+      program: "CB",
+      sort: "dc",
+      dir: "asc",
+      q: "alpha",
+    });
     const program = q.getByRole("combobox", { name: "Program" }) as HTMLSelectElement;
     expect([...program.options].map((o) => o.value)).toEqual(["", "CB", "CT", "none"]);
     const chips = within(q.getByTestId("nci-2a-chips")).getAllByRole("link");
     expect(chips.map((c) => c.getAttribute("href"))).toEqual([
-      `${BASE}?q=alpha&sort=dc&dir=asc`,
-      `${BASE}?program=CB&sort=dc&dir=asc`,
+      `${U}&q=alpha&sort=dc&dir=asc`,
+      `${U}&program=CB&sort=dc&dir=asc`,
     ]);
+    // A filtered download says so, in the note (the name is the lib's test).
+    expect(q.getByTestId("nci-2a-download-note").textContent).toContain(
+      "Filtered: this file holds only the 1 project these filters select",
+    );
     expect(within(q.getByTestId("nci-2a-table")).getAllByTestId("nci-2a-row")).toHaveLength(1);
+  });
+
+  it("every link and form keeps the unit (center, and kind off a center)", async () => {
+    const q = await renderBody({ status: "needs" }, "core");
+    const unit = `${BASE}?center=${CENTER}&kind=core`;
+    const hrefs = [
+      ...within(q.getByTestId("nci-2a-status-filter")).getAllByRole("link"),
+      q.getByTestId("nci-2a-review-link"),
+      ...within(q.getByTestId("nci-2a-table")).getAllByRole("link", { name: /^Sort by/ }),
+    ].map((l) => l.getAttribute("href"));
+    expect(hrefs.length).toBeGreaterThan(4);
+    for (const h of hrefs) expect(h?.startsWith(unit)).toBe(true);
+    for (const id of ["nci-2a-filters", "nci-2a-search"]) {
+      const fd = new FormData(q.getByTestId(id) as HTMLFormElement);
+      expect([fd.get("center"), fd.get("kind")]).toEqual([CENTER, "core"]);
+    }
+    cleanup();
+    const chipQ = await renderBody({ q: "alpha" });
+    expect(within(chipQ.getByTestId("nci-2a-chips")).getByRole("link").getAttribute("href")).toBe(
+      U,
+    );
   });
 
   it("the empty Needs review list says nothing is left", async () => {
@@ -287,6 +328,54 @@ describe("report 2 table", () => {
     expect(done.value).toBe("100");
   });
 
+  it("a lagged refresh can't bring back the AI value or an Accept bound to it", async () => {
+    const f = stubFetch();
+    const r = renderTable([AI]);
+    const input = r.q.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "65" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(h.refresh).toHaveBeenCalled());
+    // The read replica hasn't caught up: the server still says llm / 40.
+    r.rerender(tableEl([AI]));
+    const row = r.q.getByTestId("nci-2a-row");
+    expect((within(row).getByRole("spinbutton") as HTMLInputElement).value).toBe("65");
+    expect(within(row).getByTestId("nci-2a-status").textContent).toBe("Confirmed");
+    expect(within(row).queryByRole("button", { name: /Accept/ })).toBeNull();
+    expect(row.textContent).toContain("$65,000");
+    // Once the server has it, its row is shown as is.
+    const landed = {
+      ...AI,
+      cancerRelevantPercent: 65,
+      cancerRelevantPercentSource: "human" as const,
+    };
+    r.rerender(tableEl([landed]));
+    expect((within(row).getByRole("spinbutton") as HTMLInputElement).value).toBe("65");
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("no Accept beside an unsaved edit", () => {
+    const { q } = renderTable([AI]);
+    const input = q.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "65" } });
+    expect(q.queryByRole("button", { name: /Accept/ })).toBeNull();
+    fireEvent.change(input, { target: { value: "40" } });
+    expect(q.getByRole("button", { name: "Accept 40% for P-1" })).toBeTruthy();
+  });
+
+  it("a fractional percent saves as typed, to two places", async () => {
+    const f = stubFetch();
+    const { q } = renderTable([{ ...AI, cancerRelevantPercent: 37.5 }]);
+    const input = q.getByRole("spinbutton") as HTMLInputElement;
+    // Retyped: the draft passes through "3" before landing on "37.5".
+    fireEvent.change(input, { target: { value: "3" } });
+    fireEvent.change(input, { target: { value: "37.5" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect((f.mock.calls[0] as unknown[])[1]).toEqual(
+      expect.objectContaining({ body: JSON.stringify({ cancerRelevantPercent: 37.5 }) }),
+    );
+  });
+
   it("Esc undoes the draft and saves nothing", async () => {
     const f = stubFetch();
     const { q } = renderTable([AI]);
@@ -356,9 +445,10 @@ describe("report 2 table", () => {
       revokeObjectURL: () => {},
     });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const r = render(<Nci2aDownloadButton cycle="osra-2026-07-14" rows={[AI, NONE]} />);
+    const r = render(<Nci2aDownloadButton filename="f-filtered.csv" rows={[AI, NONE]} />);
     fireEvent.click(within(r.container).getByTestId("nci-2a-download"));
     expect(click).toHaveBeenCalled();
+    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe("f-filtered.csv");
     const text = await new Promise<string>((resolve) => {
       const fr = new FileReader();
       fr.onload = () => resolve(fr.result as string);
@@ -371,7 +461,7 @@ describe("report 2 table", () => {
   });
 
   it("the CSV button is disabled with no rows", () => {
-    const r = render(<Nci2aDownloadButton cycle="c" rows={[]} />);
+    const r = render(<Nci2aDownloadButton filename="c.csv" rows={[]} />);
     expect((within(r.container).getByTestId("nci-2a-download") as HTMLButtonElement).disabled).toBe(
       true,
     );

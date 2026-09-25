@@ -14,7 +14,10 @@
  *   - "Accept" on an AI-suggested row PATCHes the SAME value, confirming it.
  * After a save the page re-renders from the server (`router.refresh()`), so
  * the stats, counts and progress move with it; paging keeps its place
- * (`useShowMore`'s `resetKey` is the filter query, not the row array).
+ * (`useShowMore`'s `resetKey` is the filter query, not the row array). The
+ * refresh reads the read replica, which can lag the write, so the table also
+ * shows each saved value itself (`applyNci2aWrite`) until the server row has
+ * it — a stale row must never bring back an Accept bound to the old AI value.
  *
  * Program is read-only here: the PI's center membership, edited in the
  * center roster. Nothing here reaches `@/lib/db`.
@@ -28,9 +31,11 @@ import { useShowMore } from "@/components/edit/reports/report-show-more";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Button } from "@/components/ui/button";
 import {
+  applyNci2aWrite,
   money,
   nci2aCsv,
   nci2aStatus,
+  nci2aWriteLanded,
   type Nci2aAward,
   type Nci2aSortKey,
   type Nci2aStatus,
@@ -70,10 +75,11 @@ export function StatusPill({ status }: { status: Nci2aStatus }) {
 
 /** The CSV of exactly the rows the page's filters select (not just the page shown). */
 export function Nci2aDownloadButton({
-  cycle,
+  filename,
   rows,
 }: {
-  cycle: string;
+  /** `nci2aCsvFilename`: marks a filtered file. */
+  filename: string;
   rows: ReadonlyArray<Nci2aAward>;
 }) {
   const download = () => {
@@ -81,7 +87,7 @@ export function Nci2aDownloadButton({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `nci-table-2a-${cycle}.csv`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -99,6 +105,9 @@ export function Nci2aDownloadButton({
 }
 
 type Save = (awardId: string, value: number) => Promise<boolean>;
+
+const value0 = (a: Nci2aAward) =>
+  a.cancerRelevantPercent == null ? "" : String(a.cancerRelevantPercent);
 
 function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
   const status = nci2aStatus(award);
@@ -124,7 +133,8 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
     }
     if (draft === undefined) return;
     // Explicit: Number("") is 0, and an empty input must never save a 0%.
-    const n = draft.trim() === "" ? NaN : Math.round(Number(draft));
+    // Two decimals, the column's scale (Decimal(5,2)), so "37.5" stays 37.5.
+    const n = draft.trim() === "" ? NaN : Math.round(Number(draft) * 100) / 100;
     if (!Number.isFinite(n) || n < 0 || n > 100) {
       setDraft(undefined);
       return;
@@ -136,8 +146,7 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
     void run(n);
   }
 
-  const value =
-    draft ?? (award.cancerRelevantPercent == null ? "" : String(award.cancerRelevantPercent));
+  const value = draft ?? value0(award);
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -172,7 +181,8 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
           />
           <span className="text-muted-foreground text-[13px]">%</span>
         </span>
-        {status === "ai" && (
+        {/* No Accept beside an unsaved edit: it would save the AI value over it. */}
+        {status === "ai" && (draft === undefined || draft === value0(award)) && (
           <Button
             variant="outline"
             size="xs"
@@ -249,7 +259,23 @@ export function Nci2aTable({
 }) {
   const router = useRouter();
   const [error, setError] = React.useState<string | null>(null);
-  const { visible, hasMore, showMore, rangeLabel } = useShowMore(rows, 25, resetKey);
+  // Percents this table has saved, by award id, shown until the server row
+  // catches up: the refresh reads the read replica, which can lag the write.
+  const [written, setWritten] = React.useState<Record<string, number>>({});
+  React.useEffect(() => {
+    setWritten((w) => {
+      const landed = rows.filter((a) => a.id in w && nci2aWriteLanded(a, w[a.id]));
+      if (landed.length === 0) return w;
+      const next = { ...w };
+      for (const a of landed) delete next[a.id];
+      return next;
+    });
+  }, [rows]);
+  const shown = React.useMemo(
+    () => rows.map((a) => (a.id in written ? applyNci2aWrite(a, written[a.id]) : a)),
+    [rows, written],
+  );
+  const { visible, hasMore, showMore, rangeLabel } = useShowMore(shown, 25, resetKey);
   const rosterHref = `/edit/center/${encodeURIComponent(centerCode)}`;
 
   const save: Save = async (awardId, value) => {
@@ -271,6 +297,7 @@ export function Nci2aTable({
       setError("Save failed. The value was not changed.");
       return false;
     }
+    setWritten((w) => ({ ...w, [awardId]: value }));
     React.startTransition(() => router.refresh());
     return true;
   };
