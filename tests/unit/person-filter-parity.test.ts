@@ -5,9 +5,13 @@
  * side's output is normalized back through `UNIT_KINDS` into
  * `{ types, units: { kind: codes } }`; an unmapped column on either side
  * throws, and one case per `UNIT_KINDS` entry is generated, so a kind wired
- * into one builder but not the other fails here.
+ * into one builder but not the other fails here. A `roster` kind (division)
+ * must ALSO reach its hand-added members on both sides (`rosterOf`), and a
+ * resolved CWID list must bind the same CWIDs on both sides (`list`).
  */
 import { describe, expect, it } from "vitest";
+
+import { Prisma } from "@/lib/generated/prisma/client";
 
 import {
   PERSON_TYPE_COLUMN,
@@ -25,11 +29,31 @@ import {
 const TODAY = "2026-09-22";
 const KINDS = Object.keys(UNIT_KINDS) as UnitKind[];
 const CENTER_MEMBERS = ["abc1234"]; // fake resolved member cwid for the Prisma side
+const DIVISION_ROSTER = ["def5678"]; // fake resolved manual-roster cwid for the Prisma side
 
-type Normalized = { types: string[]; units: Partial<Record<UnitKind, string[]>>; matchNothing: boolean };
+type Normalized = {
+  types: string[];
+  units: Partial<Record<UnitKind, string[]>>;
+  matchNothing: boolean;
+  /** Codes of the kinds whose hand-added roster is matched too. */
+  rosterOf?: string[];
+  /** The CWID list's CWIDs. */
+  list?: string[];
+};
 
-function fromSql(qs: string): Normalized & { dateOps: string[] } {
-  const sql = personFilterSql(parsePersonFilter(new URLSearchParams(qs)), { scholar: "s", centerMembership: "cm" }, TODAY);
+/** A roster kind's cases expect its roster matched for the same codes. */
+function withRoster(n: Normalized): Normalized {
+  const rosterKinds = KINDS.filter((k) => UNIT_KINDS[k].roster);
+  const codes = rosterKinds.flatMap((k) => n.units[k] ?? []);
+  return codes.length > 0 ? { ...n, rosterOf: codes } : n;
+}
+
+function fromSql(qs: string, listCwids?: string[]): Normalized & { dateOps: string[] } {
+  const sql = personFilterSql(
+    { ...parsePersonFilter(new URLSearchParams(qs)), listCwids },
+    { scholar: "s", centerMembership: "cm" },
+    TODAY,
+  );
   const text = sql.sql.replace(/\s+/g, " ");
   const out: Normalized & { dateOps: string[] } = { types: [], units: {}, matchNothing: text.includes("1 = 0"), dateOps: [] };
   const pieces = text.split("?");
@@ -48,7 +72,9 @@ function fromSql(qs: string): Normalized & { dateOps: string[] } {
     }
     const push = (xs: string[]) => xs.push(String(value));
     if (alias === "s" && column === PERSON_TYPE_COLUMN.sql) push(out.types);
+    else if (alias === "s" && column === "cwid") push((out.list ??= []));
     else if (alias === "cm" && column === "center_code") push((out.units.center ??= []));
+    else if (alias === "pf_dm" && column === "division_code") push((out.rosterOf ??= []));
     else {
       const kind = KINDS.find((k) => UNIT_KINDS[k].sql === column);
       if (alias !== "s" || !kind) throw new Error(`SQL filters on unmapped column ${alias}.${column}`);
@@ -59,10 +85,15 @@ function fromSql(qs: string): Normalized & { dateOps: string[] } {
   return out;
 }
 
-function fromPrisma(qs: string): Normalized {
+function fromPrisma(qs: string, listCwids?: string[]): Normalized {
   const f = parsePersonFilter(new URLSearchParams(qs));
-  const w = personFilterWhere(f, CENTER_MEMBERS);
+  const w = personFilterWhere({ ...f, listCwids }, CENTER_MEMBERS, DIVISION_ROSTER);
   const out: Normalized = { types: w.roleCategory?.in ?? [], units: {}, matchNothing: false };
+  if (w.list) {
+    const inList = (w.list.cwid as { in: string[] }).in;
+    if (inList.length === 0) out.matchNothing = true;
+    else out.list = inList;
+  }
   const ors = (w.unit?.OR ?? []) as Record<string, { in: string[] }>[];
   if (w.unit && !w.unit.OR) {
     expect(w.unit).toEqual({ cwid: { in: [] } });
@@ -70,6 +101,12 @@ function fromPrisma(qs: string): Normalized {
   }
   for (const clause of ors) {
     const [[field, filter]] = Object.entries(clause);
+    if (field === "cwid" && filter.in.join() === DIVISION_ROSTER.join()) {
+      // The caller resolved the selected divisions' manual rosters
+      // (`loadSelectedDivisionRosterCwids`).
+      out.rosterOf = KINDS.filter((k) => UNIT_KINDS[k].roster).flatMap((k) => unitCodes(f.units, k));
+      continue;
+    }
     if (field === "cwid") {
       expect(filter.in).toEqual(CENTER_MEMBERS);
       // The Prisma side resolves these codes to members (data-quality's findMany).
@@ -131,13 +168,46 @@ const CASES: { name: string; qs: string; expected: Normalized }[] = [
 ];
 
 describe("person filter — SQL and Prisma builders agree", () => {
-  it.each(CASES)("$name", ({ qs, expected }) => {
+  it.each(CASES)("$name", ({ qs, expected: base }) => {
+    const expected = withRoster(base);
     const sql = fromSql(qs);
     const prisma = fromPrisma(qs);
-    expect({ types: sql.types, units: sql.units, matchNothing: sql.matchNothing }).toEqual(expected);
+    const { dateOps: _dateOps, ...sqlNormalized } = sql;
+    void _dateOps;
+    expect(sqlNormalized).toEqual(expected);
     expect(prisma).toEqual(expected);
     if (expected.units.center) expect(sql.dateOps).toEqual(prismaDateOps());
     else expect(sql.dateOps).toEqual([]);
+  });
+
+  it("a CWID list ANDs with the rest on both sides; an empty list matches nothing", () => {
+    const qs = "type=postdoc&unit=dept:MED";
+    const expected = { types: ["postdoc"], units: { department: ["MED"] }, matchNothing: false, list: ["aaa1111", "bbb2222"] };
+    const { dateOps: _d, ...sql } = fromSql(qs, ["aaa1111", "bbb2222"]);
+    void _d;
+    expect(sql).toEqual(expected);
+    expect(fromPrisma(qs, ["aaa1111", "bbb2222"])).toEqual(expected);
+    expect(personFilterSql({ types: [], unitValues: [], listCwids: [] }, { scholar: "s" }, TODAY).sql.trim()).toBe(
+      "AND 1 = 0",
+    );
+    expect(personFilterWhere({ types: [], unitValues: [], listCwids: [] }, [])).toEqual({ list: { cwid: { in: [] } } });
+    // No list (undefined / null) adds nothing.
+    expect(personFilterSql({ types: [], unitValues: [], listCwids: null }, { scholar: "s" }, TODAY)).toBe(Prisma.empty);
+    expect(personFilterWhere({ types: [], unitValues: [], listCwids: null }, [])).toEqual({});
+  });
+
+  it("a division also matches its manual roster: the SQL subquery gates on division.source; the Prisma side takes the resolved roster", () => {
+    const text = personFilterSql(parsePersonFilter(new URLSearchParams("unit=div:CARD")), { scholar: "s" }, TODAY).sql.replace(
+      /\s+/g,
+      " ",
+    );
+    expect(text).toBe(
+      "AND ((s.div_code IN (?) OR s.cwid IN (SELECT pf_dm.cwid FROM division_membership pf_dm JOIN division pf_d ON pf_d.code = pf_dm.division_code WHERE pf_dm.division_code IN (?) AND pf_d.source = 'manual')))",
+    );
+    // No roster resolved (no manual division selected): the column alone.
+    expect(personFilterWhere(parsePersonFilter(new URLSearchParams("unit=div:CARD")), [], [])).toEqual({
+      unit: { OR: [{ divCode: { in: ["CARD"] } }] },
+    });
   });
 
   it("every kind in UNIT_KINDS is reachable from a URL value on both sides", () => {

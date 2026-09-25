@@ -149,14 +149,15 @@ describe("loadArticleCounts", () => {
     expect(text).toContain("YEAR(DATE_ADD(p.date_added_to_entrez, INTERVAL 6 MONTH)) AS y");
     expect(text).toContain("AND j.impact_score_1 >= ?");
     expect(text).toContain("AND s.role_category IN (?)");
-    // Units OR together (the Profiles roster's rule); a center is its date-active
+    // Units OR together (the Profiles roster's rule); a division is its column
+    // plus a manual division's hand-added roster; a center is its date-active
     // members; the institution binds the ED CODE; an undecodable value is dropped.
     expect(text).toContain(
-      "AND (s.dept_code IN (?) OR s.div_code IN (?) OR s.primary_org_code IN (?,?) OR s.cwid IN (SELECT cm.cwid FROM center_membership cm WHERE cm.center_code IN (?) AND (cm.start_date IS NULL OR cm.start_date <= ?) AND (cm.end_date IS NULL OR cm.end_date >= ?) AND (cm.membership_role_key IS NULL OR cm.membership_role_key <> 'invited')))",
+      "AND (s.dept_code IN (?) OR (s.div_code IN (?) OR s.cwid IN (SELECT pf_dm.cwid FROM division_membership pf_dm JOIN division pf_d ON pf_d.code = pf_dm.division_code WHERE pf_dm.division_code IN (?) AND pf_d.source = 'manual')) OR s.primary_org_code IN (?,?) OR s.cwid IN (SELECT cm.cwid FROM center_membership cm WHERE cm.center_code IN (?) AND (cm.start_date IS NULL OR cm.start_date <= ?) AND (cm.end_date IS NULL OR cm.end_date >= ?) AND (cm.membership_role_key IS NULL OR cm.membership_role_key <> 'invited')))",
     );
     expect(text).toContain("AND p.publication_type IN (?)");
     expect(text).toContain("AND (pa.is_first = 1 OR pa.is_last = 1)");
-    expect(values).toEqual(["full_time_faculty", "MED", "CARD", "HSS", "MSKCC", "CC", today, today, "Review", 10, 2025, 2025]);
+    expect(values).toEqual(["full_time_faculty", "MED", "CARD", "CARD", "HSS", "MSKCC", "CC", today, today, "Review", 10, 2025, 2025]);
   });
 
   it("units given but none decode match nothing, never everyone", async () => {

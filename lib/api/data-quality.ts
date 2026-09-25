@@ -46,6 +46,7 @@ import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 import {
   decodeUnitValues,
   isCurrentCenterMembership,
+  loadSelectedDivisionRosterCwids,
   parsePersonFilter,
   parseUnitValue,
   personFilterWhere,
@@ -390,13 +391,16 @@ export async function loadScholarCard(
  * `scopeCenterCwids` = members of the viewer's GRANTED center units (scope);
  * `scopeRosterCwids` = manual DIVISION-roster members of the viewer's granted
  * divisions (scope) — see the module-level note on `scopeRosterCwids` in
- * `computeDataQualityEntries` for why this must be unioned in.
+ * `computeDataQualityEntries` for why this must be unioned in;
+ * `filterRosterCwids` = hand-added members of the SELECTED divisions (a `div:`
+ * filter matches them too, `lib/edit/person-filter.ts`).
  */
 function buildWhere(
   opts: DataQualityOptions,
   scopeCenterCwids: readonly string[],
   filterCenterCwids: readonly string[],
   scopeRosterCwids: readonly string[],
+  filterRosterCwids: readonly string[] = [],
 ): Prisma.ScholarWhereInput {
   const and: Prisma.ScholarWhereInput[] = [];
   const where: Prisma.ScholarWhereInput = { deletedAt: null };
@@ -415,6 +419,7 @@ function buildWhere(
   const person = personFilterWhere(
     { types: [...(opts.roleCategories ?? [])], unitValues: [...(opts.unitValues ?? [])] },
     filterCenterCwids,
+    filterRosterCwids,
   );
   if (person.roleCategory) {
     where.roleCategory = person.roleCategory;
@@ -506,7 +511,8 @@ async function computeDataQualityEntries(
     filterCenterCwids = [...filter];
   }
 
-  const where = buildWhere(opts, scopeCenterCwids, filterCenterCwids, scopeRosterCwids);
+  const filterRosterCwids = await loadSelectedDivisionRosterCwids(client, opts.unitValues ?? []);
+  const where = buildWhere(opts, scopeCenterCwids, filterCenterCwids, scopeRosterCwids, filterRosterCwids);
 
   // Candidate identities + prominence inputs. The whole in-scope set loads (the
   // prominence sort is computed in-app over all of it, then paginated).

@@ -430,6 +430,35 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     });
   });
 
+  it("a division filter also matches a manual division's hand-added roster (div: = loadDivisionMemberCwids' union)", async () => {
+    const { client, scholarFindMany } = fakeClient({
+      scholars: [],
+      divisionRosterRows: [
+        { cwid: "roster-1", divisionCode: "CARD" },
+        { cwid: "roster-2", divisionCode: "LDAPDIV" },
+      ],
+    });
+    // Only CARD is a manual division; LDAPDIV's stray roster row does not count.
+    client.division.findMany.mockImplementation((async (args: { where?: { source?: string } }) =>
+      args?.where?.source === "manual" ? [{ code: "CARD" }] : []) as never);
+    await loadDataQualityRoster(
+      { scope: { all: true }, unitValues: ["div:CARD", "div:LDAPDIV"] },
+      asClient(client),
+    );
+    expect(client.division.findMany).toHaveBeenCalledWith({
+      where: { code: { in: ["CARD", "LDAPDIV"] }, source: "manual" },
+      select: { code: true },
+    });
+    expect(client.divisionMembership.findMany).toHaveBeenCalledWith({
+      where: { divisionCode: { in: ["CARD"] } },
+      select: { cwid: true },
+    });
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND).toContainEqual({
+      OR: [{ divCode: { in: ["CARD", "LDAPDIV"] } }, { cwid: { in: ["roster-1"] } }],
+    });
+  });
+
   it("an institution-only unit filter is a bare primaryOrgCode IN, with no membership read", async () => {
     const { client, scholarFindMany } = fakeClient({ scholars: [] });
     await loadDataQualityRoster(
