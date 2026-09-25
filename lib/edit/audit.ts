@@ -258,6 +258,12 @@ export type AuditAction =
   /** a functional role assignment's scopes replaced ("Edit scope", or the
    *  import re-scoping an imported row); before/after carry `{ scopes }`. */
   | "functional_role_scope_set"
+  /** the functional-roles import refreshed an imported row's provenance
+   *  (`granted_by` / `granted_at` / `grantee_name`) with its scopes unchanged,
+   *  e.g. after the earliest `report_access` grant it mirrored was revoked;
+   *  `fieldsChanged` names the fields, before/after carry them plus
+   *  `via: "import"`. Appended LAST to the ENUM. */
+  | "functional_role_update"
   /** a functional role assignment deleted (a manual revoke, or the import
    *  dropping an imported row its source no longer lists); `beforeValues`
    *  carries the deleted row. */

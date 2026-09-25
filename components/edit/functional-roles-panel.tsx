@@ -115,6 +115,8 @@ function mapError(code: string | undefined): string {
       return "That person couldn't be found. Try a different search.";
     case "invalid_scopes":
       return "Pick at least one scope.";
+    case "already_granted":
+      return "This person already holds this role. Use Edit scope on their row to change its scope.";
     case "not_found":
       return "That assignment no longer exists. Reload the page.";
     default:

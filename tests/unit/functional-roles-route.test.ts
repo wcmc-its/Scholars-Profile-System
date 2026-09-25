@@ -91,7 +91,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   as(ADMIN, { isSuperuser: true });
-  h.grant.mockResolvedValue({ changed: true, rows: ROWS });
+  h.grant.mockResolvedValue({ changed: true, conflict: false, rows: ROWS });
   h.setScopes.mockResolvedValue({ found: true, changed: true, rows: ROWS });
   h.revoke.mockResolvedValue({ changed: true, rows: ROWS });
   h.runImport.mockResolvedValue({ added: 2, updated: 0, removed: 1, rows: ROWS });
@@ -157,6 +157,20 @@ describe("POST /api/edit/functional-roles — dispatch", () => {
       granteeName: "Pat Example",
     });
     expect(await res.json()).toMatchObject({ ok: true, op: "grant", changed: true, rows: ROWS });
+  });
+
+  it("grant for someone who already holds the role manually with other scopes → 409 already_granted", async () => {
+    h.grant.mockResolvedValue({ changed: false, conflict: true, rows: ROWS });
+    const res = await POST(post(GRANT));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "already_granted" });
+  });
+
+  it("grant repeating the same scopes stays an idempotent 200", async () => {
+    h.grant.mockResolvedValue({ changed: false, conflict: false, rows: ROWS });
+    const res = await POST(post(GRANT));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, changed: false });
   });
 
   it("set_scopes on a person with no manual row → 404 not_found", async () => {

@@ -18,6 +18,9 @@
  * validation ⇒ 400 → the write, one transaction with its audit row
  * (`actorCwid` is always the real human). "set_scopes" on a person with no
  * manual row ⇒ 404 `not_found` (an imported row is never addressable here).
+ * "grant" for a person who already holds that role manually with DIFFERENT
+ * scopes ⇒ 409 `already_granted` (nothing written; use "set_scopes"); the
+ * same scopes again is an idempotent 200 with `changed: false`.
  * Responds with the full list the write re-read on the writer.
  *
  * Registry only: nothing here changes who can open anything (see the lib).
@@ -117,13 +120,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let rows: FunctionalRoleRow[];
   try {
     if (op === "grant") {
-      ({ changed, rows } = await grantFunctionalRole({
+      const result = await grantFunctionalRole({
         ...actor,
         role,
         cwid,
         scopes,
         granteeName: granteeNameFrom(body.name),
-      }));
+      });
+      // Already holds this role manually with other scopes: nothing was
+      // written, so this is not a success. Re-scoping is "set_scopes".
+      if (result.conflict) return editError(409, "already_granted");
+      ({ changed, rows } = result);
     } else if (op === "set_scopes") {
       const result = await setFunctionalRoleScopes({ ...actor, role, cwid, scopes });
       if (!result.found) return editError(404, "not_found");

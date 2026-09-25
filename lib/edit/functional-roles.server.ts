@@ -211,19 +211,35 @@ function manualKey(role: string, cwid: string) {
 
 /**
  * Create a manual `(role, cwid)` assignment with its audit row, in one
- * transaction. Idempotent: an existing manual row is left alone and not
- * re-audited (`changed: false`); re-scoping is `setFunctionalRoleScopes`.
+ * transaction. Idempotent for a repeat of the SAME assignment: an existing
+ * manual row with the same scopes is left alone and not re-audited
+ * (`changed: false`). An existing manual row with DIFFERENT scopes is a
+ * conflict (`conflict: true`, nothing written): the request asked for scopes
+ * the person does not end up with, so the caller must say so rather than
+ * report success; re-scoping is `setFunctionalRoleScopes` ("Edit scope").
  * The caller validates the role, cwid and scopes first.
  */
 export async function grantFunctionalRole(
   args: WriteArgs & { scopes: ReadonlyArray<string>; granteeName?: string | null },
-): Promise<FunctionalRoleWriteResult> {
+): Promise<FunctionalRoleWriteResult & { conflict: boolean }> {
   const { role, cwid, actorCwid } = args;
-  const existing = await db.write.functionalRoleGrant.findUnique({
-    where: manualKey(role, cwid),
-    select: { cwid: true },
-  });
-  if (existing) return { changed: false, rows: await listFunctionalRoles(db.write) };
+  const requested = normalizeScopes(args.scopes);
+  const existingOutcome = async (): Promise<
+    (FunctionalRoleWriteResult & { conflict: boolean }) | null
+  > => {
+    const existing = await db.write.functionalRoleGrant.findUnique({
+      where: manualKey(role, cwid),
+      select: { scopes: true },
+    });
+    if (!existing) return null;
+    return {
+      changed: false,
+      conflict: !sameScopes(scopesFromJson(existing.scopes), requested),
+      rows: await listFunctionalRoles(db.write),
+    };
+  };
+  const already = await existingOutcome();
+  if (already) return already;
   try {
     const rows = await db.write.$transaction(async (tx) => {
       const row = await tx.functionalRoleGrant.create({
@@ -231,7 +247,7 @@ export async function grantFunctionalRole(
           role,
           cwid,
           source: MANUAL,
-          scopes: normalizeScopes(args.scopes),
+          scopes: requested,
           granteeName: args.granteeName ?? null,
           grantedBy: actorCwid,
         },
@@ -250,11 +266,18 @@ export async function grantFunctionalRole(
       });
       return listFunctionalRoles(tx);
     });
-    return { changed: true, rows };
+    return { changed: true, conflict: false, rows };
   } catch (err) {
     if (!isUniqueViolation(err)) throw err;
     // Lost a concurrent-grant race: the other request wrote and audited it.
-    return { changed: false, rows: await listFunctionalRoles(db.write) };
+    // Same scopes ⇒ idempotent; different scopes ⇒ the same conflict as above.
+    return (
+      (await existingOutcome()) ?? {
+        changed: false,
+        conflict: false,
+        rows: await listFunctionalRoles(db.write),
+      }
+    );
   }
 }
 
@@ -412,13 +435,51 @@ export type ImportResult = {
   rows: FunctionalRoleRow[];
 };
 
+/** Keys per import transaction. Each chunk is its own short transaction
+ *  (bulk `createMany` / `deleteMany`, one `update` per changed row, one audit
+ *  row per change), so the import's size never meets the interactive
+ *  transaction timeout the way one all-rows transaction would. */
+export const IMPORT_CHUNK_SIZE = 100;
+/** Explicit, well above Prisma's 5s interactive default: one chunk is at
+ *  most IMPORT_CHUNK_SIZE audit inserts plus a few bulk statements. */
+export const IMPORT_TX_OPTIONS = { maxWait: 10_000, timeout: 60_000 } as const;
+
+type RowKey = { role: string; cwid: string; source: string };
+
+/** Which fields of a stored imported row differ from what its source says.
+ *  `granted_at` is only compared when the source has a time (allowlists
+ *  don't), and `grantee_name` only when the source has a name (a stored name
+ *  is never cleared by a nameless source). */
+function changedFields(have: StoredRow, d: ImportedRow): string[] {
+  const out: string[] = [];
+  if (!sameScopes(scopesFromJson(have.scopes), d.scopes)) out.push("scopes");
+  if (have.grantedBy !== d.grantedBy) out.push("granted_by");
+  if (d.grantedAt && have.grantedAt.getTime() !== d.grantedAt.getTime()) out.push("granted_at");
+  if (d.granteeName && have.granteeName !== d.granteeName) out.push("grantee_name");
+  return out;
+}
+
+function pickFields(row: StoredRow, fields: ReadonlyArray<string>): Record<string, unknown> {
+  const all = snapshot(row);
+  return Object.fromEntries(fields.map((f) => [f, all[f]]));
+}
+
 /**
- * Reconcile the imported rows with their sources, in one transaction on the
- * writer: add missing rows, re-scope changed ones, delete rows whose source no
- * longer lists them. Manual rows are never read for the diff or written. Every
- * change is audited (`functional_role_grant` / `_scope_set` / `_revoke`, with
- * `via: "import"` in the values) under the actor who ran the import.
- * Idempotent: a second run with unchanged sources changes nothing.
+ * Reconcile the imported rows with their sources: add missing rows, refresh
+ * changed ones (scopes AND provenance: `granted_by` / `granted_at` /
+ * `grantee_name` follow the source, so revoking the earliest `report_access`
+ * grant moves the row's "added by" to the next one), and delete rows whose
+ * source no longer lists them. Manual rows are never read for the diff or
+ * written. Every change is audited (`functional_role_grant`,
+ * `functional_role_scope_set` when scopes changed, `functional_role_update`
+ * for provenance only, `functional_role_revoke`; `via: "import"` in the
+ * values) under the actor who ran the import.
+ *
+ * Batched: the keys are split into chunks of IMPORT_CHUNK_SIZE, and each
+ * chunk re-reads its stored rows, diffs, and writes them with their audit
+ * rows in ONE transaction (IMPORT_TX_OPTIONS). A failure leaves earlier
+ * chunks committed, each consistent with its audit rows; re-running
+ * converges. Idempotent: a second run with unchanged sources changes nothing.
  */
 export async function importFunctionalRoles(args: {
   actorCwid: string;
@@ -440,73 +501,139 @@ export async function importFunctionalRoles(args: {
     commsStewardCwids: listCommsStewardCwids(),
     developmentCwids: listDevelopmentAllowlistCwids(),
   });
+  // Allowlists carry no grant time: a new row takes the run's time (set here,
+  // not left to the DB default, so the audit snapshot matches the row).
+  const now = new Date();
+  const key = (r: RowKey) => targetId(r.role, r.cwid, r.source);
+  const desiredByKey = new Map(desired.map((d) => [key(d), d]));
 
-  return db.write.$transaction(async (tx) => {
-    const current = await tx.functionalRoleGrant.findMany({ where: { source: { not: MANUAL } } });
-    const key = (r: { role: string; cwid: string; source: string }) =>
-      targetId(r.role, r.cwid, r.source);
-    const currentByKey = new Map(current.map((r) => [key(r), r]));
-    const desiredKeys = new Set(desired.map(key));
-    const audit = (
-      action: "functional_role_grant" | "functional_role_scope_set" | "functional_role_revoke",
-      id: string,
-      beforeValues: Record<string, unknown> | null,
-      afterValues: Record<string, unknown> | null,
-    ) =>
-      appendAuditRow(tx, {
-        actorCwid: args.actorCwid,
-        impersonatedCwid: args.impersonatedCwid ?? null,
-        targetEntityType: "functional_role",
-        targetEntityId: id,
-        action,
-        fieldsChanged: action === "functional_role_scope_set" ? ["scopes"] : null,
-        beforeValues,
-        afterValues,
-        ts: new Date(),
-        requestId: args.requestId ?? null,
+  // The key universe: every imported row there is, and every one there should be.
+  const currentKeys = await db.write.functionalRoleGrant.findMany({
+    where: { source: { not: MANUAL } },
+    select: { role: true, cwid: true, source: true },
+  });
+  const universe = new Map<string, RowKey>();
+  for (const r of [...currentKeys, ...desired]) {
+    universe.set(key(r), { role: r.role, cwid: r.cwid, source: r.source });
+  }
+  const keys = [...universe.values()].sort((a, b) => key(a).localeCompare(key(b)));
+
+  let added = 0;
+  let updated = 0;
+  let removed = 0;
+  for (let i = 0; i < keys.length; i += IMPORT_CHUNK_SIZE) {
+    const chunk = keys.slice(i, i + IMPORT_CHUNK_SIZE);
+    const counts = await db.write.$transaction(async (tx) => {
+      const audit = (
+        action:
+          | "functional_role_grant"
+          | "functional_role_scope_set"
+          | "functional_role_update"
+          | "functional_role_revoke",
+        id: string,
+        fieldsChanged: string[] | null,
+        beforeValues: Record<string, unknown> | null,
+        afterValues: Record<string, unknown> | null,
+      ) =>
+        appendAuditRow(tx, {
+          actorCwid: args.actorCwid,
+          impersonatedCwid: args.impersonatedCwid ?? null,
+          targetEntityType: "functional_role",
+          targetEntityId: id,
+          action,
+          fieldsChanged,
+          beforeValues,
+          afterValues,
+          ts: new Date(),
+          requestId: args.requestId ?? null,
+        });
+
+      // Re-read inside the transaction, so the diff is against what this
+      // chunk commits over. No key here has source "manual".
+      const stored = await tx.functionalRoleGrant.findMany({
+        where: { OR: chunk.map((k) => ({ role: k.role, cwid: k.cwid, source: k.source })) },
       });
+      const storedByKey = new Map(stored.map((r) => [key(r), r]));
 
-    let added = 0;
-    let updated = 0;
-    let removed = 0;
-    for (const d of desired) {
-      const have = currentByKey.get(key(d));
-      if (!have) {
-        const row = await tx.functionalRoleGrant.create({
-          data: {
+      const toCreate: Array<StoredRow & { scopes: string[] }> = [];
+      const toDelete: StoredRow[] = [];
+      const toUpdate: Array<{ have: StoredRow; d: ImportedRow; fields: string[] }> = [];
+      for (const k of chunk) {
+        const have = storedByKey.get(key(k));
+        const d = desiredByKey.get(key(k));
+        if (d && !have) {
+          toCreate.push({
             role: d.role,
             cwid: d.cwid,
             source: d.source,
             scopes: d.scopes,
             granteeName: d.granteeName,
             grantedBy: d.grantedBy,
-            ...(d.grantedAt ? { grantedAt: d.grantedAt } : {}),
-          },
-        });
-        await audit("functional_role_grant", key(d), null, { ...snapshot(row), via: "import" });
-        added++;
-      } else if (!sameScopes(scopesFromJson(have.scopes), d.scopes)) {
+            grantedAt: d.grantedAt ?? now,
+          });
+        } else if (have && !d) {
+          toDelete.push(have);
+        } else if (have && d) {
+          const fields = changedFields(have, d);
+          if (fields.length > 0) toUpdate.push({ have, d, fields });
+        }
+      }
+
+      if (toCreate.length > 0) {
+        const res = await tx.functionalRoleGrant.createMany({ data: toCreate });
+        if (res.count !== toCreate.length) {
+          throw new Error(`import created ${res.count} rows, expected ${toCreate.length}`);
+        }
+        for (const r of toCreate) {
+          await audit("functional_role_grant", key(r), null, null, {
+            ...snapshot(r),
+            via: "import",
+          });
+        }
+      }
+
+      for (const { have, d, fields } of toUpdate) {
         const row = await tx.functionalRoleGrant.update({
           where: { role_cwid_source: { role: d.role, cwid: d.cwid, source: d.source } },
-          data: { scopes: d.scopes, granteeName: have.granteeName ?? d.granteeName },
+          data: {
+            scopes: d.scopes,
+            grantedBy: d.grantedBy,
+            ...(d.grantedAt ? { grantedAt: d.grantedAt } : {}),
+            granteeName: d.granteeName ?? have.granteeName,
+          },
         });
         await audit(
-          "functional_role_scope_set",
+          fields.includes("scopes") ? "functional_role_scope_set" : "functional_role_update",
           key(d),
-          { scopes: scopesFromJson(have.scopes), via: "import" },
-          { scopes: scopesFromJson(row.scopes), via: "import" },
+          fields,
+          { ...pickFields(have, fields), via: "import" },
+          { ...pickFields(row, fields), via: "import" },
         );
-        updated++;
       }
-    }
-    for (const have of current) {
-      if (desiredKeys.has(key(have))) continue;
-      await tx.functionalRoleGrant.delete({
-        where: { role_cwid_source: { role: have.role, cwid: have.cwid, source: have.source } },
-      });
-      await audit("functional_role_revoke", key(have), { ...snapshot(have), via: "import" }, null);
-      removed++;
-    }
-    return { added, updated, removed, rows: await listFunctionalRoles(tx) };
-  });
+
+      if (toDelete.length > 0) {
+        const res = await tx.functionalRoleGrant.deleteMany({
+          where: { OR: toDelete.map((r) => ({ role: r.role, cwid: r.cwid, source: r.source })) },
+        });
+        if (res.count !== toDelete.length) {
+          throw new Error(`import deleted ${res.count} rows, expected ${toDelete.length}`);
+        }
+        for (const r of toDelete) {
+          await audit(
+            "functional_role_revoke",
+            key(r),
+            null,
+            { ...snapshot(r), via: "import" },
+            null,
+          );
+        }
+      }
+
+      return { added: toCreate.length, updated: toUpdate.length, removed: toDelete.length };
+    }, IMPORT_TX_OPTIONS);
+    added += counts.added;
+    updated += counts.updated;
+    removed += counts.removed;
+  }
+  return { added, updated, removed, rows: await listFunctionalRoles(db.write) };
 }

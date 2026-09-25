@@ -20,6 +20,8 @@ const h = vi.hoisted(() => ({
   txCreate: vi.fn(),
   txUpdate: vi.fn(),
   txDelete: vi.fn(),
+  txCreateMany: vi.fn(),
+  txDeleteMany: vi.fn(),
   transaction: vi.fn(),
   appendAuditRow: vi.fn(),
   listCommsStewardCwids: vi.fn(),
@@ -57,6 +59,8 @@ import {
   desiredImportedRows,
   functionalRoleScopeOptions,
   grantFunctionalRole,
+  IMPORT_CHUNK_SIZE,
+  IMPORT_TX_OPTIONS,
   importFunctionalRoles,
   listFunctionalRoles,
   reportAccessScopeKey,
@@ -120,6 +124,8 @@ beforeEach(() => {
         create: h.txCreate,
         update: h.txUpdate,
         delete: h.txDelete,
+        createMany: h.txCreateMany,
+        deleteMany: h.txDeleteMany,
       },
       scholar: { findMany: h.txScholarFindMany },
     }),
@@ -291,7 +297,7 @@ describe("grantFunctionalRole", () => {
     });
     expect(h.writeFindUnique).toHaveBeenCalledWith({
       where: { role_cwid_source: { role: "reporting", cwid: "fake001", source: "manual" } },
-      select: { cwid: true },
+      select: { scopes: true },
     });
     expect(h.txCreate).toHaveBeenCalledWith({
       data: {
@@ -313,12 +319,13 @@ describe("grantFunctionalRole", () => {
       }),
     );
     expect(result.changed).toBe(true);
+    expect(result.conflict).toBe(false);
     expect(result.rows.map((r) => r.cwid)).toEqual(["txrow01"]);
     expect(h.readFindMany).not.toHaveBeenCalled();
   });
 
-  it("is idempotent: an existing manual row is not re-created or re-audited", async () => {
-    h.writeFindUnique.mockResolvedValue({ cwid: "fake001" });
+  it("is idempotent: an existing manual row with the same scopes is not re-created or re-audited", async () => {
+    h.writeFindUnique.mockResolvedValue({ scopes: ["*"] });
     const result = await grantFunctionalRole({
       ...ACTOR,
       role: "reporting",
@@ -326,20 +333,49 @@ describe("grantFunctionalRole", () => {
       scopes: ["*"],
     });
     expect(result.changed).toBe(false);
+    expect(result.conflict).toBe(false);
     expect(result.rows.map((r) => r.cwid)).toEqual(["wrrow01"]);
     expect(h.txCreate).not.toHaveBeenCalled();
     expect(h.appendAuditRow).not.toHaveBeenCalled();
   });
 
+  it("an existing manual row with DIFFERENT scopes is a conflict, not a silent no-op", async () => {
+    h.writeFindUnique.mockResolvedValue({ scopes: ["article-count"] });
+    const result = await grantFunctionalRole({
+      ...ACTOR,
+      role: "reporting",
+      cwid: "fake001",
+      scopes: ["display-titles"],
+    });
+    expect(result).toMatchObject({ changed: false, conflict: true });
+    expect(h.transaction).not.toHaveBeenCalled();
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+
   it("a P2002 race is the idempotent path, not a throw", async () => {
     h.transaction.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    h.writeFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ scopes: ["*"] });
     const result = await grantFunctionalRole({
       ...ACTOR,
       role: "reporting",
       cwid: "fake001",
       scopes: ["*"],
     });
-    expect(result.changed).toBe(false);
+    expect(result).toMatchObject({ changed: false, conflict: false });
+  });
+
+  it("a P2002 race won by a grant with other scopes is a conflict", async () => {
+    h.transaction.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    h.writeFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ scopes: ["article-count"] });
+    const result = await grantFunctionalRole({
+      ...ACTOR,
+      role: "reporting",
+      cwid: "fake001",
+      scopes: ["*"],
+    });
+    expect(result).toMatchObject({ changed: false, conflict: true });
   });
 });
 
@@ -423,6 +459,51 @@ describe("revokeFunctionalRole", () => {
 });
 
 describe("importFunctionalRoles (reconcile)", () => {
+  type Key = { role: string; cwid: string; source: string };
+  const k = (r: Key) => `${r.role}:${r.cwid}:${r.source}`;
+
+  /**
+   * A tiny in-memory `functional_role_grant` behind the writer and the
+   * transaction mocks, so the chunked reconcile runs against real state.
+   * Returns the table (keyed like the PK) so a test can inspect the result.
+   */
+  function table(rows: ReturnType<typeof stored>[]) {
+    const t = new Map(rows.map((r) => [k(r), { ...r }]));
+    const matches = (where: { OR?: Key[]; source?: { not: string } }) => (r: Key) =>
+      where.OR ? where.OR.some((w) => k(w) === k(r)) : r.source !== where.source?.not;
+    h.writeFindMany.mockImplementation(
+      async (q: { where?: { source: { not: string } }; select?: unknown }) =>
+        q.where ? [...t.values()].filter(matches(q.where)) : [...t.values()],
+    );
+    h.txFindMany.mockImplementation(async (q: { where: { OR: Key[] } }) =>
+      [...t.values()].filter(matches(q.where)),
+    );
+    h.txCreateMany.mockImplementation(async ({ data }: { data: ReturnType<typeof stored>[] }) => {
+      for (const d of data) t.set(k(d), { ...stored(), ...d });
+      return { count: data.length };
+    });
+    h.txUpdate.mockImplementation(
+      async ({
+        where,
+        data,
+      }: {
+        where: { role_cwid_source: Key };
+        data: Record<string, unknown>;
+      }) => {
+        const id = k(where.role_cwid_source);
+        const next = { ...t.get(id)!, ...data };
+        t.set(id, next);
+        return next;
+      },
+    );
+    h.txDeleteMany.mockImplementation(async ({ where }: { where: { OR: Key[] } }) => {
+      let count = 0;
+      for (const w of where.OR) if (t.delete(k(w))) count++;
+      return { count };
+    });
+    return t;
+  }
+
   it("adds missing, re-scopes changed, removes stale imported rows, never reads or writes manual rows", async () => {
     h.writeReportAccessFindMany.mockResolvedValue([
       {
@@ -443,41 +524,52 @@ describe("importFunctionalRoles (reconcile)", () => {
       },
     ]);
     h.listDevelopmentAllowlistCwids.mockReturnValue(["fake005"]);
-    // Current imported rows: fake004 with stale scopes, fake009 no longer in any source.
-    h.txFindMany
-      .mockResolvedValueOnce([
-        stored({ cwid: "fake004", source: "report_access", scopes: ["article-count"] }),
-        stored({ cwid: "fake009", source: "report_access", scopes: ["*"] }),
-      ])
-      .mockResolvedValueOnce(TX_LIST);
+    // fake004 has stale scopes, fake009 is in no source; the manual row must survive.
+    const manual = stored({ cwid: "fake004", source: "manual", scopes: ["article-count"] });
+    const t = table([
+      stored({
+        cwid: "fake004",
+        source: "report_access",
+        scopes: ["article-count"],
+        grantedBy: "adm0002",
+        grantedAt: T1,
+      }),
+      stored({ cwid: "fake009", source: "report_access", scopes: ["*"] }),
+      manual,
+    ]);
 
     const result = await importFunctionalRoles(ACTOR);
 
-    expect(h.txFindMany.mock.calls[0]![0]).toEqual({ where: { source: { not: "manual" } } });
     expect(result).toMatchObject({ added: 2, updated: 1, removed: 1 });
-    expect(
-      h.txCreate.mock.calls.map((c) => [c[0].data.role, c[0].data.cwid, c[0].data.source]),
-    ).toEqual([
-      ["reporting", "fake001", "report_access"],
-      ["development", "fake005", "allowlist"],
+    // The key read excludes manual rows; no chunk ever addresses one.
+    expect(h.writeFindMany.mock.calls[0]![0]).toMatchObject({
+      where: { source: { not: "manual" } },
+    });
+    for (const call of h.txFindMany.mock.calls) {
+      expect(call[0].where.OR.every((w: Key) => w.source !== "manual")).toBe(true);
+    }
+    expect(t.get("reporting:fake004:manual")).toEqual(manual);
+    expect([...t.keys()].sort()).toEqual([
+      "development:fake005:allowlist",
+      "reporting:fake001:report_access",
+      "reporting:fake004:manual",
+      "reporting:fake004:report_access",
     ]);
-    // report_access provenance is kept; allowlist rows take the DB default time.
-    expect(h.txCreate.mock.calls[0]![0].data).toMatchObject({
+    // report_access provenance is kept; an allowlist row gets the run's time.
+    expect(t.get("reporting:fake001:report_access")).toMatchObject({
       grantedBy: "adm0002",
       grantedAt: T0,
     });
-    expect(h.txCreate.mock.calls[1]![0].data.grantedAt).toBeUndefined();
-    expect(h.txUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          role_cwid_source: { role: "reporting", cwid: "fake004", source: "report_access" },
-        },
-        data: expect.objectContaining({ scopes: ["display-titles"] }),
-      }),
-    );
-    expect(h.txDelete).toHaveBeenCalledWith({
-      where: { role_cwid_source: { role: "reporting", cwid: "fake009", source: "report_access" } },
-    });
+    expect(t.get("development:fake005:allowlist")!.grantedAt).toBeInstanceOf(Date);
+    expect(t.get("reporting:fake004:report_access")!.scopes).toEqual(["display-titles"]);
+    // Writes are bulk: one createMany and one deleteMany, all under explicit tx options.
+    expect(h.txCreateMany).toHaveBeenCalledTimes(1);
+    expect(h.txDeleteMany).toHaveBeenCalledTimes(1);
+    expect(h.txCreate).not.toHaveBeenCalled();
+    expect(h.txDelete).not.toHaveBeenCalled();
+    for (const call of h.transaction.mock.calls) {
+      expect(call[1]).toEqual(IMPORT_TX_OPTIONS);
+    }
     const actions = h.appendAuditRow.mock.calls.map((c) => c[1].action);
     expect(actions.sort()).toEqual([
       "functional_role_grant",
@@ -490,7 +582,21 @@ describe("importFunctionalRoles (reconcile)", () => {
       expect(values).toMatchObject({ via: "import" });
       expect(call[1].actorCwid).toBe("adm0001");
     }
-    expect(result.rows.map((r) => r.cwid)).toEqual(["txrow01"]);
+    // The allowlist grant's audit snapshot carries the same time the row got.
+    const devAudit = h.appendAuditRow.mock.calls.find(
+      (c) => c[1].targetEntityId === "development:fake005:allowlist",
+    )!;
+    expect(devAudit[1].afterValues.granted_at).toBe(
+      t.get("development:fake005:allowlist")!.grantedAt.toISOString(),
+    );
+    // The list comes back from the writer, never the reader.
+    expect(result.rows.map((r) => r.cwid).sort()).toEqual([
+      "fake001",
+      "fake004",
+      "fake004",
+      "fake005",
+    ]);
+    expect(h.readFindMany).not.toHaveBeenCalled();
   });
 
   it("a second run with unchanged sources changes nothing", async () => {
@@ -504,13 +610,89 @@ describe("importFunctionalRoles (reconcile)", () => {
         granteeName: null,
       },
     ]);
-    h.txFindMany
-      .mockResolvedValueOnce([
-        stored({ cwid: "fake001", source: "report_access", scopes: ["article-count"] }),
-      ])
-      .mockResolvedValueOnce(TX_LIST);
+    h.listDevelopmentAllowlistCwids.mockReturnValue(["fake005"]);
+    table([]);
+    const first = await importFunctionalRoles(ACTOR);
+    expect(first).toMatchObject({ added: 2, updated: 0, removed: 0 });
+    h.appendAuditRow.mockClear();
+    const second = await importFunctionalRoles(ACTOR);
+    expect(second).toMatchObject({ added: 0, updated: 0, removed: 0 });
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("refreshes provenance when the earliest report_access grant is revoked with scopes unchanged", async () => {
+    // Stored row came from adm0002's T0 grant; that grant is gone and the
+    // remaining one (same report, so same scopes) is adm0003's at T1.
+    h.writeReportAccessFindMany.mockResolvedValue([
+      {
+        reportKey: "article-count",
+        scopeKey: "*",
+        cwid: "fake001",
+        grantedBy: "adm0003",
+        grantedAt: T1,
+        granteeName: null,
+      },
+    ]);
+    const t = table([
+      stored({
+        cwid: "fake001",
+        source: "report_access",
+        scopes: ["article-count"],
+        grantedBy: "adm0002",
+        grantedAt: T0,
+      }),
+    ]);
+
     const result = await importFunctionalRoles(ACTOR);
-    expect(result).toMatchObject({ added: 0, updated: 0, removed: 0 });
+
+    expect(result).toMatchObject({ added: 0, updated: 1, removed: 0 });
+    expect(t.get("reporting:fake001:report_access")).toMatchObject({
+      scopes: ["article-count"],
+      grantedBy: "adm0003",
+      grantedAt: T1,
+      // A nameless source never clears a stored name.
+      granteeName: "Pat Example",
+    });
+    expect(h.appendAuditRow).toHaveBeenCalledTimes(1);
+    expect(h.appendAuditRow.mock.calls[0]![1]).toMatchObject({
+      action: "functional_role_update",
+      targetEntityId: "reporting:fake001:report_access",
+      fieldsChanged: ["granted_by", "granted_at"],
+      beforeValues: { granted_by: "adm0002", granted_at: T0.toISOString(), via: "import" },
+      afterValues: { granted_by: "adm0003", granted_at: T1.toISOString(), via: "import" },
+    });
+  });
+
+  it("splits a large import into chunked transactions, each with its own audit rows", async () => {
+    const n = IMPORT_CHUNK_SIZE * 2 + 5;
+    h.writeReportAccessFindMany.mockResolvedValue(
+      Array.from({ length: n }, (_, i) => ({
+        reportKey: "article-count",
+        scopeKey: "*",
+        cwid: `fake${String(i).padStart(4, "0")}`,
+        grantedBy: "adm0002",
+        grantedAt: T0,
+        granteeName: null,
+      })),
+    );
+    const t = table([]);
+    const result = await importFunctionalRoles(ACTOR);
+    expect(result).toMatchObject({ added: n, updated: 0, removed: 0 });
+    expect(t.size).toBe(n);
+    expect(h.transaction).toHaveBeenCalledTimes(3);
+    expect(h.txCreateMany.mock.calls.map((c) => c[0].data.length)).toEqual([
+      IMPORT_CHUNK_SIZE,
+      IMPORT_CHUNK_SIZE,
+      5,
+    ]);
+    expect(h.appendAuditRow).toHaveBeenCalledTimes(n);
+  });
+
+  it("a bulk write that affects fewer rows than planned fails the chunk (no unaudited drift)", async () => {
+    h.listDevelopmentAllowlistCwids.mockReturnValue(["fake005"]);
+    table([]);
+    h.txCreateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(importFunctionalRoles(ACTOR)).rejects.toThrow(/created 0 rows, expected 1/);
     expect(h.appendAuditRow).not.toHaveBeenCalled();
   });
 });
