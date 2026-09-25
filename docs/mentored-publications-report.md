@@ -11,15 +11,54 @@ The Areas of Concentration (AOC) office — the MD scholarly-concentration progr
 for a spreadsheet: for each learner, every publication they co-authored with one of their mentors,
 with Journal Impact Factor and NIH iCite citations, plus per-learner counts. They built it by hand.
 `/edit/reports/7` (the permanent link; it redirects to the report's current slug URL,
-`/edit/reports/mentored-publications` by default) is that spreadsheet on demand: a Summary table (one row per learner) and a Publications table
+`/edit/reports/mentored-publications` by default) is that spreadsheet on demand: a Learners table (one row per learner) and a Publications list
 in-page, and the full three-sheet workbook (Summary / Raw Data / Query & Assumptions) behind
-"Download .xlsx" (`/api/edit/reports/mentored-publications`, same query string).
+"Download .xlsx" (`/api/edit/reports/mentored-publications`, same query string, same filters).
 
 Code: `app/edit/reports/[report]/page.tsx` (the shared report page) + `lib/edit/report-registry.ts` entry `"7"` +
 `components/edit/reports/mentored-publications-body.tsx` (the report body), `lib/edit/mentored-publications-report.ts` (loader),
 `lib/edit/mentorship-type.ts` (the type vocabulary, labels, hover text),
 `lib/edit/mentored-publications-params.ts` (query contract), `lib/edit/mentored-publications-xlsx.ts`
-(workbook), `components/edit/mentored-publications-table.tsx` (the client island).
+(workbook), `lib/edit/mentored-publications-facets.ts` (the rail's post-load filters and their counts),
+`components/edit/reports/mentored-publications-rail.tsx` (the filter rail),
+`components/edit/mentored-publications-table.tsx` (the client island: tabs, find box, tables).
+
+## The page (redesign, 2026-09-24)
+
+Built on the shared report pieces (`components/edit/reports/report-ui.tsx`). The page header (eyebrow,
+name, access badge, "Edit details", "About this report") is the shared frame's; the body's subtitle is
+one sentence.
+
+- **Filter rail**, one for both tabs, in this order: Mentorship type (the program pairings), Inferred
+  mentorship (likely / possible), Graduation year (from / to plus "Include learners with no graduation
+  year"), Counting window (0–3 years after graduation), Publications (with a mentor / all), In window
+  (per publication: in, outside, unknown), Author position (first / last / middle), Publication year,
+  Mentor (searchable), Learners shown ("Hide learners with no publications"). Every section is a
+  collapsible `<details>`; a collapsed section's inputs still submit. Filters apply on change (the
+  `AutoSubmitForm`). "Reset to defaults" returns to the bare URL. Below `lg` the rail opens from a
+  "Filters (n)" button (`FiltersSheet`).
+- **Card**: learners, publications in window, all years; Download .xlsx with a note naming the
+  workbook's sheets; "N distinct publications" (a paper two learners share counts once there and once
+  per learner in the headline numbers); the active filters as chips (× removes one; the four standing
+  values carry no × until they differ from the default); the "N faculty-asserted mentees have no CWID"
+  banner. It has no "View list" link: the loader only counts those entries, it does not load their
+  names.
+- **Learners (N)** tab: Learner (name, CWID, "Grad YYYY", "(entry est. YYYY)" for the fallback) ·
+  Mentors (each mentor's name with the pair's type as a badge, "Department · Institution" under it) ·
+  In window · [With a mentor, all-publications set only] · All years · JIF ≥ 10 · First author (With
+  a mentor, JIF ≥ 10 and First author count in-window papers only). Below `md` the mentors and counts stack inside the Learner cell, so a
+  phone never scrolls sideways (the table used to carry separate Grad year, Type, Department and
+  Institution columns and scrolled the Learner column out of view). A row with publications opens to
+  that learner's papers. "Find a learner or mentor" narrows the rows (name, CWID or mentor), never the
+  counts or the download. Sort by the column headers (Learner or Grad year in the first); graduation
+  year, newest first, by default. 25 rows, then "Show 25 more".
+- **Publications (N)** tab: one entry per distinct paper: the Vancouver citation with its PMID link
+  (Scopus-only rows print their Scopus id, no link), JIF, NIH iCite citations, date added to PubMed,
+  each learner with their byline position and window badge, each mentor with the pair's type. Sort:
+  recently added to PubMed (default), newest first, JIF, most cited, title. "Show 25 more".
+- **Footnote**: the in-window rule and the MD entry-year fallback (moved out of the subtitle), the
+  count of suggestion-evidence papers not yet in the local corpus when there are any, and "Historical
+  numbers may change slightly…".
 
 ## Who can see it
 
@@ -41,11 +80,13 @@ live in the table, never in this repo.
 ## Sources
 
 The "Type of mentorship" filter has eight keys (`MENTORSHIP_TYPE_KEYS`), each one source and one
-confidence. The page's closed "Sources" disclosure and every hover read `MENTORSHIP_TYPE_DESCRIPTION`.
+confidence. Every hover (the rail's Mentorship type / Inferred mentorship options and each pair's type
+badge) reads `MENTORSHIP_TYPE_DESCRIPTION`. The rail splits the one `mtype` param across two sections:
+the program pairings, then the two co-authorship inferences.
 
 | Label | Table | What it carries | What it lacks | Default | Since |
 |---|---|---|---|---|---|
-| AOC | `aoc_mentee` (mirror of `reporting_students_mentors`, bucket `md`) | Pairs the AOC program records in its pairing sheet; graduation year; entry year for recent classes | Entry year for older classes (see the fallback below) | On, for an `md` or `*` holder | #2664 |
+| MD (the AOC pairing sheet) | `aoc_mentee` (mirror of `reporting_students_mentors`, bucket `md`) | Pairs the AOC program records in its pairing sheet; graduation year; entry year for recent classes | Entry year for older classes (see the fallback below) | On, for an `md` or `*` holder | #2664 |
 | MD-PhD (program office) | `aoc_mentee` (bucket `mdphd`) | Pairs from the MD-PhD program office's list, loaded with the AOC sheet | Any year — no entry, no graduation | On, for an `mdphd` or `*` holder | #2664 |
 | ECR | `aoc_mentee` (bucket `ecr`) | Early Career Research pairs, classes 2018–2023; graduation year | Entry year (the fallback below applies) | On, for an `ecr` or `*` holder | #2664 |
 | PhD / MD-PhD thesis advisor | `phd_mentor_relationship` (Jenzabar, MAJSP) | Thesis-advisor pairs; conferral year | Start year | On, for every holder | #2677 |
@@ -87,8 +128,26 @@ download route can never disagree. Malformed input: the route 400s, the page fal
 - `tail=` — integer 0..3, default 1: years past graduation still counted "in window".
 - `pubs=mentored|all` — the co-pubs with a mentor (default), or every publication of the learner
   from the `aoc_mentee_publication` bridge, each flagged for a mentor co-author.
-- `view=summary|publications` — page-only; the route accepts and ignores it so one link shape
-  serves both.
+- `grad_from=` / `grad_to=` / `grad_unknown=1` — what the rail's graduation-year range submits.
+  Read only when `years` is absent and folded into the same list (every year from..to, plus
+  `unknown` when `grad_unknown` is set; a blank end is "None"). Nothing the page writes uses them:
+  every tab, chip and download link says `years=`, so an old `years=` link, a non-contiguous list
+  included, keeps its exact meaning (the rail then notes that changing the range selects every year
+  in between).
+- `window=yes|no|unknown`, `position=first|last|middle`, `pubyear=YYYY`, `mentor=<cwid>` — lists
+  (comma-separated and/or repeated); `withpubs=1`. The rail's post-load filters, added 2026-09-24
+  (before that they were client-side facets inside the tables that never touched the counts or the
+  download). `applyMentoredPubsFacets` applies them to the loaded report on the page AND in the
+  download, and the workbook's Query & Assumptions sheet states each ("All" when unset). The unit is
+  the (learner, publication) pair: `window` / `position` / `pubyear` keep a pair when the learner's own
+  window flag / byline position / the paper's year is selected, and each learner's counts are
+  recomputed over the pairs kept. `mentor` keeps the learners with a selected mentor and only their
+  pairs with that mentor (in the all-publications set every paper stays; "with a mentor" then means a
+  selected mentor). `withpubs` then drops learners left with no paper. A pair with no byline position
+  or no year never matches a selected position or year. An unknowable window stays null. None set →
+  the report is untouched. Not report 8's `pos` (single-valued, a different vocabulary).
+- `view=summary|publications`, `q=` — page-only (`q` is the "Find a learner or mentor" text); the
+  route accepts and ignores both so one link shape serves page and download.
 - Legacy `program=<scope>` — the select the types filter replaced (#2681); reads as that scope's
   roster type. `program=all` or an unknown value reads as absent. An old link never 400s.
 
@@ -103,9 +162,9 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   year) — never to a Jenzabar conferral year or a postdoc end year, whose programs have no fixed
   length. A roster MD-PhD row with no years plus a Jenzabar conferral year still gets no guess:
   the fallback reads the roster's own graduation year.
-- **Unknown years are null, never 0.** A learner with no graduation year gets an "Unknown grad
-  year" chip; every in-window count is `null` (a blank cell in the workbook, "—" on the page). A 0
-  would read as "published nothing".
+- **Unknown years are null, never 0.** A learner with no graduation year reads "No grad year";
+  every in-window count is `null` (a blank cell in the workbook, "—" on the page). A 0 would read as
+  "published nothing".
 - **Default years.** The two most recent known years, plus "unknown" when the selection has
   year-less learners.
 - **Counting.** Per learner, distinct pub keys. A pub shared with two of a learner's mentors is one
@@ -144,8 +203,8 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   re-imported); the ED postdoc pass fills its four mentor columns on the nightly ED run. A postdoc
   "mentor" with no Scholar row is usually the lab administrator HR lists as manager (#2633) — the
   name and department now make that visible rather than hiding it behind a bare CWID.
-- **Words.** The `md` bucket is labelled "AOC" everywhere in this report (the Program column, the
-  Viewers panel, the workbook); the public search facet keeps "MD" for its different audience.
+- **Words.** The `md` bucket is labelled "MD" (the degree) since 2026-09-20; "AOC" survives in the
+  hovers and the report description as the source (the pairing sheet), never as a label.
   Per-pair labels read by category ("AOC", "PhD thesis advisor", "Postdoc supervisor",
   "Volunteer · likely mentee (from co-authorship)"); "presumptive", "ambiguous", "roster",
   "Jenzabar" and "ED" never appear in a label. The `mentorshipKey` (`program:source:tier`) keeps the
@@ -154,7 +213,8 @@ download route can never disagree. Malformed input: the route 400s, the page fal
 ## Open data asks
 
 - MD-PhD program-office rows carry no entry or graduation year, so those learners always sit under
-  "Unknown grad year" with null in-window counts.
+  "No grad year" (reachable only with "Include learners with no graduation year") with null
+  in-window counts.
 - Jenzabar carries a conferral year but no start year, so a thesis-advisor pair has no window
   unless another source supplies an entry year.
 - Roughly 14% of ED postdoc managers on record are lab administrators rather than the PI (#2633).
