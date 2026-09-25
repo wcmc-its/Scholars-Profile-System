@@ -5,7 +5,7 @@
  * fails soft on its own. Renders are scoped to the page root.
  */
 import { fireEvent, render, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
@@ -13,12 +13,17 @@ const h = vi.hoisted(() => ({
   mockLoadUsage: vi.fn(),
   mockLoadHealth: vi.fn(),
   mockFindMany: vi.fn(),
+  mockPush: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`__REDIRECT__:${url}`);
   }),
 }));
 
-vi.mock("next/navigation", () => ({ redirect: h.mockRedirect, notFound: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  redirect: h.mockRedirect,
+  notFound: vi.fn(),
+  useRouter: () => ({ push: h.mockPush }),
+}));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.mockGetEditSession }));
 vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: h.mockCanViewUsage }));
 vi.mock("@/lib/api/usage-summary", () => ({ loadUsageSummary: h.mockLoadUsage }));
@@ -88,8 +93,12 @@ const HEALTH = {
   ],
 };
 
-async function renderPage() {
-  const { container } = render(<main data-testid="root">{await EditUsagePage()}</main>);
+async function renderPage(params: Record<string, string> = {}) {
+  const { container } = render(
+    <main data-testid="root">
+      {await EditUsagePage({ searchParams: Promise.resolve(params) })}
+    </main>,
+  );
   return within(container.querySelector('[data-testid="root"]') as HTMLElement);
 }
 
@@ -180,6 +189,66 @@ describe("/edit/usage", () => {
     expect(root.getByTestId("service-health-unavailable")).toBeTruthy();
     expect(root.queryByTestId("service-health-trend")).toBeNull();
     expect(root.getByTestId("usage-total-pageviews")).toBeTruthy();
+  });
+});
+
+describe("/edit/usage range", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-25T12:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("loads the default 30-day window and labels the dropdown", async () => {
+    const root = await renderPage();
+    expect(h.mockLoadUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ key: "30", since: "2026-08-26", until: "2026-09-24" }),
+    );
+    expect(root.getByTestId("usage-range-trigger").textContent).toContain("Last 30 days");
+  });
+
+  it("loads the window named by ?range= (since launch)", async () => {
+    const root = await renderPage({ range: "launch" });
+    expect(h.mockLoadUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ key: "launch", since: "2026-07-01", until: "2026-09-24" }),
+    );
+    expect(root.getByTestId("usage-range-trigger").textContent).toContain("Since launch");
+  });
+
+  it("shows a custom range's dates on the trigger", async () => {
+    const root = await renderPage({ range: "custom", from: "2026-08-01", to: "2026-08-15" });
+    expect(h.mockLoadUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ since: "2026-08-01", until: "2026-08-15" }),
+    );
+    expect(root.getByTestId("usage-range-trigger").textContent).toContain("Aug 1 – Aug 15");
+  });
+
+  it("falls back to the requested window in the subtitle when no days have data", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, pageviewsByDay: [], totalPageviews: 0 });
+    const root = await renderPage({ range: "7" });
+    expect(root.getByText(/Site-wide usage, Sep 18 – Sep 24\./)).toBeTruthy();
+    expect(root.getByTestId("usage-pageviews-empty").textContent).toContain("in this range");
+  });
+
+  it("navigates to the chosen range and to an applied custom range", async () => {
+    const root = await renderPage();
+    fireEvent.click(root.getByTestId("usage-range-trigger"));
+    // Radix portals the menu to document.body.
+    const menu = within(document.body);
+    fireEvent.click(menu.getByRole("button", { name: /Last 90 days/ }));
+    expect(h.mockPush).toHaveBeenCalledWith("/edit/usage?range=90");
+
+    fireEvent.click(root.getByTestId("usage-range-trigger"));
+    fireEvent.click(within(document.body).getByRole("button", { name: /Custom range/ }));
+    const form = within(within(document.body).getByTestId("usage-range-custom"));
+    fireEvent.change(form.getByLabelText("From"), { target: { value: "2026-08-01" } });
+    fireEvent.change(form.getByLabelText("To"), { target: { value: "2026-08-15" } });
+    fireEvent.click(form.getByRole("button", { name: "Apply" }));
+    expect(h.mockPush).toHaveBeenLastCalledWith(
+      "/edit/usage?range=custom&from=2026-08-01&to=2026-08-15",
+    );
   });
 });
 

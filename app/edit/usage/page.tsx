@@ -1,7 +1,9 @@
 /**
- * `/edit/usage` — the in-app Usage dashboard. Site-wide CloudFront usage over the
- * last 30 days (pageviews trend, top profiles, search terms, referrers, geo,
- * device), read from the `daily_usage` Athena rollup via a daily-cached loader.
+ * `/edit/usage` — the in-app Usage dashboard. Site-wide CloudFront usage over a
+ * chosen range (the header's Range dropdown: last 7 / 30 / 90 days, since
+ * launch, or custom; default last 30) — pageviews trend, top profiles, search
+ * terms, referrers, geo, device — read from the durable `daily_usage` Athena
+ * rollup via a daily-cached loader keyed per range.
  * The viewer-friendly companion to the Athena console + the `sps-usage-*` saved
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
  * and stay operator-restricted).
@@ -31,6 +33,7 @@ import {
   type ServiceHealthSummary,
   loadServiceHealth,
 } from "@/lib/api/service-health";
+import { addDays, resolveUsageRange } from "@/lib/api/usage-range";
 import { type NamedCount, type UsageSummary, loadUsageSummary } from "@/lib/api/usage-summary";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -41,7 +44,13 @@ import { canViewUsage } from "@/lib/edit/usage-access";
 import { cn } from "@/lib/utils";
 
 import { monthLabel, pctLabel, shortDay } from "./usage-format";
-import { PageviewsChart, RankTable, UptimeInfoButton, type RankRow } from "./usage-widgets";
+import {
+  PageviewsChart,
+  RankTable,
+  UptimeInfoButton,
+  UsageRangePicker,
+  type RankRow,
+} from "./usage-widgets";
 
 export const dynamic = "force-dynamic";
 
@@ -354,7 +363,7 @@ function UsageBody({
         <section className={cn(cardClass, "px-[22px] py-5")}>
           <h2 className="text-[17px] font-semibold">Profile pageviews by day</h2>
           <p className="text-muted-foreground mt-2 text-sm" data-testid="usage-pageviews-empty">
-            No profile pageviews recorded in the last {summary.windowDays} days.
+            No profile pageviews recorded in this range.
           </p>
         </section>
       ) : (
@@ -388,7 +397,11 @@ function UsageBody({
   );
 }
 
-export default async function EditUsagePage() {
+export default async function EditUsagePage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/usage");
@@ -418,10 +431,15 @@ export default async function EditUsagePage() {
     ? await countPendingHonors(db.read)
     : null;
 
+  // The header's Range dropdown (`?range=`, `?from=`/`?to=`); a bad or missing
+  // param falls back to the last 30 days.
+  const today = new Date().toISOString().slice(0, 10);
+  const range = resolveUsageRange((await searchParams) ?? {}, today);
+
   let summary: UsageSummary | null = null;
   let unavailable = false;
   try {
-    summary = await loadUsageSummary();
+    summary = await loadUsageSummary(range);
   } catch (err) {
     unavailable = true;
     console.error(
@@ -453,8 +471,11 @@ export default async function EditUsagePage() {
     ? await resolveProfileNames(summary.topProfiles.map((p) => p.slug))
     : new Map<string, { cwid: string; name: string }>();
   const days = summary?.pageviewsByDay ?? [];
+  // The span the data actually covers; the requested window when it's empty.
   const rangeSpan =
-    days.length > 0 ? `${shortDay(days[0].day)} – ${shortDay(days[days.length - 1].day)}` : null;
+    days.length > 0
+      ? `${shortDay(days[0].day)} – ${shortDay(days[days.length - 1].day)}`
+      : `${shortDay(range.since)} – ${shortDay(range.until)}`;
 
   return (
     <ConsoleShell
@@ -468,14 +489,20 @@ export default async function EditUsagePage() {
       // derivation is already true for both.
     >
       <div className="flex flex-col gap-7">
-        <div className="flex flex-col gap-1.5">
-          <h1 className="text-[30px] leading-tight font-semibold tracking-[-.01em]">Usage</h1>
-          <p className="text-muted-foreground text-[14.5px] leading-normal">
-            {rangeSpan
-              ? `Site-wide usage, ${rangeSpan}.`
-              : `Site-wide usage over the last ${summary?.windowDays ?? 30} days.`}{" "}
-            From the nightly CloudFront rollup; refreshes about once a day.
-          </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-1.5">
+            <h1 className="text-[30px] leading-tight font-semibold tracking-[-.01em]">Usage</h1>
+            <p className="text-muted-foreground text-[14.5px] leading-normal">
+              Site-wide usage, {rangeSpan}. From the nightly CloudFront rollup; refreshes about once
+              a day.
+            </p>
+          </div>
+          <UsageRangePicker
+            current={range.key}
+            since={range.since}
+            until={range.until}
+            maxDate={addDays(today, -1)}
+          />
         </div>
 
         <KpiRow summary={summary} health={serviceHealth} />

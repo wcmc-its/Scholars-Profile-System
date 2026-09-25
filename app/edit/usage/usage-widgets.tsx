@@ -7,15 +7,147 @@
  * server-rendered in `page.tsx`.
  */
 import Link from "next/link";
-import { useState } from "react";
-import { DownloadIcon, InfoIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { ChevronDownIcon, ChevronUpIcon, DownloadIcon, InfoIcon } from "lucide-react";
 
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  USAGE_RANGE_OPTIONS,
+  type UsageRangeKey,
+  isRealIsoDate,
+  usageRangeHref,
+} from "@/lib/api/usage-range";
 import { toCsv } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 
 import { isWeekend, niceCeil, shortDay } from "./usage-format";
+
+/** The header's "Range" dropdown: Last 7 / 30 / 90 days, Since launch, or a
+ *  custom from/to. The choice lives in the URL (`?range=`, plus `from`/`to`
+ *  for custom), so the server page reads the matching window and each range
+ *  is linkable. The trigger dims while the new range loads. */
+export function UsageRangePicker({
+  current,
+  since,
+  until,
+  maxDate,
+}: {
+  current: UsageRangeKey;
+  /** The resolved window, to seed the custom inputs. */
+  since: string;
+  until: string;
+  /** Latest selectable day (yesterday: today has no rollup yet). */
+  maxDate: string;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [open, setOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(current === "custom");
+  const [from, setFrom] = useState(since);
+  const [to, setTo] = useState(until);
+  const label =
+    current === "custom"
+      ? `${shortDay(since)} – ${shortDay(until)}`
+      : (USAGE_RANGE_OPTIONS.find((o) => o.key === current)?.label ?? "Last 30 days");
+  const customValid = isRealIsoDate(from) && isRealIsoDate(to);
+
+  const go = (href: string) => {
+    setOpen(false);
+    startTransition(() => router.push(href));
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground text-[13px]" id="usage-range-label">
+        Range
+      </span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          type="button"
+          aria-labelledby="usage-range-label usage-range-value"
+          aria-busy={pending || undefined}
+          className={cn(
+            "border-apollo-border-strong bg-apollo-surface text-foreground flex h-[34px] items-center gap-2.5 rounded-lg border pr-2.5 pl-3 text-[13.5px] whitespace-nowrap",
+            pending && "opacity-60",
+          )}
+          data-testid="usage-range-trigger"
+        >
+          <span id="usage-range-value">{label}</span>
+          {open ? (
+            <ChevronUpIcon className="text-muted-foreground size-4" aria-hidden="true" />
+          ) : (
+            <ChevronDownIcon className="text-muted-foreground size-4" aria-hidden="true" />
+          )}
+        </PopoverTrigger>
+        <PopoverContent align="end" className="flex w-[min(260px,90vw)] flex-col p-1">
+          {USAGE_RANGE_OPTIONS.map((o) => {
+            const selected = o.key === current;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                aria-pressed={selected}
+                onClick={() =>
+                  o.key === "custom" ? setCustomOpen(!customOpen) : go(usageRangeHref(o.key))
+                }
+                className={cn(
+                  "hover:bg-apollo-surface-2 flex justify-between gap-4 rounded-md px-3 py-2 text-left text-[13.5px] whitespace-nowrap",
+                  selected ? "text-apollo-slate font-medium" : "text-foreground",
+                  o.key === "custom" && "border-apollo-border mt-1 rounded-t-none border-t",
+                )}
+              >
+                <span>{o.label}</span>
+                {o.hint ? (
+                  <span className="text-muted-foreground text-[12.5px] font-normal">{o.hint}</span>
+                ) : null}
+              </button>
+            );
+          })}
+          {customOpen ? (
+            <form
+              className="flex flex-col gap-2 px-3 pt-1 pb-2.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (customValid) go(usageRangeHref("custom", from, to));
+              }}
+              data-testid="usage-range-custom"
+            >
+              <label className="text-muted-foreground flex items-center justify-between gap-2 text-[12.5px]">
+                From
+                <input
+                  type="date"
+                  value={from}
+                  max={maxDate}
+                  onChange={(e) => setFrom(e.target.value)}
+                  className="border-apollo-border-strong text-foreground h-8 rounded-md border px-2 text-[13px]"
+                />
+              </label>
+              <label className="text-muted-foreground flex items-center justify-between gap-2 text-[12.5px]">
+                To
+                <input
+                  type="date"
+                  value={to}
+                  max={maxDate}
+                  onChange={(e) => setTo(e.target.value)}
+                  className="border-apollo-border-strong text-foreground h-8 rounded-md border px-2 text-[13px]"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={!customValid}
+                className="bg-apollo-slate self-end rounded-md px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+              >
+                Apply
+              </button>
+            </form>
+          ) : null}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
 
 /** Profile pageviews by day — flex bars, weekends lighter, hover (or tap) a bar
  *  for its exact count in the header line. */
@@ -24,6 +156,11 @@ export function PageviewsChart({ data }: { data: { day: string; views: number }[
   const top = niceCeil(Math.max(...data.map((d) => d.views), 1));
   const ticks = [0, top / 2, top];
   const hd = hover === null ? null : data[hover];
+  // Label every `stride`-th day (every 4th for a month, wider for longer
+  // ranges so about eight labels fit), twice as sparse at phone width.
+  const stride = data.length <= 7 ? 1 : Math.max(4, Math.ceil(data.length / 8));
+  // Past ~45 bars the per-bar gap would eat the bars themselves.
+  const gap = data.length > 45 ? "gap-px" : "gap-[2px] sm:gap-1";
 
   return (
     <section
@@ -63,7 +200,7 @@ export function PageviewsChart({ data }: { data: { day: string; views: number }[
               />
             ))}
             <div
-              className="absolute inset-0 flex items-end gap-[2px] sm:gap-1"
+              className={cn("absolute inset-0 flex items-end", gap)}
               role="img"
               aria-label={`Profile pageviews per day, ${data.length} days`}
               onMouseLeave={() => setHover(null)}
@@ -91,20 +228,17 @@ export function PageviewsChart({ data }: { data: { day: string; views: number }[
               ))}
             </div>
           </div>
-          <div
-            className="text-muted-foreground flex gap-[2px] text-[11.5px] sm:gap-1"
-            aria-hidden="true"
-          >
+          <div className={cn("text-muted-foreground flex text-[11.5px]", gap)} aria-hidden="true">
             {data.map((d, i) => (
               <span
                 key={d.day}
                 className={cn(
                   "flex-1 overflow-visible text-center whitespace-nowrap",
-                  // Every 4th day on desktop; every 8th at phone width so labels don't collide.
-                  data.length > 7 && i % 8 !== 0 && "max-sm:invisible",
+                  // Every stride-th day on desktop; every 2x stride at phone width.
+                  data.length > 7 && i % (stride * 2) !== 0 && "max-sm:invisible",
                 )}
               >
-                {data.length <= 7 || i % 4 === 0 ? shortDay(d.day) : ""}
+                {i % stride === 0 ? shortDay(d.day) : ""}
               </span>
             ))}
           </div>
