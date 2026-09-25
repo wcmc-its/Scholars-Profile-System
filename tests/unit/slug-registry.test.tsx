@@ -15,6 +15,9 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// The row actions are a client island that calls `useRouter()`.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+
 import { SlugRegistry } from "@/components/edit/slug-registry";
 import type { SlugRegistryProps } from "@/components/edit/slug-registry";
 
@@ -311,5 +314,80 @@ describe("SlugRegistry — pagination", () => {
     render(<SlugRegistry {...base({ total: 1, rows: [{ slug: "a", cwid: "1", name: "A" }] })} />);
     expect(screen.queryByTestId("slug-registry-prev")).toBeNull();
     expect(screen.queryByTestId("slug-registry-next")).toBeNull();
+  });
+});
+
+describe("SlugRegistry — row actions", () => {
+  it("Live: Pin on an auto row only, beside Edit; none on a pinned row", () => {
+    render(
+      <SlugRegistry
+        {...base({
+          segment: "active",
+          total: 2,
+          rows: [
+            { slug: "jane-smith", cwid: "js1", name: "Jane Smith" },
+            { slug: "sam-doe", cwid: "sd1", name: "Sam Doe" },
+          ],
+          extras: { people: {}, pinned: ["js1"], baseHolders: {} },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("slug-pin-sd1").textContent).toBe("Pin");
+    expect(screen.queryByTestId("slug-pin-js1")).toBeNull();
+    expect(screen.getByTestId("slug-edit-js1")).toBeTruthy();
+    expect(screen.getByTestId("slug-edit-sd1")).toBeTruthy();
+  });
+
+  it("Pinned: Unpin beside Edit", () => {
+    render(
+      <SlugRegistry
+        {...base({
+          segment: "override",
+          total: 1,
+          rows: [{ slug: "dr-doe", pinnedForCwid: "h1", setByCwid: "admin9", updatedAt: "2026-02-02T00:00:00.000Z" }],
+        })}
+      />,
+    );
+    const row = screen.getByTestId("slug-row-dr-doe");
+    expect(screen.getByTestId("slug-unpin-h1").textContent).toBe("Unpin");
+    expect(row.contains(screen.getByTestId("slug-edit-h1"))).toBe(true);
+  });
+
+  it("Redirects: Remove on every row", () => {
+    render(
+      <SlugRegistry
+        {...base({
+          segment: "historical",
+          total: 1,
+          rows: [
+            {
+              oldSlug: "old-live",
+              currentSlug: "new-live",
+              name: "Live",
+              currentCwid: "c1",
+              recordedAt: "2026-01-01T00:00:00.000Z",
+              redirects: true,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("slug-remove-old-live").textContent).toBe("Remove");
+  });
+
+  it("Reserved and Collisions: no write action (built-in route words can't be released)", () => {
+    const { rerender } = render(
+      <SlugRegistry
+        {...base({ segment: "reserved", total: 1, rows: [{ word: "about", reason: "Reserved route segment" }] })}
+      />,
+    );
+    expect(screen.getByTestId("slug-row-about").querySelector("button")).toBeNull();
+    expect(screen.getByText(/can’t be released here/)).toBeTruthy();
+    rerender(
+      <SlugRegistry
+        {...base({ segment: "collisions", total: 1, rows: [{ slug: "jane-smith-2", cwid: "js2", name: "Jane Smith" }] })}
+      />,
+    );
+    expect(screen.queryByTestId("slug-pin-js2")).toBeNull();
   });
 });

@@ -14,9 +14,12 @@
  *     Collisions / Decided requests), links, so the tab is bookmarkable. The
  *     `?seg=` values are the registry segments, unchanged;
  *   - the tab's title, hint and count, then one card of rows (a grid at md+,
- *     stacked cards on a phone), and page navigation.
+ *     stacked cards on a phone), and page navigation. Row actions: Pin (Live,
+ *     auto), Unpin (Pinned), Remove (Redirects, confirmed) — the
+ *     `SlugRowAction` client island — beside the existing Edit link.
  *
- * Server-rendered; the Apollo chrome + sub-nav wrap it.
+ * Server-rendered apart from that island; the Apollo chrome + sub-nav wrap
+ * it.
  */
 import Link from "next/link";
 
@@ -32,6 +35,8 @@ import type {
   SlugStatus,
 } from "@/lib/api/slug-registry";
 import { cn } from "@/lib/utils";
+
+import { SlugRowAction, type SlugRowActionProps } from "./slug-row-action";
 
 const BASE = "/edit/slugs";
 
@@ -64,7 +69,7 @@ const TABS: ReadonlyArray<{
   {
     seg: "reserved",
     label: "Reserved",
-    hint: "Not available to anyone. Reserved words are code constants (edited in lib/slug.ts), not database rows.",
+    hint: "Not available to anyone. These are the site’s own route words, built into the code (lib/slug.ts), so they can’t be released here.",
     heads: ["URL", "Reason", "Status", "Added"],
   },
   {
@@ -81,8 +86,9 @@ const TABS: ReadonlyArray<{
   },
 ];
 
-/** The md+ row grid: URL, who/what, status, date, action. */
-const GRID = "md:grid-cols-[minmax(170px,1.3fr)_minmax(0,1.2fr)_minmax(0,1fr)_120px_64px]";
+/** The md+ row grid: URL, who/what, status, date, actions (up to two, e.g.
+ *  "Unpin Edit"). */
+const GRID = "md:grid-cols-[minmax(170px,1.3fr)_minmax(0,1.2fr)_minmax(0,1fr)_120px_112px]";
 
 /** Pill tones — one job each: neutral = routine, slate = a pin, green = free
  *  or approved, amber = reserved / forwards, red tint = blocked / broken. */
@@ -397,6 +403,8 @@ type RowCells = {
   secondary?: React.ReactNode;
   pill: { label: string; tone: Tone; testId?: string };
   date?: React.ReactNode;
+  /** A one-click / confirmed write (client island), shown before `action`. */
+  write?: SlugRowActionProps;
   action?: { label: string; href: string; testId?: string };
 };
 
@@ -444,7 +452,8 @@ function Row({ r }: { r: RowCells }) {
         </span>
       </div>
       <span className="text-muted-foreground text-[13px]">{r.date}</span>
-      <div className="flex md:justify-end">
+      <div className="flex flex-wrap items-start gap-x-1 md:justify-end">
+        {r.write && <SlugRowAction {...r.write} />}
         {r.action && (
           <Link
             href={r.action.href}
@@ -485,6 +494,7 @@ function SegmentRows({
         ? { label: "Redirects", tone: "grey", testId: `slug-redirect-${r.oldSlug}` }
         : { label: "Dead-end (404)", tone: "red", testId: `slug-deadend-${r.oldSlug}` },
       date: formatMonthYear(r.recordedAt),
+      write: { kind: "remove", slug: r.oldSlug },
     }));
   } else if (segment === "override") {
     cells = (rows as OverrideSlugRow[]).map((r) => ({
@@ -501,6 +511,7 @@ function SegmentRows({
           <span className="block text-xs">by {r.setByCwid}</span>
         </>
       ),
+      write: { kind: "unpin", cwid: r.pinnedForCwid, slug: r.slug },
       action: {
         label: "Edit",
         href: `/edit/scholar/${r.pinnedForCwid}`,
@@ -562,6 +573,8 @@ function SegmentRows({
             : isPinned
               ? { label: "Pinned", tone: "slate" }
               : { label: "Auto", tone: "grey" },
+        write:
+          segment === "active" && !isPinned ? { kind: "pin", cwid: r.cwid, slug: r.slug } : undefined,
         action: { label: "Edit", href: `/edit/scholar/${r.cwid}`, testId: `slug-edit-${r.cwid}` },
       };
     });
