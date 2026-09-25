@@ -111,7 +111,9 @@ const UNIT_RULE =
   "Owners and Curators of the unit this report is opened for can run it, plus superusers and comms stewards.";
 const ADMIN_RULE =
   "Every unit administrator — an Owner or Curator of any unit — can run it, plus superusers and comms stewards.";
-const PERSON_RULE = "Superusers and comms stewards can always run this report.";
+/** The badge list's line under the default audience for a person-gated report
+ *  with no note of its own: the audience name is the row's title already. */
+const PERSON_RULE_SHORT = "Always have access.";
 
 /** The window event the badge's "Manage access" fires and the "Edit details"
  *  sheet listens for — the two are separate islands in the server header. */
@@ -373,7 +375,7 @@ function AccessBadge(props: ReportAccessPopoverProps) {
     props.mode === "person"
       ? [
           props.audience ?? PERSON_AUDIENCE,
-          props.note ?? PERSON_RULE,
+          props.note ?? PERSON_RULE_SHORT,
           props.initialRows,
           new Map(props.scopeOptions.length > 1 ? props.scopeOptions : []),
           props.canManage,
