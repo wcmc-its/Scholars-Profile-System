@@ -2,9 +2,10 @@
  * `scripts/backfills/2026-09-25-usage-rollup-history.ts` — the pure planners.
  * The AWS calls (Lambda config, S3 listing, Lambda invoke) are not exercised.
  */
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
-import { MAX_REROLL_AGE_DAYS as LAMBDA_MAX_REROLL_AGE_DAYS } from "@/cdk/lambda/cf-usage-rollup/queries";
+import { describe, expect, it } from "vitest";
 
 import {
   MAX_REROLL_AGE_DAYS,
@@ -74,7 +75,15 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--env=prod", "--limit=0"])).toThrow(/--limit/);
   });
 
+  // Read as text, not imported: `cdk/` is in .dockerignore, and the app
+  // image's `next build` typechecks tests/, so a TS import from cdk/ breaks it.
   it("stays in step with the rollup Lambda's re-roll guard", () => {
-    expect(MAX_REROLL_AGE_DAYS).toBe(LAMBDA_MAX_REROLL_AGE_DAYS);
+    const src = readFileSync(
+      path.join(process.cwd(), "cdk/lambda/cf-usage-rollup/queries.ts"),
+      "utf8",
+    );
+    const m = src.match(/export const MAX_REROLL_AGE_DAYS = (\d+);/);
+    expect(m).not.toBeNull();
+    expect(MAX_REROLL_AGE_DAYS).toBe(Number(m![1]));
   });
 });
