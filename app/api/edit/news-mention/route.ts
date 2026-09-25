@@ -25,6 +25,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
+import { CLEARED_DECISION_STAMP } from "@/lib/edit/news-decision";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
@@ -155,7 +156,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const row = await tx.newsMention.update({
         where: { id: rowId },
         // entered_by_cwid marks the row human-touched so the ETL never reverts it.
-        data: { ...data, enteredByCwid: realCwid },
+        // Clearing the queue's undo stamp means a queue Undo can never overwrite
+        // this newer decision (lib/edit/news-decision.ts).
+        data: { ...data, enteredByCwid: realCwid, ...CLEARED_DECISION_STAMP },
       });
       await appendAuditRow(tx, {
         actorCwid: realCwid,
