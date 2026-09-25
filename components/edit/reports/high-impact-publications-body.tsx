@@ -22,7 +22,7 @@ import {
   HighImpactResults,
   type HighImpactPub,
 } from "@/components/edit/reports/high-impact-results";
-import { RailCheckList, type RailOption } from "@/components/edit/reports/rail-check-list";
+import { RailChecklist, type RailChecklistOption } from "@/components/edit/reports/rail-checklist";
 import {
   FilterChips,
   RailSection,
@@ -105,11 +105,11 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
   const groupOf = (u: string) =>
     u.startsWith("center:") ? "center" : u.startsWith("inst:") ? "inst" : "dept";
   // Deduped: a hand-typed `unit=X&unit=X` must render one checkbox, not two.
-  const unknownUnits = (group: string): RailOption[] =>
+  const unknownUnits = (group: string): RailChecklistOption[] =>
     [...new Set(params.units)]
       .filter((u) => !known.has(u) && groupOf(u) === group)
       .map((u) => ({ value: u, label: labels.get(u) ?? u, count: 0 }));
-  const unitOptions: RailOption[] = [
+  const unitOptions: RailChecklistOption[] = [
     ...facets.departments.map(({ value, label, count }) => ({ value, label, count })),
     ...facets.departments
       .flatMap((d) => d.divisions)
@@ -142,7 +142,7 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
     </select>
   );
   // A selected person type no active scholar holds still lists, so it can be unticked.
-  const typeOptions: RailOption[] = [
+  const typeOptions: RailChecklistOption[] = [
     ...facets.roleCategories,
     ...params.types
       .filter((t) => !facets.roleCategories.some((o) => o.value === t))
@@ -201,8 +201,9 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
           }
           testId="high-impact-journals"
         >
-          <RailCheckList
+          <RailChecklist
             name="journal"
+            roomy
             options={JOURNAL_FAMILIES.map((f) => ({ value: f.key, label: f.label }))}
             selected={params.journals}
           />
@@ -215,11 +216,12 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
           )}
           testId="high-impact-person-type"
         >
-          <RailCheckList
+          <RailChecklist
             name="type"
+            roomy
             options={typeOptions}
             selected={params.types}
-            countHeader="People"
+            countLabel="People"
           />
         </RailSection>
         <RailSection
@@ -227,13 +229,14 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
           summary={summarize(unitsOf(["dept:", "div:"]))}
           testId="high-impact-department"
         >
-          <RailCheckList
+          <RailChecklist
             name="unit"
+            roomy
             options={unitOptions}
             selected={params.units}
             searchPlaceholder="Search departments…"
-            shown={8}
-            countHeader="People"
+            collapseAfter={8}
+            countLabel="People"
           />
         </RailSection>
         <RailSection
@@ -241,13 +244,14 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
           summary={summarize(unitsOf(["center:"]))}
           testId="high-impact-centers"
         >
-          <RailCheckList
+          <RailChecklist
             name="unit"
+            roomy
             options={centerOptions}
             selected={params.units}
             searchPlaceholder="Search centers…"
-            shown={6}
-            countHeader="People"
+            collapseAfter={6}
+            countLabel="People"
           />
         </RailSection>
         <RailSection
@@ -255,11 +259,12 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
           summary={summarize(unitsOf(["inst:"]))}
           testId="high-impact-institution"
         >
-          <RailCheckList
+          <RailChecklist
             name="unit"
+            roomy
             options={institutionOptions}
             selected={params.units}
-            countHeader="People"
+            countLabel="People"
           />
         </RailSection>
         <RailSection
@@ -267,15 +272,16 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
           summary={summarize(params.atypes)}
           testId="high-impact-article-type"
         >
-          <RailCheckList
+          <RailChecklist
             name="atype"
+            roomy
             // A type in the URL that no publication carries still shows, so it can be unticked.
             options={[...new Set([...atypes, ...params.atypes])].map((a) => ({
               value: a,
               label: a,
             }))}
             selected={params.atypes}
-            shown={8}
+            collapseAfter={8}
           />
         </RailSection>
         <RailSection
