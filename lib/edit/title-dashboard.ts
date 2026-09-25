@@ -237,8 +237,11 @@ export async function loadTitleDashboard(client: DashboardClient): Promise<Title
   const involved = [...new Set([...conflicts.values()].flat().flatMap((x) => [...x.others]))];
   const otherNames = new Map(
     (
-      await client.scholar.findMany({ where: { cwid: { in: involved } }, select: { cwid: true, preferredName: true } })
-    ).map((n) => [n.cwid, n.preferredName]),
+      await client.scholar.findMany({
+        where: { cwid: { in: involved } },
+        select: { cwid: true, preferredName: true, fullName: true },
+      })
+    ).map((n) => [n.cwid, displayName(n)]),
   );
   const listed = candidates.flatMap((c) => {
     const row = classifyTitleRow(
@@ -256,7 +259,7 @@ export async function loadTitleDashboard(client: DashboardClient): Promise<Title
   const [names, ended] = await Promise.all([
     client.scholar.findMany({
       where: { cwid: { in: listed.map((r) => r.cwid) } },
-      select: { cwid: true, preferredName: true },
+      select: { cwid: true, preferredName: true, fullName: true },
     }),
     // Ended appointments that explain an unverified working-title claim (the
     // office really was held, until the date shown). Only the few flagged rows.
@@ -276,10 +279,17 @@ export async function loadTitleDashboard(client: DashboardClient): Promise<Title
       if (a?.endDate) r.unverifiedNotes.push(`"${a.title}" appointment ended ${a.endDate.toISOString().slice(0, 10)}`);
     }
   }
-  const nameByCwid = new Map(names.map((n) => [n.cwid, n.preferredName]));
+  const nameByCwid = new Map(names.map((n) => [n.cwid, displayName(n)]));
   return listed
     .map((r) => ({ ...r, name: nameByCwid.get(r.cwid) ?? r.cwid }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A scholar's name for the report: some rows carry an EMPTY
+ *  `preferredName` (a blank name cell on staging, 09-25), so fall through
+ *  to `fullName`, then the CWID. */
+export function displayName(n: { cwid: string; preferredName: string; fullName: string }): string {
+  return n.preferredName.trim() || n.fullName.trim() || n.cwid;
 }
 
 /** cwids holding a leadership role on a unit of `entityType`. */

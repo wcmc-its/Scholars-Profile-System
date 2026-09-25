@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   classifyTitleRow,
+  displayName,
   findRoleConflicts,
   formatConflict,
   filterTitleDashboard,
@@ -248,5 +249,13 @@ describe("findRoleConflicts", () => {
       ],
     });
     expect([...out.keys()].sort()).toEqual(["zzx0006", "zzx0008"]);
+  });
+});
+
+describe("displayName", () => {
+  it("falls through an empty preferred name to the full name, then the CWID", () => {
+    expect(displayName({ cwid: "zzn0001", preferredName: "Ann Example", fullName: "Ann B. Example" })).toBe("Ann Example");
+    expect(displayName({ cwid: "zzn0001", preferredName: " ", fullName: "Ann B. Example" })).toBe("Ann B. Example");
+    expect(displayName({ cwid: "zzn0001", preferredName: "", fullName: "" })).toBe("zzn0001");
   });
 });
