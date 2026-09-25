@@ -70,7 +70,9 @@ export const RUBRIC_RULES = [
   "Emeritus titles hold no office.",
   "Every tracked center counts as institutional.",
   "Center associate directors and co-directors never title their holder.",
-  "A director title naming its own department ranks as Chair.",
+  "A director title naming its own department, or the department its holder chairs, ranks as Chair.",
+  "A working title claims Chair only when a chair role backs it.",
+  "Only academic departments have chairs: Graduate School and MD-PhD Program do not.",
 ] as const;
 
 function toSearchParams(sp: PersonReportProps["searchParams"]): URLSearchParams {

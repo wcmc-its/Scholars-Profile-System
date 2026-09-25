@@ -92,3 +92,16 @@ director title never ranks as a director.
 **A center or institute director title that names its own appointment's department ranks
 as Chair.** When a director title is held in a department whose name it shares, the holder
 heads that department in all but name, so the title ranks 4 (the BMRI rule, #2804).
+The same holds for a director title (working or primary) naming a department the scholar
+holds the chair role on, e.g. a Reproductive Medicine chair whose working title directs
+the Institute for Reproductive Medicine.
+
+**A working title claims Chair only with a chair role behind it.** The working title is
+set by the scholar in the Web Directory and can outlive the office. "Chair of …" there
+ranks as Chair only when the scholar holds a department chair role; otherwise it ranks as
+nothing, and the endowed or academic title shows instead.
+
+**Only academic departments have chairs.** Graduate School and MD-PhD Program are
+student-only units, not academic departments, so a leader recorded on one never counts as
+a department chair. The list lives in `lib/non-academic-units.ts`, shared with the ED ETL
+that keeps these units off /browse.
