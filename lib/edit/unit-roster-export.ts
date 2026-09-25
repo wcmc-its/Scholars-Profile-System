@@ -115,7 +115,7 @@ export type RosterFacultyMeta = {
 export type BuildRosterExportOptions = {
   /** Today as `YYYY-MM-DD` (injectable for tests / determinism). */
   today: string;
-  /** When true, drop pending + inactive rows (the `?activeOnly=1` mode). */
+  /** When true, drop invited, pending + inactive rows (the `?activeOnly=1` mode). */
   activeOnly?: boolean;
   /** cwid → faculty metadata. Omit to emit the four faculty columns empty. */
   facultyByCwid?: ReadonlyMap<string, RosterFacultyMeta>;
@@ -132,7 +132,7 @@ function emailCellFor(meta: RosterFacultyMeta | undefined): string {
  * Project a center's roster to export rows, in `ROSTER_EXPORT_HEADERS` order
  * (header row NOT included). `program_label` is resolved from the
  * center's program taxonomy (`ctx.programs`); a manual division has no program /
- * type taxonomy, so those columns come through empty. Pending + inactive members
+ * type taxonomy, so those columns come through empty. Invited, pending + inactive members
  * are included by default (the dropped/lapsed-member visibility the Members tab
  * also exposes); `activeOnly` honors the dashboard-style narrowing.
  */

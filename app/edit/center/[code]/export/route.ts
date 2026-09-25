@@ -14,7 +14,7 @@
  *
  * Columns + status derivation live in `lib/edit/unit-roster-export.ts`, the
  * workbook in `lib/edit/unit-roster-xlsx.ts`; the `status` column matches the
- * Members-tab badge exactly. `?activeOnly=1` drops pending + inactive rows.
+ * Members-tab badge exactly. `?activeOnly=1` drops invited, pending + inactive rows.
  * The email column is the #1102 carve-out from #847 (see the lib header), and
  * the file is exempt from SCHOLAR_EXPORT_CAP for the same reason: a unit admin
  * downloading their own roster. The move from CSV to .xlsx changed the format
