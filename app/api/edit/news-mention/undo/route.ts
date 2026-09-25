@@ -16,7 +16,10 @@
  *
  * ALL OR NOTHING, and refused (nothing written) when —
  *   - no row carries the id any more: already undone, or a later /edit write
- *     (hide / show / "not me") cleared it ⇒ 409 `undo_unavailable`;
+ *     (hide / show / "not me", or another queue decision) touched ANY row the
+ *     decision wrote ⇒ 409 `undo_unavailable`. Such a write clears the stamp on
+ *     every row of the earlier decision (`invalidateDecisions`), never just the
+ *     row it touched, so a decision is undoable in full or not at all;
  *   - the decision was made by someone else ⇒ 403 `not_yours`. A reviewer undoes
  *     their own click, never a colleague's;
  *   - it is older than NEWS_UNDO_WINDOW_MS ⇒ 409 `undo_expired`. The row can

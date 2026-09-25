@@ -81,6 +81,18 @@ export function decisionErrorMessage(
   if (status === 400 && code === "invalid_cwid") {
     return "That doesn't look like a CWID. Check it and try again.";
   }
+  if (status === 409 && code === "rejected_by_scholar") {
+    return (
+      `That scholar has already said this ${noun} is not about them, so it can't be ` +
+      "credited to them from here. Nothing was changed."
+    );
+  }
+  if (status === 409 && code === "target_rejected") {
+    return (
+      `This ${noun} is already rejected for that scholar. If it really is theirs, approve it ` +
+      "from the Rejected tab instead. Nothing was changed."
+    );
+  }
   return "We couldn't record that decision. Please try again.";
 }
 
