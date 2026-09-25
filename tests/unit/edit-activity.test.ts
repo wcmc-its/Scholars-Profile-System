@@ -6,6 +6,8 @@ import {
   buildChanges,
   coerceValue,
   collectCwids,
+  easternOffset,
+  isSystemActor,
   loadEditActivitySummary,
   shapeSummary,
   toDay,
@@ -234,5 +236,76 @@ describe("loadEditActivitySummary name resolution", () => {
     expect(summary.people).toEqual({});
     expect(summary.totalEdits).toBe(1);
     expect(summary.topEditors).toEqual([{ actorCwid: "act0001", edits: 1 }]);
+  });
+});
+
+describe("activity redesign — KPIs, day buckets, entity names", () => {
+  it("easternOffset follows DST", () => {
+    expect(easternOffset(new Date("2026-07-01T12:00:00Z"))).toBe("-04:00");
+    expect(easternOffset(new Date("2026-01-15T12:00:00Z"))).toBe("-05:00");
+  });
+
+  it("isSystemActor is the system- prefix only", () => {
+    expect(isSystemActor("system-autolock")).toBe(true);
+    expect(isSystemActor("abc1234")).toBe(false);
+  });
+
+  it("shapeSummary reads window-wide editor stats (bigint) and stamps generatedAt", () => {
+    const now = new Date("2026-09-24T15:00:00Z");
+    const s = shapeSummary(
+      [{ day: "2026-09-24", edits: 10 }],
+      [{ actor_cwid: "abc1234", edits: 10n }],
+      [],
+      [],
+      [{ editors: 7n, automated_editors: 1n, automated_edits: 4n }],
+      now,
+    );
+    expect(s.editorStats).toEqual({ editors: 7, automatedEditors: 1, automatedEdits: 4 });
+    expect(s.generatedAt).toBe("2026-09-24T15:00:00.000Z");
+  });
+
+  it("without a stats row, editor stats fall back to the capped list", () => {
+    const s = shapeSummary(
+      [],
+      [
+        { actor_cwid: "system-autolock", edits: 3n },
+        { actor_cwid: "abc1234", edits: 2n },
+      ],
+      [],
+      [],
+    );
+    expect(s.editorStats).toEqual({ editors: 2, automatedEditors: 1, automatedEdits: 3 });
+  });
+
+  it("buckets days in Eastern time with a bound offset, and names centers + cores", async () => {
+    const sqls: string[] = [];
+    const params: unknown[][] = [];
+    const answers = [
+      [{ day: "2026-09-24", edits: 2 }],
+      [{ actor_cwid: "abc1234", edits: 2 }],
+      [
+        { target_entity_type: "center", target_entity_id: "ctr_one", edits: 1 },
+        { target_entity_type: "core", target_entity_id: "7", edits: 1 },
+      ],
+      [],
+      [{ editors: 1, automated_editors: 0, automated_edits: 0 }],
+    ];
+    let call = 0;
+    const client = {
+      $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        sqls.push(strings.join("?"));
+        params.push(values);
+        return answers[call++] ?? [];
+      },
+      scholar: { findMany: async () => [] },
+      center: { findMany: async () => [{ code: "ctr_one", name: "Center One" }] },
+      core: { findMany: async () => [{ id: "7", name: "Core Seven" }] },
+    } as never;
+    const summary = await loadEditActivitySummary(client, new Date("2026-09-24T15:00:00Z"));
+    expect(sqls[0]).toContain("CONVERT_TZ(ts, '+00:00', ?)");
+    expect(params[0]![0]).toBe("-04:00");
+    expect(sqls[4]).toContain("COUNT(DISTINCT actor_cwid)");
+    expect(summary.editorStats.editors).toBe(1);
+    expect(summary.entityNames).toEqual({ "center:ctr_one": "Center One", "core:7": "Core Seven" });
   });
 });

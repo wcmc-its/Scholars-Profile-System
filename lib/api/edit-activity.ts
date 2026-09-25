@@ -29,9 +29,53 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** Rolling window the summary spans. */
 export const EDIT_ACTIVITY_WINDOW_DAYS = 30;
+/** How many of the most recent edits the feed loads (the SQL `LIMIT 100`). */
+export const EDIT_ACTIVITY_RECENT_LIMIT = 100;
 
-/** The Prisma surface this module needs — keeps the unit test client tiny. */
-export type EditActivityClient = Pick<PrismaClient, "$queryRaw" | "scholar">;
+/** The Prisma surface this module needs — keeps the unit test client tiny.
+ *  `center` / `core` only name those entities (fail-soft, like `scholar`). */
+export type EditActivityClient = Pick<PrismaClient, "$queryRaw" | "scholar"> &
+  Partial<Pick<PrismaClient, "center" | "core">>;
+
+/** The one timezone the console reads dates in (WCM-local). */
+export const EDIT_ACTIVITY_TZ = "America/New_York";
+
+/**
+ * Audit actors that are automation, not people. The audit log's only
+ * convention for a machine actor is a `system-` prefix (e.g. the reporter
+ * ETL's `system-autolock`); anything else is a CWID.
+ */
+export function isSystemActor(cwid: string): boolean {
+  return cwid.startsWith("system-");
+}
+
+/** The Eastern UTC offset at `now` as a MySQL `CONVERT_TZ` offset ("-04:00").
+ *  One offset for the whole window: a DST switch inside it shifts that side's
+ *  day buckets by an hour, which a 30-day activity chart tolerates. */
+export function easternOffset(now: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EDIT_ACTIVITY_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const wall = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"));
+  const utc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    now.getUTCHours(),
+    now.getUTCMinutes(),
+  );
+  const mins = Math.round((wall - utc) / 60000);
+  const sign = mins < 0 ? "-" : "+";
+  const abs = Math.abs(mins);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+}
 
 export type PerDay = { day: string; edits: number };
 export type TopEditor = { actorCwid: string; edits: number };
@@ -55,9 +99,24 @@ export type RecentEdit = {
 export type PersonRef = { name: string; title: string | null };
 /** CWID -> person, for the CWIDs on this page that resolve to a Scholar. */
 export type PeopleDirectory = Record<string, PersonRef>;
+/** Window-wide editor counts (not capped like `topEditors`). */
+export type EditorStats = {
+  /** Distinct actors in the window. */
+  editors: number;
+  /** Distinct {@link isSystemActor} actors. */
+  automatedEditors: number;
+  /** Edits made by {@link isSystemActor} actors. */
+  automatedEdits: number;
+};
 export type EditActivitySummary = {
   windowDays: number;
+  /** When the summary was read (ISO) — anchors the chart's day axis. */
+  generatedAt: string;
   totalEdits: number;
+  editorStats: EditorStats;
+  /** `${entityType}:${entityId}` -> display name, for centers and cores that
+   *  resolve. Absent keys render the bare id. */
+  entityNames: Record<string, string>;
   perDay: PerDay[];
   topEditors: TopEditor[];
   topEntities: TopEntity[];
@@ -76,6 +135,11 @@ type RawEntity = {
   target_entity_type: string;
   target_entity_id: string;
   edits: bigint | number;
+};
+type RawEditorStats = {
+  editors: bigint | number;
+  automated_editors: bigint | number | null;
+  automated_edits: bigint | number | string | null;
 };
 type RawRecent = {
   id: string;
@@ -162,13 +226,30 @@ export function shapeSummary(
   editors: readonly RawEditor[],
   entities: readonly RawEntity[],
   recent: readonly RawRecent[],
+  stats: readonly RawEditorStats[] = [],
+  now: Date = new Date(),
 ): EditActivitySummary {
   const shapedPerDay = perDay.map((r) => ({ day: toDay(r.day), edits: Number(r.edits) }));
+  const s = stats[0];
   return {
     // Filled in by loadEditActivitySummary — this shaper stays pure/DB-free.
     people: {},
+    entityNames: {},
     windowDays: EDIT_ACTIVITY_WINDOW_DAYS,
+    generatedAt: now.toISOString(),
     totalEdits: shapedPerDay.reduce((sum, r) => sum + r.edits, 0),
+    editorStats: {
+      // No stats row (an empty window) ⇒ fall back to what the capped list saw.
+      editors: s ? Number(s.editors) : editors.length,
+      automatedEditors: s
+        ? Number(s.automated_editors ?? 0)
+        : editors.filter((e) => isSystemActor(e.actor_cwid)).length,
+      automatedEdits: s
+        ? Number(s.automated_edits ?? 0)
+        : editors
+            .filter((e) => isSystemActor(e.actor_cwid))
+            .reduce((sum, e) => sum + Number(e.edits), 0),
+    },
     perDay: shapedPerDay,
     topEditors: editors.map((r) => ({ actorCwid: r.actor_cwid, edits: Number(r.edits) })),
     topEntities: entities.map((r) => ({
@@ -224,6 +305,38 @@ export async function resolvePeople(
   );
 }
 
+/** Center + core names for the entities on the page (both tables are tiny;
+ *  batched `in` reads). A client without those delegates resolves nothing. */
+export async function resolveEntityNames(
+  client: EditActivityClient,
+  summary: EditActivitySummary,
+): Promise<Record<string, string>> {
+  const ids = { center: new Set<string>(), core: new Set<string>() };
+  const add = (type: string, id: string) => {
+    if (type === "center" || type === "core") ids[type].add(id);
+  };
+  for (const e of summary.topEntities) add(e.entityType, e.entityId);
+  for (const r of summary.recent) add(r.entityType, r.entityId);
+  const out: Record<string, string> = {};
+  const [centers, cores] = await Promise.all([
+    ids.center.size && client.center
+      ? client.center.findMany({
+          where: { code: { in: [...ids.center] } },
+          select: { code: true, name: true },
+        })
+      : Promise.resolve([]),
+    ids.core.size && client.core
+      ? client.core.findMany({
+          where: { id: { in: [...ids.core] } },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  for (const c of centers) out[`center:${c.code}`] = c.name;
+  for (const c of cores) out[`core:${c.id}`] = c.name;
+  return out;
+}
+
 /**
  * Load the fleet-wide edit-activity summary for the trailing
  * {@link EDIT_ACTIVITY_WINDOW_DAYS} days. Four aggregate reads run in parallel;
@@ -236,12 +349,16 @@ export async function loadEditActivitySummary(
 ): Promise<EditActivitySummary> {
   const cutoff = new Date(now.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-  const [perDay, editors, entities, recent] = await Promise.all([
+  // Day buckets in WCM-local (Eastern) time, so they agree with the Eastern
+  // timestamps the feed renders. A bound numeric offset needs no MySQL tz tables.
+  const offset = easternOffset(now);
+
+  const [perDay, editors, entities, recent, stats] = await Promise.all([
     client.$queryRaw<RawPerDay[]>`
-      SELECT DATE(ts) AS day, COUNT(*) AS edits
+      SELECT DATE(CONVERT_TZ(ts, '+00:00', ${offset})) AS day, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
        WHERE ts >= ${cutoff}
-       GROUP BY DATE(ts)
+       GROUP BY day
        ORDER BY day DESC`,
     client.$queryRaw<RawEditor[]>`
       SELECT actor_cwid, COUNT(*) AS edits
@@ -265,9 +382,28 @@ export async function loadEditActivitySummary(
        WHERE ts >= ${cutoff}
        ORDER BY ts DESC, id DESC
        LIMIT 100`,
+    client.$queryRaw<RawEditorStats[]>`
+      SELECT COUNT(DISTINCT actor_cwid) AS editors,
+             COUNT(DISTINCT CASE WHEN actor_cwid LIKE 'system-%' THEN actor_cwid END)
+               AS automated_editors,
+             CAST(COALESCE(SUM(CASE WHEN actor_cwid LIKE 'system-%' THEN 1 ELSE 0 END), 0)
+               AS SIGNED) AS automated_edits
+        FROM scholars_audit.manual_edit_audit
+       WHERE ts >= ${cutoff}`,
   ]);
 
-  const summary = shapeSummary(perDay, editors, entities, recent);
+  const summary = shapeSummary(perDay, editors, entities, recent, stats, now);
+  // Center / core display names, same fail-soft rule as the people below.
+  try {
+    summary.entityNames = await resolveEntityNames(client, summary);
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "edit_activity_entity_resolve_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
   // Names are decoration; the audit rows are the page. A throw from THIS read
   // would surface as the "activity unavailable" notice — a cosmetic lookup must
   // never be able to take down a working page — so it is logged and swallowed,
