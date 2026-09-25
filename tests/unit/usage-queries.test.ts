@@ -46,5 +46,17 @@ describe("buildUsageQueries", () => {
 
   it("propagates the date guard", () => {
     expect(() => buildUsageQueries("nope")).toThrow(/invalid_date/);
+    expect(() => buildUsageQueries("2026-06-03", "2026-06-30'; DROP")).toThrow(/invalid_date/);
+  });
+
+  it("bounds every query by an inclusive until-date when given", () => {
+    const bounded = buildUsageQueries("2026-07-01", "2026-07-31");
+    for (const sql of Object.values(bounded)) {
+      expect(sql).toContain("dt >= '2026-07-01' AND dt <= '2026-07-31'");
+    }
+    // Without one, there is no upper bound.
+    for (const sql of Object.values(q)) {
+      expect(sql).not.toContain("dt <=");
+    }
   });
 });

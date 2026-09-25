@@ -16,11 +16,14 @@
  * (Profiles' pattern). Coverage and facets load independently: no coverage →
  * the "temporarily unavailable" notice; no facets → the numbers still render
  * (the URL's filters still apply) and the panel becomes a one-line notice.
- * No charts, no trend — there is no
- * history table (a nightly snapshot row is the 10-line ETL step if one is
- * ever wanted).
+ * No trend — there is no history table (a nightly snapshot row is the 10-line
+ * ETL step if one is ever wanted). The only bars are proportions of the
+ * current counts.
+ *
+ * Client islands, view state only: `./how-we-count` (the definitions toggle)
+ * and `./coverage-tables` (Summary / All columns, department filter, sort and
+ * the top-15 fold). Every number is computed here on the server.
  */
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
@@ -35,15 +38,13 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
   type CoverageCounts,
-  type CoverageRow,
+  type InferenceSourceCounts,
   type OrcidCoverage,
   NIH_FILTER_LABELS,
   NIH_FILTERS,
   STRONG_MIN_ACCEPTED,
+  SUGGEST_MIN_ACCEPTED,
   loadOrcidCoverage,
-  neither,
-  nihNoOrcid,
-  piNoEra,
   orcidCoverageActiveFilters,
   orcidCoverageQuery,
   parseOrcidCoverageParams,
@@ -55,6 +56,10 @@ import { unitLabels } from "@/lib/edit/person-filter";
 import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { canViewUsage } from "@/lib/edit/usage-access";
+import { cn } from "@/lib/utils";
+
+import { CoverageTables } from "./coverage-tables";
+import { HowWeCount } from "./how-we-count";
 
 export const dynamic = "force-dynamic";
 
@@ -63,105 +68,243 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-const thClass = "px-3 py-2 font-medium";
-const thNum = `${thClass} text-right`;
-const tdClass = "px-3 py-2";
-const tdNum = `${tdClass} text-right tabular-nums`;
 const selectClass = "border-apollo-border rounded border px-2 py-1";
 
+/** The page's card surface — the same white, greige-edged panel as the mockups. */
+const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] border";
+
+/** A headline number: the asserted share, a two-part bar (asserted + strong
+ *  inference), and the counts behind it. Always the unfiltered population. */
 function Tile({ label, c }: { label: string; c: CoverageCounts }) {
+  const w = (n: number) => `${c.people === 0 ? 0 : (100 * n) / c.people}%`;
   return (
-    <div className="border-apollo-border bg-apollo-surface rounded-md border p-4">
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{pct(c.orcid, c.people)}</div>
-      <div className="text-muted-foreground mt-1 text-xs tabular-nums">
-        {c.orcid.toLocaleString()} of {c.people.toLocaleString()} with an asserted ORCID iD
+    <div className={cn(cardClass, "flex flex-col gap-2.5 px-[18px] py-4")}>
+      <div className="text-muted-foreground text-xs font-medium tracking-[0.1em] uppercase">
+        {label}
       </div>
-      <div className="text-muted-foreground mt-0.5 text-xs tabular-nums">
-        {c.confirmed.toLocaleString()} confirmed here · {(c.orcid - c.confirmed).toLocaleString()}{" "}
-        from Identity or RPM admin
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[32px] leading-none font-semibold tracking-[-0.01em] tabular-nums">
+          {pct(c.orcid, c.people)}
+        </span>
+        <span className="text-muted-foreground text-sm">
+          asserted ·{" "}
+          <span className="text-foreground font-medium">{pct(c.orcid + c.strong, c.people)}</span>{" "}
+          with strong inference
+        </span>
       </div>
-      <div className="text-muted-foreground mt-0.5 text-xs tabular-nums">
-        +{c.strong.toLocaleString()} strong inference ({pct(c.orcid + c.strong, c.people)} incl.)
+      <div
+        className="bg-apollo-surface-2 flex h-2.5 overflow-hidden rounded-full"
+        aria-hidden="true"
+      >
+        <div className="bg-apollo-slate h-full" style={{ width: w(c.orcid) }} />
+        <div className="bg-apollo-slate/45 h-full" style={{ width: w(c.strong) }} />
+      </div>
+      <div className="text-muted-foreground flex flex-col gap-0.5 text-[13px] tabular-nums">
+        <span>
+          <span className="text-foreground font-medium">{c.orcid.toLocaleString()}</span> of{" "}
+          {c.people.toLocaleString()} asserted ({c.confirmed.toLocaleString()} confirmed here,{" "}
+          {(c.orcid - c.confirmed).toLocaleString()} from Identity or RPM admin)
+        </span>
+        <span>
+          <span className="text-foreground font-medium">+{c.strong.toLocaleString()}</span> more by
+          strong inference
+        </span>
       </div>
     </div>
   );
 }
 
-/** Both tables share one column set. "NIH-funded, no ORCID" is the outreach
- *  number the department table sorts by. */
-function CoverageTable({
-  caption,
-  firstHeader,
-  rows,
-  testId,
+/** One term in the "How we count" panel. */
+function Definition({
+  term,
+  swatch,
+  children,
 }: {
-  caption: React.ReactNode;
-  firstHeader: string;
-  rows: CoverageRow[];
-  testId: string;
+  term: string;
+  swatch?: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="border-apollo-border bg-apollo-surface mt-2 overflow-x-auto rounded-md border">
-      <table className="w-full text-sm" data-testid={testId}>
-        <caption className="text-muted-foreground px-3 py-2 text-left text-xs">{caption}</caption>
-        <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-          <tr className="border-apollo-border border-b">
-            <th className={thClass}>{firstHeader}</th>
-            <th className={thNum}>People</th>
-            <th className={thNum}>Asserted ORCID</th>
-            <th className={thNum}>Confirmed</th>
-            <th className={thNum}>Asserted %</th>
-            <th className={thNum}>Inferred, strong</th>
-            <th className={thNum}>Inferred, weak</th>
-            <th className={thNum}>eRA account</th>
-            <th className={thNum}>Both</th>
-            <th className={thNum}>Neither</th>
-            <th className={thNum}>NIH-funded</th>
-            <th className={thNum}>NIH-funded, asserted</th>
-            <th className={thNum}>NIH-funded, no asserted (strong inference)</th>
-            <th className={thNum}>NIH PI</th>
-            <th className={thNum}>NIH PI, no eRA</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td className={`${tdClass} text-muted-foreground`} colSpan={15}>
-                No one matches these filters.
-              </td>
-            </tr>
-          ) : (
-            rows.map((r) => (
-              <tr key={r.key ?? "__null"} className="border-apollo-border border-b">
-                <td className={`${tdClass} break-words`}>{r.label}</td>
-                <td className={tdNum}>{r.people.toLocaleString()}</td>
-                <td className={tdNum}>{r.orcid.toLocaleString()}</td>
-                <td className={tdNum}>{r.confirmed.toLocaleString()}</td>
-                <td className={tdNum}>{pct(r.orcid, r.people)}</td>
-                <td className={tdNum}>{r.strong.toLocaleString()}</td>
-                <td className={tdNum}>{r.weak.toLocaleString()}</td>
-                <td className={tdNum}>{r.era.toLocaleString()}</td>
-                <td className={tdNum}>{r.both.toLocaleString()}</td>
-                <td className={tdNum}>{neither(r).toLocaleString()}</td>
-                <td className={tdNum}>{r.nihPeople.toLocaleString()}</td>
-                <td className={tdNum}>
-                  {r.nihOrcid.toLocaleString()} ({pct(r.nihOrcid, r.nihPeople)})
-                </td>
-                <td className={`${tdNum} font-semibold`}>
-                  {nihNoOrcid(r).toLocaleString()}{" "}
-                  <span className="text-muted-foreground font-normal">
-                    ({r.nihStrong.toLocaleString()})
-                  </span>
-                </td>
-                <td className={tdNum}>{r.nihPi.toLocaleString()}</td>
-                <td className={tdNum}>{piNoEra(r).toLocaleString()}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        {swatch ? (
+          <span className={cn("size-2.5 rounded-[3px]", swatch)} aria-hidden="true" />
+        ) : null}
+        <span className="text-sm font-semibold">{term}</span>
+      </div>
+      <span className="text-[13.5px] leading-[1.55] text-pretty text-[color:var(--evidence-body)]">
+        {children}
+      </span>
     </div>
+  );
+}
+
+function Definitions() {
+  return (
+    <div className={cn(cardClass, "grid gap-x-8 gap-y-4 px-[22px] py-[18px] md:grid-cols-2")}>
+      <Definition term="Asserted" swatch="bg-apollo-slate">
+        On file in WCM Identity, entered by a Publication Manager administrator, or confirmed by the
+        person (or someone editing for them) in this console. An iD the person removed counts
+        nowhere.
+      </Definition>
+      <Definition term="Confirmed">
+        The subset of asserted iDs confirmed by the person in this console.
+      </Definition>
+      <Definition term="Inferred, strong" swatch="bg-apollo-slate/45">
+        Exactly one iD with strong support: a public WCM email on the registry record (orcid_email),{" "}
+        {STRONG_MIN_ACCEPTED}+ shared works (orcid_works), Publication Manager inference with{" "}
+        {STRONG_MIN_ACCEPTED}+ accepted and no rejected articles, or both sources agreeing on the
+        same iD. A rejected article vetoes an iD.
+      </Definition>
+      <Definition term="Inferred, weak" swatch="bg-apollo-slate/20">
+        No single strong candidate: a name-only registry match, thin support, a contradiction, or
+        two or more strong candidate iDs. Inferred iDs never appear on public profiles; they become
+        the person&rsquo;s iD only when someone confirms one in this console.
+      </Definition>
+      <Definition term="&ldquo;Is this your ORCID iD?&rdquo;">
+        The prompt in this console uses a lower bar than strong: {SUGGEST_MIN_ACCEPTED} accepted
+        article at the person&rsquo;s own byline, none rejected, no competing iD. The person
+        confirming it is the safeguard.
+      </Definition>
+      <Definition term="eRA account">
+        Inferred from NIH RePORTER, where every listed PI necessarily holds one. RePORTER lists PIs
+        only, so a Co-I or key person on someone else&rsquo;s award has an account we can&rsquo;t
+        see. &ldquo;NIH PI, no eRA&rdquo; is a miss in our resolver, not in their account.
+      </Definition>
+      <Definition term="NIH-funded">
+        Any NIH award on file for the person, whatever its dates. Scholars add their iD under Manage
+        profile in{" "}
+        <a
+          href={PUBLICATION_MANAGER_URL}
+          className="text-apollo-slate underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          ReCiter
+        </a>
+        .
+      </Definition>
+    </div>
+  );
+}
+
+type SourceMethod = { key: string; rule: string; tier: "Strong" | "Weak"; n: number };
+
+function SourceCard({
+  title,
+  cadence,
+  description,
+  methods,
+}: {
+  title: string;
+  cadence: string;
+  description: string;
+  methods: SourceMethod[];
+}) {
+  return (
+    <div className={cn(cardClass, "overflow-hidden")} data-testid="orcid-coverage-source">
+      <div className="flex flex-col gap-1 px-[18px] pt-3.5 pb-3">
+        <div className="flex flex-wrap items-baseline gap-x-2.5">
+          <h3 className="m-0 text-[15px] font-semibold">{title}</h3>
+          <span className="text-muted-foreground text-[12.5px]">{cadence}</span>
+        </div>
+        <p className="text-muted-foreground m-0 text-[13px] leading-normal">{description}</p>
+      </div>
+      {methods.map((m) => (
+        <div
+          key={`${m.key}-${m.tier}`}
+          className="border-apollo-border grid grid-cols-[minmax(0,1fr)_64px_70px] items-start gap-3 border-t px-[18px] py-2.5"
+        >
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="font-mono text-[12.5px] font-semibold">{m.key}</span>
+            <span className="text-[13px] leading-[1.45] text-[color:var(--evidence-body)]">
+              {m.rule}
+            </span>
+          </div>
+          <span
+            className={cn(
+              "justify-self-start rounded-full px-2 py-px text-[11.5px] whitespace-nowrap",
+              m.tier === "Strong"
+                ? "bg-apollo-slate/20 text-apollo-slate"
+                : "bg-apollo-slate/10 text-foreground",
+            )}
+          >
+            {m.tier}
+          </span>
+          <span className="text-right text-sm font-medium tabular-nums">
+            {m.n.toLocaleString()}
+            <span className="text-muted-foreground block text-[11.5px] font-normal">people</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Where the inferred tiers come from: the two pipelines that write
+ *  `orcid_candidate`, and how many people each rule currently matches. */
+function InferenceSources({ s }: { s: InferenceSourceCounts }) {
+  return (
+    <section className="flex flex-col gap-3" data-testid="orcid-coverage-sources">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="m-0 text-lg font-semibold">Where inferences come from</h2>
+        <span className="text-muted-foreground text-[13px]">
+          Both pipelines write to orcid_candidate; neither writes scholar.orcid. Each person gets
+          one tier: asserted › strong › weak › none.
+        </span>
+      </div>
+      <div className="grid items-start gap-3.5 lg:grid-cols-2">
+        <SourceCard
+          title="Publication Manager inference"
+          cadence="Nightly · copied from ReCiter Publication Manager"
+          description="PubMed author records often carry the author’s ORCID. For each WCM person, Publication Manager counts how many accepted and rejected articles carry a given iD at their byline; the nightly import copies those counts."
+          methods={[
+            {
+              key: "rpm_inferred",
+              rule: `${STRONG_MIN_ACCEPTED}+ accepted articles carry the iD and no rejected one`,
+              tier: "Strong",
+              n: s.rpmStrong,
+            },
+            {
+              key: "rpm_inferred",
+              rule: "Fewer accepted articles, or any rejected",
+              tier: "Weak",
+              n: s.rpmWeak,
+            },
+          ]}
+        />
+        <SourceCard
+          title="ORCID registry sweep"
+          cadence="Weekly · run by Scholars"
+          description="Pulls every public ORCID record that mentions WCM by affiliation text, organization identifier, or a public WCM email, then matches each record to a scholar, strongest rule first."
+          methods={[
+            {
+              key: "orcid_email",
+              rule: "A public email on the record belongs to exactly one scholar",
+              tier: "Strong",
+              n: s.registryEmail,
+            },
+            {
+              key: "orcid_works",
+              rule: `Name and full first name agree, ${STRONG_MIN_ACCEPTED}+ shared PMIDs/DOIs, no other scholar shares as many`,
+              tier: "Strong",
+              n: s.registryWorks,
+            },
+            {
+              key: "orcid_name",
+              rule: "Name match only, or weaker overlap. Kept as a near-miss",
+              tier: "Weak",
+              n: s.registryWeak,
+            },
+          ]}
+        />
+      </div>
+      <p className="text-muted-foreground m-0 text-[12.5px] leading-normal">
+        People per rule overlap: one person can match several, and still gets one tier. Rejected
+        articles veto an iD: they usually mean it belongs to a homonym. rpm_admin also lives in
+        orcid_candidate, but holds iDs Publication Manager administrators typed in, not inferences.
+      </p>
+    </section>
   );
 }
 
@@ -179,9 +322,11 @@ function Filters({
   return (
     <AutoSubmitForm
       action="/edit/orcid-coverage"
-      className={`group border-apollo-border bg-apollo-surface flex gap-4 rounded-md border p-3 text-xs ${
-        inSheet ? "flex-col" : "mt-4 flex-wrap items-end"
-      }`}
+      className={
+        inSheet
+          ? "group border-apollo-border bg-apollo-surface flex flex-col gap-4 rounded-md border p-3 text-xs"
+          : cn(cardClass, "group flex flex-wrap items-end gap-4 px-[18px] py-3.5 text-xs")
+      }
       data-testid="orcid-coverage-filters"
     >
       <label className="flex flex-col gap-1">
@@ -203,8 +348,8 @@ function Filters({
           className={inSheet ? undefined : "grid gap-x-6 sm:grid-cols-2 lg:grid-cols-4"}
         />
         <p className="text-muted-foreground mt-1">
-          Person type narrows the department table only; the units narrow both tables. None
-          selected = everyone.
+          Person type narrows the department table only; the units narrow both tables. None selected
+          = everyone.
         </p>
       </div>
       {/* No-JS fallback; the island hides it once hydrated. */}
@@ -239,58 +384,36 @@ function Body({
     params.types.length === 0
       ? "all person types"
       : orList(params.types.map((t) => typeLabels.get(t) ?? t));
+  const RoleLabel = `${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}`;
   const unitText =
     params.units.length === 0 ? "" : ` in ${orList(params.units.map((u) => units.get(u) ?? u))}`;
   const nihLabel = params.nih === "all" ? "" : ` · ${NIH_FILTER_LABELS[params.nih]}`;
   return (
     <>
-      <p className="text-muted-foreground mt-2 max-w-prose">
-        <strong>Asserted ORCID</strong> = on file in WCM Identity, entered by a Publication
-        Manager administrator, or confirmed by the person (or someone editing for them) in this
-        console; <strong>confirmed</strong> is that last subset. An iD the person removed counts
-        nowhere. <strong>Inferred</strong> = the Publication Manager saw an ORCID on
-        the person&apos;s PubMed author record across articles they accepted, or the public ORCID
-        registry lists a WCM-affiliated iD that matches the person: <em>strong</em> when one ORCID
-        is carried by {STRONG_MIN_ACCEPTED}+ accepted articles and no rejected one, or shares{" "}
-        {STRONG_MIN_ACCEPTED}+ works between the registry record and the person&apos;s own
-        publications, or the registry record carries the person&apos;s WCM email (and whenever
-        Publication Manager and the registry agree on the same iD, provided no rejected article
-        carried it); <em>weak</em> = no single
-        strong candidate (a name-only registry match, thin support, a contradiction, or two or
-        more strong candidate ORCIDs). An inference
-        never reaches the public profile — it is the &ldquo;is this yours? confirm it&rdquo;
-        outreach list; the number in parentheses under NIH-funded is that easy subset. A scholar
-        adds theirs under Manage profile in{" "}
-        <a href={PUBLICATION_MANAGER_URL} className="underline" target="_blank" rel="noreferrer">
-          ReCiter
-        </a>
-        . &ldquo;eRA account&rdquo; is inferred from NIH RePORTER (a PI listed there necessarily
-        holds one); RePORTER lists PIs only, so a Co-I or key person on someone else&apos;s award
-        has an account we cannot see — that is why the gap column is &ldquo;NIH PI, no eRA&rdquo;,
-        which is a miss in our RePORTER resolver, not in their account. &ldquo;NIH-funded&rdquo; =
-        any NIH award on file for the person, whatever its dates. NIH requires an ORCID iD linked to
-        eRA Commons for every SciENcv biosketch.
-      </p>
-
-      <div className="mt-6 grid gap-4 sm:grid-cols-3" data-testid="orcid-coverage-tiles">
+      <div
+        className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3"
+        data-testid="orcid-coverage-tiles"
+      >
         <Tile label="All active people" c={tiles.overall} />
         <Tile label="Full-time faculty" c={tiles.fullTime} />
-        <Tile label="NIH-funded (any award) full-time faculty" c={tiles.nihFullTime} />
+        <Tile label="NIH-funded full-time faculty" c={tiles.nihFullTime} />
       </div>
+
+      <InferenceSources s={data.sources} />
 
       {facets === null ? (
         <p
-          className="text-muted-foreground mt-4 text-xs"
+          className="text-muted-foreground m-0 text-xs"
           data-testid="orcid-coverage-filters-unavailable"
         >
           Filters are unavailable right now.
         </p>
       ) : (
-        <>
+        <div>
           <div className="hidden lg:block" data-testid="orcid-coverage-rail">
             <Filters data={data} facets={facets} />
           </div>
-          <div className="mt-4 lg:hidden">
+          <div className="lg:hidden">
             <FiltersSheet
               activeCount={orcidCoverageActiveFilters(params)}
               testId="orcid-coverage-filters-sheet-trigger"
@@ -298,47 +421,28 @@ function Body({
               <Filters data={data} facets={facets} inSheet />
             </FiltersSheet>
           </div>
-        </>
+        </div>
       )}
 
       {ignoredLegacyDept && (
-        <p className="text-muted-foreground mt-4 text-xs" data-testid="orcid-coverage-legacy-dept">
+        <p className="text-muted-foreground m-0 text-xs" data-testid="orcid-coverage-legacy-dept">
           A department filter from an older link was ignored — pick it under Department / division.
         </p>
       )}
 
-      <section className="mt-8">
-        <h2 className="text-base font-semibold">By person type</h2>
-        <CoverageTable
-          caption={`Every person type${unitText}${nihLabel}.`}
-          firstHeader="Person type"
-          rows={data.byRole}
-          testId="orcid-coverage-by-role"
-        />
-      </section>
-
-      <section className="mt-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-base font-semibold">By department</h2>
-          <Link
-            href={`/edit/orcid-coverage/export${orcidCoverageQuery(params)}`}
-            className="text-xs underline"
-            data-testid="orcid-coverage-download"
-          >
-            Download CSV
-          </Link>
-        </div>
-        <CoverageTable
-          caption={`${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}${unitText}${nihLabel}, ${
-            params.nih === "none"
-              ? "sorted by people."
-              : "sorted by NIH-funded people without an asserted ORCID iD — the outreach list."
-          }`}
-          firstHeader="Department"
-          rows={data.byDept}
-          testId="orcid-coverage-by-dept"
-        />
-      </section>
+      <CoverageTables
+        byRole={data.byRole}
+        byDept={data.byDept}
+        roleCaption={`Every person type${unitText}${nihLabel}.`}
+        deptCaption={`${RoleLabel}${unitText}${nihLabel}, ${
+          params.nih === "none"
+            ? "sorted by people."
+            : "sorted by NIH-funded people without an asserted ORCID iD: the outreach list."
+        }`}
+        deptScope={params.types.length === 0 ? "All person types" : `${RoleLabel} only`}
+        downloadHref={`/edit/orcid-coverage/export${orcidCoverageQuery(params)}`}
+        defaultSort={params.nih === "none" ? "people" : "nihNo"}
+      />
     </>
   );
 }
@@ -403,10 +507,25 @@ export default async function EditOrcidCoveragePage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <div data-testid="orcid-coverage-page">
-        <h1 className="mb-1 text-xl font-bold">ORCID coverage</h1>
+      <div data-testid="orcid-coverage-page" className="flex flex-col gap-[26px]">
+        <div className="flex flex-col gap-2.5">
+          <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
+            ORCID coverage
+          </h1>
+          <HowWeCount
+            intro={
+              <>
+                How many people have an ORCID iD on file, and how many more we can infer. NIH
+                requires an ORCID iD linked to eRA Commons for every SciENcv biosketch, so
+                NIH-funded people without one are the outreach list.
+              </>
+            }
+          >
+            <Definitions />
+          </HowWeCount>
+        </div>
         {coverage === null ? (
-          <p className="text-muted-foreground mt-8" data-testid="orcid-coverage-unavailable">
+          <p className="text-muted-foreground m-0" data-testid="orcid-coverage-unavailable">
             Coverage data is temporarily unavailable. Please try again later or contact ITS Support
             if this persists.
           </p>

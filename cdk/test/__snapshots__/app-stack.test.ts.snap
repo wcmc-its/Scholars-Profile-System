@@ -1023,6 +1023,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "",
               },
               {
+                "Name": "FUNCTIONAL_ROLES_AUTHZ",
+                "Value": "off",
+              },
+              {
                 "Name": "SECURITY_CSP_MODE",
                 "Value": "enforce",
               },
@@ -5545,6 +5549,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
                 "Value": "",
+              },
+              {
+                "Name": "FUNCTIONAL_ROLES_AUTHZ",
+                "Value": "off",
               },
               {
                 "Name": "SECURITY_CSP_MODE",

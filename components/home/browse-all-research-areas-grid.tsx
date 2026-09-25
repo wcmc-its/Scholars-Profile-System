@@ -34,6 +34,7 @@ export function BrowseAllResearchAreasGrid({ items }: { items: ParentTopic[] }) 
     );
   }
 
+  const subtopicTotal = items.reduce((n, t) => n + t.subtopicCount, 0);
   const q = filter.trim().toLowerCase();
   const shown = q ? items.filter((t) => t.name.toLowerCase().includes(q)) : items;
   // Column-major split: items already arrive A–Z, so each column is a
@@ -49,7 +50,8 @@ export function BrowseAllResearchAreasGrid({ items }: { items: ParentTopic[] }) 
         <div>
           <SectionHeading>Browse all research areas</SectionHeading>
           <p className="text-muted-foreground mt-1 text-[14px]">
-            All {items.length} research areas at WCM, with publication counts.
+            All {items.length} research areas and {subtopicTotal.toLocaleString()} subareas at WCM, with
+            publication counts.
           </p>
         </div>
         <div className="relative w-full sm:w-70">

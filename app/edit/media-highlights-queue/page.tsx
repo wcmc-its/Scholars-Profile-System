@@ -1,6 +1,7 @@
 /**
  * `/edit/media-highlights-queue` — the press-clip approval queue. Same reviewers,
- * component and decision API as `/edit/news-queue`, filtered to rows with an
+ * loader and decision API as `/edit/news-queue`; its own reviewer surface
+ * (`components/edit/media-highlights-queue.tsx`, Media Highlights.dc.html), filtered to rows with an
  * `outlet` (etl/news/clips.ts); approved clips publish to the profile's Media
  * Highlights section, not News. Gated additionally on MEDIA_HIGHLIGHTS_SECTION.
  *
@@ -23,12 +24,16 @@
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
-import { NewsQueue } from "@/components/edit/news-queue";
+import { MediaHighlightsQueue } from "@/components/edit/media-highlights-queue";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { isMediaHighlightsQueueEnabled, loadNewsQueue, loadNewsQueueCounts } from "@/lib/edit/news-queue";
+import {
+  isMediaHighlightsQueueEnabled,
+  loadNewsQueue,
+  loadNewsQueueCounts,
+} from "@/lib/edit/news-queue";
 
 export const dynamic = "force-dynamic";
 
@@ -56,8 +61,6 @@ export default async function MediaHighlightsQueuePage() {
     // from `approved` — they are counted at the DB.
     loadNewsQueueCounts(db.read, "clips"),
   ]);
-  const pendingCount = pending.reduce((sum, g) => sum + g.rows.length, 0);
-  const contestedCount = pending.filter((g) => g.contested).length;
 
   // Sub-nav tabs — mirrors `/edit/methods`, the sibling comms surface.
   const superuserSurfaces = session.isSuperuser;
@@ -72,22 +75,19 @@ export default async function MediaHighlightsQueuePage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-        <h1 className="mb-1 text-xl font-bold">Media highlights</h1>
-        <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
-          {pendingCount === 0
-            ? "Press clips from the External Affairs \u201cWCM in the News\u201d digest awaiting confirmation. Nothing here shows on a profile until it is approved."
-            : `${pendingCount} press clip${pendingCount === 1 ? "" : "s"} awaiting confirmation${
-                contestedCount > 0
-                  ? `, including ${contestedCount} where more than one scholar matches the same name`
-                  : ""
-              }. Approved clips show in the profile\u2019s Media highlights section.`}
+      <div className="mb-[22px] flex flex-col gap-1.5">
+        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Media highlights</h1>
+        <p className="text-muted-foreground m-0 max-w-3xl text-[14.5px] leading-normal">
+          Press clips matched to scholars. Approved clips appear in the profile&rsquo;s Media
+          highlights section; &ldquo;Approve but hide&rdquo; confirms the match without showing it.
         </p>
-        <NewsQueue
-          pending={pending}
-          approved={approved}
-          rejected={rejected}
-          counts={counts}
-        />
+      </div>
+      <MediaHighlightsQueue
+        pending={pending}
+        approved={approved}
+        rejected={rejected}
+        counts={counts}
+      />
     </ConsoleShell>
   );
 }

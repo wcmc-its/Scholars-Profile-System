@@ -29,7 +29,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown, ChevronUp, HelpCircle, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, HelpCircle, X } from "lucide-react";
 
 import {
   DirectoryPeopleTypeahead,
@@ -91,21 +91,32 @@ export type CenterProgramCardProps = {
   }>;
 };
 
-export function CenterProgramCard({ centerCode, programs }: CenterProgramCardProps) {
+export function CenterProgramCard({
+  centerCode,
+  programs,
+  headingId = "center-program-heading",
+}: CenterProgramCardProps & {
+  /** Heading id — the single-scroll editor renders several sections. */
+  headingId?: string;
+}) {
   const editable = programs.filter((p) => !EXCLUDED_PROGRAM_CODES.has(p.code));
 
+  // Edit Center mockup (2026-09-25): each program is a collapsible row — a
+  // summary line ("2 leaders · 1 COE liaison", an amber "No description" chip)
+  // that opens onto the full editor. The first program starts open.
   return (
     <EditPanel
       slot="center-program-card"
+      headingId={headingId}
       heading="Programs"
-      description="Set each program's leaders and description. These appear on the program's public page."
+      description="Each program’s leaders and description appear on its own public page."
     >
       {editable.length === 0 ? (
         <p className="text-muted-foreground text-sm">This center has no programs with a page.</p>
       ) : (
-        <div className="flex flex-col gap-6" data-testid="center-program-list">
-          {editable.map((p) => (
-            <ProgramEditor key={p.code} centerCode={centerCode} program={p} />
+        <div className="flex flex-col gap-3" data-testid="center-program-list">
+          {editable.map((p, i) => (
+            <ProgramEditor key={p.code} centerCode={centerCode} program={p} defaultOpen={i === 0} />
           ))}
         </div>
       )}
@@ -113,13 +124,26 @@ export function CenterProgramCard({ centerCode, programs }: CenterProgramCardPro
   );
 }
 
+/** "2 leaders · 1 COE liaison" — the collapsed row's summary. */
+export function programLeaderSummary(leaders: ReadonlyArray<{ role: LeaderRole }>): string {
+  const lead = leaders.filter((l) => l.role === "leader").length;
+  const liaison = leaders.length - lead;
+  const parts = [`${lead} leader${lead === 1 ? "" : "s"}`];
+  if (liaison > 0) parts.push(`${liaison} COE liaison${liaison === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
 function ProgramEditor({
   centerCode,
   program,
+  defaultOpen = false,
 }: {
   centerCode: string;
   program: CenterProgramCardProps["programs"][number];
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  const bodyId = React.useId();
   const [leaders, setLeaders] = React.useState<LeaderState[]>(() => sortLeaders(program.leaders));
   const [adding, setAdding] = React.useState<DirectoryValue | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -258,14 +282,49 @@ function ProgramEditor({
 
   return (
     <section
-      className="border-apollo-border flex flex-col gap-4 rounded-md border p-4"
+      className="border-apollo-border-strong overflow-hidden rounded-[10px] border"
       data-testid={`program-editor-${program.code}`}
     >
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-base font-medium">{program.label}</h3>
-        <span className="text-muted-foreground text-xs">{program.code}</span>
-      </div>
+      <h3 className="m-0">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          className={cn(
+            "hover:bg-apollo-page flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3.5 py-3 text-left",
+            open ? "bg-apollo-page" : "bg-apollo-surface",
+          )}
+          data-testid={`program-toggle-${program.code}`}
+        >
+          <ChevronRight
+            className={cn(
+              "text-muted-foreground size-3.5 shrink-0 transition-transform",
+              open && "rotate-90",
+            )}
+            aria-hidden
+          />
+          <span className="text-[14.5px] font-[550]">{program.label}</span>
+          <span className="text-muted-foreground font-mono text-xs">{program.code}</span>
+          <span className="text-muted-foreground ml-auto text-[12.5px] font-normal">
+            {programLeaderSummary(leaders)}
+          </span>
+          {descSaved.trim() === "" && (
+            <span
+              className="bg-apollo-amber-tint text-apollo-amber rounded-full px-2 py-px text-[11.5px] font-normal"
+              data-testid={`program-no-description-${program.code}`}
+            >
+              No description
+            </span>
+          )}
+        </button>
+      </h3>
 
+      <div
+        id={bodyId}
+        hidden={!open}
+        className="border-apollo-border flex flex-col gap-4 border-t px-3.5 pt-3 pb-3.5"
+      >
       {/* Leaders */}
       <div className="flex flex-col gap-2">
         <span className="flex items-center gap-1 text-sm font-medium">
@@ -441,6 +500,7 @@ function ProgramEditor({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      </div>
     </section>
   );
 }

@@ -15,7 +15,11 @@ const {
   mockRedirect,
   mockRoster,
   mockForbidden,
+  mockListFunctionalRoles,
+  mockListGateHolders,
 } = vi.hoisted(() => ({
+  mockListFunctionalRoles: vi.fn(),
+  mockListGateHolders: vi.fn(),
   mockGetEditSession: vi.fn(),
   mockIsTabEnabled: vi.fn(),
   mockLoadOwnerScope: vi.fn(),
@@ -49,6 +53,12 @@ vi.mock("@/lib/edit/slug-request", () => ({
   isSlugRequestEnabled: () => false,
   countPendingSlugRequests: vi.fn().mockResolvedValue(0),
 }));
+vi.mock("@/lib/edit/functional-roles.server", () => ({
+  canManageFunctionalRoles: (s: { isSuperuser: boolean }) => s.isSuperuser,
+  listFunctionalRoles: mockListFunctionalRoles,
+  listGateHolders: mockListGateHolders,
+  functionalRoleScopeOptions: () => ({ external_affairs: [], reporting: [] }),
+}));
 vi.mock("@/lib/db", () => ({
   db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
 }));
@@ -68,6 +78,76 @@ beforeEach(() => {
   mockIsTabEnabled.mockReturnValue(true);
   mockLoadRoster.mockResolvedValue({ entries: [], nameResolutionDegraded: false });
   mockGetCoreList.mockResolvedValue([]);
+  mockListFunctionalRoles.mockResolvedValue([]);
+  mockListGateHolders.mockResolvedValue([]);
+  vi.unstubAllEnvs();
+});
+
+/** The AdministratorsRoster element the page rendered. */
+function rosterProps(result: El): Record<string, unknown> {
+  const children = [result.props.children].flat() as unknown[];
+  const rosterEl = children.map(asEl).find((c) => c.type === mockRoster);
+  expect(rosterEl).toBeTruthy();
+  return rosterEl!.props;
+}
+
+describe("/edit/administrators — Functional roles tab data", () => {
+  it("superuser → functionalRoles carries the registry rows + scope options", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockListFunctionalRoles.mockResolvedValue([{ role: "reporting", cwid: "fake001" }]);
+    const props = rosterProps(asEl(await AdministratorsPage()));
+    expect(props.functionalRoles).toEqual({
+      rows: [{ role: "reporting", cwid: "fake001" }],
+      scopeOptions: { external_affairs: [], reporting: [] },
+      authzEnabled: false,
+      gateHolders: [],
+    });
+  });
+
+  it("carries the FUNCTIONAL_ROLES_AUTHZ state and the parity holders", async () => {
+    vi.stubEnv("FUNCTIONAL_ROLES_AUTHZ", "on");
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const holder = {
+      role: "reporting",
+      cwid: "fake002",
+      name: null,
+      reportKey: "article-count",
+      scope: "*",
+      via: "report_access",
+    };
+    mockListGateHolders.mockResolvedValue([holder]);
+    const props = rosterProps(asEl(await AdministratorsPage()));
+    expect(props.functionalRoles).toMatchObject({ authzEnabled: true, gateHolders: [holder] });
+  });
+
+  it("a failed parity read drops only the parity line, not the tab", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockListGateHolders.mockRejectedValue(new Error("boom"));
+    const props = rosterProps(asEl(await AdministratorsPage()));
+    const fr = props.functionalRoles as Record<string, unknown>;
+    expect(fr.rows).toEqual([]);
+    expect(fr.gateHolders).toBeUndefined();
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("functional_roles_parity_load_failed"),
+    );
+  });
+
+  it("unit Owner → no functionalRoles and no registry read", async () => {
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadOwnerScope.mockResolvedValue(["N1280"]);
+    const props = rosterProps(asEl(await AdministratorsPage()));
+    expect(props.functionalRoles).toBeUndefined();
+    expect(mockListFunctionalRoles).not.toHaveBeenCalled();
+  });
+
+  it("a failed registry read (table not applied yet) drops the tab, not the page", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockListFunctionalRoles.mockRejectedValue(new Error("table functional_role_grant does not exist"));
+    const props = rosterProps(asEl(await AdministratorsPage()));
+    expect(props.functionalRoles).toBeUndefined();
+    expect(props.entries).toEqual([]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("functional_roles_load_failed"));
+  });
 });
 
 describe("/edit/administrators — authorization", () => {
@@ -160,7 +240,7 @@ describe("/edit/administrators — authorization", () => {
       { id: "2", name: "Biomedical Imaging", facility: null, hasConfirmedPublications: false },
     ]);
     const result = asEl(await AdministratorsPage());
-    const children = result.props.children as unknown[];
+    const children = [result.props.children].flat() as unknown[];
     const rosterEl = children.map(asEl).find((c) => c.type === mockRoster);
     expect(rosterEl).toBeTruthy();
     expect((rosterEl!.props as { allCores: unknown }).allCores).toEqual([

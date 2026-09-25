@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   publicationFindMany: vi.fn(),
   publicationCount: vi.fn(),
   subtopicFindMany: vi.fn().mockResolvedValue([]),
+  subtopicCount: vi.fn().mockResolvedValue(1615),
   spotlightFindMany: vi.fn(),
   scholarFindMany: vi.fn(),
   scholarCount: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock("@/lib/db", () => ({
     },
     subtopic: {
       findMany: mocks.subtopicFindMany,
+      count: mocks.subtopicCount,
     },
     publication: {
       findMany: mocks.publicationFindMany,
@@ -434,7 +436,7 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
       Array.from({ length: 68 }, (_, i) => ({
         id: `topic_${i}`,
         label: `Topic ${i}`,
-        description: null,
+        _count: { subtopics: 0 },
       })),
     );
     mockQueryRaw.mockResolvedValue(
@@ -457,8 +459,8 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
 
   it("merges scholar counts onto parent topic rows", async () => {
     mockTopicFindMany.mockResolvedValue([
-      { id: "cancer_genomics", label: "Cancer Genomics", description: null },
-      { id: "neuroscience", label: "Neuroscience", description: null },
+      { id: "cancer_genomics", label: "Cancer Genomics", _count: { subtopics: 9 } },
+      { id: "neuroscience", label: "Neuroscience", _count: { subtopics: 4 } },
     ]);
     mockQueryRaw.mockResolvedValue([
       { parent_topic_id: "cancer_genomics", scholar_count: 42, publication_count: 312 },
@@ -466,8 +468,8 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
     ]);
     const result = await getBrowseAllResearchAreas();
     expect(result).toEqual([
-      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312 },
-      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89 },
+      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312, subtopicCount: 9 },
+      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89, subtopicCount: 4 },
     ]);
   });
 });
@@ -674,6 +676,7 @@ describe("getHomeStats — advertised scholars == findable scholars (#2222)", ()
     expect(stats.scholarCount).toBe(8722);
     expect(stats.publicationCount).toBe(189_144);
     expect(stats.researchAreaCount).toBe(67);
+    expect(stats.subtopicCount).toBe(1615);
   });
 
   it("ALSO applies isPubliclyDisplayed — an out-of-band suffixed student passes the denylist and must not be advertised", async () => {

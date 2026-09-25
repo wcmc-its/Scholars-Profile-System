@@ -60,6 +60,14 @@ export type AuditAction =
    *  before/after carry the old and new iD and, when the value came from the
    *  "Is this your ORCID iD?" suggestion, `confirmed_suggestion: true`. */
   | "orcid_set"
+  /** a superuser removed a former-URL redirect (a `slug_history` row) from the
+   *  Profile URLs registry (`POST /api/edit/slug-redirect`); the old URL stops
+   *  redirecting and 404s. `targetEntityType='scholar'`, `targetEntityId` is
+   *  the cwid the old URL forwarded to; `beforeValues` carries
+   *  `{ oldSlug, currentSlug, recordedAt }`, `afterValues` is `null`. Requires
+   *  the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "slug_redirect_remove"
   /** a scholar rejected a publication as not theirs via /edit → ReCiter gold
    *  standard (#746); `targetEntityId` is the pmid, `afterValues` carries the
    *  suppression + pending-refresh ids and the rejected contributor cwid */
@@ -248,6 +256,26 @@ export type AuditAction =
   /** the matching revoke (`report_access` row deleted); same target shape,
    *  `beforeValues` carries the deleted row. */
   | "report_access_revoke"
+  /** a superuser recorded a functional role assignment on
+   *  `/edit/administrators` (`functional_role_grant` row created, source
+   *  `manual`), or the functional-roles import added an imported row
+   *  (`afterValues.via = "import"`). `targetEntityType='functional_role'`,
+   *  `targetEntityId` is `"{role}:{cwid}:{source}"`. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "functional_role_grant"
+  /** a functional role assignment's scopes replaced ("Edit scope", or the
+   *  import re-scoping an imported row); before/after carry `{ scopes }`. */
+  | "functional_role_scope_set"
+  /** the functional-roles import refreshed an imported row's provenance
+   *  (`granted_by` / `granted_at` / `grantee_name`) with its scopes unchanged,
+   *  e.g. after the earliest `report_access` grant it mirrored was revoked;
+   *  `fieldsChanged` names the fields, before/after carry them plus
+   *  `via: "import"`. Appended LAST to the ENUM. */
+  | "functional_role_update"
+  /** a functional role assignment deleted (a manual revoke, or the import
+   *  dropping an imported row its source no longer lists); `beforeValues`
+   *  carries the deleted row. */
+  | "functional_role_revoke"
   /** an honors curator (or superuser) pressed Run now on the honors queue's
    *  Sources tab (`POST /api/edit/honor/sources/run`, `HONORS_RUN_NOW`), which
    *  queued a scrape of one public honor list. `targetEntityType='honor_list'`,
@@ -347,6 +375,11 @@ export type AuditEntityType =
    *  `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
   | "institution"
+  /** a `functional_role_grant` row (Administrators → Functional roles);
+   *  `targetEntityId` is `"{role}:{cwid}:{source}"`. Requires the
+   *  `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "functional_role"
   /** a public honor list the honors-list scraper reads (`lib/honors/lists.ts`);
    *  `targetEntityId` is the list id. Only `honor_list_run` uses it. */
   | "honor_list";

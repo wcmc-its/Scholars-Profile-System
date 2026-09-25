@@ -1,17 +1,15 @@
 /**
  * AdministratorsRoster — the Administrators-tab body (#728 Phase B + C,
- * `ed-admin-org-unit-roles-spec.md` § 4.2/§ 4.3/§ 4.4). One card per person,
- * each listing the org units they manage (name + kind badge), the role, the
- * grant provenance (`UnitAdmin.source`), and — Phase C — per-row write controls
- * (update-role + Revoke) plus a per-card Add-admin form, all routed through the
- * existing `POST /api/edit/grant`.
+ * `ed-admin-org-unit-roles-spec.md` § 4.2/§ 4.3/§ 4.4), redesigned 2026-09 as
+ * ONE roster table with a filter rail: one row per person (org unit, role ·
+ * source, actions), multi-grant people collapsed to a summary that expands to
+ * one row per grant. Per-grant write controls (update-role + Revoke) and the
+ * page-level Add dialog all route through the existing `POST /api/edit/grant`.
  *
- * ED-locked rows (`source` LIKE 'ED:%') are owned by the nightly Enterprise
- * Directory import: for a non-superuser the role/Revoke controls render DISABLED
- * with an inline caveat note (the affordance matches the route's `ed_locked`
- * gate — a disabled control, not a click-then-403). A superuser sees the
- * controls ENABLED but with the same caveat (their override is re-asserted on
- * the next ETL run). § 4.4.
+ * ED-sourced rows (`source` LIKE 'ED:%') are owned by the nightly Enterprise
+ * Directory import and are read-only for EVERYONE (the route's `ed_locked`
+ * gate): they render a role pill and "Read-only" instead of controls, so the
+ * affordance matches the gate (no click-then-403). § 4.4.
  *
  * Client component: on mount it batch-fetches the Enterprise Directory once via
  * `GET /api/directory/people?cwids=…` to enrich each person with first/last name,
@@ -19,11 +17,15 @@
  * grantee names. LDAP is unreachable in deployed envs until #443, so this fetch
  * is the ONLY directory access and it must never throw: a 503 / network failure
  * just falls back to the server-provided Scholar name + the #443 note.
+ *
+ * Sort, search and the rail filters are client-only UI state over the roster
+ * the server already scoped — the loader's `scope`, never this UI, is the
+ * authorization boundary.
  */
 "use client";
 
 import * as React from "react";
-import { Lock } from "lucide-react";
+import { ChevronRight, Lock } from "lucide-react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import {
@@ -31,18 +33,26 @@ import {
   type AddAdminUnit,
 } from "@/components/edit/add-administrator-dialog";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import {
+  AssignFunctionalRoleDialog,
+  FunctionalRolesPanel,
+} from "@/components/edit/functional-roles-panel";
 import type { DirectoryValue } from "@/components/edit/directory-people-typeahead";
 import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AdminRosterEntry, AdminRosterGrant } from "@/lib/api/administrators-roster";
+import type {
+  FunctionalRoleRow,
+  FunctionalRoleScopeOptions,
+  GateHolder,
+} from "@/lib/edit/functional-roles";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
 import { cn } from "@/lib/utils";
 import { INSTITUTIONS } from "@/lib/institutions";
 
-/** Two-letter initials for the roster-card avatar, e.g. "Adela Vargas" → "AV". */
+/** Two-letter initials for the roster avatar, e.g. "Alex Example" → "AE". */
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -83,15 +93,67 @@ const KIND_LABEL: Record<AdminRosterGrant["entityType"], string> = {
   institution: "Institution",
 };
 
-/** Curator/Owner segmented-toggle button (styles a raw `RadioGroupPrimitive.Item`
- *  — the app's shared `RadioGroupItem` hardcodes its own dot-indicator child and
- *  can't render a text label inside the control, which the segmented look needs). */
-const ROLE_SEGMENT_BASE =
-  "px-3 py-1.5 text-xs font-medium transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-apollo-maroon data-[state=checked]:text-apollo-maroon-foreground data-[state=unchecked]:bg-apollo-surface data-[state=unchecked]:text-muted-foreground data-[state=unchecked]:hover:bg-apollo-surface-2";
+/** Rail + summary order for unit kinds. */
+const KIND_ORDER: ReadonlyArray<AdminRosterGrant["entityType"]> = [
+  "department",
+  "division",
+  "center",
+  "core",
+  "institution",
+];
 
-/** The caveat shown beside ED-locked controls (§ 4.4). */
+/** One segment of a white-on-surface-2 segmented control (the role toggle and
+ *  the Sort control). Styles a raw `RadioGroupPrimitive.Item` — the app's
+ *  shared `RadioGroupItem` hardcodes its own dot-indicator child and can't
+ *  render a text label inside the control, which the segmented look needs. */
+const SEGMENT_ITEM =
+  "cursor-pointer rounded-[5px] whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-apollo-surface data-[state=checked]:font-medium data-[state=checked]:text-foreground data-[state=checked]:shadow-[0_1px_2px_rgba(34,30,28,.12)] data-[state=unchecked]:text-muted-foreground data-[state=unchecked]:hover:text-foreground";
+const ROLE_SEGMENT_BASE = cn(SEGMENT_ITEM, "px-2.5 py-[3px] text-[12.5px]");
+
+/** The four columns every roster row shares (person · org unit · role/source ·
+ *  actions), so rows line up with the header; phones stack the cells. */
+const ROW_COLS = "md:grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_minmax(150px,1.2fr)_104px]";
+const ROW_GRID = cn("grid grid-cols-1 gap-2 md:items-center md:gap-3.5", ROW_COLS);
+
+/** Owner reads slate (the higher-trust grant); Curator reads neutral. */
+function rolePillClass(role: "owner" | "curator"): string {
+  return cn(
+    "inline-flex w-fit items-center rounded-full border px-2.5 py-0.5 text-[12.5px] font-medium whitespace-nowrap",
+    role === "owner"
+      ? "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border"
+      : "bg-apollo-surface-2 text-foreground border-apollo-border-strong",
+  );
+}
+
+const ROLE_LABEL = { owner: "Owner", curator: "Curator" } as const;
+
+/** The rail's Grants buckets: "1 grant" / "2–5 grants" / "6 or more". */
+type GrantBucket = "1" | "2-5" | "6+";
+function grantBucket(n: number): GrantBucket {
+  return n <= 1 ? "1" : n <= 5 ? "2-5" : "6+";
+}
+
+/** Rail filter group ids; a filter key is `${group}:${value}`. */
+type FilterGroup = "role" | "src" | "kind" | "n";
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Mar 2026" from an ISO timestamp (UTC, so the server render and client agree). */
+function monthYear(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/** The caveat on ED-locked grants (§ 4.4). */
 const ED_LOCKED_NOTE =
   "Managed through the Web Directory. This grant is read-only here; the role is set at the source and restored on the next sync.";
+
+const WEB_DIRECTORY_URL = "https://directory.weill.cornell.edu/";
 
 export type AdministratorsRosterProps = {
   entries: ReadonlyArray<AdminRosterEntry>;
@@ -119,7 +181,21 @@ export type AdministratorsRosterProps = {
    * so existing callers/tests are unaffected.
    */
   allCores?: ReadonlyArray<{ id: string; name: string }>;
+  /** The page title block (h1 + description), laid out beside the Add button. */
+  header?: React.ReactNode;
+  /** The Functional roles tab's data. Superuser-only: when absent (a unit
+   *  Owner), the tab strip is not rendered and the page is org-unit grants only. */
+  functionalRoles?: {
+    rows: ReadonlyArray<FunctionalRoleRow>;
+    scopeOptions: FunctionalRoleScopeOptions;
+    /** `FUNCTIONAL_ROLES_AUTHZ`: whether rows also grant access. */
+    authzEnabled?: boolean;
+    /** Current holders by the existing gates, for the parity line. */
+    gateHolders?: ReadonlyArray<GateHolder>;
+  };
 };
+
+type RosterTab = "units" | "roles";
 
 /** A person's enriched display fields, in the resolved precedence order. */
 type ResolvedPerson = {
@@ -131,10 +207,16 @@ type ResolvedPerson = {
   isBareCwid: boolean;
 };
 
-/** "By person" (group by person, one row per org unit underneath) or "by org
- *  unit" (group by org unit, one row per admin underneath) — the grouping
- *  dimension changes with the mode, not just the sort order (§ SORT). */
-type SortMode = "person" | "orgUnit";
+/** "Person" (A–Z), "Most grants" (grant count, then A–Z) — both one row per
+ *  person — or "Org unit", which regroups by unit: one band per unit with its
+ *  administrators underneath (the grouping changes, not just the order). */
+type SortMode = "person" | "grants" | "orgUnit";
+
+const SORT_OPTIONS: ReadonlyArray<{ value: SortMode; label: string }> = [
+  { value: "person", label: "Person" },
+  { value: "grants", label: "Most grants" },
+  { value: "orgUnit", label: "Org unit" },
+];
 
 /** One admin's grant on a specific unit, carrying both sides so the org-unit
  *  grouped view can render a person-focused row. */
@@ -146,8 +228,8 @@ type UnitAdmin = {
 
 /** A single org unit and everyone who administers it — the group for "by org
  *  unit" mode. Built by flattening every person's grants and bucketing by
- *  `entityType:entityId`, so a unit with N admins renders its header ONCE
- *  with N rows underneath, instead of repeating the unit once per person. */
+ *  `entityType:entityId`, so a unit with N admins renders its band ONCE with N
+ *  rows underneath, instead of repeating the unit once per person. */
 type UnitGroup = {
   key: string;
   entityType: AdminRosterGrant["entityType"];
@@ -163,7 +245,13 @@ export function AdministratorsRoster({
   nameResolutionDegraded,
   canImpersonate = false,
   allCores = [],
+  header,
+  functionalRoles,
 }: AdministratorsRosterProps) {
+  const [tab, setTab] = React.useState<RosterTab>("units");
+  const [functionalRows, setFunctionalRows] = React.useState<FunctionalRoleRow[]>(() => [
+    ...(functionalRoles?.rows ?? []),
+  ]);
   // Directory rows keyed by CWID; empty until (and unless) the fetch succeeds.
   const [directory, setDirectory] = React.useState<Map<string, DirectoryPerson>>(new Map());
   // null = not yet attempted; true/false = the fetch settled with this outcome.
@@ -177,11 +265,16 @@ export function AdministratorsRoster({
     entries.map((e) => ({ ...e, grants: [...e.grants] })),
   );
 
-  // Sort + filter — client-only UI state (§ SORT / § FILTER), no persistence.
+  // Sort + search + rail filters — client-only UI state, no persistence.
   const [sortMode, setSortMode] = React.useState<SortMode>("person");
   const [filterQuery, setFilterQuery] = React.useState("");
+  // Rail filters: OR within a group, AND across groups, matched per person (a
+  // person passes a group when ANY of their grants satisfies one of its values).
+  const [filters, setFilters] = React.useState<ReadonlySet<string>>(() => new Set());
+  // Multi-grant people whose grant rows are expanded, by CWID.
+  const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set());
 
-  // Per-card write state.
+  // Per-row write state.
   const [busyKey, setBusyKey] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   // The grant the user is confirming a revoke for, or null.
@@ -190,10 +283,7 @@ export function AdministratorsRoster({
     grant: AdminRosterGrant;
   } | null>(null);
 
-  const cwidKey = React.useMemo(
-    () => [...new Set(roster.map((e) => e.cwid))].join(","),
-    [roster],
-  );
+  const cwidKey = React.useMemo(() => [...new Set(roster.map((e) => e.cwid))].join(","), [roster]);
 
   React.useEffect(() => {
     if (cwidKey.length === 0) return;
@@ -251,14 +341,44 @@ export function AdministratorsRoster({
     return { name, title, email, isBareCwid: name === entry.cwid };
   }
 
-  const resolved = roster.map((e) => ({ entry: e, person: resolve(e) }));
+  // A person whose last grant was revoked drops off the roster.
+  const resolved = roster
+    .filter((e) => e.grants.length > 0)
+    .map((e) => ({ entry: e, person: resolve(e) }));
   const filterQueryTrimmed = filterQuery.trim().toLowerCase();
 
-  // "By person" grouping: one group per person, keeping ALL of their grant
-  // rows when ANY of name / CWID / any grant's unitName matches (substring,
-  // case-insensitive) — rows within a kept group are never individually
-  // filtered out.
-  const personGroups = resolved
+  function filterValues(group: FilterGroup): string[] {
+    const prefix = `${group}:`;
+    return [...filters].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
+  }
+  function grantMatches(group: FilterGroup, value: string, g: AdminRosterGrant): boolean {
+    switch (group) {
+      case "role":
+        return g.role === value;
+      case "src":
+        return value === "ed" ? isEdSourced(g.source) : !isEdSourced(g.source);
+      case "kind":
+        return g.entityType === value;
+      case "n":
+        return false;
+    }
+  }
+  function personMatchesValue(group: FilterGroup, value: string, entry: AdminRosterEntry): boolean {
+    if (group === "n") return grantBucket(entry.grants.length) === value;
+    return entry.grants.some((g) => grantMatches(group, value, g));
+  }
+  function passesRail(entry: AdminRosterEntry): boolean {
+    return (["role", "src", "kind", "n"] as const).every((group) => {
+      const values = filterValues(group);
+      return values.length === 0 || values.some((v) => personMatchesValue(group, v, entry));
+    });
+  }
+  const railPassing = resolved.filter(({ entry }) => passesRail(entry));
+
+  // Person rows: keep ALL of a person's grants when ANY of name / CWID / any
+  // grant's unitName matches (substring, case-insensitive) — grants within a
+  // kept person are never individually filtered out.
+  const personGroups = railPassing
     .filter(
       ({ entry, person }) =>
         filterQueryTrimmed.length === 0 ||
@@ -268,15 +388,17 @@ export function AdministratorsRoster({
     )
     .sort(
       (a, b) =>
-        a.person.name.localeCompare(b.person.name) || a.entry.cwid.localeCompare(b.entry.cwid),
+        (sortMode === "grants" ? b.entry.grants.length - a.entry.grants.length : 0) ||
+        a.person.name.localeCompare(b.person.name) ||
+        a.entry.cwid.localeCompare(b.entry.cwid),
     );
 
-  // "By org unit" grouping: flatten every person's grants and bucket by unit
-  // — the mirror of personGroups above, keeping ALL of a matching unit's
-  // admins when ANY of the unit name / an admin's name / an admin's CWID
-  // matches.
+  // "Org unit" grouping: flatten every (rail-passing) person's grants and
+  // bucket by unit — the mirror of personGroups above, keeping ALL of a
+  // matching unit's admins when ANY of the unit name / an admin's name / an
+  // admin's CWID matches.
   const unitGroupsByKey = new Map<string, UnitGroup>();
-  for (const { entry, person } of resolved) {
+  for (const { entry, person } of railPassing) {
     for (const grant of entry.grants) {
       const key = `${grant.entityType}:${grant.entityId}`;
       const group = unitGroupsByKey.get(key) ?? {
@@ -321,7 +443,83 @@ export function AdministratorsRoster({
     ? "Showing all administrators."
     : "Showing administrators within the units you own.";
 
-  const totalGrants = roster.reduce((sum, e) => sum + e.grants.length, 0);
+  const allGrants = resolved.flatMap((r) => r.entry.grants);
+  const totalGrants = allGrants.length;
+  const grantedHere = allGrants.filter((g) => !isEdSourced(g.source)).length;
+  const shownGrants = personGroups.reduce((sum, r) => sum + r.entry.grants.length, 0);
+
+  // Rail options, counted in PEOPLE over the whole (unfiltered) roster.
+  const countPeople = (group: FilterGroup, value: string) =>
+    resolved.filter(({ entry }) => personMatchesValue(group, value, entry)).length;
+  const railGroups: ReadonlyArray<{
+    group: FilterGroup;
+    label: string;
+    items: ReadonlyArray<{ value: string; label: string; count: number }>;
+  }> = [
+    {
+      group: "role",
+      label: "Role",
+      items: (["owner", "curator"] as const).map((r) => ({
+        value: r,
+        label: ROLE_LABEL[r],
+        count: countPeople("role", r),
+      })),
+    },
+    {
+      group: "src",
+      label: "Source",
+      items: [
+        { value: "ed", label: "Web Directory", count: countPeople("src", "ed") },
+        { value: "manual", label: "Granted here", count: countPeople("src", "manual") },
+      ],
+    },
+    {
+      group: "kind",
+      label: "Unit kind",
+      items: KIND_ORDER.map((k) => ({
+        value: k,
+        label: KIND_LABEL[k],
+        count: countPeople("kind", k),
+      }))
+        // Core / Institution appear only when someone holds one (or it's ticked).
+        .filter(
+          (o) =>
+            o.count > 0 ||
+            filters.has(`kind:${o.value}`) ||
+            ["department", "division", "center"].includes(o.value),
+        ),
+    },
+    {
+      group: "n",
+      label: "Grants",
+      items: [
+        { value: "1", label: "1 grant", count: countPeople("n", "1") },
+        { value: "2-5", label: "2–5 grants", count: countPeople("n", "2-5") },
+        { value: "6+", label: "6 or more", count: countPeople("n", "6+") },
+      ],
+    },
+  ];
+
+  function toggleFilter(key: string) {
+    setFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  const anyFilter = filters.size > 0 || filterQuery.length > 0;
+
+  const multiShown = personGroups.filter((r) => r.entry.grants.length > 1).map((r) => r.entry.cwid);
+  const allExpanded = multiShown.length > 0 && multiShown.every((c) => expanded.has(c));
+  function toggleExpanded(cwid: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(cwid)) next.delete(cwid);
+      else next.add(cwid);
+      return next;
+    });
+  }
 
   // ── Phase C writes (all POST /api/edit/grant) ──────────────────────────────
 
@@ -404,11 +602,17 @@ export function AdministratorsRoster({
   /**
    * Upsert a just-granted admin into the roster (called by the page-level Add
    * dialog after a successful `POST /api/edit/grant`). Updates the matching unit
-   * grant on an existing person, or adds a new person card whose name the
+   * grant on an existing person, or adds a new person row whose name the
    * directory effect then enriches.
    */
-  function handleGranted(grantee: DirectoryValue, grant: AdminRosterGrant) {
+  function handleGranted(grantee: DirectoryValue, granted: AdminRosterGrant) {
     setError(null);
+    // The dialog's grant is always a manual one made by the viewer, just now.
+    const grant: AdminRosterGrant = {
+      grantedBy: actorCwid,
+      grantedAt: new Date().toISOString(),
+      ...granted,
+    };
     setRoster((prev) => {
       if (prev.some((e) => e.cwid === grantee.cwid)) {
         return prev.map((e) =>
@@ -439,332 +643,617 @@ export function AdministratorsRoster({
     });
   }
 
-  /** Role radios + Source badge + Actions (Revoke, ED-locked note) — the three
-   *  trailing cells shared by both grouping modes; only the leading cell (org
-   *  unit info in "by person" mode, person info in "by org unit" mode)
-   *  differs, so it's rendered separately by each caller. */
-  function renderGrantActionCells(entry: AdminRosterEntry, grant: AdminRosterGrant) {
-    const isSelf = entry.cwid === actorCwid;
-    const prov = provenanceBadge(grant.source);
-    const edLocked = isEdSourced(grant.source);
-    // ED-sourced rows are read-only for EVERYONE (matches the route's
-    // `ed_locked` gate) — they're managed in the Web Directory, so a local
-    // change would just be re-synced.
-    const controlsDisabled = edLocked;
-    const rowKey = `${grant.entityType}:${grant.entityId}`;
-    const busy = busyKey === `${entry.cwid}:${rowKey}`;
-    const revokeDisabled = controlsDisabled || isSelf || busy;
+  // ── Cell renderers ─────────────────────────────────────────────────────────
+
+  /** "Added by <name> · Mar 2026" for a grant made in Scholars Console. */
+  function addedByLine(g: AdminRosterGrant): string {
+    if (!g.grantedBy) return "Granted in Scholars Console";
+    const who = g.grantedBy === actorCwid ? "you" : (g.grantedByName ?? g.grantedBy);
+    const when = monthYear(g.grantedAt);
+    return `Added by ${who}${when ? ` · ${when}` : ""}`;
+  }
+
+  /** One grant's source, as its own line: "Web Directory · IAMDELA" / "Added by …". */
+  function grantSourceText(g: AdminRosterGrant): string {
+    return isEdSourced(g.source)
+      ? `Web Directory · ${provenanceBadge(g.source).label}`
+      : addedByLine(g);
+  }
+
+  /** The small lock tile ED-sourced rows carry; links to the Web Directory. */
+  function lockTile() {
     return (
-      <>
-        <td className="py-3 pl-5">
-          <RadioGroupPrimitive.Root
-            value={grant.role}
-            onValueChange={(v) => updateRole(entry.cwid, grant, v as "owner" | "curator")}
-            disabled={controlsDisabled || busy}
-            className="border-apollo-border-strong inline-flex w-fit overflow-hidden rounded-md border"
-            data-testid={`administrators-role-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
-          >
-            <RadioGroupPrimitive.Item
-              value="curator"
-              className={cn(ROLE_SEGMENT_BASE, "border-apollo-border-strong border-r")}
-              data-testid={`administrators-role-curator-${entry.cwid}-${rowKey}`}
-            >
-              Curator
-            </RadioGroupPrimitive.Item>
-            <RadioGroupPrimitive.Item
-              value="owner"
-              className={ROLE_SEGMENT_BASE}
-              data-testid={`administrators-role-owner-${entry.cwid}-${rowKey}`}
-            >
-              Owner
-            </RadioGroupPrimitive.Item>
-          </RadioGroupPrimitive.Root>
-        </td>
-        <td className="py-3 pl-5 whitespace-nowrap">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm">{prov.label}</span>
-            {edLocked && (
-              <a
-                href="https://directory.weill.cornell.edu/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-muted-foreground hover:text-apollo-slate inline-flex items-center gap-1 text-xs whitespace-nowrap hover:underline"
-                title={ED_LOCKED_NOTE}
-                data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
-              >
-                <Lock className="size-3" aria-hidden />
-                Managed through Web Directory
-                <span className="sr-only"> — {ED_LOCKED_NOTE}</span>
-              </a>
-            )}
-          </div>
-        </td>
-        <td className="py-3 pr-5 pl-5 text-right">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={revokeDisabled}
-            title={
-              isSelf
-                ? "You can't remove your own access."
-                : controlsDisabled
-                  ? ED_LOCKED_NOTE
-                  : undefined
-            }
-            onClick={() => setRevokeTarget({ cwid: entry.cwid, grant })}
-            data-testid={`administrators-revoke-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
-          >
-            Revoke
-          </Button>
-        </td>
-      </>
+      <a
+        href={WEB_DIRECTORY_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={ED_LOCKED_NOTE}
+        className="bg-apollo-lock-bg text-foreground hover:text-apollo-slate inline-flex size-[18px] flex-none items-center justify-center rounded"
+      >
+        <Lock className="size-[11px]" aria-hidden />
+        <span className="sr-only">Managed through the Web Directory — {ED_LOCKED_NOTE}</span>
+      </a>
     );
   }
 
-  return (
-    <div className="flex flex-col gap-4" data-slot="administrators-roster">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-muted-foreground text-sm" data-testid="administrators-scope-caption">
-            {scopeCaption}
-          </p>
-          {/* Paired with just the (short) caption on its own row, rather than
-           *  nested alongside the filter + sort controls below: that keeps
-           *  this button from ever wrapping onto an orphan line by itself
-           *  when the controls row runs out of width. */}
-          <AddAdministratorDialog units={unitOptions(roster, allCores)} onGranted={handleGranted} />
+  /** The role control for one grant: a Curator/Owner segmented toggle for a
+   *  grant made here, a read-only role pill for an ED-sourced one. */
+  function roleControl(entry: AdminRosterEntry, grant: AdminRosterGrant) {
+    const rowKey = `${grant.entityType}:${grant.entityId}`;
+    if (isEdSourced(grant.source)) {
+      return (
+        <span
+          className={rolePillClass(grant.role)}
+          data-testid={`administrators-role-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+        >
+          {ROLE_LABEL[grant.role]}
+        </span>
+      );
+    }
+    const busy = busyKey === `${entry.cwid}:${rowKey}`;
+    return (
+      <RadioGroupPrimitive.Root
+        value={grant.role}
+        onValueChange={(v) => updateRole(entry.cwid, grant, v as "owner" | "curator")}
+        disabled={busy}
+        aria-label={`Role on ${grant.unitName}`}
+        className="bg-apollo-surface-2 border-apollo-border-strong inline-flex w-fit flex-none rounded-[7px] border p-0.5"
+        data-testid={`administrators-role-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+      >
+        <RadioGroupPrimitive.Item
+          value="curator"
+          className={ROLE_SEGMENT_BASE}
+          data-testid={`administrators-role-curator-${entry.cwid}-${rowKey}`}
+        >
+          Curator
+        </RadioGroupPrimitive.Item>
+        <RadioGroupPrimitive.Item
+          value="owner"
+          className={ROLE_SEGMENT_BASE}
+          data-testid={`administrators-role-owner-${entry.cwid}-${rowKey}`}
+        >
+          Owner
+        </RadioGroupPrimitive.Item>
+      </RadioGroupPrimitive.Root>
+    );
+  }
+
+  /** Revoke for a grant made here; "Read-only" for an ED-sourced one. */
+  function grantAction(entry: AdminRosterEntry, grant: AdminRosterGrant) {
+    if (isEdSourced(grant.source)) {
+      return (
+        <span
+          title={ED_LOCKED_NOTE}
+          className="text-muted-foreground text-[12.5px] whitespace-nowrap"
+          data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+        >
+          Read-only
+          <span className="sr-only"> — {ED_LOCKED_NOTE}</span>
+        </span>
+      );
+    }
+    const isSelf = entry.cwid === actorCwid;
+    const busy = busyKey === `${entry.cwid}:${grant.entityType}:${grant.entityId}`;
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={isSelf || busy}
+        title={isSelf ? "You can't remove your own access." : undefined}
+        onClick={() => setRevokeTarget({ cwid: entry.cwid, grant })}
+        className="text-destructive hover:text-destructive -ml-2 h-7 px-2 text-[13px] font-normal"
+        data-testid={`administrators-revoke-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+      >
+        Revoke
+      </Button>
+    );
+  }
+
+  function personCell(entry: AdminRosterEntry, person: ResolvedPerson) {
+    return (
+      <div className="flex min-w-0 items-center gap-3">
+        <div
+          aria-hidden
+          className="bg-apollo-surface-2 ring-apollo-border-strong text-apollo-bar flex size-9 flex-none items-center justify-center rounded-full text-[12.5px] font-semibold ring-1"
+        >
+          {initials(person.name)}
         </div>
-        {roster.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Input
-              type="text"
-              value={filterQuery}
-              placeholder="Filter by name, org unit, or CWID"
-              onChange={(e) => setFilterQuery(e.target.value)}
-              aria-label="Filter administrators"
-              className="max-w-xs"
-              data-testid="administrators-filter-input"
-            />
-            <label className="text-muted-foreground flex items-center gap-2 text-sm">
-              Sort
-              <select
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="border-apollo-border-strong text-foreground h-9 rounded-md border bg-apollo-surface px-2 text-sm"
-                data-testid="administrators-sort-select"
+        <div className="flex min-w-0 flex-col gap-px">
+          <span className="truncate text-[14.5px] font-[550]">{person.name}</span>
+          {person.title && (
+            <span className="text-muted-foreground truncate text-[13px]">{person.title}</span>
+          )}
+          <span className="text-muted-foreground flex min-w-0 flex-wrap gap-x-2 text-xs">
+            <span className="font-mono">{entry.cwid}</span>
+            {person.email && (
+              <a
+                href={`mailto:${person.email}`}
+                onClick={(e) => e.stopPropagation()}
+                className="hover:text-apollo-slate truncate hover:underline"
+                data-testid={`administrators-email-${entry.cwid}`}
               >
-                <option value="person">Person</option>
-                <option value="orgUnit">Org unit</option>
-              </select>
-            </label>
-            <span className="text-muted-foreground text-sm whitespace-nowrap">
-              {roster.length} {roster.length === 1 ? "person" : "people"} · {totalGrants}{" "}
-              {totalGrants === 1 ? "grant" : "grants"}
+                {person.email}
+              </a>
+            )}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  function viewAs(entry: AdminRosterEntry, person: ResolvedPerson) {
+    if (!canImpersonate || entry.cwid === actorCwid) return null;
+    return <ViewAsButton targetCwid={entry.cwid} targetName={person.name} variant="ghost" />;
+  }
+
+  /** One person's row: the collapsed summary, plus the per-grant rows when a
+   *  multi-grant person is expanded. */
+  function personRow(entry: AdminRosterEntry, person: ResolvedPerson, index: number) {
+    const grants = entry.grants;
+    const g0 = grants[0]!;
+    const multi = grants.length > 1;
+    const isOpen = multi && expanded.has(entry.cwid);
+    const stripe = index % 2 === 1 ? "bg-apollo-page" : "bg-apollo-surface";
+    const allEd = grants.every((g) => isEdSourced(g.source));
+    const noneEd = grants.every((g) => !isEdSourced(g.source));
+
+    // Org unit column.
+    const kindCounts = new Map<AdminRosterGrant["entityType"], number>();
+    for (const g of grants) kindCounts.set(g.entityType, (kindCounts.get(g.entityType) ?? 0) + 1);
+    const kindSummary = KIND_ORDER.filter((k) => kindCounts.has(k))
+      .map((k) => plural(kindCounts.get(k)!, KIND_LABEL[k].toLowerCase()))
+      .join(" · ");
+    const unitSub =
+      grants
+        .slice(0, 3)
+        .map((g) => g.unitName)
+        .join(", ") + (grants.length > 3 ? `, +${grants.length - 3} more` : "");
+
+    // Role column: per-role counts for a multi-grant person.
+    const roleCounts = (["owner", "curator"] as const)
+      .map((r) => ({ role: r, n: grants.filter((g) => g.role === r).length }))
+      .filter((r) => r.n > 0);
+
+    // Source line.
+    let sourceLine: string;
+    if (!multi) sourceLine = grantSourceText(g0);
+    else if (allEd) {
+      const labels = [...new Set(grants.map((g) => provenanceBadge(g.source).label))];
+      sourceLine = `Web Directory · ${labels.length === 1 ? labels[0] : "several roles"}`;
+    } else if (noneEd) {
+      const lines = [...new Set(grants.map(addedByLine))];
+      sourceLine = lines.length === 1 ? lines[0]! : "Granted in Scholars Console";
+    } else sourceLine = "Mixed sources";
+
+    return (
+      <div
+        key={entry.cwid}
+        className={cn("border-apollo-border border-b", stripe)}
+        data-testid={`administrators-person-${entry.cwid}`}
+      >
+        <div
+          className={cn(
+            ROW_GRID,
+            "px-5 py-3.5",
+            multi && "hover:bg-apollo-surface-2 cursor-pointer",
+          )}
+          onClick={multi ? () => toggleExpanded(entry.cwid) : undefined}
+          data-testid={
+            multi ? undefined : `administrators-grant-${entry.cwid}-${g0.entityType}-${g0.entityId}`
+          }
+        >
+          {personCell(entry, person)}
+          <div className="flex min-w-0 flex-col gap-0.5 pl-12 md:pl-0">
+            {multi ? (
+              <>
+                <span className="truncate text-sm">{kindSummary}</span>
+                <span className="text-muted-foreground truncate text-[12.5px]">{unitSub}</span>
+              </>
+            ) : (
+              <>
+                <span className="truncate text-sm">{g0.unitName}</span>
+                <span className="text-muted-foreground text-[12.5px]">
+                  {KIND_LABEL[g0.entityType]}
+                </span>
+              </>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-col gap-1.5 pl-12 md:pl-0">
+            <div className="flex flex-wrap gap-1.5">
+              {multi
+                ? roleCounts.map(({ role, n }) => (
+                    <span key={role} className={rolePillClass(role)}>
+                      {roleCounts.length === 1
+                        ? `${ROLE_LABEL[role]} · ${n}`
+                        : `${ROLE_LABEL[role]} ${n}`}
+                    </span>
+                  ))
+                : roleControl(entry, g0)}
+            </div>
+            <span className="flex min-w-0 items-center gap-1.5 text-[12.5px]">
+              {allEd && lockTile()}
+              <span className="text-muted-foreground min-w-0 truncate">{sourceLine}</span>
             </span>
+          </div>
+          <div className="flex items-center justify-between gap-2 pl-12 md:pl-0">
+            <div className="flex flex-col items-start gap-0.5" onClick={(e) => e.stopPropagation()}>
+              {viewAs(entry, person)}
+              {!multi && grantAction(entry, g0)}
+            </div>
+            {multi && (
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                aria-label={`${isOpen ? "Hide" : "Show"} ${grants.length} grants for ${person.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpanded(entry.cwid);
+                }}
+                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -mr-1 inline-flex size-7 flex-none items-center justify-center rounded-md outline-none focus-visible:ring-[3px]"
+                data-testid={`administrators-expand-${entry.cwid}`}
+              >
+                <ChevronRight
+                  className={cn("size-4 transition-transform", isOpen && "rotate-90")}
+                  aria-hidden
+                />
+              </button>
+            )}
+          </div>
+        </div>
+        {isOpen && (
+          <div className="border-apollo-border border-t border-dashed pt-1 pb-2">
+            {grants.map((grant) => (
+              <div
+                key={`${grant.entityType}:${grant.entityId}`}
+                className={cn(ROW_GRID, "px-5 py-2")}
+                data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+              >
+                <span className="hidden md:block" />
+                <div className="flex min-w-0 flex-col pl-12 md:pl-0">
+                  <span className="truncate text-sm">{grant.unitName}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {KIND_LABEL[grant.entityType]}
+                  </span>
+                </div>
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-12 md:pl-0">
+                  {roleControl(entry, grant)}
+                  <span className="text-muted-foreground min-w-0 truncate text-[12.5px]">
+                    {grantSourceText(grant)}
+                  </span>
+                </div>
+                <div className="pl-12 md:pl-0">{grantAction(entry, grant)}</div>
+              </div>
+            ))}
           </div>
         )}
       </div>
+    );
+  }
 
-      {showDegradedNote && (
-        <p className="text-muted-foreground text-sm" data-testid="administrators-name-degraded-note">
-          Some names resolve from the Web Directory and are unavailable until directory routing
-          (#443) lands; unit scope, role, and provenance below are accurate.
-        </p>
+  const headerCell = "text-muted-foreground text-xs font-medium tracking-[0.08em] uppercase";
+
+  return (
+    <div className="flex flex-col gap-6" data-slot="administrators-roster">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="flex min-w-0 flex-1 basis-[300px] flex-col gap-1.5">{header}</div>
+        {tab === "roles" && functionalRoles ? (
+          <AssignFunctionalRoleDialog
+            scopeOptions={functionalRoles.scopeOptions}
+            onAssigned={setFunctionalRows}
+            authzEnabled={functionalRoles.authzEnabled}
+          />
+        ) : (
+          <AddAdministratorDialog units={unitOptions(roster, allCores)} onGranted={handleGranted} />
+        )}
+      </div>
+
+      {functionalRoles && (
+        <div
+          role="tablist"
+          aria-label="Administrator kinds"
+          className="border-apollo-border-strong flex flex-wrap items-end gap-7 border-b"
+          data-testid="administrators-tabs"
+        >
+          {(
+            [
+              ["units", "Org unit grants", resolved.length],
+              ["roles", "Functional roles", functionalRows.length],
+            ] as const
+          ).map(([value, label, n]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              onClick={() => setTab(value)}
+              className={cn(
+                "flex items-center gap-2 px-0.5 pt-2.5 pb-3 text-[15px] whitespace-nowrap",
+                tab === value
+                  ? "text-foreground font-medium shadow-[inset_0_-2px_0_var(--apollo-maroon)]"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              data-testid={`administrators-tab-${value}`}
+            >
+              {label}
+              <span
+                className={cn(
+                  "text-foreground rounded-full px-[7px] py-px text-xs font-normal",
+                  tab === value ? "bg-apollo-rail" : "bg-apollo-surface-2",
+                )}
+              >
+                {n}
+              </span>
+            </button>
+          ))}
+        </div>
       )}
 
-      {error && (
-        <Alert variant="destructive" data-testid="administrators-error">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      {roster.length === 0 ? (
-        <p className="text-muted-foreground text-sm" data-testid="administrators-empty">
-          {isSuperuser ? "No administrators yet." : "No administrators within your units."}
-        </p>
-      ) : displayedCount === 0 ? (
-        <p className="text-muted-foreground text-sm" data-testid="administrators-no-matches">
-          No administrators match your search.
-        </p>
+      {tab === "roles" && functionalRoles ? (
+        <>
+          <p
+            className="text-muted-foreground -mt-2 text-[13px]"
+            data-testid="functional-roles-caption"
+          >
+            Access that isn’t tied to an org unit.
+          </p>
+          <FunctionalRolesPanel
+            rows={functionalRows}
+            onRowsChange={setFunctionalRows}
+            scopeOptions={functionalRoles.scopeOptions}
+            actorCwid={actorCwid}
+            canImpersonate={canImpersonate}
+            authzEnabled={functionalRoles.authzEnabled}
+            gateHolders={functionalRoles.gateHolders}
+          />
+        </>
       ) : (
-        // One card per group (R11). "By person" groups by person (avatar +
-        // name/title/CWID/email header band, grant rows nested underneath in
-        // their own small table); "by org unit" inverts it — the org unit is
-        // the card header (rendered once no matter how many admins it has)
-        // and each admin becomes a row underneath, with Revoke living on that
-        // person's row rather than the unit's. Each card's grant list keeps
-        // real `<table>` markup (native row/column semantics) — only the
-        // group header moved out into its own styled band.
-        <div className="flex flex-col gap-4" data-testid="administrators-table">
-          {sortMode === "orgUnit"
-            ? unitGroups.map((group) => (
-                <div
-                  key={group.key}
-                  data-testid={`administrators-unit-${group.key}`}
-                  className="border-apollo-border bg-apollo-surface shadow-xs overflow-hidden rounded-xl border"
-                >
-                  <div className="bg-apollo-surface-2 border-apollo-border flex items-center gap-3 border-b px-5 py-4">
-                    <span className="font-semibold">{group.unitName}</span>
-                    <Badge
-                      variant="outline"
-                      className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+        <>
+          <p className="text-muted-foreground -mt-2 text-[13px]">
+            <span data-testid="administrators-scope-caption">{scopeCaption}</span> Unit owners and
+            curators also get Reports for their units.
+          </p>
+
+          {showDegradedNote && (
+            <p
+              className="text-muted-foreground text-sm"
+              data-testid="administrators-name-degraded-note"
+            >
+              Some names resolve from the Web Directory and are unavailable until directory routing
+              (#443) lands; unit scope, role, and provenance below are accurate.
+            </p>
+          )}
+
+          {error && (
+            <Alert variant="destructive" data-testid="administrators-error">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {resolved.length === 0 ? (
+            <p className="text-muted-foreground text-sm" data-testid="administrators-empty">
+              {isSuperuser ? "No administrators yet." : "No administrators within your units."}
+            </p>
+          ) : (
+            <div className="grid items-start gap-5 md:grid-cols-[200px_minmax(0,1fr)]">
+              <aside
+                aria-label="Filters"
+                className="bg-apollo-rail border-apollo-border-strong flex flex-col gap-5 rounded-[13px] border px-5 pt-[18px] pb-5 md:sticky md:top-5 md:gap-[22px]"
+                data-testid="administrators-rail"
+              >
+                <div className="flex items-baseline justify-between">
+                  <span className="text-muted-foreground text-xs font-medium tracking-[0.12em] uppercase">
+                    Filters
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilters(new Set());
+                      setFilterQuery("");
+                    }}
+                    disabled={!anyFilter}
+                    className="text-apollo-slate disabled:text-muted-foreground text-[13px] hover:underline disabled:cursor-default disabled:no-underline"
+                    data-testid="administrators-filters-clear"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-5 md:flex md:flex-col md:gap-[22px]">
+                  {railGroups.map(({ group, label, items }) => (
+                    <fieldset
+                      key={group}
+                      className="m-0 flex min-w-0 flex-col gap-0.5 border-0 p-0"
                     >
-                      {KIND_LABEL[group.entityType]}
-                    </Badge>
-                    <span className="text-muted-foreground ml-auto text-xs whitespace-nowrap">
-                      {group.admins.length}{" "}
-                      {group.admins.length === 1 ? "administrator" : "administrators"}
+                      <legend className="text-muted-foreground mb-1.5 p-0 text-xs font-medium tracking-[0.12em] whitespace-nowrap uppercase">
+                        {label}
+                      </legend>
+                      {items.map((item) => {
+                        const key = `${group}:${item.value}`;
+                        return (
+                          <label
+                            key={key}
+                            className="flex cursor-pointer items-center gap-2.5 py-1 text-sm"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={filters.has(key)}
+                              onChange={() => toggleFilter(key)}
+                              className="accent-apollo-maroon m-0 size-4 flex-none cursor-pointer"
+                              data-testid={`administrators-filter-${group}-${item.value}`}
+                            />
+                            <span className="min-w-0 flex-1 leading-[1.35]">{item.label}</span>
+                            <span className="text-muted-foreground text-[13px] tabular-nums">
+                              {item.count}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </fieldset>
+                  ))}
+                </div>
+              </aside>
+
+              <section className="flex min-w-0 flex-col gap-3.5" aria-label="Administrators">
+                <Input
+                  type="text"
+                  value={filterQuery}
+                  placeholder="Filter by name, org unit, or CWID…"
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                  aria-label="Filter administrators"
+                  className="bg-apollo-surface h-10"
+                  data-testid="administrators-filter-input"
+                />
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                  <span
+                    className="text-muted-foreground flex flex-wrap gap-x-6 gap-y-1 text-[15px]"
+                    data-testid="administrators-stats"
+                  >
+                    <span className="whitespace-nowrap">
+                      <span className="text-foreground font-semibold tabular-nums">
+                        {resolved.length}
+                      </span>{" "}
+                      {resolved.length === 1 ? "person" : "people"}
                     </span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-muted-foreground border-apollo-border border-b text-left">
-                          <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase">
-                            Person
-                          </th>
-                          <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
-                            Role
-                          </th>
-                          <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
-                            Source
-                          </th>
-                          <th className="py-2 pr-5 pl-5 text-right text-[11px] font-semibold tracking-wider uppercase">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.admins.map(({ entry, person, grant }) => {
-                          const isSelf = entry.cwid === actorCwid;
-                          return (
-                            <tr
-                              key={entry.cwid}
-                              className="border-apollo-border border-t align-middle"
-                              data-testid={`administrators-admin-${group.key}-${entry.cwid}`}
-                            >
-                              <td className="py-3 pl-5">
-                                <div className="flex items-center gap-2.5">
-                                  <div className="bg-apollo-maroon/10 text-apollo-maroon flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold">
-                                    {initials(person.name)}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <span className="font-medium">{person.name}</span>
-                                    {person.title && (
-                                      <span className="text-muted-foreground font-normal">
-                                        {" "}
-                                        · {person.title}
-                                      </span>
-                                    )}
-                                    <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
-                                      {entry.cwid}
-                                    </span>
-                                  </div>
-                                  {canImpersonate && !isSelf && (
-                                    <ViewAsButton
-                                      targetCwid={entry.cwid}
-                                      targetName={person.name}
-                                    />
-                                  )}
-                                </div>
-                              </td>
-                              {renderGrantActionCells(entry, grant)}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                    <span className="whitespace-nowrap">
+                      <span className="text-foreground font-semibold tabular-nums">
+                        {totalGrants}
+                      </span>{" "}
+                      {totalGrants === 1 ? "grant" : "grants"}
+                    </span>
+                    <span className="whitespace-nowrap">
+                      <span className="text-foreground font-semibold tabular-nums">
+                        {grantedHere}
+                      </span>{" "}
+                      granted here
+                    </span>
+                  </span>
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <span
+                      className="text-muted-foreground text-[13px]"
+                      id="administrators-sort-label"
+                    >
+                      Sort
+                    </span>
+                    <RadioGroupPrimitive.Root
+                      value={sortMode}
+                      onValueChange={(v) => setSortMode(v as SortMode)}
+                      aria-labelledby="administrators-sort-label"
+                      orientation="horizontal"
+                      className="bg-apollo-surface-2 border-apollo-border flex rounded-lg border p-[3px]"
+                      data-testid="administrators-sort"
+                    >
+                      {SORT_OPTIONS.map((o) => (
+                        <RadioGroupPrimitive.Item
+                          key={o.value}
+                          value={o.value}
+                          className={cn(SEGMENT_ITEM, "rounded-md px-[11px] py-1 text-[13px]")}
+                          data-testid={`administrators-sort-${o.value}`}
+                        >
+                          {o.label}
+                        </RadioGroupPrimitive.Item>
+                      ))}
+                    </RadioGroupPrimitive.Root>
+                    {sortMode !== "orgUnit" && multiShown.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setExpanded(allExpanded ? new Set() : new Set(multiShown))}
+                        className="text-apollo-slate text-[13px] whitespace-nowrap hover:underline"
+                        data-testid="administrators-expand-all"
+                      >
+                        {allExpanded ? "Collapse all" : "Expand all"}
+                      </button>
+                    )}
                   </div>
                 </div>
-              ))
-            : personGroups.map(({ entry, person }) => {
-                const isSelf = entry.cwid === actorCwid;
-                return (
+
+                <div className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[13px] border">
                   <div
-                    key={entry.cwid}
-                    data-testid={`administrators-person-${entry.cwid}`}
-                    className="border-apollo-border bg-apollo-surface shadow-xs overflow-hidden rounded-xl border"
+                    className={cn(
+                      "bg-apollo-surface-2 border-apollo-border-strong hidden gap-3.5 border-b px-5 py-3 md:grid",
+                      ROW_COLS,
+                    )}
+                    aria-hidden
                   >
-                    <div className="bg-apollo-surface-2 border-apollo-border flex items-start gap-4 border-b px-5 py-4">
-                      <div className="bg-apollo-maroon/10 text-apollo-maroon flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold">
-                        {initials(person.name)}
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <div className="flex flex-wrap items-baseline gap-2">
-                          <span className="font-semibold">{person.name}</span>
-                          {person.title && (
-                            <span className="text-muted-foreground text-sm font-normal">
-                              {person.title}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-muted-foreground flex flex-wrap gap-3 text-xs">
-                          <span className="tabular-nums">{entry.cwid}</span>
-                          {person.email && (
-                            <a
-                              href={`mailto:${person.email}`}
-                              className="hover:underline"
-                              data-testid={`administrators-email-${entry.cwid}`}
-                            >
-                              {person.email}
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                      <div className="ml-auto flex shrink-0 items-center gap-3">
-                        <span className="text-muted-foreground text-xs whitespace-nowrap">
-                          {entry.grants.length} {entry.grants.length === 1 ? "grant" : "grants"}
-                        </span>
-                        {canImpersonate && !isSelf && (
-                          <ViewAsButton targetCwid={entry.cwid} targetName={person.name} />
-                        )}
-                      </div>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-muted-foreground border-apollo-border border-b text-left">
-                            <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase">
-                              Org unit
-                            </th>
-                            <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
-                              Role
-                            </th>
-                            <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
-                              Source
-                            </th>
-                            <th className="py-2 pr-5 pl-5 text-right text-[11px] font-semibold tracking-wider uppercase">
-                              Actions
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {entry.grants.map((grant) => (
-                            <tr
-                              key={`${grant.entityType}:${grant.entityId}`}
-                              className="border-apollo-border border-t align-middle"
-                              data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
-                            >
-                              <td className="py-3 pl-5">
-                                <span className="font-medium">{grant.unitName}</span>
-                                <Badge
-                                  variant="outline"
-                                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border ml-2 rounded-full"
-                                >
-                                  {KIND_LABEL[grant.entityType]}
-                                </Badge>
-                              </td>
-                              {renderGrantActionCells(entry, grant)}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {sortMode === "orgUnit" ? (
+                      <>
+                        <span className={headerCell}>Person</span>
+                        <span className={headerCell}>Role</span>
+                        <span className={headerCell}>Source</span>
+                        <span />
+                      </>
+                    ) : (
+                      <>
+                        <span className={headerCell}>Person</span>
+                        <span className={headerCell}>Org unit</span>
+                        <span className={headerCell}>Role · source</span>
+                        <span />
+                      </>
+                    )}
                   </div>
-                );
-              })}
-        </div>
+
+                  {displayedCount === 0 ? (
+                    <p
+                      className="text-muted-foreground m-0 px-8 py-8 text-center text-sm"
+                      data-testid="administrators-no-matches"
+                    >
+                      No administrators match these filters.
+                    </p>
+                  ) : (
+                    <div data-testid="administrators-table">
+                      {sortMode === "orgUnit"
+                        ? unitGroups.map((group) => (
+                            <div key={group.key} data-testid={`administrators-unit-${group.key}`}>
+                              <div className="bg-apollo-page border-apollo-border flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b px-5 py-2.5">
+                                <span className="text-sm font-semibold">{group.unitName}</span>
+                                <span className="text-muted-foreground text-[12.5px]">
+                                  {KIND_LABEL[group.entityType]}
+                                </span>
+                                <span className="text-muted-foreground ml-auto text-xs whitespace-nowrap">
+                                  {plural(group.admins.length, "administrator")}
+                                </span>
+                              </div>
+                              {group.admins.map(({ entry, person, grant }) => (
+                                <div
+                                  key={entry.cwid}
+                                  className={cn(
+                                    ROW_GRID,
+                                    "border-apollo-border border-b px-5 py-3",
+                                  )}
+                                  data-testid={`administrators-admin-${group.key}-${entry.cwid}`}
+                                >
+                                  {personCell(entry, person)}
+                                  <div className="pl-12 md:pl-0">{roleControl(entry, grant)}</div>
+                                  <span className="flex min-w-0 items-center gap-1.5 pl-12 text-[12.5px] md:pl-0">
+                                    {isEdSourced(grant.source) && lockTile()}
+                                    <span className="text-muted-foreground min-w-0 truncate">
+                                      {grantSourceText(grant)}
+                                    </span>
+                                  </span>
+                                  <div className="flex flex-col items-start gap-0.5 pl-12 md:pl-0">
+                                    {viewAs(entry, person)}
+                                    {grantAction(entry, grant)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ))
+                        : personGroups.map(({ entry, person }, i) => personRow(entry, person, i))}
+                    </div>
+                  )}
+
+                  <div
+                    className="bg-apollo-page text-muted-foreground px-5 py-3 text-[13px]"
+                    data-testid="administrators-footer"
+                  >
+                    {sortMode === "orgUnit"
+                      ? `Showing ${plural(unitGroups.length, "org unit")}.`
+                      : `Showing ${personGroups.length} of ${resolved.length} ${resolved.length === 1 ? "person" : "people"} · ${plural(shownGrants, "grant")}.`}
+                  </div>
+                </div>
+              </section>
+            </div>
+          )}
+        </>
       )}
 
       <ConfirmDialog

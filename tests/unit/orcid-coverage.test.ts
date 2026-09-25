@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildOrcidCoverage,
+  inferenceSourceCounts,
   loadOrcidCoverage,
   neither,
   nihNoOrcid,
@@ -619,5 +620,61 @@ describe("loadOrcidCoverage", () => {
     expect(r.byDept.map((x) => [x.label, x.people])).toEqual([["Dept A", 1]]);
     expect(r.byRole.reduce((n, x) => n + x.people, 0)).toBe(1);
     expect(r.tiles.overall.people).toBe(2);
+  });
+});
+
+describe("inferenceSourceCounts", () => {
+  const row = (
+    cwid: string,
+    source: string,
+    articlesAccepted = 0,
+    articlesRejected = 0,
+    orcid = `iD-${cwid}-${source}`,
+  ): CandidateRow => ({ cwid, orcid, source, articlesAccepted, articlesRejected });
+
+  it("counts distinct people per rule, overlapping, within the population only", () => {
+    const candidates = [
+      row("a1", "rpm_inferred", 5, 0), // rpm strong
+      row("a1", "rpm_inferred", 1, 0, "iD-other"), // same person, second row: still one person
+      row("a2", "rpm_inferred", 5, 1), // a rejection → weak
+      row("a3", "rpm_inferred", 2, 0), // too few → weak
+      row("a1", "orcid_email"), // registry strong (email); a1 also counted under RPM
+      row("a4", "orcid_works", 3), // registry strong (works)
+      row("a5", "orcid_works", 2), // under the bar → registry weak
+      row("a6", "orcid_name"), // registry weak
+      row("a4", "orcid_name"), // a4 already strong in the registry → not weak
+      row("a7", "rpm_admin"), // typed in by an admin: not an inference
+      row("gone", "orcid_email"), // not in the active population
+    ];
+    const population = new Set(["a1", "a2", "a3", "a4", "a5", "a6", "a7"]);
+    expect(inferenceSourceCounts(candidates, population)).toEqual({
+      rpmStrong: 1,
+      rpmWeak: 2,
+      registryEmail: 1,
+      registryWorks: 1,
+      registryWeak: 2,
+    });
+  });
+
+  it("rides on buildOrcidCoverage, after dismissals", () => {
+    const scholars: ScholarRow[] = [
+      {
+        cwid: "b1",
+        roleCategory: null,
+        primaryDepartment: null,
+        orcid: null,
+        orcidConfirmedAt: null,
+      },
+    ];
+    const cands = [row("b1", "orcid_email", 0, 0, "iD-x")];
+    const today = new Date("2026-09-18T00:00:00Z");
+    const params = parseOrcidCoverageParams({});
+    expect(buildOrcidCoverage(scholars, [], [], params, today, cands).sources.registryEmail).toBe(
+      1,
+    );
+    expect(
+      buildOrcidCoverage(scholars, [], [], params, today, cands, [{ cwid: "b1", orcid: "iD-x" }])
+        .sources.registryEmail,
+    ).toBe(0);
   });
 });
