@@ -79,4 +79,17 @@ describe("report-ui", () => {
     rerender({ r: rows.slice(0, 40) });
     expect(result.current.visible).toHaveLength(25);
   });
+
+  it("useShowMore with a resetKey keeps its page across new row arrays and resets on a new key", () => {
+    const rows = Array.from({ length: 60 }, (_, i) => i);
+    const { result, rerender } = renderHook(({ r, k }) => useShowMore(r, 25, k), {
+      initialProps: { r: rows, k: "a" },
+    });
+    act(() => result.current.showMore());
+    expect(result.current.visible).toHaveLength(50);
+    rerender({ r: [...rows], k: "a" }); // a refresh: same filters, new array
+    expect(result.current.visible).toHaveLength(50);
+    rerender({ r: [...rows], k: "b" }); // a new filter
+    expect(result.current.visible).toHaveLength(25);
+  });
 });

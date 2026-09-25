@@ -109,7 +109,9 @@ vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: () 
 vi.mock("@/components/edit/cancer-center-collab-report-card", () => ({
   CancerCenterCollabReportCard: () => null,
 }));
-vi.mock("@/components/edit/cancer-center-nci-2a-card", () => ({ Nci2aCard: () => null }));
+vi.mock("@/lib/edit/nci-2a-report.server", () => ({
+  loadNci2aReport: vi.fn().mockResolvedValue({ cycle: null, programs: [], awards: [] }),
+}));
 vi.mock("@/components/edit/publications-report-table", () => ({
   PublicationsReportTable: () => null,
 }));
