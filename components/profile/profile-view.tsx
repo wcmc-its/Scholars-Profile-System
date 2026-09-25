@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { notFound } from "next/navigation";
 import { SidebarCard } from "@/components/profile/sidebar-card";
 import { ProfileSectionNav } from "@/components/profile/profile-section-nav";
@@ -316,7 +317,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                         rel="noopener noreferrer"
                         className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                       >
-                        Clinical profile →
+                        Clinical profile ↗
                       </a>
                     </li>
                   ) : null}
@@ -454,9 +455,14 @@ export async function ProfileView({ slug }: { slug: string }) {
                 <SidebarCard title="Past Appointments">
                   <ul className="flex flex-col gap-3">{head.map(row)}</ul>
                   {rest.length > 0 ? (
-                    <details className="mt-3">
-                      <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs">
-                        + Show All
+                    <details className="group mt-3">
+                      <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer list-none items-center gap-1 text-xs select-none [&::-webkit-details-marker]:hidden">
+                        <ChevronRight
+                          className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+                          aria-hidden="true"
+                        />
+                        <span className="group-open:hidden">Show all {head.length + rest.length}</span>
+                        <span className="hidden group-open:inline">Show fewer</span>
                       </summary>
                       <ul className="mt-3 flex flex-col gap-3">
                         {rest.map((a, i) => row(a, i + head.length))}

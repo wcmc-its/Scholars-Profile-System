@@ -12,6 +12,8 @@ import {
   formatConflict,
   filterTitleDashboard,
   parseTitleDashboardParams,
+  titleDashboardQueryString,
+  titleTabOf,
 } from "@/lib/edit/title-dashboard";
 import { loadChairedDepartments } from "@/lib/edit/title-picker";
 import { buildTitleOptions, type TitleInputs } from "@/lib/scholar-title";
@@ -145,6 +147,31 @@ describe("filterTitleDashboard", () => {
     expect(filterTitleDashboard([chair, working, pinned], p("rule=override"))).toEqual([pinned]);
     expect(filterTitleDashboard([chair, working, pinned], p("pinned=no"))).toEqual([chair, working]);
     expect(filterTitleDashboard([chair, working, pinned], p("reason=bogus&band=leadership"))).toHaveLength(3);
+  });
+
+  it("tabs: an issue reason wins over a pin; a pin over plain leadership; unset tab = every row", () => {
+    const contested = row(
+      { edPrimaryTitle: "Associate Dean for Research", chiefTitle: "Chief, Cardiology" },
+      { roles: { chief: true } },
+    )!;
+    const contestedPinned = row(
+      { edPrimaryTitle: "Associate Dean for Research", chiefTitle: "Chief, Cardiology" },
+      { override: "Associate Dean for Research", roles: { chief: true } },
+    )!;
+    expect(titleTabOf(contested)).toBe("review");
+    expect(titleTabOf(contestedPinned)).toBe("review");
+    expect(titleTabOf(pinned)).toBe("pinned");
+    expect(titleTabOf(chair)).toBe("fyi");
+    const every = [chair, working, pinned, contested];
+    const p = (q: string) => parseTitleDashboardParams(new URLSearchParams(q));
+    expect(p("").tab).toBeNull();
+    expect(p("tab=bogus").tab).toBeNull();
+    expect(filterTitleDashboard(every, p(""))).toEqual(every);
+    expect(filterTitleDashboard(every, p("tab=all"))).toEqual(every);
+    expect(filterTitleDashboard(every, p("tab=review"))).toEqual([contested]);
+    expect(filterTitleDashboard(every, p("tab=pinned"))).toEqual([pinned]);
+    expect(filterTitleDashboard(every, p("tab=fyi"))).toEqual([chair, working]);
+    expect(titleDashboardQueryString(p("tab=pinned&q=x"))).toBe("tab=pinned&q=x");
   });
 
   it("bands a pinned row by the pin's rank, not the ladder winner's", () => {

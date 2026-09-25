@@ -305,8 +305,54 @@ async function roleCwids(
   return new Set(rows.map((r) => r.cwid));
 }
 
+/**
+ * The report's tabs: every listed scholar sits in exactly one of review /
+ * pinned / fyi, by the reasons it is listed for. "review" is any reason that
+ * asks an operator to act (a working title no role backs, a role/text
+ * mismatch, a role someone else holds, a close contest, a leadership title
+ * that lost); otherwise a pin puts the row under "pinned"; the rest is
+ * leadership the ladder resolved cleanly ("fyi"). "all" is the union.
+ */
+export type TitleTab = "review" | "pinned" | "fyi" | "all";
+
+export const TITLE_TABS: readonly TitleTab[] = ["review", "pinned", "fyi", "all"] as const;
+
+export const TITLE_TAB_LABEL: Record<TitleTab, string> = {
+  review: "Needs review",
+  pinned: "Pinned",
+  fyi: "Leadership, no issues",
+  all: "All",
+};
+
+/** The one-line note under the tabs. */
+export const TITLE_TAB_NOTE: Record<TitleTab, string> = {
+  review:
+    "Unverified working titles, conflicting roles, mismatched text, close contests and leadership titles that lost. Fix the source or pin a title.",
+  pinned: "Pins override the ladder. Remove pins that now match what the ladder would pick anyway.",
+  fyi: "Leadership titles the ladder resolved cleanly. Listed for comms review; usually no action.",
+  all: "Every scholar on this report.",
+};
+
+/** The reasons that put a row under "Needs review". */
+export const TITLE_REVIEW_REASONS: readonly TitleReason[] = [
+  "unverifiedWorkingTitle",
+  "mismatch",
+  "conflictingRoles",
+  "contested",
+  "leadershipLost",
+] as const;
+
+/** The tab a row lives under (never "all"). */
+export function titleTabOf(r: Pick<TitleDashboardRow, "reasons">): Exclude<TitleTab, "all"> {
+  if (r.reasons.some((x) => TITLE_REVIEW_REASONS.includes(x))) return "review";
+  return r.reasons.includes("pinned") ? "pinned" : "fyi";
+}
+
 /** The report's filters, from the URL. Every key optional; unset = all. */
 export type TitleDashboardParams = {
+  /** Unset (null) = every tab. The PAGE reads unset as "review"; the download
+   *  route keeps unset = all, so a bare export link exports what it always did. */
+  tab: TitleTab | null;
   reason: TitleReason | null;
   /** "1-8.5" leadership, "9-10" endowed/unit director, "11+" the rest. */
   band: "leadership" | "director" | "other" | null;
@@ -357,7 +403,9 @@ export function parseTitleDashboardParams(sp: URLSearchParams): TitleDashboardPa
   const band = sp.get("band");
   const pinned = sp.get("pinned");
   const rule = sp.get("rule");
+  const tab = sp.get("tab");
   return {
+    tab: (TITLE_TABS as readonly string[]).includes(tab ?? "") ? (tab as TitleTab) : null,
     reason: (TITLE_REASONS as readonly string[]).includes(reason ?? "") ? (reason as TitleReason) : null,
     band: band === "leadership" || band === "director" || band === "other" ? band : null,
     pinned: pinned === "yes" ? true : pinned === "no" ? false : null,
@@ -377,6 +425,7 @@ export function filterTitleDashboard(
 ): TitleDashboardRow[] {
   const q = p.q.toLowerCase();
   return rows.filter((r) => {
+    if (p.tab && p.tab !== "all" && titleTabOf(r) !== p.tab) return false;
     if (p.reason && !r.reasons.includes(p.reason)) return false;
     if (p.pinned !== null && (r.pin !== null) !== p.pinned) return false;
     if (p.rule && winningRule(r) !== p.rule) return false;
@@ -394,6 +443,7 @@ export function filterTitleDashboard(
 /** The query string for `p` (the download link, chip removal); unset keys omitted. */
 export function titleDashboardQueryString(p: TitleDashboardParams): string {
   const out = new URLSearchParams();
+  if (p.tab) out.set("tab", p.tab);
   if (p.reason) out.set("reason", p.reason);
   if (p.band) out.set("band", p.band);
   if (p.pinned !== null) out.set("pinned", p.pinned ? "yes" : "no");
@@ -406,6 +456,7 @@ export function titleDashboardQueryString(p: TitleDashboardParams): string {
  *  Criteria sheet. */
 export function titleDashboardCriteria(p: TitleDashboardParams): Array<readonly [string, string]> {
   return [
+    ["Tab", p.tab ? TITLE_TAB_LABEL[p.tab] : "All"],
     ["Reason", p.reason ? TITLE_REASON_LABEL[p.reason] : "All"],
     ["Rank band", p.band ? TITLE_BAND_LABEL[p.band] : "All"],
     ["Pinned", p.pinned === null ? "All" : p.pinned ? "Yes" : "No"],

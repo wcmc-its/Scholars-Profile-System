@@ -52,6 +52,15 @@ const PENDING = {
 
 const STEWARD = { cwid: "cms1001", isSuperuser: false, isCommsSteward: true };
 
+/** The undo stamp every decision write carries (lib/edit/news-decision.ts). */
+const stamp = (prevStatus: string, prevShowOnProfile?: boolean) => ({
+  decisionId: "req-1",
+  decisionAt: expect.any(Date),
+  prevStatus,
+  prevShowOnProfile,
+  prevEnteredByCwid: null,
+});
+
 function request(body: Record<string, unknown>, session: Record<string, unknown> = STEWARD) {
   h.readEditRequest.mockResolvedValue({
     ok: true,
@@ -89,7 +98,12 @@ describe("approve_hidden", () => {
     expect(h.tx.newsMention.update).toHaveBeenCalledTimes(1);
     expect(h.tx.newsMention.update).toHaveBeenCalledWith({
       where: { id: "news-1" },
-      data: { status: "published", showOnProfile: false, enteredByCwid: "cms1001" },
+      data: {
+        status: "published",
+        showOnProfile: false,
+        enteredByCwid: "cms1001",
+        ...stamp("pending", true),
+      },
     });
   });
 
@@ -109,7 +123,7 @@ describe("approve_hidden", () => {
     await POST(request({ id: "news-1", decision: "approve" }) as never);
     expect(h.tx.newsMention.update).toHaveBeenCalledWith({
       where: { id: "news-1" },
-      data: { status: "published", enteredByCwid: "cms1001" },
+      data: { status: "published", enteredByCwid: "cms1001", ...stamp("pending", true) },
     });
     expect(h.appendAuditRow.mock.calls[0][1]).toMatchObject({ fieldsChanged: ["status"] });
   });
@@ -123,7 +137,7 @@ describe("approve_hidden", () => {
     // The sibling is REJECTED, not hidden — hiding is only this row's editorial call.
     expect(h.tx.newsMention.update).toHaveBeenCalledWith({
       where: { id: "news-2" },
-      data: { status: "rejected", enteredByCwid: "cms1001" },
+      data: { status: "rejected", enteredByCwid: "cms1001", ...stamp("pending", true) },
     });
     for (const call of h.appendAuditRow.mock.calls) {
       expect(call[1]).toMatchObject({ action: "news_mention_update" });

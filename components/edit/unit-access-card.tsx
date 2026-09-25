@@ -33,6 +33,7 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { cn } from "@/lib/utils";
 
 type AccessRow = {
   cwid: string;
@@ -202,9 +203,9 @@ export function UnitAccessCard({
       slot="unit-access-card"
       headingId={headingId}
       heading="Access"
-      description={`Owners, Curators, and Communications stewards can edit this ${entityType}. Owners and Communications stewards can manage access.`}
+      description={`Owners, curators and communications stewards can edit this ${entityType}. Owners and communications stewards can also manage access.`}
     >
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3">
         {hint && <p className="text-muted-foreground text-sm">{hint}</p>}
 
         {rows.length === 0 ? (
@@ -212,90 +213,124 @@ export function UnitAccessCard({
             No one has been granted access yet.
           </p>
         ) : (
-          <table className="[&_td]:align-middle w-full text-sm" data-testid="unit-access-table">
-            <thead>
-              <tr className="text-muted-foreground border-apollo-border border-b text-left">
-                <th className="py-2 font-medium">Person</th>
-                <th className="py-2 font-medium">Role</th>
-                <th className="py-2 font-medium">Granted by</th>
-                <th className="py-2 font-medium">Granted on</th>
-                <th className="py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const isSelf = row.cwid === actorCwid;
-                const edLocked = isEdLocked(row);
-                const removeTitle = isSelf
-                  ? "You can't remove your own access."
-                  : edLocked
-                    ? ED_LOCKED_HINT
-                    : undefined;
-                const shown = displayName(row);
-                return (
-                  <tr key={row.cwid} className="border-apollo-border border-b" data-testid={`unit-access-row-${row.cwid}`}>
-                    <td className="py-2">
-                      <span className="font-medium">{shown.name}</span>
-                      {shown.title && <span className="text-muted-foreground"> · {shown.title}</span>}
-                    </td>
-                    <td className="py-2 capitalize">{row.role}</td>
-                    <td className="py-2">{formatGrantedBy(row.grantedBy)}</td>
-                    <td className="py-2 tabular-nums">{formatGrantedAt(row.grantedAt)}</td>
-                    <td className="py-2 text-right">
-                      {/* The Button carries `disabled:pointer-events-none`, so `title` on a
-                          disabled Remove never fires and the row reads as broken rather than
-                          governed. ED-locked rows say so in the open, LOCKED-style: neutral +
-                          lock + text, no hue. `title` stays for the self-removal case. */}
-                      <div className="flex items-center justify-end gap-2">
-                        {edLocked && (
-                          <span
-                            className="text-muted-foreground inline-flex items-center gap-1 text-xs whitespace-nowrap"
-                            data-testid={`unit-access-ed-locked-note-${row.cwid}`}
-                          >
-                            <Lock className="size-3" aria-hidden />
-                            Managed in the Enterprise Directory
-                          </span>
-                        )}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          disabled={isSelf || edLocked || busy}
-                          title={removeTitle}
-                          onClick={() => setRevokeTarget(row)}
-                          data-testid={`unit-access-remove-${row.cwid}`}
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          // Edit Center / Edit Org Unit mockups (2026-09-25): one compact row per
+          // grant — person, role chip, "Granted by … · date", Remove.
+          <ul
+            className="border-apollo-border divide-apollo-border divide-y overflow-hidden rounded-[10px] border text-sm"
+            data-testid="unit-access-table"
+          >
+            {rows.map((row) => {
+              const isSelf = row.cwid === actorCwid;
+              const edLocked = isEdLocked(row);
+              const removeTitle = isSelf
+                ? "You can't remove your own access."
+                : edLocked
+                  ? ED_LOCKED_HINT
+                  : undefined;
+              const shown = displayName(row);
+              return (
+                <li
+                  key={row.cwid}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3.5 py-2.5 md:grid-cols-[minmax(0,1fr)_80px_minmax(0,220px)_auto]"
+                  data-testid={`unit-access-row-${row.cwid}`}
+                >
+                  <div className="flex min-w-0 flex-col">
+                    {/* No ScholarHoverCard here: this card also mounts on the core
+                        editor, whose admins the scholar-card route doesn't admit. */}
+                    <span className="truncate font-[550]">{shown.name}</span>
+                    {shown.title && (
+                      <span className="text-muted-foreground truncate text-[12.5px]">{shown.title}</span>
+                    )}
+                  </div>
+                  <span
+                    className={cn(
+                      "col-start-1 row-start-2 w-fit rounded-full px-2 py-px text-[12.5px] capitalize md:col-start-2 md:row-start-1",
+                      row.role === "owner"
+                        ? "bg-apollo-slate-tint text-apollo-slate"
+                        : "bg-apollo-surface-2 text-foreground",
+                    )}
+                  >
+                    {row.role}
+                  </span>
+                  <span className="text-muted-foreground col-span-2 text-[12.5px] md:col-span-1">
+                    Granted by <span>{formatGrantedBy(row.grantedBy)}</span>
+                    {formatGrantedAt(row.grantedAt) !== "—" && (
+                      <> · <span className="tabular-nums">{formatGrantedAt(row.grantedAt)}</span></>
+                    )}
+                  </span>
+                  {/* The Button carries `disabled:pointer-events-none`, so `title` on a
+                      disabled Remove never fires and the row reads as broken rather than
+                      governed. ED-locked rows say so in the open, LOCKED-style: neutral +
+                      lock + text, no hue. `title` stays for the self-removal case. */}
+                  <div className="col-start-2 row-start-1 flex items-center justify-end gap-2 md:col-start-4">
+                    {edLocked && (
+                      <span
+                        className="text-muted-foreground inline-flex items-center gap-1 text-xs whitespace-nowrap"
+                        data-testid={`unit-access-ed-locked-note-${row.cwid}`}
+                      >
+                        <Lock className="size-3" aria-hidden />
+                        Managed in the Enterprise Directory
+                      </span>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isSelf || edLocked || busy}
+                      title={removeTitle}
+                      onClick={() => setRevokeTarget(row)}
+                      className="text-destructive hover:text-destructive"
+                      data-testid={`unit-access-remove-${row.cwid}`}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
 
-        <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="unit-access-add">
-          <p className="text-sm font-medium">Add admin</p>
-          <DirectoryPeopleTypeahead idPrefix="grant" value={addValue} onChange={setAddValue} />
+        <div
+          className="bg-apollo-page border-apollo-border-strong flex flex-wrap items-center gap-2 rounded-[10px] border border-dashed px-3 py-2.5"
+          data-slot="unit-access-add"
+        >
+          <span className="text-[13px] font-medium">Grant</span>
+          <div className="min-w-[180px] flex-1">
+            <DirectoryPeopleTypeahead idPrefix="grant" value={addValue} onChange={setAddValue} />
+          </div>
           <RadioGroup
             value={addRole}
             onValueChange={(v) => setAddRole(v as "owner" | "curator")}
-            className="flex gap-4"
+            aria-label="Role"
+            className="bg-apollo-surface-2 border-apollo-border flex gap-0.5 rounded-[7px] border p-0.5"
           >
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="curator" data-testid="grant-role-curator" /> Curator
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="owner" data-testid="grant-role-owner" /> Owner
-            </label>
+            {(["curator", "owner"] as const).map((r) => (
+              <label
+                key={r}
+                className={cn(
+                  "cursor-pointer rounded-[5px] px-2.5 py-[3px] text-[13px] capitalize select-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-apollo-ring/40",
+                  addRole === r
+                    ? "text-foreground bg-white shadow-[0_1px_2px_rgba(34,30,28,0.12)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <RadioGroupItem value={r} className="sr-only" data-testid={`grant-role-${r}`} />
+                {r}
+              </label>
+            ))}
           </RadioGroup>
-          <div>
-            <Button type="button" variant="apollo" onClick={grant} disabled={!addValue || busy} data-testid="unit-access-grant">
-              {busy ? "Granting…" : "Grant access"}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={grant}
+            disabled={!addValue || busy}
+            className="border-apollo-slate text-apollo-slate"
+            data-testid="unit-access-grant"
+          >
+            {busy ? "Granting…" : "Grant access"}
+          </Button>
         </div>
 
         {error && (
@@ -329,7 +364,13 @@ function formatGrantedBy(grantedBy: string | null): string {
 function formatGrantedAt(d: Date): string {
   const date = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(date.getTime()) || date.getTime() === 0) return "—";
-  return date.toISOString().slice(0, 10);
+  // "Jul 13, 2026" — formatted in UTC so a date-only grant never shifts a day.
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function mapErrorToMessage(code: string): string {

@@ -46,13 +46,28 @@ describe("SlugRequestRow — anatomy", () => {
     const change = screen.getByTestId("slug-request-change-line");
     expect(change.textContent).toContain("jane-q-smith");
     expect(change.textContent).toContain("jane-smith");
+    expect(change.textContent).toBe("/scholars/jane-smithnow /scholars/jane-q-smith");
     expect(screen.getByTestId("slug-request-reason").textContent).toContain("This is how I'm known.");
-    expect(screen.getByTestId("slug-request-meta").textContent).toMatch(/Requested .*2026/);
+    expect(screen.getByTestId("slug-request-meta").textContent).toBe("jqs2001 · Medicine · asked May 27, 2026");
+    // A clean request checks as Available.
+    expect(screen.getByTestId("slug-request-check").textContent).toBe("AvailableCurrent URL will redirect");
   });
 
-  it("shows (no note) when the reason is empty", () => {
+  it("omits the scholar's note when there is none", () => {
     render(<SlugRequestRow request={row({ reason: null })} onDecided={vi.fn()} />);
-    expect(screen.getByTestId("slug-request-reason").textContent).toContain("(no note)");
+    expect(screen.queryByTestId("slug-request-reason")).toBeNull();
+  });
+
+  it("a -N current URL: the check says the suffix goes", () => {
+    render(<SlugRequestRow request={row({ currentSlug: "jane-smith-2" })} onDecided={vi.fn()} />);
+    expect(screen.getByTestId("slug-request-check").textContent).toContain("Drops the -N suffix");
+  });
+
+  it("Deny opens the required-note form", () => {
+    render(<SlugRequestRow request={row()} onDecided={vi.fn()} />);
+    expect(screen.queryByTestId("slug-request-decline-form")).toBeNull();
+    fireEvent.click(screen.getByText("Deny"));
+    expect(screen.getByTestId("slug-request-decline-form")).toBeTruthy();
   });
 });
 
