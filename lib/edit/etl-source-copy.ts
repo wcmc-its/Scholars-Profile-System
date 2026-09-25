@@ -248,6 +248,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Submits new opportunities from the Research Dean's weekly funding email to Grant Matcha.",
     origin: "external", // Research Dean digest, via SES to S3, then ReciterAI
   },
+  HonorsLists: {
+    label: "Honor Lists",
+    description:
+      "Checks public honor lists (academies, fellowships) for Weill Cornell scholars and queues each new match for curator approval.",
+    origin: "external", // public roster pages of the conferring bodies
+  },
   NewsClips: {
     label: "Media highlights",
     description: "Queues press clips from the daily \"WCM in the News\" email for comms review.",

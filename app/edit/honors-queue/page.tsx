@@ -29,6 +29,7 @@ import { db } from "@/lib/db";
 // feeds the sub-nav badge from `groups` rather than paying for a second COUNT —
 // the same thing `/edit/slug-requests` does with `requests.length`.
 import { isHonorQueueEnabled, loadHonorQueue, loadHonorSources } from "@/lib/edit/honor-queue";
+import { isHonorsRunNowEnabled } from "@/lib/honors/run-now";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -72,8 +73,8 @@ export default async function HonorsQueuePage() {
   // loads only what a scholar did NOT enter about themselves. SELF honors are
   // created `published` and never enter the pending/rejected flow, so only the
   // published load needs splitting.
-  // Sources: the honor rosters behind the fed rows plus the recorded honors-load
-  // runs (`etl_run`), for the read-only Sources tab.
+  // Sources: the scraped honor lists and their runs (`honor_list_run`), the
+  // seed-only rosters behind the other fed rows, and the recorded loads.
   const [groups, approved, rejected, userAsserted, sources] = await Promise.all([
     loadHonorQueue(db.read, "pending"),
     loadHonorQueue(db.read, "published", { self: false }),
@@ -121,6 +122,7 @@ export default async function HonorsQueuePage() {
         rejected={rejected}
         userAsserted={userAsserted}
         sources={sources}
+        runNowEnabled={isHonorsRunNowEnabled()}
       />
     </ConsoleShell>
   );

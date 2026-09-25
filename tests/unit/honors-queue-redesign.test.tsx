@@ -12,7 +12,13 @@ const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 import { buildListSections, HonorsQueue, rosterSourceUrl } from "@/components/edit/honors-queue";
-import type { HonorQueueGroup, HonorQueueRow, HonorSourcesSummary } from "@/lib/edit/honor-queue";
+import type {
+  HonorListRunView,
+  HonorListStatus,
+  HonorQueueGroup,
+  HonorQueueRow,
+  HonorSourcesSummary,
+} from "@/lib/edit/honor-queue";
 
 function row(over: Partial<HonorQueueRow>): HonorQueueRow {
   return {
@@ -37,6 +43,7 @@ function row(over: Partial<HonorQueueRow>): HonorQueueRow {
     rejectionReason: null,
     superseded: false,
     competingCwids: [],
+    evidence: null,
     ...over,
   };
 }
@@ -49,7 +56,7 @@ function grp(
   return { key, rows, rosterMatchedName, contested: new Set(rows.map((r) => r.cwid)).size > 1 };
 }
 
-const NO_SOURCES: HonorSourcesSummary = { sources: [], runs: [] };
+const NO_SOURCES: HonorSourcesSummary = { sources: [], runs: [], lists: [] };
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -496,6 +503,7 @@ describe("HonorsQueue: Sources tab", () => {
         errorMessage: null,
       },
     ],
+    lists: [],
   };
 
   it("lists each roster read-only, with the last load and its error, and no Run now", () => {
@@ -516,7 +524,7 @@ describe("HonorsQueue: Sources tab", () => {
     const link = within(panel).getByRole("link", { name: "example.org" });
     expect(link.getAttribute("href")).toBe("https://example.org/members");
     expect(panel.querySelector('[data-slot="honors-sources-last-run"]')?.textContent).toMatch(
-      /Last load Sep 1, 2026.*Failed/,
+      /Last full load Sep 1, 2026.*Failed/,
     );
     expect(panel.querySelector('[data-slot="honors-sources-error"]')?.textContent).toBe(
       "invented failure",
@@ -539,7 +547,208 @@ describe("HonorsQueue: Sources tab", () => {
     );
     fireEvent.click(screen.getByRole("tab", { name: /Sources/ }));
     const panel = container.querySelector('[data-slot="honors-sources"]') as HTMLElement;
-    expect(panel.textContent).toContain("No load recorded yet");
+    expect(panel.textContent).toContain("No full load recorded yet");
     expect(panel.textContent).toContain("No honor lists loaded yet.");
+  });
+});
+
+describe("HonorsQueue: scraped lists and Run now", () => {
+  const T = "2026-09-20T10:00:00.000Z";
+  function run(over: Partial<HonorListRunView>): HonorListRunView {
+    return {
+      id: "run-1",
+      status: "success",
+      trigger: "schedule",
+      createdAt: T,
+      finishedAt: T,
+      onListTotal: 1234,
+      matched: 7,
+      newCandidates: 2,
+      errorMessage: null,
+      ...over,
+    };
+  }
+  function list(over: Partial<HonorListStatus>): HonorListStatus {
+    return {
+      id: "invented-fellows",
+      honorName: "Fellow",
+      organization: "Invented Academy",
+      rosterUrl: "https://example.org/fellows",
+      host: "example.org",
+      schedule: "Weekly",
+      latest: run({}),
+      lastFinished: run({}),
+      active: false,
+      ...over,
+    };
+  }
+  function summaryWith(lists: HonorListStatus[]): HonorSourcesSummary {
+    return {
+      sources: [
+        {
+          // Rolled up from seeded rows of the SAME roster: shown once, as the list.
+          key: "https://example.org/fellows",
+          name: "Fellow",
+          organization: "Invented Academy",
+          url: "https://example.org/fellows",
+          host: "example.org",
+          lines: 3,
+          pendingLines: 1,
+          approved: 2,
+          rejected: 0,
+        },
+        {
+          key: "seed-only-roster",
+          name: "Member",
+          organization: "Made-up Society",
+          url: null,
+          host: null,
+          lines: 4,
+          pendingLines: 0,
+          approved: 4,
+          rejected: 0,
+        },
+      ],
+      runs: [],
+      lists,
+    };
+  }
+  function open(lists: HonorListStatus[], runNowEnabled: boolean) {
+    const utils = render(
+      <HonorsQueue
+        pending={[]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={summaryWith(lists)}
+        runNowEnabled={runNowEnabled}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Sources/ }));
+    return utils.container.querySelector('[data-slot="honors-sources"]') as HTMLElement;
+  }
+
+  it("shows each scraped list's last run, on-list and WCM counts; seed rosters stay Manual", () => {
+    const panel = open([list({})], false);
+    const row = panel.querySelector('[data-list="invented-fellows"]') as HTMLElement;
+    expect(row.textContent).toContain("Weekly");
+    expect(row.textContent).toContain("Sep 20, 2026");
+    expect(row.textContent).toContain("Succeeded");
+    expect(row.textContent).toContain("1,234");
+    expect(row.textContent).toContain("7");
+    // The same roster's seed rollup is not listed a second time.
+    const manual = panel.querySelectorAll('[data-slot="honors-source"]');
+    expect(manual).toHaveLength(1);
+    expect(manual[0].textContent).toContain("Manual");
+    // 1 scraped + 1 seed-only list.
+    expect(screen.getByRole("tab", { name: /Sources/ }).textContent).toContain("2");
+  });
+
+  it("offers no Run now while HONORS_RUN_NOW is off", () => {
+    const panel = open([list({})], false);
+    expect(within(panel).queryByRole("button", { name: /Run now/ })).toBeNull();
+  });
+
+  it("Run now POSTs the list id, then shows it queued and refreshes", async () => {
+    const panel = open([list({})], true);
+    fireEvent.click(within(panel).getByRole("button", { name: "Run now" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/honor/sources/run");
+    expect(JSON.parse(init.body as string)).toEqual({ list: "invented-fellows" });
+    const button = await within(panel).findByRole("button", { name: "Queued" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("a list with a run in flight shows it and disables Run now", () => {
+    const panel = open(
+      [list({ active: true, latest: run({ status: "running", finishedAt: null }) })],
+      true,
+    );
+    const row = panel.querySelector('[data-list="invented-fellows"]') as HTMLElement;
+    expect(row.textContent).toContain("Running now…");
+    const button = within(row).getByRole("button", { name: "Running…" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    // The previous finished run's counts stay on screen meanwhile.
+    expect(row.textContent).toContain("1,234");
+  });
+
+  it("a failed run shows its error and dashes for the counts; a partial one is amber", () => {
+    const failed = run({
+      status: "failed",
+      errorMessage: "HTTP 403 on https://example.org/fellows",
+    });
+    const panel = open(
+      [
+        list({ latest: failed, lastFinished: failed }),
+        list({
+          id: "invented-two",
+          rosterUrl: "https://example.org/two",
+          latest: run({ status: "partial", errorMessage: "Stopped early: page 3" }),
+          lastFinished: run({ status: "partial", errorMessage: "Stopped early: page 3" }),
+        }),
+      ],
+      true,
+    );
+    const bad = panel.querySelector('[data-list="invented-fellows"]') as HTMLElement;
+    expect(bad.textContent).toContain("Failed");
+    expect(bad.querySelector('[data-slot="honors-list-error"]')?.textContent).toBe(
+      "HTTP 403 on https://example.org/fellows",
+    );
+    expect(bad.textContent).not.toContain("1,234");
+    const part = panel.querySelector('[data-list="invented-two"]') as HTMLElement;
+    expect(part.textContent).toContain("Partial");
+    expect(part.textContent).toContain("1,234");
+    expect(panel.textContent).toMatch(/1\s*partial/);
+    expect(panel.textContent).toMatch(/1\s*failed/);
+  });
+
+  it("a run that never finished reads Did not finish and can be run again", () => {
+    const stalled = run({ status: "stalled", finishedAt: null });
+    const panel = open([list({ latest: stalled, active: false })], true);
+    const row = panel.querySelector('[data-list="invented-fellows"]') as HTMLElement;
+    expect(row.textContent).toContain("Did not finish");
+    expect(
+      (within(row).getByRole("button", { name: "Run now" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("says so when the list is already running server-side", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "already_running" }), { status: 409 }),
+    );
+    const panel = open([list({})], true);
+    fireEvent.click(within(panel).getByRole("button", { name: "Run now" }));
+    expect((await within(panel).findByRole("alert")).textContent).toMatch(
+      /already queued or running/,
+    );
+  });
+});
+
+describe("HonorsQueue: candidate evidence", () => {
+  it("shows a scraped candidate's evidence line; a seeded one shows none", () => {
+    const scraped = grp(
+      "https://example.org/fellows|Ada Example|2024",
+      [row({ id: "e1", evidence: "Name and institution match: listed at Weill Cornell Medicine" })],
+      "Ada Example",
+    );
+    const seeded = grp(
+      "seed-line",
+      [row({ id: "e2", cwid: "zzz2002", evidence: null })],
+      "B. Example",
+    );
+    const { container } = render(
+      <HonorsQueue
+        pending={[scraped, seeded]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    const ev = container.querySelectorAll('[data-slot="honor-evidence"]');
+    expect(ev).toHaveLength(1);
+    expect(ev[0].textContent).toBe("Name and institution match: listed at Weill Cornell Medicine");
   });
 });

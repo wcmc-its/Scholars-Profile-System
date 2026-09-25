@@ -420,6 +420,7 @@ describe("buildHonorCsv", () => {
       rejectionReason: null,
       superseded: false,
       competingCwids: [],
+      evidence: null,
       status: "published",
       ...over,
     };

@@ -35,20 +35,23 @@
  * `ids`), which the server reverts all-or-nothing and which restores the siblings
  * an approval auto-rejected — so a failed undo leaves the card exactly as it was. A reject may carry a reason
  * from the select beside the button (optional, so one click still rejects).
- * Sources lists the honor rosters the queue's rows came from and the recorded
- * load runs — read-only, with no Run now (nothing in the console can start one).
+ * Sources lists every honor list: the ones the weekly scrape reads, each with
+ * its last run and (behind HONORS_RUN_NOW) a Run now, and the seed-only rosters
+ * the queue's other rows came from. Candidates carry the scrape's evidence line.
  *
  * Kept from the shipped queue although the mockup omits them on Possible: the
  * person-type filter (and its "All" chip, on every tab), the Possible sort, and
  * the Possible group-by. Group-by is ORTHOGONAL to the contested-pair mechanic —
  * a contested line stays one pick-one unit under every mode.
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import type {
   HonorQueueGroup,
+  HonorListRunView,
+  HonorListStatus,
   HonorQueueRow,
   HonorSourceRun,
   HonorSourcesSummary,
@@ -65,6 +68,8 @@ type Props = {
   userAsserted: HonorQueueGroup[];
   /** The Sources tab: honor rosters and recorded load runs. */
   sources: HonorSourcesSummary;
+  /** HONORS_RUN_NOW: offer Run now on each scraped list. */
+  runNowEnabled?: boolean;
 };
 
 type Tab = "pending" | "approved" | "rejected" | "self" | "sources";
@@ -283,7 +288,14 @@ const TAB_LABEL: Record<Tab, string> = {
   sources: "Sources",
 };
 
-export function HonorsQueue({ pending, approved, rejected, userAsserted, sources }: Props) {
+export function HonorsQueue({
+  pending,
+  approved,
+  rejected,
+  userAsserted,
+  sources,
+  runNowEnabled = false,
+}: Props) {
   const router = useRouter();
   // Possible first — the redesign: land on the working queue.
   const [tab, setTab] = useState<Tab>("pending");
@@ -332,7 +344,9 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted, sources
       approved: approved.reduce((n, g) => n + g.rows.length, 0),
       rejected: rejected.reduce((n, g) => n + g.rows.length, 0),
       self: userAsserted.reduce((n, g) => n + g.rows.length, 0),
-      sources: sources.sources.length,
+      sources:
+        sources.lists.length +
+        sources.sources.filter((x) => !sources.lists.some((l) => l.rosterUrl === x.key)).length,
     }),
     [undecided, approved, rejected, userAsserted, sources],
   );
@@ -390,7 +404,7 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted, sources
         : tab === "rejected"
           ? "Matches that were ruled out. They won’t be suggested again."
           : tab === "sources"
-            ? "Honor lists the matches come from, and when a list was last loaded."
+            ? "Honor lists we scrape, and when each last ran."
             : "Honors scholars added to their own profiles. Shown as self-reported.";
 
   function switchTab(next: Tab) {
@@ -655,7 +669,11 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted, sources
       ) : null}
 
       {tab === "sources" ? (
-        <SourcesPanel summary={sources} empty={emptyMessage("sources", true)} />
+        <SourcesPanel
+          summary={sources}
+          empty={emptyMessage("sources", true)}
+          runNowEnabled={runNowEnabled}
+        />
       ) : tab === "pending" ? (
         filtered.length === 0 ? (
           <EmptyCard slot="honors-queue-empty">{emptyMessage(tab, source.length === 0)}</EmptyCard>
@@ -1094,23 +1112,32 @@ function CandidateRow({
       </div>
       <span
         className={cn(
-          "text-muted-foreground text-xs sm:text-right",
+          "text-muted-foreground flex flex-col gap-0.5 text-xs sm:items-end sm:text-right",
           choosing && "col-start-2 sm:col-start-auto",
         )}
       >
-        {row.roleLabel && role !== row.roleLabel ? `${row.roleLabel} · ` : null}
-        {row.slug ? (
-          <a
-            href={`/scholars/${row.slug}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-apollo-slate hover:underline"
-          >
-            profile ↗
-          </a>
-        ) : (
-          <span className="italic">no public profile</span>
-        )}
+        {/* What the match rests on (the mockup's evidence column). Only scraped
+            rows carry it; seeded and hand-entered rows show the type alone. */}
+        {row.evidence ? (
+          <span className="sm:max-w-[34ch]" data-slot="honor-evidence">
+            {row.evidence}
+          </span>
+        ) : null}
+        <span>
+          {row.roleLabel && role !== row.roleLabel ? `${row.roleLabel} · ` : null}
+          {row.slug ? (
+            <a
+              href={`/scholars/${row.slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-apollo-slate hover:underline"
+            >
+              profile ↗
+            </a>
+          ) : (
+            <span className="italic">no public profile</span>
+          )}
+        </span>
       </span>
     </>
   );
@@ -1323,53 +1350,157 @@ function runStatus(run: HonorSourceRun): { label: string; dot: string; ink: stri
   return { label: "Running", dot: "bg-apollo-amber", ink: "text-apollo-amber" };
 }
 
-const SOURCE_COLS = "sm:grid-cols-[minmax(0,2.2fr)_90px_80px_80px_80px]";
+const SOURCE_COLS = "sm:grid-cols-[minmax(0,2.2fr)_80px_150px_76px_64px_92px]";
+
+/** "Sep 1, 2026" — a list run's date. */
+function formatRunDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function listRunStatus(run: HonorListRunView | null): { label: string; dot: string; ink: string } {
+  switch (run?.status) {
+    case "success":
+      return { label: "Succeeded", dot: "bg-apollo-slate", ink: "text-muted-foreground" };
+    case "partial":
+      return { label: "Partial", dot: "bg-apollo-amber", ink: "text-apollo-amber" };
+    case "failed":
+      return { label: "Failed", dot: "bg-destructive", ink: "text-destructive" };
+    case "stalled":
+      return { label: "Did not finish", dot: "bg-destructive", ink: "text-destructive" };
+    case "queued":
+      return { label: "Queued", dot: "bg-apollo-slate", ink: "text-apollo-slate" };
+    case "running":
+      return { label: "Running now…", dot: "bg-apollo-slate", ink: "text-apollo-slate" };
+    default:
+      return { label: "Not run yet", dot: "bg-apollo-border-strong", ink: "text-muted-foreground" };
+  }
+}
+
+/** The error line shown under a list: the latest run's, when it did not succeed. */
+function listRunError(run: HonorListRunView | null): string | null {
+  if (!run) return null;
+  if (run.status === "stalled")
+    return "The run did not finish. Run it again, or check the ETL logs.";
+  if (run.status === "failed" || run.status === "partial") return run.errorMessage;
+  return null;
+}
+
+const count = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("en-US"));
+
+/** How often a queued/running list re-reads its status. */
+const RUN_POLL_MS = 20_000;
 
 /**
- * Sources: the honor rosters the queue's rows came from, with how many lines
- * each matched and where they stand, and the recorded load runs. Read-only.
- * There is no Run now: loads are operator-run jobs with no console trigger, so
- * every list's schedule is "Manual" and one load covers every list.
+ * Sources: every honor list the queue's matches come from.
+ *
+ *  - SCRAPED lists (`lib/honors/lists.ts`) run weekly on the deployed honors
+ *    scrape. Each shows its latest run (date, status, on-list size, WCM matches)
+ *    and, when HONORS_RUN_NOW is on, a Run now that queues one scrape of that
+ *    list. A queued or running list polls until it finishes.
+ *  - Every other roster the queue's rows came from was loaded by the
+ *    operator-run seed import: Schedule "Manual", no Run now.
  */
-function SourcesPanel({ summary, empty }: { summary: HonorSourcesSummary; empty: string }) {
-  const { sources, runs } = summary;
+function SourcesPanel({
+  summary,
+  empty,
+  runNowEnabled,
+}: {
+  summary: HonorSourcesSummary;
+  empty: string;
+  runNowEnabled: boolean;
+}) {
+  const router = useRouter();
+  const { sources, runs, lists } = summary;
   const last = runs[0] ?? null;
   const lastStatus = last ? runStatus(last) : null;
+  const scrapedUrls = new Set(lists.map((l) => l.rosterUrl));
+  const manual = sources.filter((s) => !scrapedUrls.has(s.key));
+  const rollupByUrl = new Map(sources.map((s) => [s.key, s]));
   const waiting = sources.reduce((n, s) => n + s.pendingLines, 0);
+  const partial = lists.filter((l) => l.latest?.status === "partial").length;
+  const failed = lists.filter(
+    (l) => l.latest?.status === "failed" || l.latest?.status === "stalled",
+  ).length;
+  const total = lists.length + manual.length;
+
+  /** List id -> when this page asked for a run, until the server shows it. */
+  const [requested, setRequested] = useState<Record<string, number>>({});
+  const [runBusy, setRunBusy] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const isPending = (l: HonorListStatus) => {
+    if (l.active) return true;
+    const at = requested[l.id];
+    if (at === undefined) return false;
+    // Settled once the server shows a run created since the request (a minute
+    // of clock-skew slack) that is no longer active.
+    return !(l.latest && Date.parse(l.latest.createdAt) >= at - 60_000);
+  };
+  const anyActive = lists.some(isPending);
+
+  // While anything is queued or running, re-read the page so the row flips to
+  // its result without a manual reload.
+  useEffect(() => {
+    if (!anyActive) return;
+    const t = setInterval(() => router.refresh(), RUN_POLL_MS);
+    return () => clearInterval(t);
+  }, [anyActive, router]);
+
+  async function runNow(listId: string) {
+    setRunBusy(listId);
+    setRunError(null);
+    try {
+      const res = await fetch("/api/edit/honor/sources/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ list: listId }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (res.ok && json.ok) {
+        setRequested((r) => ({ ...r, [listId]: Date.now() }));
+        router.refresh();
+      } else if (json.error === "already_running") {
+        setRequested((r) => ({ ...r, [listId]: Date.now() }));
+        setRunError("That list is already queued or running.");
+        router.refresh();
+      } else {
+        setRunError("The run could not be started. Try again, or ask an administrator.");
+      }
+    } catch {
+      setRunError("The run could not be started. Check your connection and try again.");
+    } finally {
+      setRunBusy(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4" data-slot="honors-sources">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[15px]">
         <span className="text-muted-foreground whitespace-nowrap">
-          <span className="text-foreground font-semibold tabular-nums">{sources.length}</span> honor
-          list{sources.length === 1 ? "" : "s"}
+          <span className="text-foreground font-semibold tabular-nums">{total}</span> honor list
+          {total === 1 ? "" : "s"}
+        </span>
+        <span className="text-muted-foreground whitespace-nowrap">
+          <span className="text-apollo-amber font-semibold tabular-nums">{partial}</span> partial
+        </span>
+        <span className="text-muted-foreground whitespace-nowrap">
+          <span className="text-destructive font-semibold tabular-nums">{failed}</span> failed
         </span>
         <span className="text-muted-foreground whitespace-nowrap">
           <span className="text-apollo-amber font-semibold tabular-nums">{waiting}</span> waiting
         </span>
-        <span
-          className="text-muted-foreground inline-flex flex-wrap items-center gap-1.5 text-[13.5px]"
-          data-slot="honors-sources-last-run"
-        >
-          {last && lastStatus ? (
-            <>
-              <span className={cn("size-2 flex-none rounded-full", lastStatus.dot)} aria-hidden />
-              Last load {formatRunTime(last.startedAt)} ·{" "}
-              <span className={lastStatus.ink}>{lastStatus.label}</span> ·{" "}
-              {last.rowsProcessed.toLocaleString("en-US")} rows
-            </>
-          ) : (
-            "No load recorded yet"
-          )}
-        </span>
       </div>
 
-      {last?.status === "failed" && last.errorMessage ? (
-        <div
-          className="border-apollo-red-tint-border bg-apollo-red-tint text-destructive rounded-md border px-2.5 py-1.5 font-mono text-[12.5px] [overflow-wrap:anywhere]"
-          data-slot="honors-sources-error"
-        >
-          {last.errorMessage}
-        </div>
+      {runError ? (
+        <p className="text-destructive m-0 text-[13px]" role="alert" data-slot="honors-run-error">
+          {runError}
+        </p>
       ) : null}
 
       <div
@@ -1385,21 +1516,111 @@ function SourcesPanel({ summary, empty }: { summary: HonorSourcesSummary; empty:
         >
           <span>Honor list</span>
           <span>Schedule</span>
-          <span className="text-right">Matched</span>
-          <span className="text-right">Waiting</span>
-          <span className="text-right">Approved</span>
+          <span>Last run</span>
+          <span className="text-right">On list</span>
+          <span className="text-right">WCM</span>
+          <span />
         </div>
-        {sources.length === 0 ? (
+        {total === 0 ? (
           <div className="text-muted-foreground p-8 text-center text-sm">{empty}</div>
         ) : (
           <ul>
-            {sources.map((s, i) => (
+            {lists.map((l, i) => {
+              const shownRun = l.latest;
+              const st = listRunStatus(shownRun);
+              const counts = l.lastFinished?.status === "failed" ? null : l.lastFinished;
+              const pending = isPending(l);
+              const err = listRunError(shownRun);
+              const rollup = rollupByUrl.get(l.rosterUrl);
+              return (
+                <li
+                  key={l.id}
+                  className={cn(i > 0 && "border-apollo-border border-t")}
+                  data-slot="honors-list"
+                  data-list={l.id}
+                >
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-center gap-x-3.5 gap-y-1 px-5 py-2.5 text-sm sm:grid",
+                      SOURCE_COLS,
+                    )}
+                  >
+                    <span className="flex min-w-0 basis-full flex-col gap-0.5 sm:basis-auto">
+                      <span className="truncate font-medium">{l.honorName}</span>
+                      <span className="text-muted-foreground truncate text-[12.5px]">
+                        {l.organization}
+                        {" · "}
+                        <a
+                          href={l.rosterUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-apollo-slate font-mono text-xs hover:underline"
+                        >
+                          {l.host}
+                        </a>
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground text-[13px]">{l.schedule}</span>
+                    <span className="flex flex-col gap-0.5" data-slot="honors-list-last-run">
+                      <span className="inline-flex items-center gap-1.5 text-[13px]">
+                        <span className={cn("size-2 flex-none rounded-full", st.dot)} aria-hidden />
+                        {shownRun ? formatRunDate(shownRun.finishedAt ?? shownRun.createdAt) : "—"}
+                      </span>
+                      <span className={cn("text-xs", st.ink)}>{st.label}</span>
+                    </span>
+                    <span className="text-[13px] tabular-nums sm:text-right sm:text-sm">
+                      {count(counts?.onListTotal)}
+                      <span className="text-muted-foreground sm:hidden"> on list</span>
+                    </span>
+                    <span
+                      className="text-[13px] font-medium tabular-nums sm:text-right sm:text-sm"
+                      title={
+                        rollup
+                          ? `${rollup.pendingLines} waiting · ${rollup.approved} approved`
+                          : undefined
+                      }
+                    >
+                      {count(counts?.matched)}
+                      <span className="text-muted-foreground font-normal sm:hidden"> WCM</span>
+                    </span>
+                    <span className="flex sm:justify-end">
+                      {runNowEnabled ? (
+                        <button
+                          type="button"
+                          onClick={() => runNow(l.id)}
+                          disabled={pending || runBusy !== null}
+                          className="border-apollo-border-strong bg-apollo-surface hover:bg-apollo-surface-2 h-7 rounded-md border px-2.5 text-[12.5px] whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60"
+                          data-slot="honors-run-now"
+                        >
+                          {runBusy === l.id
+                            ? "Starting…"
+                            : pending
+                              ? l.latest?.status === "running"
+                                ? "Running…"
+                                : "Queued"
+                              : "Run now"}
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                  {err ? (
+                    <div
+                      className="border-apollo-red-tint-border bg-apollo-red-tint text-destructive mx-5 mb-2.5 rounded-md border px-2.5 py-1.5 font-mono text-[12.5px] [overflow-wrap:anywhere]"
+                      data-slot="honors-list-error"
+                    >
+                      {err}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+            {manual.map((s, i) => (
               <li
                 key={s.key}
                 className={cn(
-                  "flex flex-wrap gap-x-3.5 gap-y-0.5 px-5 py-2.5 text-sm sm:grid sm:items-center",
+                  "flex flex-wrap items-center gap-x-3.5 gap-y-1 px-5 py-2.5 text-sm sm:grid",
                   SOURCE_COLS,
-                  i > 0 && "border-apollo-border border-t",
+                  (i > 0 || lists.length > 0) && "border-apollo-border border-t",
                 )}
                 data-slot="honors-source"
               >
@@ -1423,33 +1644,51 @@ function SourcesPanel({ summary, empty }: { summary: HonorSourcesSummary; empty:
                   </span>
                 </span>
                 <span className="text-muted-foreground text-[13px]">Manual</span>
-                <span className="text-[13px] tabular-nums sm:text-right sm:text-sm">
-                  {s.lines}
-                  <span className="text-muted-foreground sm:hidden"> matched</span>
-                </span>
-                <span
-                  className={cn(
-                    "text-[13px] tabular-nums sm:text-right sm:text-sm",
-                    s.pendingLines > 0 && "text-apollo-amber font-medium",
-                  )}
-                >
-                  {s.pendingLines}
-                  <span className="text-muted-foreground font-normal sm:hidden"> waiting</span>
+                <span className="text-muted-foreground text-[13px]">Seed import</span>
+                <span className="text-muted-foreground text-[13px] sm:text-right sm:text-sm">
+                  —
                 </span>
                 <span className="text-[13px] font-medium tabular-nums sm:text-right sm:text-sm">
-                  {s.approved}
-                  <span className="text-muted-foreground font-normal sm:hidden"> approved</span>
+                  {s.lines}
+                  <span className="text-muted-foreground font-normal sm:hidden"> WCM</span>
                 </span>
+                <span />
               </li>
             ))}
           </ul>
         )}
         <div className="bg-apollo-page border-apollo-border text-muted-foreground border-t px-5 py-3 text-[13px]">
-          New matches from each load land in Possible. &ldquo;Matched&rdquo; counts list entries
-          matched to at least one Weill Cornell scholar. Lists are loaded by an operator, so there
-          is no automatic schedule yet.
+          New matches from each run land in Possible, and nothing is approved automatically.
+          &ldquo;On list&rdquo; counts the entries read from the list; &ldquo;WCM&rdquo; counts
+          those matched to a Weill Cornell scholar. &ldquo;Manual&rdquo; lists come from the
+          operator-run seed import.
         </div>
       </div>
+
+      <div
+        className="text-muted-foreground inline-flex flex-wrap items-center gap-1.5 text-[13px]"
+        data-slot="honors-sources-last-run"
+      >
+        {last && lastStatus ? (
+          <>
+            <span className={cn("size-2 flex-none rounded-full", lastStatus.dot)} aria-hidden />
+            Last full load {formatRunTime(last.startedAt)} ·{" "}
+            <span className={lastStatus.ink}>{lastStatus.label}</span> ·{" "}
+            {last.rowsProcessed.toLocaleString("en-US")} rows
+          </>
+        ) : (
+          "No full load recorded yet"
+        )}
+      </div>
+
+      {last?.status === "failed" && last.errorMessage ? (
+        <div
+          className="border-apollo-red-tint-border bg-apollo-red-tint text-destructive rounded-md border px-2.5 py-1.5 font-mono text-[12.5px] [overflow-wrap:anywhere]"
+          data-slot="honors-sources-error"
+        >
+          {last.errorMessage}
+        </div>
+      ) : null}
 
       {runs.length > 1 ? (
         <details className="text-[13px]" data-slot="honors-sources-runs">

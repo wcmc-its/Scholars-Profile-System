@@ -140,6 +140,8 @@ export class EtlStack extends Stack {
   public readonly reconcileStateMachine: sfn.StateMachine;
   /** #353 durable CloudFront-invalidation reconciler (ADR-005 layer 3), ~5 min cadence. */
   public readonly cdnReconcileStateMachine: sfn.StateMachine;
+  /** Honors-list scraper, `scholars-honors-<env>`: weekly + the console's Run now. */
+  public readonly honorsStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
@@ -2949,6 +2951,127 @@ export class EtlStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // Honors-list scraper -- `scholars-honors-<env>`.
+    //
+    // A one-shot `etl:honors` run (etl/honors/scrape-lists.ts) on the base ETL
+    // task def: it reads the public honor rosters in lib/honors/lists.ts and
+    // proposes each new Weill Cornell match as a PENDING honor for the curator
+    // queue. Nothing it writes can reach a profile without a human approving it.
+    //
+    // Its OWN machine rather than a WeeklyStateMachine step, because the console
+    // starts it too: the honors queue's Run now (POST /api/edit/honor/sources/run,
+    // behind HONORS_RUN_NOW) calls states:StartExecution on exactly this machine,
+    // and the app task role's grant is scoped to it by NAME
+    // (TaskRoleHonorsRunNowPolicy in app-stack.ts builds the same ARN). Granting
+    // StartExecution on the weekly machine instead would let the app start the
+    // whole weekly chain.
+    //
+    // Input -> container env (both fields REQUIRED, JsonPath fails on a missing
+    // one): { "lists": "all" | "<id>[,<id>]", "trigger": "schedule" | "manual" }.
+    // The weekly rule sends all lists; Run now sends one.
+    //
+    // ETL code ships on the ECR push, so a parser fix needs no cdk deploy; this
+    // block (the machine, rule and alarm) does, once.
+    //
+    // No task retry: a failed list is recorded on its honor_list_run row and the
+    // next weekly run (or a Run now) is the retry. The run is idempotent (an
+    // existing honor row is never re-proposed) but re-fetching every roster on a
+    // transient failure is not worth the load on sites we do not own.
+    // ------------------------------------------------------------------
+    const honorsUnit = taskUnitFor("etl:honors"); // base (no source creds)
+    const honorsTask = new tasks.EcsRunTask(this, "TaskHonorsLists", {
+      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+      cluster: ecsCluster,
+      taskDefinition: honorsUnit.taskDefinition,
+      launchTarget: new tasks.EcsFargateLaunchTarget({
+        platformVersion: ecs.FargatePlatformVersion.LATEST,
+      }),
+      assignPublicIp: false,
+      subnets: etlTaskSubnets,
+      securityGroups: [etlSecurityGroup],
+      containerOverrides: [
+        {
+          containerDefinition: honorsUnit.container,
+          command: ["npm", "run", "etl:honors"],
+          environment: [
+            { name: "HONORS_LISTS", value: sfn.JsonPath.stringAt("$.lists") },
+            { name: "HONORS_TRIGGER", value: sfn.JsonPath.stringAt("$.trigger") },
+          ],
+        },
+      ],
+      // A few roster pages per list; 45 min is ample over cold start and well
+      // inside the app's 3h "did not finish" window (HONOR_LIST_RUN_STALE_MS).
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(45)),
+    });
+    honorsTask.addCatch(
+      new tasks.SnsPublish(this, "NotifyHonorsLists", {
+        topic: this.failureTopic,
+        subject: `SPS honors-list scrape ${env} -- run failed`,
+        message: sfn.TaskInput.fromObject({
+          env,
+          step: "HonorsLists",
+          stateMachine: sfn.JsonPath.stateMachineName,
+          execution: sfn.JsonPath.executionName,
+          error: sfn.JsonPath.stringAt("$.error"),
+        }),
+      }).next(new sfn.Fail(this, "FailHonorsLists", { cause: "honors-list scrape failed" })),
+      { errors: ["States.ALL"], resultPath: "$.error" },
+    );
+
+    const honorsSmLogGroup = new logs.LogGroup(this, "HonorsSmLogGroup", {
+      logGroupName: `/aws/states/honors-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.honorsStateMachine = new sfn.StateMachine(this, "HonorsStateMachine", {
+      stateMachineName: `scholars-honors-${env}`,
+      stateMachineType: sfn.StateMachineType.STANDARD,
+      definitionBody: sfn.DefinitionBody.fromChainable(honorsTask),
+      // Over the 45 min task timeout so the task's own timeout (which the Catch
+      // sees and pages on) always fires first; a machine TIMED_OUT runs no Catch.
+      timeout: Duration.minutes(60),
+      logs: {
+        destination: honorsSmLogGroup,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
+      },
+      tracingEnabled: true,
+    });
+
+    // Weekly, Monday 10:00 UTC: clear of the Sunday 12:00 weekly chain and the
+    // 07:00 nightly. Enabled in both envs: a run only ever adds PENDING rows.
+    const honorsRule = new events.Rule(this, "HonorsScheduleRule", {
+      ruleName: `sps-honors-${env}`,
+      description: `SPS honors-list scrape -- weekly Mon 10:00 UTC (${env}).`,
+      schedule: events.Schedule.cron({ minute: "0", hour: "10", weekDay: "MON" }),
+      enabled: true,
+    });
+    honorsRule.addTarget(
+      new eventsTargets.SfnStateMachine(this.honorsStateMachine, {
+        input: events.RuleTargetInput.fromObject({ lists: "all", trigger: "schedule" }),
+        retryAttempts: 0,
+      }),
+    );
+
+    // Status alarm: failed, timed out or aborted. Absence (the schedule dying)
+    // is the freshness heartbeat's job -- TRACKED.HonorsLists (weekly) in
+    // lib/etl/freshness-policy.ts -- rather than a 7-day cadence alarm sitting
+    // exactly on CloudWatch's 604800s evaluation ceiling.
+    const honorsStatusAlarm = new cloudwatch.Alarm(this, "HonorsStatusAlarm", {
+      alarmName: `sps-honors-status-${env}`,
+      alarmDescription: `SPS honors-list scrape (${env}) -- a run did not finish successfully: every requested list failed, it ran out of time, or it was stopped. Candidates already in the queue are unaffected; no new ones arrived. Next: open the Step Functions execution for scholars-honors-${env}, read the task log, and check each list's error on the honors queue's Sources tab. A roster that changed layout needs a parser fix in etl/honors/lists/.`,
+      metric: unsuccessfulMetric(
+        { StateMachineArn: this.honorsStateMachine.stateMachineArn },
+        Duration.days(1),
+      ),
+      evaluationPeriods: 1,
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    honorsStatusAlarm.addAlarmAction(alarmAction);
+
+    // ------------------------------------------------------------------
     // Grants bulk-export schedule -- nightly all-scholars `export:grants-bulk`
     // NDJSON dump (see GrantsExportBucket above) for the Research Informatics
     // cross-account consumer. Structurally mirrors the curated-tables backup
@@ -3559,6 +3682,10 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "NightlyStateMachineArn", {
       value: this.nightlyStateMachine.stateMachineArn,
       description: "SPS nightly ETL state machine ARN.",
+    });
+    new CfnOutput(this, "HonorsStateMachineArn", {
+      value: this.honorsStateMachine.stateMachineArn,
+      description: "SPS honors-list scrape state machine ARN (weekly + honors Run now).",
     });
     new CfnOutput(this, "WeeklyStateMachineArn", {
       value: this.weeklyStateMachine.stateMachineArn,

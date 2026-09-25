@@ -328,12 +328,13 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates seven state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler + grants export), seven EventBridge rules, two SNS topics", () => {
+      it("creates eight state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler + grants export + honors lists), eight EventBridge rules, two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
         // the #353 cdn reconciler (PR-2) + the grants-export machine, now
-        // that grantsExportScheduleEnabled is true in prod too.
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 7);
-        template.resourceCountIs("AWS::Events::Rule", 7);
+        // that grantsExportScheduleEnabled is true in prod too, + the
+        // honors-list scraper (weekly + the console's Run now).
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 8);
+        template.resourceCountIs("AWS::Events::Rule", 8);
         // The heartbeat + both reconcilers + grants export reuse the cadence
         // failure topic; PR-7 adds the etl-page P1 topic, so two total:
         // etl-failures + etl-page.
@@ -342,7 +343,7 @@ describe("EtlStack", () => {
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates seventeen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness)", () => {
+      it("creates eighteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status)", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
         // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
         // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
@@ -350,7 +351,9 @@ describe("EtlStack", () => {
         // cadence), now that grantsExportScheduleEnabled is true in prod too,
         // + the Phase 0a opportunity-corpus-freshness alarm (custom SPS/ETL
         // metric, not an AWS/States one).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 17);
+        // + the honors-list scraper's status alarm (its absence is graded by the
+        // freshness heartbeat, TRACKED.HonorsLists, not a cadence alarm).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 18);
       });
 
       it("creates eight ECS task definitions (5 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -705,10 +708,11 @@ describe("EtlStack", () => {
         // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353) + 2
         // grants-export alarms (status + cadence), now that
         // grantsExportScheduleEnabled is true in prod too, + the Phase 0a
-        // opportunity-corpus-freshness alarm; all share the
+        // opportunity-corpus-freshness alarm + the honors-list scraper's
+        // status alarm; all share the
         // topic -- a duration alarm that routed elsewhere would be invisible,
         // so it is covered by the same loop below.
-        expect(Object.keys(alarms)).toHaveLength(17);
+        expect(Object.keys(alarms)).toHaveLength(18);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -1813,8 +1817,9 @@ describe("EtlStack", () => {
       // the grants bulk export rule + the #443 ED email-visibility bridge
       // rule; all enabled in staging.
       // The #1218 opportunity-projection rule was RETIRED in staging on
-      // 2026-07-20 (the nightly now covers the work), so 9 rather than 10.
-      expect(Object.keys(rules)).toHaveLength(9);
+      // 2026-07-20 (the nightly now covers the work); the honors-list scraper's
+      // weekly rule brings it to 10.
+      expect(Object.keys(rules)).toHaveLength(10);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -2257,4 +2262,44 @@ describe("EtlStack", () => {
       expect(states.FailIntegrityNightly.Type).toBe("Fail");
     });
   });
+});
+
+// Honors-list scraper: its own machine so the app's Run now grant can be scoped
+// to it alone (TaskRoleHonorsRunNowPolicy in app-stack.ts builds its ARN from
+// the NAME asserted here).
+describe("EtlStack honors-list scraper (scholars-honors-<env>)", () => {
+  for (const env of ["staging", "prod"] as const) {
+    const { template } = buildEtlStack(env);
+
+    it(`${env}: a named machine running etl:honors with the input-driven env`, () => {
+      const sms = Object.values(template.findResources("AWS::StepFunctions::StateMachine"));
+      const honors = sms.find((s) => s.Properties?.StateMachineName === `scholars-honors-${env}`);
+      expect(honors).toBeDefined();
+      const def = JSON.stringify(honors?.Properties?.DefinitionString);
+      expect(def).toContain("etl:honors");
+      expect(def).toContain("HONORS_LISTS");
+      expect(def).toContain("$.lists");
+      expect(def).toContain("HONORS_TRIGGER");
+      expect(def).toContain("$.trigger");
+    });
+
+    it(`${env}: a weekly rule, enabled, sending every list`, () => {
+      const rule = Object.values(template.findResources("AWS::Events::Rule")).find(
+        (r) => r.Properties?.Name === `sps-honors-${env}`,
+      );
+      expect(rule?.Properties?.ScheduleExpression).toBe("cron(0 10 ? * MON *)");
+      expect(rule?.Properties?.State).toBe("ENABLED");
+      expect(rule?.Properties?.Targets).toHaveLength(1);
+      expect(JSON.parse(rule?.Properties?.Targets[0].Input)).toEqual({
+        lists: "all",
+        trigger: "schedule",
+      });
+    });
+
+    it(`${env}: a status alarm on the machine`, () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: `sps-honors-status-${env}`,
+      });
+    });
+  }
 });

@@ -578,6 +578,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "ITS:Library:Scholars/honors-curator-role",
               },
               {
+                "Name": "HONORS_RUN_NOW",
+                "Value": "off",
+              },
+              {
+                "Name": "HONORS_STATE_MACHINE_ARN",
+                "Value": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-prod",
+              },
+              {
                 "Name": "DATA_SHARING_VIEWER_ENABLED",
                 "Value": "on",
               },
@@ -4154,6 +4162,27 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleHonorsRunNowPolicy88BAC4EA": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-prod",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-honors-run-now",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleOpportunitySubmissionPolicy51C9A514": {
       "Properties": {
         "PolicyDocument": {
@@ -5071,6 +5100,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_HONORS_CURATOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/honors-curator-role",
+              },
+              {
+                "Name": "HONORS_RUN_NOW",
+                "Value": "off",
+              },
+              {
+                "Name": "HONORS_STATE_MACHINE_ARN",
+                "Value": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-staging",
               },
               {
                 "Name": "DATA_SHARING_VIEWER_ENABLED",
@@ -8641,6 +8678,27 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleHonorsRunNowPolicy88BAC4EA": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-staging",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-honors-run-now",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",

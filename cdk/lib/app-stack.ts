@@ -190,6 +190,9 @@ export class AppStack extends Stack {
 
     const { envConfig, vpc } = props;
     const env = envConfig.envName;
+    // `scholars-honors-<env>` (EtlStack HonorsStateMachine), by name -- see
+    // TaskRoleHonorsRunNowPolicy below.
+    const honorsStateMachineArn = `arn:aws:states:${this.region}:${this.account}:stateMachine:scholars-honors-${env}`;
     // Item-3 pass 2a: import the app/etl/alb SGs by id from the SSM params
     // NetworkStack publishes (pass 1) instead of the cross-stack handles — severs
     // the SG `Ref` exports that would lock the useSharedVpc flip (the SGs replace
@@ -1133,6 +1136,31 @@ export class AppStack extends Stack {
     // No cloudwatch:DescribeAlarms -- the loader never calls it (alarm STATE is
     // not read, only history).
     // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Honors queue Run now -- start the honors-list scrape.
+    //
+    // POST /api/edit/honor/sources/run (lib/honors/run-now.ts) calls
+    // states:StartExecution on `scholars-honors-<env>` (EtlStack
+    // HonorsStateMachine) and nothing else: one action, one machine. Not
+    // DescribeExecution/StopExecution -- the Sources tab reads run state from
+    // `honor_list_run`, which the job itself writes. The ARN is built from the
+    // machine NAME so this stack does not depend on EtlStack (which is deployed
+    // separately); a rename there must be mirrored here. Gated in code by
+    // HONORS_RUN_NOW (off in both envs); the grant lands first so the flip is
+    // the only step.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleHonorsRunNowPolicy", {
+      policyName: `sps-task-${env}-honors-run-now`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["states:StartExecution"],
+          resources: [honorsStateMachineArn],
+        }),
+      ],
+    });
+
     new iam.Policy(this, "TaskRoleCloudWatchReadPolicy", {
       policyName: `sps-task-${env}-cloudwatch-read`,
       roles: [taskRole],
@@ -1781,6 +1809,19 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         HONORS_CURATOR_ENABLED: "on",
         SCHOLARS_HONORS_CURATOR_GROUP_CN: "ITS:Library:Scholars/honors-curator-role",
+        // Honors queue Sources tab -- Run now. When "on", a superuser or
+        // honors_curator can start the honors-list scrape for one list
+        // (POST /api/edit/honor/sources/run -> states:StartExecution on
+        // scholars-honors-<env>, EtlStack HonorsStateMachine). Off ⇒ the button
+        // is hidden and the route 404s; the weekly schedule runs regardless.
+        // The grant below (TaskRoleHonorsRunNowPolicy) and the ARN ship with
+        // this deploy, so flipping the flag is the only step left. OFF in both
+        // envs until the first scheduled run has been checked on staging.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        HONORS_RUN_NOW: "off",
+        // The machine Run now starts. Built from the name, not imported from
+        // EtlStack, so the app stack takes no cross-stack dependency on it.
+        HONORS_STATE_MACHINE_ARN: honorsStateMachineArn,
         // `data_sharing_viewer` role (2026-08-15 -- data-sharing dashboard
         // handoff). Unlocks ONLY /edit/data-sharing for the dashboard's
         // reframed standing audience (research leadership, compliance/grant

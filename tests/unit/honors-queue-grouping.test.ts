@@ -32,6 +32,7 @@ function mkRow(over: Partial<HonorQueueRow>): HonorQueueRow {
     rejectionReason: null,
     superseded: false,
     competingCwids: [],
+    evidence: null,
     ...over,
   };
 }

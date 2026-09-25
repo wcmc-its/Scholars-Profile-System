@@ -2613,3 +2613,25 @@ describe("AppStack", () => {
     });
   });
 });
+
+// Honors queue Run now: ONE action on ONE machine, and the flag ships dark.
+describe("AppStack honors Run now", () => {
+  for (const env of ["staging", "prod"] as const) {
+    it(`${env}: grants states:StartExecution on scholars-honors-${env} only, flag off`, () => {
+      const { template } = buildAppStack(env);
+      const policies = Object.values(template.findResources("AWS::IAM::Policy")).filter(
+        (p) => p.Properties?.PolicyName === `sps-task-${env}-honors-run-now`,
+      );
+      expect(policies).toHaveLength(1);
+      const statements = policies[0].Properties.PolicyDocument.Statement;
+      expect(statements).toHaveLength(1);
+      expect(statements[0].Action).toBe("states:StartExecution");
+      expect(JSON.stringify(statements[0].Resource)).toContain(
+        `:stateMachine:scholars-honors-${env}`,
+      );
+      const json = JSON.stringify(template.toJSON());
+      expect(json).toContain('"Name":"HONORS_RUN_NOW","Value":"off"');
+      expect(json).toContain('"Name":"HONORS_STATE_MACHINE_ARN"');
+    });
+  }
+});

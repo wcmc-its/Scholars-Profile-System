@@ -23,6 +23,12 @@
  * Operator-run in-VPC (`run-task` on the env's sps-etl task), NOT part of
  * etl/orchestrate.ts — the seed changes only when the curated file does.
  *
+ * The lists with a public, parseable roster are now scraped weekly instead
+ * (`etl/honors/scrape-lists.ts`, `npm run etl:honors`, lists in
+ * `lib/honors/lists.ts`). This import stays for the honor lists that have no
+ * scraper (their rosters refuse non-browser clients or need a login); its rows
+ * show as "Manual" on the queue's Sources tab.
+ *
  * Env:  HONORS_SEED_PATH   absolute path to the seed JSON (required — no
  *                          in-repo default on purpose)
  * Usage:
