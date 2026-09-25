@@ -1818,11 +1818,14 @@ describe("EtlStack", () => {
       // rule; all enabled in staging.
       // The #1218 opportunity-projection rule was RETIRED in staging on
       // 2026-07-20 (the nightly now covers the work); the honors-list scraper's
-      // weekly rule brings it to 10.
+      // weekly rule brings it to 10. That one rule ships DISABLED on purpose
+      // (first run is supervised; see the honors describe block below), so it
+      // is the single exception here.
       expect(Object.keys(rules)).toHaveLength(10);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
-        expect({ id, state }).toEqual({ id, state: "ENABLED" });
+        const expected = rule.Properties?.Name === "sps-honors-staging" ? "DISABLED" : "ENABLED";
+        expect({ id, state }).toEqual({ id, state: expected });
       }
     });
 
@@ -2281,14 +2284,39 @@ describe("EtlStack honors-list scraper (scholars-honors-<env>)", () => {
       expect(def).toContain("$.lists");
       expect(def).toContain("HONORS_TRIGGER");
       expect(def).toContain("$.trigger");
+      // A Run now execution names the queued row it must claim; a run without
+      // one (the schedule, an operator start) gets "" via the Choice default.
+      expect(def).toContain("HONORS_RUN_ID");
+      expect(def).toContain("$.runId");
+      const parsed = JSON.parse(
+        (honors?.Properties?.DefinitionString["Fn::Join"][1] as unknown[])
+          .map((p) => (typeof p === "string" ? p : "X"))
+          .join(""),
+      );
+      expect(parsed.StartAt).toBe("HonorsHasRunId");
+      expect(parsed.States.HonorsHasRunId.Choices[0]).toMatchObject({
+        Variable: "$.runId",
+        IsPresent: true,
+        Next: "TaskHonorsLists",
+      });
+      expect(parsed.States.HonorsHasRunId.Default).toBe("HonorsDefaultRunId");
+      expect(parsed.States.HonorsDefaultRunId).toMatchObject({
+        Type: "Pass",
+        Result: "",
+        ResultPath: "$.runId",
+        Next: "TaskHonorsLists",
+      });
     });
 
-    it(`${env}: a weekly rule, enabled, sending every list`, () => {
+    it(`${env}: a weekly rule, DISABLED on first deploy, sending every list`, () => {
       const rule = Object.values(template.findResources("AWS::Events::Rule")).find(
         (r) => r.Properties?.Name === `sps-honors-${env}`,
       );
       expect(rule?.Properties?.ScheduleExpression).toBe("cron(0 10 ? * MON *)");
-      expect(rule?.Properties?.State).toBe("ENABLED");
+      // Disabled in BOTH envs until a supervised first run has been checked for
+      // candidates that duplicate the seed import; the machine still deploys
+      // and is startable by hand.
+      expect(rule?.Properties?.State).toBe("DISABLED");
       expect(rule?.Properties?.Targets).toHaveLength(1);
       expect(JSON.parse(rule?.Properties?.Targets[0].Input)).toEqual({
         lists: "all",

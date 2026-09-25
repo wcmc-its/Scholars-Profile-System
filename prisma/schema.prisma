@@ -346,6 +346,13 @@ model HonorListRun {
   newCandidates   Int?      @map("new_candidates")
   errorMessage    String?   @map("error_message") @db.VarChar(1024)
   createdAt       DateTime  @default(now()) @map("created_at")
+  /// The one-in-flight-per-list lock: set to `listId` while the run is
+  /// `queued` or `running`, NULL once it ends (any end state, including a stale
+  /// row expired as "did not finish"). UNIQUE, and MySQL admits any number of
+  /// NULLs, so at most ONE active run per list can exist: a second insert gets
+  /// P2002, which Run now answers 409 and the scheduled run skips.
+  /// See `lib/honors/run-lock.ts`.
+  activeListId    String?   @unique @map("active_list_id") @db.VarChar(64)
 
   @@index([listId, createdAt])
   @@map("honor_list_run")

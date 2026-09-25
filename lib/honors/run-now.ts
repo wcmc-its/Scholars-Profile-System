@@ -10,7 +10,10 @@
  * (`TaskRoleHonorsRunNowPolicy`, cdk/lib/app-stack.ts).
  *
  * Execution input — the shape the state machine reads into the container env:
- *   { "lists": "<id>[,<id>]", "trigger": "manual" }
+ *   { "lists": "<id>", "trigger": "manual", "runId": "<honor_list_run.id>" }
+ *
+ * `runId` is the queued row the route just wrote; the job claims exactly that
+ * row (HONORS_RUN_ID, see lib/honors/run-lock.ts claimHonorRun).
  */
 import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 
@@ -27,13 +30,15 @@ export function honorsStateMachineArn(): string | null {
 
 export type StartHonorsRun = (input: {
   lists: string[];
+  /** The queued `honor_list_run` row this execution must claim. */
+  runId: string;
   requestId: string;
 }) => Promise<{ executionArn: string }>;
 
 let client: SFNClient | null = null;
 
 /** Start one execution. Throws when the ARN is not configured or the call fails. */
-export const startHonorsRun: StartHonorsRun = async ({ lists, requestId }) => {
+export const startHonorsRun: StartHonorsRun = async ({ lists, runId, requestId }) => {
   const stateMachineArn = honorsStateMachineArn();
   if (!stateMachineArn) throw new Error("HONORS_STATE_MACHINE_ARN is not set");
   client ??= new SFNClient({});
@@ -43,7 +48,7 @@ export const startHonorsRun: StartHonorsRun = async ({ lists, requestId }) => {
       // Execution names must be unique per machine for 90 days; the request id
       // is, and it ties the execution to its audit row.
       name: `run-now-${requestId}`.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 80),
-      input: JSON.stringify({ lists: lists.join(","), trigger: "manual" }),
+      input: JSON.stringify({ lists: lists.join(","), trigger: "manual", runId }),
     }),
   );
   if (!out.executionArn) throw new Error("StartExecution returned no executionArn");

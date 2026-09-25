@@ -17,11 +17,16 @@
  * Env:
  *   HONORS_LISTS    "all" (default) or a comma-separated list of list ids.
  *   HONORS_TRIGGER  "schedule" (default) | "manual" — recorded on each run row.
+ *   HONORS_RUN_ID   set only by a Run now execution: the `queued` honor_list_run
+ *                   row the route wrote. Requires exactly one list.
  *
  * Records:
- *   - one `honor_list_run` row per list (the Sources tab's "Last run"). A Run now
- *     request pre-writes it as `queued`; this claims that row rather than adding
- *     a second one.
+ *   - one `honor_list_run` row per list (the Sources tab's "Last run"). A run
+ *     only ever claims its OWN row (lib/honors/run-lock.ts claimHonorRun): a Run
+ *     now execution claims the queued row named by HONORS_RUN_ID; any other run
+ *     inserts a new row holding the list's lock (`active_list_id`, UNIQUE). If
+ *     another run of a list is in flight (e.g. a Run now), a scheduled run SKIPS
+ *     that list rather than taking over its row or scraping it twice.
  *   - on an all-lists run, one `etl_run` row under source "HonorsLists" — the
  *     freshness heartbeat's weekly signal (lib/etl/freshness-policy.ts). A
  *     single-list Run now does NOT write it: one list succeeding says nothing
@@ -35,12 +40,8 @@
  */
 import { db, disconnect } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
-import {
-  HONOR_LIST_RUN_STALE_MS,
-  HONOR_LISTS,
-  type HonorListMeta,
-  selectHonorLists,
-} from "@/lib/honors/lists";
+import { HONOR_LISTS, type HonorListMeta, selectHonorLists } from "@/lib/honors/lists";
+import { claimHonorRun } from "@/lib/honors/run-lock";
 
 import { defaultFetch } from "./lists/html";
 import { SCRAPERS } from "./lists/index";
@@ -52,39 +53,38 @@ const dryRun = process.argv.includes("--dry-run");
 /** `honor_list_run.error_message` is VARCHAR(1024). */
 const ERROR_MAX = 1024;
 
-type ListOutcome = { list: string; status: "success" | "partial" | "failed"; onList: number };
+type ListOutcome = {
+  list: string;
+  status: "success" | "partial" | "failed" | "skipped";
+  onList: number;
+};
+type Trigger = "schedule" | "manual";
 
 const clip = (s: string) => (s.length <= ERROR_MAX ? s : `${s.slice(0, ERROR_MAX - 1)}…`);
-
-/** Claim a fresh `queued` row for this list (a Run now request), else open one. */
-async function openRun(listId: string, trigger: string): Promise<string> {
-  const since = new Date(Date.now() - HONOR_LIST_RUN_STALE_MS);
-  const queued = await db.write.honorListRun.findFirst({
-    where: { listId, status: "queued", createdAt: { gte: since } },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
-  if (queued) {
-    // Conditional, so two concurrent jobs cannot both claim one request.
-    const claimed = await db.write.honorListRun.updateMany({
-      where: { id: queued.id, status: "queued" },
-      data: { status: "running", startedAt: new Date() },
-    });
-    if (claimed.count === 1) return queued.id;
-  }
-  const run = await db.write.honorListRun.create({
-    data: { listId, trigger, status: "running", startedAt: new Date() },
-  });
-  return run.id;
-}
 
 async function runList(
   meta: HonorListMeta,
   index: ScholarIndex,
-  trigger: string,
+  trigger: Trigger,
+  ownRunId: string | null,
 ): Promise<ListOutcome> {
   const scraper = SCRAPERS[meta.id];
-  const runId = dryRun ? null : await openRun(meta.id, trigger);
+  let runId: string | null = null;
+  if (!dryRun) {
+    const claim = await claimHonorRun(db.write, { listId: meta.id, trigger, runId: ownRunId });
+    if (claim.kind === "busy") {
+      console.warn(`[Honors] ${meta.id}: another run of this list is in flight; skipped.`);
+      return { list: meta.id, status: "skipped", onList: 0 };
+    }
+    if (claim.kind === "missing") {
+      console.error(
+        `[Honors] ${meta.id}: run ${ownRunId} is not a queued run of this list ` +
+          "(expired as stale, or never written); nothing scraped.",
+      );
+      return { list: meta.id, status: "failed", onList: 0 };
+    }
+    runId = claim.id;
+  }
   try {
     if (!scraper) throw new Error(`no scraper registered for list "${meta.id}"`);
     const scrape = await scraper(defaultFetch);
@@ -123,6 +123,7 @@ async function runList(
       data: {
         status,
         finishedAt: new Date(),
+        activeListId: null,
         onListTotal: plan.onListTotal,
         matched: plan.matched,
         newCandidates: plan.creates.length,
@@ -137,7 +138,12 @@ async function runList(
       await db.write.honorListRun
         .update({
           where: { id: runId },
-          data: { status: "failed", finishedAt: new Date(), errorMessage: clip(message) },
+          data: {
+            status: "failed",
+            finishedAt: new Date(),
+            activeListId: null,
+            errorMessage: clip(message),
+          },
         })
         .catch((e) => console.error(`[Honors] could not record failure for ${meta.id}`, e));
     }
@@ -145,7 +151,11 @@ async function runList(
   }
 }
 
-async function scrapeSelected(lists: HonorListMeta[], trigger: string): Promise<number> {
+async function scrapeSelected(
+  lists: HonorListMeta[],
+  trigger: Trigger,
+  ownRunId: string | null,
+): Promise<number> {
   const scholars = await db.read.scholar.findMany({
     where: { deletedAt: null, status: "active" },
     select: { cwid: true, preferredName: true, fullName: true },
@@ -157,7 +167,7 @@ async function scrapeSelected(lists: HonorListMeta[], trigger: string): Promise<
 
   const outcomes: ListOutcome[] = [];
   // Sequential: a few polite requests at a time to each host, never a burst.
-  for (const meta of lists) outcomes.push(await runList(meta, index, trigger));
+  for (const meta of lists) outcomes.push(await runList(meta, index, trigger, ownRunId));
 
   const failed = outcomes.filter((o) => o.status === "failed");
   if (failed.length === outcomes.length) {
@@ -173,15 +183,21 @@ async function scrapeSelected(lists: HonorListMeta[], trigger: string): Promise<
 async function main() {
   const raw = process.env.HONORS_LISTS;
   const lists = selectHonorLists(raw);
-  const trigger = process.env.HONORS_TRIGGER === "manual" ? "manual" : "schedule";
+  const trigger: Trigger = process.env.HONORS_TRIGGER === "manual" ? "manual" : "schedule";
+  // Empty on a scheduled or operator-started execution (the state machine
+  // defaults it); a Run now execution carries the queued row's id.
+  const ownRunId = process.env.HONORS_RUN_ID?.trim() || null;
+  if (ownRunId && lists.length !== 1) {
+    throw new Error(`HONORS_RUN_ID names one run, but ${lists.length} lists were requested`);
+  }
   const allLists = lists.length === HONOR_LISTS.length;
   if (dryRun) {
     console.log("[Honors] DRY-RUN: scrape + match only, no DB writes.");
-    await scrapeSelected(lists, trigger);
+    await scrapeSelected(lists, trigger, ownRunId);
     return;
   }
-  if (allLists) await withEtlRun("HonorsLists", () => scrapeSelected(lists, trigger));
-  else await scrapeSelected(lists, trigger);
+  if (allLists) await withEtlRun("HonorsLists", () => scrapeSelected(lists, trigger, ownRunId));
+  else await scrapeSelected(lists, trigger, ownRunId);
 }
 
 main()

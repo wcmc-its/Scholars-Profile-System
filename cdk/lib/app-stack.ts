@@ -1813,12 +1813,14 @@ export class AppStack extends Stack {
         // honors_curator can start the honors-list scrape for one list
         // (POST /api/edit/honor/sources/run -> states:StartExecution on
         // scholars-honors-<env>, EtlStack HonorsStateMachine). Off ⇒ the button
-        // is hidden and the route 404s; the weekly schedule runs regardless.
+        // is hidden and the route 404s; the weekly schedule (EtlStack
+        // sps-honors-<env>, itself disabled until enabled per env) is separate.
         // The grant below (TaskRoleHonorsRunNowPolicy) and the ARN ship with
         // this deploy, so flipping the flag is the only step left. OFF in both
-        // envs until the first scheduled run has been checked on staging.
+        // envs until the first supervised run has been checked on staging;
+        // flip staging's branch first.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        HONORS_RUN_NOW: "off",
+        HONORS_RUN_NOW: envConfig.envName === "staging" ? "off" : "off",
         // The machine Run now starts. Built from the name, not imported from
         // EtlStack, so the app stack takes no cross-stack dependency on it.
         HONORS_STATE_MACHINE_ARN: honorsStateMachineArn,

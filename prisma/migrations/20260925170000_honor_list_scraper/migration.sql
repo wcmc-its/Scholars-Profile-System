@@ -1,6 +1,8 @@
 -- Honors-list scraper: a per-candidate evidence line on `honor`, and a per-list
 -- run record for the queue's Sources tab (last run, on-list count, matches, new
--- candidates, error). Additive DDL only: one nullable column and one new table.
+-- candidates, error), with a UNIQUE nullable `active_list_id`
+-- that holds the list id only while a run is queued/running, so at most one
+-- run per list can be in flight (lib/honors/run-lock.ts). Additive DDL only: one nullable column and one new table.
 -- The running app image never selects either by name, so this can land ahead of
 -- the image that reads them.
 
@@ -21,7 +23,9 @@ CREATE TABLE `honor_list_run` (
     `new_candidates` INTEGER NULL,
     `error_message` VARCHAR(1024) NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `active_list_id` VARCHAR(64) NULL,
 
+    UNIQUE INDEX `honor_list_run_active_list_id_key`(`active_list_id`),
     INDEX `honor_list_run_list_id_created_at_idx`(`list_id`, `created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

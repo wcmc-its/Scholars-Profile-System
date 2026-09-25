@@ -2966,9 +2966,14 @@ export class EtlStack extends Stack {
     // StartExecution on the weekly machine instead would let the app start the
     // whole weekly chain.
     //
-    // Input -> container env (both fields REQUIRED, JsonPath fails on a missing
-    // one): { "lists": "all" | "<id>[,<id>]", "trigger": "schedule" | "manual" }.
-    // The weekly rule sends all lists; Run now sends one.
+    // Input -> container env: { "lists": "all" | "<id>[,<id>]",
+    // "trigger": "schedule" | "manual", "runId"?: "<honor_list_run.id>" }.
+    // `lists` and `trigger` are REQUIRED (JsonPath fails on a missing one).
+    // `runId` is optional: the HonorsHasRunId Choice defaults it to "" so the
+    // weekly rule and an operator's hand-typed StartExecution need not send it.
+    // Run now sends one list plus the id of the queued row it wrote, which the
+    // job claims (HONORS_RUN_ID); a run without one inserts its own row and
+    // never takes over a Run now's row (lib/honors/run-lock.ts).
     //
     // ETL code ships on the ECR push, so a parser fix needs no cdk deploy; this
     // block (the machine, rule and alarm) does, once.
@@ -2996,6 +3001,7 @@ export class EtlStack extends Stack {
           environment: [
             { name: "HONORS_LISTS", value: sfn.JsonPath.stringAt("$.lists") },
             { name: "HONORS_TRIGGER", value: sfn.JsonPath.stringAt("$.trigger") },
+            { name: "HONORS_RUN_ID", value: sfn.JsonPath.stringAt("$.runId") },
           ],
         },
       ],
@@ -3026,7 +3032,16 @@ export class EtlStack extends Stack {
     this.honorsStateMachine = new sfn.StateMachine(this, "HonorsStateMachine", {
       stateMachineName: `scholars-honors-${env}`,
       stateMachineType: sfn.StateMachineType.STANDARD,
-      definitionBody: sfn.DefinitionBody.fromChainable(honorsTask),
+      definitionBody: sfn.DefinitionBody.fromChainable(
+        new sfn.Choice(this, "HonorsHasRunId")
+          .when(sfn.Condition.isPresent("$.runId"), honorsTask)
+          .otherwise(
+            new sfn.Pass(this, "HonorsDefaultRunId", {
+              result: sfn.Result.fromString(""),
+              resultPath: "$.runId",
+            }).next(honorsTask),
+          ),
+      ),
       // Over the 45 min task timeout so the task's own timeout (which the Catch
       // sees and pages on) always fires first; a machine TIMED_OUT runs no Catch.
       timeout: Duration.minutes(60),
@@ -3039,12 +3054,21 @@ export class EtlStack extends Stack {
     });
 
     // Weekly, Monday 10:00 UTC: clear of the Sunday 12:00 weekly chain and the
-    // 07:00 nightly. Enabled in both envs: a run only ever adds PENDING rows.
+    // 07:00 nightly.
+    //
+    // DISABLED in both envs on first deploy. The machine deploys and can be
+    // started by hand (or by Run now) either way; only the schedule waits. The
+    // first run in each env is a supervised manual StartExecution, checked for
+    // candidates that duplicate the seed import (a scraped honor name that
+    // differs from the seed's would re-propose already-decided honors). Once
+    // staging's first run is clean, flip staging's branch to `true`, then
+    // prod's, each with a snapshot update and a `cdk deploy Sps-Etl-<env>`.
+    const honorsScheduleEnabled = envConfig.envName === "staging" ? false : false;
     const honorsRule = new events.Rule(this, "HonorsScheduleRule", {
       ruleName: `sps-honors-${env}`,
       description: `SPS honors-list scrape -- weekly Mon 10:00 UTC (${env}).`,
       schedule: events.Schedule.cron({ minute: "0", hour: "10", weekDay: "MON" }),
-      enabled: true,
+      enabled: honorsScheduleEnabled,
     });
     honorsRule.addTarget(
       new eventsTargets.SfnStateMachine(this.honorsStateMachine, {
