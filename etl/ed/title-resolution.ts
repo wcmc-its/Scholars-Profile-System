@@ -124,6 +124,9 @@ export type TitleCandidates = {
   primaryTitle: string | null;
   /** The raw `field_override(primaryTitle)` value; `""` means un-pinned. */
   override: string | null;
+  /** ED `weillCornellEduWorkingTitle` as stored, whatever the flag: the
+   *  display-titles report checks its office claims against the roles. */
+  workingTitle: string | null;
   options: TitleOption[];
   /** Every raw title string (working, ED primary, EACH current appointment) —
    *  the options keep only the best appointment, which hides a second office
@@ -172,6 +175,7 @@ export async function loadTitleCandidates(
     cwid: s.cwid,
     primaryTitle: s.primaryTitle,
     override: overrides.get(s.cwid) ?? null,
+    workingTitle: s.workingTitle,
     texts: [
       ...(opts.applyDerivedTiers && s.workingTitle ? [{ title: s.workingTitle }] : []),
       ...(s.edPrimaryTitle ? [{ title: s.edPrimaryTitle }] : []),

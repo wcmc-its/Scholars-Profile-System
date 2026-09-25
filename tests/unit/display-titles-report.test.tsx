@@ -44,7 +44,7 @@ function fixture(cwid: string, name: string, edPrimaryTitle: string, extra: { ov
     appointmentTitles: extra.appt ? [{ title: extra.appt }] : [],
   });
   const row = classifyTitleRow(
-    { cwid, primaryTitle: extra.override ?? options[0]?.value ?? null, override: extra.override ?? null, options,
+    { cwid, primaryTitle: extra.override ?? options[0]?.value ?? null, override: extra.override ?? null, options, workingTitle: null,
       texts: [{ title: edPrimaryTitle }, ...(extra.appt ? [{ title: extra.appt }] : [])] },
     { ...NO_ROLES, chair: Boolean(extra.appt) },
     name,

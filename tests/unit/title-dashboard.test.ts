@@ -28,7 +28,7 @@ function row(inputs: Partial<TitleInputs>, opts: { override?: string; roles?: Pa
     .map((title) => ({ title }))
     .concat(inputs.appointmentTitles ?? []);
   return classifyTitleRow(
-    { cwid: "abc1234", primaryTitle: options[0]?.value ?? null, override: opts.override ?? null, options, texts },
+    { cwid: "abc1234", primaryTitle: options[0]?.value ?? null, override: opts.override ?? null, options, texts, workingTitle: inputs.workingTitle ?? null },
     { ...NO_ROLES, ...opts.roles },
     "Test Person",
   );
@@ -99,6 +99,28 @@ describe("classifyTitleRow", () => {
     );
     expect(r?.winner?.value).toBe("Dean of the Medical College");
     expect(r?.mismatchNotes).toEqual([]);
+  });
+
+  it("flags a working title claiming Chief or Chair with no role as unverified, not a mismatch", () => {
+    const chief = row({ workingTitle: "Chief, Example Neurology", edPrimaryTitle: "Professor of Clinical Neurology" });
+    expect(chief?.reasons).toEqual(["leadership", "unverifiedWorkingTitle"]);
+    expect(chief?.mismatchNotes).toEqual([]);
+    expect(chief?.unverifiedNotes).toEqual(['Working title "Chief, Example Neurology" claims Chief; no chief role']);
+
+    // A stale "Chair of Surgery" no longer displays (the ladder ignores it),
+    // but the row still surfaces so someone fixes the Web Directory.
+    const chair = row({
+      workingTitle: "Chair of Surgery",
+      edPrimaryTitle: "Professor of Surgery",
+      appointmentTitles: [{ title: "The Example Family Professor of Surgery" }],
+    });
+    expect(chair?.winner?.value).toBe("The Example Family Professor of Surgery");
+    expect(chair?.reasons).toEqual(["unverifiedWorkingTitle"]);
+  });
+
+  it("does not flag a working-title claim the role confirms", () => {
+    expect(row({ workingTitle: "Chief, Cardiology", chiefTitle: "Chief, Cardiology" }, { roles: { chief: true } })?.unverifiedNotes).toEqual([]);
+    expect(row({ workingTitle: "Chair of Surgery" }, { roles: { chair: true } })?.unverifiedNotes).toEqual([]);
   });
 
   it("does not call a director of their own department (BMRI) a mismatch", () => {

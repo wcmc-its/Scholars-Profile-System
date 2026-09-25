@@ -36,7 +36,13 @@ import {
   type TitleTier,
 } from "@/lib/scholar-title";
 
-export type TitleReason = "leadership" | "pinned" | "contested" | "leadershipLost" | "mismatch";
+export type TitleReason =
+  | "leadership"
+  | "pinned"
+  | "contested"
+  | "leadershipLost"
+  | "mismatch"
+  | "unverifiedWorkingTitle";
 
 export const TITLE_REASONS: readonly TitleReason[] = [
   "leadership",
@@ -44,6 +50,7 @@ export const TITLE_REASONS: readonly TitleReason[] = [
   "contested",
   "leadershipLost",
   "mismatch",
+  "unverifiedWorkingTitle",
 ] as const;
 
 export const TITLE_REASON_LABEL: Record<TitleReason, string> = {
@@ -52,6 +59,7 @@ export const TITLE_REASON_LABEL: Record<TitleReason, string> = {
   contested: "Contested",
   leadershipLost: "Leadership lost",
   mismatch: "Mismatch",
+  unverifiedWorkingTitle: "Unverified working title",
 };
 
 /** Rank 1–8.5: Dean through Vice Chair. */
@@ -75,6 +83,9 @@ export type TitleDashboardRow = {
   reasons: TitleReason[];
   /** Why `mismatch` fired, operator-facing. Empty when it did not. */
   mismatchNotes: string[];
+  /** Why `unverifiedWorkingTitle` fired, plus any ended appointment that
+   *  explains the claim (filled by the loader). Empty when it did not. */
+  unverifiedNotes: string[];
   /** Every tier row, for the inline picker. */
   options: TitleOption[];
 };
@@ -84,7 +95,7 @@ export type TitleDashboardRow = {
  * when no reason holds (the scholar is not listed).
  */
 export function classifyTitleRow(
-  c: Pick<TitleCandidates, "cwid" | "primaryTitle" | "override" | "options" | "texts">,
+  c: Pick<TitleCandidates, "cwid" | "primaryTitle" | "override" | "options" | "texts" | "workingTitle">,
   roles: TitleRoles,
   name: string,
 ): TitleDashboardRow | null {
@@ -93,9 +104,26 @@ export function classifyTitleRow(
   const runnerUp = present.find((o) => o.value !== winner?.value) ?? null;
   const pin = resolveFromOptions(c.options, c.override).overridden ? c.override!.trim() : null;
 
-  // Role vs text, over EVERY raw title string: the options keep only the
-  // best appointment, which would hide a Dean's second office as Chair.
-  const textRanks = c.texts.map((t) => ({ title: t.title, rank: rankTitleText(t.title, t.department) }));
+  // A working title (self-set in the Web Directory) claiming an office no
+  // role confirms: "Chair of Surgery" left behind after the appointment
+  // ended, "Chief, Sleep Neurology" for a section SPS has no division for.
+  // Its own reason, not a mismatch: the fix is a person, not a rule.
+  const working = c.workingTitle?.trim() || null;
+  const workingRank = rankTitleText(working);
+  const unverifiedNotes: string[] = [];
+  if (working && workingRank === TITLE_RANK.chair && !roles.chair && !/director/i.test(working)) {
+    unverifiedNotes.push(`Working title "${working}" claims Chair; no chair role`);
+  }
+  if (working && workingRank === TITLE_RANK.divisionChief && !roles.chief) {
+    unverifiedNotes.push(`Working title "${working}" claims Chief; no chief role`);
+  }
+
+  // Role vs ED text, over EVERY raw ED title string (not the working title,
+  // above): the options keep only the best appointment, which would hide a
+  // Dean's second office as Chair.
+  const textRanks = c.texts
+    .filter((t) => t.title !== working)
+    .map((t) => ({ title: t.title, rank: rankTitleText(t.title, t.department) }));
   const hasText = (rank: number) =>
     textRanks.some((t) => t.rank === rank) ||
     // An ED-tier option ranked with the chaired department in hand (a
@@ -108,7 +136,9 @@ export function classifyTitleRow(
     // (BMRI, #2804) — it has no chair role and is not a mismatch.
     mismatchNotes.push("Chair title, no Chair role");
   }
-  if (!roles.chief && hasText(TITLE_RANK.divisionChief)) mismatchNotes.push("Chief title, no Chief role");
+  if (!roles.chief && textRanks.some((t) => t.rank === TITLE_RANK.divisionChief)) {
+    mismatchNotes.push("Chief title, no Chief role");
+  }
 
   const reasons: TitleReason[] = [];
   if ((winner && isLeadershipRank(winner.rank)) || roles.chair || roles.chief || roles.centerDirector) {
@@ -128,6 +158,7 @@ export function classifyTitleRow(
     reasons.push("leadershipLost");
   }
   if (mismatchNotes.length > 0) reasons.push("mismatch");
+  if (unverifiedNotes.length > 0) reasons.push("unverifiedWorkingTitle");
   if (reasons.length === 0) return null;
 
   return {
@@ -140,6 +171,7 @@ export function classifyTitleRow(
     pinRedundant: pin !== null && pin === winner?.value,
     reasons,
     mismatchNotes,
+    unverifiedNotes,
     options: c.options,
   };
 }
@@ -164,10 +196,29 @@ export async function loadTitleDashboard(client: DashboardClient): Promise<Title
     );
     return row ? [row] : [];
   });
-  const names = await client.scholar.findMany({
-    where: { cwid: { in: listed.map((r) => r.cwid) } },
-    select: { cwid: true, preferredName: true },
-  });
+  const [names, ended] = await Promise.all([
+    client.scholar.findMany({
+      where: { cwid: { in: listed.map((r) => r.cwid) } },
+      select: { cwid: true, preferredName: true },
+    }),
+    // Ended appointments that explain an unverified working-title claim (the
+    // office really was held, until the date shown). Only the few flagged rows.
+    client.appointment.findMany({
+      where: {
+        cwid: { in: listed.filter((r) => r.unverifiedNotes.length > 0).map((r) => r.cwid) },
+        endDate: { not: null },
+      },
+      select: { cwid: true, title: true, endDate: true },
+      orderBy: { endDate: "desc" },
+    }),
+  ]);
+  for (const r of listed) {
+    for (const claim of [TITLE_RANK.chair, TITLE_RANK.divisionChief]) {
+      if (!r.unverifiedNotes.some((n) => n.endsWith(claim === TITLE_RANK.chair ? "no chair role" : "no chief role"))) continue;
+      const a = ended.find((e) => e.cwid === r.cwid && rankTitleText(e.title) === claim);
+      if (a?.endDate) r.unverifiedNotes.push(`"${a.title}" appointment ended ${a.endDate.toISOString().slice(0, 10)}`);
+    }
+  }
   const nameByCwid = new Map(names.map((n) => [n.cwid, n.preferredName]));
   return listed
     .map((r) => ({ ...r, name: nameByCwid.get(r.cwid) ?? r.cwid }))
@@ -224,7 +275,7 @@ export function formatTitleRank(rank: number | null | undefined): string {
 
 /** The operator notes on a row: the mismatch reasons, then the redundant pin. */
 export function titleRowNotes(r: TitleDashboardRow): string[] {
-  return [...r.mismatchNotes, ...(r.pinRedundant ? ["Pin matches ladder — can unpin"] : [])];
+  return [...r.mismatchNotes, ...r.unverifiedNotes, ...(r.pinRedundant ? ["Pin matches ladder — can unpin"] : [])];
 }
 
 /** The rank of what is displayed by rule: the pin's (its tier row when it is
