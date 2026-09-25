@@ -37,7 +37,17 @@
  * transaction, so the line comes back whole. An auto-rejected sibling cannot be
  * undone on its own (409 `superseded`): reopening it next to a published winner
  * would put a second live claim on an awarded line; undo the approval instead.
+ * Undoing a MANUAL rejection is refused (409 `line_already_awarded`) once another
+ * candidate on the same line is `published`: reject A, approve B, undo A would
+ * otherwise reopen a contested claim next to the winner. Undo B first.
  * Each reverted row gets its own `honor_update` audit row under the one `ts`.
+ *
+ * UNDO IS ALL-OR-NOTHING AND RACE-SAFE. `ids` (instead of `id`) undoes several
+ * rows — a multi-row "None of these" — in ONE transaction: any refusal throws and
+ * rolls back every row, so the card is never left half-reopened. Each transition
+ * is a conditional `updateMany` keyed on the decided status the guards just read,
+ * so of two concurrent undos only one matches a row; the loser's count is 0 and
+ * it rolls back with a 409 instead of writing a second audit trail.
  *
  * DECISION METADATA. Every approve/reject stamps `decidedByCwid` (the REAL actor,
  * never the impersonated identity — same as the audit row) and `decidedAt`; a
@@ -86,6 +96,16 @@ const CLEARED_DECISION = {
   supersededById: null,
 } as const;
 
+/** Most rows one undo may revert — a contested line's candidates, not a bulk tool. */
+const UNDO_MAX_IDS = 50;
+
+/** An undo refusal, thrown so the WHOLE undo transaction rolls back. */
+class UndoRefused extends Error {
+  constructor(readonly code: "not_found" | "not_undoable" | "superseded" | "line_already_awarded") {
+    super(code);
+  }
+}
+
 /** The audit before/after payload. Deliberately small: identity + what moved. */
 function snapshot(row: StoredRow) {
   return {
@@ -124,13 +144,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return new NextResponse(null, { status: 403 });
   }
 
-  const honorId = typeof body.id === "string" ? body.id : null;
   const decision =
     body.decision === "approve" || body.decision === "reject" || body.decision === "undo"
       ? body.decision
       : null;
-  if (!honorId) return editError(400, "invalid_body", "id");
   if (!decision) return editError(400, "invalid_body", "decision");
+  // `ids` is undo-only: every row a multi-row decision wrote, reverted together.
+  let undoIds: string[] | null = null;
+  if (body.ids !== undefined) {
+    const ids = body.ids;
+    if (
+      decision !== "undo" ||
+      body.id !== undefined ||
+      !Array.isArray(ids) ||
+      ids.length === 0 ||
+      ids.length > UNDO_MAX_IDS ||
+      !ids.every((x): x is string => typeof x === "string" && x.length > 0) ||
+      new Set(ids).size !== ids.length
+    ) {
+      return editError(400, "invalid_body", "ids");
+    }
+    undoIds = ids;
+  }
+  const honorId = undoIds ? undoIds[0] : typeof body.id === "string" ? body.id : null;
+  if (!honorId) return editError(400, "invalid_body", "id");
   // Optional, reject-only. Blank ⇒ no reason. Over-long is a 400 rather than a
   // silent truncation: the column is VARCHAR(255) and MySQL strict mode would
   // otherwise fail the whole transaction.
@@ -150,64 +187,92 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const result = await db.write.$transaction(async (tx) => {
-      const row = (await tx.honor.findUnique({ where: { id: honorId } })) as StoredRow | null;
-      if (!row) return { kind: "not_found" as const };
-
       if (decision === "undo") {
-        // Only a decision the QUEUE made is undoable — see the undo note above.
-        if (row.status === "pending" || !row.decidedAt) {
-          return { kind: "not_undoable" as const };
-        }
-        if (row.supersededById) return { kind: "superseded" as const };
-        const reverted = (await tx.honor.update({
-          where: { id: row.id },
-          data: { status: "pending", ...CLEARED_DECISION },
-        })) as StoredRow;
-        await appendAuditRow(tx, {
-          actorCwid: realCwid,
-          impersonatedCwid,
-          targetEntityType: "honor",
-          requestId,
-          targetEntityId: row.id,
-          action: "honor_update",
-          fieldsChanged: ["status", "decidedByCwid", "decidedAt", "rejectionReason"],
-          beforeValues: snapshot(row),
-          afterValues: snapshot(reverted),
-          ts,
-        });
-        const affected = new Set<string>([row.cwid]);
+        const ids = undoIds ?? [honorId];
+        const affected = new Set<string>();
         let siblingsRestored = 0;
-        if (row.status === "published") {
-          const superseded = (await tx.honor.findMany({
-            where: { supersededById: row.id, status: "rejected" },
-          })) as StoredRow[];
-          for (const sibling of superseded) {
-            const after = (await tx.honor.update({
-              where: { id: sibling.id },
-              data: { status: "pending", ...CLEARED_DECISION },
-            })) as StoredRow;
-            await appendAuditRow(tx, {
-              actorCwid: realCwid,
-              impersonatedCwid,
-              targetEntityType: "honor",
-              requestId,
-              targetEntityId: sibling.id,
-              action: "honor_update",
-              fieldsChanged: ["status", "decidedByCwid", "decidedAt", "supersededById"],
-              beforeValues: snapshot(sibling),
-              afterValues: snapshot(after),
-              ts,
+        // Every refusal THROWS (never returns) so rows already reverted earlier in
+        // this loop roll back with it — see the all-or-nothing note above.
+        for (const id of ids) {
+          const row = (await tx.honor.findUnique({ where: { id } })) as StoredRow | null;
+          if (!row) throw new UndoRefused("not_found");
+          // Only a decision the QUEUE made is undoable — see the undo note above.
+          if (row.status === "pending" || !row.decidedAt) throw new UndoRefused("not_undoable");
+          if (row.supersededById) throw new UndoRefused("superseded");
+          // A manual rejection on a line another candidate has since WON would
+          // reopen a contested claim next to a published winner. Rows undone in
+          // this same request are not "another candidate".
+          if (row.status === "rejected" && row.sourceRef) {
+            const awarded = await tx.honor.findFirst({
+              where: { sourceRef: row.sourceRef, status: "published", id: { notIn: ids } },
+              select: { id: true },
             });
-            affected.add(sibling.cwid);
-            siblingsRestored++;
+            if (awarded) throw new UndoRefused("line_already_awarded");
+          }
+          // Conditional on the decided state just read: a concurrent undo that got
+          // here first has already moved it, so this matches nothing and we refuse.
+          const claimed = await tx.honor.updateMany({
+            where: {
+              id: row.id,
+              status: row.status as "published" | "rejected",
+              decidedAt: { not: null },
+              supersededById: null,
+            },
+            data: { status: "pending", ...CLEARED_DECISION },
+          });
+          if (claimed.count !== 1) throw new UndoRefused("not_undoable");
+          const reverted: StoredRow = { ...row, status: "pending", ...CLEARED_DECISION };
+          await appendAuditRow(tx, {
+            actorCwid: realCwid,
+            impersonatedCwid,
+            targetEntityType: "honor",
+            requestId,
+            targetEntityId: row.id,
+            action: "honor_update",
+            fieldsChanged: ["status", "decidedByCwid", "decidedAt", "rejectionReason"],
+            beforeValues: snapshot(row),
+            afterValues: snapshot(reverted),
+            ts,
+          });
+          affected.add(row.cwid);
+          if (row.status === "published") {
+            const superseded = (await tx.honor.findMany({
+              where: { supersededById: row.id, status: "rejected" },
+            })) as StoredRow[];
+            for (const sibling of superseded) {
+              const restored = await tx.honor.updateMany({
+                where: { id: sibling.id, status: "rejected", supersededById: row.id },
+                data: { status: "pending", ...CLEARED_DECISION },
+              });
+              if (restored.count !== 1) throw new UndoRefused("not_undoable");
+              const after: StoredRow = { ...sibling, status: "pending", ...CLEARED_DECISION };
+              await appendAuditRow(tx, {
+                actorCwid: realCwid,
+                impersonatedCwid,
+                targetEntityType: "honor",
+                requestId,
+                targetEntityId: sibling.id,
+                action: "honor_update",
+                fieldsChanged: ["status", "decidedByCwid", "decidedAt", "supersededById"],
+                beforeValues: snapshot(sibling),
+                afterValues: snapshot(after),
+                ts,
+              });
+              affected.add(sibling.cwid);
+              siblingsRestored++;
+            }
           }
         }
         return {
           kind: "undone" as const,
+          reverted: ids.length,
           siblingsRestored,
           affectedCwids: [...affected],
         };
       }
+
+      const row = (await tx.honor.findUnique({ where: { id: honorId } })) as StoredRow | null;
+      if (!row) return { kind: "not_found" as const };
 
       // Only a pending row is decidable, re-checked INSIDE the transaction so two
       // curators racing the same row cannot both decide it. This is also what
@@ -308,8 +373,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
     if (result.kind === "not_found") return editError(404, "not_found", "id");
-    if (result.kind === "not_undoable") return editError(409, "not_undoable", "id");
-    if (result.kind === "superseded") return editError(409, "superseded", "id");
     if (result.kind === "not_pending") return editError(409, "not_pending", "id");
     if (result.kind === "line_already_awarded") {
       return editError(409, "line_already_awarded", "id");
@@ -339,10 +402,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
 
     if (result.kind === "undone") {
-      return editOk({ status: "pending", siblingsRestored: result.siblingsRestored });
+      return editOk({
+        status: "pending",
+        reverted: result.reverted,
+        siblingsRestored: result.siblingsRestored,
+      });
     }
     return editOk({ status: result.status, siblingsRejected: result.siblingsRejected });
-  } catch {
+  } catch (error) {
+    if (error instanceof UndoRefused) {
+      return error.code === "not_found"
+        ? editError(404, "not_found", "id")
+        : editError(409, error.code, "id");
+    }
     return editError(500, "write_failed");
   }
 }

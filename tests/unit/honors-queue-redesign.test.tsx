@@ -335,12 +335,43 @@ describe("HonorsQueue: undo, reasons, decided-by", () => {
     ]);
 
     fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    expect(fetchMock.mock.calls.slice(2).map((c) => JSON.parse(c[1].body))).toEqual([
-      { id: "c1", decision: "undo" },
-      { id: "c2", decision: "undo" },
-    ]);
+    // ONE all-or-nothing request for every rejected candidate, not one per row.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+      ids: ["c1", "c2"],
+      decision: "undo",
+    });
     await waitFor(() => expect(within(card).queryByText("Rejected")).toBeNull());
+  });
+
+  it("a failed multi-row undo leaves the None of these card whole and still undoable", async () => {
+    // Regression: the per-row loop used to break on the first failure, leaving
+    // some candidates reopened server-side while the card still read "Rejected".
+    const { container } = render(
+      <HonorsQueue
+        pending={[contested]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: "None of these" }));
+    await waitFor(() => expect(within(card).getByText("Rejected")).toBeTruthy());
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ ok: false, error: "line_already_awarded" }), {
+          status: 409,
+        }),
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(/has since been approved/),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(within(card).getByText("Rejected")).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Undo" })).toBeTruthy();
   });
 
   it("a failed undo keeps the decision and says so", async () => {

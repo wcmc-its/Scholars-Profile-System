@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
 }));
@@ -84,6 +85,7 @@ beforeEach(() => {
     ...(where as { id: string }),
     ...(data as object),
   }));
+  h.tx.honor.updateMany.mockResolvedValue({ count: 1 });
   h.resolveAffectedProfiles.mockImplementation(async (_t: string, cwid: string) => [
     { slug: `slug-${cwid}` },
   ]);
@@ -300,14 +302,14 @@ describe("undo", () => {
     const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ ok: false, error: "not_undoable" });
-    expect(h.tx.honor.update).not.toHaveBeenCalled();
+    expect(h.tx.honor.updateMany).not.toHaveBeenCalled();
     expect(h.appendAuditRow).not.toHaveBeenCalled();
   });
 
   it("refuses a row that is still pending", async () => {
     const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
     expect(res.status).toBe(409);
-    expect(h.tx.honor.update).not.toHaveBeenCalled();
+    expect(h.tx.honor.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuses an auto-rejected sibling on its own; the approval is what gets undone", async () => {
@@ -320,7 +322,7 @@ describe("undo", () => {
     const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "superseded" });
-    expect(h.tx.honor.update).not.toHaveBeenCalled();
+    expect(h.tx.honor.updateMany).not.toHaveBeenCalled();
   });
 
   it("reverts a rejection to pending and clears the decision columns", async () => {
@@ -334,8 +336,8 @@ describe("undo", () => {
     const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, status: "pending", siblingsRestored: 0 });
-    expect(h.tx.honor.update).toHaveBeenCalledWith({
-      where: { id: "honor-1" },
+    expect(h.tx.honor.updateMany).toHaveBeenCalledWith({
+      where: { id: "honor-1", status: "rejected", decidedAt: { not: null }, supersededById: null },
       data: {
         status: "pending",
         decidedByCwid: null,
@@ -344,8 +346,12 @@ describe("undo", () => {
         supersededById: null,
       },
     });
-    // Undoing a rejection never touches siblings.
+    // Undoing a rejection never touches siblings (it only checks none has won).
     expect(h.tx.honor.findMany).not.toHaveBeenCalled();
+    expect(h.tx.honor.findFirst).toHaveBeenCalledWith({
+      where: { sourceRef: ROW.sourceRef, status: "published", id: { notIn: ["honor-1"] } },
+      select: { id: true },
+    });
     expect(h.appendAuditRow.mock.calls[0][1]).toMatchObject({
       action: "honor_update",
       targetEntityId: "honor-1",
@@ -372,8 +378,8 @@ describe("undo", () => {
     expect(h.tx.honor.findMany).toHaveBeenCalledWith({
       where: { supersededById: "honor-1", status: "rejected" },
     });
-    expect(h.tx.honor.update).toHaveBeenCalledWith({
-      where: { id: "honor-2" },
+    expect(h.tx.honor.updateMany).toHaveBeenCalledWith({
+      where: { id: "honor-2", status: "rejected", supersededById: "honor-1" },
       data: expect.objectContaining({ status: "pending", supersededById: null }),
     });
     const audits = h.appendAuditRow.mock.calls.map(
@@ -384,6 +390,88 @@ describe("undo", () => {
     // Both owners' cached profiles change: the winner loses the honor.
     const reflected = h.resolveAffectedProfiles.mock.calls.map((c) => c[1]).sort();
     expect(reflected).toEqual(["abc1001", "def2002"]);
+  });
+
+  it("🔴 refuses to reopen a MANUAL rejection once another candidate on the line is approved", async () => {
+    // Reject A, approve B (B's approval only auto-rejects PENDING siblings, so A
+    // carries no supersededById), then undo A: A would sit pending next to a
+    // published winner — a second live claim on an awarded line.
+    h.tx.honor.findUnique.mockResolvedValue({
+      ...ROW,
+      status: "rejected",
+      decidedAt: DECIDED_AT,
+      supersededById: null,
+    });
+    h.tx.honor.findFirst.mockResolvedValue({ id: "honor-2" });
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "line_already_awarded" });
+    expect(h.tx.honor.updateMany).not.toHaveBeenCalled();
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("🔴 a concurrent undo that already moved the row loses: 409, no audit row", async () => {
+    // Both undos read the row as decided; the conditional updateMany is what
+    // lets only one of them transition it.
+    h.tx.honor.findUnique.mockResolvedValue({ ...ROW, status: "rejected", decidedAt: DECIDED_AT });
+    h.tx.honor.updateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_undoable" });
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+    expect(h.resolveAffectedProfiles).not.toHaveBeenCalled();
+  });
+
+  it("🔴 a multi-row undo is all-or-nothing: a later refusal throws so the transaction rolls back", async () => {
+    // "None of these" wrote c1 and c2. If c2 cannot be undone, c1's revert must
+    // not commit — the throw is what makes Prisma roll the transaction back.
+    const rows: Record<string, unknown> = {
+      c1: { ...ROW, id: "c1", status: "rejected", decidedAt: DECIDED_AT },
+      c2: { ...ROW, id: "c2", status: "rejected", decidedAt: DECIDED_AT, supersededById: "x" },
+    };
+    h.tx.honor.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => rows[where.id] ?? null,
+    );
+    const { db } = await import("@/lib/db");
+    const txn = vi.mocked(db.write.$transaction);
+    const res = await POST(request({ ids: ["c1", "c2"], decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "superseded" });
+    // The callback REJECTED (not resolved with a refusal value), so a real
+    // interactive transaction discards c1's already-issued update.
+    await expect(txn.mock.results[0].value).rejects.toThrow("superseded");
+    expect(h.resolveAffectedProfiles).not.toHaveBeenCalled();
+  });
+
+  it("undoes every row of a multi-row rejection in one transaction", async () => {
+    const rows: Record<string, unknown> = {
+      c1: { ...ROW, id: "c1", cwid: "abc1001", status: "rejected", decidedAt: DECIDED_AT },
+      c2: { ...ROW, id: "c2", cwid: "def2002", status: "rejected", decidedAt: DECIDED_AT },
+    };
+    h.tx.honor.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => rows[where.id] ?? null,
+    );
+    const res = await POST(request({ ids: ["c1", "c2"], decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, status: "pending", reverted: 2 });
+    const { db } = await import("@/lib/db");
+    expect(db.write.$transaction).toHaveBeenCalledTimes(1);
+    expect(h.tx.honor.updateMany).toHaveBeenCalledTimes(2);
+    const audits = h.appendAuditRow.mock.calls.map((c) => c[1] as { ts: Date });
+    expect(audits).toHaveLength(2);
+    expect(new Set(audits.map((a) => a.ts.getTime())).size).toBe(1);
+  });
+
+  it.each([
+    [{ ids: [], decision: "undo" }],
+    [{ ids: ["c1", "c1"], decision: "undo" }],
+    [{ ids: ["c1", 7], decision: "undo" }],
+    [{ ids: ["c1"], id: "c1", decision: "undo" }],
+    [{ ids: ["c1"], decision: "reject" }],
+  ])("400s a malformed ids body %j", async (body) => {
+    const res = await POST(request(body, CURATOR) as never);
+    expect(res.status).toBe(400);
+    expect(h.tx.honor.updateMany).not.toHaveBeenCalled();
   });
 
   it("403s a non-curator", async () => {

@@ -30,9 +30,10 @@
  * all, with a search box.
  *
  * Decisions are undoable: a dark toast names the last decision with an Undo, and
- * every decided card keeps an Undo link. Undo POSTs `decision: "undo"` per row
- * the decision wrote (the approved row, or each rejected candidate); the server
- * restores the siblings an approval auto-rejected. A reject may carry a reason
+ * every decided card keeps an Undo link. Undo POSTs ONE `decision: "undo"` for
+ * every row the decision wrote (the approved row, or each rejected candidate as
+ * `ids`), which the server reverts all-or-nothing and which restores the siblings
+ * an approval auto-rejected — so a failed undo leaves the card exactly as it was. A reject may carry a reason
  * from the select beside the button (optional, so one click still rejects).
  * Sources lists the honor rosters the queue's rows came from and the recorded
  * load runs — read-only, with no Run now (nothing in the console can start one).
@@ -403,11 +404,15 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted, sources
     decision: "approve" | "reject" | "undo",
     reason?: string,
   ): Promise<boolean> {
+    return send(reason ? { id: rowId, decision, reason } : { id: rowId, decision });
+  }
+
+  async function send(payload: Record<string, unknown>): Promise<boolean> {
     try {
       const res = await fetch("/api/edit/honor/decision", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reason ? { id: rowId, decision, reason } : { id: rowId, decision }),
+        body: JSON.stringify(payload),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !json.ok) {
@@ -416,7 +421,9 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted, sources
             ? "Someone already decided that one. Refresh to see the current queue."
             : json.error === "not_undoable" || json.error === "superseded"
               ? "That decision can't be undone any more. Refresh to see the current queue."
-              : "That didn't save. Nothing was changed.",
+              : json.error === "line_already_awarded"
+                ? "Another candidate for that award has since been approved. Undo that approval first."
+                : "That didn't save. Nothing was changed.",
         );
         return false;
       }
@@ -478,21 +485,20 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted, sources
     setBusy(null);
   }
 
-  /** Revert a decision made on this page. The server restores any siblings an
-   *  approval auto-rejected, so one undo per written row brings the line back. */
+  /** Revert a decision made on this page, in ONE request: the server reverts
+   *  every written row (and any siblings an approval auto-rejected) all-or-nothing,
+   *  so on failure nothing moved and the decided card stays as it is. */
   async function undo(groupKey: string) {
     const d = decided[groupKey];
     if (!d) return;
     setBusy(groupKey);
     setError(null);
-    let all = true;
-    for (const id of d.rowIds) {
-      if (!(await post(id, "undo"))) {
-        all = false;
-        break;
-      }
-    }
-    if (all) {
+    const ok = await send(
+      d.rowIds.length === 1
+        ? { id: d.rowIds[0], decision: "undo" }
+        : { ids: d.rowIds, decision: "undo" },
+    );
+    if (ok) {
       setDecided((cur) => {
         const next = { ...cur };
         delete next[groupKey];
