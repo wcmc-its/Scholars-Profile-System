@@ -160,7 +160,7 @@ describe("/edit/administrators — authorization", () => {
       { id: "2", name: "Biomedical Imaging", facility: null, hasConfirmedPublications: false },
     ]);
     const result = asEl(await AdministratorsPage());
-    const children = result.props.children as unknown[];
+    const children = [result.props.children].flat() as unknown[];
     const rosterEl = children.map(asEl).find((c) => c.type === mockRoster);
     expect(rosterEl).toBeTruthy();
     expect((rosterEl!.props as { allCores: unknown }).allCores).toEqual([

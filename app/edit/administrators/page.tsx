@@ -112,21 +112,27 @@ export default async function AdministratorsPage() {
       // see the Forbidden gate above) silently lost a tab their role alone
       // already earned (docs/edit-console-ia-spec.md Gap 4b).
     >
-        <h1 className="mb-1 text-xl font-bold">Administrators</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Everyone with an Owner or Curator grant on an org unit, grouped by person. Add, change a
-          role, or revoke a grant from each card. Grants sourced from the{" "}
-          <a
-            href="https://directory.weill.cornell.edu/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[var(--apollo-maroon)] hover:underline"
-          >
-            Web Directory
-          </a>{" "}
-          are managed there and read-only here.
-        </p>
         <AdministratorsRoster
+          header={
+            <>
+              <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
+                Administrators
+              </h1>
+              <p className="text-muted-foreground m-0 max-w-[84ch] text-[14.5px] leading-normal text-pretty">
+                Everyone with an Owner or Curator grant on an org unit. Grants from the{" "}
+                <a
+                  href="https://directory.weill.cornell.edu/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-apollo-slate underline underline-offset-[3px]"
+                >
+                  Web Directory
+                </a>{" "}
+                are read-only here; change them there. Grants made in Scholars Console can be
+                edited or revoked below.
+              </p>
+            </>
+          }
           entries={entries}
           isSuperuser={session.isSuperuser}
           actorCwid={session.cwid}

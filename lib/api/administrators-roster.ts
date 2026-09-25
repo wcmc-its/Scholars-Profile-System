@@ -38,6 +38,13 @@ export type AdminRosterGrant = {
   role: "owner" | "curator";
   /** `UnitAdmin.source` — "manual" | "ED:DA" | "ED:DivA" | "ED:IAMDELA" | "ED:DivA-IAMDELA". */
   source: string;
+  /** `UnitAdmin.grantedBy` — the actor CWID for a manual grant ("ED-ETL" for an
+   *  import). Optional: absent on rows the caller synthesized. */
+  grantedBy?: string | null;
+  /** The granter's display name (Scholar `preferredName`) when one resolves. */
+  grantedByName?: string | null;
+  /** `UnitAdmin.createdAt` as an ISO string. */
+  grantedAt?: string | null;
 };
 
 /** One person on the roster, with the set of unit grants they hold. */
@@ -86,6 +93,8 @@ export async function loadUnitAdministratorRoster(
       role: true,
       source: true,
       granteeName: true,
+      grantedBy: true,
+      createdAt: true,
     },
   });
 
@@ -141,8 +150,12 @@ export async function loadUnitAdministratorRoster(
   for (const c of centers) unitName.set(`center:${c.code}`, c.name);
   for (const c of cores) unitName.set(`core:${c.id}`, c.name);
 
-  // Batch-resolve grantee display names from the local Scholar table.
-  const cwids = [...new Set(rows.map((r) => r.cwid))];
+  // Batch-resolve grantee display names from the local Scholar table — plus
+  // the granters of manual grants, so "Added by …" can show a name.
+  const granters = rows
+    .filter((r) => r.source === "manual" && r.grantedBy)
+    .map((r) => r.grantedBy as string);
+  const cwids = [...new Set([...rows.map((r) => r.cwid), ...granters])];
   const scholars = await client.scholar.findMany({
     where: { cwid: { in: cwids } },
     select: { cwid: true, preferredName: true, primaryTitle: true },
@@ -179,6 +192,9 @@ export async function loadUnitAdministratorRoster(
       unitName: unitName.get(`${entityType}:${r.entityId}`) ?? r.entityId,
       role: r.role,
       source: r.source,
+      grantedBy: r.grantedBy ?? null,
+      grantedByName: r.grantedBy ? (scholarName.get(r.grantedBy)?.name ?? null) : null,
+      grantedAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : null,
     });
   }
 
