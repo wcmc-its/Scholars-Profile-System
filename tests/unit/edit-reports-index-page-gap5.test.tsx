@@ -20,6 +20,7 @@ const {
   mockReportsIndex,
   mockGetReportScopes,
   mockGetHighImpactScopes,
+  mockGetDisplayTitlesScopes,
   mockListReportAccess,
   mockReportMetaFindMany,
   mockCanViewArticleCount,
@@ -36,6 +37,7 @@ const {
   mockReportsIndex: vi.fn(() => null),
   mockGetReportScopes: vi.fn(),
   mockGetHighImpactScopes: vi.fn(),
+  mockGetDisplayTitlesScopes: vi.fn(),
   mockListReportAccess: vi.fn(),
   mockReportMetaFindMany: vi.fn(),
 }));
@@ -71,15 +73,20 @@ vi.mock("@/lib/edit/manageable-units", () => ({ unitEditHref: () => "/edit/cente
 vi.mock("@/lib/edit/report-access", () => {
   const whole = [["*", "Whole report"]];
   return {
-    // Report 9's grant rides its own mock so the report 7 cases stay pinned.
+    // Reports 9 and 10 ride their own mocks so the report 7 cases stay pinned.
     getReportScopes: (s: unknown, key: string) =>
-      key === "high-impact-publications" ? mockGetHighImpactScopes(s, key) : mockGetReportScopes(s, key),
+      key === "high-impact-publications"
+        ? mockGetHighImpactScopes(s, key)
+        : key === "display-titles"
+          ? mockGetDisplayTitlesScopes(s, key)
+          : mockGetReportScopes(s, key),
     listReportAccess: mockListReportAccess,
     canManageReportAccess: (s: { isSuperuser: boolean; isCommsSteward: boolean }) =>
       s.isSuperuser || s.isCommsSteward,
     MENTORED_PUBS_REPORT: "mentored-publications",
     ARTICLE_COUNT_REPORT: "article-count",
     HIGH_IMPACT_PUBS_REPORT: "high-impact-publications",
+    DISPLAY_TITLES_REPORT: "display-titles",
     ARTICLE_COUNT_ACCESS_NOTE: "admins note",
     WHOLE_REPORT_SCOPE_OPTIONS: whole,
     REPORT_ACCESS_SCOPE_OPTIONS: {
@@ -89,6 +96,7 @@ vi.mock("@/lib/edit/report-access", () => {
       ],
       "article-count": whole,
       "high-impact-publications": whole,
+      "display-titles": whole,
     },
   };
 });
@@ -130,6 +138,7 @@ beforeEach(() => {
   mockLoadReportableUnits.mockResolvedValue([]);
   mockGetReportScopes.mockResolvedValue(new Set());
   mockGetHighImpactScopes.mockResolvedValue(new Set());
+  mockGetDisplayTitlesScopes.mockResolvedValue(new Set());
   mockListReportAccess.mockResolvedValue([]);
   mockReportMetaFindMany.mockResolvedValue([]);
   mockCanViewArticleCount.mockResolvedValue(false);
@@ -173,6 +182,22 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(units[0].reports.map((r) => r.n)).toEqual([9]);
     expect(units[0].editHref).toBe("/edit/reports/high-impact-publications");
     expect(units[0].reports[0].accessText).toBe("Superusers and comms stewards");
+  });
+
+  it("a report 10 grant beside report 9 → the institution row lists 9 then 10", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockGetHighImpactScopes.mockResolvedValue(new Set(["*"]));
+    mockGetDisplayTitlesScopes.mockResolvedValue(new Set(["*"]));
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    const units = findByType(result, mockReportsIndex)!.props.units as Array<{
+      kind: string;
+      reports: Array<{ n: number; slug: string }>;
+    }>;
+    expect(units.map((u) => u.kind)).toEqual(["institution"]);
+    expect(units[0].reports.map((r) => [r.n, r.slug])).toEqual([
+      [9, "high-impact-publications"],
+      [10, "display-titles"],
+    ]);
   });
 
   it("scoped Owner/Curator with zero grants → still 404s", async () => {

@@ -29,16 +29,22 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { CENTER_ENTITY_TYPE } from "@/lib/org-unit-roles";
-import { isCenterDirector, loadCurrentAppointmentTitles } from "@/lib/edit/title-picker";
+import {
+  isCenterDirector,
+  loadChairedDepartments,
+  loadCurrentAppointmentTitles,
+} from "@/lib/edit/title-picker";
 import {
   ambiguousUnitNames,
+  buildTitleOptions,
   formatUnitLeadershipTitle,
-  resolveScholarTitle,
+  resolveFromOptions,
   type AppointmentTitle,
+  type TitleOption,
 } from "@/lib/scholar-title";
 
 /** The Prisma surface this pass needs — base client or interactive tx. */
-type TitleResolutionClient = Pick<
+export type TitleResolutionClient = Pick<
   PrismaClient,
   | "scholar"
   | "orgUnitRoleAssignment"
@@ -72,28 +78,7 @@ export async function resolveScholarTitles(
   client: TitleResolutionClient,
   opts: { applyDerivedTiers: boolean },
 ): Promise<TitleResolutionResult> {
-  const [scholars, overrideRows] = await Promise.all([
-    client.scholar.findMany({
-      where: { deletedAt: null },
-      select: { cwid: true, primaryTitle: true, edPrimaryTitle: true, workingTitle: true },
-    }),
-    client.fieldOverride.findMany({
-      where: { entityType: "scholar", fieldName: "primaryTitle" },
-      select: { entityId: true, value: true },
-    }),
-  ]);
-  const overrides = new Map(overrideRows.map((o) => [o.entityId, o.value]));
-
-  const [{ chiefTitles, centerTitles }, appointmentTitles] = opts.applyDerivedTiers
-    ? await Promise.all([loadLeadershipTitles(client), loadCurrentAppointmentTitles(client)])
-    : [
-        {
-          chiefTitles: new Map<string, string>(),
-          centerTitles: new Map<string, string>(),
-        },
-        new Map<string, AppointmentTitle[]>(),
-      ];
-
+  const scholars = await loadTitleCandidates(client, opts);
   const byTier: Record<string, number> = {};
   let updated = 0;
   // Scholars holding a title that this run could not re-derive. Non-zero is
@@ -102,14 +87,7 @@ export async function resolveScholarTitles(
   let skippedNullResolution = 0;
 
   for (const s of scholars) {
-    const resolved = resolveScholarTitle({
-      override: overrides.get(s.cwid) ?? null,
-      workingTitle: opts.applyDerivedTiers ? s.workingTitle : null,
-      appointmentTitles: appointmentTitles.get(s.cwid) ?? [],
-      chiefTitle: chiefTitles.get(s.cwid) ?? null,
-      centerHeadTitle: centerTitles.get(s.cwid) ?? null,
-      edPrimaryTitle: s.edPrimaryTitle,
-    });
+    const resolved = resolveFromOptions(s.options, s.override);
 
     const key = resolved.overridden ? "override" : (resolved.tier ?? "none");
     byTier[key] = (byTier[key] ?? 0) + 1;
@@ -137,6 +115,81 @@ export async function resolveScholarTitles(
   }
 
   return { scanned: scholars.length, updated, byTier, skippedNullResolution };
+}
+
+/** One scholar's ladder inputs, already built into picker options. */
+export type TitleCandidates = {
+  cwid: string;
+  /** What `Scholar.primaryTitle` holds today. */
+  primaryTitle: string | null;
+  /** The raw `field_override(primaryTitle)` value; `""` means un-pinned. */
+  override: string | null;
+  /** ED `weillCornellEduWorkingTitle` as stored, whatever the flag: the
+   *  display-titles report checks its office claims against the roles. */
+  workingTitle: string | null;
+  options: TitleOption[];
+  /** Every raw title string (working, ED primary, EACH current appointment) —
+   *  the options keep only the best appointment, which hides a second office
+   *  (a Dean who is also Chair). Only the display-titles report reads it. */
+  texts: AppointmentTitle[];
+};
+
+/**
+ * Every non-deleted scholar's title options — the ONE computation both this
+ * post-pass and the `/edit` display-titles report read, so the report can
+ * never show a winner the nightly would not write.
+ */
+export async function loadTitleCandidates(
+  client: TitleResolutionClient,
+  opts: { applyDerivedTiers: boolean },
+): Promise<TitleCandidates[]> {
+  const [scholars, overrideRows] = await Promise.all([
+    client.scholar.findMany({
+      where: { deletedAt: null },
+      select: { cwid: true, primaryTitle: true, edPrimaryTitle: true, workingTitle: true },
+    }),
+    client.fieldOverride.findMany({
+      where: { entityType: "scholar", fieldName: "primaryTitle" },
+      select: { entityId: true, value: true },
+    }),
+  ]);
+  const overrides = new Map(overrideRows.map((o) => [o.entityId, o.value]));
+
+  const [{ chiefTitles, centerTitles }, appointmentTitles, chairedDepartments] =
+    opts.applyDerivedTiers
+      ? await Promise.all([
+          loadLeadershipTitles(client),
+          loadCurrentAppointmentTitles(client),
+          loadChairedDepartments(client),
+        ])
+      : [
+          {
+            chiefTitles: new Map<string, string>(),
+            centerTitles: new Map<string, string>(),
+          },
+          new Map<string, AppointmentTitle[]>(),
+          new Map<string, string[]>(),
+        ];
+
+  return scholars.map((s) => ({
+    cwid: s.cwid,
+    primaryTitle: s.primaryTitle,
+    override: overrides.get(s.cwid) ?? null,
+    workingTitle: s.workingTitle,
+    texts: [
+      ...(opts.applyDerivedTiers && s.workingTitle ? [{ title: s.workingTitle }] : []),
+      ...(s.edPrimaryTitle ? [{ title: s.edPrimaryTitle }] : []),
+      ...(appointmentTitles.get(s.cwid) ?? []),
+    ],
+    options: buildTitleOptions({
+      workingTitle: opts.applyDerivedTiers ? s.workingTitle : null,
+      appointmentTitles: appointmentTitles.get(s.cwid) ?? [],
+      chiefTitle: chiefTitles.get(s.cwid) ?? null,
+      centerHeadTitle: centerTitles.get(s.cwid) ?? null,
+      edPrimaryTitle: s.edPrimaryTitle,
+      chairedDepartments: chairedDepartments.get(s.cwid) ?? [],
+    }),
+  }));
 }
 
 /**

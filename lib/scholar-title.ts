@@ -54,6 +54,26 @@ export const TITLE_RANK = {
   unranked: 13,
 } as const;
 
+/** The rubric's wording per rank — what `/edit/reports/display-titles` and
+ *  `docs/title-hierarchy.md` show (a test pins the doc to this and
+ *  {@link TITLE_RANK}). */
+export const TITLE_RANK_LABEL: Record<keyof typeof TITLE_RANK, string> = {
+  deanProvost: "Dean / Provost / President",
+  viceProvostDean: "Vice Provost / Vice Dean / Vice President",
+  seniorAssociateDean: "Senior Associate Dean",
+  chair: "Department Chair",
+  institutionalCenterDirector: "Institutional Center / Institute Director",
+  divisionChief: "Division Chief",
+  associateDean: "Associate / Assistant Dean",
+  associateViceProvost: "Associate / Assistant Vice Provost",
+  viceChair: "Vice Chair",
+  endowed: "Endowed title of any academic rank (incl. endowed Clinical / Research / Educational Scholars)",
+  unitCenterDirector: "Unit-based Center / Institute Director",
+  unitProgramDirector: "Unit-based Program Director",
+  academic: "Academic rank (Professor, Instructor …)",
+  unranked: "Anything else",
+};
+
 const EMERITUS = /\bemerit(?:us|a|i)\b/i;
 /** Words that qualify an academic rank without making it a named (endowed) one. */
 const RANK_WORDS = new Set([
@@ -124,7 +144,8 @@ export function rankTitleText(
   return TITLE_RANK.unranked;
 }
 
-/** "Gale and Ira Drukier Professor of …", "… Chair in …", "Endowed …". A
+/** "Gale and Ira Drukier Professor of …", "… Chair in …", "Endowed …", a
+ *  named Clinical / Research / Educational Scholar. A
  *  professorship is named when a non-rank word precedes "Professor" —
  *  "Associate Professor of Clinical Medicine" is not. A lead naming an office
  *  or carrying of/for/in is another role joined on ("Director of X and
@@ -132,7 +153,11 @@ export function rankTitleText(
  *  Assistant Professor"). */
 function isEndowed(t: string): boolean {
   if (/\bendowed\b|\bchair in\b/i.test(t)) return true;
-  const m = /^(.*?)\bprofessor\b/i.exec(t);
+  // "Endowed academic titles of any rank" includes the endowed Clinical /
+  // Research / Educational Scholars (EA, 2026-09-25: EFC stressed these for
+  // junior faculty). Same named-lead test as a professorship: "Jane Example
+  // Research Scholar in Lung Cancer" is named, a bare "Research Scholar" not.
+  const m = /^(.*?)\b(?:professor|(?:clinical|research|education(?:al)?) scholar)\b/i.exec(t);
   if (!m || /\b(?:of|for|in|director|chief|chair|dean|provost|president|head)\b/i.test(m[1])) {
     return false;
   }
@@ -190,6 +215,11 @@ export type TitleInputs = {
   centerHeadTitle: string | null;
   /** ED `weillCornellEduPrimaryTitle`, annotation-stripped. */
   edPrimaryTitle: string | null;
+  /** Names of the academic departments this scholar holds the CHAIR role on
+   *  (`OrgUnitRoleAssignment`, key `chair`; never a non-academic unit). Lets a
+   *  director title naming that department rank as Chair, and is the proof a
+   *  self-set working title claiming Chair needs (EA, 2026-09-25). */
+  chairedDepartments?: readonly string[];
 };
 
 /**
@@ -211,12 +241,27 @@ export function buildTitleOptions(inputs: TitleInputs): TitleOption[] {
     sharesUnitName(r[0], centerHead)
       ? [r[0], TITLE_RANK.institutionalCenterDirector]
       : r;
+  const chaired = inputs.chairedDepartments ?? [];
+  // A director title naming a department the scholar CHAIRS heads it: Chair
+  // (the working-title twin of the BMRI appointment rule — "Executive
+  // Director, …, Institute for Reproductive Medicine" held by the
+  // Reproductive Medicine chair).
+  const rankedChaired = (title: string | null): [string | null, number] => {
+    const r = ranked(title);
+    for (const d of chaired) r[1] = Math.min(r[1], rankTitleText(r[0], d));
+    return r;
+  };
+  // The working title is self-set in the Web Directory and outlives the
+  // office: "Chair of Surgery" stayed there after the chair appointment
+  // ended. Without a chair role it claims nothing (EA, 2026-09-25).
+  const working = rankedChaired(inputs.workingTitle);
+  if (working[1] === TITLE_RANK.chair && chaired.length === 0) working[1] = TITLE_RANK.unranked;
   const byTier: Record<TitleTier, [string | null, number]> = {
-    working: sameDirectorship(ranked(inputs.workingTitle)),
+    working: sameDirectorship(working),
     appointment: sameDirectorship(bestRanked(inputs.appointmentTitles ?? [])),
     centerHead: [centerHead, TITLE_RANK.institutionalCenterDirector],
     chief: [blankToNull(inputs.chiefTitle), TITLE_RANK.divisionChief],
-    primary: sameDirectorship(ranked(inputs.edPrimaryTitle)),
+    primary: sameDirectorship(rankedChaired(inputs.edPrimaryTitle)),
   };
   return TITLE_TIERS.map((tier) => ({
     tier,

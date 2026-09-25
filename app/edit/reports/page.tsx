@@ -87,6 +87,7 @@ import { unitEditHref } from "@/lib/edit/manageable-units";
 import {
   ARTICLE_COUNT_ACCESS_NOTE,
   ARTICLE_COUNT_REPORT,
+  DISPLAY_TITLES_REPORT,
   getReportScopes,
   HIGH_IMPACT_PUBS_REPORT,
   MENTORED_PUBS_REPORT,
@@ -186,11 +187,13 @@ export default async function EditReportsIndexPage({
     programScopes.size > 0
       ? buildProgramUnit(meta, await loadReportAccessPopoverProps(MENTORED_PUBS_REPORT, session))
       : null;
-  // Reports 8 (Article counts: unit administrators + grants) and 9
-  // (Top clinical and high-impact journal publications: grants) ride a second pseudo-unit.
-  const [canArticleCount, highImpactScopes] = await Promise.all([
+  // Reports 8 (Article counts: unit administrators + grants), 9
+  // (Top clinical and high-impact journal publications: grants) and 10
+  // (Display titles: grants) ride a second pseudo-unit.
+  const [canArticleCount, highImpactScopes, displayTitlesScopes] = await Promise.all([
     canViewArticleCountReport(session),
     getReportScopes(session, HIGH_IMPACT_PUBS_REPORT),
+    getReportScopes(session, DISPLAY_TITLES_REPORT),
   ]);
   const institutionReports = [
     ...(canArticleCount
@@ -205,6 +208,9 @@ export default async function EditReportsIndexPage({
       : []),
     ...(highImpactScopes.size > 0
       ? [catalogEntry(meta, 9, await loadReportAccessPopoverProps(HIGH_IMPACT_PUBS_REPORT, session))]
+      : []),
+    ...(displayTitlesScopes.size > 0
+      ? [catalogEntry(meta, 10, await loadReportAccessPopoverProps(DISPLAY_TITLES_REPORT, session))]
       : []),
   ];
   const institutionUnit = institutionReports.length > 0 ? buildInstitutionUnit(institutionReports) : null;
@@ -300,7 +306,7 @@ function buildProgramUnit(
   };
 }
 
-/** Reports 8 / 9 — whichever this viewer may run — as one pseudo-unit. */
+/** Reports 8 / 9 / 10 — whichever this viewer may run — as one pseudo-unit. */
 function buildInstitutionUnit(reports: ReportsIndexReport[]): ReportsIndexUnit {
   return {
     code: "institution",

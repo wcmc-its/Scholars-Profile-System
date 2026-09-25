@@ -82,6 +82,7 @@ import type * as React from "react";
 
 import { renderArticleCountReport } from "@/components/edit/reports/article-count-body";
 import { renderClinicalTrialsReport } from "@/components/edit/reports/clinical-trials-body";
+import { renderDisplayTitlesReport } from "@/components/edit/reports/display-titles-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -95,7 +96,7 @@ import {
   type ReportableUnitKind,
   type ReportsContext,
 } from "@/lib/edit/cancer-center-reports";
-import { HIGH_IMPACT_PUBS_REPORT, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import { DISPLAY_TITLES_REPORT, HIGH_IMPACT_PUBS_REPORT, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
 import type { ReportKey } from "@/lib/edit/report-meta";
 
 /** The page's `searchParams`, awaited — Next's shape (a repeated key is an array). */
@@ -169,8 +170,9 @@ export type ReportDef =
     };
 
 /** Every report, by `report_meta.report_key`. Reports 1–6 are unit-gated;
- *  reports 7 (Mentored publications) and 9 (Top clinical and high-impact journal publications) are
- *  person-gated on their `report_access` keys. */
+ *  reports 7 (Mentored publications), 9 (Top clinical and high-impact journal
+ *  publications) and 10 (Display titles) are person-gated on their
+ *  `report_access` keys. */
 export const REPORTS: Record<ReportKey, ReportDef> = {
   "1": { n: "1", gate: "unit", render: renderOptimizeMembershipReport },
   "2": { n: "2", gate: "unit", render: renderNciTable2aReport },
@@ -190,6 +192,12 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     gate: "person",
     accessKey: HIGH_IMPACT_PUBS_REPORT,
     render: renderHighImpactPublicationsReport,
+  },
+  "10": {
+    n: "10",
+    gate: "person",
+    accessKey: DISPLAY_TITLES_REPORT,
+    render: renderDisplayTitlesReport,
   },
 };
 

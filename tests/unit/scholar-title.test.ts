@@ -108,6 +108,12 @@ describe("rankTitleText — the EA ladder (2026-09-24)", () => {
     ["Instructor in Medicine", 12],
     ["Postdoctoral Associate", 12],
     ["Director of Example Center and Professor of Medicine", 10], // not endowed
+    // Endowed Scholars count as endowed (EA, 2026-09-25); unnamed ones do not.
+    ["Jane Example Research Scholar in Lung Cancer", 9],
+    ["The Example Family Clinical Scholar", 9],
+    ["Example Foundation Educational Scholar in Surgery", 9],
+    ["Research Scholar", 13],
+    ["Clinical Scholar in Medicine", 13],
     ["Anne Example, M.D. Assistant Professor of Otolaryngology", 9], // comma in a name
     ["Vice Chair for Research and Professor of Medicine", 8.5], // an office, not a name
     ["Professor Emeritus of Medicine", 12],
@@ -419,5 +425,45 @@ describe("ambiguousUnitNames", () => {
 
   it("ignores blank names", () => {
     expect(ambiguousUnitNames([{ name: "  " }, { name: "" }]).size).toBe(0);
+  });
+});
+
+describe("chaired departments (EA, 2026-09-25)", () => {
+  const base = { chiefTitle: null, centerHeadTitle: null, appointmentTitles: [] };
+
+  it("a stale working title claiming Chair, with no chair role, claims nothing", () => {
+    const r = resolveScholarTitle({
+      ...base,
+      override: null,
+      workingTitle: "Chair of Surgery",
+      edPrimaryTitle: "Professor of Surgery",
+      appointmentTitles: [{ title: "The Example Family Professor of Surgery" }],
+    });
+    expect(r.value).toBe("The Example Family Professor of Surgery");
+  });
+
+  it("a working title claiming Chair still wins when a chair role backs it", () => {
+    const r = resolveScholarTitle({
+      ...base,
+      override: null,
+      workingTitle: "Chair of Surgery",
+      edPrimaryTitle: "Professor of Surgery",
+      chairedDepartments: ["Surgery"],
+    });
+    expect(r).toEqual({ value: "Chair of Surgery", tier: "working", overridden: false });
+  });
+
+  it("a director title naming the department they chair ranks as Chair", () => {
+    const inputs = {
+      ...base,
+      override: null,
+      workingTitle: "Executive Director, Example Service Center, Institute for Reproductive Medicine",
+      edPrimaryTitle: "Professor of Obstetrics and Gynecology",
+      appointmentTitles: [{ title: "The Example Distinguished Professor of Reproductive Medicine" }],
+    };
+    expect(resolveScholarTitle(inputs).value).toBe("The Example Distinguished Professor of Reproductive Medicine");
+    expect(resolveScholarTitle({ ...inputs, chairedDepartments: ["Reproductive Medicine"] }).value).toBe(
+      "Executive Director, Example Service Center, Institute for Reproductive Medicine",
+    );
   });
 });
