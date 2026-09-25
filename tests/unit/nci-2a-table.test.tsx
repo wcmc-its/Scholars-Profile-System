@@ -157,9 +157,9 @@ describe("report 2 body", () => {
     expect(within(progress).getByTestId("nci-2a-review-link").getAttribute("href")).toBe(
       `${U}&status=needs`,
     );
-    expect(within(progress).getByTestId("nci-2a-review-link").textContent).toBe(
-      "Review 1 suggestion",
-    );
+    // The link counts every row to review (the not-inferred NONE too), like the
+    // Needs review segment and the download note.
+    expect(within(progress).getByTestId("nci-2a-review-link").textContent).toBe("Review 2 rows");
     const labels = [...q.getByTestId("nci-2a-stats").querySelectorAll("dt")].map(
       (d) => d.textContent,
     );
@@ -173,6 +173,14 @@ describe("report 2 body", () => {
     );
     // The whole cycle: no "Filtered" marker.
     expect(q.getByTestId("nci-2a-download-note").textContent).not.toContain("Filtered");
+  });
+
+  it("the review link stays while only not-inferred rows need review", async () => {
+    h.load.mockResolvedValue({ ...DATA, awards: [DONE, NONE] });
+    const q = await renderBody();
+    const progress = q.getByTestId("nci-2a-progress");
+    expect(progress.textContent).toContain("1 of 1");
+    expect(within(progress).getByTestId("nci-2a-review-link").textContent).toBe("Review 1 row");
   });
 
   it("status segments count over the other filters and link with them kept", async () => {
@@ -543,6 +551,45 @@ describe("report 2 table", () => {
       expect(within(r.q.getByTestId("nci-2a-bulk")).getByRole("status").textContent).toBe(
         "Accepted 1 suggestion. Skipped 1: already reviewed or no percentage to accept.",
       );
+    });
+
+    it("a filter or sort change clears the result note", async () => {
+      stubAccept({
+        ok: true,
+        accepted: [{ awardId: "1", cancerRelevantPercent: 40 }],
+        skipped: [],
+      });
+      const r = renderTable([AI, AI2], "status=needs");
+      fireEvent.click(r.q.getByRole("button", { name: "Accept 2 shown suggestions" }));
+      fireEvent.click(
+        within(r.q.getByTestId("nci-2a-bulk-confirm")).getByRole("button", { name: "Accept 2" }),
+      );
+      await waitFor(() =>
+        expect(r.q.getByRole("status").textContent).toBe("Accepted 1 suggestion."),
+      );
+      // Same filters (the post-save refresh): the note stays.
+      r.rerender(tableEl([AI, AI2], "status=needs"));
+      expect(r.q.getByRole("status").textContent).toBe("Accepted 1 suggestion.");
+      // A new sort: a different row set, so the note goes.
+      r.rerender(tableEl([AI2, AI], "status=needs&sort=dc"));
+      expect(r.q.queryByRole("status")).toBeNull();
+    });
+
+    it("a lost response says the result is unknown and refreshes", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new TypeError("network");
+        }),
+      );
+      const { q } = renderTable([AI, AI2]);
+      fireEvent.click(q.getByRole("button", { name: "Accept 2 shown suggestions" }));
+      fireEvent.click(
+        within(q.getByTestId("nci-2a-bulk-confirm")).getByRole("button", { name: "Accept 2" }),
+      );
+      await waitFor(() => expect(h.refresh).toHaveBeenCalled());
+      expect(q.getByRole("alert").textContent).toContain("may not have finished");
+      expect(q.getByRole("alert").textContent).not.toContain("Nothing was changed");
     });
 
     it("never sends more than 50 ids; the label says so", async () => {

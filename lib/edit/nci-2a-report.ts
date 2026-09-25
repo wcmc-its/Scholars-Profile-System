@@ -256,7 +256,9 @@ export function nci2aStats(rows: ReadonlyArray<Nci2aAward>): Nci2aStats {
  * Cycle-wide review progress over the AI-suggested percentages: `total` = rows
  * with an AI value, `reviewed` = those a human has since confirmed or
  * corrected, `pending` = those still AI-suggested. A not-inferred row has no
- * suggestion, so it is in none of these (it still counts under Needs review).
+ * suggestion, so it is in none of these; `needsReview` is every row still to
+ * review, not-inferred included (it drives the "Review N" link, so the link
+ * agrees with the Needs review segment, the CSV note and the reports index).
  */
 export function reviewProgress(awards: ReadonlyArray<Nci2aAward>) {
   const suggested = awards.filter((a) => a.cancerRelevantPercentAi != null);
@@ -266,6 +268,7 @@ export function reviewProgress(awards: ReadonlyArray<Nci2aAward>) {
     reviewed: done,
     total,
     pending: total - done,
+    needsReview: awards.filter(needsReview).length,
     pct: total ? Math.round((done / total) * 100) : 100,
   };
 }

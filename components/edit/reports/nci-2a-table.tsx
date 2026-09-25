@@ -282,6 +282,14 @@ export function Nci2aTable({
   const [confirming, setConfirming] = React.useState(false);
   const [bulkBusy, setBulkBusy] = React.useState(false);
   const [bulkNote, setBulkNote] = React.useState<string | null>(null);
+  // A filter or sort change (a Link, so this component keeps its state) swaps
+  // the row set: drop a result note or an open confirm that was about the old one.
+  const [noteKey, setNoteKey] = React.useState(resetKey);
+  if (noteKey !== resetKey) {
+    setNoteKey(resetKey);
+    setBulkNote(null);
+    setConfirming(false);
+  }
 
   const acceptShown = async () => {
     const ids = bulkAcceptTargets(visible).map((a) => a.id);
@@ -305,7 +313,10 @@ export function Nci2aTable({
       }
       result = (await res.json()) as Nci2aAcceptResult;
     } catch {
-      setError("Accept failed. Nothing was changed.");
+      // No response: the POST may still have committed. Say so, and refresh so
+      // the rows show whatever was actually saved.
+      setError("Accept may not have finished. Reloading the rows to show what was saved.");
+      React.startTransition(() => router.refresh());
       return;
     } finally {
       setBulkBusy(false);

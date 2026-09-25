@@ -173,6 +173,14 @@ describe("POST /api/edit/center/[code]/nci-2a/accept", () => {
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
   });
 
+  it("gives the transaction room for a full 50-id batch (not Prisma's 5 s default)", async () => {
+    await POST(post({ awardIds: ["a1"] }), { params: params() });
+    expect(mockTransaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ timeout: 15000 }),
+    );
+  });
+
   it("500s when the transaction fails", async () => {
     mockAppendAuditRow.mockRejectedValueOnce(new Error("boom"));
     const res = await POST(post({ awardIds: ["a1"] }), { params: params() });

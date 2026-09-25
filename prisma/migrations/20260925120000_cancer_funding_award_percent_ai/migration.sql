@@ -3,7 +3,9 @@
 -- correction ("Corrected · AI said X%") from a confirmation. Additive and
 -- nullable; the backfill copies the current value only where nobody has
 -- reviewed it yet (source = 'llm'), since a human-sourced value is not what
--- the model said. Safe on an empty table.
+-- the model said. Safe on an empty table. Rows already reviewed get their AI
+-- value from the audit log via
+-- scripts/backfills/2026-09-25-nci-2a-ai-percent-from-audit.ts.
 ALTER TABLE `cancer_center_funding_award`
   ADD COLUMN `cancer_relevant_percent_ai` DECIMAL(5, 2) NULL AFTER `cancer_relevant_percent_source`;
 

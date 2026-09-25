@@ -191,7 +191,7 @@ export async function renderNciTable2aReport({
             >
               {NCI2A_BANNER}
             </p>
-            {progress.pending > 0 && (
+            {progress.needsReview > 0 && (
               <div>
                 <Link
                   href={href(
@@ -200,8 +200,8 @@ export async function renderNciTable2aReport({
                   className="border-apollo-border-strong hover:bg-apollo-surface-2 inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium"
                   data-testid="nci-2a-review-link"
                 >
-                  Review {progress.pending.toLocaleString()}{" "}
-                  {progress.pending === 1 ? "suggestion" : "suggestions"}
+                  Review {progress.needsReview.toLocaleString()}{" "}
+                  {progress.needsReview === 1 ? "row" : "rows"}
                 </Link>
               </div>
             )}

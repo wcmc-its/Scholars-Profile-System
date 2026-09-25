@@ -216,7 +216,14 @@ describe("numbers", () => {
 
   it("progress counts reviewed rows of those with an AI value, cycle-wide", () => {
     // C has no AI value (not inferred), so it is out of the denominator.
-    expect(reviewProgress(ALL)).toEqual({ reviewed: 1, total: 2, pending: 1, pct: 50 });
+    // needsReview counts every row still to review, the not-inferred C included.
+    expect(reviewProgress(ALL)).toEqual({
+      reviewed: 1,
+      total: 2,
+      pending: 1,
+      needsReview: 2,
+      pct: 50,
+    });
     // A corrected row counts as reviewed; a human value on a row with no AI value doesn't count.
     const corrected = {
       ...A,
@@ -232,6 +239,14 @@ describe("numbers", () => {
       reviewed: 2,
       total: 2,
       pending: 0,
+      needsReview: 0,
+      pct: 100,
+    });
+    // Every AI row reviewed, one not-inferred left: progress is 100% but the
+    // review link still has a row to point at.
+    expect(reviewProgress([corrected, B, C])).toMatchObject({
+      pending: 0,
+      needsReview: 1,
       pct: 100,
     });
     expect(reviewProgress([]).pct).toBe(100);

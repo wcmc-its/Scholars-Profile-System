@@ -35,6 +35,9 @@ import {
 import { NCI2A_ACCEPT_CAP, type Nci2aAcceptResult } from "@/lib/edit/nci-2a-report";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 
+/** Interactive-transaction limits for a full 50-id batch. */
+const TX_OPTIONS = { maxWait: 5000, timeout: 15000 } as const;
+
 const PATH = "/api/edit/center/[code]/nci-2a/accept";
 
 function parseAwardIds(v: unknown): string[] | null {
@@ -79,6 +82,8 @@ export async function POST(
 
   let result: Nci2aAcceptResult;
   try {
+    // Up to 101 sequential statements (1 read + 50 updates + 50 audit rows):
+    // Prisma's 5 s default could roll back a whole batch on a slow writer.
     result = await db.write.$transaction(async (tx) => {
       const rows = await tx.cancerCenterFundingAward.findMany({
         where: { id: { in: awardIds }, centerCode: center.code },
@@ -132,7 +137,7 @@ export async function POST(
         out.accepted.push({ awardId, cancerRelevantPercent: pct });
       }
       return out;
-    });
+    }, TX_OPTIONS);
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
