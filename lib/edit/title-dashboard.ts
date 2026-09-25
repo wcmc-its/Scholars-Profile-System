@@ -11,7 +11,7 @@
  *   pinned          a `field_override(primaryTitle)` is set;
  *   contested       two or more candidates rank 1–8.5 (EA's coin flips);
  *   leadershipLost  a leadership or director candidate (rank ≤ 10) lost to a
- *                   lower-ranked KIND of title — the Iadecola pattern;
+ *                   lower-ranked KIND of title — the pre-#2804 BMRI pattern;
  *   mismatch        a role and the title text disagree (a chair/chief role
  *                   with no chair/chief text, or chair/chief text with no
  *                   role). Dean-family text has no role source to confirm it
@@ -114,7 +114,7 @@ export function classifyTitleRow(
     reasons.push("contested");
   }
   // A leadership or director title lost to a non-leadership kind: the
-  // Iadecola pattern, "Director, … Institute" (10) beaten by an endowed
+  // pre-#2804 BMRI pattern, "Director, … Institute" (10) beaten by an endowed
   // professorship (9), or a pin that chose an academic title over a chair.
   const shown = pin ?? winner?.value ?? null;
   const isOffice = (rank: number) => isLeadershipRank(rank) || rank === TITLE_RANK.unitCenterDirector;
