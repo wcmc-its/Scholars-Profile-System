@@ -182,6 +182,8 @@ beforeEach(() => {
     detail: [],
     publications: [],
     generatedAt: new Date("2026-09-20T00:00:00Z"),
+    // The loader always echoes its filters; report 7's body reads the set from them.
+    filters: { scopes: ["md"], types: ["aoc"], gradYears: null, tail: 1, pubs: "mentored" },
     allPubsLoaded: null,
     droppedUnresolved: 0,
     droppedNoCwid: 0,
