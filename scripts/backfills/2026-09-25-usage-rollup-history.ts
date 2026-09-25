@@ -41,13 +41,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-// The Lambda's own re-roll guard, imported (not copied) so the two can't drift:
-// the oldest day (in UTC days before today) whose raw logs are still guaranteed
-// to exist under EdgeStack's 90-day expiry. `queries.ts` is dependency-free, so
-// this read-only import pulls nothing else in and leaves the Lambda asset as is.
-import { MAX_REROLL_AGE_DAYS } from "../../cdk/lambda/cf-usage-rollup/queries";
-
-export { MAX_REROLL_AGE_DAYS };
+// The Lambda's re-roll guard (`cdk/lambda/cf-usage-rollup/queries.ts`): the
+// oldest day (in UTC days before today) whose raw logs are still guaranteed to
+// exist under EdgeStack's 90-day expiry. Copied, not imported: `cdk/` is in
+// .dockerignore, so an import from it breaks the app image's `next build`.
+// tests/unit/usage-rollup-backfill.test.ts pins this to the Lambda's value.
+export const MAX_REROLL_AGE_DAYS = 85;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
