@@ -119,6 +119,15 @@ vi.mock("@/lib/db", () => ({
         args?.where?.entityType === "division"
           ? mockDivChiefAssignmentFindFirst(args)
           : mockOrgUnitRoleAssignmentFindFirst(args),
+      // The department page's division list resolves every chief in ONE
+      // batched read (`resolveUnitLeaderCwids`); it serves each requested
+      // division the row `mockDivChiefAssignmentFindFirst` would have.
+      findMany: async (args: { where: { entityId: { in: string[] } } }) => {
+        const row = await mockDivChiefAssignmentFindFirst(args);
+        return row
+          ? args.where.entityId.in.map((entityId) => ({ entityId, cwid: row.cwid }))
+          : [];
+      },
     },
   },
 }));

@@ -9,6 +9,7 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import {
   countActiveCenterMembersByCode,
   isCenterMembershipActive,
@@ -1537,6 +1538,66 @@ export function getCenterPublicationsList(
   );
 }
 
+/**
+ * The number of publications a set of center members makes visible — exactly
+ * `publication.count({ where: unitPublicationWhere({ membership: { cwid: { in:
+ * memberCwids } }, darkPmids }) })`, the Publications tab's `total` with no
+ * area filter, computed without touching `publication`:
+ *   - "has a confirmed member author" is a DISTINCT pmid over confirmed
+ *     `publication_author` rows of those cwids. Every such pmid IS a
+ *     publication (`publication_author.pmid` is an FK to it, ON DELETE
+ *     CASCADE), so no join is needed;
+ *   - `darkPmids` are removed exactly as the tab's `pmid NOT IN` removes them.
+ *
+ * The Prisma form scans all of `publication` with a correlated EXISTS per
+ * row (~0.6s for a 300-member center); this reads only the members' rows off
+ * `publication_author(cwid, is_confirmed)`. KEEP IN STEP with
+ * `unitPublicationWhere`. Exported for tests.
+ */
+export async function countUnitPublicationsForCwids(
+  memberCwids: string[],
+  darkPmids: string[],
+): Promise<number> {
+  if (memberCwids.length === 0) return 0;
+  const notDark =
+    darkPmids.length > 0
+      ? Prisma.sql`AND pa.pmid NOT IN (${Prisma.join(darkPmids)})`
+      : Prisma.empty;
+  const rows = (await prisma.$queryRaw(
+    Prisma.sql`SELECT COUNT(DISTINCT pa.pmid) AS n
+                 FROM publication_author pa
+                WHERE pa.is_confirmed = 1
+                  AND pa.cwid IN (${Prisma.join(memberCwids)})
+                  ${notDark}`,
+  )) as Array<{ n: number | bigint }> | undefined;
+  return Number(rows?.[0]?.n ?? 0);
+}
+
+async function getCenterPublicationCountUncached(centerCode: string): Promise<number> {
+  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
+  if (memberCwids.length === 0) return 0;
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const unitDarkPmids = await resolveUnitDarkPmids(
+    suppressions,
+    { cwid: { in: memberCwids } },
+    prisma,
+  );
+  return countUnitPublicationsForCwids(memberCwids, unitDarkPmids);
+}
+
+/**
+ * The center's visible-publication count — the hero stat, the Publications
+ * tab label and Spotlight's "view all" — without loading a page of cards.
+ * Always equal to `getCenterPublicationsList(code, {}).total`. Cached under
+ * the `center:` prefix, so `reflectUnitChange`'s `bust("center:")` clears it
+ * with the list.
+ */
+export function getCenterPublicationCount(centerCode: string): Promise<number> {
+  return cachedRead(`center:pubcount:${centerCode}`, () =>
+    getCenterPublicationCountUncached(centerCode),
+  );
+}
+
 const CENTER_GRANT_PAGE_SIZE = 20;
 
 /**
@@ -1559,14 +1620,7 @@ async function getCenterGrantsListUncached(
   if (memberCwids.length === 0) {
     return { hits: [], total: 0, page, pageSize: CENTER_GRANT_PAGE_SIZE };
   }
-  const sortedGroups = await loadUnitGrantProjects(
-    {
-      cwid: { in: memberCwids },
-      endDate: { gte: new Date() },
-      source: { not: "RePORTER" }, // exclude individual RePORTER history
-    },
-    sort,
-  );
+  const sortedGroups = await loadUnitGrantProjects(centerGrantWhere(memberCwids), sort);
   const total = sortedGroups.length;
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: CENTER_GRANT_PAGE_SIZE };
@@ -1594,6 +1648,29 @@ export function getCenterGrantsList(
   return cachedRead(`center:grants:${centerCode}:${page}:${sort}`, () =>
     getCenterGrantsListUncached(centerCode, { page, sort }),
   );
+}
+
+/** The center's active-grant member filter — shared by the list and the count. */
+function centerGrantWhere(memberCwids: string[]) {
+  return {
+    cwid: { in: memberCwids },
+    endDate: { gte: new Date() },
+    source: { not: "RePORTER" }, // exclude individual RePORTER history
+  };
+}
+
+/**
+ * The Grants tab count — `getCenterGrantsList(code, {}).total` — without
+ * building a page of grant cards (`buildUnitGrantCards` is 3 more queries).
+ * Cached under the `center:` prefix with the list.
+ */
+export function getCenterGrantCount(centerCode: string): Promise<number> {
+  return cachedRead(`center:grantcount:${centerCode}`, async () => {
+    const memberCwids = await loadActiveCenterMemberCwids(centerCode);
+    if (memberCwids.length === 0) return 0;
+    const groups = await loadUnitGrantProjects(centerGrantWhere(memberCwids), "most_recent");
+    return groups.length;
+  });
 }
 
 /**

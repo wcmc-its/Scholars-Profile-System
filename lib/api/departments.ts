@@ -34,7 +34,7 @@ import {
   DEPARTMENT_DIRECTOR_ROLE_KEY,
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
-import { resolveUnitLeader } from "@/lib/api/unit-leader";
+import { resolveUnitLeader, resolveUnitLeaderCwids } from "@/lib/api/unit-leader";
 import {
   isUnitSuppressed,
   loadUnitFieldOverrides,
@@ -258,23 +258,15 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
   });
   type DivisionRow = Awaited<typeof rawDivisions>[number];
   // Chief per division: override > assignment (#2542 contract A) —
-  // `Division.chiefCwid` no longer exists as a read source. Resolved through
-  // the same `resolveUnitLeader` precedence the division's own page uses.
-  const chiefResolutions = await Promise.all(
-    rawDivisions.map(async (d: DivisionRow) => {
-      const divOverrides = await loadUnitFieldOverrides("division", d.code, prisma);
-      const resolved = await resolveUnitLeader({
-        entityType: "division",
-        entityId: d.code,
-        roleKey: DIVISION_CHIEF_ROLE_KEY,
-        overrides: divOverrides,
-        fallbackLabel: "Chief",
-        client: prisma,
-      });
-      return [d.code, resolved?.cwid ?? null] as const;
-    }),
-  );
-  const chiefCwidByDivision = new Map<string, string | null>(chiefResolutions);
+  // `Division.chiefCwid` no longer exists as a read source. Same precedence as
+  // `resolveUnitLeader` (the division's own page), batched: two queries for
+  // every division instead of three per division.
+  const chiefCwidByDivision = await resolveUnitLeaderCwids({
+    entityType: "division",
+    entityIds: rawDivisions.map((d: DivisionRow) => d.code),
+    roleKey: DIVISION_CHIEF_ROLE_KEY,
+    client: prisma,
+  });
   const chiefCwids: string[] = [...chiefCwidByDivision.values()].filter(
     (c): c is string => !!c,
   );

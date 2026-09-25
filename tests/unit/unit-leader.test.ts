@@ -9,7 +9,12 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveUnitLeader, type UnitLeaderReadClient } from "@/lib/api/unit-leader";
+import {
+  resolveUnitLeader,
+  resolveUnitLeaderCwids,
+  type UnitLeaderCwidReadClient,
+  type UnitLeaderReadClient,
+} from "@/lib/api/unit-leader";
 import type { UnitFieldOverrides } from "@/lib/api/manual-layer";
 
 type RoleRow = { entityType: string; key: string; label: string };
@@ -21,6 +26,29 @@ type AssignmentRow = {
   interim: boolean;
   sortOrder?: number;
 };
+
+type OrderBy = Array<Record<string, "asc" | "desc">>;
+
+/**
+ * Sort fixture rows by the `orderBy` the code under test PASSES (not a
+ * hard-coded order), so a changed orderBy changes which row comes first.
+ * A missing `sortOrder` reads as the column default, 0.
+ */
+function sortByOrderBy<T extends AssignmentRow>(rows: T[], orderBy: OrderBy | undefined): T[] {
+  const keys = (orderBy ?? []).map((o) => Object.entries(o)[0] as [keyof AssignmentRow, "asc" | "desc"]);
+  return [...rows].sort((a, b) => {
+    for (const [k, dir] of keys) {
+      const av = a[k] ?? 0;
+      const bv = b[k] ?? 0;
+      const c =
+        typeof av === "number" && typeof bv === "number"
+          ? av - bv
+          : String(av).localeCompare(String(bv));
+      if (c !== 0) return dir === "asc" ? c : -c;
+    }
+    return 0;
+  });
+}
 
 function makeClient(opts: { roles?: RoleRow[]; assignments?: AssignmentRow[] }): UnitLeaderReadClient {
   const roles = opts.roles ?? [];
@@ -36,16 +64,19 @@ function makeClient(opts: { roles?: RoleRow[]; assignments?: AssignmentRow[] }):
     } as unknown as UnitLeaderReadClient["orgUnitRole"],
     orgUnitRoleAssignment: {
       findFirst: vi.fn(async (args: unknown) => {
-        const where = (args as { where: { entityType: string; entityId: string; roleKey: string } })
-          .where;
-        const matches = assignments
-          .filter(
+        const { where, orderBy } = args as {
+          where: { entityType: string; entityId: string; roleKey: string };
+          orderBy?: OrderBy;
+        };
+        const matches = sortByOrderBy(
+          assignments.filter(
             (a) =>
               a.entityType === where.entityType &&
               a.entityId === where.entityId &&
               a.roleKey === where.roleKey,
-          )
-          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.cwid.localeCompare(b.cwid));
+          ),
+          orderBy,
+        );
         const first = matches[0];
         if (!first) return null;
         const role = roles.find((r) => r.entityType === first.entityType && r.key === first.roleKey);
@@ -248,5 +279,135 @@ describe("resolveUnitLeader — field_override present (the regression test that
     // curator's explicit "not interim" is silently discarded -- which the test above
     // would NOT catch.
     expect(result?.interim).toBe(false);
+  });
+});
+
+describe("resolveUnitLeaderCwids — batched, same cwid as resolveUnitLeader per unit", () => {
+  type OverrideRow = { entityType: string; entityId: string; fieldName: string; value: string };
+
+  /** A batch client over the same fixture rows `makeClient` serves one unit at a time. */
+  function makeBatchClient(opts: {
+    assignments: AssignmentRow[];
+    overrides: OverrideRow[];
+  }): UnitLeaderCwidReadClient & { calls: () => number } {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      fieldOverride: {
+        findMany: vi.fn(async (args: unknown) => {
+          calls++;
+          const where = (
+            args as { where: { entityType: string; entityId: { in: string[] }; fieldName: string } }
+          ).where;
+          return opts.overrides
+            .filter(
+              (o) =>
+                o.entityType === where.entityType &&
+                where.entityId.in.includes(o.entityId) &&
+                o.fieldName === where.fieldName,
+            )
+            .map((o) => ({ entityId: o.entityId, value: o.value }));
+        }),
+      } as unknown as UnitLeaderCwidReadClient["fieldOverride"],
+      orgUnitRoleAssignment: {
+        findMany: vi.fn(async (args: unknown) => {
+          calls++;
+          const { where, orderBy } = args as {
+            where: { entityType: string; entityId: { in: string[] }; roleKey: string };
+            orderBy?: OrderBy;
+          };
+          return sortByOrderBy(
+            opts.assignments.filter(
+              (a) =>
+                a.entityType === where.entityType &&
+                where.entityId.in.includes(a.entityId) &&
+                a.roleKey === where.roleKey,
+            ),
+            orderBy,
+          ).map((a) => ({ entityId: a.entityId, cwid: a.cwid }));
+        }),
+      } as unknown as UnitLeaderCwidReadClient["orgUnitRoleAssignment"],
+    };
+  }
+
+  const assignments: AssignmentRow[] = [
+    // DIV_A: assignment only.
+    { entityType: "division", entityId: "DIV_A", roleKey: "chief", cwid: "aaa0001", interim: false },
+    // DIV_B: three holders — (sortOrder, cwid) picks bbb0005. Chosen so every
+    // other ordering picks someone else: cwid-only → bbb0001, sortOrder-only
+    // (insertion order within a tie) → bbb0009, no orderBy → bbb0001.
+    { entityType: "division", entityId: "DIV_B", roleKey: "chief", cwid: "bbb0001", interim: false, sortOrder: 1 },
+    { entityType: "division", entityId: "DIV_B", roleKey: "chief", cwid: "bbb0009", interim: false, sortOrder: 0 },
+    { entityType: "division", entityId: "DIV_B", roleKey: "chief", cwid: "bbb0005", interim: false, sortOrder: 0 },
+    // DIV_C: an assignment the override must beat.
+    { entityType: "division", entityId: "DIV_C", roleKey: "chief", cwid: "ccc0001", interim: false },
+    // DIV_D: an assignment an explicit-vacancy override must suppress.
+    { entityType: "division", entityId: "DIV_D", roleKey: "chief", cwid: "ddd0001", interim: false },
+    // DIV_F: a different role key — not the chief.
+    { entityType: "division", entityId: "DIV_F", roleKey: "associate_chief", cwid: "fff0001", interim: false },
+    // Same code under another entity type — must not leak in.
+    { entityType: "department", entityId: "DIV_E", roleKey: "chief", cwid: "eee0001", interim: false },
+  ];
+  const overrides: OverrideRow[] = [
+    { entityType: "division", entityId: "DIV_C", fieldName: "leaderCwid", value: "ovr0001" },
+    { entityType: "division", entityId: "DIV_D", fieldName: "leaderCwid", value: "" },
+    // An interim-only override does not change WHO.
+    { entityType: "division", entityId: "DIV_A", fieldName: "leaderInterim", value: "true" },
+    // An override on a unit with no assignment.
+    { entityType: "division", entityId: "DIV_G", fieldName: "leaderCwid", value: "ggg0001" },
+  ];
+  const ids = ["DIV_A", "DIV_B", "DIV_C", "DIV_D", "DIV_E", "DIV_F", "DIV_G"];
+
+  it("matches resolveUnitLeader's cwid for every unit, in two queries", async () => {
+    const batch = makeBatchClient({ assignments, overrides });
+    const got = await resolveUnitLeaderCwids({
+      entityType: "division",
+      entityIds: ids,
+      roleKey: "chief",
+      client: batch,
+    });
+    expect(batch.calls()).toBe(2);
+
+    const single = makeClient({ assignments });
+    const expected = new Map<string, string | null>();
+    for (const id of ids) {
+      const bag: UnitFieldOverrides = {};
+      for (const o of overrides) {
+        if (o.entityType === "division" && o.entityId === id) {
+          (bag as Record<string, string>)[o.fieldName] = o.value;
+        }
+      }
+      const r = await resolveUnitLeader({
+        entityType: "division",
+        entityId: id,
+        roleKey: "chief",
+        overrides: bag,
+        fallbackLabel: "Chief",
+        client: single,
+      });
+      expected.set(id, r?.cwid ?? null);
+    }
+    expect([...got]).toEqual([...expected]);
+    expect(Object.fromEntries(got)).toEqual({
+      DIV_A: "aaa0001",
+      DIV_B: "bbb0005",
+      DIV_C: "ovr0001",
+      DIV_D: null,
+      DIV_E: null,
+      DIV_F: null,
+      DIV_G: "ggg0001",
+    });
+  });
+
+  it("no units → no queries", async () => {
+    const batch = makeBatchClient({ assignments, overrides });
+    const got = await resolveUnitLeaderCwids({
+      entityType: "division",
+      entityIds: [],
+      roleKey: "chief",
+      client: batch,
+    });
+    expect(got.size).toBe(0);
+    expect(batch.calls()).toBe(0);
   });
 });

@@ -144,3 +144,53 @@ export async function resolveUnitLeader(params: {
     source: "assignment",
   };
 }
+
+/** The Prisma surface `resolveUnitLeaderCwids` needs. */
+export type UnitLeaderCwidReadClient = Pick<PrismaClient, "fieldOverride" | "orgUnitRoleAssignment">;
+
+/**
+ * WHO leads each of many departments or divisions — the `cwid` that
+ * `resolveUnitLeader` would return for each unit (`null` where it returns
+ * `null`), in TWO queries instead of 2-3 per unit. Same precedence:
+ *
+ *  1. `field_override(leaderCwid)` wins outright; `""` is an explicit vacancy
+ *     (`null`, no fall-through).
+ *  2. Otherwise the unit's first `OrgUnitRoleAssignment` for `roleKey` by
+ *     (`sortOrder`, `cwid`) — the `findFirst` order.
+ *
+ * Only the cwid: the role LABEL and the interim flag are not resolved here —
+ * callers that render a leader card use `resolveUnitLeader`. Used for the
+ * department page's division list, which shows each chief's name only.
+ */
+export async function resolveUnitLeaderCwids(params: {
+  entityType: "department" | "division";
+  entityIds: string[];
+  roleKey: string;
+  client: UnitLeaderCwidReadClient;
+}): Promise<Map<string, string | null>> {
+  const { entityType, entityIds, roleKey, client } = params;
+  const out = new Map<string, string | null>();
+  if (entityIds.length === 0) return out;
+  const [overrideRows, assignmentRows] = await Promise.all([
+    client.fieldOverride.findMany({
+      where: { entityType, entityId: { in: entityIds }, fieldName: "leaderCwid" },
+      select: { entityId: true, value: true },
+    }),
+    client.orgUnitRoleAssignment.findMany({
+      where: { entityType, entityId: { in: entityIds }, roleKey },
+      select: { entityId: true, cwid: true },
+      orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
+    }),
+  ]);
+  const overrideById = new Map(overrideRows.map((r) => [r.entityId, r.value]));
+  const firstAssignment = new Map<string, string>();
+  for (const a of assignmentRows) {
+    if (!firstAssignment.has(a.entityId)) firstAssignment.set(a.entityId, a.cwid);
+  }
+  for (const id of entityIds) {
+    const override = overrideById.get(id);
+    if (override !== undefined) out.set(id, override === "" ? null : override);
+    else out.set(id, firstAssignment.get(id) ?? null);
+  }
+  return out;
+}
