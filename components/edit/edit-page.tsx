@@ -1206,6 +1206,16 @@ function renderPanel(
                   }
                   pending={ctx.titlePicker.pending}
                   canSet={isSuperuserLike(mode)}
+                  // The ladder lives on the display-titles report, which only a
+                  // superuser / comms steward can open — so only they get the link.
+                  // `isSuperuser` is the self-mode superuser tell (own profile).
+                  rubricHref={
+                    mode === "superuser" ||
+                    mode === "comms_steward" ||
+                    (mode === "self" && isSuperuser)
+                      ? "/edit/reports/display-titles#rubric"
+                      : undefined
+                  }
                 />
               ) : (
                 ctx.scholar.primaryTitle
