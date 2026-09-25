@@ -34,6 +34,7 @@ import {
   ambiguousUnitNames,
   formatUnitLeadershipTitle,
   resolveScholarTitle,
+  type AppointmentTitle,
 } from "@/lib/scholar-title";
 
 /** The Prisma surface this pass needs — base client or interactive tx. */
@@ -46,6 +47,7 @@ type TitleResolutionClient = Pick<
   | "centerProgram"
   | "fieldOverride"
   | "appointment"
+  | "department"
 >;
 
 export type TitleResolutionResult = {
@@ -89,7 +91,7 @@ export async function resolveScholarTitles(
           chiefTitles: new Map<string, string>(),
           centerTitles: new Map<string, string>(),
         },
-        new Map<string, string[]>(),
+        new Map<string, AppointmentTitle[]>(),
       ];
 
   const byTier: Record<string, number> = {};

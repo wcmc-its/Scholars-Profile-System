@@ -119,6 +119,17 @@ describe("rankTitleText — the EA ladder (2026-09-24)", () => {
   it.each(cases)("%s → %s", (title, rank) => {
     expect(rankTitleText(title)).toBe(rank);
   });
+
+  it("a center/institute director title naming its OWN department ranks as Chair", () => {
+    const t = "Director of the Feil Family Brain and Mind Research Institute";
+    expect(rankTitleText(t, "Brain and Mind Research")).toBe(4);
+    expect(rankTitleText(t, "Medicine")).toBe(10);
+    expect(rankTitleText(t)).toBe(10);
+    // Only director titles are promoted — never an associate director.
+    expect(
+      rankTitleText("Associate Director, Brain and Mind Research Institute", "Brain and Mind Research"),
+    ).toBe(13);
+  });
 });
 
 describe("resolveScholarTitle — rank, not source", () => {
@@ -207,7 +218,10 @@ describe("resolveScholarTitle — rank, not source", () => {
     const r = resolveScholarTitle({
       ...NONE,
       override: null,
-      appointmentTitles: ["Professor of Biochemistry", "Leon Example Professor of Surgery"],
+      appointmentTitles: [
+        { title: "Professor of Biochemistry" },
+        { title: "Leon Example Professor of Surgery" },
+      ],
       edPrimaryTitle: "Professor of Surgery",
     });
     expect(r).toMatchObject({ tier: "appointment", value: "Leon Example Professor of Surgery" });
@@ -215,7 +229,7 @@ describe("resolveScholarTitle — rank, not source", () => {
       resolveScholarTitle({
         ...NONE,
         override: null,
-        appointmentTitles: ["Professor of Biochemistry"],
+        appointmentTitles: [{ title: "Professor of Biochemistry" }],
         edPrimaryTitle: "Professor of Surgery",
       }).tier,
     ).toBe("primary");

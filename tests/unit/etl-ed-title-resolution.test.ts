@@ -32,7 +32,9 @@ function fakeClient(opts: {
   divisions?: { code: string; name: string; department: { name: string } | null }[];
   centers?: { code: string; name: string; officialName: string | null }[];
   /** Current ED appointment titles. */
-  appointments?: { cwid: string; title: string }[];
+  appointments?: { cwid: string; title: string; organization?: string }[];
+  /** Department names (appointment organizations that are departments). */
+  departmentNames?: string[];
   overrides?: { entityId: string; value: string }[];
   /** Centers with a CenterProgram taxonomy, i.e. "the Cancer Center". */
   cancerCenterCodes?: string[];
@@ -64,6 +66,9 @@ function fakeClient(opts: {
     division: { findMany: vi.fn(async () => opts.divisions ?? []) },
     center: { findMany: vi.fn(async () => opts.centers ?? []) },
     appointment: { findMany: vi.fn(async () => opts.appointments ?? []) },
+    department: {
+      findMany: vi.fn(async () => (opts.departmentNames ?? []).map((name) => ({ name }))),
+    },
     centerProgram: {
       findMany: vi.fn(async () =>
         (opts.cancerCenterCodes ?? ["CTR-CANCER"]).map((centerCode) => ({ centerCode })),
@@ -234,6 +239,34 @@ describe("resolveScholarTitles — derived tiers", () => {
     expect(updates).toEqual([
       { cwid: "endw", primaryTitle: "Gale and Ira Drukier Professor of Children's Health" },
       { cwid: "chr1", primaryTitle: "Sanford I. Weill Chair of Medicine" },
+    ]);
+  });
+
+  it("a director title naming its OWN department ranks as Chair (BMRI)", async () => {
+    // BMRI is a department in SPS; its director heads it. Without the rule the
+    // director title (unit-based, 10) lost to the endowed professorship (9).
+    const { client, updates } = fakeClient({
+      scholars: [
+        { cwid: "bmri", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
+        { cwid: "ctr1", primaryTitle: "Professor", edPrimaryTitle: "Professor", workingTitle: null },
+      ],
+      appointments: [
+        { cwid: "bmri", title: "Example Family Professor of Neurology", organization: "Neurology" },
+        {
+          cwid: "bmri",
+          title: "Director of the Example Brain and Mind Research Institute",
+          organization: "Brain and Mind Research",
+        },
+        // A center held INSIDE a department it does not name stays unit-based.
+        { cwid: "ctr1", title: "Example Family Professor of Medicine", organization: "Medicine" },
+        { cwid: "ctr1", title: "Director, Center for Aging Research", organization: "Medicine" },
+      ],
+      departmentNames: ["Brain and Mind Research", "Neurology", "Medicine"],
+    });
+    await resolveScholarTitles(client as never, { applyDerivedTiers: true });
+    expect(updates).toEqual([
+      { cwid: "bmri", primaryTitle: "Director of the Example Brain and Mind Research Institute" },
+      { cwid: "ctr1", primaryTitle: "Example Family Professor of Medicine" },
     ]);
   });
 
