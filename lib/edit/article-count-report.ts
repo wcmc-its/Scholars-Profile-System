@@ -58,6 +58,7 @@ import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { loadCwidList, type CwidListData } from "@/lib/edit/cwid-list";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { ARTICLE_COUNT_REPORT, loadReportScopesForCwid } from "@/lib/edit/report-access";
+import { addCriteriaSheet, boldRow, overListCapNote, workbookBuffer } from "@/lib/edit/report-xlsx";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
 import { Prisma } from "@/lib/generated/prisma/client";
@@ -629,38 +630,31 @@ export async function buildArticleCountWorkbook(
   labels: ReadonlyMap<string, string> = new Map(),
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  const bold = (ws: ExcelJS.Worksheet, r: number) => (ws.getRow(r).font = { bold: true });
 
   const counts = wb.addWorksheet("Counts");
   counts.addRow([articleCountYearHeader(p), "Articles"]);
-  bold(counts, 1);
+  boldRow(counts, 1);
   for (const r of rows) counts.addRow([r.year, r.count]);
   counts.addRow(["Total", total]);
-  bold(counts, counts.rowCount);
+  boldRow(counts, counts.rowCount);
   counts.getColumn(1).width = 26;
   counts.getColumn(2).width = 12;
 
-  const criteria = wb.addWorksheet("Criteria");
-  criteria.addRow(["Criterion", "Value"]);
-  bold(criteria, 1);
-  for (const [k, v] of describeCriteria(p, generatedAt, labels, { cwidList: true })) criteria.addRow([k, v]);
-  criteria.addRow([
-    "Articles sheet",
-    articles
-      ? `Lists each of the ${total.toLocaleString()} counted articles with its matching scholars.`
-      : `Omitted: ${total.toLocaleString()} articles exceeds the ${ARTICLE_LIST_CAP.toLocaleString()}-row limit. Narrow the filters to list them.`,
+  addCriteriaSheet(wb, [
+    ...describeCriteria(p, generatedAt, labels, { cwidList: true }),
+    [
+      "Articles sheet",
+      articles
+        ? `Lists each of the ${total.toLocaleString()} counted articles with its matching scholars.`
+        : `Omitted: ${total.toLocaleString()} articles exceeds the ${ARTICLE_LIST_CAP.toLocaleString()}-row limit. Narrow the filters to list them.`,
+    ],
   ]);
-  criteria.getColumn(1).width = 32;
-  criteria.getColumn(2).width = 100;
-  criteria.getColumn(2).alignment = { wrapText: true, vertical: "top" };
 
   const list = wb.addWorksheet("Articles");
   if (!articles) {
-    list.addRow([
-      `${total.toLocaleString()} articles exceeds the ${ARTICLE_LIST_CAP.toLocaleString()}-row limit for this sheet. Narrow the filters to list them.`,
-    ]);
+    list.addRow([overListCapNote(total, ARTICLE_LIST_CAP)]);
     list.getColumn(1).width = 100;
-    return Buffer.from(await wb.xlsx.writeBuffer());
+    return workbookBuffer(wb);
   }
   const yearHeader = p.added ? "Year added to PubMed" : p.basis === "fy" ? "Fiscal year" : "Year";
   list.addRow([
@@ -674,7 +668,7 @@ export async function buildArticleCountWorkbook(
     "DOI",
     "Matching scholars",
   ]);
-  bold(list, 1);
+  boldRow(list, 1);
   list.views = [{ state: "frozen", ySplit: 1 }];
   for (const a of articles) {
     list.addRow([
@@ -693,5 +687,5 @@ export async function buildArticleCountWorkbook(
   list.getColumn(2).alignment = { wrapText: true, vertical: "top" };
   list.getColumn(9).alignment = { wrapText: true, vertical: "top" };
 
-  return Buffer.from(await wb.xlsx.writeBuffer());
+  return workbookBuffer(wb);
 }

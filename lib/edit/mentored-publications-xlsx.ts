@@ -37,6 +37,7 @@ import {
 } from "@/lib/edit/mentored-publications-report";
 import { POSITION_FACET_LABEL, WINDOW_FACET_LABEL } from "@/lib/edit/mentored-publications-facets";
 import { MENTORSHIP_TYPE_LABEL, mentorshipLabel } from "@/lib/edit/mentorship-type";
+import { workbookBuffer } from "@/lib/edit/report-xlsx";
 
 export const SUMMARY_SHEET = "Summary";
 export const RAW_SHEET = "Raw Data";
@@ -363,6 +364,5 @@ export async function buildMentoredPublicationsWorkbook(
   ];
   fillSheet(wb.addWorksheet(ASSUMPTIONS_SHEET), ["Item", "Value"], assumptions);
 
-  const out = await wb.xlsx.writeBuffer();
-  return Buffer.isBuffer(out) ? out : Buffer.from(out as ArrayBuffer);
+  return workbookBuffer(wb);
 }

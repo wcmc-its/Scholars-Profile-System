@@ -75,6 +75,13 @@ describe("RailChecklist", () => {
     expect(list.textContent).toContain("No matches.");
   });
 
+  it("options without a count and no countLabel → no count column", () => {
+    const { getByTestId } = render(
+      <RailChecklist name="journal" options={[{ value: "cell", label: "Cell" }]} selected={[]} testId="list" />,
+    );
+    expect(getByTestId("list").textContent).toBe("Cell");
+  });
+
   it("no options → a short note, no list", () => {
     const { getByTestId } = render(
       <div data-testid="host">

@@ -28,6 +28,7 @@ import {
   scopeSql,
   type ArticleCountParams,
 } from "@/lib/edit/article-count-report";
+import { addCriteriaSheet, boldRow, overListCapNote, workbookBuffer } from "@/lib/edit/report-xlsx";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { Prisma } from "@/lib/generated/prisma/client";
@@ -369,8 +370,7 @@ export async function buildHighImpactWorkbook(
   labels?: ReadonlyMap<string, string>,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  const bold = (ws: ExcelJS.Worksheet, r: number) => (ws.getRow(r).font = { bold: true });
-  const overCap = `${total.toLocaleString()} articles exceeds the ${HIGH_IMPACT_LIST_CAP.toLocaleString()}-row limit for this sheet. Narrow the filters to list them.`;
+  const overCap = overListCapNote(total, HIGH_IMPACT_LIST_CAP);
 
   // People first: the report is about who. A list of scholars is a scholar
   // export, so above SCHOLAR_EXPORT_CAP the sheet is withheld, never truncated.
@@ -395,7 +395,7 @@ export async function buildHighImpactWorkbook(
       "NIH citations",
       "Journals",
     ]);
-    bold(summary, 1);
+    boldRow(summary, 1);
     summary.views = [{ state: "frozen", ySplit: 1 }];
     for (const r of people) {
       summary.addRow([
@@ -428,7 +428,7 @@ export async function buildHighImpactWorkbook(
       "Year",
       "DOI",
     ]);
-    bold(pubs, 1);
+    boldRow(pubs, 1);
     pubs.views = [{ state: "frozen", ySplit: 1 }];
     for (const a of list) {
       pubs.addRow([
@@ -451,15 +451,9 @@ export async function buildHighImpactWorkbook(
     pubs.addRow([overCap]);
   }
 
-  const criteria = wb.addWorksheet("Criteria");
-  criteria.addRow(["Criterion", "Value"]);
-  bold(criteria, 1);
-  for (const [k, v] of describeHighImpactCriteria(p, generatedAt, labels)) criteria.addRow([k, v]);
-  criteria.getColumn(1).width = 32;
-  criteria.getColumn(2).width = 100;
-  criteria.getColumn(2).alignment = { wrapText: true, vertical: "top" };
+  addCriteriaSheet(wb, describeHighImpactCriteria(p, generatedAt, labels));
 
-  return Buffer.from(await wb.xlsx.writeBuffer());
+  return workbookBuffer(wb);
 }
 
 /** The bare-URL (awards) defaults, the "Reset to defaults" target. */
