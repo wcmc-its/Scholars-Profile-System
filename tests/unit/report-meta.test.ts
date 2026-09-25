@@ -166,6 +166,12 @@ describe("isValidReportSlug", () => {
     for (const slug of slugs) expect(isValidReportSlug(slug)).toBe(true);
     expect(new Set(slugs).size).toBe(slugs.length);
   });
+  it("report 5's default summary matches its scope: PIs only, every OnCore status", () => {
+    const { summary } = REPORT_META_DEFAULTS["5"];
+    expect(summary).not.toMatch(/^Active/);
+    expect(summary).toMatch(/principal investigator/);
+    expect(summary).toMatch(/every OnCore status/);
+  });
 });
 
 describe("reportLabel / reportPageMetadata", () => {

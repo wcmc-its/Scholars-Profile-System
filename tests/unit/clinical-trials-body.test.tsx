@@ -196,6 +196,26 @@ describe("ClinicalTrialsResults", () => {
     expect(list.textContent).toContain("Principal investigator");
   });
 
+  it("By member: tapping the name on a touch screen re-issues the click and expands the row", () => {
+    const { container } = renderResults({ view: "members" });
+    const name = within(within(container).getAllByTestId("ct-member-row")[0]).getByRole("button", {
+      name: "Ada Anders",
+    });
+    // iOS: the hover trigger preventDefaults touchstart, so no click follows the tap.
+    fireEvent.touchEnd(name);
+    expect(within(container).getByTestId("ct-member-trials")).toBeTruthy();
+  });
+
+  it("By member: a filter change collapses the open row, so Clear filters doesn't bring it back open", () => {
+    const { container } = renderResults({ view: "members" });
+    fireEvent.click(within(container).getAllByTestId("ct-member-row")[0]);
+    expect(within(container).getByTestId("ct-member-trials")).toBeTruthy();
+    fireEvent.change(within(container).getByTestId("ct-status"), { target: { value: "irb" } });
+    fireEvent.click(within(container).getByTestId("ct-clear"));
+    expect(within(container).getAllByTestId("ct-member-row")).toHaveLength(2);
+    expect(within(container).queryByTestId("ct-member-trials")).toBeNull();
+  });
+
   it("warns that the Investigators sheet is left out above the cap", () => {
     const { container } = renderResults({}, ROWS, 1);
     const note = within(container).getByTestId("ct-download-note");
@@ -208,6 +228,14 @@ describe("ClinicalTrialsResults", () => {
     expect(sortMembers(members, "pi", 1).map((m) => m.cwid)).toEqual(["bbb2002", "aaa1001"]);
     expect(sortMembers(members, "name", -1).map((m) => m.cwid)).toEqual(["bbb2002", "aaa1001"]);
     expect(sortMembers(members, "open", -1).map((m) => m.cwid)).toEqual(["aaa1001", "bbb2002"]);
+    // The shared surname helper: a generational suffix is not the surname.
+    const suffixed = summarizeMembers(
+      groupTrials([
+        row({ protocolNumber: "P-1", cwid: "ccc3003", personName: "John Zeller Jr." }),
+        row({ protocolNumber: "P-2", cwid: "ddd4004", personName: "Mia Kent" }),
+      ]),
+    );
+    expect(sortMembers(suffixed, "name", 1).map((m) => m.cwid)).toEqual(["ddd4004", "ccc3003"]);
   });
 });
 

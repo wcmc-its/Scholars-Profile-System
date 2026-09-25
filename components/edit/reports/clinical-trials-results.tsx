@@ -40,6 +40,7 @@ import {
   type TrialGroup,
   type TrialStatusKey,
 } from "@/lib/edit/clinical-trials-report";
+import { extractLastNameSort } from "@/lib/name-sort";
 import { cn } from "@/lib/utils";
 
 const TH =
@@ -100,7 +101,7 @@ const roleText = (role: string) =>
 
 type MemberSort = "name" | "pi" | "open";
 
-const lastName = (name: string) => name.trim().split(/\s+/).pop() ?? name;
+const lastName = extractLastNameSort;
 
 export function sortMembers(
   rows: ReadonlyArray<MemberSummary>,
@@ -405,6 +406,9 @@ function TrialsTable({ trials }: { trials: TrialGroup[] }) {
 function MembersTable({ members }: { members: MemberSummary[] }) {
   const [sort, setSort] = useState<{ key: MemberSort; dir: 1 | -1 }>({ key: "pi", dir: -1 });
   const [expanded, setExpanded] = useState<string | null>(null);
+  // A filter change is a new `members` list: collapse, as the mockup does, so
+  // Clear filters never brings a row back already open past the first page.
+  useEffect(() => setExpanded(null), [members]);
   const rows = useMemo(() => sortMembers(members, sort.key, sort.dir), [members, sort]);
   const { visible, hasMore, showMore, rangeLabel } = useShowMore(rows);
   if (members.length === 0) return <Empty />;
@@ -464,6 +468,12 @@ function MembersTable({ members }: { members: MemberSummary[] }) {
                       <button
                         type="button"
                         aria-expanded={open}
+                        // The hover trigger preventDefaults touchstart, which on
+                        // iOS cancels this tap's click: re-issue it (#2588).
+                        onTouchEnd={(e) => {
+                          e.preventDefault();
+                          e.currentTarget.click();
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggle();

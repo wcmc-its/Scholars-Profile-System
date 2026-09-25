@@ -122,7 +122,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "clinical-trials",
     name: "Clinical Trials",
     summary:
-      "Active clinical trials involving the center's members, with ClinicalTrials.gov links.",
+      "Clinical trials led by the center's members as principal investigator, in every OnCore status, with ClinicalTrials.gov links.",
     descriptionHtml: null,
   },
   "6": {

@@ -268,6 +268,23 @@ describe("buildClinicalTrialsWorkbook", () => {
     expect(inv).toHaveLength(3);
   });
 
+  it("ships the Investigators sheet at exactly SCHOLAR_EXPORT_CAP people", async () => {
+    const many = Array.from({ length: SCHOLAR_EXPORT_CAP }, (_, i) =>
+      row({ protocolNumber: `P-${i}`, cwid: `x${i}`, personName: `Person ${i}` }),
+    );
+    const { values } = await sheets(
+      await buildClinicalTrialsWorkbook(
+        groupTrials(many),
+        CLINICAL_TRIALS_DEFAULTS,
+        "Test Center",
+        at,
+      ),
+    );
+    const inv = values("Investigators");
+    expect(inv).toHaveLength(SCHOLAR_EXPORT_CAP + 1);
+    expect(inv[0][0]).toBe("CWID");
+  });
+
   it("withholds the Investigators sheet above SCHOLAR_EXPORT_CAP but still ships every trial", async () => {
     const many = Array.from({ length: SCHOLAR_EXPORT_CAP + 1 }, (_, i) =>
       row({ protocolNumber: `P-${i}`, cwid: `x${i}`, personName: `Person ${i}` }),
