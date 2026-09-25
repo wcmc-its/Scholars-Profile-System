@@ -1,53 +1,69 @@
 /**
- * Report 9 — "Top clinical and high-impact journal publications" body: a
- * filter rail (years, journal families, the Profiles roster's person-type /
- * unit facets, article type, author position; plain GET params,
- * `AutoSubmitForm` like reports 7 and 8)
- * beside Summary (one row per person, `summarizePeople`) / Publications
- * tabs with the `.xlsx` button at the right of the tab row
- * (`/api/edit/reports/high-impact-publications`, same query string). Loaders,
- * journal families and defaults live in `lib/edit/high-impact-pubs-report.ts`.
+ * Report 9 — "Top clinical and high-impact journal publications" body
+ * (reports redesign, 2026-09-24; mockup `High-Impact Publications
+ * Redesign.dc.html`). The shared pieces (`report-ui.tsx`): a filter rail of
+ * collapsed sections (years with calendar / fiscal basis, journal families,
+ * the Profiles roster's person type / department / center / institution
+ * facets, article type, author position) in a plain GET `AutoSubmitForm`;
+ * the headline numbers with the `.xlsx` button and its note; the active
+ * filters as chips; then the Scholars / Publications tabs
+ * (`high-impact-results.tsx`, the client half). Below `lg` the rail moves
+ * into `FiltersSheet`.
+ *
+ * Loaders, journal families, defaults, chips and the download note live in
+ * `lib/edit/high-impact-pubs-report.ts`; the download route
+ * (`/api/edit/reports/high-impact-publications`) takes the same query string.
  */
 import { Download } from "lucide-react";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
-import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import {
+  HighImpactResults,
+  type HighImpactPub,
+} from "@/components/edit/reports/high-impact-results";
+import { RailCheckList, type RailOption } from "@/components/edit/reports/rail-check-list";
+import {
+  FilterChips,
+  RailSection,
+  ReportCard,
+  ReportLayout,
+  ReportRail,
+  ReportStats,
+} from "@/components/edit/reports/report-ui";
 import { Button } from "@/components/ui/button";
-import { PersonFilterFacets } from "@/components/edit/reports/article-count-facets";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
-import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import {
   ARTICLE_COUNT_CAVEAT,
-  articleCountActiveFilters,
+  BASIS_LABEL,
   loadArticleCountChoices,
   POSITION_LABEL,
+  unitLabels,
+  type AuthorPosition,
+  type YearBasis,
 } from "@/lib/edit/article-count-report";
 import {
   HIGH_IMPACT_LIST_CAP,
+  highImpactChips,
+  highImpactDownloadNote,
   highImpactQueryString,
+  isHighImpactDefault,
   JOURNAL_FAMILIES,
   loadHighImpactList,
-  loadHighImpactTotal,
+  loadHighImpactTotals,
   parseHighImpactParams,
   summarizePeople,
+  yearLabel,
+  yearRangeLabel,
   type HighImpactParams,
-  type HighImpactRow,
-  type PersonSummaryRow,
 } from "@/lib/edit/high-impact-pubs-report";
 import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
-import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
+import { cn } from "@/lib/utils";
 
-const RAIL_HEADING = "mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
-const RAIL_OPTION = "flex items-start gap-2 py-[3px] text-[13px] leading-[1.4]";
-const RAIL_BOX = "mt-[3px] accent-[var(--color-primary-cornell-red)]";
-const SELECT = "w-full rounded border border-[#c8c6be] bg-white px-2 py-1 text-[13px]";
-const TAB_ACTIVE = "border-apollo-maroon inline-block border-b-2 py-2.5 text-base font-medium";
-const TAB_IDLE =
-  "text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-2.5 text-base";
-const TH = "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
-const TD = "border-apollo-border border-t px-3 py-2 align-top";
-const NUM = `${TD} text-right tabular-nums`;
+const SELECT =
+  "border-apollo-border-strong bg-apollo-surface h-[34px] min-w-0 rounded-md border px-2 text-sm";
+const RADIO = "flex cursor-pointer items-center gap-2 text-sm";
+const RADIO_INPUT = "accent-apollo-maroon size-4";
 
 function toSearchParams(sp: PersonReportProps["searchParams"]): URLSearchParams {
   const out = new URLSearchParams();
@@ -57,186 +73,232 @@ function toSearchParams(sp: PersonReportProps["searchParams"]): URLSearchParams 
   return out;
 }
 
+/** A section's current value: "Any" (or `all`), up to two labels, else "N selected". */
+function summarize(labels: string[], all = "Any"): string {
+  if (labels.length === 0) return all;
+  return labels.length <= 2 ? labels.join(", ") : `${labels.length} selected`;
+}
+
 type RailProps = {
   basePath: string;
   params: HighImpactParams;
-  choices: { facets: DataQualityFacets; atypes: string[] };
-  /** Appended to every DOM id: the phone sheet's copy passes "-sheet". */
-  idSuffix?: string;
+  facets: DataQualityFacets;
+  atypes: string[];
+  labels: ReadonlyMap<string, string>;
+  resetHref: string | null;
 };
 
-function Rail({ basePath, params, choices, idSuffix = "" }: RailProps) {
-  const years = Array.from({ length: 30 }, (_, i) => new Date().getFullYear() + 1 - i);
+function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps) {
+  const thisYear = new Date().getFullYear();
+  // The fiscal basis runs a year ahead (FY2027 starts July 2026).
+  const years = Array.from({ length: 30 }, (_, i) => thisYear + 1 - i);
+  const unitOptions: RailOption[] = [
+    ...facets.departments.map(({ value, label, count }) => ({ value, label, count })),
+    ...facets.departments
+      .flatMap((d) => d.divisions)
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+  ];
+  // A memberless center can only return zero — hidden unless already selected.
+  const centerOptions = facets.centers.filter((c) => c.count > 0 || params.units.includes(c.value));
+  const unitsOf = (prefixes: string[]) =>
+    params.units
+      .filter((u) => prefixes.some((p) => u.startsWith(p)))
+      .map((u) => labels.get(u) ?? u);
+  const allJournals = params.journals.length === JOURNAL_FAMILIES.length;
+  const yearSelect = (k: "from" | "to") => (
+    <select
+      name={k}
+      defaultValue={params[k]}
+      aria-label={k === "from" ? "From year" : "To year"}
+      className={SELECT}
+    >
+      {years.map((y) => (
+        <option key={y} value={y}>
+          {yearLabel(params, y)}
+        </option>
+      ))}
+    </select>
+  );
+  // A selected person type no active scholar holds still lists, so it can be unticked.
+  const typeOptions: RailOption[] = [
+    ...facets.roleCategories,
+    ...params.types
+      .filter((t) => !facets.roleCategories.some((o) => o.value === t))
+      .map((t) => ({ value: t, label: t, count: 0 })),
+  ];
   return (
-    <div className="border-apollo-rail-border bg-apollo-rail rounded-xl border p-3">
-      <div className="mb-4 flex items-center gap-2">
-        <span className="text-muted-foreground text-xs">Filters apply automatically</span>
-        <a href={basePath} className="text-muted-foreground ml-auto text-xs hover:underline">
-          Reset
-        </a>
-      </div>
-      <AutoSubmitForm
-        id={`high-impact-filters${idSuffix}`}
-        action={basePath}
-        className="group flex flex-col text-sm"
-        data-testid="high-impact-filters"
-      >
+    <ReportRail
+      resetHref={resetHref}
+      help="Filters apply automatically. Numbers next to options count active people."
+      testId="high-impact-rail"
+    >
+      <AutoSubmitForm action={basePath} className="group" data-testid="high-impact-filters">
         <input type="hidden" name="view" value={params.view} />
-        <div className="mb-5 flex gap-2">
-          {(["from", "to"] as const).map((k) => (
-            <label key={k} className="flex flex-1 flex-col">
-              <span className={RAIL_HEADING}>{k === "from" ? "From" : "To"}</span>
-              <select name={k} defaultValue={params[k]} className={SELECT}>
-                {years.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ))}
-        </div>
-        <fieldset className="mb-5">
-          <legend className={RAIL_HEADING}>Journals</legend>
-          {JOURNAL_FAMILIES.map((f) => (
-            <label key={f.key} className={RAIL_OPTION}>
-              <input
-                type="checkbox"
-                name="journal"
-                value={f.key}
-                defaultChecked={params.journals.includes(f.key)}
-                className={RAIL_BOX}
-              />
-              {f.label}
-            </label>
-          ))}
-          <span className="text-muted-foreground mt-1 block text-[11px]">None selected = all.</span>
-        </fieldset>
-        <PersonFilterFacets
-          facets={choices.facets}
-          types={params.types}
-          units={params.units}
-          testId="high-impact-facets"
-        />
-        <p className="text-muted-foreground -mt-3 mb-5 text-[11px]">Counts are active people, not articles.</p>
-        <label className="mb-5 flex flex-col">
-          <span className={RAIL_HEADING}>Article type</span>
-          <select name="atype" multiple size={6} defaultValue={params.atypes} className={SELECT}>
-            {choices.atypes.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-          <span className="text-muted-foreground mt-1 text-[11px]">None selected = all.</span>
-        </label>
-        <fieldset className="mb-5">
-          <legend className={RAIL_HEADING}>Author position</legend>
-          {(Object.keys(POSITION_LABEL) as (keyof typeof POSITION_LABEL)[]).map((p) => (
-            <label key={p} className={RAIL_OPTION}>
-              <input type="radio" name="pos" value={p} defaultChecked={params.pos === p} className={RAIL_BOX} />
-              {POSITION_LABEL[p]}
-            </label>
-          ))}
-        </fieldset>
-        {/* No-JS fallback; the island hides it once hydrated. */}
-        <button
-          type="submit"
-          className="border-foreground/40 hover:bg-apollo-surface-2 mb-2 self-start rounded border px-3 py-1.5 group-data-[hydrated=true]:hidden"
+        <RailSection
+          label="Years"
+          summary={`${yearRangeLabel(params)} · ${params.basis === "fy" ? "Fiscal (July–June)" : "Calendar"}`}
+          defaultOpen
+          testId="high-impact-years"
         >
-          Apply
-        </button>
+          <div className="flex flex-col gap-2">
+            {(Object.keys(BASIS_LABEL) as YearBasis[]).map((b) => (
+              <label key={b} className={RADIO}>
+                <input
+                  type="radio"
+                  name="basis"
+                  value={b}
+                  defaultChecked={params.basis === b}
+                  className={RADIO_INPUT}
+                />
+                {BASIS_LABEL[b]}
+              </label>
+            ))}
+          </div>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+            {yearSelect("from")}
+            <span className="text-muted-foreground text-[13px]">to</span>
+            {yearSelect("to")}
+          </div>
+          {params.basis === "fy" && (
+            <p className="text-muted-foreground text-xs">
+              Fiscal years run July–June and are named by the year they end, by the date the article
+              was added to PubMed.
+            </p>
+          )}
+        </RailSection>
+        <RailSection
+          label="Journals"
+          summary={
+            allJournals
+              ? `All ${JOURNAL_FAMILIES.length} top-tier journal families`
+              : summarize(
+                  JOURNAL_FAMILIES.filter((f) => params.journals.includes(f.key)).map(
+                    (f) => f.label,
+                  ),
+                )
+          }
+          testId="high-impact-journals"
+        >
+          <RailCheckList
+            name="journal"
+            options={JOURNAL_FAMILIES.map((f) => ({ value: f.key, label: f.label }))}
+            selected={params.journals}
+          />
+          <span className="text-muted-foreground text-xs">None checked = all.</span>
+        </RailSection>
+        <RailSection
+          label="Person type"
+          summary={summarize(
+            params.types.map((t) => facets.roleCategories.find((o) => o.value === t)?.label ?? t),
+          )}
+          testId="high-impact-person-type"
+        >
+          <RailCheckList
+            name="type"
+            options={typeOptions}
+            selected={params.types}
+            countHeader="People"
+          />
+        </RailSection>
+        <RailSection
+          label="Department / division"
+          summary={summarize(unitsOf(["dept:", "div:"]))}
+          testId="high-impact-department"
+        >
+          <RailCheckList
+            name="unit"
+            options={unitOptions}
+            selected={params.units}
+            searchPlaceholder="Search departments…"
+            shown={8}
+            countHeader="People"
+          />
+        </RailSection>
+        <RailSection
+          label="Centers"
+          summary={summarize(unitsOf(["center:"]))}
+          testId="high-impact-centers"
+        >
+          <RailCheckList
+            name="unit"
+            options={centerOptions}
+            selected={params.units}
+            searchPlaceholder="Search centers…"
+            shown={6}
+            countHeader="People"
+          />
+        </RailSection>
+        <RailSection
+          label="Institution"
+          summary={summarize(unitsOf(["inst:"]))}
+          testId="high-impact-institution"
+        >
+          <RailCheckList
+            name="unit"
+            options={facets.institutions}
+            selected={params.units}
+            countHeader="People"
+          />
+        </RailSection>
+        <RailSection
+          label="Article type"
+          summary={summarize(params.atypes)}
+          testId="high-impact-article-type"
+        >
+          <RailCheckList
+            name="atype"
+            // A type in the URL that no publication carries still shows, so it can be unticked.
+            options={[...new Set([...atypes, ...params.atypes])].map((a) => ({
+              value: a,
+              label: a,
+            }))}
+            selected={params.atypes}
+            shown={8}
+          />
+        </RailSection>
+        <RailSection
+          label="Author position"
+          summary={POSITION_LABEL[params.pos]}
+          testId="high-impact-position"
+        >
+          <div className="flex flex-col gap-2">
+            {(Object.keys(POSITION_LABEL) as AuthorPosition[]).map((p) => (
+              <label key={p} className={RADIO}>
+                <input
+                  type="radio"
+                  name="pos"
+                  value={p}
+                  defaultChecked={params.pos === p}
+                  className={RADIO_INPUT}
+                />
+                {POSITION_LABEL[p]}
+              </label>
+            ))}
+          </div>
+        </RailSection>
+        {/* No-JS fallback; the island hides it once hydrated. */}
+        <div className="px-[18px] pb-4 group-data-[hydrated=true]:hidden">
+          <button
+            type="submit"
+            className="border-foreground/40 hover:bg-apollo-surface-2 rounded border px-3 py-1.5 text-sm"
+          >
+            Apply
+          </button>
+        </div>
       </AutoSubmitForm>
-    </div>
+    </ReportRail>
   );
 }
 
-function SummaryTable({ people }: { people: PersonSummaryRow[] }) {
-  return (
-    <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
-      <table className="w-full border-collapse text-left text-sm" data-testid="high-impact-summary">
-        <thead>
-          <tr>
-            <th className={TH}>Name</th>
-            <th className={TH}>Department</th>
-            <th className={`${TH} text-right`}>Articles</th>
-            <th className={`${TH} text-right`}>First author</th>
-            <th className={`${TH} text-right`}>Last author</th>
-            <th className={`${TH} text-right`}>NIH citations</th>
-            <th className={TH}>Journals</th>
-          </tr>
-        </thead>
-        <tbody>
-          {people.map((r) => (
-            <tr key={r.cwid}>
-              <td className={TD}>
-                <ScholarHoverCard cwid={r.cwid}>
-                  <span className="hover:underline">{r.name}</span>
-                </ScholarHoverCard>
-                <span className="text-muted-foreground ml-2 font-mono text-xs">{r.cwid}</span>
-                <span className="text-muted-foreground block text-xs">{r.personType}</span>
-              </td>
-              <td className={TD}>{r.department ?? "—"}</td>
-              <td className={NUM}>{r.articles}</td>
-              <td className={NUM}>{r.firstAuthor}</td>
-              <td className={NUM}>{r.lastAuthor}</td>
-              <td className={NUM}>{r.citations.toLocaleString()}</td>
-              <td className={TD}>
-                {r.journals.map((j, i) => (
-                  <span key={j}>
-                    {i > 0 && "; "}
-                    <PubJournal as="span" value={j} />
-                  </span>
-                ))}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function PublicationsTable({ rows }: { rows: HighImpactRow[] }) {
-  return (
-    <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
-      <table className="w-full border-collapse text-left text-sm" data-testid="high-impact-publications">
-        <thead>
-          <tr>
-            <th className={TH}>Title</th>
-            <th className={TH}>Journal</th>
-            <th className={`${TH} text-right`}>Impact factor</th>
-            <th className={TH}>WCM first / last author</th>
-            <th className={TH}>Added to Entrez</th>
-            <th className={`${TH} text-right`}>NIH citations</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.pmid}>
-              <td className={TD}>
-                <a
-                  href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(r.pmid)}/`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-apollo-slate hover:underline"
-                >
-                  <PubTitle value={r.title} />
-                </a>
-              </td>
-              <td className={TD}>
-                <PubJournal as="span" value={r.journal} />
-              </td>
-              <td className={NUM}>{r.jif?.toFixed(1) ?? "—"}</td>
-              <td className={TD}>{r.authors.join("; ")}</td>
-              <td className={`${TD} whitespace-nowrap`}>{r.dateAdded ?? "—"}</td>
-              <td className={NUM}>{r.citations ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+/** "2026 counts publications through September 24, 2026. …" when the window
+ *  reaches the year in progress; null otherwise. */
+function partialYearNote(p: HighImpactParams, now: Date): string | null {
+  const today = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const current =
+    p.basis === "fy" ? now.getFullYear() + (now.getMonth() >= 6 ? 1 : 0) : now.getFullYear();
+  if (p.to < current) return null;
+  const counted = p.basis === "fy" ? "publications added to PubMed" : "publications";
+  return `${yearLabel(p, current)} counts ${counted} through ${today}. Citation counts for recent articles are low because they have had little time to be cited.`;
 }
 
 export async function renderHighImpactPublicationsReport({
@@ -244,75 +306,125 @@ export async function renderHighImpactPublicationsReport({
   basePath,
 }: PersonReportProps): Promise<ReportRender> {
   const params = parseHighImpactParams(toSearchParams(searchParams));
-  const [choices, total] = await Promise.all([loadArticleCountChoices(), loadHighImpactTotal(params)]);
-  // Both views read the list: the Summary is its per-person roll-up.
-  const list = total <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;
-  const people = list ? summarizePeople(list) : [];
-  const tab = (view: HighImpactParams["view"], label: string) => (
-    <a
-      href={`${basePath}?${highImpactQueryString(params, view)}`}
-      className={params.view === view ? TAB_ACTIVE : TAB_IDLE}
-      aria-current={params.view === view ? "page" : undefined}
-      data-testid={`high-impact-view-${view}`}
-    >
-      {label}
-    </a>
+  const [{ facets, atypes }, totals] = await Promise.all([
+    loadArticleCountChoices(),
+    loadHighImpactTotals(params),
+  ]);
+  // Both tabs read the list: the Scholars tab is its per-person roll-up.
+  const list = totals.articles <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;
+  const people = list ? summarizePeople(list) : null;
+  const labels = unitLabels(facets);
+  const chips = highImpactChips(params, labels);
+  const note = highImpactDownloadNote(totals);
+  const href = (q: string) => `${basePath}?${q}`;
+  const resetHref = isHighImpactDefault(params)
+    ? null
+    : params.view === "publications"
+      ? href("view=publications")
+      : basePath;
+  // The download-only `authors` strings stay on the server.
+  const pubs: HighImpactPub[] | null = list
+    ? list.map((r): HighImpactPub => {
+        const { authors, ...rest } = r;
+        void authors;
+        return rest;
+      })
+    : null;
+  const partial = partialYearNote(params, new Date());
+  const rail = (
+    <Rail
+      basePath={basePath}
+      params={params}
+      facets={facets}
+      atypes={atypes}
+      labels={labels}
+      resetHref={resetHref}
+    />
   );
+
   return {
     subtitle: (
       <p className="text-muted-foreground text-sm">
-        Who published in top-tier journals: each matching scholar with their article count, author positions,
-        citations and journals. Opens on original research by full-time faculty as first or last author this
-        year.
+        Scholars who published in top-tier journals, with their article counts, author positions,
+        citations and journals. Opens on original research by full-time faculty as first or last
+        author this year.
       </p>
     ),
     main: (
-      <div className="mt-4 flex flex-col gap-6 lg:flex-row lg:items-start">
-        <aside className="hidden lg:block lg:w-64 lg:shrink-0" data-testid="high-impact-rail">
-          <Rail basePath={basePath} params={params} choices={choices} />
-        </aside>
-        <div className="min-w-0 flex-1">
-          <div className="mb-4 lg:hidden">
+      <ReportLayout rail={rail}>
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="lg:hidden">
             <FiltersSheet
-              activeCount={articleCountActiveFilters(params) + (params.journals.length < JOURNAL_FAMILIES.length ? 1 : 0)}
+              activeCount={chips.filter((c) => c.removeQuery !== null).length}
               testId="high-impact-filters-sheet-trigger"
             >
-              <Rail basePath={basePath} params={params} choices={choices} idSuffix="-sheet" />
+              {rail}
             </FiltersSheet>
           </div>
-          <div className="border-apollo-border mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-b">
-            <nav className="flex gap-6" aria-label="Report views">
-              {tab("summary", `Summary (${people.length.toLocaleString()} people)`)}
-              {tab("publications", `Publications (${total.toLocaleString()})`)}
-            </nav>
-            <Button asChild variant="apollo" size="sm" className="mb-1.5 sm:ml-auto">
-              <a
-                href={`/api/edit/reports/high-impact-publications?${highImpactQueryString(params)}`}
-                data-testid="high-impact-download"
-              >
-                <Download className="size-4" aria-hidden />
-                Download .xlsx
-              </a>
-            </Button>
-          </div>
-          {list ? (
-            params.view === "summary" ? (
-              <SummaryTable people={people} />
-            ) : (
-              <PublicationsTable rows={list} />
-            )
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              {total.toLocaleString()} articles is more than {HIGH_IMPACT_LIST_CAP.toLocaleString()}. Narrow the
-              filters to list them.
-            </p>
-          )}
-          <p className="text-muted-foreground mt-4 max-w-prose text-xs" role="note">
-            {ARTICLE_COUNT_CAVEAT} Only ReCiter-confirmed authorships of active scholars count. The download&rsquo;s
-            People sheet is included for {SCHOLAR_EXPORT_CAP} or fewer people.
-          </p>
+          <ReportCard>
+            <ReportStats
+              stats={[
+                { value: totals.scholars.toLocaleString(), label: "scholars" },
+                { value: totals.articles.toLocaleString(), label: "distinct publications" },
+              ]}
+              aside={
+                <div className="flex flex-col items-start gap-2">
+                  <Button asChild variant="apollo">
+                    <a
+                      href={`/api/edit/reports/high-impact-publications?${highImpactQueryString(params)}`}
+                      data-testid="high-impact-download"
+                    >
+                      <Download className="size-4" aria-hidden />
+                      Download .xlsx
+                    </a>
+                  </Button>
+                  <p
+                    className={cn(
+                      "text-[13px]",
+                      note.withheld ? "text-apollo-amber" : "text-muted-foreground",
+                    )}
+                    data-testid="high-impact-download-note"
+                  >
+                    {note.text}
+                  </p>
+                </div>
+              }
+            />
+            <div className="mt-5">
+              <FilterChips
+                chips={chips.map((c) => ({
+                  group: c.group,
+                  value: c.value,
+                  removeHref: c.removeQuery === null ? null : href(c.removeQuery),
+                }))}
+                testId="high-impact-chips"
+              />
+            </div>
+            <HighImpactResults
+              view={params.view}
+              tabHrefs={{
+                summary: href(highImpactQueryString(params, "summary")),
+                publications: href(highImpactQueryString(params, "publications")),
+              }}
+              counts={totals}
+              people={people}
+              pubs={pubs}
+              showPersonType={params.types.length !== 1}
+              overCapMessage={`${totals.articles.toLocaleString()} articles is more than ${HIGH_IMPACT_LIST_CAP.toLocaleString()}. Narrow the filters to list them.`}
+            />
+            <div
+              className="text-muted-foreground mt-6 flex max-w-[680px] flex-col gap-1.5 text-[13px]"
+              role="note"
+            >
+              {partial && <p>{partial}</p>}
+              <p>
+                Only ReCiter-confirmed authorships of active scholars count. Citations are NIH iCite
+                counts. {ARTICLE_COUNT_CAVEAT}
+              </p>
+            </div>
+          </ReportCard>
         </div>
-      </div>
+      </ReportLayout>
     ),
   };
 }

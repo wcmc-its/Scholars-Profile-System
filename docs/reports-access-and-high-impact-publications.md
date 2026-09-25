@@ -95,18 +95,48 @@ abbreviation to `NOT_NATURE`.
 A bare URL (nothing but `view`) opens on the awards defaults: person type **full-time faculty**,
 article type **Academic Article**, author position **first or last author**, the **current calendar
 year**, every journal family. Any filter in the URL means the form was submitted, and the URL is taken
-as-is. "Reset" returns to the defaults.
+as-is. "Reset to defaults" (in the rail header, disabled while the defaults are on) returns to them.
+Report 9 does not take report 8's default of the viewer's own units.
 
-Rail facets: years (from / to), journal families (none checked = all), the Profiles roster's person
-type and department / division / center / institution facets, article type, author position.
+The rail (shared `ReportRail` / `RailSection`, `components/edit/reports/report-ui.tsx`) has one
+collapsed section per filter, each showing its current value, in this order:
+
+| Section | Params | Notes |
+|---|---|---|
+| Years | `basis`, `from`, `to` | Calendar year, or fiscal year (July–June, named by the ending year, by the date the article was added to PubMed; `basis=fy`, report 8's rule in `scopeSql`). No `basis` = calendar, which is what every earlier link meant. |
+| Journals | `journal` (repeated family keys) | None checked = all ten families. |
+| Person type | `type` | The Profiles roster's facet (`parsePersonFilter`). |
+| Department / division | `unit=dept:` / `div:` | Searchable, first 8 then "Show all". |
+| Centers | `unit=center:` | Searchable, first 6 then "Show all". |
+| Institution | `unit=inst:` | |
+| Article type | `atype` (repeated) | None checked = all. |
+| Author position | `pos` | `any`, `first`, `last`, `either` (first or last). |
+
+Numbers beside the who-filter options count active people (`loadDataQualityFacets`), not articles.
+`jif` is ignored: a minimum impact factor belongs to report 8. The form submits on every change
+(`AutoSubmitForm`); below `lg` the rail opens from a "Filters (n)" button (`FiltersSheet`).
+
+Above the tabs: the number of matching scholars and distinct publications, the Download button with a
+note naming the sheets it includes (and, in amber, any sheet withheld and why), and the active
+filters as chips. Removing a chip drops only that value; years, and journals when all are on, have no
+remove button.
 
 ### Tabs
 
-- **Summary:** one row per matching person (`summarizePeople`): name, CWID, person type, department,
-  articles, first-author count, last-author count, summed NIH citations, and journals (most articles
-  first). Sorted by article count. The page lists everyone.
-- **Publications:** one row per article, highest impact factor first: title (linked to PubMed),
-  journal, impact factor, the WCM first/last author(s), date added to Entrez, NIH citations.
+The tab is the `view` param (`summary` = Scholars, `publications`), so old links keep their tab. The
+find box, sorts, expanded row and "Show 25 more" paging are page state, not params.
+
+- **Scholars (N):** one row per matching person (`summarizePeople`): name (hover card), CWID,
+  department (plus person type when more than one is selected), articles, "x first y last", summed NIH
+  citations, and journal chips (two, then "+N more"). Sorted by articles; the Scholar, Articles and
+  Citations headers re-sort. "Find a scholar" filters by name or CWID. Selecting a row lists that
+  scholar's publications, newest first, with their position on each. The table scrolls inside its
+  card on a phone.
+- **Publications (N):** one entry per article: title (linked to PubMed), the byline with the matching
+  WCM authors in bold (long bylines keep the first three, every matching author and the last), journal
+  and citation, then article type, the matching scholars with their positions, NIH citations, journal
+  impact factor, date added to PubMed, DOI and PMID. Sort: newest first (default), most cited, journal
+  A–Z, or highest impact factor (the order the page used before the redesign, and still the download's).
 
 **NIH citations** are `publication.cited_by_count` (the iCite count), not the Scopus `citation_count`.
 
@@ -114,17 +144,18 @@ type and department / division / center / institution facets, article type, auth
 
 Three sheets, same query string as the page:
 
-- **People:** the Summary as a sheet, **only when 50 or fewer people match.** A list of scholars is a
-  scholar export, so it follows the standing `SCHOLAR_EXPORT_CAP` rule (`lib/api/export-scholars.ts`):
+- **People:** the Scholars tab as a sheet, **only when 50 or fewer people match.** A list of scholars
+  is a scholar export, so it follows the standing `SCHOLAR_EXPORT_CAP` rule (`lib/api/export-scholars.ts`):
   above 50 the sheet is withheld and says how many matched and to narrow the filters. It is never
   truncated to fit. With the awards defaults this cap is usually exceeded; narrow by department to
-  get the sheet. The page's Summary tab still lists everyone.
-- **Publications:** every article with title, journal, impact factor, WCM first/last authors, Entrez
-  date, NIH citation count, article type, year, DOI.
-- **Criteria:** every filter, "All" when unset.
+  get the sheet. The page's Scholars tab still lists everyone, and the note under the Download button
+  says when the sheet is left out.
+- **Publications:** every article with title, journal, impact factor, WCM first/last authors, date
+  added to PubMed, NIH citation count, article type, year, DOI; highest impact factor first.
+- **Criteria:** every filter, "All" when unset, including the year basis.
 
 Above `HIGH_IMPACT_LIST_CAP` (5,000 articles) the page and workbook skip the article list and ask for
-narrower filters.
+narrower filters; the headline numbers still show.
 
 ### Known limitations
 
