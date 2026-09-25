@@ -24,6 +24,32 @@ export function assertIsoDate(dt: string): void {
 }
 
 /**
+ * Oldest date (in whole UTC days before today) the rollup will re-roll. The raw
+ * CloudFront logs expire 90 days after delivery (EdgeStack's
+ * `sps-cf-logs-expire-<env>` lifecycle rule), and the handler PURGES a day's
+ * rollup partition before re-inserting it. Re-rolling a day whose raw logs have
+ * expired (or partly expired) would replace a good durable rollup with an empty
+ * or short one, and the rollup is the only long-term copy of that day. 85 leaves
+ * a few days of margin for delivery lag and S3's midnight-rounded expiry. Keep
+ * it below the EdgeStack expiry if that rule ever changes.
+ */
+export const MAX_REROLL_AGE_DAYS = 85;
+
+/**
+ * True when `dt` is recent enough that its raw logs are still guaranteed to
+ * exist, so a delete-then-insert re-roll cannot shrink its durable rollup.
+ * `today` is the UTC calendar date the handler runs on (YYYY-MM-DD).
+ */
+export function isRerollable(dt: string, today: string): boolean {
+  assertIsoDate(dt);
+  assertIsoDate(today);
+  const ageDays =
+    (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${dt}T00:00:00Z`)) /
+    86_400_000;
+  return ageDays <= MAX_REROLL_AGE_DAYS;
+}
+
+/**
  * The Glue catalog coordinates the rollup INSERT runs against. Supplied to the
  * builder by the handler from the Lambda's own environment (CDK-set), never
  * from the invocation event.

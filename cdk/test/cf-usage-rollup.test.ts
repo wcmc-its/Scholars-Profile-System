@@ -5,7 +5,12 @@
 // needs. The import is extensionless on purpose: ts-jest's CommonJS resolver
 // does not remap a NodeNext `.js` specifier back to the `.ts` source, but it
 // resolves the extensionless path directly to queries.ts.
-import { assertIsoDate, buildRollupInsert } from "../lambda/cf-usage-rollup/queries";
+import {
+  assertIsoDate,
+  buildRollupInsert,
+  isRerollable,
+  MAX_REROLL_AGE_DAYS,
+} from "../lambda/cf-usage-rollup/queries";
 
 const CFG = {
   database: "sps_usage_staging",
@@ -127,5 +132,29 @@ describe("buildRollupInsert", () => {
     const upTo3xx = sql.match(/sc_status BETWEEN 200 AND 399/g) ?? [];
     expect(twoxx).toHaveLength(2);
     expect(upTo3xx).toHaveLength(3);
+  });
+});
+
+describe("isRerollable", () => {
+  it("allows a re-roll while the raw logs are still retained", () => {
+    expect(isRerollable("2026-09-24", "2026-09-25")).toBe(true);
+    expect(isRerollable("2026-09-25", "2026-09-25")).toBe(true);
+    // Exactly MAX_REROLL_AGE_DAYS (85) old is still inside the margin.
+    expect(isRerollable("2026-07-02", "2026-09-25")).toBe(true);
+  });
+
+  it("refuses a day old enough that its raw logs may have expired", () => {
+    // 86+ days: a purge-then-insert here could wipe the only durable copy.
+    expect(isRerollable("2026-07-01", "2026-09-25")).toBe(false);
+    expect(isRerollable("2026-05-22", "2026-09-25")).toBe(false);
+  });
+
+  it("keeps the margin below EdgeStack's 90-day raw-log expiry", () => {
+    expect(MAX_REROLL_AGE_DAYS).toBeLessThan(90);
+  });
+
+  it("validates both dates", () => {
+    expect(() => isRerollable("bad", "2026-09-25")).toThrow(/invalid_date/);
+    expect(() => isRerollable("2026-09-24", "x")).toThrow(/invalid_date/);
   });
 });
