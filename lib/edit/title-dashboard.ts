@@ -28,6 +28,8 @@ import {
   rankTitleText,
   resolveFromOptions,
   TITLE_RANK,
+  TITLE_TIER_LABEL,
+  TITLE_TIERS,
   type TitleOption,
   type TitleTier,
 } from "@/lib/scholar-title";
@@ -189,6 +191,42 @@ export type TitleDashboardParams = {
   q: string;
 };
 
+export type TitleBand = NonNullable<TitleDashboardParams["band"]>;
+export type TitleRule = NonNullable<TitleDashboardParams["rule"]>;
+
+export const TITLE_BANDS: readonly TitleBand[] = ["leadership", "director", "other"] as const;
+
+export const TITLE_BAND_LABEL: Record<TitleBand, string> = {
+  leadership: "Leadership (ranks 1–8.5)",
+  director: "Endowed / unit director (9–10)",
+  other: "Everything else (11+)",
+};
+
+/** Every tier, then "override" (the pin). */
+export const TITLE_RULES: readonly TitleRule[] = [...TITLE_TIERS, "override"];
+
+/** A winning rule as the operator reads it: the tier's label, "Pinned" for a pin. */
+export function titleRuleLabel(rule: TitleRule): string {
+  return rule === "override" ? "Pinned" : TITLE_TIER_LABEL[rule];
+}
+
+/** A ladder rank for display: "4", "8.5"; "—" for unranked or none. */
+export function formatTitleRank(rank: number | null | undefined): string {
+  return rank === null || rank === undefined || rank >= TITLE_RANK.unranked ? "—" : String(rank);
+}
+
+/** The operator notes on a row: the mismatch reasons, then the redundant pin. */
+export function titleRowNotes(r: TitleDashboardRow): string[] {
+  return [...r.mismatchNotes, ...(r.pinRedundant ? ["Pin matches ladder — can unpin"] : [])];
+}
+
+/** The rank of what is displayed by rule: the pin's (its tier row when it is
+ *  one, else its text), otherwise the ladder winner's. */
+export function winningRank(r: TitleDashboardRow): number | null {
+  if (r.pin !== null) return r.options.find((o) => o.value === r.pin)?.rank ?? rankTitleText(r.pin);
+  return r.winner?.rank ?? null;
+}
+
 export function parseTitleDashboardParams(sp: URLSearchParams): TitleDashboardParams {
   const reason = sp.get("reason");
   const band = sp.get("band");
@@ -198,10 +236,7 @@ export function parseTitleDashboardParams(sp: URLSearchParams): TitleDashboardPa
     reason: (TITLE_REASONS as readonly string[]).includes(reason ?? "") ? (reason as TitleReason) : null,
     band: band === "leadership" || band === "director" || band === "other" ? band : null,
     pinned: pinned === "yes" ? true : pinned === "no" ? false : null,
-    rule:
-      rule === "override" || ["working", "primary", "appointment", "centerHead", "chief"].includes(rule ?? "")
-        ? (rule as TitleDashboardParams["rule"])
-        : null,
+    rule: (TITLE_RULES as readonly string[]).includes(rule ?? "") ? (rule as TitleRule) : null,
     q: (sp.get("q") ?? "").trim(),
   };
 }
@@ -228,4 +263,27 @@ export function filterTitleDashboard(
     if (q && !`${r.name} ${r.cwid} ${r.displayed ?? ""}`.toLowerCase().includes(q)) return false;
     return true;
   });
+}
+
+/** The query string for `p` (the download link, chip removal); unset keys omitted. */
+export function titleDashboardQueryString(p: TitleDashboardParams): string {
+  const out = new URLSearchParams();
+  if (p.reason) out.set("reason", p.reason);
+  if (p.band) out.set("band", p.band);
+  if (p.pinned !== null) out.set("pinned", p.pinned ? "yes" : "no");
+  if (p.rule) out.set("rule", p.rule);
+  if (p.q) out.set("q", p.q);
+  return out.toString();
+}
+
+/** Every filter as `[criterion, value]`, "All" when unset — the export's
+ *  Criteria sheet. */
+export function titleDashboardCriteria(p: TitleDashboardParams): Array<readonly [string, string]> {
+  return [
+    ["Reason", p.reason ? TITLE_REASON_LABEL[p.reason] : "All"],
+    ["Rank band", p.band ? TITLE_BAND_LABEL[p.band] : "All"],
+    ["Pinned", p.pinned === null ? "All" : p.pinned ? "Yes" : "No"],
+    ["Winning rule", p.rule ? titleRuleLabel(p.rule) : "All"],
+    ["Search", p.q || "All"],
+  ];
 }

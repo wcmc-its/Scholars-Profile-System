@@ -111,7 +111,7 @@ describe("loadReportMeta", () => {
       summary: REPORT_META_DEFAULTS["4"].summary,
       descriptionHtml: null,
     });
-    expect(meta.size).toBe(9);
+    expect(meta.size).toBe(10);
   });
 
   it("a row the catalog doesn't know is ignored, not added", async () => {
@@ -119,7 +119,7 @@ describe("loadReportMeta", () => {
       { reportKey: "99", name: "X", summary: "Y", descriptionHtml: null },
     ]);
     const meta = await loadReportMeta();
-    expect(meta.size).toBe(9);
+    expect(meta.size).toBe(10);
     expect(meta.has("99" as never)).toBe(false);
   });
 
@@ -133,10 +133,10 @@ describe("loadReportMeta", () => {
 });
 
 describe("isReportKey", () => {
-  it.each(["1", "2", "3", "4", "5", "6", "7"])("accepts %j", (v) => {
+  it.each(["1", "2", "3", "4", "5", "6", "7", "10"])("accepts %j", (v) => {
     expect(isReportKey(v)).toBe(true);
   });
-  it.each(["10", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
+  it.each(["11", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
     expect(isReportKey(v)).toBe(false);
   });
 });
