@@ -21,6 +21,12 @@
  * Authz mirrors the parent report: Curator/Owner of the center, or
  * Superuser/comms_steward (`canEditUnit`).
  *
+ * Whole-report mode (no `cwid`) is a bulk scholar export, so it follows the
+ * standing SCHOLAR_EXPORT_CAP policy (`lib/api/export-scholars.ts`): above 50
+ * candidates the server refuses with a 422 — it never truncates. Meyer's
+ * ~2,400-candidate cohort is therefore per-person (`?cwid=`) only; the card
+ * hides the whole-report button when the cohort is over the cap.
+ *
  * ponytail: the no-`cwid` (whole-report) mode pulls every candidate's
  * post-cutoff papers in one request — today that's ~2,400 candidates and
  * ~98k `PublicationAuthor` rows for Meyer (the only center with a program
@@ -36,6 +42,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { loadCancerTaxonomy, matchedTopics, matchedUis } from "@/lib/cancer-taxonomy";
 import { DEFAULT_CUTOFF_YEAR, splitName } from "@/lib/center-collaboration/recommendations-core";
 import { toCsv, type CsvCell } from "@/lib/csv";
@@ -126,6 +133,16 @@ export async function GET(
     select: { cwid: true },
   });
   if (candidates.length === 0) return csvResponse([], center.code, cwidParam);
+  if (!cwidParam && candidates.length > SCHOLAR_EXPORT_CAP) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "export_cap_exceeded",
+        message: `The full-report CSV is only available for ${SCHOLAR_EXPORT_CAP} people or fewer (this report has ${candidates.length}). Download individual people's CSVs instead.`,
+      },
+      { status: 422 },
+    );
+  }
   const cwids = candidates.map((c) => c.cwid);
 
   const scholars = await db.read.scholar.findMany({

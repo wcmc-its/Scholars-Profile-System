@@ -81,7 +81,7 @@ describe("GET /api/edit/center/[code]/collab-report", () => {
     const res = await GET(get(), { params: Promise.resolve({ code: "meyer_cancer_center" }) });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true, generatedAt: null, rows: [] });
+    expect(body).toEqual({ ok: true, generatedAt: null, rows: [], exportCap: 50 });
   });
 
   it("joins Scholar for display fields and derives generatedAt as the max lastRefreshedAt", async () => {

@@ -65,6 +65,7 @@ vi.mock("@/lib/cancer-taxonomy", () => ({
 }));
 
 import { GET } from "@/app/api/edit/center/[code]/collab-report/export/route";
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 
 const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
@@ -175,5 +176,31 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
     expect(res.status).toBe(200);
     const csv = await res.text();
     expect(csv.trim().split("\r\n")).toHaveLength(1);
+  });
+
+  it("refuses (422) a whole-report export above SCHOLAR_EXPORT_CAP — never truncates, never reads papers", async () => {
+    mockCandidateFindMany.mockResolvedValue(
+      Array.from({ length: SCHOLAR_EXPORT_CAP + 1 }, (_, i) => ({ cwid: `c${i}` })),
+    );
+    const res = await GET(get("http://localhost/x"), params());
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, error: "export_cap_exceeded" });
+    expect(body.message).toContain(`${SCHOLAR_EXPORT_CAP} people or fewer`);
+    expect(mockAuthorFindMany).not.toHaveBeenCalled();
+  });
+
+  it("still serves a whole-report export at exactly the cap", async () => {
+    mockCandidateFindMany.mockResolvedValue(
+      Array.from({ length: SCHOLAR_EXPORT_CAP }, (_, i) => ({ cwid: `c${i}` })),
+    );
+    const res = await GET(get("http://localhost/x"), params());
+    expect(res.status).toBe(200);
+  });
+
+  it("keeps the per-person (?cwid=) export working regardless of the cohort cap", async () => {
+    const res = await GET(get("http://localhost/x?cwid=c1"), params());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/csv");
   });
 });

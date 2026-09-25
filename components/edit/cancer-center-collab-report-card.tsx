@@ -82,7 +82,9 @@ type Row = {
   currentProgramCode: string | null;
 };
 
-type LoadedState = { generatedAt: string | null; rows: Row[] };
+/** `exportCap` is the standing SCHOLAR_EXPORT_CAP, served by the route so this
+ *  client component never imports the db-backed module that defines it. */
+type LoadedState = { generatedAt: string | null; rows: Row[]; exportCap: number };
 
 type Mode = "percent" | "count";
 
@@ -274,8 +276,12 @@ function MeshLogicModal() {
   // topic) but isn't a disease-site OR a cross-cutting cc- bucket itself —
   // excluded from both counts below so the intro prose's "N site buckets
   // plus M cc- buckets" stays literally additive.
-  const siteCount = data?.topics.filter((t) => !t.topic.startsWith("cc-") && t.topic !== "unassigned").length;
-  const ccCount = data?.topics.filter((t) => t.topic.startsWith("cc-")).length;
+  // An empty taxonomy means the generator hasn't run in this environment —
+  // say so instead of printing "0 descriptors / 0 buckets" as if it were real.
+  const empty = data?.totalRelevant === 0;
+  const live = empty ? null : data;
+  const siteCount = live?.topics.filter((t) => !t.topic.startsWith("cc-") && t.topic !== "unassigned").length;
+  const ccCount = live?.topics.filter((t) => t.topic.startsWith("cc-")).length;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -292,11 +298,13 @@ function MeshLogicModal() {
         <DialogHeader>
           <DialogTitle>How cancer-relevance is determined</DialogTitle>
           <DialogDescription>
-            {data
-              ? `${data.totalRelevant} cancer-relevant descriptors from ${data.ruleCount} ruleset rows${
-                  data.meshRelease ? ` · Resolved against ${data.meshRelease}` : ""
-                }`
-              : " "}
+            {empty
+              ? "The cancer taxonomy hasn't been generated in this environment yet, so no publications are classified as cancer-relevant."
+              : data
+                ? `${data.totalRelevant} cancer-relevant descriptors from ${data.ruleCount} ruleset rows${
+                    data.meshRelease ? ` · Resolved against ${data.meshRelease}` : ""
+                  }`
+                : " "}
           </DialogDescription>
         </DialogHeader>
 
@@ -651,17 +659,25 @@ export function CancerCenterCollabReportCard({ centerCode, centerName }: CancerC
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <MeshLogicModal />
-          <Button asChild variant="apollo" size="sm">
-            {/* Plain `<a download>` — no JS/blob dance, the browser handles the
-                download off the route's `Content-Disposition` header. */}
-            <a
-              href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export`}
-              aria-label="Download full report (CSV)"
-            >
-              <Download className="size-4" aria-hidden />
-              Download full report (CSV)
-            </a>
-          </Button>
+          {/* Bulk export policy: the whole-report CSV is offered only at or
+              under the cap (the route refuses above it). Per-person CSVs stay. */}
+          {state && state.rows.length > state.exportCap ? (
+            <p className="text-xs text-muted-foreground">
+              Full-report CSV isn&apos;t offered above {state.exportCap} people; use each person&apos;s CSV link.
+            </p>
+          ) : state ? (
+            <Button asChild variant="apollo" size="sm">
+              {/* Plain `<a download>` — no JS/blob dance, the browser handles the
+                  download off the route's `Content-Disposition` header. */}
+              <a
+                href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export`}
+                aria-label="Download full report (CSV)"
+              >
+                <Download className="size-4" aria-hidden />
+                Download full report (CSV)
+              </a>
+            </Button>
+          ) : null}
         </div>
       </div>
       <div className="border-apollo-amber-tint-border bg-apollo-amber-tint rounded-md border px-4 py-3.5">
