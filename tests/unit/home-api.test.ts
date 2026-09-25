@@ -434,7 +434,7 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
       Array.from({ length: 68 }, (_, i) => ({
         id: `topic_${i}`,
         label: `Topic ${i}`,
-        description: null,
+        _count: { subtopics: 0 },
       })),
     );
     mockQueryRaw.mockResolvedValue(
@@ -457,8 +457,8 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
 
   it("merges scholar counts onto parent topic rows", async () => {
     mockTopicFindMany.mockResolvedValue([
-      { id: "cancer_genomics", label: "Cancer Genomics", description: null },
-      { id: "neuroscience", label: "Neuroscience", description: null },
+      { id: "cancer_genomics", label: "Cancer Genomics", _count: { subtopics: 9 } },
+      { id: "neuroscience", label: "Neuroscience", _count: { subtopics: 4 } },
     ]);
     mockQueryRaw.mockResolvedValue([
       { parent_topic_id: "cancer_genomics", scholar_count: 42, publication_count: 312 },
@@ -466,8 +466,8 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
     ]);
     const result = await getBrowseAllResearchAreas();
     expect(result).toEqual([
-      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312 },
-      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89 },
+      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312, subtopicCount: 9 },
+      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89, subtopicCount: 4 },
     ]);
   });
 });

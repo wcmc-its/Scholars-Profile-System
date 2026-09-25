@@ -141,6 +141,7 @@ export type ParentTopic = {
   name: string;
   scholarCount: number;
   publicationCount: number;
+  subtopicCount: number;
 };
 
 export type HomeMethodCategory = {
@@ -583,7 +584,7 @@ export function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
 
 async function getBrowseAllResearchAreasUncached(): Promise<ParentTopic[]> {
   const topics = await prisma.topic.findMany({
-    select: { id: true, label: true },
+    select: { id: true, label: true, _count: { select: { subtopics: true } } },
     orderBy: { label: "asc" },
   });
 
@@ -621,6 +622,7 @@ async function getBrowseAllResearchAreasUncached(): Promise<ParentTopic[]> {
     name: t.label,
     scholarCount: scholarByParent.get(t.id) ?? 0,
     publicationCount: pubByParent.get(t.id) ?? 0,
+    subtopicCount: t._count.subtopics,
   }));
 }
 
