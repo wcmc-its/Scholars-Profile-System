@@ -97,9 +97,10 @@ function QueryAndAssumptions({ cycle }: { cycle: string }) {
         </li>
         <li>
           Cancer-relevant %: proposed by Bedrock from the project title and funding source, and
-          marked AI-suggested until a reviewer saves or accepts it (then Confirmed). A project with
-          no proposed percentage is Not inferred: it counts as Needs review and is left out of the
-          Cancer-relevant dollar figure.
+          marked AI-suggested until a reviewer accepts it (Confirmed) or saves a different value
+          (Corrected, which names what the AI said). Review progress counts the projects that have
+          an AI-suggested percentage. A project with no proposed percentage is Not inferred: it
+          counts as Needs review and is left out of the Cancer-relevant dollar figure.
         </li>
         <li>
           Program: the PI&apos;s current program in the center roster; if the PI has none, the
@@ -111,9 +112,9 @@ function QueryAndAssumptions({ cycle }: { cycle: string }) {
         </li>
         <li>
           The CSV holds the rows these filters select (its name ends in -filtered when that is not
-          the whole cycle), one line per program, with a Review Status column (Confirmed or Needs
-          review). It is award-level NCI submission data, so it is exempt from the 50-person limit
-          on scholar exports: it names PIs but has no CWID column.
+          the whole cycle), one line per program, with a Review Status column (Confirmed, Corrected
+          or Needs review). It is award-level NCI submission data, so it is exempt from the
+          50-person limit on scholar exports: it names PIs but has no CWID column.
         </li>
       </ul>
     </section>
@@ -163,7 +164,7 @@ export async function renderNciTable2aReport({
   ];
   const emptyMessage =
     params.status === "needs" && !narrowed
-      ? "Nothing left to review. Every percentage is confirmed."
+      ? "Nothing left to review. Every percentage is confirmed or corrected."
       : "No projects match these filters.";
   const programKnown =
     params.program === "" ||
@@ -179,7 +180,9 @@ export async function renderNciTable2aReport({
               <span className="text-[32px] leading-none font-bold tabular-nums">
                 {progress.reviewed.toLocaleString()} of {progress.total.toLocaleString()}
               </span>
-              <span className="text-muted-foreground text-[15px]">percentages reviewed</span>
+              <span className="text-muted-foreground text-[15px]">
+                AI-suggested percentages reviewed
+              </span>
             </div>
             <Progress value={progress.pct} aria-label="Review progress" />
             <p
@@ -333,7 +336,8 @@ export async function renderNciTable2aReport({
           <Link href={`/edit/center/${encodeURIComponent(code)}`}>
             edit it in the center roster
           </Link>
-          . Press Enter or leave the field to save a percentage; Esc undoes.
+          . Press Enter or leave the field to save a percentage; Esc undoes. &ldquo;Accept … shown
+          suggestions&rdquo; confirms the AI-suggested rows on screen, up to 50 at a time.
         </p>
         <QueryAndAssumptions cycle={cycle} />
       </div>

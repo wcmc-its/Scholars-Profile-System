@@ -6,9 +6,11 @@
  * the review status of a row, the headline numbers, the chips and the CSV.
  * Safe to import from the client table (`components/edit/reports/nci-2a-table.tsx`).
  *
- * Review status, until the AI-original column lands (PR 2b):
- *   - `confirmed`     — `cancerRelevantPercentSource = "human"` (a reviewer
- *                       saved or accepted the value).
+ * Review status (PR 2b: `cancerRelevantPercentAi` holds what the model said):
+ *   - `confirmed`     — `cancerRelevantPercentSource = "human"` and the value
+ *                       equals the AI's (or there is no AI value).
+ *   - `corrected`     — `"human"`, and the value differs from the AI's
+ *                       ("Corrected · AI said X%").
  *   - `ai`            — an LLM value nobody has reviewed yet.
  *   - `not-inferred`  — the percent is null (the Bedrock call failed or the
  *                       import skipped it). Counts under Needs review, and is
@@ -37,6 +39,8 @@ export type Nci2aAward = {
   annualProjectDirectCosts: number;
   cancerRelevantPercent: number | null;
   cancerRelevantPercentSource: "llm" | "human";
+  /** What Bedrock proposed (`cancer_relevant_percent_ai`); null = no AI value. */
+  cancerRelevantPercentAi: number | null;
   cancerRelevantRationale: string | null;
   cancerRelevantAnnualProjectDc: number | null;
   isPeerReviewed: boolean;
@@ -51,19 +55,31 @@ export type Nci2aAward = {
 
 export type Nci2aData = { cycle: string | null; programs: Nci2aProgram[]; awards: Nci2aAward[] };
 
-export type Nci2aStatus = "confirmed" | "ai" | "not-inferred";
+export type Nci2aStatus = "confirmed" | "corrected" | "ai" | "not-inferred";
 
 export function nci2aStatus(
-  a: Pick<Nci2aAward, "cancerRelevantPercent" | "cancerRelevantPercentSource">,
+  a: Pick<
+    Nci2aAward,
+    "cancerRelevantPercent" | "cancerRelevantPercentSource" | "cancerRelevantPercentAi"
+  >,
 ): Nci2aStatus {
   if (a.cancerRelevantPercent == null) return "not-inferred";
-  return a.cancerRelevantPercentSource === "human" ? "confirmed" : "ai";
+  if (a.cancerRelevantPercentSource !== "human") return "ai";
+  return a.cancerRelevantPercentAi != null && a.cancerRelevantPercentAi !== a.cancerRelevantPercent
+    ? "corrected"
+    : "confirmed";
 }
 
-export const needsReview = (a: Nci2aAward) => nci2aStatus(a) !== "confirmed";
+/** Reviewed = a human saved or accepted it (Confirmed or Corrected). */
+const reviewed = (s: Nci2aStatus) => s === "confirmed" || s === "corrected";
 
-/** The CSV / chip wording: only these two until "Corrected" can be told apart. */
-export const reviewStatusLabel = (a: Nci2aAward) => (needsReview(a) ? "Needs review" : "Confirmed");
+export const needsReview = (a: Nci2aAward) => !reviewed(nci2aStatus(a));
+
+/** The CSV Review Status column: Confirmed / Corrected / Needs review. */
+export function reviewStatusLabel(a: Nci2aAward): "Confirmed" | "Corrected" | "Needs review" {
+  const s = nci2aStatus(a);
+  return s === "confirmed" ? "Confirmed" : s === "corrected" ? "Corrected" : "Needs review";
+}
 
 // ── URL filters ──────────────────────────────────────────────────────────
 
@@ -236,15 +252,21 @@ export function nci2aStats(rows: ReadonlyArray<Nci2aAward>): Nci2aStats {
   return s;
 }
 
-/** Cycle-wide review progress: reviewed = confirmed rows, of every row in the cycle. */
+/**
+ * Cycle-wide review progress over the AI-suggested percentages: `total` = rows
+ * with an AI value, `reviewed` = those a human has since confirmed or
+ * corrected, `pending` = those still AI-suggested. A not-inferred row has no
+ * suggestion, so it is in none of these (it still counts under Needs review).
+ */
 export function reviewProgress(awards: ReadonlyArray<Nci2aAward>) {
-  const reviewed = awards.filter((a) => !needsReview(a)).length;
-  const total = awards.length;
+  const suggested = awards.filter((a) => a.cancerRelevantPercentAi != null);
+  const done = suggested.filter((a) => !needsReview(a)).length;
+  const total = suggested.length;
   return {
-    reviewed,
+    reviewed: done,
     total,
-    pending: total - reviewed,
-    pct: total ? Math.round((reviewed / total) * 100) : 100,
+    pending: total - done,
+    pct: total ? Math.round((done / total) * 100) : 100,
   };
 }
 
@@ -325,7 +347,7 @@ export function nci2aChips(p: Nci2aParams, programs: ReadonlyArray<Nci2aProgram>
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * `a` as the PATCH just wrote it: the percent, `source: "human"`, and the
+ * `a` as the PATCH (or bulk Accept) just wrote it: the percent, `source: "human"`, and the
  * dollars derived from it (the same arithmetic as the loader). The table shows
  * this until the server row catches up, so a lagged read-replica refresh can't
  * put the old AI value (and an Accept bound to it) back on screen.
@@ -344,9 +366,45 @@ export function applyNci2aWrite(a: Nci2aAward, pct: number): Nci2aAward {
   };
 }
 
-/** The server row already shows the write, so the local copy can go. */
+/** The server row already shows the write, so the local copy can go. The AI
+ *  original is left as it is: it is what tells Confirmed from Corrected. */
 export const nci2aWriteLanded = (a: Nci2aAward, pct: number) =>
   a.cancerRelevantPercentSource === "human" && a.cancerRelevantPercent === pct;
+
+// ── Bulk Accept ──────────────────────────────────────────────────────────
+
+/** Most awards one `POST .../nci-2a/accept` takes (one transaction). */
+export const NCI2A_ACCEPT_CAP = 50;
+
+export type Nci2aAcceptSkipReason = "already_reviewed" | "no_percent" | "not_found";
+
+export type Nci2aAcceptResult = {
+  accepted: Array<{ awardId: string; cancerRelevantPercent: number }>;
+  skipped: Array<{ awardId: string; reason: Nci2aAcceptSkipReason }>;
+};
+
+/** The AI-suggested rows among `shown`, up to the route's cap, in order. */
+export const bulkAcceptTargets = (shown: ReadonlyArray<Nci2aAward>) =>
+  shown.filter((a) => nci2aStatus(a) === "ai").slice(0, NCI2A_ACCEPT_CAP);
+
+/** The pill text: Corrected names what the model said. */
+export function statusPillLabel(
+  a: Pick<
+    Nci2aAward,
+    "cancerRelevantPercent" | "cancerRelevantPercentSource" | "cancerRelevantPercentAi"
+  >,
+): string {
+  switch (nci2aStatus(a)) {
+    case "ai":
+      return "AI-suggested";
+    case "not-inferred":
+      return "Not inferred";
+    case "corrected":
+      return `Corrected · AI said ${a.cancerRelevantPercentAi}%`;
+    default:
+      return "Confirmed";
+  }
+}
 
 // ── CSV ──────────────────────────────────────────────────────────────────
 

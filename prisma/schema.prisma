@@ -2276,6 +2276,12 @@ model CancerCenterFundingAward {
   /// real rubric" — see `lib/edit/cancer-center-funding-generator.ts`).
   cancerRelevantPercent       Decimal? @map("cancer_relevant_percent") @db.Decimal(5, 2)
   cancerRelevantPercentSource String   @default("llm") @map("cancer_relevant_percent_source") @db.VarChar(16)
+  /// What Bedrock proposed for `cancerRelevantPercent`, kept apart from it so a
+  /// reviewer's correction can be told from a confirmation ("Corrected · AI
+  /// said X%" vs "Confirmed"). Written by the OSRA import alongside an
+  /// llm-sourced percent, never over a human one; NULL = no AI value (not
+  /// inferred). Backfilled from `cancerRelevantPercent` where source = 'llm'.
+  cancerRelevantPercentAi     Decimal? @map("cancer_relevant_percent_ai") @db.Decimal(5, 2)
   /// The model's one-sentence rationale for `cancerRelevantPercent` — shown to
   /// the reviewer, never used as a scoring input.
   cancerRelevantRationale     String?  @map("cancer_relevant_rationale") @db.Text

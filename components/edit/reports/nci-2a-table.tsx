@@ -12,6 +12,10 @@
  *     out-of-range draft reverts, never saves (an empty input must not
  *     commit a 0% onto a row nobody inferred).
  *   - "Accept" on an AI-suggested row PATCHes the SAME value, confirming it.
+ *   - "Accept N shown suggestions" (over the AI-suggested rows currently on
+ *     screen, at most `NCI2A_ACCEPT_CAP`) asks to confirm, then POSTs their ids
+ *     to `/api/edit/center/[code]/nci-2a/accept` — one transaction; rows a
+ *     human already reviewed are skipped server-side and reported here.
  * After a save the page re-renders from the server (`router.refresh()`), so
  * the stats, counts and progress move with it; paging keeps its place
  * (`useShowMore`'s `resetKey` is the filter query, not the row array). The
@@ -32,10 +36,13 @@ import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Button } from "@/components/ui/button";
 import {
   applyNci2aWrite,
+  bulkAcceptTargets,
   money,
   nci2aCsv,
   nci2aStatus,
   nci2aWriteLanded,
+  statusPillLabel,
+  type Nci2aAcceptResult,
   type Nci2aAward,
   type Nci2aSortKey,
   type Nci2aStatus,
@@ -43,32 +50,25 @@ import {
 import { nihReporterProjectUrl } from "@/lib/nih-reporter";
 import { cn } from "@/lib/utils";
 
-const PILL: Record<Nci2aStatus, { label: string; className: string }> = {
-  ai: {
-    label: "AI-suggested",
-    className: "text-apollo-amber bg-apollo-amber-tint border-apollo-amber-tint-border",
-  },
-  "not-inferred": {
-    label: "Not inferred",
-    className: "text-apollo-amber bg-apollo-amber-tint border-apollo-amber-tint-border",
-  },
-  confirmed: {
-    label: "Confirmed",
-    className: "text-apollo-slate bg-apollo-slate-tint border-apollo-slate-tint-border",
-  },
+const AMBER = "text-apollo-amber bg-apollo-amber-tint border-apollo-amber-tint-border";
+const SLATE = "text-apollo-slate bg-apollo-slate-tint border-apollo-slate-tint-border";
+const PILL_CLASS: Record<Nci2aStatus, string> = {
+  ai: AMBER,
+  "not-inferred": AMBER,
+  confirmed: SLATE,
+  corrected: SLATE,
 };
 
-export function StatusPill({ status }: { status: Nci2aStatus }) {
-  const p = PILL[status];
+export function StatusPill({ award }: { award: Nci2aAward }) {
   return (
     <span
       className={cn(
         "inline-block rounded border px-1.5 py-px text-[11px] font-semibold tracking-[0.02em] whitespace-nowrap",
-        p.className,
+        PILL_CLASS[nci2aStatus(award)],
       )}
       data-testid="nci-2a-status"
     >
-      {p.label}
+      {statusPillLabel(award)}
     </span>
   );
 }
@@ -139,7 +139,7 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
       setDraft(undefined);
       return;
     }
-    if (n === award.cancerRelevantPercent && status === "confirmed") {
+    if (n === award.cancerRelevantPercent && award.cancerRelevantPercentSource === "human") {
       setDraft(undefined);
       return;
     }
@@ -174,7 +174,7 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
               "bg-apollo-surface h-[30px] w-[58px] rounded-md border px-1.5 text-right text-sm tabular-nums",
               draft !== undefined
                 ? "border-apollo-slate"
-                : status === "confirmed"
+                : award.cancerRelevantPercentSource === "human"
                   ? "border-apollo-border-strong"
                   : "border-apollo-amber-tint-border",
             )}
@@ -195,7 +195,7 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
         )}
       </div>
       <div className="mt-1.5">
-        <StatusPill status={status} />
+        <StatusPill award={award} />
       </div>
     </div>
   );
@@ -277,6 +277,54 @@ export function Nci2aTable({
   );
   const { visible, hasMore, showMore, rangeLabel } = useShowMore(shown, 25, resetKey);
   const rosterHref = `/edit/center/${encodeURIComponent(centerCode)}`;
+  const aiShown = visible.filter((a) => nci2aStatus(a) === "ai").length;
+  const targets = bulkAcceptTargets(visible);
+  const [confirming, setConfirming] = React.useState(false);
+  const [bulkBusy, setBulkBusy] = React.useState(false);
+  const [bulkNote, setBulkNote] = React.useState<string | null>(null);
+
+  const acceptShown = async () => {
+    const ids = bulkAcceptTargets(visible).map((a) => a.id);
+    setError(null);
+    setBulkNote(null);
+    if (ids.length === 0) {
+      setConfirming(false);
+      return;
+    }
+    setBulkBusy(true);
+    let result: Nci2aAcceptResult;
+    try {
+      const res = await fetch(`/api/edit/center/${encodeURIComponent(centerCode)}/nci-2a/accept`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ awardIds: ids }),
+      });
+      if (!res.ok) {
+        setError(`Accept failed (${res.status}). Nothing was changed.`);
+        return;
+      }
+      result = (await res.json()) as Nci2aAcceptResult;
+    } catch {
+      setError("Accept failed. Nothing was changed.");
+      return;
+    } finally {
+      setBulkBusy(false);
+      setConfirming(false);
+    }
+    // The written values, shown until the (possibly lagging) replica has them.
+    setWritten((w) => {
+      const next = { ...w };
+      for (const a of result.accepted) next[a.awardId] = a.cancerRelevantPercent;
+      return next;
+    });
+    const n = result.accepted.length;
+    const skipped = result.skipped.length;
+    setBulkNote(
+      `Accepted ${n} ${n === 1 ? "suggestion" : "suggestions"}.` +
+        (skipped ? ` Skipped ${skipped}: already reviewed or no percentage to accept.` : ""),
+    );
+    React.startTransition(() => router.refresh());
+  };
 
   const save: Save = async (awardId, value) => {
     setError(null);
@@ -318,6 +366,44 @@ export function Nci2aTable({
 
   return (
     <div data-testid="nci-2a-table">
+      {(aiShown > 1 || bulkNote) && (
+        <div
+          className="flex flex-wrap items-center justify-end gap-3 px-5 pt-3"
+          data-testid="nci-2a-bulk"
+        >
+          {bulkNote && (
+            <p role="status" className="text-muted-foreground mr-auto text-[13px]">
+              {bulkNote}
+            </p>
+          )}
+          {aiShown > 1 &&
+            (confirming ? (
+              <div className="flex flex-wrap items-center gap-2" data-testid="nci-2a-bulk-confirm">
+                <span className="text-[13px]">
+                  Accept the AI percentage on {targets.length}{" "}
+                  {targets.length === 1 ? "project" : "projects"} as is?
+                </span>
+                <Button size="sm" disabled={bulkBusy} onClick={() => void acceptShown()}>
+                  Accept {targets.length}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={bulkBusy}
+                  onClick={() => setConfirming(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => setConfirming(true)}>
+                {aiShown > targets.length
+                  ? `Accept the first ${targets.length} shown suggestions`
+                  : `Accept ${targets.length} shown suggestions`}
+              </Button>
+            ))}
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-destructive px-5 pt-3 text-sm">
           {error}

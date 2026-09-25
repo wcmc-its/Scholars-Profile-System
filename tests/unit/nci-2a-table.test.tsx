@@ -47,6 +47,8 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     projectEndDate: "2028-12-31",
     annualProjectDirectCosts: 100000,
     cancerRelevantPercentSource: "llm",
+    // The AI original defaults to the fixture's percent (so a human row is Confirmed).
+    cancerRelevantPercentAi: pct,
     cancerRelevantRationale: "because",
     cancerRelevantAnnualProjectDc: pct == null ? null : pct * 1000,
     isPeerReviewed: true,
@@ -146,7 +148,9 @@ describe("report 2 body", () => {
     const q = await renderBody();
     expect(h.load).toHaveBeenCalledWith(CENTER);
     const progress = q.getByTestId("nci-2a-progress");
-    expect(progress.textContent).toContain("1 of 3");
+    // Of the rows with an AI value (NONE has none): 1 of 2.
+    expect(progress.textContent).toContain("1 of 2");
+    expect(progress.textContent).toContain("AI-suggested percentages reviewed");
     expect(within(progress).getByTestId("nci-2a-banner").textContent).toContain(
       "from the project title and funding source",
     );
@@ -154,7 +158,7 @@ describe("report 2 body", () => {
       `${U}&status=needs`,
     );
     expect(within(progress).getByTestId("nci-2a-review-link").textContent).toBe(
-      "Review 2 suggestions",
+      "Review 1 suggestion",
     );
     const labels = [...q.getByTestId("nci-2a-stats").querySelectorAll("dt")].map(
       (d) => d.textContent,
@@ -246,7 +250,7 @@ describe("report 2 body", () => {
     h.load.mockResolvedValue({ ...DATA, awards: [DONE] });
     const q = await renderBody({ status: "needs" });
     expect(q.getByTestId("nci-2a-empty").textContent).toBe(
-      "Nothing left to review. Every percentage is confirmed.",
+      "Nothing left to review. Every percentage is confirmed or corrected.",
     );
     expect(q.queryByTestId("nci-2a-review-link")).toBeNull();
   });
@@ -339,7 +343,8 @@ describe("report 2 table", () => {
     r.rerender(tableEl([AI]));
     const row = r.q.getByTestId("nci-2a-row");
     expect((within(row).getByRole("spinbutton") as HTMLInputElement).value).toBe("65");
-    expect(within(row).getByTestId("nci-2a-status").textContent).toBe("Confirmed");
+    // A different value from the AI's: Corrected, naming what the AI said.
+    expect(within(row).getByTestId("nci-2a-status").textContent).toBe("Corrected · AI said 40%");
     expect(within(row).queryByRole("button", { name: /Accept/ })).toBeNull();
     expect(row.textContent).toContain("$65,000");
     // Once the server has it, its row is shown as is.
@@ -458,6 +463,119 @@ describe("report 2 table", () => {
     expect(text).toContain("Review Status");
     expect(text).not.toContain("zzz1");
     click.mockRestore();
+  });
+
+  it("human rows: Corrected names the AI value; Confirmed when equal or no AI value", () => {
+    const corrected = award({
+      id: "c",
+      cancerRelevantPercentSource: "human",
+      cancerRelevantPercent: 25,
+      cancerRelevantPercentAi: 60,
+    });
+    const noAi = award({
+      id: "d",
+      cancerRelevantPercentSource: "human",
+      cancerRelevantPercent: 25,
+      cancerRelevantPercentAi: null,
+    });
+    const { q } = renderTable([corrected, DONE, noAi]);
+    expect(q.getAllByTestId("nci-2a-status").map((p) => p.textContent)).toEqual([
+      "Corrected · AI said 60%",
+      "Confirmed",
+      "Confirmed",
+    ]);
+  });
+
+  describe("bulk Accept", () => {
+    const AI2 = award({ id: "5", pi: "Delta, Di", cancerRelevantPercent: 75 });
+
+    function stubAccept(body: unknown, ok = true, status = 200) {
+      const f = vi.fn(async () => ({ ok, status, json: async () => body }));
+      vi.stubGlobal("fetch", f);
+      return f;
+    }
+
+    it("only offered with two or more AI-suggested rows on screen", () => {
+      const one = renderTable([AI, DONE, NONE]);
+      expect(one.q.queryByTestId("nci-2a-bulk")).toBeNull();
+      cleanup();
+      const two = renderTable([AI, DONE, AI2]);
+      expect(within(two.q.getByTestId("nci-2a-bulk")).getByRole("button").textContent).toBe(
+        "Accept 2 shown suggestions",
+      );
+    });
+
+    it("asks first; Cancel sends nothing", async () => {
+      const f = stubAccept({});
+      const { q } = renderTable([AI, AI2]);
+      fireEvent.click(q.getByRole("button", { name: "Accept 2 shown suggestions" }));
+      const confirm = q.getByTestId("nci-2a-bulk-confirm");
+      expect(confirm.textContent).toContain("Accept the AI percentage on 2 projects as is?");
+      fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+      await act(async () => {});
+      expect(f).not.toHaveBeenCalled();
+      expect(q.queryByTestId("nci-2a-bulk-confirm")).toBeNull();
+    });
+
+    it("POSTs the shown AI ids, applies the written values through a lagged refresh, reports skips", async () => {
+      const f = stubAccept({
+        ok: true,
+        accepted: [{ awardId: "1", cancerRelevantPercent: 40 }],
+        skipped: [{ awardId: "5", reason: "already_reviewed" }],
+      });
+      const r = renderTable([AI, DONE, AI2]);
+      fireEvent.click(r.q.getByRole("button", { name: "Accept 2 shown suggestions" }));
+      fireEvent.click(
+        within(r.q.getByTestId("nci-2a-bulk-confirm")).getByRole("button", { name: "Accept 2" }),
+      );
+      await waitFor(() => expect(h.refresh).toHaveBeenCalled());
+      expect(f).toHaveBeenCalledWith(
+        `/api/edit/center/${CENTER}/nci-2a/accept`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ awardIds: ["1", "5"] }),
+        }),
+      );
+      // The replica still says llm for both: the accepted row shows Confirmed anyway.
+      r.rerender(tableEl([AI, DONE, AI2]));
+      const pills = r.q.getAllByTestId("nci-2a-status").map((p) => p.textContent);
+      expect(pills).toEqual(["Confirmed", "Confirmed", "AI-suggested"]);
+      expect(within(r.q.getByTestId("nci-2a-bulk")).getByRole("status").textContent).toBe(
+        "Accepted 1 suggestion. Skipped 1: already reviewed or no percentage to accept.",
+      );
+    });
+
+    it("never sends more than 50 ids; the label says so", async () => {
+      const f = stubAccept({ ok: true, accepted: [], skipped: [] });
+      const many = Array.from({ length: 60 }, (_, i) => award({ id: String(200 + i) }));
+      const { q } = renderTable(many);
+      fireEvent.click(q.getByRole("button", { name: "Show 25 more" }));
+      fireEvent.click(q.getByRole("button", { name: "Show 25 more" }));
+      fireEvent.click(q.getByRole("button", { name: "Accept the first 50 shown suggestions" }));
+      fireEvent.click(
+        within(q.getByTestId("nci-2a-bulk-confirm")).getByRole("button", { name: "Accept 50" }),
+      );
+      await waitFor(() => expect(f).toHaveBeenCalled());
+      const sent = JSON.parse((f.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+      expect(sent.awardIds).toHaveLength(50);
+    });
+
+    it("a failed bulk Accept shows an error and doesn't refresh", async () => {
+      stubAccept({}, false, 403);
+      const { q } = renderTable([AI, AI2]);
+      fireEvent.click(q.getByRole("button", { name: "Accept 2 shown suggestions" }));
+      fireEvent.click(
+        within(q.getByTestId("nci-2a-bulk-confirm")).getByRole("button", { name: "Accept 2" }),
+      );
+      await waitFor(() =>
+        expect(q.getByRole("alert").textContent).toContain("Accept failed (403)"),
+      );
+      expect(h.refresh).not.toHaveBeenCalled();
+      expect(q.getAllByTestId("nci-2a-status").map((p) => p.textContent)).toEqual([
+        "AI-suggested",
+        "AI-suggested",
+      ]);
+    });
   });
 
   it("the CSV button is disabled with no rows", () => {
