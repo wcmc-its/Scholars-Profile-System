@@ -96,6 +96,9 @@ vi.mock("@/lib/edit/cancer-center-grants-report", () => ({
 vi.mock("@/lib/center-collaboration/clinical-trials-report", () => ({
   loadClinicalTrialsReport: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("@/lib/center-collaboration/collab-report-rows", () => ({
+  loadCollabReportRows: vi.fn().mockResolvedValue({ rows: [], lastRefreshedAt: null }),
+}));
 vi.mock("@/lib/edit/nih-funded-publications-report", () => ({
   loadNihFundedPublicationsReport: vi.fn().mockResolvedValue({ totalPublications: 0, rows: [] }),
 }));
