@@ -114,6 +114,26 @@ describe("TitleField — radio list", () => {
     );
   });
 
+  it("shows no rubric link unless the page passes rubricHref", () => {
+    renderField();
+    expect(screen.queryByTestId("title-rubric-link")).toBeNull();
+    expect(screen.queryByText("How titles are chosen")).toBeNull();
+  });
+
+  it("links to the title ladder when rubricHref is passed (picker posture)", () => {
+    renderField({ rubricHref: "/edit/reports/display-titles#rubric" });
+    const link = screen.getByTestId("title-rubric-link");
+    expect(link.textContent).toBe("How titles are chosen");
+    expect(link.getAttribute("href")).toBe("/edit/reports/display-titles#rubric");
+  });
+
+  it("links to the title ladder in the read-only posture too", () => {
+    renderField({ canSet: false, rubricHref: "/edit/reports/display-titles#rubric" });
+    expect(screen.getByTestId("title-rubric-link").getAttribute("href")).toBe(
+      "/edit/reports/display-titles#rubric",
+    );
+  });
+
   it("with only one applicable title, shows the plain value (no list)", () => {
     renderField({
       options: OPTIONS.map((o) => (o.tier === "primary" ? o : { ...o, value: null })),

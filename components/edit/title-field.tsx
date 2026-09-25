@@ -23,6 +23,10 @@
  * option already says where it comes from. After a save the
  * page refreshes so the identity header above picks up the new title.
  *
+ * `rubricHref` adds a "How titles are chosen" link to the published ladder
+ * (`/edit/reports/display-titles#rubric`, docs/title-hierarchy.md). The page
+ * passes it only to a superuser / comms steward, who can open that report.
+ *
  * Imports ONLY `@/lib/scholar-title` (pure, import-free) — never
  * `@/lib/edit/title-picker`, which touches the database and would drag the
  * mariadb driver into the client bundle.
@@ -30,6 +34,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Info } from "lucide-react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
@@ -88,6 +93,20 @@ function OptionText({ option: o }: { option: TitleOption }) {
   );
 }
 
+/** Link to the title ladder; rendered only when the page passes an href. */
+function RubricLink({ href }: { href?: string }) {
+  if (!href) return null;
+  return (
+    <Link
+      href={href}
+      data-testid="title-rubric-link"
+      className="text-apollo-slate self-start text-xs hover:underline"
+    >
+      How titles are chosen
+    </Link>
+  );
+}
+
 function DisplayedPill() {
   return (
     <span className="bg-apollo-surface border-apollo-border rounded-[10px] border px-2 py-px text-xs whitespace-nowrap text-[#5c574d]">
@@ -108,6 +127,9 @@ export type TitleFieldProps = {
   pending: { value: string; requestedBy: string } | null;
   /** Operator posture (pick outright) vs scholar/proxy posture (request). */
   canSet: boolean;
+  /** Where "How titles are chosen" points. Omitted = no link (only a
+   *  superuser / comms steward can open the display-titles report). */
+  rubricHref?: string;
 };
 
 export function TitleField({
@@ -117,6 +139,7 @@ export function TitleField({
   hasOverride,
   pending,
   canSet,
+  rubricHref,
 }: TitleFieldProps) {
   const router = useRouter();
   const [savedTitle, setSavedTitle] = React.useState(current);
@@ -165,6 +188,7 @@ export function TitleField({
         <p className="text-muted-foreground text-xs" data-testid="title-recourse">
           To show a different one of these titles, use Request a change.
         </p>
+        <RubricLink href={rubricHref} />
       </div>
     );
   }
@@ -261,6 +285,7 @@ export function TitleField({
         })}
       </RadioGroupPrimitive.Root>
       </TooltipProvider>
+      <RubricLink href={rubricHref} />
 
       {/* Nothing below the list until there is something to do: a pick to save,
           a pin to undo, or the result of the last action (locked-panels canvas). */}
