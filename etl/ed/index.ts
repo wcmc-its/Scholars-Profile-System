@@ -942,6 +942,12 @@ async function main() {
     const EXCLUDED_DEPT_NAMES = new Set<string>([
       "Information Technologies and Services",
       "Administration & Finance",
+      // Student-only org units (doctoral / MD-PhD students' level1), not
+      // academic departments. Excluding them nulls those students' deptCode
+      // and the Phase 3 prune deletes the now-empty Department rows.
+      "Graduate School",
+      "Weill Cornell Graduate School",
+      "MD-PhD Program",
     ]);
 
     /** Manual rename map: LDAP returns these org-unit names, but the
@@ -952,10 +958,6 @@ async function main() {
       // WCM faculty at HSS are members of the Orthopaedic Surgery dept;
       // HSS is the affiliate hospital, not an academic dept.
       "Hospital for Special Surgery": "Orthopaedic Surgery",
-      // Doctoral students' LDAP entries return the bare "Graduate School"
-      // for their level1 org unit; the official name of the unit is
-      // "Weill Cornell Graduate School" (of Medical Sciences).
-      "Graduate School": "Weill Cornell Graduate School",
     };
 
     /** Level2 org-unit names that LDAP returns under academic depts but which
