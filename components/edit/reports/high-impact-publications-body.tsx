@@ -92,14 +92,35 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
   const thisYear = new Date().getFullYear();
   // The fiscal basis runs a year ahead (FY2027 starts July 2026).
   const years = Array.from({ length: 30 }, (_, i) => thisYear + 1 - i);
+  // A selected unit no rail option carries (renamed, retired, hand-typed)
+  // still lists in its group, ticked, so the next submit keeps it and it can be
+  // unticked. Centers and institutions by prefix; anything else under departments.
+  const known = new Set(
+    [
+      ...facets.departments.flatMap((d) => [d, ...d.divisions]),
+      ...facets.centers,
+      ...facets.institutions,
+    ].map((o) => o.value),
+  );
+  const groupOf = (u: string) =>
+    u.startsWith("center:") ? "center" : u.startsWith("inst:") ? "inst" : "dept";
+  const unknownUnits = (group: string): RailOption[] =>
+    params.units
+      .filter((u) => !known.has(u) && groupOf(u) === group)
+      .map((u) => ({ value: u, label: labels.get(u) ?? u, count: 0 }));
   const unitOptions: RailOption[] = [
     ...facets.departments.map(({ value, label, count }) => ({ value, label, count })),
     ...facets.departments
       .flatMap((d) => d.divisions)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    ...unknownUnits("dept"),
   ];
   // A memberless center can only return zero — hidden unless already selected.
-  const centerOptions = facets.centers.filter((c) => c.count > 0 || params.units.includes(c.value));
+  const centerOptions = [
+    ...facets.centers.filter((c) => c.count > 0 || params.units.includes(c.value)),
+    ...unknownUnits("center"),
+  ];
+  const institutionOptions = [...facets.institutions, ...unknownUnits("inst")];
   const unitsOf = (prefixes: string[]) =>
     params.units
       .filter((u) => prefixes.some((p) => u.startsWith(p)))
@@ -235,7 +256,7 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
         >
           <RailCheckList
             name="unit"
-            options={facets.institutions}
+            options={institutionOptions}
             selected={params.units}
             countHeader="People"
           />
@@ -291,12 +312,12 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
 }
 
 /** "2026 counts publications through September 24, 2026. …" when the window
- *  reaches the year in progress; null otherwise. */
+ *  includes the year in progress; null otherwise. */
 function partialYearNote(p: HighImpactParams, now: Date): string | null {
   const today = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const current =
     p.basis === "fy" ? now.getFullYear() + (now.getMonth() >= 6 ? 1 : 0) : now.getFullYear();
-  if (p.to < current) return null;
+  if (p.from > current || p.to < current) return null;
   const counted = p.basis === "fy" ? "publications added to PubMed" : "publications";
   return `${yearLabel(p, current)} counts ${counted} through ${today}. Citation counts for recent articles are low because they have had little time to be cited.`;
 }

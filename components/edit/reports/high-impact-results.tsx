@@ -425,7 +425,13 @@ function PubItem({ pub, who }: { pub: HighImpactPub; who: ReactNode }) {
           {pub.byline.map((s, i) => (
             <span key={i}>
               {i > 0 && (s.gap || pub.byline[i - 1].gap ? " " : ", ")}
-              <span className={s.wcm ? "text-foreground font-bold" : undefined}>{s.text}</span>
+              {s.wcm && s.cwid ? (
+                <ScholarHoverCard cwid={s.cwid}>
+                  <span className="text-foreground font-bold">{s.text}</span>
+                </ScholarHoverCard>
+              ) : (
+                <span className={s.wcm ? "text-foreground font-bold" : undefined}>{s.text}</span>
+              )}
             </span>
           ))}
           .

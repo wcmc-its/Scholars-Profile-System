@@ -1,12 +1,17 @@
 /** Report 9: the awards defaults, the year basis, the people summary, the
- *  shortened byline, the chips, the reset test and the download note. */
+ *  shortened byline (and which authors it bolds), the chips, the reset test,
+ *  the download note and the workbook's Publications header. Fixture people
+ *  are invented. */
+import ExcelJS from "exceljs";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+const h = vi.hoisted(() => ({ queryRaw: vi.fn() }));
+vi.mock("@/lib/db", () => ({ db: { read: { $queryRaw: h.queryRaw }, write: {} } }));
 
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import {
   authorSegments,
+  buildHighImpactWorkbook,
   describeHighImpactCriteria,
   HIGH_IMPACT_LIST_CAP,
   highImpactChips,
@@ -14,6 +19,7 @@ import {
   highImpactQueryString,
   isHighImpactDefault,
   JOURNAL_FAMILIES,
+  loadHighImpactList,
   parseHighImpactParams,
   summarizePeople,
   type HighImpactRow,
@@ -137,6 +143,60 @@ describe("authorSegments", () => {
     const out = authorSegments(names(12), new Set([3, 99]));
     expect(out.map((s) => s.text)).toEqual(["Author1 A", "Author2 A", "Author3 A", "Author4 A", "…", "Author12 A"]);
   });
+
+  it("given ranks mapped to CWIDs, each matching segment carries its scholar's CWID", () => {
+    expect(authorSegments(names(3), new Map([[2, "zzq9001"]]))).toEqual([
+      { text: "Author1 A" },
+      { text: "Author2 A" },
+      { text: "Author3 A", wcm: true, cwid: "zzq9001" },
+    ]);
+  });
+});
+
+describe("loadHighImpactList byline", () => {
+  const raw = (over: Record<string, unknown>) => ({
+    pmid: "901",
+    title: "T",
+    journal: "Cell",
+    year: 2026,
+    publication_type: "Academic Article",
+    jif: 40,
+    date_added_to_entrez: new Date("2026-03-04T00:00:00Z"),
+    cited_by_count: 1,
+    doi: null,
+    volume: null,
+    issue: null,
+    pages: null,
+    full_authors_string: "Aaa A, Bbb B, Ccc C",
+    authors_string: "Aaa A, ((Bbb B)), Ccc C",
+    position: 2,
+    preferred_name: "Pat Testperson",
+    cwid: "zzq9001",
+    primary_department: "Medicine",
+    role_category: "full_time_faculty",
+    is_first: 0,
+    is_last: 0,
+    ...over,
+  });
+
+  it("the full author string bolds the matching author by rank, carrying the CWID", async () => {
+    h.queryRaw.mockResolvedValueOnce([raw({})]);
+    const [row] = await loadHighImpactList(parseHighImpactParams(new URLSearchParams()));
+    expect(row.byline).toEqual([
+      { text: "Aaa A" },
+      { text: "Bbb B", wcm: true, cwid: "zzq9001" },
+      { text: "Ccc C" },
+    ]);
+  });
+
+  it("on the truncated fallback string the ranks no longer line up, so nobody is bolded", async () => {
+    h.queryRaw.mockResolvedValueOnce([
+      raw({ full_authors_string: null, authors_string: "Aaa A, ((Bbb B)), Ccc C", position: 3 }),
+    ]);
+    const [row] = await loadHighImpactList(parseHighImpactParams(new URLSearchParams()));
+    expect(row.byline.map((s) => s.text)).toEqual(["Aaa A", "Bbb B", "Ccc C"]);
+    expect(row.byline.filter((s) => s.wcm)).toEqual([]);
+  });
 });
 
 describe("highImpactChips", () => {
@@ -223,5 +283,21 @@ describe("describeHighImpactCriteria", () => {
     expect(rows.get("Journals")).toBe("Cell");
     expect(rows.get("Year basis")).toMatch(/^Fiscal year/);
     expect(rows.has("Minimum Journal Impact Factor")).toBe(false);
+  });
+});
+
+describe("buildHighImpactWorkbook", () => {
+  it("the Publications sheet's date column says PubMed, as the page does", async () => {
+    const buf = await buildHighImpactWorkbook(
+      parseHighImpactParams(new URLSearchParams()),
+      0,
+      [],
+      new Date("2026-09-24T00:00:00Z"),
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const header = (wb.getWorksheet("Publications")!.getRow(1).values as unknown[]).slice(1);
+    expect(header).toContain("Date added to PubMed");
+    expect(header).not.toContain("Date added to Entrez");
   });
 });

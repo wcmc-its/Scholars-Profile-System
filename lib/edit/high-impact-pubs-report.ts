@@ -165,24 +165,32 @@ export type HighImpactRow = {
 
 export type AuthorRole = "first" | "last" | "middle";
 
-export type BylineSegment = { text: string; wcm?: boolean; gap?: boolean };
+/** `cwid` is the matching scholar's, on a `wcm` segment whose rank is known. */
+export type BylineSegment = { text: string; wcm?: boolean; cwid?: string; gap?: boolean };
 
 /** The byline the page prints: every author up to `max`; past that the first
  *  three, each matching WCM author (whatever their rank) and the last author,
  *  with a `gap` wherever authors were skipped — a consortium paper's 400
  *  names never bury the WCM author the report is about. `wcm` holds 0-based
- *  indexes into `tokens`. */
-export function authorSegments(tokens: readonly string[], wcm: ReadonlySet<number>, max = 10): BylineSegment[] {
+ *  indexes into `tokens` — as a map, each to the matching scholar's CWID,
+ *  which the segment carries. */
+export function authorSegments(
+  tokens: readonly string[],
+  wcm: ReadonlySet<number> | ReadonlyMap<number, string>,
+  max = 10,
+): BylineSegment[] {
   const keep =
     tokens.length <= max
       ? tokens.map((_, i) => i)
-      : [...new Set([0, 1, 2, ...[...wcm].filter((i) => i >= 0 && i < tokens.length), tokens.length - 1])].sort(
+      : [...new Set([0, 1, 2, ...[...wcm.keys()].filter((i) => i >= 0 && i < tokens.length), tokens.length - 1])].sort(
           (a, b) => a - b,
         );
   const out: BylineSegment[] = [];
   keep.forEach((i, k) => {
     if (k > 0 && i !== keep[k - 1] + 1) out.push({ text: "…", gap: true });
-    out.push(wcm.has(i) ? { text: tokens[i], wcm: true } : { text: tokens[i] });
+    if (!wcm.has(i)) out.push({ text: tokens[i] });
+    else if (wcm instanceof Map) out.push({ text: tokens[i], wcm: true, cwid: wcm.get(i) });
+    else out.push({ text: tokens[i], wcm: true });
   });
   return out;
 }
@@ -224,8 +232,10 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
      ORDER BY j.impact_score_1 DESC, p.date_added_to_entrez DESC, p.pmid, pa.position`;
   const byPmid = new Map<string, HighImpactRow>();
   // The matching authors' byline ranks (1-based `position`; 0 = rank unknown,
-  // never bolded), gathered before each byline is shortened.
-  const ranks = new Map<string, { tokens: string[]; wcm: Set<number> }>();
+  // never bolded) → their CWIDs, gathered before each byline is shortened.
+  // `ranked` is false on the truncated fallback byline, whose ranks no longer
+  // line up with `position`: nobody is bolded there.
+  const ranks = new Map<string, { tokens: string[]; ranked: boolean; wcm: Map<number, string> }>();
   for (const r of raw) {
     let row = byPmid.get(r.pmid);
     if (!row) {
@@ -236,7 +246,7 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean);
-      ranks.set(r.pmid, { tokens, wcm: new Set() });
+      ranks.set(r.pmid, { tokens, ranked: r.full_authors_string !== null, wcm: new Map() });
       const vip = formatVolIssuePages(r.volume, r.issue, r.pages);
       row = {
         pmid: r.pmid,
@@ -256,7 +266,8 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
       };
       byPmid.set(r.pmid, row);
     }
-    if (r.position > 0) ranks.get(r.pmid)!.wcm.add(Number(r.position) - 1);
+    const rank = ranks.get(r.pmid)!;
+    if (rank.ranked && r.position > 0) rank.wcm.set(Number(r.position) - 1, r.cwid);
     const position: AuthorRole = r.is_first ? "first" : r.is_last ? "last" : "middle";
     row.authors.push(`${r.preferred_name} (${position} author)`);
     row.people.push({
@@ -411,7 +422,7 @@ export async function buildHighImpactWorkbook(
       "Journal",
       "Journal impact factor",
       "WCM first/last author(s)",
-      "Date added to Entrez",
+      "Date added to PubMed",
       "NIH citation count",
       "Article type",
       "Year",

@@ -60,7 +60,7 @@ function pub(pmid: string, over: Partial<HighImpactRow>, people: Who[]): HighImp
     doi: `10.1000/x${pmid}`,
     cite: "2026;12(3):100-110.",
     id: { label: "PMID", value: pmid, href: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/` },
-    byline: [{ text: "Alpha A" }, { text: "Beta B", wcm: true }],
+    byline: [{ text: "Alpha A" }, { text: "Beta B", wcm: true, cwid: "zzb9002" }],
     authors: people.map((p) => `${p.name} (${p.position} author)`),
     people: people.map((p) => ({ ...p, department: "Medicine", personType: "Full-time faculty" })),
     ...over,
@@ -187,6 +187,33 @@ describe("report 9 body", () => {
     expect(q.getByTestId("high-impact-view-summary").textContent).toBe("Scholars (900)");
   });
 
+  it("a unit in the URL that no rail option carries still lists, ticked, in its own group", async () => {
+    const units = ["dept:GONE", "center:GONE", "inst:GONE"];
+    const q = await renderBody({ unit: units });
+    const form = q.getAllByTestId("high-impact-filters")[0] as HTMLFormElement;
+    expect(new FormData(form).getAll("unit")).toEqual(units);
+    const boxes = (section: string) =>
+      [...within(form).getByTestId(section).querySelectorAll("input[type=checkbox]:checked")].map(
+        (b) => (b as HTMLInputElement).value,
+      );
+    expect(boxes("high-impact-department")).toEqual(["dept:GONE"]);
+    expect(boxes("high-impact-centers")).toEqual(["center:GONE"]);
+    expect(boxes("high-impact-institution")).toEqual(["inst:GONE"]);
+  });
+
+  it("the partial-year footnote shows only when the window includes the year in progress", async () => {
+    const y = new Date().getFullYear();
+    const note = () => q.getAllByRole("note")[0].textContent;
+    let q = await renderBody();
+    expect(note()).toContain(`${y} counts publications through`);
+    cleanup();
+    q = await renderBody({ from: String(y + 1), to: String(y + 1) });
+    expect(note()).not.toContain("counts publications through");
+    cleanup();
+    q = await renderBody({ from: String(y - 3), to: String(y - 1) });
+    expect(note()).not.toContain("counts publications through");
+  });
+
   it("the fiscal basis labels years FY and says so in the rail", async () => {
     const q = await renderBody({ basis: "fy", from: "2025", to: "2026", pos: "any" });
     const years = q.getAllByTestId("high-impact-years")[0];
@@ -295,8 +322,11 @@ describe("report 9 Publications tab", () => {
     expect(first.textContent).toContain("Bob Exampleton (last author)");
     expect(first.textContent).toContain("Ann Testperson (last author)");
     expect(first.textContent).toContain("Nature Medicine. 2026;12(3):100-110.");
-    // Matching WCM authors bold in the byline.
-    expect(within(first).getByText("Beta B").className).toContain("font-bold");
+    // Matching WCM authors bold in the byline, each the trigger of its scholar's hover card.
+    const beta = within(first).getByText("Beta B");
+    expect(beta.className).toContain("font-bold");
+    expect(beta.getAttribute("data-state")).toBe("closed");
+    expect(within(first).getByText("Alpha A").getAttribute("data-state")).toBeNull();
     const noDoi = [...items].find((li) => li.textContent?.includes("Title 222"))!;
     expect(noDoi.textContent).not.toContain("DOI");
     expect(noDoi.textContent).not.toContain("Impact factor");
