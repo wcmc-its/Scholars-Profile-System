@@ -72,7 +72,7 @@ A few things stay with Superusers even for units you own — don't spend time hu
 | Create a **department** or a coded (LDAP) **division** | Org units → Create a unit | Superuser (`scholars@weill.cornell.edu`) |
 | **Retire** a unit | Unit attribute rail → Retire unit | Superuser |
 | Set a unit's **Center type** or **Profile URL** (slug) | Unit attribute rail | Superuser |
-| Approve or decline a **pending profile-URL request** from one of your faculty | Queues → Profile URL requests | Superuser (today, every unit's queue is reviewed centrally) |
+| Approve or decline a **pending profile-URL request** from one of your faculty | Registries → Profile URLs (requests to review sit at the top) | Superuser (today, every unit's queue is reviewed centrally) |
 | Site-wide publication takedown or hiding another scholar's whole profile | — | Superuser |
 
 ## Known limitations worth knowing

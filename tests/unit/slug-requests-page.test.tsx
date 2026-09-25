@@ -1,20 +1,12 @@
 /**
- * `app/edit/slug-requests/page.tsx` — the superuser approval-queue page
- * (#497 PR-3c). Route-level authorization + flag-gating, mirroring the
- * `/edit/profiles` roster page test (real `requireSuperuserGet`, mocked
- * boundary deps).
+ * `app/edit/slug-requests/page.tsx` — the old queue address, now a redirect to
+ * Profile URLs (`/edit/slugs`), where the queue sits above the registry.
+ * Still: signed-out → SAML login first; flag off → 404 (mirroring the
+ * endpoints). Authorization is `/edit/slugs`' own superuser re-check.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
 
-const {
-  mockGetEditSession,
-  mockRedirect,
-  mockNotFound,
-  mockForbidden,
-  mockEnabled,
-  mockLoadQueue,
-} = vi.hoisted(() => ({
+const { mockGetEditSession, mockRedirect, mockNotFound, mockEnabled } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`__REDIRECT__:${url}`);
@@ -22,88 +14,38 @@ const {
   mockNotFound: vi.fn(() => {
     throw new Error("__NOTFOUND__");
   }),
-  mockForbidden: vi.fn(() => null),
   mockEnabled: vi.fn(),
-  mockLoadQueue: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
-vi.mock("@/lib/db", () => ({
-  db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
-}));
-vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
-// `ConsoleShell` is an async Server Component (it awaits `loadConsoleTabs`) —
-// mocked here like every other chrome component in this boundary test, both to
-// avoid needing a full grant-loader mock stack AND because react-dom's
-// synchronous renderer can't mount an unresolved async component reached via
-// JSX (only the page's own top-level `await SlugRequestsPage()` is awaited).
-vi.mock("@/components/edit/console-shell", () => ({
-  ConsoleShell: (p: { pendingSlugRequests: number | null; children: React.ReactNode }) => (
-    <div>
-      <div data-testid="mock-subnav" data-pending={String(p.pendingSlugRequests)} />
-      {p.children}
-    </div>
-  ),
-}));
-vi.mock("@/components/edit/slug-request-queue", () => ({
-  SlugRequestQueue: (p: { initialRequests: unknown[] }) => (
-    <div data-testid="mock-queue" data-count={p.initialRequests.length} />
-  ),
-}));
-vi.mock("@/lib/edit/slug-request", () => ({
-  isSlugRequestEnabled: mockEnabled,
-  loadSlugRequestQueue: mockLoadQueue,
-}));
+vi.mock("@/lib/edit/slug-request", () => ({ isSlugRequestEnabled: mockEnabled }));
 
 import SlugRequestsPage from "@/app/edit/slug-requests/page";
 
-type El = { type: unknown; props: Record<string, unknown> };
-const asEl = (v: unknown) => v as El;
-
 const ADMIN = { cwid: "adm001", isSuperuser: true };
-const SELF = { cwid: "self01", isSuperuser: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, "warn").mockImplementation(() => {});
   mockEnabled.mockReturnValue(true);
-  mockLoadQueue.mockResolvedValue([]);
 });
 
-describe("/edit/slug-requests — authorization & flag", () => {
+describe("/edit/slug-requests — redirect to Profile URLs", () => {
   it("signed-out → SAML redirect with ?return=/edit/slug-requests", async () => {
     mockGetEditSession.mockResolvedValue(null);
     await expect(SlugRequestsPage()).rejects.toThrow(
       "__REDIRECT__:/api/auth/saml/login?return=/edit/slug-requests",
     );
-    expect(mockLoadQueue).not.toHaveBeenCalled();
   });
 
-  it("signed-in non-superuser → ForbiddenEditPage, no queue load", async () => {
-    mockGetEditSession.mockResolvedValue(SELF);
-    const result = asEl(await SlugRequestsPage());
-    // C8/C9 — the denial branch is wrapped in the same ConsoleShell the
-    // success path uses, so the top-level element is the shell and
-    // ForbiddenEditPage is its child, not the return value itself.
-    expect(asEl(result.props.children).type).toBe(mockForbidden);
-    expect(mockLoadQueue).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalled(); // requireSuperuserGet denial line
-  });
-
-  it("superuser but flag off → notFound, no queue load", async () => {
+  it("flag off → notFound", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     mockEnabled.mockReturnValue(false);
     await expect(SlugRequestsPage()).rejects.toThrow("__NOTFOUND__");
-    expect(mockLoadQueue).not.toHaveBeenCalled();
   });
 
-  it("superuser + flag on → renders the queue + sub-nav with the pending count", async () => {
+  it("signed in + flag on → /edit/slugs", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
-    mockLoadQueue.mockResolvedValue([{ id: "a" }, { id: "b" }]);
-    render(await SlugRequestsPage());
-    expect(screen.getByTestId("mock-queue").getAttribute("data-count")).toBe("2");
-    expect(screen.getByTestId("mock-subnav").getAttribute("data-pending")).toBe("2");
-    expect(mockLoadQueue).toHaveBeenCalledOnce();
+    await expect(SlugRequestsPage()).rejects.toThrow("__REDIRECT__:/edit/slugs");
   });
 });

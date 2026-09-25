@@ -142,6 +142,13 @@ async function HomeStats() {
       >
         <span className={figure}>{stats.researchAreaCount}</span>research areas
       </a>
+      <a
+        href="#browse-all-research-areas"
+        aria-label={`Browse ${stats.subtopicCount} research subareas`}
+        className={stat}
+      >
+        <span className={figure}>{stats.subtopicCount.toLocaleString()}</span>subareas
+      </a>
       {methodCategories ? (
         <MethodBeaconLink
           href="#browse-by-method"
