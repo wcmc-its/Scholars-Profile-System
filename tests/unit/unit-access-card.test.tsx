@@ -67,7 +67,7 @@ describe("UnitAccessCard", () => {
     render(<UnitAccessCard {...base} access={rows} />);
     expect(
       screen.getByText(
-        /Owners, Curators, and Communications stewards can edit this department\. Owners and Communications stewards can manage access\./i,
+        /Owners, curators and communications stewards can edit this department\. Owners and communications stewards can also manage access\./i,
       ),
     ).toBeTruthy();
   });
@@ -161,5 +161,22 @@ describe("UnitAccessCard", () => {
   it("returns null when access is null (defensive — rail shouldn't mount it)", () => {
     const { container } = render(<UnitAccessCard {...base} access={null} />);
     expect(container.querySelector('[data-slot="unit-access-card"]')).toBeNull();
+  });
+
+  // Edit Center / Edit Org Unit mockups (2026-09-25): compact rows.
+  it("each row reads 'Granted by {who} · {Mon D, YYYY}'", () => {
+    render(<UnitAccessCard {...base} access={rows} />);
+    const row = screen.getByTestId("unit-access-row-cur001");
+    expect(row.textContent).toContain("Granted by own001 · May 2, 2026");
+  });
+
+  it("the grant row's segmented role control switches the posted role to owner", async () => {
+    const fetchMock = stubOk();
+    render(<UnitAccessCard {...base} access={rows} />);
+    fireEvent.click(screen.getByTestId("grant-pick"));
+    fireEvent.click(screen.getByTestId("grant-role-owner"));
+    fireEvent.click(screen.getByTestId("unit-access-grant"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ role: "owner", action: "grant" });
   });
 });

@@ -17,10 +17,21 @@
  * (`/api/edit/roster` `set` action); until then `roster` keeps a placeholder —
  * deliberate, so the PR boundary is visible to reviewers.
  *
+ * Edit Center mockup (2026-09-25): a CENTER no longer uses the one-panel rail —
+ * it renders `UnitEditSections`, every visible attribute as a section of one
+ * scrolling page (the five Basics fields merged into one form). Visibility still
+ * comes from `ATTRIBUTES` below; `?attr=roster` keeps the full-width Members
+ * page; any other `?attr=` scrolls to the section that now holds it.
+ * Departments and divisions are unchanged here.
+ *
  * Retired read-through (edge 11): a Superuser may open a retired unit (to
  * restore it). The `retire` panel renders normally so they can Restore; every
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+
+import { CenterBasicsSection } from "@/components/edit/center-basics-section";
 import { CenterLeadershipCard } from "@/components/edit/center-leadership-card";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
@@ -37,7 +48,10 @@ import { UnitRosterCard } from "@/components/edit/unit-roster-card";
 import { UnitNameCard } from "@/components/edit/unit-name-card";
 import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import { CtscFeedIssuesPanel } from "@/components/edit/ctsc-feed-issues-panel";
+import { UnitEditSections, type UnitEditSection } from "@/components/edit/unit-edit-sections";
+import { Button } from "@/components/ui/button";
 import { CTSC_CENTER_SLUG } from "@/lib/edit/external-member-sources";
+import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
 import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
@@ -192,6 +206,26 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
       : `/edit/reports?center=${encodeURIComponent(ctx.unit.code)}&kind=${ctx.unit.unitType}`
     : undefined;
 
+  // A center renders the single-scroll editor (Edit Center mockup, 2026-09-25)
+  // — every section on one page. The rich Members table keeps its own
+  // full-width `?attr=roster` page below (EditShell with `hideRail`).
+  if (ctx.unit.unitType === "center" && active.key !== "roster") {
+    return (
+      <UnitEditSections
+        name={ctx.unit.name}
+        kindLabel={ctx.unit.centerType === "institute" ? "Institute" : "Center"}
+        crumbLabel="Centers"
+        orgUnitsNavVisible={orgUnitsNavVisible}
+        actorRole={ctx.actorRole}
+        previewHref={previewHref}
+        reportsHref={reportsHref}
+        sections={centerSections(ctx, visible, basePath)}
+        initialSection={attr ? LEGACY_ATTR_SECTION[attr as AttrKey] : undefined}
+        notice={ctx.unit.suppression !== null ? <RetiredNotice /> : undefined}
+      />
+    );
+  }
+
   return (
     <EditShell
       mode="superuser"
@@ -215,6 +249,218 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
     >
       {renderPanel(active.key, ctx)}
     </EditShell>
+  );
+}
+
+/** Old `?attr=` bookmarks → the section of the single-scroll page they now
+ *  live in (the five Basics fields collapsed into one section). */
+const LEGACY_ATTR_SECTION: Partial<Record<AttrKey, string>> = {
+  name: "basics",
+  description: "basics",
+  url: "basics",
+  slug: "basics",
+  "center-type": "basics",
+  leader: "leadership",
+  programs: "programs",
+  access: "access",
+  "feed-issues": "feed-issues",
+  retire: "retire",
+};
+
+/** Mirrors `CenterProgramCard`'s EXCLUDED_PROGRAM_CODES (no public page). */
+const CENTER_PROGRAMS_WITHOUT_PAGE = new Set(["ZY"]);
+
+/** The center's sections, gated by the SAME visibility predicates the rail
+ *  used (`visible` is `ATTRIBUTES` already filtered for this ctx). */
+function centerSections(
+  ctx: UnitEditContext,
+  visible: ReadonlyArray<AttrDef>,
+  basePath: string,
+): UnitEditSection[] {
+  const has = (key: AttrKey) => visible.some((a) => a.key === key);
+  const retired = ctx.unit.suppression !== null;
+  const retireSection: UnitEditSection | null = has("retire")
+    ? {
+        id: "retire",
+        label: "Retire",
+        tone: "danger",
+        content: (
+          <UnitRetireCard
+            entityType="center"
+            entityId={ctx.unit.code}
+            unitName={ctx.unit.name}
+            headingId="retire-heading"
+            suppression={
+              ctx.unit.suppression
+                ? { id: ctx.unit.suppression.id, suppressedAt: ctx.unit.suppression.suppressedAt }
+                : null
+            }
+          />
+        ),
+      }
+    : null;
+  // Retired read-through (edge 11): only the Retire section stays editable.
+  if (retired) return retireSection ? [retireSection] : [];
+
+  const sections: UnitEditSection[] = [];
+  const description = ctx.unit.description?.trim() ?? "";
+  sections.push({
+    id: "basics",
+    label: "Basics",
+    stat: description ? undefined : "No description",
+    warn: !description,
+    content: (
+      <CenterBasicsSection
+        code={ctx.unit.code}
+        name={ctx.unit.name}
+        description={ctx.unit.description}
+        url={ctx.unit.url}
+        slug={ctx.unit.slug}
+        centerType={ctx.unit.centerType ?? "center"}
+        canEditSuperuserFields={isSuperuser(ctx.actorRole)}
+        headingId="basics-heading"
+      />
+    ),
+  });
+
+  const leadership = ctx.centerLeadership ?? [];
+  const holderCount = leadership.reduce((n, r) => n + r.holders.length, 0);
+  sections.push({
+    id: "leadership",
+    label: "Leadership",
+    stat: String(holderCount),
+    content: (
+      <CenterLeadershipCard
+        centerCode={ctx.unit.code}
+        roles={leadership}
+        headingId="leadership-heading"
+      />
+    ),
+  });
+
+  if (has("roster")) {
+    const active = activeCenterMemberCount(ctx.roster ?? []);
+    sections.push({
+      id: "members",
+      label: "Members",
+      stat: active.toLocaleString("en-US"),
+      content: (
+        <CenterMembersSummary
+          count={active}
+          rosterHref={`${basePath}?attr=roster`}
+          exportHref={
+            isUnitRosterExportEnabled()
+              ? `/edit/center/${encodeURIComponent(ctx.unit.code)}/export`
+              : undefined
+          }
+        />
+      ),
+    });
+  }
+
+  if (has("programs")) {
+    const programs = ctx.programs ?? [];
+    sections.push({
+      id: "programs",
+      label: "Programs",
+      stat: String(programs.filter((p) => !CENTER_PROGRAMS_WITHOUT_PAGE.has(p.code)).length),
+      content: (
+        <CenterProgramCard
+          centerCode={ctx.unit.code}
+          programs={programs}
+          headingId="programs-heading"
+        />
+      ),
+    });
+  }
+
+  if (has("access")) {
+    sections.push({
+      id: "access",
+      label: "Access",
+      stat: String(ctx.access?.length ?? 0),
+      content: (
+        <UnitAccessCard
+          entityType="center"
+          entityId={ctx.unit.code}
+          access={ctx.access}
+          actorCwid={ctx.actorCwid}
+          headingId="access-heading"
+        />
+      ),
+    });
+  }
+
+  if (has("feed-issues")) {
+    sections.push({
+      id: "feed-issues",
+      label: "Feed CWID issues",
+      headingId: "panel-heading",
+      content: <CtscFeedIssuesPanel />,
+    });
+  }
+
+  if (retireSection) sections.push(retireSection);
+  return sections;
+}
+
+/** Active members, by the same #552 §3.3 predicate the roster table's default
+ *  view uses (invitees never count; inclusive dates; null = open). */
+function activeCenterMemberCount(
+  roster: NonNullable<UnitEditContext["roster"]>,
+  today: string = new Date().toISOString().slice(0, 10),
+): number {
+  return roster.filter(
+    (m) =>
+      m.membershipRoleKey !== INVITED_ROLE_KEY &&
+      !(m.startDate && m.startDate > today) &&
+      !(m.endDate && m.endDate < today),
+  ).length;
+}
+
+/** The Members section: a count + the way into the full roster table (which
+ *  keeps its own full-width page — filters, disease review, xlsx). */
+function CenterMembersSummary({
+  count,
+  rosterHref,
+  exportHref,
+}: {
+  count: number;
+  rosterHref: string;
+  exportHref?: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-4" data-testid="center-members-summary">
+      <div className="flex min-w-[240px] flex-1 flex-col gap-0.5">
+        <h2 id="members-heading" className="text-[17px] font-[600] tracking-[-0.015em]">
+          Members
+        </h2>
+        <p className="text-muted-foreground text-[13px]">
+          Faculty on the center roster, as shown on its public page.
+        </p>
+      </div>
+      <p className="flex items-baseline gap-1.5">
+        <span className="text-2xl font-semibold tabular-nums" data-testid="center-members-count">
+          {count.toLocaleString("en-US")}
+        </span>
+        <span className="text-muted-foreground text-[13px]">active</span>
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {exportHref && (
+          <Button asChild variant="outline" size="sm">
+            <a href={exportHref} data-testid="center-members-export">
+              Export CSV
+            </a>
+          </Button>
+        )}
+        <Button asChild variant="outline" size="sm" className="border-apollo-slate text-apollo-slate">
+          <Link href={rosterHref} data-testid="center-members-manage">
+            Manage members
+            <ArrowRight className="size-4" aria-hidden />
+          </Link>
+        </Button>
+      </div>
+    </div>
   );
 }
 
