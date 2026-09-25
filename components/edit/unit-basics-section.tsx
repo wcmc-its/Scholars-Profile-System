@@ -1,17 +1,26 @@
 /**
- * CenterBasicsSection — the "Basics" block of the single-scroll center editor
- * (Edit Center mockup, 2026-09-25). One form for the fields that used to be five
- * separate rail tabs (Name, Description, Website, Profile URL, Center type),
- * with ONE save: a floating "Unsaved changes to Basics · Discard · Save" bar
- * that appears only while something is dirty.
+ * UnitBasicsSection — the "Basics" block of the single-scroll unit editor
+ * (Edit Center / Edit Org Unit mockups, 2026-09-25). One form for the fields
+ * that used to be separate rail tabs (Name, Description, Website, Profile URL,
+ * and — for a center — Center type), with ONE save: a floating "Unsaved changes
+ * to Basics · Discard · Save" bar that appears only while something is dirty.
  *
  * Every field still writes through the same endpoint + field name the old cards
- * used — `/api/edit/unit` op:"update" (a center edits in-row; no
- * `field_override`) — one POST per CHANGED field, in form order. A failure on
- * one field doesn't roll back the others: the saved fields settle, the failed
- * one stays dirty with its own inline error, and the bar stays up.
+ * used, one POST per CHANGED field, in form order:
+ *   - a CENTER edits in-row: `/api/edit/unit` op:"update" for every field;
+ *   - a DEPARTMENT / DIVISION writes a `field_override` via `/api/edit/field`
+ *     op:"set" for description / url / slug (a slug override applies on the
+ *     next nightly ETL, not immediately), and a field with an override keeps
+ *     its "Clear override" action (op:"clear", confirmed) so the directory value
+ *     can show through again;
+ *   - the NAME is editable only where SPS owns it (a center, or a manually
+ *     created division → `/api/edit/unit`); a department's or an ED division's
+ *     name is the directory's and renders LOCKED ("From the Enterprise
+ *     Directory. Change it there.").
+ * A failure on one field doesn't roll back the others: the saved fields settle,
+ * the failed one stays dirty with its own inline error, and the bar stays up.
  *
- * Profile URL and Center type are Superuser-only (the route enforces it —
+ * Profile URL and Center type are Superuser-only (the routes enforce it —
  * `not_superuser`); for anyone else they render read-only, LOCKED-style
  * (neutral lock + text), instead of disappearing.
  */
@@ -21,6 +30,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Check, Lock } from "lucide-react";
 
+import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -37,64 +47,101 @@ const URL_MAX_CHARS = 512;
 type CenterType = "center" | "institute";
 type FieldKey = "name" | "description" | "url" | "slug" | "centerType";
 type Values = Record<FieldKey, string>;
+/** The override-backed fields a dept/div can clear. */
+type ClearableKey = "description" | "url" | "slug";
 
 const CENTER_TYPE_OPTIONS: ReadonlyArray<{ value: CenterType; label: string }> = [
   { value: "center", label: "Center" },
   { value: "institute", label: "Institute" },
 ];
 
-export type CenterBasicsSectionProps = {
+export type UnitBasicsSectionProps = {
+  unitType: "center" | "department" | "division";
   code: string;
   name: string;
+  /** Whether SPS owns the name (a center, or a manually created division). */
+  nameEditable: boolean;
   description: string | null;
   url: string | null;
+  /** The live public slug (the unit's `slug` column). */
   slug: string;
-  centerType: CenterType;
+  /** dept/div: the current `field_override(slug)` value, else null. */
+  slugOverride?: string | null;
+  /** The public path in front of the slug ("/centers/", "/departments/", …). */
+  urlPrefix: string;
+  /** Center only. */
+  centerType?: CenterType | null;
+  /** dept/div: which fields currently carry a `field_override` row. */
+  overriddenFields?: ReadonlyArray<string>;
   /** Superuser-only fields (Profile URL, Center type). */
   canEditSuperuserFields: boolean;
   /** Section heading id (the page has several sections, each needs its own). */
   headingId?: string;
 };
 
-export function CenterBasicsSection({
+export function UnitBasicsSection({
+  unitType,
   code,
   name,
+  nameEditable,
   description,
   url,
   slug,
-  centerType,
+  slugOverride = null,
+  urlPrefix,
+  centerType = null,
+  overriddenFields = [],
   canEditSuperuserFields,
   headingId = "basics-heading",
-}: CenterBasicsSectionProps) {
+}: UnitBasicsSectionProps) {
   const router = useRouter();
+  const isCenter = unitType === "center";
   const initial: Values = {
     name,
     description: description ?? "",
     url: url ?? "",
-    slug,
-    centerType,
+    // dept/div: the input edits the override; with none, it starts at the live slug.
+    slug: isCenter ? slug : (slugOverride ?? slug),
+    centerType: centerType ?? "center",
   };
   const [saved, setSaved] = React.useState<Values>(initial);
   const [values, setValues] = React.useState<Values>(initial);
   const [errors, setErrors] = React.useState<Partial<Record<FieldKey, string>>>({});
   const [saving, setSaving] = React.useState(false);
-  const [justSaved, setJustSaved] = React.useState(false);
+  const [justSaved, setJustSaved] = React.useState<null | "live" | "pending">(null);
+  const [overrides, setOverrides] = React.useState<Set<ClearableKey>>(
+    () =>
+      new Set(
+        isCenter
+          ? []
+          : (["description", "url", "slug"] as const).filter((k) =>
+              k === "slug" ? slugOverride !== null : overriddenFields.includes(k),
+            ),
+      ),
+  );
+  const [clearTarget, setClearTarget] = React.useState<ClearableKey | null>(null);
 
-  const editable: FieldKey[] = canEditSuperuserFields
-    ? ["name", "description", "url", "slug", "centerType"]
-    : ["name", "description", "url"];
+  const editable: FieldKey[] = [
+    ...(nameEditable ? (["name"] as const) : []),
+    "description",
+    "url",
+    ...(canEditSuperuserFields ? (["slug"] as const) : []),
+    ...(canEditSuperuserFields && isCenter ? (["centerType"] as const) : []),
+  ];
   const dirtyKeys = editable.filter((k) => values[k] !== saved[k]);
   const dirty = dirtyKeys.length > 0;
 
   // Client-side validation — the same validators the server runs.
   const nameResult = validateUnitName(values.name);
-  const nameError = values.name !== saved.name && !nameResult.ok
-    ? nameResult.error === "name_too_long"
-      ? "Use 255 characters or fewer."
-      : "Enter a name."
-    : null;
+  const nameError =
+    values.name !== saved.name && !nameResult.ok
+      ? nameResult.error === "name_too_long"
+        ? "Use 255 characters or fewer."
+        : "Enter a name."
+      : null;
   const slugResult = validateSlugFormat(values.slug);
-  const slugError = values.slug !== saved.slug && !slugResult.ok ? slugFormatMessage(slugResult.error) : null;
+  const slugError =
+    values.slug !== saved.slug && !slugResult.ok ? slugFormatMessage(slugResult.error) : null;
   const descOver = values.description.length > DESCRIPTION_MAX_CHARS;
   const urlOver = values.url.length > URL_MAX_CHARS;
   const invalid = Boolean(nameError || slugError || descOver || urlOver);
@@ -102,7 +149,7 @@ export function CenterBasicsSection({
   function set(key: FieldKey, value: string) {
     setValues((v) => ({ ...v, [key]: value }));
     if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
-    if (justSaved) setJustSaved(false);
+    if (justSaved) setJustSaved(null);
   }
 
   function discard() {
@@ -116,34 +163,42 @@ export function CenterBasicsSection({
     return values[key];
   }
 
+  /** Center + name/centerType edit in-row; dept/div content fields override. */
+  function requestFor(key: FieldKey, value: string) {
+    const inRow = isCenter || key === "name" || key === "centerType";
+    return inRow
+      ? {
+          url: "/api/edit/unit",
+          body: { op: "update", entityType: unitType, entityId: code, fieldName: key, value },
+        }
+      : {
+          url: "/api/edit/field",
+          body: { op: "set", entityType: unitType, entityId: code, fieldName: key, value },
+        };
+  }
+
   async function save() {
     if (!dirty || invalid || saving) return;
     setSaving(true);
-    setJustSaved(false);
+    setJustSaved(null);
     const nextSaved: Values = { ...saved };
     const nextValues: Values = { ...values };
     const nextErrors: Partial<Record<FieldKey, string>> = {};
+    const nextOverrides = new Set(overrides);
     let anyOk = false;
+    let slugPending = false;
     for (const key of dirtyKeys) {
       try {
-        const res = await fetch("/api/edit/unit", {
+        const { url: endpoint, body } = requestFor(key, payloadValue(key));
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            op: "update",
-            entityType: "center",
-            entityId: code,
-            fieldName: key,
-            value: payloadValue(key),
-          }),
+          body: JSON.stringify(body),
         });
         // Status before body: a bodyless 401 / edge error page isn't JSON.
-        const data = res.ok
-          ? ((await res.json()) as { ok: true; value: string } | { ok: false; error: string })
-          : ((await res.json().catch(() => ({ ok: false, error: "" }))) as {
-              ok: false;
-              error: string;
-            });
+        const data = (await res.json().catch(() => ({ ok: false, error: "" }))) as
+          | { ok: true; value?: string }
+          | { ok: false; error: string };
         if (!res.ok || data.ok !== true) {
           nextErrors[key] = saveErrorMessage(key, "error" in data ? data.error : "");
           continue;
@@ -151,6 +206,10 @@ export function CenterBasicsSection({
         const settled = typeof data.value === "string" ? data.value : payloadValue(key);
         nextSaved[key] = settled;
         nextValues[key] = settled;
+        if (!isCenter && (key === "description" || key === "url" || key === "slug")) {
+          nextOverrides.add(key);
+          if (key === "slug") slugPending = true;
+        }
         anyOk = true;
       } catch {
         nextErrors[key] = saveErrorMessage(key, "");
@@ -159,40 +218,88 @@ export function CenterBasicsSection({
     setSaved(nextSaved);
     setValues(nextValues);
     setErrors(nextErrors);
+    setOverrides(nextOverrides);
     setSaving(false);
     if (anyOk) {
-      setJustSaved(Object.keys(nextErrors).length === 0);
+      if (Object.keys(nextErrors).length === 0) setJustSaved(slugPending ? "pending" : "live");
       router.refresh();
     }
   }
 
+  async function clearOverride(key: ClearableKey) {
+    const res = await fetch("/api/edit/field", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "clear", entityType: unitType, entityId: code, fieldName: key }),
+    });
+    const data = (await res.json().catch(() => ({ ok: false }))) as { ok: boolean; error?: string };
+    if (!res.ok || data.ok !== true) {
+      setErrors((e) => ({ ...e, [key]: saveErrorMessage(key, data.error ?? "") }));
+      throw new Error("clear_failed"); // keeps the dialog open
+    }
+    // The upstream (directory) value now shows through; we don't know it
+    // client-side for description/url, so blank them and let the refresh
+    // re-seed the public page. The slug reverts to the live column value.
+    const cleared = key === "slug" ? slug : "";
+    setSaved((s) => ({ ...s, [key]: cleared }));
+    setValues((v) => ({ ...v, [key]: cleared }));
+    setOverrides((o) => {
+      const next = new Set(o);
+      next.delete(key);
+      return next;
+    });
+    setClearTarget(null);
+    router.refresh();
+  }
+
+  const kind = unitType;
   const fieldClass = "bg-apollo-page border-apollo-border-strong";
+  const clearButton = (key: ClearableKey) =>
+    !isCenter && overrides.has(key) && values[key] === saved[key] ? (
+      <button
+        type="button"
+        onClick={() => setClearTarget(key)}
+        className="text-apollo-slate text-xs hover:underline"
+        data-testid={`basics-clear-${key}`}
+      >
+        Clear override
+      </button>
+    ) : null;
 
   return (
-    <div className="flex flex-col gap-[18px]" data-testid="center-basics-section">
+    <div className="flex flex-col gap-[18px]" data-testid="unit-basics-section">
       <UnsavedChangesGuard dirty={dirty} />
       <SectionHeader
         id={headingId}
         title="Basics"
-        description="Shown on the center’s public page, in search and on browse."
+        description={`Shown on the ${kind}’s public page, in search and on browse.`}
       />
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="basics-name" className="text-[13.5px] font-medium">
           Name
         </label>
-        <Input
-          id="basics-name"
-          value={values.name}
-          onChange={(e) => set("name", e.target.value)}
-          aria-invalid={Boolean(nameError || errors.name)}
-          autoComplete="off"
-          className={fieldClass}
-          data-testid="basics-name"
-        />
-        <FieldNote error={nameError ?? errors.name}>
-          Changing the name doesn’t change the profile URL.
-        </FieldNote>
+        {nameEditable ? (
+          <>
+            <Input
+              id="basics-name"
+              value={values.name}
+              onChange={(e) => set("name", e.target.value)}
+              aria-invalid={Boolean(nameError || errors.name)}
+              autoComplete="off"
+              className={fieldClass}
+              data-testid="basics-name"
+            />
+            <FieldNote error={nameError ?? errors.name}>
+              Changing the name doesn’t change the profile URL.
+            </FieldNote>
+          </>
+        ) : (
+          <>
+            <LockedValue id="basics-name">{values.name}</LockedValue>
+            <FieldNote>From the Enterprise Directory. Change it there.</FieldNote>
+          </>
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -200,19 +307,25 @@ export function CenterBasicsSection({
           <label htmlFor="basics-description" className="text-[13.5px] font-medium">
             Description
           </label>
-          <span
-            aria-live="polite"
-            className={cn("text-xs tabular-nums", descOver ? "text-destructive" : "text-muted-foreground")}
-          >
-            {values.description.length.toLocaleString("en-US")} /{" "}
-            {DESCRIPTION_MAX_CHARS.toLocaleString("en-US")}
+          <span className="flex items-baseline gap-3">
+            {clearButton("description")}
+            <span
+              aria-live="polite"
+              className={cn(
+                "text-xs tabular-nums",
+                descOver ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {values.description.length.toLocaleString("en-US")} /{" "}
+              {DESCRIPTION_MAX_CHARS.toLocaleString("en-US")}
+            </span>
           </span>
         </div>
         <Textarea
           id="basics-description"
           value={values.description}
           rows={4}
-          placeholder="What the center does, in two or three sentences."
+          placeholder={`What the ${kind} does, in two or three sentences.`}
           onChange={(e) => set("description", e.target.value)}
           className={fieldClass}
           data-testid="basics-description"
@@ -222,9 +335,12 @@ export function CenterBasicsSection({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
         <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="basics-url" className="text-[13.5px] font-medium">
-            Website
-          </label>
+          <div className="flex items-baseline justify-between gap-3">
+            <label htmlFor="basics-url" className="text-[13.5px] font-medium">
+              Website
+            </label>
+            {clearButton("url")}
+          </div>
           <Input
             id="basics-url"
             type="url"
@@ -243,9 +359,12 @@ export function CenterBasicsSection({
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="basics-slug" className="text-[13.5px] font-medium">
-            Profile URL
-          </label>
+          <div className="flex items-baseline justify-between gap-3">
+            <label htmlFor="basics-slug" className="text-[13.5px] font-medium">
+              Profile URL
+            </label>
+            {canEditSuperuserFields && clearButton("slug")}
+          </div>
           {canEditSuperuserFields ? (
             <div
               className={cn(
@@ -253,8 +372,8 @@ export function CenterBasicsSection({
                 slugError || errors.slug ? "border-destructive" : "",
               )}
             >
-              <span className="bg-apollo-surface-2 text-muted-foreground flex items-center px-2 font-mono text-xs whitespace-nowrap">
-                /centers/
+              <span className="bg-apollo-surface-2 text-muted-foreground flex max-w-[55%] items-center truncate px-2 font-mono text-xs whitespace-nowrap">
+                {urlPrefix}
               </span>
               <input
                 id="basics-slug"
@@ -269,41 +388,48 @@ export function CenterBasicsSection({
             </div>
           ) : (
             <LockedValue id="basics-slug" mono>
-              /centers/{values.slug}
+              {urlPrefix}
+              {values.slug}
             </LockedValue>
           )}
           {canEditSuperuserFields ? (
-            (slugError || errors.slug) && <FieldNote error={slugError ?? errors.slug} />
+            slugError || errors.slug ? (
+              <FieldNote error={slugError ?? errors.slug} />
+            ) : isCenter ? null : (
+              <FieldNote>A new URL applies on the next nightly ETL run.</FieldNote>
+            )
           ) : (
             <FieldNote>Only a superuser can change the profile URL.</FieldNote>
           )}
         </div>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="basics-center-type" className="text-[13.5px] font-medium">
-            Center type
-          </label>
-          {canEditSuperuserFields ? (
-            <select
-              id="basics-center-type"
-              value={values.centerType}
-              onChange={(e) => set("centerType", e.target.value)}
-              className="bg-apollo-page border-apollo-border-strong h-9 rounded-md border px-2 text-sm"
-              data-testid="basics-center-type"
-            >
-              {CENTER_TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <LockedValue id="basics-center-type">
-              {CENTER_TYPE_OPTIONS.find((o) => o.value === values.centerType)?.label ?? "Center"}
-            </LockedValue>
-          )}
-          {errors.centerType && <FieldNote error={errors.centerType} />}
-        </div>
+        {isCenter && (
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <label htmlFor="basics-center-type" className="text-[13.5px] font-medium">
+              Center type
+            </label>
+            {canEditSuperuserFields ? (
+              <select
+                id="basics-center-type"
+                value={values.centerType}
+                onChange={(e) => set("centerType", e.target.value)}
+                className="bg-apollo-page border-apollo-border-strong h-9 rounded-md border px-2 text-sm"
+                data-testid="basics-center-type"
+              >
+                {CENTER_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <LockedValue id="basics-center-type">
+                {CENTER_TYPE_OPTIONS.find((o) => o.value === values.centerType)?.label ?? "Center"}
+              </LockedValue>
+            )}
+            {errors.centerType && <FieldNote error={errors.centerType} />}
+          </div>
+        )}
       </div>
 
       {justSaved && !dirty && (
@@ -314,7 +440,9 @@ export function CenterBasicsSection({
           data-testid="basics-saved"
         >
           <Check className="size-4" aria-hidden />
-          Saved. Live now; search updates on the next nightly index rebuild.
+          {justSaved === "pending"
+            ? "Saved. The new profile URL applies on the next nightly ETL run."
+            : "Saved. Live now; search updates on the next nightly index rebuild."}
         </p>
       )}
       {Object.values(errors).some(Boolean) && (
@@ -354,6 +482,19 @@ export function CenterBasicsSection({
           </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={clearTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setClearTarget(null);
+        }}
+        title={`Clear the ${clearTarget === "url" ? "website" : clearTarget === "slug" ? "profile URL" : "description"} override?`}
+        description="Clearing the override lets the directory value (if any) show through."
+        reasonMode="none"
+        confirmLabel="Clear override"
+        confirmVariant="default"
+        onConfirm={() => (clearTarget ? clearOverride(clearTarget) : Promise.resolve())}
+      />
     </div>
   );
 }
@@ -433,7 +574,7 @@ function saveErrorMessage(key: FieldKey, code: string): string {
       return "You no longer have access to change this. Refresh the page and try again.";
     case "slug_taken":
     case "collision":
-      return "Another center already uses that URL. Choose another.";
+      return "Another unit already uses that URL. Choose another.";
     case "url_too_long":
     case "invalid_url":
       return "That doesn’t look like a valid https:// web address.";

@@ -17,39 +17,35 @@
  * (`/api/edit/roster` `set` action); until then `roster` keeps a placeholder —
  * deliberate, so the PR boundary is visible to reviewers.
  *
- * Edit Center mockup (2026-09-25): a CENTER no longer uses the one-panel rail —
- * it renders `UnitEditSections`, every visible attribute as a section of one
- * scrolling page (the five Basics fields merged into one form). Visibility still
- * comes from `ATTRIBUTES` below; `?attr=roster` keeps the full-width Members
- * page; any other `?attr=` scrolls to the section that now holds it.
- * Departments and divisions are unchanged here.
+ * Edit Center / Edit Org Unit mockups (2026-09-25): no unit uses the one-panel
+ * rail any more — every unit renders `UnitEditSections`, each visible attribute
+ * as a section of one scrolling page (Name / Description / Website / Profile
+ * URL / Center type merged into one Basics form; a department's divisions as a
+ * section instead of a sub-rail). Visibility still comes from `ATTRIBUTES`
+ * below; `?attr=roster` keeps the full-width Members page (EditShell); any
+ * other `?attr=` scrolls to the section that now holds it.
  *
  * Retired read-through (edge 11): a Superuser may open a retired unit (to
- * restore it). The `retire` panel renders normally so they can Restore; every
- * other panel shows a "Retired — restore to edit" notice instead of its editor.
+ * restore it). Only the Retire section renders (so they can Restore), under a
+ * "Retired — restore to edit" notice.
  */
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-import { CenterBasicsSection } from "@/components/edit/center-basics-section";
 import { CenterLeadershipCard } from "@/components/edit/center-leadership-card";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
-import { CenterTypeCard } from "@/components/edit/center-type-card";
 import { EditShell } from "@/components/edit/edit-shell";
 import { SiblingDivisionsRail } from "@/components/edit/sibling-divisions-rail";
 import { UnitAccessCard } from "@/components/edit/unit-access-card";
-import { UnitDescriptionCard } from "@/components/edit/unit-description-card";
-import { UnitUrlCard } from "@/components/edit/unit-url-card";
+import { UnitBasicsSection } from "@/components/edit/unit-basics-section";
 import { UnitLeaderCard } from "@/components/edit/unit-leader-card";
 import { UnitRetireCard } from "@/components/edit/unit-retire-card";
 import { UnitFacultyExportCard } from "@/components/edit/unit-faculty-export-card";
+import { UnitMembersSummary } from "@/components/edit/unit-members-summary";
 import { UnitRosterCard } from "@/components/edit/unit-roster-card";
-import { UnitNameCard } from "@/components/edit/unit-name-card";
-import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import { CtscFeedIssuesPanel } from "@/components/edit/ctsc-feed-issues-panel";
 import { UnitEditSections, type UnitEditSection } from "@/components/edit/unit-edit-sections";
-import { Button } from "@/components/ui/button";
 import { CTSC_CENTER_SLUG } from "@/lib/edit/external-member-sources";
 import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 import type { RailItem } from "@/components/edit/attribute-rail";
@@ -206,20 +202,20 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
       : `/edit/reports?center=${encodeURIComponent(ctx.unit.code)}&kind=${ctx.unit.unitType}`
     : undefined;
 
-  // A center renders the single-scroll editor (Edit Center mockup, 2026-09-25)
-  // — every section on one page. The rich Members table keeps its own
-  // full-width `?attr=roster` page below (EditShell with `hideRail`).
-  if (ctx.unit.unitType === "center" && active.key !== "roster") {
+  // Every unit renders the single-scroll editor (Edit Center / Edit Org Unit
+  // mockups, 2026-09-25) — every section on one page. The Members roster keeps
+  // its own full-width `?attr=roster` page below (EditShell with `hideRail`).
+  if (active.key !== "roster") {
     return (
       <UnitEditSections
         name={ctx.unit.name}
-        kindLabel={ctx.unit.centerType === "institute" ? "Institute" : "Center"}
-        crumbLabel="Centers"
+        kindLabel={kindLabel(ctx)}
+        crumbLabel={crumbLabel(ctx)}
         orgUnitsNavVisible={orgUnitsNavVisible}
         actorRole={ctx.actorRole}
         previewHref={previewHref}
         reportsHref={reportsHref}
-        sections={centerSections(ctx, visible, basePath)}
+        sections={unitSections(ctx, visible, basePath)}
         initialSection={attr ? LEGACY_ATTR_SECTION[attr as AttrKey] : undefined}
         notice={ctx.unit.suppression !== null ? <RetiredNotice /> : undefined}
       />
@@ -242,12 +238,12 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
       reportsHref={reportsHref}
       subRail={subRail}
       // Members gets the whole width for its own filter bar + (on a center)
-      // disease grid, not a shared column with a rail it has no room to use —
-      // "← Back" (to basePath, the default attr, rail restored) replaces it.
-      hideRail={active.key === "roster"}
+      // disease grid — "← Back" (to basePath, the sections page) is the way
+      // back to everything else.
+      hideRail
       backHref={basePath}
     >
-      {renderPanel(active.key, ctx)}
+      {renderRoster(ctx)}
     </EditShell>
   );
 }
@@ -270,14 +266,51 @@ const LEGACY_ATTR_SECTION: Partial<Record<AttrKey, string>> = {
 /** Mirrors `CenterProgramCard`'s EXCLUDED_PROGRAM_CODES (no public page). */
 const CENTER_PROGRAMS_WITHOUT_PAGE = new Set(["ZY"]);
 
-/** The center's sections, gated by the SAME visibility predicates the rail
+/** The chip beside the `<h1>`. */
+function kindLabel(ctx: UnitEditContext): string {
+  switch (ctx.unit.unitType) {
+    case "center":
+      return ctx.unit.centerType === "institute" ? "Institute" : "Center";
+    case "department":
+      return "Department";
+    case "division":
+      return "Division";
+  }
+}
+
+/** The breadcrumb's second segment — the unit's kind, or a division's parent. */
+function crumbLabel(ctx: UnitEditContext): string {
+  switch (ctx.unit.unitType) {
+    case "center":
+      return "Centers";
+    case "department":
+      return "Departments";
+    case "division":
+      return ctx.unit.deptName ?? "Divisions";
+  }
+}
+
+/** The public path in front of the slug, for the Basics Profile URL field. */
+function urlPrefix(ctx: UnitEditContext): string {
+  switch (ctx.unit.unitType) {
+    case "center":
+      return "/centers/";
+    case "department":
+      return "/departments/";
+    case "division":
+      return ctx.unit.deptSlug ? `/departments/${ctx.unit.deptSlug}/divisions/` : "…/divisions/";
+  }
+}
+
+/** The unit's sections, gated by the SAME visibility predicates the rail
  *  used (`visible` is `ATTRIBUTES` already filtered for this ctx). */
-function centerSections(
+function unitSections(
   ctx: UnitEditContext,
   visible: ReadonlyArray<AttrDef>,
   basePath: string,
 ): UnitEditSection[] {
   const has = (key: AttrKey) => visible.some((a) => a.key === key);
+  const unitType = ctx.unit.unitType;
   const retired = ctx.unit.suppression !== null;
   const retireSection: UnitEditSection | null = has("retire")
     ? {
@@ -286,7 +319,7 @@ function centerSections(
         tone: "danger",
         content: (
           <UnitRetireCard
-            entityType="center"
+            entityType={unitType}
             entityId={ctx.unit.code}
             unitName={ctx.unit.name}
             headingId="retire-heading"
@@ -310,51 +343,127 @@ function centerSections(
     stat: description ? undefined : "No description",
     warn: !description,
     content: (
-      <CenterBasicsSection
+      <UnitBasicsSection
+        unitType={unitType}
         code={ctx.unit.code}
         name={ctx.unit.name}
+        nameEditable={has("name")}
         description={ctx.unit.description}
         url={ctx.unit.url}
         slug={ctx.unit.slug}
-        centerType={ctx.unit.centerType ?? "center"}
+        slugOverride={ctx.unit.slugOverride}
+        urlPrefix={urlPrefix(ctx)}
+        centerType={unitType === "center" ? (ctx.unit.centerType ?? "center") : null}
+        overriddenFields={ctx.unit.overriddenFields}
         canEditSuperuserFields={isSuperuser(ctx.actorRole)}
         headingId="basics-heading"
       />
     ),
   });
 
-  const leadership = ctx.centerLeadership ?? [];
-  const holderCount = leadership.reduce((n, r) => n + r.holders.length, 0);
-  sections.push({
-    id: "leadership",
-    label: "Leadership",
-    stat: String(holderCount),
-    content: (
-      <CenterLeadershipCard
-        centerCode={ctx.unit.code}
-        roles={leadership}
-        headingId="leadership-heading"
-      />
-    ),
-  });
-
-  if (has("roster")) {
-    const active = activeCenterMemberCount(ctx.roster ?? []);
+  if (unitType === "center") {
+    const leadership = ctx.centerLeadership ?? [];
+    const holderCount = leadership.reduce((n, r) => n + r.holders.length, 0);
     sections.push({
-      id: "members",
-      label: "Members",
-      stat: active.toLocaleString("en-US"),
+      id: "leadership",
+      label: "Leadership",
+      stat: String(holderCount),
       content: (
-        <CenterMembersSummary
-          count={active}
-          rosterHref={`${basePath}?attr=roster`}
-          exportHref={
-            isUnitRosterExportEnabled()
-              ? `/edit/center/${encodeURIComponent(ctx.unit.code)}/export`
-              : undefined
-          }
+        <CenterLeadershipCard
+          centerCode={ctx.unit.code}
+          roles={leadership}
+          headingId="leadership-heading"
         />
       ),
+    });
+  } else {
+    const leader = ctx.unit.leader;
+    sections.push({
+      id: "leadership",
+      label: "Leadership",
+      stat: leader.cwid ? "1" : leader.explicitVacancy ? "Vacant" : "0",
+      warn: !leader.cwid,
+      content: (
+        <UnitLeaderCard
+          entityType={unitType}
+          entityId={ctx.unit.code}
+          leader={leader}
+          canClear
+          hasOverride={
+            ctx.unit.overriddenFields.includes("leaderCwid") ||
+            ctx.unit.overriddenFields.includes("leaderInterim")
+          }
+          headingId="leadership-heading"
+        />
+      ),
+    });
+  }
+
+  if (has("roster")) {
+    const rosterHref = `${basePath}?attr=roster`;
+    if (unitType === "center") {
+      const active = activeCenterMemberCount(ctx.roster ?? []);
+      sections.push({
+        id: "members",
+        label: "Members",
+        stat: active.toLocaleString("en-US"),
+        content: (
+          <UnitMembersSummary
+            description="Faculty on the center roster, as shown on its public page."
+            count={active}
+            countLabel="active"
+            manageHref={rosterHref}
+            exportHref={
+              isUnitRosterExportEnabled()
+                ? `/edit/center/${encodeURIComponent(ctx.unit.code)}/export`
+                : undefined
+            }
+          />
+        ),
+      });
+    } else if (hasFacultyExportTab(ctx)) {
+      // Faculty count + CSV export (async — reads the count itself), plus the
+      // way into a manual division's editable roster.
+      sections.push({
+        id: "members",
+        label: "Members",
+        content: (
+          <UnitFacultyExportCard
+            unitType={unitType}
+            code={ctx.unit.code}
+            source={ctx.unit.source}
+            manageHref={hasRoster(ctx) ? rosterHref : undefined}
+          />
+        ),
+      });
+    } else {
+      // A manual division with the export flag off: its curated roster only.
+      const count = ctx.roster?.length ?? 0;
+      sections.push({
+        id: "members",
+        label: "Members",
+        stat: count.toLocaleString("en-US"),
+        content: (
+          <UnitMembersSummary
+            description="People on this division’s roster, as shown on its public page."
+            count={count}
+            countLabel="on the roster"
+            manageHref={rosterHref}
+          />
+        ),
+      });
+    }
+  }
+
+  // A department lists its divisions — each has its own editor (this replaces
+  // the old sibling-divisions sub-rail).
+  if (unitType === "department" && (ctx.siblingDivisions?.length ?? 0) > 0) {
+    const divisions = ctx.siblingDivisions ?? [];
+    sections.push({
+      id: "divisions",
+      label: "Divisions",
+      stat: String(divisions.length),
+      content: <UnitDivisionsList divisions={divisions} />,
     });
   }
 
@@ -381,7 +490,7 @@ function centerSections(
       stat: String(ctx.access?.length ?? 0),
       content: (
         <UnitAccessCard
-          entityType="center"
+          entityType={unitType}
           entityId={ctx.unit.code}
           access={ctx.access}
           actorCwid={ctx.actorCwid}
@@ -418,215 +527,93 @@ function activeCenterMemberCount(
   ).length;
 }
 
-/** The Members section: a count + the way into the full roster table (which
- *  keeps its own full-width page — filters, disease review, xlsx). */
-function CenterMembersSummary({
-  count,
-  rosterHref,
-  exportHref,
+/** A department's Divisions section: a grid of links to each division editor. */
+function UnitDivisionsList({
+  divisions,
 }: {
-  count: number;
-  rosterHref: string;
-  exportHref?: string;
+  divisions: NonNullable<UnitEditContext["siblingDivisions"]>;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-4" data-testid="center-members-summary">
-      <div className="flex min-w-[240px] flex-1 flex-col gap-0.5">
-        <h2 id="members-heading" className="text-[17px] font-[600] tracking-[-0.015em]">
-          Members
+    <div className="flex flex-col gap-3">
+      <header className="flex flex-col gap-0.5">
+        <h2 id="divisions-heading" className="text-[17px] font-[600] tracking-[-0.015em]">
+          Divisions
         </h2>
         <p className="text-muted-foreground text-[13px]">
-          Faculty on the center roster, as shown on its public page.
+          Each division has its own editor. Open one to change its leadership or access.
         </p>
-      </div>
-      <p className="flex items-baseline gap-1.5">
-        <span className="text-2xl font-semibold tabular-nums" data-testid="center-members-count">
-          {count.toLocaleString("en-US")}
-        </span>
-        <span className="text-muted-foreground text-[13px]">active</span>
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        {exportHref && (
-          <Button asChild variant="outline" size="sm">
-            <a href={exportHref} data-testid="center-members-export">
-              Export CSV
-            </a>
-          </Button>
-        )}
-        <Button asChild variant="outline" size="sm" className="border-apollo-slate text-apollo-slate">
-          <Link href={rosterHref} data-testid="center-members-manage">
-            Manage members
-            <ArrowRight className="size-4" aria-hidden />
-          </Link>
-        </Button>
-      </div>
+      </header>
+      <ul className="border-apollo-border grid grid-cols-1 overflow-hidden rounded-[10px] border sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+        {divisions.map((d) => (
+          <li key={d.code} className="border-apollo-border -mr-px -mb-px border-r border-b">
+            <Link
+              href={`/edit/division/${d.code}`}
+              className="hover:bg-apollo-page flex items-center justify-between gap-2 px-3.5 py-2.5 text-[13.5px]"
+              data-testid={`sibling-division-${d.code}`}
+            >
+              <span>{d.name}</span>
+              <ArrowRight className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-function renderPanel(key: AttrKey, ctx: UnitEditContext) {
-  // Retired read-through (edge 11): every panel except `retire` is read-only
-  // while the unit is retired — the Superuser restores via the retire panel.
-  if (ctx.unit.suppression !== null && key !== "retire") {
-    return <RetiredNotice />;
+/** The full-width Members page (`?attr=roster`). Every other attribute now
+ *  lives on the single-scroll sections page. */
+function renderRoster(ctx: UnitEditContext) {
+  // Retired read-through (edge 11): read-only while the unit is retired.
+  if (ctx.unit.suppression !== null) return <RetiredNotice />;
+  // A center gets the rich #552 §6.1 table (Member/Type/Program/Diseases/
+  // Status); a manual division gets the simple add/remove list (PR-7c).
+  if (ctx.unit.unitType === "center") {
+    return (
+      <CenterRosterCard
+        unitCode={ctx.unit.code}
+        members={ctx.roster ?? []}
+        programs={ctx.programs ?? []}
+        membershipRoles={ctx.centerMembershipRoles ?? []}
+        exportEnabled={isUnitRosterExportEnabled()}
+        // The canonical disease-code list for "+ Add a disease" — was
+        // already computed by `loadUnitEditContext` for the API route's
+        // own server-side validation but never reached this component.
+        diseaseOptions={ctx.diseaseOptions ?? []}
+        cornellDirectoryEnabled={isCornellDirectoryMembersEnabled()}
+      />
+    );
   }
-  switch (key) {
-    case "description":
-      return (
-        <UnitDescriptionCard
-          entityType={ctx.unit.unitType}
-          entityId={ctx.unit.code}
-          description={ctx.unit.description}
-          // Centers edit in-row (no field_override), so there is nothing to clear.
-          canClear={ctx.unit.unitType !== "center"}
-          hasOverride={ctx.unit.overriddenFields.includes("description")}
-        />
-      );
-    case "url":
-      return (
-        <UnitUrlCard
-          entityType={ctx.unit.unitType}
-          entityId={ctx.unit.code}
-          url={ctx.unit.url}
-          // Centers edit in-row (no field_override), so there is nothing to clear.
-          canClear={ctx.unit.unitType !== "center"}
-          hasOverride={ctx.unit.overriddenFields.includes("url")}
-        />
-      );
-    case "leader":
-      // #2542 Phase C — a center's leadership is manually-owned and
-      // vocabulary-driven (three roles, not one), so it gets the generic
-      // picker instead of the dept/div override card.
-      if (ctx.unit.unitType === "center") {
-        return (
-          <CenterLeadershipCard centerCode={ctx.unit.code} roles={ctx.centerLeadership ?? []} />
-        );
-      }
-      return (
-        <UnitLeaderCard
-          entityType={ctx.unit.unitType}
-          entityId={ctx.unit.code}
-          leader={ctx.unit.leader}
-          canClear
-          hasOverride={
-            ctx.unit.overriddenFields.includes("leaderCwid") ||
-            ctx.unit.overriddenFields.includes("leaderInterim")
-          }
-        />
-      );
-    case "access":
-      return (
-        <UnitAccessCard
-          entityType={ctx.unit.unitType}
-          entityId={ctx.unit.code}
-          access={ctx.access}
-          actorCwid={ctx.actorCwid}
-        />
-      );
-    case "feed-issues":
-      return <CtscFeedIssuesPanel />;
-    case "roster":
-      // A center gets the rich #552 §6.1 table (Member/Type/Program/Diseases/
-      // Status); a manual division gets the simple add/remove list (PR-7c).
-      if (ctx.unit.unitType === "center") {
-        return (
-          <CenterRosterCard
+  if (ctx.unit.unitType === "division") {
+    return (
+      <div className="flex flex-col gap-6">
+        {/* A manual division keeps its editable add/remove roster (PR-7c);
+            an ED division has none, so only the faculty export shows. */}
+        {hasRoster(ctx) && (
+          <UnitRosterCard
+            entityType="division"
             unitCode={ctx.unit.code}
             members={ctx.roster ?? []}
-            programs={ctx.programs ?? []}
-            membershipRoles={ctx.centerMembershipRoles ?? []}
-            exportEnabled={isUnitRosterExportEnabled()}
-            // The canonical disease-code list for "+ Add a disease" — was
-            // already computed by `loadUnitEditContext` for the API route's
-            // own server-side validation but never reached this component.
-            diseaseOptions={ctx.diseaseOptions ?? []}
             cornellDirectoryEnabled={isCornellDirectoryMembersEnabled()}
           />
-        );
-      }
-      if (ctx.unit.unitType === "division") {
-        return (
-          <div className="flex flex-col gap-6">
-            {/* A manual division keeps its editable add/remove roster (PR-7c);
-                an ED division has none, so only the faculty export shows. */}
-            {hasRoster(ctx) && (
-              <UnitRosterCard
-                entityType="division"
-                unitCode={ctx.unit.code}
-                members={ctx.roster ?? []}
-                cornellDirectoryEnabled={isCornellDirectoryMembersEnabled()}
-              />
-            )}
-            {/* Faculty CSV export (count + link) — extends #1102 to divisions. */}
-            {hasFacultyExportTab(ctx) && (
-              <UnitFacultyExportCard
-                unitType="division"
-                code={ctx.unit.code}
-                source={ctx.unit.source}
-              />
-            )}
-          </div>
-        );
-      }
-      // A department has no curated roster — its Members tab is the read-only
-      // faculty CSV export (extends #1102 to departments).
-      if (ctx.unit.unitType === "department" && hasFacultyExportTab(ctx)) {
-        return (
-          <UnitFacultyExportCard
-            unitType="department"
-            code={ctx.unit.code}
-            source={ctx.unit.source}
-          />
-        );
-      }
-      return null;
-    case "programs":
-      // #1117 — only surfaced for a center with a program taxonomy.
-      return (
-        <CenterProgramCard centerCode={ctx.unit.code} programs={ctx.programs ?? []} />
-      );
-    case "name":
-      // The rail only surfaces this row for a manually-owned unit, so the
-      // unitType is center | division here (never department).
-      return (
-        <UnitNameCard
-          entityType={ctx.unit.unitType === "division" ? "division" : "center"}
-          entityId={ctx.unit.code}
-          name={ctx.unit.name}
-        />
-      );
-    case "slug":
-      return (
-        <UnitSlugCard
-          entityType={ctx.unit.unitType}
-          entityId={ctx.unit.code}
-          liveSlug={ctx.unit.slug}
-          initialOverride={ctx.unit.slugOverride}
-        />
-      );
-    case "center-type":
-      // The rail only surfaces this row for a center; centerType is non-null there.
-      return (
-        <CenterTypeCard
-          entityId={ctx.unit.code}
-          centerType={ctx.unit.centerType ?? "center"}
-        />
-      );
-    case "retire":
-      return (
-        <UnitRetireCard
-          entityType={ctx.unit.unitType}
-          entityId={ctx.unit.code}
-          unitName={ctx.unit.name}
-          suppression={
-            ctx.unit.suppression
-              ? { id: ctx.unit.suppression.id, suppressedAt: ctx.unit.suppression.suppressedAt }
-              : null
-          }
-        />
-      );
+        )}
+        {/* Faculty CSV export (count + link) — extends #1102 to divisions. */}
+        {hasFacultyExportTab(ctx) && (
+          <UnitFacultyExportCard unitType="division" code={ctx.unit.code} source={ctx.unit.source} />
+        )}
+      </div>
+    );
   }
+  // A department has no curated roster — its Members page is the read-only
+  // faculty CSV export (extends #1102 to departments).
+  if (hasFacultyExportTab(ctx)) {
+    return (
+      <UnitFacultyExportCard unitType="department" code={ctx.unit.code} source={ctx.unit.source} />
+    );
+  }
+  return null;
 }
+
 
 /** Edge 11: shown on non-retire panels while the unit is retired. */
 function RetiredNotice() {
