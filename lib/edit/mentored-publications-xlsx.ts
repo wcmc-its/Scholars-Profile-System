@@ -10,8 +10,11 @@
  *                          learner publications" mode, one row per (learner,
  *                          publication) with the mentor(s) on it;
  *   - "Query & Assumptions" what was asked for and the rules applied (which
- *                          publication set, the mentored-subset rule), so the
- *                          sheet is self-describing a year later.
+ *                          publication set, the mentored-subset rule, and
+ *                          every page filter — In window, Author position,
+ *                          Publication years, Mentors, Learners shown — "All"
+ *                          when unset), so the sheet is self-describing a
+ *                          year later.
  *
  * The Summary and Raw Data headers differ by mode (`SUMMARY_HEADERS` /
  * `SUMMARY_HEADERS_ALL`, `RAW_HEADERS` / `RAW_HEADERS_ALL`); the page's
@@ -32,6 +35,7 @@ import {
   type MentorPair,
   type MentorRef,
 } from "@/lib/edit/mentored-publications-report";
+import { POSITION_FACET_LABEL, WINDOW_FACET_LABEL } from "@/lib/edit/mentored-publications-facets";
 import { MENTORSHIP_TYPE_LABEL, mentorshipLabel } from "@/lib/edit/mentorship-type";
 
 export const SUMMARY_SHEET = "Summary";
@@ -215,7 +219,7 @@ export async function buildMentoredPublicationsWorkbook(
   wb.creator = "Scholars Profile System";
   wb.created = report.generatedAt;
 
-  const { filters } = report;
+  const { filters, facets } = report;
   const allMode = filters.pubs === "all";
 
   const summaryRows: CellValue[][] = report.summary.map((r) => {
@@ -291,6 +295,24 @@ export async function buildMentoredPublicationsWorkbook(
       allMode
         ? "All learner publications: every PubMed- or Scopus-indexed publication on which the learner is a WCM-identified author (ReCiter author graph), whether or not a mentor is on it. Publications with a mentor = the subset also co-authored by one of the learner's selected mentors (the mentored co-publication set)."
         : "Mentored co-publications: every PubMed- or Scopus-indexed publication on which the learner and one of their selected mentors are both WCM-identified authors.",
+    ],
+    // The page's post-load filters (`applyMentoredPubsFacets`), "All" when unset.
+    [
+      "In window filter (per publication)",
+      facets?.window.length ? facets.window.map((w) => WINDOW_FACET_LABEL[w]).join(", ") : "All",
+    ],
+    [
+      "Author position filter",
+      facets?.position.length ? facets.position.map((p) => POSITION_FACET_LABEL[p]).join(", ") : "All",
+    ],
+    ["Publication years filter", facets?.pubYears.length ? facets.pubYears.join(", ") : "All"],
+    [
+      "Mentor filter",
+      facets?.mentors.length ? facets.mentors.map((m) => `${m.name} (${m.cwid})`).join("; ") : "All",
+    ],
+    [
+      "Learners shown",
+      facets?.withPubs ? "Only learners with at least one publication" : "All, including learners with no publications",
     ],
     ["Learners", report.summary.length],
     ["Publication rows", report.detail.length],

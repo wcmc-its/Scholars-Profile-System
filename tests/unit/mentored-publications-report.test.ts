@@ -1455,14 +1455,26 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
       override("men0003", [{ name: "", cwid: "stu0011" }]), // fails validation as a whole
       override("men0004", [{ name: "Real Mentee", cwid: "stu0012" }]),
     ]);
+    // men0001 has a Scholar row; the page's "View list" names mentee and mentor.
+    hoisted.mockScholarFindMany.mockResolvedValue([{ cwid: "men0001", preferredName: "Zed Mentor" }]);
     const report = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
     expect(report.droppedNoCwid).toBe(2);
+    expect(report.droppedNoCwidMentees).toEqual([
+      { menteeName: "Also None", mentorName: "Zed Mentor" },
+      { menteeName: "No Cwid", mentorName: "Zed Mentor" },
+    ]);
     expect(report.summary.map((s) => s.cwid)).toEqual(["stu0012"]);
 
     hoisted.mockOverrideFindMany.mockResolvedValue([override("men0001", [{ name: "No Cwid" }])]);
     const none = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
     expect(none.summary).toEqual([]);
     expect(none.droppedNoCwid).toBe(1);
+    expect(none.droppedNoCwidMentees).toEqual([{ menteeName: "No Cwid", mentorName: "Zed Mentor" }]);
+
+    // No Scholar row for the mentor → the bare CWID stands in.
+    hoisted.mockScholarFindMany.mockResolvedValue([]);
+    const bare = await loadMentoredPublicationsReport({ scopes: ["md"], types: ["faculty"] });
+    expect(bare.droppedNoCwidMentees).toEqual([{ menteeName: "No Cwid", mentorName: "men0001" }]);
   });
 
   it("gradYears admits a faculty entry by its year, and a year-less one only with 'unknown'", async () => {

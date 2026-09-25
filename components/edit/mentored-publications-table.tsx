@@ -1,17 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { Download } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
-import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
+import { useShowMore } from "@/components/edit/reports/report-show-more";
+import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { citationIdentifier } from "@/lib/citation";
-import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import type {
   MentoredPubsLearnerOnPub,
   MentoredPubsPublicationRow,
   MentoredPubsSummaryRow,
+  MentorPair,
   MentorRef,
 } from "@/lib/edit/mentored-publications-report";
 import {
@@ -23,118 +24,56 @@ import {
 } from "@/lib/edit/mentorship-type";
 
 /**
- * `/edit/reports/7` — the Summary / Publications tables as a client island:
- * a facet rail on the left, a sortable table on the right, the shape
- * `publications-report-table.tsx` (report 3) proves out. The rail's TOP is
- * the page's server-side filter form (`children` — the auto-submit `mtype` /
- * `years` / `pubs` / `tail` form the page renders; one rail, not a strip
- * above plus a rail below, 2026-09-20), the client facets below it. Every row arrives
- * loaded from the page; filtering and sorting are `useMemo` over them (no
- * fetch, no URL state); the rail is `RosterFacet`, each facet counting the
- * rows that pass every OTHER facet (the cross-facet convention it documents).
- * A facet with no selection passes every row. The .xlsx download is
- * server-filtered only (types / years / set / tail) — never by the rail.
+ * Report 7's results as a client island (reports redesign, 2026-09-24; mockup
+ * `Pub Reports/Mentored Publications Redesign.dc.html`): the Learners (N) /
+ * Publications (N) tabs, the "Find a learner or mentor" box, the tables and
+ * "Show 25 more". Everything that FILTERS lives in the body's rail (URL
+ * params, a server round trip, applied before the rows reach this island);
+ * what stays here is what never changes a count: the tab, the find box, the
+ * sort and paging.
  *
- * "Type of mentorship" is NOT a rail facet: it is the page's server-side
- * `mtype=` filter (`lib/edit/mentorship-type.ts`), because a rail facet
- * filters learner ROWS — a learner passing on one roster pair still listed
- * every co-author pair beside it and counted their papers. The type still
- * shows as a Learners column and under each mentor, each line hovering the
- * plain-language description of its category (`TypeLine`). Sortable headers are a
- * `<button>` in the `<th>` (`aria-sort` on the active one); clicking the
- * active header flips the direction; nulls sort last either way. Rows
- * render capped at `ROW_CAP` behind "Show all N".
+ * Learners: Learner (name, CWID, "Grad YYYY") · Mentors (each mentor's name
+ * with the pair's type as a badge, "Department · Institution" under it) · In
+ * window · [With a mentor, all-publications set only] · All years ·
+ * JIF ≥ 10 · First author. The old table's separate Grad year / Type /
+ * Department / Institution columns made it wider than the page and scrolled
+ * the Learner column out of view (the 2026-09-24 bug); below `md` the mentor
+ * lines and the numbers stack inside the Learner cell instead, so a 390px
+ * page never scrolls sideways. A row with publications opens (row click or
+ * its chevron button) to that learner's papers. "—" (never 0) wherever the
+ * learner's window is unknowable, as in the loader and the workbook. Sort by
+ * the header buttons (`aria-sort` on the active one; clicking it flips);
+ * nulls sort last either way.
  *
- * The Learners | Publications tabs live here too: both views ride on the same
- * loaded report, so a tab click swaps the view in state and only rewrites the
- * URL (`history.replaceState`, which Next's router picks up) — no server
- * round trip, nothing to wait for. The current view is carried to the filter
- * form by a hidden input bound with `form="mentored-pubs-filters"`, so a
- * filter change submits the view the user is looking at; without JS the tab
- * is a plain link and the server renders `?view=`.
+ * Publications: one entry per distinct paper (the Vancouver citation and its
+ * PMID link, JIF, NIH iCite citations, date added to PubMed, then each
+ * learner with their byline position and window badge, and each mentor with
+ * the pair's type) — a list, not the old seven-column table, for the same
+ * width reason. Sort select: date added to PubMed (default, the loader's
+ * order), publication year, JIF, citations, title.
+ *
+ * Tabs: both views ride on the same loaded rows, so a click swaps the view in
+ * state and rewrites the URL (`history.replaceState`); without JS the tab is
+ * a plain link. The current view and find text reach the rail's GET forms as
+ * hidden inputs bound by `form=` to each form id (the desktop rail and the
+ * phone sheet's copy), so a filter change keeps them.
  */
 
-const TH_CLASS = "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
-const TD_CLASS = "border-apollo-border border-t px-3 py-2 align-top";
-const NUM_CLASS = `${TD_CLASS} text-right tabular-nums`;
-const CWID_CLASS = "text-muted-foreground ml-2 font-mono text-xs";
-const CHIP_CLASS = "text-muted-foreground ml-2 text-xs";
-const ROW_CAP = 200;
+type View = "summary" | "publications";
 
-// ---- facets ---------------------------------------------------------------
+const TH = "text-muted-foreground px-3 py-2.5 align-bottom text-xs font-semibold tracking-[0.08em] uppercase";
+const TD = "px-3 py-3 align-top";
+const NUM_TD = `${TD} text-right tabular-nums hidden md:table-cell`;
+const TAB_ACTIVE = "border-apollo-maroon text-foreground -mb-px border-b-2 py-2.5 text-base font-semibold";
+const TAB_IDLE =
+  "text-muted-foreground hover:text-foreground -mb-px border-b-2 border-transparent py-2.5 text-base";
 
-type Facet<Row> = {
-  id: string;
-  title: string;
-  /** The values a row carries for this facet (a row may carry several). */
-  values: (row: Row) => string[];
-  label?: (value: string) => string;
-  /** Option order; default count desc, then label. */
-  compare?: (a: FacetOption, b: FacetOption) => number;
-  collapseAfter?: number;
-  searchable?: boolean;
-};
-type Selection = Record<string, ReadonlySet<string>>;
-const NONE: ReadonlySet<string> = new Set();
+const learnerName = (l: { firstName: string | null; lastName: string | null }) =>
+  [l.lastName, l.firstName].filter(Boolean).join(", ");
 
-function passes<Row>(row: Row, f: Facet<Row>, sel: ReadonlySet<string>): boolean {
-  return sel.size === 0 || f.values(row).some((v) => sel.has(v));
-}
-
-/** Every value of `facet` across ALL rows (so the option list is stable),
- *  counted over the rows that pass every OTHER facet. */
-function facetOptions<Row>(
-  rows: readonly Row[],
-  facets: Facet<Row>[],
-  sel: Selection,
-  facet: Facet<Row>,
-): FacetOption[] {
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    const counted = facets.every((f) => f === facet || passes(row, f, sel[f.id] ?? NONE));
-    for (const v of new Set(facet.values(row))) counts.set(v, (counts.get(v) ?? 0) + (counted ? 1 : 0));
-  }
-  return [...counts]
-    .map(([value, count]) => ({ value, label: facet.label?.(value) ?? value, count }))
-    .sort(facet.compare ?? ((a, b) => b.count - a.count || a.label.localeCompare(b.label)));
-}
-
-function useFacetRail<Row>(rows: readonly Row[], facets: Facet<Row>[]) {
-  const [selected, setSelected] = React.useState<Selection>({});
-  const toggle = (id: string) => (value: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev[id] ?? NONE);
-      if (next.has(value)) next.delete(value);
-      else next.add(value);
-      return { ...prev, [id]: next };
-    });
-  const filtered = React.useMemo(
-    () => rows.filter((r) => facets.every((f) => passes(r, f, selected[f.id] ?? NONE))),
-    [rows, facets, selected],
-  );
-  const rail = facets.map((f) => (
-    <RosterFacet
-      key={f.id}
-      title={f.title}
-      options={facetOptions(rows, facets, selected, f)}
-      selected={selected[f.id] ?? NONE}
-      onToggle={toggle(f.id)}
-      collapseAfter={f.collapseAfter}
-      searchable={f.searchable}
-    />
-  ));
-  return { filtered, rail };
-}
-
-const fixedOrder = (order: readonly string[]) => (a: FacetOption, b: FacetOption) =>
-  order.indexOf(a.value) - order.indexOf(b.value);
-const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-// ---- sorting --------------------------------------------------------------
+// ---- sorting ----------------------------------------------------------------
 
 type SortDir = "asc" | "desc";
-type SortState = { key: string; dir: SortDir };
-/** `dir` is the direction a first click on the header sorts by. */
 type SortCol<Row> = { key: string; get: (row: Row) => number | string | null; dir: SortDir };
 
 /** Nulls last in BOTH directions. */
@@ -149,347 +88,186 @@ function compareNullsLast(a: number | string | null, b: number | string | null, 
   return dir === "asc" ? c : -c;
 }
 
-function useSort<Row>(rows: readonly Row[], cols: Record<string, SortCol<Row>>, initialKey: string) {
-  const [sort, setSort] = React.useState<SortState>({ key: initialKey, dir: cols[initialKey].dir });
-  const onSort = (key: string) =>
-    setSort((prev) =>
-      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: cols[key].dir },
-    );
-  const sorted = React.useMemo(() => {
-    const col = cols[sort.key];
-    // Stable, so the loader's own order breaks ties.
-    return [...rows].sort((a, b) => compareNullsLast(col.get(a), col.get(b), sort.dir));
-  }, [rows, cols, sort]);
-  return { sorted, sort, onSort };
+function sortRows<Row>(rows: readonly Row[], col: SortCol<Row>, dir: SortDir): Row[] {
+  // Stable, so the loader's own order breaks ties.
+  return [...rows].sort((a, b) => compareNullsLast(col.get(a), col.get(b), dir));
 }
 
-function SortHeader<Row>({
-  col,
-  sort,
-  onSort,
-  className = "",
-  children,
-}: {
-  col: SortCol<Row>;
-  sort: SortState;
-  onSort: (key: string) => void;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  const active = sort.key === col.key;
-  return (
-    <th
-      className={`${TH_CLASS} ${className}`}
-      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      <button type="button" onClick={() => onSort(col.key)} className="cursor-pointer hover:underline">
-        {children}
-        {active ? <span aria-hidden="true">{sort.dir === "asc" ? " ^" : " v"}</span> : null}
-      </button>
-    </th>
-  );
-}
+// ---- shared pieces ------------------------------------------------------------
 
-// ---- shared pieces --------------------------------------------------------
-
-function useRowCap<Row>(rows: readonly Row[]) {
-  const [showAll, setShowAll] = React.useState(false);
-  const shown = showAll ? rows : rows.slice(0, ROW_CAP);
-  const button =
-    shown.length < rows.length ? (
-      <button
-        type="button"
-        onClick={() => setShowAll(true)}
-        className="border-apollo-border hover:bg-apollo-surface-2 self-start rounded border px-3 py-1.5 text-sm"
-        data-testid="mentored-pubs-show-all"
-      >
-        Show all {rows.length.toLocaleString()}
-      </button>
-    ) : null;
-  return { shown, button };
-}
-
-/** Rail left, table right (stacked on narrow), the "Showing X of Y" line
- *  above the table. `filters` (the page's server-side form) heads the rail;
- *  the client facets follow. */
-function Layout({
-  filters,
-  rail,
-  shown,
-  total,
-  noun,
-  children,
-}: {
-  filters: React.ReactNode;
-  rail: React.ReactNode;
-  shown: number;
-  total: number;
-  noun: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mt-4 grid grid-cols-1 items-start gap-5 md:grid-cols-[16rem_minmax(0,1fr)]">
-      <div className="border-apollo-rail-border bg-apollo-rail w-full shrink-0 rounded-xl border p-3 md:w-64">
-        {filters}
-        {rail}
-      </div>
-      <div className="flex min-w-0 flex-col gap-2">
-        <p className="text-muted-foreground text-sm" data-testid="mentored-pubs-shown">
-          Showing {shown.toLocaleString()} of {total.toLocaleString()} {noun}
-        </p>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Empty({ noun }: { noun: string }) {
-  return (
-    <p className="text-muted-foreground mt-6" data-testid="mentored-pubs-empty">
-      No {noun} match these filters.
-    </p>
-  );
-}
-
-const learnerName = (l: { firstName: string | null; lastName: string | null }) =>
-  [l.lastName, l.firstName].filter(Boolean).join(", ");
-
-/** One pair's type label, hovering its category's description — the same
- *  sentence the filter checkbox hovers, so the words match end to end. A
- *  pair no filter key maps to (an unselectable roster bucket) has no
- *  description and renders bare. */
-function TypeLine({ type }: { type: MentorshipType }) {
+/** One pair's type as a badge, hovering its category's description (the
+ *  rail checkbox hovers the same sentence). Inferred pairs read amber. */
+function TypeBadge({ type }: { type: MentorshipType }) {
   const key = mentorshipTypeKey(type);
-  const label = mentorshipLabel(type);
-  if (key === null) return <>{label}</>;
-  return (
-    <HoverTooltip text={MENTORSHIP_TYPE_DESCRIPTION[key]} wide>
-      <span>{label}</span>
-    </HoverTooltip>
+  const inferred = type.source === "coauthor";
+  const badge = (
+    <span
+      className={`rounded border px-1.5 text-xs leading-5 ${
+        inferred ? "bg-apollo-amber-tint border-apollo-amber-tint-border" : "bg-apollo-surface-2 border-apollo-border"
+      }`}
+    >
+      {mentorshipLabel(type)}
+    </span>
   );
+  return key === null ? badge : <HoverTooltip text={MENTORSHIP_TYPE_DESCRIPTION[key]} wide>{badge}</HoverTooltip>;
 }
 
-/** "Name  cwid", the type label(s) beneath when the mentor carries them. */
-function MentorCell({ mentors }: { mentors: ReadonlyArray<MentorRef & { mentorships?: MentorshipType[] }> }) {
+/** "Department · Institution", "—" when neither is known. */
+function where(m: MentorRef): string {
+  return [m.department, m.institution].filter(Boolean).join(" · ") || "—";
+}
+
+function MentorList({ mentors }: { mentors: ReadonlyArray<MentorPair> }) {
   if (mentors.length === 0) return <span className="text-muted-foreground">—</span>;
   return (
-    <ul className="m-0 list-none p-0">
+    <ul className="m-0 flex list-none flex-col gap-2 p-0">
       {mentors.map((m) => (
         <li key={m.cwid}>
-          <ScholarHoverCard cwid={m.cwid}>
-            <span className="hover:underline">{m.name}</span>
-          </ScholarHoverCard>
-          <span className={CWID_CLASS}>{m.cwid}</span>
-          {m.mentorships?.map((t) => (
-            <div key={mentorshipKey(t)} className="text-muted-foreground text-xs">
-              <TypeLine type={t} />
-            </div>
-          ))}
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <ScholarHoverCard cwid={m.cwid}>
+              <span className="font-medium hover:underline">{m.name}</span>
+            </ScholarHoverCard>
+            <TypeBadge type={m.mentorship} />
+          </div>
+          <div className="text-muted-foreground mt-px text-[13px]">{where(m)}</div>
         </li>
       ))}
     </ul>
   );
 }
 
-/** One cell, one line per mentor in the Mentors column's order, "—" where
- *  the mentor lacks the value (the Department / Institution columns). */
-function MentorLines({
-  mentors,
-  get,
-}: {
-  mentors: ReadonlyArray<MentorRef>;
-  get: (m: MentorRef) => string | null | undefined;
-}) {
-  return (
-    <td className={TD_CLASS}>
-      <ul className="m-0 list-none p-0">
-        {mentors.map((m) => (
-          <li key={m.cwid} className="whitespace-nowrap">
-            {get(m) || <span className="text-muted-foreground">—</span>}
-          </li>
-        ))}
-      </ul>
-    </td>
-  );
-}
-
-// ---- Publications view ----------------------------------------------------
-
-const POSITIONS = ["first", "last", "middle"] as const;
-type Position = (typeof POSITIONS)[number];
-
-function learnerPosition(l: MentoredPubsLearnerOnPub, authorCount: number): Position | null {
-  if (l.authorPosition === null) return null;
-  if (l.authorPosition === 1) return "first";
-  if (l.authorPosition === authorCount) return "last";
-  return "middle";
-}
-
-const windowValue = (inWindow: boolean | null) => (inWindow === null ? "unknown" : inWindow ? "yes" : "no");
-
-const PUB_COLS: Record<string, SortCol<MentoredPubsPublicationRow>> = {
-  title: { key: "title", get: (r) => r.title, dir: "asc" },
-  date: { key: "date", get: (r) => r.dateAdded?.getTime() ?? null, dir: "desc" },
-  year: { key: "year", get: (r) => r.year, dir: "desc" },
-  jif: { key: "jif", get: (r) => r.jif, dir: "desc" },
-  citations: { key: "citations", get: (r) => r.citations, dir: "desc" },
+const WINDOW_BADGE: Record<"yes" | "no" | "unknown", { label: string; className: string }> = {
+  yes: { label: "In window", className: "bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate" },
+  no: { label: "Outside window", className: "bg-apollo-surface-2 border-apollo-border-strong" },
+  unknown: { label: "Window unknown", className: "bg-apollo-surface-2 border-apollo-border-strong" },
 };
 
-function PublicationsView({
-  rows,
-  allMode,
-  filters,
-}: {
-  rows: MentoredPubsPublicationRow[];
-  allMode: boolean;
-  filters: React.ReactNode;
-}) {
-  const facets = React.useMemo(
-    (): Facet<MentoredPubsPublicationRow>[] => [
-      {
-        id: "year",
-        title: "Year",
-        values: (r) => (r.year === null ? [] : [String(r.year)]),
-        compare: (a, b) => Number(b.value) - Number(a.value),
-        collapseAfter: 6,
-      },
-      {
-        id: "position",
-        title: "Learner author position",
-        values: (r) =>
-          r.learners.map((l) => learnerPosition(l, r.authorCount)).filter((p): p is Position => p !== null),
-        label: capitalize,
-        compare: fixedOrder(POSITIONS),
-      },
-      {
-        id: "window",
-        title: "In program window",
-        values: (r) => r.learners.map((l) => windowValue(l.inWindow)),
-        label: capitalize,
-        compare: fixedOrder(["yes", "no", "unknown"]),
-      },
-      { id: "mentor", title: "Mentor", values: (r) => r.mentors.map((m) => m.name), collapseAfter: 8, searchable: true },
-    ],
-    [],
-  );
-  const { filtered, rail } = useFacetRail(rows, facets);
-  const { sorted, sort, onSort } = useSort(filtered, PUB_COLS, "date");
-  const { shown, button } = useRowCap(sorted);
-  const th = { sort, onSort };
-
-  if (rows.length === 0) return <Empty noun="publications" />;
+function WindowBadge({ inWindow }: { inWindow: boolean | null }) {
+  const b = WINDOW_BADGE[inWindow === null ? "unknown" : inWindow ? "yes" : "no"];
   return (
-    <Layout filters={filters} rail={rail} shown={filtered.length} total={rows.length} noun="publications">
-      {filtered.length === 0 ? (
-        <Empty noun="publications" />
-      ) : (
-        <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
-          <table className="w-full border-collapse text-left text-sm" data-testid="mentored-pubs-publications">
-            <thead>
-              <tr>
-                <SortHeader col={PUB_COLS.title} {...th}>
-                  Citation
-                </SortHeader>
-                <SortHeader col={PUB_COLS.date} {...th}>
-                  Date added
-                </SortHeader>
-                <SortHeader col={PUB_COLS.year} {...th}>
-                  Year
-                </SortHeader>
-                <SortHeader col={PUB_COLS.jif} {...th} className="text-right">
-                  Impact factor
-                </SortHeader>
-                <SortHeader col={PUB_COLS.citations} {...th} className="text-right">
-                  Citations
-                </SortHeader>
-                <th className={TH_CLASS}>Learner(s)</th>
-                <th className={TH_CLASS}>Mentor(s)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((p) => {
-                const id = citationIdentifier(p.pmid);
-                return (
-                  <tr key={p.pmid} data-testid={`mentored-pubs-pub-${p.pmid}`}>
-                    <td className={TD_CLASS}>
-                      {p.citation}{" "}
-                      <span className="whitespace-nowrap">
-                        {id.label}:{" "}
-                        {id.href ? (
-                          <a
-                            href={id.href}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-apollo-slate hover:underline"
-                          >
-                            {id.value}
-                          </a>
-                        ) : (
-                          id.value
-                        )}
-                      </span>
-                    </td>
-                    <td className={`${TD_CLASS} whitespace-nowrap tabular-nums`}>
-                      {p.dateAdded ? p.dateAdded.toISOString().slice(0, 10) : "—"}
-                    </td>
-                    <td className={`${TD_CLASS} tabular-nums`}>{p.year ?? "—"}</td>
-                    <td className={NUM_CLASS}>{p.jif ?? "—"}</td>
-                    <td className={NUM_CLASS}>{p.citations ?? "—"}</td>
-                    <td className={TD_CLASS}>
-                      <ul className="m-0 list-none p-0">
-                        {p.learners.map((l) => {
-                          const pos = learnerPosition(l, p.authorCount);
-                          return (
-                            <li key={l.cwid} className="whitespace-nowrap">
-                              <ScholarHoverCard cwid={l.cwid}>
-                                <span className="hover:underline">{learnerName(l)}</span>
-                              </ScholarHoverCard>
-                              <span className={CWID_CLASS}>{l.cwid}</span>
-                              {pos === "first" && (
-                                <span className={CHIP_CLASS} title="Learner is first author">
-                                  1st author
-                                </span>
-                              )}
-                              {pos === "last" && (
-                                <span className={CHIP_CLASS} title="Learner is last author">
-                                  last author
-                                </span>
-                              )}
-                              <span
-                                className={CHIP_CLASS}
-                                title={
-                                  l.inWindow === null
-                                    ? "Program window unknown (no graduation or entry year on record)"
-                                    : "Publication year inside this learner's program window"
-                                }
-                              >
-                                In window: {l.inWindow === null ? "—" : l.inWindow ? "Yes" : "No"}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </td>
-                    <td className={TD_CLASS}>
-                      {allMode && !p.withMentor ? (
-                        <span className="text-muted-foreground">No mentor co-author</span>
-                      ) : (
-                        <MentorCell mentors={p.mentors} />
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {button}
-    </Layout>
+    <span
+      className={`rounded border px-1.5 text-xs leading-5 whitespace-nowrap ${b.className}`}
+      title={inWindow === null ? "No graduation or entry year on record, so no window to count against" : undefined}
+    >
+      {b.label}
+    </span>
   );
 }
 
-// ---- Summary view (one row per learner) --------------------------------------------------------
+function positionLabel(l: MentoredPubsLearnerOnPub, authorCount: number): string | null {
+  if (l.authorPosition === null) return null;
+  if (l.authorPosition === 1) return "1st author";
+  if (l.authorPosition === authorCount) return "last author";
+  return null;
+}
+
+/** One publication: citation + identifier, the numbers, then who is on it.
+ *  `focus` (a learner's expanded row) shows only that learner's badge. */
+function PubItem({
+  p,
+  allMode,
+  focus,
+}: {
+  p: MentoredPubsPublicationRow;
+  allMode: boolean;
+  focus?: string;
+}) {
+  const id = citationIdentifier(p.pmid);
+  const learners = focus ? p.learners.filter((l) => l.cwid === focus) : p.learners;
+  return (
+    <li className="border-apollo-border flex flex-col gap-1.5 border-b py-3.5 last:border-b-0" data-testid={`mentored-pubs-pub-${p.pmid}`}>
+      <p className="text-[15px] leading-snug">
+        {p.citation}{" "}
+        <span className="whitespace-nowrap">
+          {id.label}:{" "}
+          {id.href ? (
+            <a href={id.href} target="_blank" rel="noopener noreferrer" className="text-apollo-slate hover:underline">
+              {id.value}
+            </a>
+          ) : (
+            id.value
+          )}
+        </span>
+      </p>
+      <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
+        {focus && learners[0] && <WindowBadge inWindow={learners[0].inWindow} />}
+        <span>JIF {p.jif ?? "—"}</span>
+        <span>{p.citations === null ? "Citations —" : p.citations === 1 ? "1 citation" : `${p.citations} citations`}</span>
+        <span>Added to PubMed {p.dateAdded ? p.dateAdded.toISOString().slice(0, 10) : "—"}</span>
+      </div>
+      <dl className="m-0 flex flex-col gap-1 text-[13px]">
+        {!focus && (
+          <div className="flex flex-wrap gap-x-2">
+            <dt className="text-muted-foreground">{learners.length === 1 ? "Learner:" : "Learners:"}</dt>
+            <dd className="m-0 flex flex-wrap gap-x-4 gap-y-1">
+              {learners.map((l) => {
+                const pos = positionLabel(l, p.authorCount);
+                return (
+                  <span key={l.cwid} className="inline-flex flex-wrap items-center gap-x-1.5">
+                    <ScholarHoverCard cwid={l.cwid}>
+                      <span className="font-medium hover:underline">{learnerName(l)}</span>
+                    </ScholarHoverCard>
+                    <span className="text-muted-foreground font-mono text-xs">{l.cwid}</span>
+                    {pos && <span className="text-muted-foreground">{pos}</span>}
+                    <WindowBadge inWindow={l.inWindow} />
+                  </span>
+                );
+              })}
+            </dd>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-x-2">
+          <dt className="text-muted-foreground">{p.mentors.length === 1 ? "Mentor:" : "Mentors:"}</dt>
+          <dd className="m-0 flex flex-wrap gap-x-4 gap-y-1">
+            {allMode && !p.withMentor ? (
+              <span className="text-muted-foreground">No mentor co-author</span>
+            ) : p.mentors.length === 0 ? (
+              <span className="text-muted-foreground">—</span>
+            ) : (
+              p.mentors.map((m) => (
+                <span key={m.cwid} className="inline-flex flex-wrap items-center gap-x-1.5">
+                  <ScholarHoverCard cwid={m.cwid}>
+                    <span className="font-medium hover:underline">{m.name}</span>
+                  </ScholarHoverCard>
+                  {m.mentorships.map((t) => (
+                    <TypeBadge key={mentorshipKey(t)} type={t} />
+                  ))}
+                </span>
+              ))
+            )}
+          </dd>
+        </div>
+      </dl>
+    </li>
+  );
+}
+
+function ShowMoreRow({
+  label,
+  hasMore,
+  onMore,
+  testId,
+}: {
+  label: string;
+  hasMore: boolean;
+  onMore: () => void;
+  testId: string;
+}) {
+  return (
+    <div className="mt-3.5 flex flex-wrap items-center justify-between gap-3">
+      <span className="text-muted-foreground text-[13px]" data-testid={`${testId}-range`}>
+        {label}
+      </span>
+      {hasMore && (
+        <Button type="button" variant="outline" size="sm" onClick={onMore} data-testid={`${testId}-more`}>
+          Show 25 more
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ---- Learners ------------------------------------------------------------------
 
 const num = (key: string, get: (r: MentoredPubsSummaryRow) => number | null): SortCol<MentoredPubsSummaryRow> => ({
   key,
@@ -497,208 +275,349 @@ const num = (key: string, get: (r: MentoredPubsSummaryRow) => number | null): So
   dir: "desc",
 });
 const LEARNER_COLS: Record<string, SortCol<MentoredPubsSummaryRow>> = {
-  gradYear: num("gradYear", (r) => r.gradYear),
+  grad: num("grad", (r) => r.gradYear),
   learner: { key: "learner", get: (r) => learnerName(r) || null, dir: "asc" },
-  pubsInWindow: num("pubsInWindow", (r) => r.pubsInWindow),
-  withMentorInWindow: num("withMentorInWindow", (r) => r.withMentorInWindow),
-  pubsAllTime: num("pubsAllTime", (r) => r.pubsAllTime),
-  highImpactInWindow: num("highImpactInWindow", (r) => r.highImpactInWindow),
-  firstAuthorInWindow: num("firstAuthorInWindow", (r) => r.firstAuthorInWindow),
+  win: num("win", (r) => r.pubsInWindow),
+  withMentor: num("withMentor", (r) => r.withMentorInWindow),
+  all: num("all", (r) => r.pubsAllTime),
+  if10: num("if10", (r) => r.highImpactInWindow),
+  first: num("first", (r) => r.firstAuthorInWindow),
 };
 
-function LearnersView({
-  rows,
-  allMode,
-  highImpactThreshold,
-  filters,
-}: {
-  rows: MentoredPubsSummaryRow[];
-  allMode: boolean;
-  highImpactThreshold: number;
-  filters: React.ReactNode;
-}) {
-  const facets = React.useMemo(
-    (): Facet<MentoredPubsSummaryRow>[] => [
-      {
-        id: "window",
-        title: "In program window",
-        values: (r) => [r.pubsInWindow === null ? "unknown" : "known"],
-        label: capitalize,
-        compare: fixedOrder(["known", "unknown"]),
-      },
-      { id: "mentor", title: "Mentor", values: (r) => r.mentors.map((m) => m.name), collapseAfter: 8, searchable: true },
-    ],
-    [],
-  );
-  const { filtered, rail } = useFacetRail(rows, facets);
-  const { sorted, sort, onSort } = useSort(filtered, LEARNER_COLS, "gradYear");
-  const { shown, button } = useRowCap(sorted);
-  const th = { sort, onSort, className: "text-right" };
-  const C = LEARNER_COLS;
+type SortState = { key: string; dir: SortDir };
 
-  if (rows.length === 0) return <Empty noun="learners" />;
+function SortButton({
+  col,
+  sort,
+  onSort,
+  title,
+  children,
+}: {
+  col: SortCol<MentoredPubsSummaryRow>;
+  sort: SortState;
+  onSort: (key: string) => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const active = sort.key === col.key;
   return (
-    <Layout filters={filters} rail={rail} shown={filtered.length} total={rows.length} noun="learners">
-      {filtered.length === 0 ? (
-        <Empty noun="learners" />
-      ) : (
-        <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
-          <table className="w-full border-collapse text-left text-sm" data-testid="mentored-pubs-summary">
-            <thead>
-              <tr>
-                <SortHeader col={C.gradYear} sort={sort} onSort={onSort}>
-                  Grad year
-                </SortHeader>
-                <SortHeader col={C.learner} sort={sort} onSort={onSort}>
-                  Learner
-                </SortHeader>
-                {/* No Program column: every Type line already names the program
-                    (roster "MD" / "MD-PhD (program office)" / "ECR", "PhD thesis
-                    advisor", "Postdoc · faculty-asserted", "<kind> · likely
-                    mentee…"), so a second column read "MD | MD" (2026-09-20).
-                    The workbook keeps its Program column. */}
-                <th className={TH_CLASS}>Type of mentorship</th>
-                <th className={TH_CLASS}>Mentors</th>
-                {/* One line per mentor, in the Mentors column's order (as Type is). */}
-                <th className={TH_CLASS}>Department</th>
-                <th className={TH_CLASS}>Institution</th>
-                {allMode ? (
-                  <>
-                    <SortHeader col={C.pubsInWindow} {...th}>
-                      All pubs (in window)
-                    </SortHeader>
-                    <SortHeader col={C.withMentorInWindow} {...th}>
-                      With a mentor (in window)
-                    </SortHeader>
-                    <SortHeader col={C.firstAuthorInWindow} {...th}>
-                      First author (in window)
-                    </SortHeader>
-                    <SortHeader col={C.highImpactInWindow} {...th}>
-                      Impact factor &ge; {highImpactThreshold} (in window)
-                    </SortHeader>
-                    <SortHeader col={C.pubsAllTime} {...th}>
-                      All-time total
-                    </SortHeader>
-                  </>
-                ) : (
-                  <>
-                    <SortHeader col={C.pubsInWindow} {...th}>
-                      In window
-                    </SortHeader>
-                    <SortHeader col={C.pubsAllTime} {...th}>
-                      All years
-                    </SortHeader>
-                    <SortHeader col={C.highImpactInWindow} {...th}>
-                      Impact factor &ge; {highImpactThreshold}
-                    </SortHeader>
-                    <SortHeader col={C.firstAuthorInWindow} {...th}>
-                      First author
-                    </SortHeader>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((r) => (
-                <tr key={r.cwid} data-testid={`mentored-pubs-learner-${r.cwid}`}>
-                  <td className={TD_CLASS}>{r.gradYear ?? "—"}</td>
-                  <td className={TD_CLASS}>
-                    <ScholarHoverCard cwid={r.cwid}>
-                      <span className="hover:underline">{learnerName(r)}</span>
-                    </ScholarHoverCard>
-                    <span className={CWID_CLASS}>{r.cwid}</span>
-                    {r.entryYearSource === "fallback" && (
-                      <span className={CHIP_CLASS} title="Entry year not on the pairing sheet; window assumes a 4-year track.">
-                        (entry est. {r.entryYear})
-                      </span>
-                    )}
-                  </td>
-                  {/* One line per mentor, in the Mentors column's order. */}
-                  <td className={TD_CLASS}>
-                    <ul className="m-0 list-none p-0">
-                      {r.mentors.map((m) => (
-                        <li key={m.cwid} className="whitespace-nowrap">
-                          <TypeLine type={m.mentorship} />
-                        </li>
-                      ))}
-                    </ul>
-                  </td>
-                  <td className={TD_CLASS}>
-                    <MentorCell mentors={r.mentors} />
-                  </td>
-                  <MentorLines mentors={r.mentors} get={(m) => m.department} />
-                  <MentorLines mentors={r.mentors} get={(m) => m.institution} />
-                  {/* "—" = no window to count against (no grad or entry year). */}
-                  {allMode ? (
-                    <>
-                      <td className={NUM_CLASS}>{r.pubsInWindow ?? "—"}</td>
-                      <td className={NUM_CLASS}>{r.withMentorInWindow ?? "—"}</td>
-                      <td className={NUM_CLASS}>{r.firstAuthorInWindow ?? "—"}</td>
-                      <td className={NUM_CLASS}>{r.highImpactInWindow ?? "—"}</td>
-                      <td className={NUM_CLASS}>{r.pubsAllTime}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td className={NUM_CLASS}>{r.pubsInWindow ?? "—"}</td>
-                      <td className={NUM_CLASS}>{r.pubsAllTime}</td>
-                      <td className={NUM_CLASS}>{r.highImpactInWindow ?? "—"}</td>
-                      <td className={NUM_CLASS}>{r.firstAuthorInWindow ?? "—"}</td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {button}
-    </Layout>
+    <button
+      type="button"
+      onClick={() => onSort(col.key)}
+      title={title}
+      className="inline-flex cursor-pointer items-end gap-1 text-inherit uppercase hover:underline"
+    >
+      {children}
+      {active && <span aria-hidden>{sort.dir === "asc" ? "↑" : "↓"}</span>}
+    </button>
   );
 }
 
-type View = "summary" | "publications";
+function ariaSort(sort: SortState, key: string): "ascending" | "descending" | "none" {
+  return sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
+}
 
-const TAB_ACTIVE = "border-apollo-maroon inline-block border-b-2 py-2.5 text-base font-medium";
-const TAB_IDLE =
-  "text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-2.5 text-base";
+/** A count cell's text: "—" for an unknowable window, the number otherwise;
+ *  zeros muted, other numbers semibold (the mockup). */
+function Count({ v }: { v: number | null }) {
+  if (v === null) return <span className="text-muted-foreground">—</span>;
+  return <span className={v === 0 ? "text-muted-foreground" : "font-semibold"}>{v.toLocaleString()}</span>;
+}
+
+function LearnersView({
+  rows,
+  publications,
+  allMode,
+  highImpactThreshold,
+  tail,
+  query,
+}: {
+  rows: MentoredPubsSummaryRow[];
+  publications: MentoredPubsPublicationRow[];
+  allMode: boolean;
+  highImpactThreshold: number;
+  tail: number;
+  query: string;
+}) {
+  const [sort, setSort] = React.useState<SortState>({ key: "grad", dir: "desc" });
+  const [expanded, setExpanded] = React.useState<string | null>(null);
+  const onSort = (key: string) =>
+    setSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: LEARNER_COLS[key].dir },
+    );
+  const q = query.trim().toLowerCase();
+  const found = React.useMemo(
+    () =>
+      q
+        ? rows.filter((r) =>
+            [learnerName(r), r.cwid, ...r.mentors.flatMap((m) => [m.name, m.cwid])].some((s) =>
+              s.toLowerCase().includes(q),
+            ),
+          )
+        : rows,
+    [rows, q],
+  );
+  const sorted = React.useMemo(() => sortRows(found, LEARNER_COLS[sort.key], sort.dir), [found, sort]);
+  const { visible, hasMore, showMore, rangeLabel } = useShowMore(sorted);
+  const pubsOf = React.useMemo(() => {
+    const m = new Map<string, MentoredPubsPublicationRow[]>();
+    for (const p of publications) for (const l of p.learners) m.set(l.cwid, [...(m.get(l.cwid) ?? []), p]);
+    return m;
+  }, [publications]);
+
+  if (rows.length === 0 || found.length === 0) {
+    return (
+      <p className="text-muted-foreground py-7 text-sm" data-testid="mentored-pubs-empty">
+        {rows.length === 0 ? "No learners match these filters." : `No learners or mentors match “${query.trim()}”.`}
+      </p>
+    );
+  }
+  const C = LEARNER_COLS;
+  const windowRule = `Entry year ≤ publication year ≤ graduation year + ${tail}`;
+  const numCols: Array<{ col: SortCol<MentoredPubsSummaryRow>; label: string; title: string; get: (r: MentoredPubsSummaryRow) => number | null }> = [
+    { col: C.win, label: "In window", title: windowRule, get: (r) => r.pubsInWindow },
+    ...(allMode
+      ? [{ col: C.withMentor, label: "With a mentor", title: "In window, with a mentor on the byline", get: (r: MentoredPubsSummaryRow) => r.withMentorInWindow }]
+      : []),
+    { col: C.all, label: "All years", title: "Every year, in window or not", get: (r) => r.pubsAllTime },
+    {
+      col: C.if10,
+      label: `JIF ≥ ${highImpactThreshold}`,
+      title: `In window, in a journal with Journal Impact Factor ≥ ${highImpactThreshold}`,
+      get: (r) => r.highImpactInWindow,
+    },
+    { col: C.first, label: "First author", title: "In window, learner is first author", get: (r) => r.firstAuthorInWindow },
+  ];
+  const colSpan = 2 + numCols.length;
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-left text-sm" data-testid="mentored-pubs-summary">
+          <thead className="bg-apollo-surface-2">
+            <tr>
+              <th className={TH} aria-sort={sort.key === "learner" || sort.key === "grad" ? ariaSort(sort, sort.key) : "none"}>
+                <span className="inline-flex flex-wrap items-end gap-x-2">
+                  <SortButton col={C.learner} sort={sort} onSort={onSort}>
+                    Learner
+                  </SortButton>
+                  <span aria-hidden>·</span>
+                  <SortButton col={C.grad} sort={sort} onSort={onSort} title="Sort by graduation year">
+                    Grad year
+                  </SortButton>
+                </span>
+              </th>
+              <th className={`${TH} hidden md:table-cell`}>Mentors</th>
+              {numCols.map((c) => (
+                <th key={c.col.key} className={`${TH} hidden w-16 text-right md:table-cell`} aria-sort={ariaSort(sort, c.col.key)}>
+                  <SortButton col={c.col} sort={sort} onSort={onSort} title={c.title}>
+                    {c.label}
+                  </SortButton>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => {
+              const has = r.pubsAllTime > 0;
+              const open = has && expanded === r.cwid;
+              const toggle = () => has && setExpanded((cur) => (cur === r.cwid ? null : r.cwid));
+              const mine = open
+                ? [...(pubsOf.get(r.cwid) ?? [])].sort(
+                    (a, b) => compareNullsLast(a.year, b.year, "desc") || compareNullsLast(a.dateAdded?.getTime() ?? null, b.dateAdded?.getTime() ?? null, "desc"),
+                  )
+                : [];
+              return (
+                <React.Fragment key={r.cwid}>
+                  <tr
+                    className={`border-apollo-border hover:bg-apollo-page border-t ${has ? "cursor-pointer" : ""} ${open ? "bg-apollo-page" : ""}`}
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("a, button")) return;
+                      toggle();
+                    }}
+                    data-testid={`mentored-pubs-learner-${r.cwid}`}
+                  >
+                    <td className={TD}>
+                      <div className="flex items-start gap-1.5">
+                        {has ? (
+                          <button
+                            type="button"
+                            onClick={toggle}
+                            aria-expanded={open}
+                            aria-label={`${open ? "Hide" : "Show"} publications of ${learnerName(r)}`}
+                            className="text-muted-foreground hover:text-foreground mt-0.5 -ml-1 shrink-0"
+                          >
+                            {open ? <ChevronDown className="size-4" aria-hidden /> : <ChevronRight className="size-4" aria-hidden />}
+                          </button>
+                        ) : (
+                          <span className="w-3 shrink-0" aria-hidden />
+                        )}
+                        <div className="min-w-0">
+                          <ScholarHoverCard cwid={r.cwid}>
+                            <span className="font-semibold leading-snug hover:underline">{learnerName(r) || r.cwid}</span>
+                          </ScholarHoverCard>
+                          <div className="text-muted-foreground mt-0.5 flex flex-wrap gap-x-1.5 text-[13px]">
+                            <span className="font-mono text-xs leading-5">{r.cwid}</span>
+                            <span>{r.gradYear !== null ? `Grad ${r.gradYear}` : "No grad year"}</span>
+                            {r.entryYearSource === "fallback" && (
+                              <span title="Entry year not on the pairing sheet; the window assumes a 4-year track.">
+                                (entry est. {r.entryYear})
+                              </span>
+                            )}
+                          </div>
+                          {/* Below md: the mentors and the numbers stack here. */}
+                          <div className="mt-2.5 md:hidden" data-testid="mentored-pubs-stacked">
+                            <MentorList mentors={r.mentors} />
+                            <dl className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-x-3 gap-y-1 text-[13px]">
+                              {numCols.map((c) => (
+                                <div key={c.col.key} className="flex items-baseline justify-between gap-1.5">
+                                  <dt className="text-muted-foreground">{c.label}</dt>
+                                  <dd className="m-0 tabular-nums">
+                                    <Count v={c.get(r)} />
+                                  </dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className={`${TD} hidden md:table-cell`}>
+                      <MentorList mentors={r.mentors} />
+                    </td>
+                    {numCols.map((c) => (
+                      <td key={c.col.key} className={NUM_TD}>
+                        <Count v={c.get(r)} />
+                      </td>
+                    ))}
+                  </tr>
+                  {open && (
+                    <tr className="bg-apollo-page border-apollo-border border-t" data-testid={`mentored-pubs-expanded-${r.cwid}`}>
+                      <td colSpan={colSpan} className="px-4 pb-1 md:pl-10">
+                        <ol className="m-0 list-none p-0">
+                          {mine.map((p) => (
+                            <PubItem key={p.pmid} p={p} allMode={allMode} focus={r.cwid} />
+                          ))}
+                        </ol>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <ShowMoreRow
+        label={`${rangeLabel} ${found.length === 1 ? "learner" : "learners"} · select a row to see its publications`}
+        hasMore={hasMore}
+        onMore={showMore}
+        testId="mentored-pubs-learners"
+      />
+    </>
+  );
+}
+
+// ---- Publications ----------------------------------------------------------------
+
+export const PUB_SORTS = {
+  date: { label: "Recently added to PubMed", col: { key: "date", get: (r) => r.dateAdded?.getTime() ?? null, dir: "desc" } },
+  year: { label: "Newest first", col: { key: "year", get: (r) => r.year, dir: "desc" } },
+  jif: { label: "Journal Impact Factor", col: { key: "jif", get: (r) => r.jif, dir: "desc" } },
+  citations: { label: "Most cited", col: { key: "citations", get: (r) => r.citations, dir: "desc" } },
+  title: { label: "Title A–Z", col: { key: "title", get: (r) => r.title, dir: "asc" } },
+} satisfies Record<string, { label: string; col: SortCol<MentoredPubsPublicationRow> }>;
+type PubSort = keyof typeof PUB_SORTS;
+
+function PublicationsView({
+  rows,
+  allMode,
+  sort,
+}: {
+  rows: MentoredPubsPublicationRow[];
+  allMode: boolean;
+  sort: PubSort;
+}) {
+  const sorted = React.useMemo(() => {
+    const { col } = PUB_SORTS[sort];
+    return sortRows(rows, col, col.dir);
+  }, [rows, sort]);
+  const { visible, hasMore, showMore, rangeLabel } = useShowMore(sorted);
+  if (rows.length === 0) {
+    return (
+      <p className="text-muted-foreground py-7 text-sm" data-testid="mentored-pubs-empty">
+        No publications match these filters.
+      </p>
+    );
+  }
+  return (
+    <>
+      <ol className="m-0 list-none p-0" data-testid="mentored-pubs-publications">
+        {visible.map((p) => (
+          <PubItem key={p.pmid} p={p} allMode={allMode} />
+        ))}
+      </ol>
+      <ShowMoreRow
+        label={`${rangeLabel} ${rows.length === 1 ? "publication" : "publications"}`}
+        hasMore={hasMore}
+        onMore={showMore}
+        testId="mentored-pubs-publications"
+      />
+    </>
+  );
+}
+
+// ---- the island ---------------------------------------------------------------------
 
 export function MentoredPublicationsTable({
   view: initialView,
   viewHrefs,
-  downloadHref,
   summary,
   publications,
   pubsMode,
   highImpactThreshold,
-  children,
+  tail,
+  initialQuery = "",
+  formIds,
 }: {
   view: View;
   /** The page URL for each view with every other param kept — the tab's
    *  href (no-JS fallback) and what a click writes into the address bar. */
   viewHrefs: Record<View, string>;
-  downloadHref: string;
   summary: MentoredPubsSummaryRow[];
   publications: MentoredPubsPublicationRow[];
   pubsMode: "mentored" | "all";
   /** `HIGH_IMPACT_THRESHOLD` — its module reads `@/lib/db`, so it is a prop. */
   highImpactThreshold: number;
-  /** The page's server-side filter form (`AutoSubmitForm`
-   *  `#mentored-pubs-filters`), seated at the top of the rail. Children, not
-   *  a named prop, so a server component can hand it across the boundary
-   *  without a wrapper. */
-  children?: React.ReactNode;
+  /** The counting window's years past graduation (the In window hover). */
+  tail: number;
+  /** `q` from the URL: the find box's starting text. */
+  initialQuery?: string;
+  /** The rail forms' ids (desktop + phone sheet) the hidden `view` / `q`
+   *  inputs bind to. */
+  formIds: ReadonlyArray<string>;
 }) {
   const [view, setView] = React.useState<View>(initialView);
+  const [query, setQuery] = React.useState(initialQuery);
+  const [pubSort, setPubSort] = React.useState<PubSort>("date");
   const allMode = pubsMode === "all";
+
+  // The server's hrefs never carry `q` (the body strips it), so appending is enough.
+  const withQuery = (href: string, q: string) =>
+    q.trim() ? `${href}${href.includes("?") ? "&" : "?"}q=${encodeURIComponent(q.trim())}` : href;
   const pick = (next: View) => (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // new tab / window: let the link be
     e.preventDefault();
     setView(next);
-    window.history.replaceState(null, "", viewHrefs[next]);
+    window.history.replaceState(null, "", withQuery(viewHrefs[next], query));
+  };
+  const onQuery = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setQuery(e.target.value);
+    window.history.replaceState(null, "", withQuery(viewHrefs[view], e.target.value));
   };
   const tab = (v: View, label: string) => (
     <a
-      href={viewHrefs[v]}
+      href={withQuery(viewHrefs[v], query)}
       onClick={pick(v)}
       className={view === v ? TAB_ACTIVE : TAB_IDLE}
       aria-current={view === v ? "page" : undefined}
@@ -707,39 +626,58 @@ export function MentoredPublicationsTable({
       {label}
     </a>
   );
-  const totalInWindow = summary.reduce((n, r) => n + (r.pubsInWindow ?? 0), 0);
-  const totalAllTime = summary.reduce((n, r) => n + r.pubsAllTime, 0);
+
   return (
     <>
-      <input type="hidden" name="view" value={view} form="mentored-pubs-filters" />
-      <nav className="border-apollo-border mt-4 flex gap-4 border-b" aria-label="View">
-        {tab("summary", "Summary")}
-        {tab("publications", "Publications")}
-      </nav>
-      <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
-        <p data-testid="mentored-pubs-total">
-          <strong>{summary.length.toLocaleString()}</strong>{" "}
-          {summary.length === 1 ? "learner" : "learners"} ·{" "}
-          <strong>{totalInWindow.toLocaleString()}</strong> publications in window ·{" "}
-          <strong>{totalAllTime.toLocaleString()}</strong> all years ·{" "}
-          <strong>{publications.length.toLocaleString()}</strong> distinct{" "}
-          {publications.length === 1 ? "publication" : "publications"}
-        </p>
-        <Button asChild variant="apollo" size="sm">
-          <a href={downloadHref} data-testid="mentored-pubs-download">
-            <Download className="size-4" aria-hidden />
-            Download .xlsx
-          </a>
-        </Button>
+      {formIds.map((id) => (
+        <React.Fragment key={id}>
+          <input type="hidden" name="view" value={view} form={id} />
+          {query.trim() && <input type="hidden" name="q" value={query.trim()} form={id} />}
+        </React.Fragment>
+      ))}
+      <div className="border-apollo-border mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b">
+        <nav className="flex gap-6" aria-label="Report views">
+          {tab("summary", `Learners (${summary.length.toLocaleString()})`)}
+          {tab("publications", `Publications (${publications.length.toLocaleString()})`)}
+        </nav>
+        {view === "summary" ? (
+          <input
+            type="search"
+            value={query}
+            onChange={onQuery}
+            placeholder="Find a learner or mentor"
+            aria-label="Find a learner or mentor"
+            className="border-apollo-border-strong bg-apollo-surface mb-2 h-8 w-full rounded-md border px-2.5 text-sm sm:w-56"
+            data-testid="mentored-pubs-find"
+          />
+        ) : (
+          <label className="mb-2 flex items-center gap-2 text-[13px]">
+            <span className="text-muted-foreground">Sort</span>
+            <select
+              value={pubSort}
+              onChange={(e) => setPubSort(e.target.value as PubSort)}
+              className="border-apollo-border-strong bg-apollo-surface h-8 rounded-md border px-2 text-[13px]"
+              data-testid="mentored-pubs-sort"
+            >
+              {(Object.keys(PUB_SORTS) as PubSort[]).map((k) => (
+                <option key={k} value={k}>
+                  {PUB_SORTS[k].label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       {view === "publications" ? (
-        <PublicationsView rows={publications} allMode={allMode} filters={children} />
+        <PublicationsView rows={publications} allMode={allMode} sort={pubSort} />
       ) : (
         <LearnersView
           rows={summary}
+          publications={publications}
           allMode={allMode}
           highImpactThreshold={highImpactThreshold}
-          filters={children}
+          tail={tail}
+          query={query}
         />
       )}
     </>
