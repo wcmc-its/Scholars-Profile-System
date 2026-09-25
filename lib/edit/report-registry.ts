@@ -41,7 +41,10 @@
  * `tests/unit/person-filter-parity.test.ts`.
  *   - Reserved params, same meaning everywhere: `type` (raw roleCategory,
  *     repeated), `unit` (`dept:` / `div:` / `center:` / `inst:` + CODE,
- *     repeated, OR'd), `from` / `to` (year window), `q` (name / CWID search).
+ *     repeated, OR'd; `div:` includes a manual division's hand-added members),
+ *     `list` (a stored CWID list's id, `lib/edit/cwid-list.ts`, resolved by the
+ *     caller and passed to the builders as `listCwids`), `from` / `to` (year
+ *     window), `q` (name / CWID search).
  *     [enforced for `type` / `unit` reads: report-filter-guard; the rest review]
  *   - Who-filters: `parsePersonFilter` + `personFilterSql` (or
  *     `personFilterWhere`) from `lib/edit/person-filter.ts`, the rail from
