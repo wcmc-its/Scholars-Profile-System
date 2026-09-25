@@ -17,7 +17,7 @@ const CENTER = "TEST_CENTER";
 /** A minimal fake client — only the three tables the query touches. */
 function fakeClient(overrides: {
   memberships?: Array<{ cwid: string; startDate: Date | null; endDate: Date | null }>;
-  scholars?: Array<{ cwid: string; preferredName: string }>;
+  scholars?: Array<{ cwid: string; preferredName: string; primaryDepartment?: string | null }>;
   links?: Array<{
     cwid: string;
     protocolNumber: string;
@@ -107,6 +107,7 @@ describe("loadClinicalTrialsReport", () => {
       {
         cwid: "aaa1001",
         personName: "Ada Faculty",
+        department: null,
         role: "Principal Investigator",
         protocolNumber: "P-1",
         nctNumber: "NCT00000001",
@@ -185,5 +186,15 @@ describe("loadClinicalTrialsReport", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("Withdrawn");
     expect(rows[0].isActive).toBe(false);
+  });
+
+  it("carries the member's primary department onto each row", async () => {
+    const client = fakeClient({
+      memberships: [{ cwid: "aaa1001", startDate: null, endDate: null }],
+      scholars: [{ cwid: "aaa1001", preferredName: "Ada Faculty", primaryDepartment: "Medicine" }],
+      links: [{ cwid: "aaa1001", protocolNumber: "P-1", role: "Principal Investigator", trial: trial() }],
+    });
+    const rows = await loadClinicalTrialsReport(client, CENTER);
+    expect(rows[0].department).toBe("Medicine");
   });
 });

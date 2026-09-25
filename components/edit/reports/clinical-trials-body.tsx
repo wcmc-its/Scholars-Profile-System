@@ -1,102 +1,77 @@
 /**
- * Report 5 — "Clinical Trials". Lists every current Cancer Center member's
- * clinical-trial links (Principal Investigator or Investigator), one row per
- * (person, trial) pair. The query itself lives in
- * `lib/center-collaboration/clinical-trials-report.ts` — see that file's doc
- * comment for the membership-resolution and data-scope decisions (uncarved
- * membership, no CLINICAL_TRIALS_SECTION gate, withdrawn trials kept).
+ * Report 5 — "Clinical Trials" body (reports redesign, 2026-09-25; mockup
+ * `Clinical Trials Redesign.dc.html`, plan decision D4). The center's trials,
+ * one per OnCore protocol number, with the members on each, plus a By member
+ * roll-up; search / status / phase filters narrow the tabs, the headline
+ * numbers and the `.xlsx` (`/api/edit/reports/clinical-trials`).
  *
- * The body of what was `app/edit/reports/5/page.tsx`, moved verbatim into the
- * registry shape (`lib/edit/report-registry.ts`): the session / gate / shell /
- * header frame is the dynamic page's; this owns only the report. Unit-gated,
- * center-only (`REPORT_NUMBERS_BY_KIND`). The count-aware subtitle `<p>` is
- * returned as `subtitle` (the header's children).
+ * The query is `loadClinicalTrialsReport`
+ * (`lib/center-collaboration/clinical-trials-report.ts`: current members,
+ * uncarved, no public-profile flag, withdrawn and suspended trials kept);
+ * the grouping, filters and totals are `lib/edit/clinical-trials-report.ts`,
+ * shared with the download. The filtering itself runs in the client half
+ * (`clinical-trials-results.tsx`), which keeps the URL in step.
+ *
+ * Unit-gated, center-only (`REPORT_NUMBERS_BY_KIND`); the frame is the
+ * dynamic page's (`lib/edit/report-registry.ts`).
  */
+import { ClinicalTrialsResults } from "@/components/edit/reports/clinical-trials-results";
+import { ReportCard } from "@/components/edit/reports/report-ui";
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { loadClinicalTrialsReport } from "@/lib/center-collaboration/clinical-trials-report";
 import { db } from "@/lib/db";
+import { groupTrials, parseClinicalTrialsParams } from "@/lib/edit/clinical-trials-report";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
-import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 
-/** ClinicalTrials.gov study page for an NCT id — same URL form as the public
- *  profile's `ctgovUrl` (`components/profile/clinical-trials-section.tsx`);
- *  that helper isn't exported, so this mirrors it rather than importing it. */
-function ctgovUrl(nct: string): string {
-  return `https://clinicaltrials.gov/study/${encodeURIComponent(nct)}`;
+function toSearchParams(sp: UnitReportProps["searchParams"]): URLSearchParams {
+  const out = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) out.append(k, x);
+  }
+  return out;
 }
 
-/** Report 5's body: one row per (current member, clinical trial) pair. */
-export async function renderClinicalTrialsReport({ code }: UnitReportProps): Promise<ReportRender> {
-  const rows = await loadClinicalTrialsReport(db.read, code);
+export async function renderClinicalTrialsReport({
+  code,
+  searchParams,
+  basePath,
+}: UnitReportProps): Promise<ReportRender> {
+  const sp = toSearchParams(searchParams);
+  const params = parseClinicalTrialsParams(sp);
+  const trials = groupTrials(await loadClinicalTrialsReport(db.read, code));
+  const center = sp.get("center");
+  const keepQuery = center ? `center=${encodeURIComponent(center)}` : "";
 
   return {
     subtitle: (
-      <p className="text-muted-foreground mb-4 text-sm">
-        {rows.length === 0
-          ? "Current members' clinical-trial links (Principal Investigator or Investigator)."
-          : `${rows.length} clinical-trial link${rows.length === 1 ? "" : "s"} across the center's current members.`}
+      <p className="text-muted-foreground text-sm">
+        Clinical trials that current center members lead, with phase, sponsor and accrual status.
       </p>
     ),
-    main:
-      rows.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          No clinical trial links found for this center&rsquo;s current members.
-        </p>
-      ) : (
-        <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
-          <table className="w-full text-sm" data-testid="clinical-trials-report-table">
-            <thead>
-              <tr className="text-muted-foreground border-apollo-border bg-apollo-surface-2 border-b text-left">
-                <th className="px-4 py-2.5 font-medium">Person</th>
-                <th className="px-4 py-2.5 font-medium">Role</th>
-                <th className="px-4 py-2.5 font-medium">Trial</th>
-                <th className="px-4 py-2.5 font-medium">Phase</th>
-                <th className="px-4 py-2.5 font-medium">Sponsor</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
-                <th className="px-4 py-2.5 font-medium">NCT</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr
-                  key={`${row.cwid}-${row.protocolNumber}`}
-                  className="border-apollo-border border-b align-top last:border-b-0"
-                >
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <ScholarHoverCard cwid={row.cwid}>
-                      <span className="hover:underline">{row.personName}</span>
-                    </ScholarHoverCard>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">{row.role}</td>
-                  <td className="px-4 py-3">{row.title}</td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    {row.phase ?? <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    {row.principalSponsor ?? <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    {row.status ?? <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    {row.nctNumber ? (
-                      <a
-                        href={ctgovUrl(row.nctNumber)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="View on ClinicalTrials.gov"
-                        className="text-apollo-slate font-mono text-xs underline-offset-4 hover:underline"
-                      >
-                        {row.nctNumber}
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ),
+    main: (
+      <div className="mt-7">
+        <ReportCard>
+          {trials.length === 0 ? (
+            <p className="text-muted-foreground text-sm" data-testid="ct-no-data">
+              No clinical trials found for this center&rsquo;s current members.
+            </p>
+          ) : (
+            <ClinicalTrialsResults
+              trials={trials}
+              initial={params}
+              basePath={basePath}
+              centerCode={code}
+              keepQuery={keepQuery}
+              cap={SCHOLAR_EXPORT_CAP}
+            />
+          )}
+          <p className="text-muted-foreground mt-6 max-w-[760px] text-[13px]" role="note">
+            Trials come from the WCM clinical trials management system, matched to center members by
+            CWID. Only each trial&rsquo;s Principal Investigator is listed. Registered trials link
+            to ClinicalTrials.gov.
+          </p>
+        </ReportCard>
+      </div>
+    ),
   };
 }
