@@ -3,7 +3,6 @@ import { Wrench } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
-import { htmlToPlainText } from "@/lib/utils";
 import { formatRoleCategory } from "@/lib/role-display";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
@@ -23,9 +22,9 @@ const MESH_CHIP_CLASS =
  * One roster row — Unit Page v2 layout: grid 40px | 1fr | 72px, 18px vertical
  * padding, a hairline under every row. Name (16px, slate + underline on hover)
  * with only the membership badge beside it; then title, a meta line (division /
- * department), an appointment line ("{role} at {institution}"), a 2-line
- * overview snippet, ONE tag row (TOPICS MeSH chips by default, or method chips —
- * see `ROSTER_ROW_TAGS`), and a fixed pubs / grants column.
+ * department), an appointment line ("{role} at {institution}"), ONE tag row
+ * (TOPICS MeSH chips by default, or method chips — see `ROSTER_ROW_TAGS`), and a
+ * fixed pubs / grants column (a zero count is omitted, not dashed).
  */
 export function PersonRow({
   hit,
@@ -70,7 +69,6 @@ export function PersonRow({
       : hit.divisionName
         ? `${hit.divisionName} · Department of ${hit.departmentName}`
         : `Department of ${hit.departmentName}`;
-  const snippet = hit.overview ? htmlToPlainText(hit.overview) : null;
   // Appointment line (Unit Page v2 — replaces the uppercase role tag and the
   // institution pill beside the name). The institution is a non-WCMC primary
   // institution (absence-as-default) or, for an external member (#2519 Cornell
@@ -154,11 +152,6 @@ export function PersonRow({
         {apptLine && (
           <div className="text-[13px] leading-[19px] text-muted-foreground">{apptLine}</div>
         )}
-        {snippet && (
-          <p className="mt-[3px] line-clamp-2 text-pretty text-[13px] leading-[20px] text-muted-foreground">
-            {snippet}
-          </p>
-        )}
         {meshRow.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-[6px]">
             <span
@@ -207,18 +200,22 @@ export function PersonRow({
         )}
       </div>
       <dl className="m-0 flex flex-col gap-1 text-right text-[12px] leading-[20px] text-muted-foreground">
-        <div>
-          <dt className="inline text-[14px] text-foreground">
-            {hit.pubCount > 0 ? hit.pubCount.toLocaleString() : "—"}
-          </dt>{" "}
-          <dd className="m-0 inline">{pubLabel}</dd>
-        </div>
-        <div>
-          <dt className="inline text-[14px] text-foreground">
-            {hit.grantCount > 0 ? hit.grantCount.toLocaleString() : "—"}
-          </dt>{" "}
-          <dd className="m-0 inline">{grantLabel}</dd>
-        </div>
+        {hit.pubCount > 0 && (
+          <div>
+            <dt className="inline text-[14px] text-foreground">
+              {hit.pubCount.toLocaleString()}
+            </dt>{" "}
+            <dd className="m-0 inline">{pubLabel}</dd>
+          </div>
+        )}
+        {hit.grantCount > 0 && (
+          <div>
+            <dt className="inline text-[14px] text-foreground">
+              {hit.grantCount.toLocaleString()}
+            </dt>{" "}
+            <dd className="m-0 inline">{grantLabel}</dd>
+          </div>
+        )}
       </dl>
     </div>
   );

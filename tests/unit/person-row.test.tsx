@@ -73,12 +73,13 @@ describe("PersonRow", () => {
     expect(screen.getByText("Doctoral student")).toBeTruthy();
   });
 
-  it("always renders both stat lines, with an em dash for zero (Unit Page v2)", () => {
+  it("omits a zero stat line instead of dashing it", () => {
     const { container } = render(
-      <PersonRow hit={{ ...baseHit, pubCount: 0, grantCount: 0 }} />
+      <PersonRow hit={{ ...baseHit, pubCount: 3, grantCount: 0 }} />
     );
-    expect(container.textContent).toContain("— pubs");
-    expect(container.textContent).toContain("— grants");
+    expect(container.textContent).toContain("3 pubs");
+    expect(container.textContent).not.toContain("grant");
+    expect(container.textContent).not.toContain("—");
   });
 
   it("uses singular 'pub' when N=1, plural 'pubs' otherwise", () => {
@@ -296,12 +297,11 @@ describe("PersonRow", () => {
       expect(c2.textContent).not.toContain("Department of");
     });
 
-    it("clamps the overview snippet to two lines", () => {
+    it("does not render the overview snippet", () => {
       const { container } = render(
         <PersonRow hit={{ ...baseHit, overview: "Studies widgets." }} />,
       );
-      const p = within(container).getByText("Studies widgets.");
-      expect(p.className).toContain("line-clamp-2");
+      expect(container.textContent).not.toContain("Studies widgets.");
     });
   });
 });
