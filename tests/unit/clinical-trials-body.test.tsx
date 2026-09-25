@@ -138,6 +138,7 @@ describe("ClinicalTrialsResults", () => {
       "Cooperative group",
       "NIH",
       "Other federal",
+      "WCM (investigator-initiated)",
       "Other academic",
       "Other",
       "Unknown",

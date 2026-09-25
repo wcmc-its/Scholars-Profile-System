@@ -29,7 +29,7 @@ import {
   type SponsorClass,
 } from "@/lib/clinical-trial-sponsor-class";
 
-/** The sponsor-type filter's values: the six classes, then Unknown (null). */
+/** The sponsor-type filter's values: the seven classes, then Unknown (null). */
 export type SponsorTypeKey = SponsorClass | "unknown";
 
 export const SPONSOR_TYPE_OPTIONS: ReadonlyArray<{ value: SponsorTypeKey; label: string }> = [
@@ -324,7 +324,7 @@ export function describeClinicalTrialsCriteria(
     ],
     [
       "Sponsor type source",
-      "From the ClinicalTrials.gov lead sponsor class for registered trials: Industry; NIH; Other federal (FED); Cooperative group (NETWORK); Other academic (OTHER, which also covers hospitals and foundations); Other (non-US, state or local government, or an individual). For a trial with no NCT, or no class on ClinicalTrials.gov, a best-effort reading of the OnCore principal sponsor name (NIH institutes, federal agencies, cooperative groups, companies, universities and hospitals, foundations and societies). Unknown when neither source says.",
+      "Registered trials (with an NCT) use the ClinicalTrials.gov lead sponsor class: Industry; NIH; Other federal (FED); Cooperative group (NETWORK); WCM (investigator-initiated) when the class is OTHER and the lead sponsor is Weill Cornell; Other academic (the rest of OTHER, which also covers hospitals and foundations); Other (non-US, state or local government, or an individual). If ClinicalTrials.gov could not be read that week, the trial keeps its last class. Trials with no NCT use a best-effort reading of the OnCore principal sponsor name: NIH institutes; federal agencies; cooperative groups (including the Canadian Cancer Trials Group); Weill Cornell; foundations, societies and charities (as Other academic, like ClinicalTrials.gov); companies; universities and hospitals. Unknown when the source does not say.",
     ],
   ];
 }

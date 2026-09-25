@@ -34,6 +34,7 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { db } from "../../lib/db";
 import {
   buildTrialsAndLinks,
+  loadPriorSponsorClasses,
   loadScholars,
   replaceAll,
   type EnrichedRow,
@@ -131,7 +132,17 @@ async function main() {
   }
 
   const scholars = await loadScholars();
-  const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholars, now);
+  // The bridge never calls CT.gov, so registered trials keep the sponsor class
+  // the direct ETL last stored (no-NCT trials are re-read from OnCore).
+  const prior = await loadPriorSponsorClasses();
+  const { trials, links, stats } = buildTrialsAndLinks(
+    institutional,
+    enriched,
+    scholars,
+    now,
+    undefined,
+    prior,
+  );
   console.log(
     `Built ${stats.trials} trials (${stats.enrichedHits} had NCT enrichment) and ${stats.links} ` +
       `person links. Skipped ${stats.skippedNoProtocol} rows w/o protocolNumber, ` +

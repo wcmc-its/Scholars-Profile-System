@@ -21,6 +21,20 @@ describe("sponsorClassFromCtgov", () => {
     expect(sponsorClassFromCtgov(raw)).toBe(want);
   });
 
+  it("OTHER led by Weill Cornell is WCM (investigator-initiated); other OTHER stays academic", () => {
+    expect(sponsorClassFromCtgov("OTHER", "Weill Medical College of Cornell University")).toBe(
+      "wcm",
+    );
+    expect(sponsorClassFromCtgov("OTHER", "Weill Cornell Medicine")).toBe("wcm");
+    expect(sponsorClassFromCtgov("OTHER", "Memorial Sloan Kettering Cancer Center")).toBe(
+      "academic",
+    );
+    expect(sponsorClassFromCtgov("OTHER", "Cornell University")).toBe("academic");
+    expect(sponsorClassFromCtgov("OTHER", null)).toBe("academic");
+    // Only OTHER is re-read by name: a WCM-named INDUSTRY lead stays industry.
+    expect(sponsorClassFromCtgov("INDUSTRY", "Weill Cornell Medicine")).toBe("industry");
+  });
+
   it("AMBIG, UNKNOWN, junk and missing are null", () => {
     for (const raw of ["AMBIG", "UNKNOWN", "", "nonsense", null, undefined]) {
       expect(sponsorClassFromCtgov(raw)).toBeNull();
@@ -41,11 +55,26 @@ describe("sponsorClassFromOncore", () => {
     ["Genentech, Inc.", "industry"],
     ["IDEAYA Biosciences", "industry"],
     ["Merck Sharp & Dohme LLC", "industry"],
-    ["Weill Cornell Medicine", "academic"],
+    ["Weill Cornell Medicine", "wcm"],
+    ["Weill Medical College of Cornell University", "wcm"],
+    ["WCMC", "wcm"],
     ["Memorial Sloan Kettering Cancer Center", "academic"],
     ["Columbia University", "academic"],
-    ["Leukemia & Lymphoma Society", "other"],
-    ["Conquer Cancer Foundation", "other"],
+    ["Leukemia & Lymphoma Society", "academic"],
+    ["Conquer Cancer Foundation", "academic"],
+    // Non-profits whose legal name carries a company suffix are not Industry.
+    ["American Cancer Society, Inc.", "academic"],
+    ["The Leukemia & Lymphoma Society, Inc.", "academic"],
+    ["Prostate Cancer Foundation Inc", "academic"],
+    // "pharma" only as a word: a pharmacology department is not a company.
+    ["Weill Cornell Medicine Department of Pharmacology", "wcm"],
+    ["Columbia University Department of Pharmacology", "academic"],
+    ["Jazz Pharmaceuticals", "industry"],
+    ["Acme Pharma", "industry"],
+    // The Canadian cooperative group is not NIH.
+    ["National Cancer Institute of Canada Clinical Trials Group", "network"],
+    ["NCIC Clinical Trials Group", "network"],
+    ["Canadian Cancer Trials Group", "network"],
   ])("%s → %s", (name, want) => {
     expect(sponsorClassFromOncore(name)).toBe(want);
   });
@@ -66,8 +95,13 @@ describe("labels", () => {
     expect(sponsorClassLabel("bogus")).toBe("Unknown");
   });
 
-  it("isSponsorClass accepts only the six keys", () => {
+  it("labels wcm with the mockup's WCM (investigator-initiated)", () => {
+    expect(sponsorClassLabel("wcm")).toBe("WCM (investigator-initiated)");
+  });
+
+  it("isSponsorClass accepts only the seven keys", () => {
     expect(isSponsorClass("academic")).toBe(true);
+    expect(isSponsorClass("wcm")).toBe(true);
     expect(isSponsorClass("unknown")).toBe(false);
     expect(isSponsorClass(null)).toBe(false);
   });

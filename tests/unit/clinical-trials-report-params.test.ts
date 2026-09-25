@@ -130,6 +130,7 @@ describe("parseClinicalTrialsParams / clinicalTrialsQueryString", () => {
       phase: "1/2",
       sponsorType: "network",
     });
+    expect(parseClinicalTrialsParams(new URLSearchParams("sponsorType=wcm")).sponsorType).toBe("wcm");
     expect(parseClinicalTrialsParams(new URLSearchParams("sponsorType=unknown")).sponsorType).toBe(
       "unknown",
     );

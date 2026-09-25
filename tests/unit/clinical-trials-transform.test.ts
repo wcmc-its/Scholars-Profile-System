@@ -219,7 +219,8 @@ describe("ClinicalTrials.gov live enrichment + CTA rule", () => {
     const cls = (
       r: InstitutionalRow,
       ctgov?: { studies: Map<string, CtgovStudy>; complete: boolean },
-    ) => buildTrialsAndLinks([r], [], scholars, NOW, ctgov).trials[0].sponsorClass;
+      prior?: Map<string, string | null>,
+    ) => buildTrialsAndLinks([r], [], scholars, NOW, ctgov, prior).trials[0].sponsorClass;
 
     it("takes CT.gov LeadSponsorClass for a registered trial, over OnCore's name", () => {
       const ctgov = {
@@ -229,20 +230,57 @@ describe("ClinicalTrials.gov live enrichment + CTA rule", () => {
       expect(cls(row({ principalSponsor: "Acme Pharmaceuticals Inc" }), ctgov)).toBe("network");
     });
 
-    it("reads OnCore's principal sponsor for a trial with no NCT", () => {
-      expect(cls(row({ nctNumber: "NA", principalSponsor: "Genentech, Inc." }))).toBe("industry");
-      expect(cls(row({ nctNumber: null, principalSponsor: "Weill Cornell Medicine" }))).toBe(
-        "academic",
-      );
+    it("reads CT.gov's lead sponsor name to mark WCM-led OTHER trials", () => {
+      const ctgov = {
+        studies: new Map([
+          [
+            "NCT00001",
+            study({
+              leadSponsorClass: "OTHER",
+              leadSponsorName: "Weill Medical College of Cornell University",
+            }),
+          ],
+        ]),
+        complete: true,
+      };
+      expect(cls(row({}), ctgov)).toBe("wcm");
     });
 
-    it("falls back to OnCore when CT.gov gives AMBIG/UNKNOWN or no study", () => {
+    it("reads OnCore's principal sponsor for a trial with no NCT", () => {
+      expect(cls(row({ nctNumber: "NA", principalSponsor: "Genentech, Inc." }))).toBe("industry");
+      expect(cls(row({ nctNumber: null, principalSponsor: "Weill Cornell Medicine" }))).toBe("wcm");
+    });
+
+    it("never reads OnCore's name for a registered trial (AMBIG/UNKNOWN, or not on CT.gov, is null)", () => {
       const ambig = {
         studies: new Map([["NCT00001", study({ leadSponsorClass: "UNKNOWN" })]]),
         complete: true,
       };
-      expect(cls(row({ principalSponsor: "National Cancer Institute" }), ambig)).toBe("nih");
-      expect(cls(row({ principalSponsor: "NRG Oncology" }))).toBe("network");
+      expect(cls(row({ principalSponsor: "National Cancer Institute" }), ambig)).toBeNull();
+      const absent = { studies: new Map<string, CtgovStudy>(), complete: true };
+      expect(cls(row({ principalSponsor: "NRG Oncology" }), absent)).toBeNull();
+    });
+
+    it("keeps a registered trial's stored class when the CT.gov fetch failed or never ran", () => {
+      const failed = { studies: new Map<string, CtgovStudy>(), complete: false };
+      const prior = new Map<string, string | null>([["P-1", "industry"]]);
+      const r = row({ protocolNumber: "P-1", principalSponsor: "Some Foundation" });
+      expect(cls(r, failed, prior)).toBe("industry");
+      // The bridge import: no CT.gov at all.
+      expect(cls(r, undefined, prior)).toBe("industry");
+      // No stored class (or a stale key): null, not a guess from OnCore.
+      expect(cls(r, failed)).toBeNull();
+      expect(cls(r, failed, new Map([["P-1", "bogus"]]))).toBeNull();
+      // A complete fetch that lacks the study does not reuse the old class.
+      expect(cls(r, { studies: new Map<string, CtgovStudy>(), complete: true }, prior)).toBeNull();
+    });
+
+    it("re-reads OnCore for a no-NCT trial even when a prior class is stored", () => {
+      const prior = new Map<string, string | null>([["P-1", "industry"]]);
+      const r = row({ protocolNumber: "P-1", nctNumber: null, principalSponsor: "NRG Oncology" });
+      expect(cls(r, { studies: new Map<string, CtgovStudy>(), complete: false }, prior)).toBe(
+        "network",
+      );
     });
 
     it("is null when neither source says", () => {
@@ -262,7 +300,7 @@ describe("fetchCtgovStudies", () => {
           descriptionModule: { briefSummary: "Sum" },
           conditionsModule: { conditions: ["A", "B"] },
           designModule: { studyType: "INTERVENTIONAL", phases: ["PHASE2"], enrollmentInfo: { count: 27 } },
-          sponsorCollaboratorsModule: { leadSponsor: { class: "INDUSTRY" } },
+          sponsorCollaboratorsModule: { leadSponsor: { class: "INDUSTRY", name: "Acme Inc" } },
         },
         derivedSection: { conditionBrowseModule: { meshes: [{ term: "Cognitive Dysfunction" }] } },
       },
@@ -287,6 +325,7 @@ describe("fetchCtgovStudies", () => {
       enrollment: 27,
       primaryCompletionActual: "2022-09-15",
       leadSponsorClass: "INDUSTRY",
+      leadSponsorName: "Acme Inc",
     });
     expect(studies.get("NCT00000002")?.primaryCompletionActual).toBeNull();
     expect(studies.get("NCT00000002")?.leadSponsorClass).toBeNull();
@@ -306,13 +345,15 @@ describe("fetchCtgovStudies", () => {
     expect(complete).toBe(false);
   });
 
-  it("requests LeadSponsorClass in fields=", async () => {
+  it("requests LeadSponsorClass and LeadSponsorName in fields=", async () => {
     const urls: string[] = [];
     const fake = (async (url: string) => {
       urls.push(url);
       return new Response(JSON.stringify({ studies: [] }));
     }) as unknown as typeof fetch;
     await fetchCtgovStudies(["NCT00000001"], fake);
-    expect(new URL(urls[0]).searchParams.get("fields")?.split(",")).toContain("LeadSponsorClass");
+    const fields = new URL(urls[0]).searchParams.get("fields")?.split(",");
+    expect(fields).toContain("LeadSponsorClass");
+    expect(fields).toContain("LeadSponsorName");
   });
 });

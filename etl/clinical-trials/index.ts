@@ -31,6 +31,7 @@ import { closeReciterPool } from "@/lib/sources/reciterdb";
 import { withEtlRun } from "@/lib/etl-run";
 import {
   buildTrialsAndLinks,
+  loadPriorSponsorClasses,
   cleanNct,
   fetchCtgovStudies,
   loadScholars,
@@ -60,7 +61,18 @@ async function main() {
         (ctgov.complete ? "." : " (INCOMPLETE — falling back to reciterdb enrichment where missing)."),
     );
 
-    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholars, now, ctgov);
+    // A failed CT.gov batch: keep registered trials' stored sponsor class.
+    const prior = ctgov.complete
+      ? new Map<string, string | null>()
+      : await loadPriorSponsorClasses();
+    const { trials, links, stats } = buildTrialsAndLinks(
+      institutional,
+      enriched,
+      scholars,
+      now,
+      ctgov,
+      prior,
+    );
     console.log(
       `Built ${stats.trials} trials (${stats.enrichedHits} institutional rows had NCT enrichment) ` +
         `and ${stats.links} person links. ` +

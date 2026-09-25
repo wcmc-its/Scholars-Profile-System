@@ -918,7 +918,7 @@ model ClinicalTrial {
   /// Enriched `phases` (e.g. "Phase 2/Phase 3"); null for non-NCT or N/A.
   phase            String?   @db.VarChar(64)
   principalSponsor String?   @map("principal_sponsor") @db.VarChar(255)
-  /// Sponsor type key (industry | nih | federal | academic | network | other):
+  /// Sponsor type key (industry | nih | federal | wcm | academic | network | other):
   /// CT.gov LeadSponsorClass, else a best-effort read of principalSponsor
   /// (`lib/clinical-trial-sponsor-class.ts`). Null = unknown.
   sponsorClass     String?   @map("sponsor_class") @db.VarChar(16)
