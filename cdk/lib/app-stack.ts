@@ -1450,7 +1450,7 @@ export class AppStack extends Stack {
         // #1102/#1103/#1104/#1105 — Cancer-Center / org-unit features (merged
         // 2026-06-18, PRs #1108/#1109/#1110/#1111). Staging-on for soak;
         // prod-off/armed (flip on the next approval-gated Sps-App-prod deploy):
-        //   EDIT_UNIT_ROSTER_EXPORT    (#1102) center roster CSV on the /edit Members tab
+        //   EDIT_UNIT_ROSTER_EXPORT    (#1102) center roster .xlsx on the /edit Members tab
         //   PROFILE_CENTER_AFFILIATION (#1103) "Centers" card on the scholar profile
         //                              (center name renders now; program label/type
         //                              fill in once #906's classification load runs)
