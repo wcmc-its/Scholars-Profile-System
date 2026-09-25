@@ -60,9 +60,7 @@ export default async function RoleVocabularyPage() {
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
-  const pendingHonors = isHonorsQueueTabVisible(session)
-    ? await countPendingHonors(db.read)
-    : null;
+  const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
 
   return (
     <ConsoleShell
@@ -71,15 +69,19 @@ export default async function RoleVocabularyPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-bold">Role vocabulary</h1>
-      <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
-        Manage the leadership and membership role labels available for each unit kind. Renaming a
-        label changes what every current holder&rsquo;s role reads on their profile and on the
-        unit page; sort order and profile-title only affect display. Delete is available only for
-        a role you created here with no current holders — a seeded default, or a role with live
-        holders, stays available even if you stop using it going forward.
-      </p>
-      <OrgUnitRoleRoster roles={roster} />
+      <OrgUnitRoleRoster
+        roles={roster}
+        intro={
+          <div className="flex flex-col gap-1.5">
+            <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Role vocabulary</h1>
+            <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
+              Leadership and membership role labels for each unit kind. Renaming a label changes
+              what every current holder&rsquo;s role reads on their profile and the unit page. Order
+              and &ldquo;profile title&rdquo; only affect display.
+            </p>
+          </div>
+        }
+      />
     </ConsoleShell>
   );
 }
