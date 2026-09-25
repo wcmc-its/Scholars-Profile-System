@@ -14,7 +14,11 @@
  *     Approve but hide / Reject in the card footer.
  *   - A focused card (click, or J / K) takes A / H / R from the keyboard.
  *   - Ticked cards go through the dark bulk bar at the bottom.
- *   - A dark status bar confirms each decision.
+ *   - A dark status bar confirms each decision and offers Undo (POST
+ *     /api/edit/news-mention/undo with the decision ids the route returned).
+ *   - "Wrong person? Reassign" on a pending card searches the directory for the
+ *     right scholar; Approve / Approve but hide / A / H and the bulk bar then
+ *     credit that scholar instead (the decision route's `cwid`).
  *
  * Everything filterable is ALREADY in the props: Pending is loaded unbounded
  * (only the history tabs are capped at NEWS_HISTORY_LIMIT), so filtering and
@@ -31,7 +35,22 @@
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  DirectoryPeopleTypeahead,
+  type DirectoryValue,
+} from "@/components/edit/directory-people-typeahead";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
+import {
+  DecisionStatusBar,
+  MATCH_BASIS,
+  highlightName,
+  lookupScholar,
+  postDecision,
+  postUndo,
+  type DecisionStep,
+  type ReviewDecision,
+  type ScholarOverride,
+} from "@/components/edit/news-review-shared";
 import { mapChunked } from "@/components/edit/selection-bar";
 import { Button } from "@/components/ui/button";
 import { NEWS_HISTORY_LIMIT, sortNewsQueueGroups } from "@/lib/edit/news-queue";
@@ -45,37 +64,18 @@ import { CAREER_STAGE_ORDER } from "@/lib/role-display";
 import { cn, initials } from "@/lib/utils";
 
 type Tab = "pending" | "approved" | "rejected";
-type Decision = "approve" | "approve_hidden" | "reject";
+type Decision = ReviewDecision;
 type RegroupOp = "ungroup" | "make_lead" | "group";
 
 const TIERS = ["HIGH", "MEDIUM", "LOW"] as const;
 const TIER_LABEL: Record<string, string> = { HIGH: "High", MEDIUM: "Medium", LOW: "Low" };
 
-/** The certainty pill's tones — the shipped green / amber / red tiers (#2578
- *  follow-up, a product-owner ask), in the mockup's rounded-pill shape. */
+/** The certainty pill's tones, per the mockup: slate for High, amber for
+ *  everything else (look twice). */
 const TIER_PILL: Readonly<Record<string, string>> = {
-  HIGH: "border-apollo-green-tint-border bg-apollo-green-tint text-apollo-green-foreground",
-  MEDIUM: "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber",
-  LOW: "border-apollo-red-tint-border bg-apollo-red-tint text-destructive",
-};
-
-/** How the ETL found the name, in reviewer language (#2578). */
-const BASIS_LABEL: Readonly<Record<string, { text: string; hint: string }>> = {
-  TAG: {
-    text: "newsroom tag",
-    hint: "The newsroom's own story tags name this scholar — attribution by the article's authors.",
-  },
-  BODY: { text: "article text", hint: "Named in the article prose." },
-  CAPTION: {
-    text: "photo caption",
-    hint: "Named only in a photo's alt text, nowhere in the prose.",
-  },
-  TITLE: {
-    text: "endowed title only",
-    hint:
-      "Named only inside an endowed-chair or memorial phrase. The story is usually about the " +
-      "chair's holder, not the person it is named for.",
-  },
+  HIGH: "border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate",
+  MEDIUM: "border-transparent bg-apollo-amber-tint text-apollo-amber",
+  LOW: "border-transparent bg-apollo-amber-tint text-apollo-amber",
 };
 
 const SORTS: ReadonlyArray<{ value: NewsQueueSort; label: string }> = [
@@ -105,44 +105,6 @@ const CLIP_STATUS: Record<string, string> = {
 };
 
 const UNKNOWN_TYPE = "Other";
-
-/** The two 409s the decision route can answer are both actionable by a human. */
-function decisionErrorMessage(status: number, code: string | undefined): string {
-  if (status === 409 && code === "already_decided") {
-    return (
-      "Another scholar is already approved for this story — a mention can only be credited " +
-      "to one person. Remove their approval first, on that scholar's own edit page, then " +
-      "approve this one."
-    );
-  }
-  if (status === 409 && code === "not_pending") {
-    return "That clip has already been decided by someone else. Refresh the page to see where it landed.";
-  }
-  return "We couldn't record that decision. Please try again.";
-}
-
-/** The snippet with the detected name marked — React nodes, never HTML: this is
- *  scraped article prose. */
-function highlightName(snippet: string, ranges: [number, number][]): ReactNode {
-  if (ranges.length === 0) return snippet;
-  const out: ReactNode[] = [];
-  let at = 0;
-  for (const [start, end] of ranges) {
-    if (start < at || end > snippet.length || start >= end) continue;
-    if (start > at) out.push(snippet.slice(at, start));
-    out.push(
-      <mark
-        key={start}
-        className="bg-apollo-amber-tint text-foreground rounded-[3px] px-0.5 font-semibold"
-      >
-        {snippet.slice(start, end)}
-      </mark>,
-    );
-    at = end;
-  }
-  if (at < snippet.length) out.push(snippet.slice(at));
-  return out;
-}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Undated";
@@ -215,7 +177,11 @@ export function MediaHighlightsQueue({
   const [focusKey, setFocusKey] = useState<string | null>(pending[0]?.key ?? null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  /** The status bar: what just happened, and the decision ids Undo would send. */
+  const [toast, setToast] = useState<{ text: string; decisionIds: string[] } | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  /** Pending group key -> the "Wrong person? Reassign" scholar staged for it. */
+  const [overrides, setOverrides] = useState<Record<string, ScholarOverride>>({});
   const cardRefs = useRef(new Map<string, HTMLElement>());
 
   const base = tab === "pending" ? pending : tab === "approved" ? approved : rejected;
@@ -275,19 +241,45 @@ export function MediaHighlightsQueue({
     return rest[Math.max(0, last - keys.length + 1)] ?? rest[rest.length - 1] ?? null;
   }
 
-  async function post(id: string, decision: Decision): Promise<string | null> {
-    try {
-      const res = await fetch("/api/edit/news-mention/decision", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id, decision }),
-      });
-      if (res.ok) return null;
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      return decisionErrorMessage(res.status, data?.error);
-    } catch {
-      return "We couldn't record that decision. Please try again.";
+  /** POST one decision: `failure` is the reviewer-facing message, or null. */
+  async function post(
+    step: DecisionStep,
+  ): Promise<{ failure: string | null; decisionId: string | null }> {
+    const result = await postDecision(step, "clip");
+    return result.ok
+      ? { failure: null, decisionId: result.decisionId }
+      : { failure: result.message, decisionId: null };
+  }
+
+  /** The step for one row: an approval carries the group's staged reassign. */
+  function stepFor(row: NewsQueueRow, decision: Decision, groupKey?: string): DecisionStep {
+    const o = groupKey ? overrides[groupKey] : undefined;
+    return o && decision !== "reject"
+      ? { id: row.id, decision, cwid: o.cwid }
+      : { id: row.id, decision };
+  }
+
+  function dropOverrides(keys: ReadonlyArray<string>) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      for (const k of keys) delete next[k];
+      return next;
+    });
+  }
+
+  /** The status bar's Undo: take back every decision the last action made. */
+  async function undo() {
+    if (!toast || toast.decisionIds.length === 0) return;
+    setError(null);
+    setUndoing(true);
+    const result = await postUndo(toast.decisionIds);
+    setUndoing(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
     }
+    setToast({ text: "Undone. The decision was taken back.", decisionIds: [] });
+    startTransition(() => router.refresh());
   }
 
   function markBusy(ids: ReadonlyArray<string>, on: boolean) {
@@ -304,15 +296,25 @@ export function MediaHighlightsQueue({
   /** One row's decision; `groupKey` moves focus on to the next card. */
   async function decideOne(row: NewsQueueRow, decision: Decision, groupKey?: string) {
     setError(null);
+    const step = stepFor(row, decision, groupKey);
+    const o = step.cwid && groupKey ? overrides[groupKey] : undefined;
     markBusy([row.id], true);
-    const failure = await post(row.id, decision);
+    const { failure, decisionId } = await post(step);
     markBusy([row.id], false);
     if (failure) {
       setError(failure);
       return;
     }
-    setToast(`${VERB[decision]}: “${row.articleTitle}” for ${row.scholarName}.`);
-    if (groupKey) setFocusKey(nextFocusAfter([groupKey]));
+    setToast({
+      text: o
+        ? `${VERB[decision]}: “${row.articleTitle}” for ${o.name ?? o.cwid}, reassigned from ${row.scholarName}.`
+        : `${VERB[decision]}: “${row.articleTitle}” for ${row.scholarName}.`,
+      decisionIds: decisionId ? [decisionId] : [],
+    });
+    if (groupKey) {
+      dropOverrides([groupKey]);
+      setFocusKey(nextFocusAfter([groupKey]));
+    }
     startTransition(() => router.refresh());
   }
 
@@ -321,12 +323,13 @@ export function MediaHighlightsQueue({
     setError(null);
     const ids = g.rows.map((r) => r.id);
     markBusy(ids, true);
-    const failures = await mapChunked(ids, (id) => post(id, "reject"));
+    const results = await mapChunked(ids, (id) => post({ id, decision: "reject" }));
     markBusy(ids, false);
-    const failed = failures.filter(Boolean);
+    const decisionIds = results.flatMap((r) => (r.decisionId ? [r.decisionId] : []));
+    const failed = results.map((r) => r.failure).filter(Boolean);
     if (failed.length > 0) setError(failed[0]);
     else {
-      setToast(`Rejected every candidate for “${g.rows[0]!.articleTitle}”.`);
+      setToast({ text: `Rejected every candidate for “${g.rows[0]!.articleTitle}”.`, decisionIds });
       setFocusKey(nextFocusAfter([g.key]));
     }
     startTransition(() => router.refresh());
@@ -338,8 +341,10 @@ export function MediaHighlightsQueue({
     setError(null);
     const ids = groups.map((g) => g.rows[0]!.id);
     markBusy(ids, true);
-    const failures = await mapChunked(ids, (id) => post(id, decision));
+    const results = await mapChunked(groups, (g) => post(stepFor(g.rows[0]!, decision, g.key)));
     markBusy(ids, false);
+    const failures = results.map((r) => r.failure);
+    const decisionIds = results.flatMap((r) => (r.decisionId ? [r.decisionId] : []));
     const failedKeys = groups.filter((_, i) => failures[i]).map((g) => g.key);
     const okCount = groups.length - failedKeys.length;
     setSelected(new Set(failedKeys));
@@ -350,7 +355,11 @@ export function MediaHighlightsQueue({
       );
     }
     if (okCount > 0) {
-      setToast(`${VERB[decision]} ${okCount} clip${okCount === 1 ? "" : "s"}.`);
+      setToast({
+        text: `${VERB[decision]} ${okCount} clip${okCount === 1 ? "" : "s"}.`,
+        decisionIds,
+      });
+      dropOverrides(groups.map((g) => g.key).filter((k) => !failedKeys.includes(k)));
       setFocusKey(nextFocusAfter(groups.map((g) => g.key).filter((k) => !failedKeys.includes(k))));
     }
     startTransition(() => router.refresh());
@@ -369,9 +378,11 @@ export function MediaHighlightsQueue({
         setError("We couldn't update this clip. Please try again.");
         return;
       }
-      setToast(
-        `${action === "hide" ? "Hidden" : "Shown"}: “${row.articleTitle}” for ${row.scholarName}.`,
-      );
+      // The Hide / Show toggle is its own undo: no decision ids.
+      setToast({
+        text: `${action === "hide" ? "Hidden" : "Shown"}: “${row.articleTitle}” for ${row.scholarName}.`,
+        decisionIds: [],
+      });
       startTransition(() => router.refresh());
     } catch {
       setError("We couldn't update this clip. Please try again.");
@@ -588,20 +599,14 @@ export function MediaHighlightsQueue({
           )}
 
           {toast && (
-            <div
-              role="status"
-              className="bg-apollo-bar flex items-center gap-3 rounded-[10px] px-3.5 py-2.5 text-[13.5px] text-white"
-              data-testid="mh-queue-toast"
-            >
-              <span className="flex-1">{toast}</span>
-              <button
-                type="button"
-                onClick={() => setToast(null)}
-                className="rounded-md border border-white/35 px-2.5 py-0.5 text-[13px] text-white"
-              >
-                Dismiss
-              </button>
-            </div>
+            <DecisionStatusBar
+              text={toast.text}
+              canUndo={toast.decisionIds.length > 0}
+              undoing={undoing}
+              onUndo={() => void undo()}
+              onDismiss={() => setToast(null)}
+              testId="mh-queue-toast"
+            />
           )}
 
           {tab === "approved" && (
@@ -646,6 +651,15 @@ export function MediaHighlightsQueue({
                 pendingByCwid={pendingByCwid}
                 pendingBySourceRef={pendingBySourceRef}
                 decide={(row, d) => decideOne(row, d, g.key)}
+                override={overrides[g.key] ?? null}
+                setOverride={(o) =>
+                  setOverrides((prev) => {
+                    const next = { ...prev };
+                    if (o) next[g.key] = o;
+                    else delete next[g.key];
+                    return next;
+                  })
+                }
                 rejectGroup={() => rejectGroup(g)}
                 setVisibility={setVisibility}
                 regroup={regroup}
@@ -844,6 +858,8 @@ function ClipCard({
   pendingByCwid,
   pendingBySourceRef,
   decide,
+  override,
+  setOverride,
   rejectGroup,
   setVisibility,
   regroup,
@@ -859,6 +875,9 @@ function ClipCard({
   pendingByCwid: ReadonlyMap<string, number>;
   pendingBySourceRef: ReadonlyMap<string, number>;
   decide: (row: NewsQueueRow, d: Decision) => void;
+  /** The staged "Wrong person? Reassign" scholar (pending, uncontested only). */
+  override: ScholarOverride | null;
+  setOverride: (o: ScholarOverride | null) => void;
   rejectGroup: () => void;
   setVisibility: (row: NewsQueueRow, action: "hide" | "show") => void;
   regroup: (op: RegroupOp, id: string, leadId?: string) => void;
@@ -1016,7 +1035,20 @@ function ClipCard({
         )}
         {g.rows.map((row) => (
           <div key={row.id} className="flex flex-col gap-3">
-            <Scholar row={row} tab={tab} pendingCount={pendingByCwid.get(row.cwid) ?? 0} />
+            <Scholar
+              row={row}
+              tab={tab}
+              pendingCount={pendingByCwid.get(row.cwid) ?? 0}
+              override={pendingUncontested && row === lead ? override : null}
+            />
+            {pendingUncontested && row === lead ? (
+              <ReassignControl
+                override={override}
+                disabled={busy.has(lead.id)}
+                onPick={setOverride}
+                idPrefix={`mh-queue-reassign-${g.key}`}
+              />
+            ) : null}
             {!single || (tab === "pending" && g.contested) ? rowActions(row) : null}
           </div>
         ))}
@@ -1030,6 +1062,7 @@ function ClipCard({
               className={slateButton}
               disabled={busy.has(lead.id)}
               onClick={() => decide(lead, "approve")}
+              data-testid={`mh-queue-approve-${lead.id}`}
             >
               Approve
             </Button>
@@ -1037,7 +1070,7 @@ function ClipCard({
               size="sm"
               variant="outline"
               disabled={busy.has(lead.id)}
-              aria-label={`Approve “${lead.articleTitle}” for ${lead.scholarName} but hide it from their profile`}
+              aria-label={`Approve “${lead.articleTitle}” for ${override ? (override.name ?? override.cwid) : lead.scholarName} but hide it from their profile`}
               data-testid={`mh-queue-approve-hidden-${lead.id}`}
               onClick={() => decide(lead, "approve_hidden")}
             >
@@ -1083,13 +1116,17 @@ function Scholar({
   row,
   tab,
   pendingCount,
+  override = null,
 }: {
   row: NewsQueueRow;
   tab: Tab;
   pendingCount: number;
+  /** A staged reassign: show that scholar in place of the matched one. */
+  override?: ScholarOverride | null;
 }) {
-  const basis = row.matchBasis ? BASIS_LABEL[row.matchBasis] : undefined;
+  const basis = row.matchBasis ? MATCH_BASIS[row.matchBasis] : undefined;
   const tier = row.likelihood ? TIER_LABEL[row.likelihood] : undefined;
+  const shownName = override ? (override.name ?? override.cwid) : row.scholarName;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start gap-2.5">
@@ -1097,30 +1134,39 @@ function Scholar({
           aria-hidden
           className="bg-apollo-surface-2 ring-apollo-border-strong text-apollo-bar flex size-9 flex-none items-center justify-center rounded-full text-[12.5px] font-semibold ring-1"
         >
-          {initials(row.scholarName)}
+          {initials(shownName)}
         </span>
-        <div className="flex min-w-0 flex-col gap-0.5">
-          {row.slug ? (
-            <a
-              href={`/${row.slug}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-apollo-slate text-[14.5px] font-semibold"
-            >
-              {row.scholarName}
-            </a>
-          ) : (
-            <span className="text-[14.5px] font-semibold">{row.scholarName}</span>
-          )}
-          {row.title && (
-            <span className="text-muted-foreground text-[12.5px] leading-[1.4]">{row.title}</span>
-          )}
-          {(row.department || row.roleLabel) && (
+        {override ? (
+          <div className="flex min-w-0 flex-col gap-0.5" data-testid="mh-queue-override">
+            <span className="text-[14.5px] font-semibold">{shownName}</span>
             <span className="text-muted-foreground text-[12.5px]">
-              {[row.department, row.roleLabel].filter(Boolean).join(" · ")}
+              <span className="font-mono">{override.cwid}</span> · Manually assigned
             </span>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="flex min-w-0 flex-col gap-0.5">
+            {row.slug ? (
+              <a
+                href={`/${row.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-apollo-slate text-[14.5px] font-semibold"
+              >
+                {row.scholarName}
+              </a>
+            ) : (
+              <span className="text-[14.5px] font-semibold">{row.scholarName}</span>
+            )}
+            {row.title && (
+              <span className="text-muted-foreground text-[12.5px] leading-[1.4]">{row.title}</span>
+            )}
+            {(row.department || row.roleLabel) && (
+              <span className="text-muted-foreground text-[12.5px]">
+                {[row.department, row.roleLabel].filter(Boolean).join(" · ")}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         {row.source === "VIVO" ? (
@@ -1148,11 +1194,14 @@ function Scholar({
             title={basis.hint}
             data-testid={`mh-queue-basis-${row.matchBasis}`}
           >
-            via {basis.text}
+            via {basis.via}
           </span>
         )}
         {tab === "pending" && pendingCount > 1 && (
           <span className="text-muted-foreground text-xs">{pendingCount} clips pending</span>
+        )}
+        {override && (
+          <span className="text-apollo-amber text-xs">Reassigned from {row.scholarName}</span>
         )}
       </div>
       {tab === "approved" && row.decidedByName && (
@@ -1164,6 +1213,100 @@ function Scholar({
           data-testid={`mh-queue-declined-${row.id}`}
         >
           The scholar declined this clip themselves.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Wrong person? Reassign" — search the directory for the scholar the clip is
+ * really about. A pick is checked against the scholar table (a directory person
+ * with no profile cannot be credited) and then only STAGED: Approve / Approve
+ * but hide (or A / H, or the bulk bar) send it as the decision's `cwid`.
+ */
+function ReassignControl({
+  override,
+  disabled,
+  onPick,
+  idPrefix,
+}: {
+  override: ScholarOverride | null;
+  disabled: boolean;
+  onPick: (o: ScholarOverride | null) => void;
+  idPrefix: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  async function pick(v: DirectoryValue | null) {
+    if (!v) return;
+    setProblem(null);
+    setChecking(true);
+    const hit = await lookupScholar(v.cwid);
+    setChecking(false);
+    if (!hit.found) {
+      setProblem(`${v.name} has no scholar profile, so the clip can't be credited to them.`);
+      return;
+    }
+    onPick({ cwid: v.cwid, name: hit.name ?? v.name });
+    setOpen(false);
+  }
+
+  if (!open) {
+    return (
+      <div className="flex flex-wrap gap-3 text-[12.5px]">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+          className="text-apollo-slate hover:underline disabled:opacity-60"
+          data-testid={`${idPrefix}-open`}
+        >
+          Wrong person? Reassign
+        </button>
+        {override && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(null)}
+            className="text-muted-foreground hover:text-foreground"
+            data-testid={`${idPrefix}-revert`}
+          >
+            Revert
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="bg-apollo-page border-apollo-border-strong flex flex-col gap-1.5 rounded-lg border p-2">
+      <div className="flex items-center gap-1.5">
+        <div className="min-w-0 flex-1">
+          <DirectoryPeopleTypeahead
+            value={null}
+            onChange={(v) => void pick(v)}
+            placeholder="Search scholar name…"
+            disabled={checking}
+            idPrefix={idPrefix}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setProblem(null);
+          }}
+          className="text-muted-foreground hover:text-foreground text-[12.5px]"
+        >
+          Cancel
+        </button>
+      </div>
+      {checking && <span className="text-muted-foreground text-xs">Checking…</span>}
+      {problem && (
+        <span className="text-destructive text-xs" role="alert">
+          {problem}
         </span>
       )}
     </div>

@@ -1,7 +1,9 @@
 /**
  * `components/edit/media-highlights-queue.tsx` — the redesigned Media highlights
  * review surface: tab counts, the filter rail, the search, per-card and bulk
- * decisions, the keyboard shortcuts, and the contested-group guard.
+ * decisions, the keyboard shortcuts, the contested-group guard, the mockup's
+ * slate / amber certainty pills, Undo in the status bar, and "Wrong person?
+ * Reassign". All people are invented.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -146,7 +148,7 @@ describe("MediaHighlightsQueue", () => {
       { id: "clip-2", decision: "approve" },
     ]);
     await waitFor(() =>
-      expect(screen.getByTestId("mh-queue-toast").textContent).toBe("Approved 2 clips.Dismiss"),
+      expect(screen.getByTestId("mh-queue-toast").textContent).toContain("Approved 2 clips."),
     );
   });
 
@@ -189,5 +191,136 @@ describe("MediaHighlightsQueue", () => {
     expect(screen.getByTestId("mh-queue-empty").textContent).toBe(
       "Queue clear. Nothing awaiting review.",
     );
+  });
+
+  it("colours the certainty pill slate for High and amber otherwise, per the mockup", () => {
+    renderQueue();
+    expect(screen.getByTestId("mh-queue-likelihood-HIGH").className).toContain(
+      "bg-apollo-slate-tint",
+    );
+    expect(screen.getByTestId("mh-queue-likelihood-MEDIUM").className).toContain(
+      "bg-apollo-amber-tint",
+    );
+    expect(screen.getByTestId("mh-queue-likelihood-HIGH").className).not.toContain("green");
+  });
+
+  describe("Undo in the status bar", () => {
+    function routeFetch() {
+      let n = 0;
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url === "/api/edit/news-mention/undo") {
+          return new Response(JSON.stringify({ ok: true, restored: 2 }), { status: 200 });
+        }
+        n += 1;
+        return new Response(JSON.stringify({ ok: true, decisionId: `dec-${n}` }), { status: 200 });
+      });
+    }
+    const undoBody = () => {
+      const call = fetchMock.mock.calls.find((c) => c[0] === "/api/edit/news-mention/undo")!;
+      return JSON.parse((call[1] as RequestInit).body as string);
+    };
+
+    it("takes back a card decision", async () => {
+      routeFetch();
+      renderQueue();
+      fireEvent.click(screen.getByTestId("mh-queue-approve-hidden-clip-1"));
+      fireEvent.click(await screen.findByTestId("mh-queue-toast-undo"));
+      await waitFor(() =>
+        expect(screen.getByTestId("mh-queue-toast").textContent).toContain("Undone"),
+      );
+      expect(undoBody()).toEqual({ decisionIds: ["dec-1"] });
+    });
+
+    it("takes back a whole bulk action at once", async () => {
+      routeFetch();
+      renderQueue();
+      fireEvent.click(screen.getByTestId("mh-queue-select-all"));
+      fireEvent.click(within(screen.getByTestId("mh-queue-bulk-bar")).getByText("Reject"));
+      fireEvent.click(await screen.findByTestId("mh-queue-toast-undo"));
+      await waitFor(() => expect(undoBody().decisionIds).toHaveLength(2));
+      expect([...undoBody().decisionIds].sort()).toEqual(["dec-1", "dec-2"]);
+    });
+  });
+
+  describe("Wrong person? Reassign", () => {
+    function directory(hasProfile: boolean) {
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.startsWith("/api/directory/people")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              people: [{ cwid: "zzz9009", name: "Quinn Fictional", title: null, dept: null }],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.startsWith("/api/edit/scholar-card/")) {
+          return hasProfile
+            ? new Response(JSON.stringify({ cwid: "zzz9009", name: "Quinn Fictional" }), {
+                status: 200,
+              })
+            : new Response("Not found", { status: 404 });
+        }
+        return new Response(JSON.stringify({ ok: true, decisionId: "dec-1" }), { status: 200 });
+      });
+    }
+    async function pickQuinn() {
+      fireEvent.click(screen.getByTestId("mh-queue-reassign-clip-1-open"));
+      fireEvent.change(screen.getByTestId("mh-queue-reassign-clip-1-input"), {
+        target: { value: "Quinn" },
+      });
+      fireEvent.mouseDown(await screen.findByTestId("mh-queue-reassign-clip-1-option-zzz9009"));
+    }
+    const decisionBodies = () =>
+      fetchMock.mock.calls
+        .filter((c) => c[0] === "/api/edit/news-mention/decision")
+        .map((c) => JSON.parse((c[1] as RequestInit).body as string));
+
+    it("stages the picked scholar and Approve credits them", async () => {
+      directory(true);
+      renderQueue();
+      await pickQuinn();
+      const staged = await screen.findByTestId("mh-queue-override");
+      expect(staged.textContent).toContain("Quinn Fictional");
+      const card = screen.getByTestId("mh-queue-card-clip-1");
+      expect(within(card).getByText("Reassigned from Invented Person")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("mh-queue-approve-clip-1"));
+      await waitFor(() => expect(decisionBodies()).toHaveLength(1));
+      expect(decisionBodies()[0]).toEqual({ id: "clip-1", decision: "approve", cwid: "zzz9009" });
+      expect((await screen.findByTestId("mh-queue-toast")).textContent).toContain(
+        "for Quinn Fictional, reassigned from Invented Person",
+      );
+    });
+
+    it("the A shortcut honours a staged reassign", async () => {
+      directory(true);
+      renderQueue();
+      await pickQuinn();
+      await screen.findByTestId("mh-queue-override");
+      fireEvent.click(screen.getByTestId("mh-queue-card-clip-1"));
+      fireEvent.keyDown(window, { key: "a" });
+      await waitFor(() => expect(decisionBodies()).toHaveLength(1));
+      expect(decisionBodies()[0]).toMatchObject({ cwid: "zzz9009" });
+    });
+
+    it("Revert drops the staged scholar", async () => {
+      directory(true);
+      renderQueue();
+      await pickQuinn();
+      await screen.findByTestId("mh-queue-override");
+      fireEvent.click(screen.getByTestId("mh-queue-reassign-clip-1-revert"));
+      expect(screen.queryByTestId("mh-queue-override")).toBeNull();
+      fireEvent.click(screen.getByTestId("mh-queue-approve-clip-1"));
+      await waitFor(() => expect(decisionBodies()).toHaveLength(1));
+      expect(decisionBodies()[0]).toEqual({ id: "clip-1", decision: "approve" });
+    });
+
+    it("refuses a directory person with no scholar profile", async () => {
+      directory(false);
+      renderQueue();
+      await pickQuinn();
+      expect((await screen.findByRole("alert")).textContent).toContain("has no scholar profile");
+      expect(screen.queryByTestId("mh-queue-override")).toBeNull();
+    });
   });
 });
