@@ -3,13 +3,14 @@
  * Options come from the real `buildTitleOptions`, so a ladder change that
  * shifts who is listed shows up here.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   classifyTitleRow,
   filterTitleDashboard,
   parseTitleDashboardParams,
 } from "@/lib/edit/title-dashboard";
+import { loadChairedDepartments } from "@/lib/edit/title-picker";
 import { buildTitleOptions, type TitleInputs } from "@/lib/scholar-title";
 
 const NO_ROLES = { chair: false, chief: false, centerDirector: false };
@@ -129,5 +130,29 @@ describe("filterTitleDashboard", () => {
     const p = (q: string) => parseTitleDashboardParams(new URLSearchParams(q));
     expect(filterTitleDashboard([pinnedDown], p("band=other"))).toEqual([pinnedDown]);
     expect(filterTitleDashboard([pinnedDown], p("band=leadership"))).toEqual([]);
+  });
+});
+
+describe("loadChairedDepartments", () => {
+  it("drops non-academic units (Graduate School, MD-PhD) and roles whose department row is gone", async () => {
+    const client = {
+      orgUnitRoleAssignment: {
+        findMany: vi.fn(async () => [
+          { cwid: "zzc0001", entityId: "D-SURG" },
+          { cwid: "zzc0002", entityId: "D-GRAD" },
+          { cwid: "zzc0003", entityId: "D-MDPHD" },
+          { cwid: "zzc0004", entityId: "D-GONE" },
+        ]),
+      },
+      department: {
+        findMany: vi.fn(async () => [
+          { code: "D-SURG", name: "Surgery" },
+          { code: "D-GRAD", name: "Weill Cornell Graduate School" },
+          { code: "D-MDPHD", name: "MD-PhD Program" },
+        ]),
+      },
+    };
+    const out = await loadChairedDepartments(client as never);
+    expect([...out.entries()]).toEqual([["zzc0001", ["Surgery"]]]);
   });
 });

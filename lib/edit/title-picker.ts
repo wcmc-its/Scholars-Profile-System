@@ -22,7 +22,12 @@
  * operator's Dismiss takes.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import { NON_ACADEMIC_DEPT_NAMES } from "@/lib/non-academic-units";
+import {
+  CENTER_ENTITY_TYPE,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DIRECTOR_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import {
   ambiguousUnitNames,
   buildTitleOptions,
@@ -91,6 +96,35 @@ export async function loadCurrentAppointmentTitles(
   return out;
 }
 
+/** cwid → names of the ACADEMIC departments the scholar holds the chair role
+ *  on — the ladder's `chairedDepartments`. A role on a department row that is
+ *  gone, or on a non-academic unit (Graduate School, MD-PhD Program — whose
+ *  curated leader overrides outlive the prune), counts for nothing. */
+export async function loadChairedDepartments(
+  client: Pick<PrismaClient, "orgUnitRoleAssignment" | "department">,
+  cwids?: readonly string[],
+): Promise<Map<string, string[]>> {
+  const [roles, departments] = await Promise.all([
+    client.orgUnitRoleAssignment.findMany({
+      where: {
+        entityType: "department",
+        role: { key: DEPARTMENT_CHAIR_ROLE_KEY },
+        ...(cwids ? { cwid: { in: [...cwids] } } : {}),
+      },
+      select: { cwid: true, entityId: true },
+    }),
+    client.department.findMany({ select: { code: true, name: true } }),
+  ]);
+  const nameByCode = new Map(departments.map((d) => [d.code, d.name]));
+  const out = new Map<string, string[]>();
+  for (const r of roles) {
+    const name = nameByCode.get(r.entityId);
+    if (!name || NON_ACADEMIC_DEPT_NAMES.has(name)) continue;
+    out.set(r.cwid, [...(out.get(r.cwid) ?? []), name]);
+  }
+  return out;
+}
+
 type TitlePickerClient = Pick<
   PrismaClient,
   | "scholar"
@@ -143,7 +177,7 @@ export async function loadTitlePickerState(
   });
   if (!scholar) return null;
 
-  const [assignments, overrideRows, appointmentTitles] = await Promise.all([
+  const [assignments, overrideRows, appointmentTitles, chairedDepartments] = await Promise.all([
     client.orgUnitRoleAssignment.findMany({
       where: {
         cwid,
@@ -167,6 +201,7 @@ export async function loadTitlePickerState(
       select: { fieldName: true, value: true, actorCwid: true, updatedAt: true },
     }),
     loadCurrentAppointmentTitles(client, [cwid]),
+    loadChairedDepartments(client, [cwid]),
   ]);
 
   const divAssignment = assignments.find((a) => a.entityType === "division");
@@ -220,6 +255,7 @@ export async function loadTitlePickerState(
       chiefTitle,
       centerHeadTitle,
       edPrimaryTitle: scholar.edPrimaryTitle,
+      chairedDepartments: chairedDepartments.get(cwid) ?? [],
     }),
     current: scholar.primaryTitle,
     override: overrideRow?.value ?? null,

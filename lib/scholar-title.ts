@@ -215,6 +215,11 @@ export type TitleInputs = {
   centerHeadTitle: string | null;
   /** ED `weillCornellEduPrimaryTitle`, annotation-stripped. */
   edPrimaryTitle: string | null;
+  /** Names of the academic departments this scholar holds the CHAIR role on
+   *  (`OrgUnitRoleAssignment`, key `chair`; never a non-academic unit). Lets a
+   *  director title naming that department rank as Chair, and is the proof a
+   *  self-set working title claiming Chair needs (EA, 2026-09-25). */
+  chairedDepartments?: readonly string[];
 };
 
 /**
@@ -236,12 +241,27 @@ export function buildTitleOptions(inputs: TitleInputs): TitleOption[] {
     sharesUnitName(r[0], centerHead)
       ? [r[0], TITLE_RANK.institutionalCenterDirector]
       : r;
+  const chaired = inputs.chairedDepartments ?? [];
+  // A director title naming a department the scholar CHAIRS heads it: Chair
+  // (the working-title twin of the BMRI appointment rule — "Executive
+  // Director, …, Institute for Reproductive Medicine" held by the
+  // Reproductive Medicine chair).
+  const rankedChaired = (title: string | null): [string | null, number] => {
+    const r = ranked(title);
+    for (const d of chaired) r[1] = Math.min(r[1], rankTitleText(r[0], d));
+    return r;
+  };
+  // The working title is self-set in the Web Directory and outlives the
+  // office: "Chair of Surgery" stayed there after the chair appointment
+  // ended. Without a chair role it claims nothing (EA, 2026-09-25).
+  const working = rankedChaired(inputs.workingTitle);
+  if (working[1] === TITLE_RANK.chair && chaired.length === 0) working[1] = TITLE_RANK.unranked;
   const byTier: Record<TitleTier, [string | null, number]> = {
-    working: sameDirectorship(ranked(inputs.workingTitle)),
+    working: sameDirectorship(working),
     appointment: sameDirectorship(bestRanked(inputs.appointmentTitles ?? [])),
     centerHead: [centerHead, TITLE_RANK.institutionalCenterDirector],
     chief: [blankToNull(inputs.chiefTitle), TITLE_RANK.divisionChief],
-    primary: sameDirectorship(ranked(inputs.edPrimaryTitle)),
+    primary: sameDirectorship(rankedChaired(inputs.edPrimaryTitle)),
   };
   return TITLE_TIERS.map((tier) => ({
     tier,

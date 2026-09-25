@@ -23,6 +23,7 @@
 import { db } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
+import { NON_ACADEMIC_DEPT_NAMES } from "../../lib/non-academic-units";
 import { resolveScholarTitles } from "./title-resolution";
 import {
   loadUnitOverridesForETL,
@@ -936,19 +937,10 @@ async function main() {
     }
 
     /** Org-unit names that LDAP returns as the level1 unit but which are
-     *  not academic departments (admin units, support orgs). Scholars whose
-     *  primary appointment is in one of these get null dept_code/div_code
-     *  so they don't appear under a fake dept on /browse. */
-    const EXCLUDED_DEPT_NAMES = new Set<string>([
-      "Information Technologies and Services",
-      "Administration & Finance",
-      // Student-only org units (doctoral / MD-PhD students' level1), not
-      // academic departments. Excluding them nulls those students' deptCode
-      // and the Phase 3 prune deletes the now-empty Department rows.
-      "Graduate School",
-      "Weill Cornell Graduate School",
-      "MD-PhD Program",
-    ]);
+     *  not academic departments — see `lib/non-academic-units.ts`. Scholars
+     *  whose primary appointment is in one get null dept_code/div_code, and
+     *  the Phase 3 prune deletes the now-empty Department rows. */
+    const EXCLUDED_DEPT_NAMES = NON_ACADEMIC_DEPT_NAMES;
 
     /** Manual rename map: LDAP returns these org-unit names, but the
      *  display should reflect the WCM academic department they roll up

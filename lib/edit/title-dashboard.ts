@@ -25,8 +25,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadTitleCandidates, type TitleResolutionClient, type TitleCandidates } from "@/etl/ed/title-resolution";
-import { isTitleResolutionEnabled } from "@/lib/edit/title-picker";
-import { DEPARTMENT_CHAIR_ROLE_KEY } from "@/lib/org-unit-roles";
+import { isTitleResolutionEnabled, loadChairedDepartments } from "@/lib/edit/title-picker";
 import {
   rankTitleText,
   resolveFromOptions,
@@ -97,7 +96,11 @@ export function classifyTitleRow(
   // Role vs text, over EVERY raw title string: the options keep only the
   // best appointment, which would hide a Dean's second office as Chair.
   const textRanks = c.texts.map((t) => ({ title: t.title, rank: rankTitleText(t.title, t.department) }));
-  const hasText = (rank: number) => textRanks.some((t) => t.rank === rank);
+  const hasText = (rank: number) =>
+    textRanks.some((t) => t.rank === rank) ||
+    // An ED-tier option ranked with the chaired department in hand (a
+    // director title naming the department they chair) — `textRanks` can't.
+    present.some((o) => o.rank === rank && (o.tier === "working" || o.tier === "primary"));
   const mismatchNotes: string[] = [];
   if (roles.chair && !hasText(TITLE_RANK.chair)) mismatchNotes.push("Chair role, no Chair title");
   if (!roles.chair && textRanks.some((t) => t.rank === TITLE_RANK.chair && !/director/i.test(t.title))) {
@@ -147,8 +150,9 @@ type DashboardClient = TitleResolutionClient & Pick<PrismaClient, "scholar">;
 export async function loadTitleDashboard(client: DashboardClient): Promise<TitleDashboardRow[]> {
   const [candidates, chairRows, chiefRows, centerRows] = await Promise.all([
     loadTitleCandidates(client, { applyDerivedTiers: isTitleResolutionEnabled() }),
-    // Chairs only: an administrative department's head holds `director`.
-    roleCwids(client, "department", DEPARTMENT_CHAIR_ROLE_KEY),
+    // Chairs of academic departments only (`loadChairedDepartments`): not an
+    // administrative department's `director`, not Graduate School / MD-PhD.
+    loadChairedDepartments(client),
     roleCwids(client, "division"),
     roleCwids(client, "center", "director"),
   ]);

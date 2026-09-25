@@ -29,7 +29,11 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { CENTER_ENTITY_TYPE } from "@/lib/org-unit-roles";
-import { isCenterDirector, loadCurrentAppointmentTitles } from "@/lib/edit/title-picker";
+import {
+  isCenterDirector,
+  loadChairedDepartments,
+  loadCurrentAppointmentTitles,
+} from "@/lib/edit/title-picker";
 import {
   ambiguousUnitNames,
   buildTitleOptions,
@@ -148,15 +152,21 @@ export async function loadTitleCandidates(
   ]);
   const overrides = new Map(overrideRows.map((o) => [o.entityId, o.value]));
 
-  const [{ chiefTitles, centerTitles }, appointmentTitles] = opts.applyDerivedTiers
-    ? await Promise.all([loadLeadershipTitles(client), loadCurrentAppointmentTitles(client)])
-    : [
-        {
-          chiefTitles: new Map<string, string>(),
-          centerTitles: new Map<string, string>(),
-        },
-        new Map<string, AppointmentTitle[]>(),
-      ];
+  const [{ chiefTitles, centerTitles }, appointmentTitles, chairedDepartments] =
+    opts.applyDerivedTiers
+      ? await Promise.all([
+          loadLeadershipTitles(client),
+          loadCurrentAppointmentTitles(client),
+          loadChairedDepartments(client),
+        ])
+      : [
+          {
+            chiefTitles: new Map<string, string>(),
+            centerTitles: new Map<string, string>(),
+          },
+          new Map<string, AppointmentTitle[]>(),
+          new Map<string, string[]>(),
+        ];
 
   return scholars.map((s) => ({
     cwid: s.cwid,
@@ -173,6 +183,7 @@ export async function loadTitleCandidates(
       chiefTitle: chiefTitles.get(s.cwid) ?? null,
       centerHeadTitle: centerTitles.get(s.cwid) ?? null,
       edPrimaryTitle: s.edPrimaryTitle,
+      chairedDepartments: chairedDepartments.get(s.cwid) ?? [],
     }),
   }));
 }

@@ -427,3 +427,43 @@ describe("ambiguousUnitNames", () => {
     expect(ambiguousUnitNames([{ name: "  " }, { name: "" }]).size).toBe(0);
   });
 });
+
+describe("chaired departments (EA, 2026-09-25)", () => {
+  const base = { chiefTitle: null, centerHeadTitle: null, appointmentTitles: [] };
+
+  it("a stale working title claiming Chair, with no chair role, claims nothing", () => {
+    const r = resolveScholarTitle({
+      ...base,
+      override: null,
+      workingTitle: "Chair of Surgery",
+      edPrimaryTitle: "Professor of Surgery",
+      appointmentTitles: [{ title: "The Example Family Professor of Surgery" }],
+    });
+    expect(r.value).toBe("The Example Family Professor of Surgery");
+  });
+
+  it("a working title claiming Chair still wins when a chair role backs it", () => {
+    const r = resolveScholarTitle({
+      ...base,
+      override: null,
+      workingTitle: "Chair of Surgery",
+      edPrimaryTitle: "Professor of Surgery",
+      chairedDepartments: ["Surgery"],
+    });
+    expect(r).toEqual({ value: "Chair of Surgery", tier: "working", overridden: false });
+  });
+
+  it("a director title naming the department they chair ranks as Chair", () => {
+    const inputs = {
+      ...base,
+      override: null,
+      workingTitle: "Executive Director, Example Service Center, Institute for Reproductive Medicine",
+      edPrimaryTitle: "Professor of Obstetrics and Gynecology",
+      appointmentTitles: [{ title: "The Example Distinguished Professor of Reproductive Medicine" }],
+    };
+    expect(resolveScholarTitle(inputs).value).toBe("The Example Distinguished Professor of Reproductive Medicine");
+    expect(resolveScholarTitle({ ...inputs, chairedDepartments: ["Reproductive Medicine"] }).value).toBe(
+      "Executive Director, Example Service Center, Institute for Reproductive Medicine",
+    );
+  });
+});
