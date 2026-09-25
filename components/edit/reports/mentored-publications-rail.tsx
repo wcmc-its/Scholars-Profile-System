@@ -9,7 +9,9 @@
  *   3. Graduation year — from / to + "Include learners with no graduation
  *      year" (`grad_from` / `grad_to` / `grad_unknown`, which the parser
  *      folds into the `years` list — every link the page writes still says
- *      `years=`)
+ *      `years=`); a gappy selection (an old `years=2019,2027` link) also
+ *      rides a hidden `grad_exact`, kept exactly while the selects are
+ *      untouched, so another control's change never widens it
  *   4. Counting window (`tail`)
  *   5. Publications (`pubs`)
  *   6. In window — per PUBLICATION (`window`)
@@ -36,6 +38,7 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import type { MentoredPubsFacetOptions } from "@/lib/edit/mentored-publications-facets";
 import {
   gradYearsLabel,
+  isGappyYearSelection,
   type MentoredPubsParams,
 } from "@/lib/edit/mentored-publications-params";
 import {
@@ -170,7 +173,10 @@ export function MentoredPublicationsRail({
     (a, b) => a - b,
   );
   const unknownSelected = years.length === 0 || years.includes(null);
-  const contiguous = knownSelected.every((y, i) => i === 0 || y === knownSelected[i - 1] + 1);
+  // Gappy = skips a year that exists (not merely a whole number no class
+  // graduated in): the range selects can't express it, so the exact list
+  // rides a hidden `grad_exact` the parser honours while they are untouched.
+  const gappy = isGappyYearSelection(knownSelected, knownChoices);
   const windowSel = new Set<string>(params.window);
   const position = new Set<string>(params.position);
   const mentorLabels = new Map(options.mentors.map((m) => [m.value, m.label]));
@@ -230,7 +236,7 @@ export function MentoredPublicationsRail({
 
         <RailSection
           label="Graduation year"
-          summary={gradYearsLabel(years)}
+          summary={gradYearsLabel(years, yearChoices)}
           defaultOpen
           testId="mentored-pubs-section-years"
         >
@@ -265,10 +271,13 @@ export function MentoredPublicationsRail({
               </select>
             </div>
           )}
-          {!contiguous && (
-            <p className={NOTE} data-testid="mentored-pubs-years-gappy">
-              This link picks {knownSelected.join(", ")}. Changing the range selects every year in between.
-            </p>
+          {gappy && (
+            <>
+              <input type="hidden" name="grad_exact" value={knownSelected.join(",")} />
+              <p className={NOTE} data-testid="mentored-pubs-years-gappy">
+                This link picks {knownSelected.join(", ")}. Changing the range selects every year in between.
+              </p>
+            </>
           )}
           {yearChoices.includes(null) && (
             <>

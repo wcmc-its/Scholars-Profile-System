@@ -254,6 +254,7 @@ describe("the rail's post-load facets (2026-09-24)", () => {
       allPubsLoaded: null,
       droppedUnresolved: 0,
       droppedNoCwid: 0,
+      droppedNoCwidMentees: [],
     }));
 
   it("the workbook is built from the narrowed report (same as the page), the facets stated on it", async () => {

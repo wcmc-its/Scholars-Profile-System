@@ -32,6 +32,14 @@
  *               plus `null` when `grad_unknown` is set), so every link the
  *               page writes still speaks `years=` and an old `years=` link
  *               (a non-contiguous list included) keeps its exact meaning;
+ *   - `grad_exact` the rail's hidden echo of a GAPPY selection (e.g.
+ *               `2019,2027` from an old `years=` link): while `grad_from` /
+ *               `grad_to` still equal its first / last year (the selects
+ *               untouched), the list is kept exactly as given (plus `null`
+ *               when `grad_unknown` is set) instead of widening to every
+ *               year between — so changing any OTHER rail control keeps the
+ *               link's meaning; once either select moves, the range wins.
+ *               Server-side, so it holds without JS too;
  *   - `window`  per-PUBLICATION program-window facet: `yes` / `no` /
  *               `unknown`, comma-separated and/or repeated; absent = any;
  *   - `position` the learner's byline position on the publication: `first` /
@@ -193,7 +201,17 @@ export function parseMentoredPubsParams(
     const rawFrom = get("grad_from")?.trim() || undefined;
     const rawTo = get("grad_to")?.trim() || undefined;
     const withUnknown = (get("grad_unknown")?.trim() ?? "") !== "";
-    if (rawFrom !== undefined || rawTo !== undefined) {
+    const exact: number[] = [];
+    for (const t of (get("grad_exact") ?? "").split(",").map((v) => v.trim()).filter(Boolean)) {
+      const y = yearToken(t);
+      if (y === null) return { ok: false, error: "invalid_years" };
+      exact.push(y);
+    }
+    exact.sort((a, b) => a - b);
+    if (exact.length > 0 && rawFrom === String(exact[0]) && rawTo === String(exact[exact.length - 1])) {
+      years = [...new Set(exact)];
+      if (withUnknown) years.push(null);
+    } else if (rawFrom !== undefined || rawTo !== undefined) {
       const a = yearToken(rawFrom ?? rawTo!);
       const b = yearToken(rawTo ?? rawFrom!);
       if (a === null || b === null) return { ok: false, error: "invalid_years" };
@@ -307,7 +325,7 @@ export function parseMentoredPubsParams(
  *  link with none reads exactly as it did before they existed; `view` and
  *  `q` only when not the default, so the download link (built with both at
  *  their defaults) stays page-state-free. `program`, `types` and the
- *  `grad_*` range fields are never written — read-only input shapes. */
+ *  `grad_*` range fields (`grad_exact` included) are never written — read-only input shapes. */
 export function mentoredPubsQueryString(p: MentoredPubsParams): string {
   const sp = new URLSearchParams();
   if (p.years !== null) {
@@ -326,16 +344,37 @@ export function mentoredPubsQueryString(p: MentoredPubsParams): string {
   return sp.toString();
 }
 
+/** Whether a known-year selection skips a year that EXISTS: some year in
+ *  `choices` between its first and last is not selected. Without `choices`,
+ *  every whole number between counts. A selection that skips only years no
+ *  learner graduated in is a plain range — picking that range reproduces it. */
+export function isGappyYearSelection(
+  selected: ReadonlyArray<number>,
+  choices?: ReadonlyArray<number | null>,
+): boolean {
+  if (selected.length < 2) return false;
+  const sorted = [...selected].sort((a, b) => a - b);
+  const lo = sorted[0];
+  const hi = sorted[sorted.length - 1];
+  const picked = new Set(sorted);
+  if (choices === undefined) return sorted.some((y, i) => i > 0 && y !== sorted[i - 1] + 1);
+  return choices.some((y) => y !== null && y > lo && y < hi && !picked.has(y));
+}
+
 /** A graduation-year selection as the rail summary and chip read it:
- *  `[]` → "All years"; a contiguous run → "2026–2027"; otherwise the years
+ *  `[]` → "All years"; a run with no gap (`isGappyYearSelection` against
+ *  `choices`, the years that exist) → "2026–2027"; otherwise the years
  *  listed; `null` (no graduation year) → "+ unknown", or "No graduation
  *  year" alone. */
-export function gradYearsLabel(years: ReadonlyArray<number | null>): string {
+export function gradYearsLabel(
+  years: ReadonlyArray<number | null>,
+  choices?: ReadonlyArray<number | null>,
+): string {
   if (years.length === 0) return "All years";
   const known = years.filter((y): y is number => y !== null).sort((a, b) => a - b);
   const unknown = years.includes(null);
   if (known.length === 0) return "No graduation year";
-  const contiguous = known.every((y, i) => i === 0 || y === known[i - 1] + 1);
+  const contiguous = !isGappyYearSelection(known, choices);
   const span =
     known.length === 1
       ? String(known[0])

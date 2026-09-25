@@ -53,7 +53,8 @@
  *     the entry's `programType` (AOC → md, MD-PhD → mdphd, PhD → phd,
  *     POSTDOC → postdoc) or `other`; grad year = the entry's `year`, no
  *     entry year. An entry with NO cwid cannot be a pair (nothing to join
- *     on): skipped and counted in `droppedNoCwid`. Pubs: not in the bridge
+ *     on): skipped and counted in `droppedNoCwid` (and listed by name, with
+ *     the asserting mentor's name, in `droppedNoCwidMentees`). Pubs: not in the bridge
  *     either — a `mentee_suggestion` row for the pair (any tier, dismissed
  *     or not: a later dismissal must not lose the pubs of a pair the mentor
  *     asserted) supplies its evidence exactly as a co-author pair's does;
@@ -319,6 +320,12 @@ export type MentoredPublicationsReport = {
   /** Faculty-asserted mentees entered without a CWID — no pair to join on,
    *  so not shown (0 unless `faculty` is selected). */
   droppedNoCwid: number;
+  /** Those same entries by name, for the page's "View list": the mentee's
+   *  name as the mentor typed it and the mentor's display name (Scholar
+   *  `preferredName`, else the bare CWID), sorted by mentee then mentor.
+   *  Names only — the mentee has no CWID. Page-only: the workbook does not
+   *  list them. */
+  droppedNoCwidMentees: Array<{ menteeName: string; mentorName: string }>;
   /** The post-load facets this report was narrowed by — set only by
    *  `applyMentoredPubsFacets` (`mentored-publications-facets.ts`), absent
    *  when none were given. The workbook states them. */
@@ -442,22 +449,45 @@ const FACULTY_PROGRAM: Record<string, string> = {
  *  is the upgrade path if the table ever outgrows the scan). A malformed
  *  value is skipped, never thrown — `validateManualMentees` is the same
  *  gate the write path applies. Used by the loader and the year picker. */
-async function readFacultyPairs(): Promise<{ pairs: FacultyPair[]; droppedNoCwid: number }> {
+async function readFacultyPairs(): Promise<{
+  pairs: FacultyPair[];
+  noCwid: Array<{ mentorCwid: string; menteeName: string }>;
+}> {
   const rows = await db.read.fieldOverride.findMany({
     where: { entityType: "scholar", fieldName: "manualMentees" },
     select: { entityId: true, value: true },
   });
   const pairs: FacultyPair[] = [];
-  let droppedNoCwid = 0;
+  const noCwid: Array<{ mentorCwid: string; menteeName: string }> = [];
   for (const r of rows) {
     const parsed = validateManualMentees(r.value);
     if (!parsed.ok) continue;
     for (const entry of parsed.value) {
       if (entry.cwid) pairs.push({ mentorCwid: r.entityId, entry: { ...entry, cwid: entry.cwid } });
-      else droppedNoCwid += 1;
+      else noCwid.push({ mentorCwid: r.entityId, menteeName: entry.name });
     }
   }
-  return { pairs, droppedNoCwid };
+  return { pairs, noCwid };
+}
+
+/** The CWID-less faculty-asserted entries by name (the page's "View list"):
+ *  each mentor's Scholar `preferredName`, else the bare CWID. No read when
+ *  there are none. */
+async function nameNoCwidMentees(
+  noCwid: ReadonlyArray<{ mentorCwid: string; menteeName: string }>,
+): Promise<Array<{ menteeName: string; mentorName: string }>> {
+  if (noCwid.length === 0) return [];
+  const names = new Map<string, string>();
+  for (const batch of chunks([...new Set(noCwid.map((e) => e.mentorCwid))], PMID_BATCH)) {
+    const found = await db.read.scholar.findMany({
+      where: { cwid: { in: batch } },
+      select: { cwid: true, preferredName: true },
+    });
+    for (const s of found) names.set(s.cwid, s.preferredName);
+  }
+  return noCwid
+    .map((e) => ({ menteeName: e.menteeName, mentorName: names.get(e.mentorCwid) ?? e.mentorCwid }))
+    .sort((a, b) => compareName(a.menteeName, b.menteeName) || compareName(a.mentorName, b.mentorName));
 }
 
 /** Whether any roster key is selected — the gate on reading `aoc_mentee`. */
@@ -739,9 +769,12 @@ export async function loadMentoredPublicationsReport({
   const allMode = pubs === "all";
   // Faculty-asserted entries without a cwid are counted even when no learner
   // survives the other filters — the page's sentence must not vanish with them.
-  const faculty = selected.has("faculty")
-    ? await readFacultyPairs()
-    : { pairs: [], droppedNoCwid: 0 };
+  const facultyRead = selected.has("faculty") ? await readFacultyPairs() : { pairs: [], noCwid: [] };
+  const faculty = {
+    pairs: facultyRead.pairs,
+    droppedNoCwid: facultyRead.noCwid.length,
+    droppedNoCwidMentees: await nameNoCwidMentees(facultyRead.noCwid),
+  };
   const empty = (allPubsLoaded: boolean | null): MentoredPublicationsReport => ({
     summary: [],
     detail: [],
@@ -751,6 +784,7 @@ export async function loadMentoredPublicationsReport({
     allPubsLoaded,
     droppedUnresolved: 0,
     droppedNoCwid: faculty.droppedNoCwid,
+    droppedNoCwidMentees: faculty.droppedNoCwidMentees,
   });
 
   // A `null` in `gradYears` admits the rows with no graduation year.
@@ -1445,5 +1479,6 @@ export async function loadMentoredPublicationsReport({
     allPubsLoaded,
     droppedUnresolved: droppedUnresolved.size,
     droppedNoCwid: faculty.droppedNoCwid,
+    droppedNoCwidMentees: faculty.droppedNoCwidMentees,
   };
 }

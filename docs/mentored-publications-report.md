@@ -40,9 +40,11 @@ one sentence.
 - **Card**: learners, publications in window, all years; Download .xlsx with a note naming the
   workbook's sheets; "N distinct publications" (a paper two learners share counts once there and once
   per learner in the headline numbers); the active filters as chips (× removes one; the four standing
-  values carry no × until they differ from the default); the "N faculty-asserted mentees have no CWID"
-  banner. It has no "View list" link: the loader only counts those entries, it does not load their
-  names.
+  values carry no × until they differ from the default; a chip's × keeps the "Find a learner or
+  mentor" text, "Reset to defaults" clears it); the "N faculty-asserted mentees have no CWID" banner,
+  whose "View list" (a native `<details>`) names each dropped entry as "Mentee name — added by
+  Mentor name" (`droppedNoCwidMentees`: names only, since those mentees have no CWID; on the page
+  only, never in the workbook).
 - **Learners (N)** tab: Learner (name, CWID, "Grad YYYY", "(entry est. YYYY)" for the fallback) ·
   Mentors (each mentor's name with the pair's type as a badge, "Department · Institution" under it) ·
   In window · [With a mentor, all-publications set only] · All years · JIF ≥ 10 · First author (With
@@ -93,7 +95,7 @@ the program pairings, then the two co-authorship inferences.
 | Postdoc supervisor | `postdoc_mentor_relationship` (ED appointment record) | The postdoc's reporting manager; appointment start and end dates (no end = ongoing) | A PI guarantee: roughly one in seven managers on record is a lab administrator (#2633) | On, for every holder | #2677 |
 | Likely mentee (from co-authorship) | `mentee_suggestion`, tier `presumptive` (#2634) | A trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with the faculty member; pubs from the suggestion's own evidence list | Any year; confirmation | Off | #2677 |
 | Possible mentee (from co-authorship) | `mentee_suggestion`, tier `ambiguous` | The same inference for research staff or MD alumni, who may be peers | Any year; confirmation | Off | #2677 |
-| Faculty-asserted | `field_override` (`scholar`, `manualMentees`) — the mentor's own list on `/edit`, including accepted co-authorship suggestions | Mentee name, optional CWID, optional completion year, optional degree bucket | Entries with no CWID (listed nowhere; counted in `droppedNoCwid`); entry year | On, for a `*` holder | #2684 |
+| Faculty-asserted | `field_override` (`scholar`, `manualMentees`) — the mentor's own list on `/edit`, including accepted co-authorship suggestions | Mentee name, optional CWID, optional completion year, optional degree bucket | Entries with no CWID (counted in `droppedNoCwid`; named only in the page banner's "View list"); entry year | On, for a `*` holder | #2684 |
 
 Publications for the pairing-sheet, Jenzabar and ED sources come from the mentoring co-pub bridge
 (`mentee_copublication_pub`, one row per mentor × mentee × pub). Co-author pairs' pubs come from the
@@ -133,7 +135,12 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   `unknown` when `grad_unknown` is set; a blank end is "None"). Nothing the page writes uses them:
   every tab, chip and download link says `years=`, so an old `years=` link, a non-contiguous list
   included, keeps its exact meaning (the rail then notes that changing the range selects every year
-  in between).
+  in between). A gap is judged against the years that exist: skipping only a year no class
+  graduated in is a plain range.
+- `grad_exact=` — the rail's hidden echo of a gappy selection (`2019,2027`). While `grad_from` /
+  `grad_to` still equal its first and last year (the selects untouched), the parser keeps the list
+  exactly (plus `unknown` when `grad_unknown` is set), so changing any other rail control does not
+  widen an old link; once either select moves, the range wins. Server-side, so it holds without JS.
 - `window=yes|no|unknown`, `position=first|last|middle`, `pubyear=YYYY`, `mentor=<cwid>` — lists
   (comma-separated and/or repeated); `withpubs=1`. The rail's post-load filters, added 2026-09-24
   (before that they were client-side facets inside the tables that never touched the counts or the

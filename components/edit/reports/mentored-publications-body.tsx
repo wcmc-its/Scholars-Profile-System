@@ -17,7 +17,9 @@
  * sections in the spec's order, plus the Publications tab's Year facet kept)
  * beside a white card holding the headline numbers + Download and its note,
  * the "N distinct publications" line, the active-filter chips (× removes
- * one), the CWID-less faculty-asserted banner, then the client island
+ * one), the CWID-less faculty-asserted banner (its "View list" names each
+ * dropped mentee and the mentor who added them — page-only, not in the
+ * workbook), then the client island
  * (`components/edit/mentored-publications-table.tsx`: Learners (N) /
  * Publications (N) tabs, the find box, the tables, "Show 25 more") and the
  * footnote carrying the in-window rule. Below `lg` the rail moves into the
@@ -94,10 +96,11 @@ import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry
 const FORM_ID = "mentored-pubs-filters";
 const SHEET_SUFFIX = "-sheet";
 
-/** The page URL for `params` (tab / chip / reset hrefs). `q` never rides a
- *  server-built href — the island adds the live find text itself. */
-function pageHref(basePath: string, params: MentoredPubsParams): string {
-  const qs = mentoredPubsQueryString({ ...params, q: "" });
+/** The page URL for `params`. The tab hrefs pass `keepQ: false` — the
+ *  island appends the live find text to those itself; a chip's × keeps the
+ *  `q` the page was opened with, so removing a filter doesn't clear the box. */
+function pageHref(basePath: string, params: MentoredPubsParams, keepQ: boolean): string {
+  const qs = mentoredPubsQueryString(keepQ ? params : { ...params, q: "" });
   return qs ? `${basePath}?${qs}` : basePath;
 }
 
@@ -166,7 +169,9 @@ export async function renderMentoredPublicationsReport({
     tail: params.tail !== DEFAULT_TAIL,
     pubs: params.pubs !== "mentored",
   };
-  const href = (patch: Partial<MentoredPubsParams>) => pageHref(basePath, { ...params, ...patch });
+  // Chip × hrefs keep `q`; the tab hrefs (`viewHref`) don't — the island adds it.
+  const href = (patch: Partial<MentoredPubsParams>) => pageHref(basePath, { ...params, ...patch }, true);
+  const viewHref = (view: MentoredPubsParams["view"]) => pageHref(basePath, { ...params, view }, false);
   const resetHref =
     Object.values(nonDefault).some(Boolean) || hasMentoredPubsFacets(params)
       ? params.view === "publications"
@@ -180,7 +185,11 @@ export async function renderMentoredPublicationsReport({
 
   const mentorName = new Map(options.mentors.map((m) => [m.value, m.label]));
   const chips: FilterChip[] = [
-    { group: "Graduation", value: gradYearsLabel(years), removeHref: nonDefault.years ? href({ years: null }) : null },
+    {
+      group: "Graduation",
+      value: gradYearsLabel(years, yearChoices),
+      removeHref: nonDefault.years ? href({ years: null }) : null,
+    },
     { group: "Mentorship", value: typesChip(types, typeChoices), removeHref: nonDefault.types ? href({ types: null }) : null },
     {
       group: "Window",
@@ -310,7 +319,7 @@ export async function renderMentoredPublicationsReport({
                 <FilterChips chips={chips} testId="mentored-pubs-chips" />
               </div>
               {loaded.droppedNoCwid > 0 && (
-                <p
+                <div
                   className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber mt-4 rounded-lg border px-3.5 py-2.5 text-[13px] text-pretty"
                   role="note"
                   data-testid="mentored-pubs-no-cwid"
@@ -318,13 +327,25 @@ export async function renderMentoredPublicationsReport({
                   {loaded.droppedNoCwid.toLocaleString()} faculty-asserted{" "}
                   {loaded.droppedNoCwid === 1 ? "mentee has" : "mentees have"} no CWID, so they can&rsquo;t be matched
                   to publications and aren&rsquo;t shown.
-                </p>
+                  {loaded.droppedNoCwidMentees.length > 0 && (
+                    <details className="mt-1.5" data-testid="mentored-pubs-no-cwid-list">
+                      <summary className="cursor-pointer font-medium underline-offset-2 hover:underline">View list</summary>
+                      <ul className="mt-1.5 flex flex-col gap-0.5">
+                        {loaded.droppedNoCwidMentees.map((m, i) => (
+                          <li key={i}>
+                            {m.menteeName} &mdash; added by {m.mentorName}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
               )}
               <MentoredPublicationsTable
                 view={params.view}
                 viewHrefs={{
-                  summary: href({ view: "summary" }),
-                  publications: href({ view: "publications" }),
+                  summary: viewHref("summary"),
+                  publications: viewHref("publications"),
                 }}
                 summary={report.summary}
                 publications={report.publications}

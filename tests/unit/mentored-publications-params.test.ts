@@ -10,6 +10,7 @@ vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
 import {
   gradYearsLabel,
   hasMentoredPubsFacets,
+  isGappyYearSelection,
   MENTORED_PUBS_DEFAULT_PARAMS,
   mentoredPubsQueryString,
   parseMentoredPubsParams,
@@ -318,5 +319,46 @@ describe("the redesign's params (2026-09-24)", () => {
     expect(gradYearsLabel([2025])).toBe("2025");
     expect(gradYearsLabel([2019, 2027])).toBe("2019, 2027");
     expect(gradYearsLabel([null])).toBe("No graduation year");
+  });
+
+  it("gradYearsLabel with choices: a gap is a year that EXISTS and isn't picked, not a missing whole number", () => {
+    // No class graduated in 2020: 2019 + 2021 is the range 2019–2021.
+    expect(gradYearsLabel([2019, 2021], [2023, 2021, 2019, null])).toBe("2019–2021");
+    expect(gradYearsLabel([2019, 2021, null], [2021, 2019])).toBe("2019–2021 + unknown");
+    // 2020 exists and is skipped: listed.
+    expect(gradYearsLabel([2019, 2021], [2021, 2020, 2019])).toBe("2019, 2021");
+    expect(isGappyYearSelection([2019, 2021], [2021, 2019])).toBe(false);
+    expect(isGappyYearSelection([2019, 2021], [2021, 2020, 2019])).toBe(true);
+    expect(isGappyYearSelection([2019, 2021])).toBe(true);
+    expect(isGappyYearSelection([2019], [2021, 2020, 2019])).toBe(false);
+  });
+
+  it("grad_exact: a gappy list is kept exactly while the selects still span it; moving either select widens to the range", () => {
+    // Untouched: another control changed, the form resubmits the same list.
+    expect(parseMentoredPubsParams({ grad_from: "2019", grad_to: "2027", grad_exact: "2019,2027" })).toMatchObject({
+      ok: true,
+      value: { years: [2019, 2027] },
+    });
+    expect(
+      parseMentoredPubsParams({ grad_from: "2019", grad_to: "2027", grad_exact: "2027,2019", grad_unknown: "1" }),
+    ).toMatchObject({ ok: true, value: { years: [2019, 2027, null] } });
+    // Touched: the range wins.
+    const widened = parseMentoredPubsParams({ grad_from: "2020", grad_to: "2027", grad_exact: "2019,2027" });
+    expect(widened.ok && widened.value.years).toEqual([2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027]);
+    const toMoved = parseMentoredPubsParams({ grad_from: "2019", grad_to: "2021", grad_exact: "2019,2027" });
+    expect(toMoved.ok && toMoved.value.years).toEqual([2019, 2020, 2021]);
+    expect(parseMentoredPubsParams({ grad_from: "", grad_to: "", grad_exact: "2019,2027" })).toMatchObject({
+      ok: true,
+      value: { years: null },
+    });
+    // `years` still wins; a malformed token is an error.
+    expect(parseMentoredPubsParams({ years: "2024", grad_from: "2019", grad_to: "2027", grad_exact: "2019,2027" })).toMatchObject({
+      ok: true,
+      value: { years: [2024] },
+    });
+    expect(parseMentoredPubsParams({ grad_from: "2019", grad_to: "2027", grad_exact: "2019,x" })).toEqual({
+      ok: false,
+      error: "invalid_years",
+    });
   });
 });

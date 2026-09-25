@@ -32,7 +32,8 @@
  * popover's `md` scope reads "MD". `HoverTooltip` is mocked to its children —
  * the walker calls plain function components, and Radix's provider uses hooks.
  * "Faculty-asserted" is offered to every holder, checked by default for
- * `"*"` only, and its CWID-less entries get their own banner.
+ * `"*"` only, and its CWID-less entries get their own banner, with a native
+ * `<details>` "View list" of mentee / mentor names.
  *
  * Redesign (2026-09-24): the rail is `MentoredPublicationsRail` (walked — a
  * plain function over the shared `RailSection`s) with its long lists in
@@ -43,7 +44,9 @@
  * the stats, download href + note, distinct line, chips (× only where a
  * value differs from the default), reset link; the post-load facets narrow
  * what the island receives; the one-sentence subtitle and the footnote's
- * window rule.
+ * window rule. A gappy `years=` link rides a hidden `grad_exact` so another
+ * control's change keeps it (moving a range select writes the range), gaps
+ * judged against the years that exist; a chip's × keeps `q`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -253,6 +256,20 @@ function checkboxes(node: unknown): Array<[string, string, boolean]> {
   return out;
 }
 
+/** Every `<input type="hidden">` in `node` as `[name, value]`. */
+function hiddenInputs(node: unknown): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  const walk = (n: unknown) => {
+    if (n === null || n === undefined || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    const el = asEl(n);
+    if (el.type === "input" && el.props.type === "hidden") out.push([String(el.props.name), String(el.props.value)]);
+    for (const c of childrenOf(el)) walk(c);
+  };
+  walk(node);
+  return out;
+}
+
 describe("/edit/reports/mentored-publications (7) — gate", () => {
   it("no session → SSO login with the return path", async () => {
     h.mockGetEditSession.mockResolvedValue(null);
@@ -407,6 +424,40 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     expect(h.mockLoadReport).toHaveBeenCalledWith(expect.objectContaining({ gradYears: [2024, 2026] }));
     const form = findByType(result, h.mockAutoSubmitForm);
     expect(textOf(findByTestId(form, "mentored-pubs-years-gappy"))).toContain("This link picks 2024, 2026");
+    // The rail echoes the exact list in a hidden field beside the range selects.
+    expect(hiddenInputs(findByTestId(form, "mentored-pubs-section-years"))).toEqual([["grad_exact", "2024,2026"]]);
+  });
+
+  it("a gappy link survives another rail control's change; moving a range select writes the range", async () => {
+    // What the form submits when only `tail` changed: the selects at their
+    // defaults (the list's first / last year) + the hidden exact list.
+    await EditReportsMentoredPublicationsPage({
+      searchParams: sp({ grad_from: "2024", grad_to: "2026", grad_exact: "2024,2026", tail: "2" }),
+    });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith(expect.objectContaining({ gradYears: [2024, 2026], tail: 2 }));
+
+    // The "from" select moved: the range wins, every year between.
+    await EditReportsMentoredPublicationsPage({
+      searchParams: sp({ grad_from: "2025", grad_to: "2026", grad_exact: "2024,2026" }),
+    });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith(expect.objectContaining({ gradYears: [2025, 2026] }));
+
+    // A contiguous selection carries no exact field (the range says it all).
+    const plain = await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "2024,2025" }) });
+    const form = findByType(plain, h.mockAutoSubmitForm);
+    expect(hiddenInputs(findByTestId(form, "mentored-pubs-section-years"))).toEqual([]);
+    expect(findByTestId(form, "mentored-pubs-years-gappy")).toBeNull();
+  });
+
+  it("a gap is judged against the years that exist: skipping a year no class graduated in is a plain range", async () => {
+    h.mockLoadGradYears.mockResolvedValue([2026, 2024]); // no 2025 class
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "2024,2026" }) });
+    const form = findByType(result, h.mockAutoSubmitForm);
+    expect(findByTestId(form, "mentored-pubs-years-gappy")).toBeNull();
+    expect(hiddenInputs(findByTestId(form, "mentored-pubs-section-years"))).toEqual([]);
+    expect(textOf(findByTestId(form, "mentored-pubs-section-years"))).toContain("2024–2026");
+    const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; value: string }>;
+    expect(chips[0]).toMatchObject({ group: "Graduation", value: "2024–2026" });
   });
 
   it("the range fields reach the loader as the same years list; every link the page writes speaks years=", async () => {
@@ -561,6 +612,14 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       "Raw Data (one row per learner and publication)",
     );
     expect(findByTestId(result, "mentored-pubs-all-missing")).toBeNull();
+    // A chip's × keeps the find text (the tabs don't — the island appends it).
+    const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; removeHref: string | null }>;
+    expect(chips.find((c) => c.group === "Graduation")?.removeHref).toBe(
+      `${BASE}?mtype=aoc&tail=2&pubs=all&view=publications&q=ada`,
+    );
+    expect(chips.find((c) => c.group === "Window")?.removeHref).toBe(
+      `${BASE}?years=2025&mtype=aoc&tail=1&pubs=all&view=publications&q=ada`,
+    );
   });
 
   it("with data: stats, the distinct line, the island's rows; the one-sentence subtitle; the window rule and dropped counts below", async () => {
@@ -581,7 +640,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       h.mockLoadReport.mockImplementation(async (args: Record<string, unknown>) => ({
         summary: [summaryRow], detail: [], publications: [pub],
         generatedAt: new Date("2026-09-18T00:00:00Z"), filters: { ...args }, allPubsLoaded: null,
-        droppedUnresolved: 0, droppedNoCwid: 0, ...extra,
+        droppedUnresolved: 0, droppedNoCwid: 0, droppedNoCwidMentees: [], ...extra,
       }));
     reportWith({});
 
@@ -626,13 +685,31 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       "1 co-publications not yet in the local corpus are not shown.",
     );
 
-    // Faculty-asserted entries with no CWID: the banner (no View list — the names are not loaded).
-    reportWith({ droppedNoCwid: 2 });
+    // Faculty-asserted entries with no CWID: the banner, and a native
+    // <details> "View list" naming each one and the mentor who added them.
+    reportWith({
+      droppedNoCwid: 2,
+      droppedNoCwidMentees: [
+        { menteeName: "Also None", mentorName: "Grace Mentor" },
+        { menteeName: "No Cwid", mentorName: "Zed Mentor" },
+      ],
+    });
     const noCwid = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
-    expect(textOf(findByTestId(noCwid, "mentored-pubs-no-cwid"))).toBe(
+    const banner = findByTestId(noCwid, "mentored-pubs-no-cwid");
+    expect(textOf(banner)).toContain(
       "2 faculty-asserted mentees have no CWID, so they can’t be matched to publications and aren’t shown.",
     );
-    expect(textOf(noCwid)).not.toContain("View list");
+    const list = findByTestId(banner, "mentored-pubs-no-cwid-list");
+    expect(list?.type).toBe("details");
+    expect(textOf(list)).toBe("View listAlso None — added by Grace MentorNo Cwid — added by Zed Mentor");
+
+    // No names (nothing to list) → the sentence alone.
+    reportWith({ droppedNoCwid: 1, droppedNoCwidMentees: [] });
+    const unnamed = await EditReportsMentoredPublicationsPage({ searchParams: sp({}) });
+    expect(textOf(findByTestId(unnamed, "mentored-pubs-no-cwid"))).toBe(
+      "1 faculty-asserted mentee has no CWID, so they can’t be matched to publications and aren’t shown.",
+    );
+    expect(findByTestId(unnamed, "mentored-pubs-no-cwid-list")).toBeNull();
   });
 
   it("chips: the four standing values without ×, until one differs from the default; each facet a removable chip; the reset link", async () => {

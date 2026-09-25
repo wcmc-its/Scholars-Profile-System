@@ -187,6 +187,7 @@ beforeEach(() => {
     allPubsLoaded: null,
     droppedUnresolved: 0,
     droppedNoCwid: 0,
+    droppedNoCwidMentees: [],
   });
 });
 
