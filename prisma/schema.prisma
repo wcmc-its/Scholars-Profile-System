@@ -2517,6 +2517,39 @@ model ReportAccess {
   @@map("report_access")
 }
 
+/// Functional role assignments (`/edit/administrators` → Functional roles):
+/// access that is not tied to an org unit — External Affairs (one role; its
+/// functions "communications" / "development" are the row's scopes) and
+/// Reporting. One row = (role, cwid, source). `source` is
+/// "manual" for an assignment made on the Administrators page, or the name of
+/// the existing mechanism an import mirrored ("report_access" rows, or the
+/// comms-steward / development break-glass "allowlist"). Imported rows are
+/// read-only on the page (the source owns them) and are reconciled by the
+/// import; manual rows are created, re-scoped and revoked on the page, each
+/// write audited as `functional_role_*`. `scopes` is a JSON string array of
+/// scope keys (External Affairs: its functions; Reporting: "*", a report key
+/// or "reportKey:scope"). Gates read this table only while
+/// `FUNCTIONAL_ROLES_AUTHZ` is "on", and then only to ADD access on top of the
+/// ED groups, allowlists and `report_access`
+/// (`lib/auth/functional-role-authz.ts`).
+model FunctionalRoleGrant {
+  role        String   @db.VarChar(32)
+  cwid        String   @db.VarChar(32)
+  source      String   @default("manual") @db.VarChar(32)
+  scopes      Json
+  // Grantee display name as the people picker (or the imported source row)
+  // supplied it — the `report_access.grantee_name` precedent: the runtime
+  // cannot reach LDAP (#443). Read back as Scholar.preferredName ?? this ?? cwid.
+  granteeName String?  @map("grantee_name") @db.VarChar(255)
+  grantedBy   String   @map("granted_by") @db.VarChar(32)
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@id([role, cwid, source])
+  @@index([cwid])
+  @@map("functional_role_grant")
+}
+
 /// Editable report metadata for the `/edit/reports` console — one row per
 /// numbered report (`reportKey` '1'..'7'): the NAME shown in the index and the
 /// page `<h1>` (without its "N. " prefix), the one-line SUMMARY the index card

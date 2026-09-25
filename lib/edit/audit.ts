@@ -255,7 +255,27 @@ export type AuditAction =
   | "report_access_grant"
   /** the matching revoke (`report_access` row deleted); same target shape,
    *  `beforeValues` carries the deleted row. */
-  | "report_access_revoke";
+  | "report_access_revoke"
+  /** a superuser recorded a functional role assignment on
+   *  `/edit/administrators` (`functional_role_grant` row created, source
+   *  `manual`), or the functional-roles import added an imported row
+   *  (`afterValues.via = "import"`). `targetEntityType='functional_role'`,
+   *  `targetEntityId` is `"{role}:{cwid}:{source}"`. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "functional_role_grant"
+  /** a functional role assignment's scopes replaced ("Edit scope", or the
+   *  import re-scoping an imported row); before/after carry `{ scopes }`. */
+  | "functional_role_scope_set"
+  /** the functional-roles import refreshed an imported row's provenance
+   *  (`granted_by` / `granted_at` / `grantee_name`) with its scopes unchanged,
+   *  e.g. after the earliest `report_access` grant it mirrored was revoked;
+   *  `fieldsChanged` names the fields, before/after carry them plus
+   *  `via: "import"`. Appended LAST to the ENUM. */
+  | "functional_role_update"
+  /** a functional role assignment deleted (a manual revoke, or the import
+   *  dropping an imported row its source no longer lists); `beforeValues`
+   *  carries the deleted row. */
+  | "functional_role_revoke";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -344,7 +364,12 @@ export type AuditEntityType =
    *  code, lib/institutions.ts); `targetEntityId` is the code. Requires the
    *  `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
-  | "institution";
+  | "institution"
+  /** a `functional_role_grant` row (Administrators → Functional roles);
+   *  `targetEntityId` is `"{role}:{cwid}:{source}"`. Requires the
+   *  `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "functional_role";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

@@ -35,6 +35,11 @@
  * The check is **fail-closed**: a disabled flag, a missing group cn, an
  * unreachable directory, a bind failure, or a search error all resolve to "not
  * a developer". A directory problem can never *grant* the role.
+ *
+ * With `FUNCTIONAL_ROLES_AUTHZ` "on", an External Affairs grant carrying the
+ * Development function in `functional_role_grant` ALSO confers the role
+ * (additive; `lib/auth/functional-role-authz.ts`). The kill switch above still
+ * wins.
  */
 import { cache } from "react";
 import { isGroupMember } from "@/lib/auth/ldap-group";
@@ -72,6 +77,30 @@ function getDevelopmentAllowlist(): string[] {
   ];
 }
 
+/**
+ * The development CWIDs that can be ENUMERATED: the interim allowlist only
+ * (the ED group's member list cannot be read, `lib/auth/global-roles.ts`).
+ * `[]` when the role is disabled. Used by the functional-roles import
+ * (`lib/edit/functional-roles.server.ts`); mirrors `listCommsStewardCwids`.
+ */
+export function listDevelopmentAllowlistCwids(): string[] {
+  if (!isDevelopmentEnabled()) return [];
+  return getDevelopmentAllowlist();
+}
+
+/** Whether the functional-roles registry admits `cwid` as Development.
+ *  False without touching the DB while `FUNCTIONAL_ROLES_AUTHZ` is off; never
+ *  throws (the registry read is itself fail-closed). */
+async function registryAdmits(cwid: string): Promise<boolean> {
+  if (process.env.FUNCTIONAL_ROLES_AUTHZ !== "on") return false;
+  try {
+    const { registryAdmitsExternalAffairs } = await import("@/lib/auth/functional-role-authz");
+    return await registryAdmitsExternalAffairs(cwid, "development");
+  } catch {
+    return false;
+  }
+}
+
 /** One structured log line for a directory-side failure of the development check. */
 function logCheckFailed(cwid: string, reason: string): void {
   console.warn(
@@ -100,6 +129,10 @@ export const isDeveloper = cache(async (cwid: string): Promise<boolean> => {
   // directory work (VPC↔WCM routing pending, so the live search fails closed).
   // Matched case-insensitively; empty/unset => no-op.
   if (getDevelopmentAllowlist().includes(cwid.toLowerCase())) return true;
+  // Functional roles registry (additive, `FUNCTIONAL_ROLES_AUTHZ`): an
+  // External Affairs grant carrying Development also confers the role.
+  // Loaded lazily so this module stays DB-free while the flag is off.
+  if (await registryAdmits(cwid)) return true;
   const groupCn = process.env.SCHOLARS_DEVELOPMENT_GROUP_CN;
   // Group cn not configured yet — the role is dormant, not broken.
   if (!groupCn) return false;

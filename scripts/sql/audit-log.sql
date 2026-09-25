@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- description writes target, now that the route writes
   -- `OrgUnitRoleAssignment` rows directly. Appended LAST to preserve existing
   -- ENUM ordinals.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution') NOT NULL,
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- entry; same `target_entity_type`/`target_entity_id` shape as the other
   -- two `role_vocabulary_*` actions) -- appended LAST after
   -- `role_vocabulary_update`.
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove') NOT NULL,
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -346,9 +346,20 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         target_entity_id = the cwid the old URL forwarded to,
 --                         so no target_entity_type ENUM change). Appended LAST
 --                         to preserve existing ENUM ordinals.
+--   Functional roles (/edit/administrators, app/api/edit/functional-roles):
+--                         + functional_role_grant · functional_role_scope_set ·
+--                         functional_role_revoke  (a superuser recorded,
+--                         re-scoped or revoked a manual functional role
+--                         assignment, or the functional-roles import changed an
+--                         imported row — values carry via:"import";
+--                         target_entity_type='functional_role',
+--                         target_entity_id "{role}:{cwid}:{source}"); then
+--                         functional_role_update  (the import refreshed an
+--                         imported row's granted_by / granted_at / grantee_name
+--                         with its scopes unchanged). Appended LAST.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update')
     NOT NULL;
 
 --   SELF_EDIT_MENTEE_SUGGESTIONS (#2634): + mentee_suggestion_dismiss ·
@@ -430,9 +441,13 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --                    an ED primary-organization code — lib/institutions.ts;
 --                    target_entity_id is the code). Appended LAST to preserve
 --                    existing ENUM ordinals.
+--   Functional roles: + functional_role  (a functional_role_grant row on
+--                    /edit/administrators; target_entity_id is
+--                    "{role}:{cwid}:{source}"). Appended LAST to preserve
+--                    existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for
