@@ -46,7 +46,9 @@ export function canViewDataSharingDashboard(session: EditSession): boolean {
  *  mechanism would be two different interaction models on one page for no
  *  real gain; ponytail: native GET links cover the ask (click a header,
  *  page reloads sorted) without a client island or shipping the full
- *  (unpaginated) byFaculty array to the browser. */
+ *  (unpaginated) byFaculty array to the browser. (2026-09: the links now
+ *  soft-navigate via `SoftLink`, so no full reload or scroll jump, but the
+ *  sort is still server-side and the URL still the only state.) */
 /** Rows per faculty-table page (2026-08-16: was a static "+N more, see the
  *  CSV" cut; now the page size for real in-page pagination — same number,
  *  same rationale, a 500+-row wall was the original complaint). */

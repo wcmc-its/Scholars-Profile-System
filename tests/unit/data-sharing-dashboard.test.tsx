@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+
+// The filter/sort/pager links soft-navigate through the app router
+// (`data-sharing-nav.tsx`); outside Next there is no mounted router to supply.
+const mockPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
+}));
+beforeEach(() => mockPush.mockReset());
 
 import { DataSharingDashboard } from "@/components/edit/data-sharing-dashboard";
 import {
@@ -631,5 +639,103 @@ describe("DataSharingDashboard — filter bar", () => {
       "US_OPEN",
       "CONCERN",
     ]);
+  });
+});
+
+describe("DataSharingDashboard — soft navigation", () => {
+  /** Asserts exactly one scroll-preserving push, and returns its query. */
+  const pushed = () => {
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    const [href, opts] = mockPush.mock.calls[0];
+    expect(opts).toEqual({ scroll: false });
+    return new URLSearchParams(new URL(href, "http://x").search);
+  };
+
+  it("a tier chip click pushes its own href without a reload or scroll jump", () => {
+    const { container } = render(
+      <DataSharingDashboard
+        report={report}
+        ui={{ ...DEFAULT_UI, filters: { tiers: ["US_OPEN"] } }}
+      />,
+    );
+    const chip = container.querySelector('a[data-tier="CONCERN"]') as HTMLAnchorElement;
+    // fireEvent returns false when the default (a full navigation) was prevented.
+    expect(fireEvent.click(chip)).toBe(false);
+    expect(pushed().getAll("tier")).toEqual(["US_OPEN", "CONCERN"]);
+  });
+
+  it("NIH segments, sort headers and the faculty pager soft-navigate too", () => {
+    const { container, getByText } = render(
+      <DataSharingDashboard report={report} ui={DEFAULT_UI} />,
+    );
+    fireEvent.click(container.querySelector('a[data-nih="true"]') as HTMLElement);
+    expect(pushed().get("nihFunded")).toBe("true");
+
+    mockPush.mockReset();
+    const facultyTable = container.querySelector("#faculty table") as HTMLElement;
+    fireEvent.click(within(facultyTable).getByRole("link", { name: /Share rate/ }));
+    expect(pushed().get("facSort")).toBe("shareRate");
+
+    mockPush.mockReset();
+    fireEvent.click(getByText("Next →"));
+    expect(pushed().get("facPage")).toBe("2");
+  });
+
+  it("leaves modified clicks (open in new tab/window) to the browser", () => {
+    const { container } = render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    const chip = container.querySelector('a[data-tier="CONCERN"]') as HTMLAnchorElement;
+    expect(fireEvent.click(chip, { metaKey: true })).toBe(true);
+    expect(fireEvent.click(chip, { ctrlKey: true })).toBe(true);
+    expect(fireEvent.click(chip, { shiftKey: true })).toBe(true);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("Clear filters soft-navigates back to the bare page", () => {
+    render(
+      <DataSharingDashboard report={report} ui={{ ...DEFAULT_UI, filters: { nihFunded: true } }} />,
+    );
+    fireEvent.click(screen.getByText("Clear filters"));
+    expect(mockPush).toHaveBeenCalledWith("/edit/data-sharing", { scroll: false });
+  });
+
+  it("the Custom year form submits as a soft navigation, carrying filters and sorts, dropping empty fields", () => {
+    const { container } = render(
+      <DataSharingDashboard
+        report={report}
+        ui={{
+          ...DEFAULT_UI,
+          filters: { tiers: ["US_OPEN"], nihFunded: false },
+          deptSort: "faculty",
+          deptDir: "asc",
+        }}
+      />,
+    );
+    const form = container.querySelector('[data-testid="ds-filter-bar"] form') as HTMLFormElement;
+    const details = form.closest("details") as HTMLDetailsElement;
+    details.open = true;
+    fireEvent.change(form.querySelector('input[name="yearFrom"]') as HTMLInputElement, {
+      target: { value: "2021" },
+    });
+    expect(fireEvent.submit(form)).toBe(false);
+    const q = pushed();
+    expect(q.get("yearFrom")).toBe("2021");
+    expect(q.has("yearTo")).toBe(false); // left blank → omitted, not `yearTo=`
+    expect(q.getAll("tier")).toEqual(["US_OPEN"]);
+    expect(q.get("nihFunded")).toBe("false");
+    expect(q.get("deptSort")).toBe("faculty");
+    expect(q.get("deptDir")).toBe("asc");
+    expect(details.open).toBe(false); // the popover closes on Apply
+  });
+
+  it("export CSV links stay plain downloads, never intercepted", () => {
+    render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    expect(fireEvent.click(screen.getByTestId("ds-export-link"))).toBe(true);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("marks the report region idle and the status empty when nothing is loading", () => {
+    render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    expect(screen.getByTestId("ds-pending-region").getAttribute("aria-busy")).toBe("false");
+    expect(screen.getByTestId("ds-pending-status").textContent).toBe("");
   });
 });

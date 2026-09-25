@@ -50,7 +50,7 @@ export default async function EditDataSharingPage({
   // Year-range/tier filters + per-table sort/page (2026-08-16 ask) — every
   // value is server-parsed from the URL, no client state; see
   // `parseDataSharingParams`'s doc comment for why sort is a plain link, not
-  // a client island.
+  // a client island. (The links soft-navigate; see `data-sharing-nav.tsx`.)
   const ui = parseDataSharingParams((await searchParams) ?? {});
 
   const [pendingSlugRequests, pendingHonors] = await Promise.all([
@@ -70,9 +70,13 @@ export default async function EditDataSharingPage({
         Dataset deposits synced from reciterdb by the weekly data-sharing bridge. Aggregate views
         for research leadership, compliance and grant reporting, and the library / RDM team.
       </p>
-      {/* The report streams under a body-only skeleton; keyed on the query so
-          a filter or sort change shows it again. */}
-      <Suspense key={JSON.stringify(ui)} fallback={<DataSharingBodySkeleton />}>
+      {/* The report streams under a body-only skeleton on first load.
+          Deliberately NOT keyed on the query: filter/sort/page changes are
+          client-side transitions (`data-sharing-nav.tsx`), and an unchanged
+          boundary lets React keep the current dashboard on screen (dimmed)
+          until the new render arrives, instead of flashing the skeleton and
+          collapsing the filter bar mid-click. */}
+      <Suspense fallback={<DataSharingBodySkeleton />}>
         <DataSharingBody ui={ui} />
       </Suspense>
     </ConsoleShell>

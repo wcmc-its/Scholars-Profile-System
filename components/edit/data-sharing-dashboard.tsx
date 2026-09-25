@@ -108,6 +108,13 @@ import { ArrowUpRight } from "lucide-react";
 
 import { CopyButton } from "@/components/publication/copy-button";
 import { DataSharingMethodsSection } from "@/components/edit/data-sharing-methods";
+import {
+  DataSharingNavProvider,
+  DataSharingPendingRegion,
+  DataSharingPendingStatus,
+  SoftGetForm,
+  SoftLink,
+} from "@/components/edit/data-sharing-nav";
 import { DataSharingRail, ShowMoreRows, type RailItem } from "@/components/edit/data-sharing-rail";
 import { DefinedTerm } from "@/components/edit/data-sharing-term";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
@@ -368,7 +375,7 @@ function SortableTh({
       className={cn(thClass, align === "right" && "text-right")}
       aria-sort={isActive ? (activeDir === "desc" ? "descending" : "ascending") : undefined}
     >
-      <a
+      <SoftLink
         href={href}
         title={title}
         className={cn(
@@ -378,7 +385,7 @@ function SortableTh({
       >
         {label}
         {isActive && <span aria-hidden>{activeDir === "desc" ? "↓" : "↑"}</span>}
-      </a>
+      </SoftLink>
     </th>
   );
 }
@@ -1456,20 +1463,20 @@ function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSha
           </span>
           <span className="flex gap-4">
             {facPage > 1 && (
-              <a
+              <SoftLink
                 href={buildQuery({ ...otherParams, facPage: facPage - 1 })}
                 className="text-apollo-slate hover:underline"
               >
                 ← Previous
-              </a>
+              </SoftLink>
             )}
             {facPage < totalPages && (
-              <a
+              <SoftLink
                 href={buildQuery({ ...otherParams, facPage: facPage + 1 })}
                 className="text-apollo-slate hover:underline"
               >
                 Next →
-              </a>
+              </SoftLink>
             )}
           </span>
         </div>
@@ -1813,7 +1820,10 @@ function yearSpan(from: number, to: number): string {
  *  changed (every other filter and both tables' sorts preserved; the faculty
  *  page resets, since the row count under a new filter makes it
  *  meaningless). The typed from/to year range is kept behind "Custom" as the
- *  same plain GET form it always was. No client state anywhere. */
+ *  same GET form it always was. Links and the form are `SoftLink` /
+ *  `SoftGetForm` (`data-sharing-nav.tsx`): same hrefs, applied as a
+ *  client-side `router.push` with no scroll jump, the URL still the only
+ *  filter state. */
 function FilterBar({
   ui,
   bounds,
@@ -1860,14 +1870,14 @@ function FilterBar({
         <span className="text-muted-foreground text-[13px]">Deposit years</span>
         <div className={segGroupClass} role="group" aria-label="Deposit years">
           {presets.map((p) => (
-            <a
+            <SoftLink
               key={p.label}
               href={hrefWith({ ...f, yearFrom: p.yearFrom, yearTo: undefined })}
               className={segClass(presetActive(p))}
               aria-current={presetActive(p) ? "true" : undefined}
             >
               {p.label}
-            </a>
+            </SoftLink>
           ))}
           <details className="relative">
             <summary
@@ -1880,8 +1890,11 @@ function FilterBar({
                 ? yearSpan(f.yearFrom ?? bounds?.min ?? 0, f.yearTo ?? bounds?.max ?? 0)
                 : "Custom"}
             </summary>
-            <form
-              method="get"
+            {/* Keyed on the active range: the inputs are uncontrolled, so after a
+                preset or Clear (a soft nav that keeps this element mounted)
+                they'd otherwise still show the last typed values. */}
+            <SoftGetForm
+              key={`${f.yearFrom ?? ""}-${f.yearTo ?? ""}`}
               className="border-apollo-border-strong bg-apollo-surface absolute top-[calc(100%+6px)] left-0 z-20 flex w-max items-end gap-2 rounded-[10px] border p-3 text-xs shadow-md"
             >
               <label className="flex flex-col gap-1">
@@ -1925,7 +1938,7 @@ function FilterBar({
               >
                 Apply
               </button>
-            </form>
+            </SoftGetForm>
           </details>
         </div>
 
@@ -1938,7 +1951,7 @@ function FilterBar({
               [false, "Not NIH"],
             ] as const
           ).map(([value, label]) => (
-            <a
+            <SoftLink
               key={label}
               href={hrefWith({ ...f, nihFunded: value })}
               className={segClass(f.nihFunded === value)}
@@ -1946,7 +1959,7 @@ function FilterBar({
               data-nih={value === undefined ? "any" : String(value)}
             >
               {label}
-            </a>
+            </SoftLink>
           ))}
         </div>
 
@@ -1955,7 +1968,7 @@ function FilterBar({
           {FILTERABLE_TIERS.map((tier) => {
             const on = !!f.tiers?.includes(tier);
             return (
-              <a
+              <SoftLink
                 key={tier}
                 href={toggleTier(tier)}
                 title={TIER_LABELS[tier]}
@@ -1969,19 +1982,19 @@ function FilterBar({
               >
                 <TierDot tier={tier} />
                 {TIER_SHORT_LABELS[tier]}
-              </a>
+              </SoftLink>
             );
           })}
         </div>
 
-        {active && (
-          <Link
-            href="/edit/data-sharing"
-            className="text-apollo-slate ml-auto text-[13px] hover:underline"
-          >
-            Clear filters
-          </Link>
-        )}
+        <span className="ml-auto flex items-center gap-3 text-[13px]">
+          <DataSharingPendingStatus className="text-muted-foreground" />
+          {active && (
+            <SoftLink href="/edit/data-sharing" className="text-apollo-slate hover:underline">
+              Clear filters
+            </SoftLink>
+          )}
+        </span>
       </div>
       {active && (
         <p className="text-muted-foreground text-xs leading-normal">
@@ -2054,38 +2067,47 @@ export function DataSharingDashboard({
     },
   ];
   return (
-    <div className="grid items-start gap-[22px] lg:grid-cols-[170px_minmax(0,1fr)]">
-      <DataSharingRail items={railItems} />
-      <div className="flex min-w-0 flex-col gap-9">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-2.5 text-[13px]">
-            <span className="border-apollo-border-strong bg-apollo-surface rounded-full border px-2.5 py-[3px] whitespace-nowrap">
-              Data as of {formatDate(report.dataAsOf)}
-            </span>
-            {/* Permanent methodology note (2026-08-16), NOT conditional on
+    <DataSharingNavProvider>
+      <div className="grid items-start gap-[22px] lg:grid-cols-[170px_minmax(0,1fr)]">
+        <DataSharingRail items={railItems} />
+        <div className="flex min-w-0 flex-col gap-9">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2.5 text-[13px]">
+              <span className="border-apollo-border-strong bg-apollo-surface rounded-full border px-2.5 py-[3px] whitespace-nowrap">
+                Data as of {formatDate(report.dataAsOf)}
+              </span>
+              {/* Permanent methodology note (2026-08-16), NOT conditional on
                 filter state — a fixed historical marker: the FTE-narrowed
                 share-rate denominator roughly doubled every rate, and a reader
                 reconciling an old percentage needs the answer at the source. */}
-            <span
-              className="bg-apollo-amber-tint text-apollo-amber rounded-full px-2.5 py-[3px]"
-              data-testid="ds-fte-note"
-            >
-              Aug 2026: share-rate denominator narrowed to full-time faculty; rates roughly doubled
-              vs. earlier published figures
-            </span>
+              <span
+                className="bg-apollo-amber-tint text-apollo-amber rounded-full px-2.5 py-[3px]"
+                data-testid="ds-fte-note"
+              >
+                Aug 2026: share-rate denominator narrowed to full-time faculty; rates roughly
+                doubled vs. earlier published figures
+              </span>
+            </div>
+            <FilterBar ui={ui} bounds={report.depositYearBounds} />
           </div>
-          <FilterBar ui={ui} bounds={report.depositYearBounds} />
+          <DataSharingPendingRegion className="flex flex-col gap-9">
+            <RollupSection
+              report={report}
+              doc={doc}
+              filters={ui.filters}
+              currentYear={currentYear}
+            />
+            <FundingSection report={report} filters={ui.filters} />
+            <RepositoriesSection report={report} ui={ui} />
+            <DepartmentsSection report={report} ui={ui} />
+            <FacultySection report={report} ui={ui} />
+            <SubtypesSection report={report} filters={ui.filters} />
+            <RecentDepositsSection report={report} filters={ui.filters} />
+            <ComplianceSection report={report} />
+            <DataSharingMethodsSection doc={doc} />
+          </DataSharingPendingRegion>
         </div>
-        <RollupSection report={report} doc={doc} filters={ui.filters} currentYear={currentYear} />
-        <FundingSection report={report} filters={ui.filters} />
-        <RepositoriesSection report={report} ui={ui} />
-        <DepartmentsSection report={report} ui={ui} />
-        <FacultySection report={report} ui={ui} />
-        <SubtypesSection report={report} filters={ui.filters} />
-        <RecentDepositsSection report={report} filters={ui.filters} />
-        <ComplianceSection report={report} />
-        <DataSharingMethodsSection doc={doc} />
       </div>
-    </div>
+    </DataSharingNavProvider>
   );
 }
