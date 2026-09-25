@@ -87,6 +87,7 @@ const ACTION_LABEL: Partial<Record<AuditAction, string>> = {
   impersonation_start: "Started View-as session",
   impersonation_end: "Ended View-as session",
   orcid_set: "Set ORCID iD",
+  slug_redirect_remove: "Removed old profile URL redirect",
   disease_assignment_decision: "Reviewed disease assignment",
 };
 
@@ -160,6 +161,10 @@ export function detailForAction(action: string, before: unknown, after: unknown)
       if (set) return set;
       const gone = readStr(before, "orcid");
       return gone ? `Removed ${gone}` : null;
+    }
+    case "slug_redirect_remove": {
+      const gone = readStr(before, "oldSlug");
+      return gone ? `/${gone}` : null;
     }
     case "slug_request":
     case "slug_request_approved":

@@ -47,10 +47,24 @@ function row(id: string): SlugRequestQueueRow {
 describe("SlugRequestQueue", () => {
   it("renders the empty state when there are no pending requests", () => {
     render(<SlugRequestQueue initialRequests={[]} />);
-    expect(screen.getByTestId("slug-request-queue-empty").textContent).toMatch(
-      /no pending url requests/i,
-    );
+    expect(screen.getByTestId("slug-request-queue-empty").textContent).toBe("No pending requests.");
     expect(screen.queryByTestId("slug-request-queue")).toBeNull();
+    expect(screen.getByTestId("slug-request-count").textContent).toBe("0");
+  });
+
+  it("the empty state says when the last request was decided", () => {
+    render(<SlugRequestQueue initialRequests={[]} lastDecidedAt="2026-06-03T15:00:00.000Z" />);
+    expect(screen.getByTestId("slug-request-queue-empty").textContent).toBe(
+      "No pending requests. Last decided Jun 3, 2026.",
+    );
+  });
+
+  it("the header badge counts what is still pending, and drops as rows are decided", () => {
+    render(<SlugRequestQueue initialRequests={[row("a"), row("b")]} />);
+    expect(screen.getByRole("heading", { name: "Requests to review" })).toBeTruthy();
+    expect(screen.getByTestId("slug-request-count").textContent).toBe("2");
+    fireEvent.click(screen.getByTestId("decide-a"));
+    expect(screen.getByTestId("slug-request-count").textContent).toBe("1");
   });
 
   it("renders one row per request, in the order given (oldest-first from the server)", () => {

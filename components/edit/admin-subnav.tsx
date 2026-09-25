@@ -3,9 +3,9 @@
  * `slug-personalization-ui-spec.md` § 3.1; unified onto the self-edit surface in
  * `role-aware-navigation-entry-points-spec.md`). The maroon-underlined tab strip
  * in the black Apollo bar, linking the Profiles roster (`/edit/profiles`), the
- * Profile-URL request queue (`/edit/slug-requests`), the URL registry,
+ * Profile URLs page (`/edit/slugs`: the URL request queue above the registry),
  * Administrators, Method Families, and the matcher tools
- * (`/edit/matcha`, `/edit/grant-matcha`). A pending-count pill sits on the "URL requests"
+ * (`/edit/matcha`, `/edit/grant-matcha`). A pending-count pill sits on the "Profile URLs"
  * tab.
  *
  * Renders INSIDE the dark `ConsoleTopBar` (pass it as the bar's children), not as
@@ -18,9 +18,9 @@
  * the console — not just after drilling into the roster. A plain scholar's
  * self-edit page keeps its minimal "My Profile" strip and never mounts this.
  *
- * `pendingSlugRequests === null` hides the URL-requests tab entirely — the
- * slug-request feature is flag-gated (`SELF_EDIT_SLUG_REQUEST`), so a surface
- * that doesn't exist isn't advertised.
+ * `pendingSlugRequests === null` drops the pending pill from Profile URLs — the
+ * slug-request feature is flag-gated (`SELF_EDIT_SLUG_REQUEST`), so a queue
+ * that doesn't exist isn't advertised. The registry itself always shows.
  */
 import Link from "next/link";
 
@@ -37,7 +37,6 @@ import { isMediaHighlightsQueueEnabled, isNewsQueueEnabled } from "@/lib/edit/ne
 export type AdminSubnavActive =
   | "profiles"
   | "units"
-  | "slug-requests"
   | "honors-queue"
   | "news-queue"
   | "media-highlights-queue"
@@ -95,7 +94,6 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   /** Pending work — something is waiting on a human. All four are approve/reject
    *  review surfaces; `cores` moves here from its old bar position (its own code
    *  comment calls it the "Cores review-queue index"). */
-  "slug-requests": "queues",
   "honors-queue": "queues",
   "news-queue": "queues",
   "media-highlights-queue": "queues",
@@ -189,7 +187,7 @@ export function AdminSubnav({
    *  Data Quality, there is no natural per-unit cut here). A number shows it
    *  (passed `0` — no badge). */
   dataSharingTab?: number | null;
-  /** Whether to show the superuser list surfaces (URL requests / Slug registry /
+  /** Whether to show the superuser list surfaces (Profile URLs /
    *  Administrators — and Profiles, unless `profilesTab` separately enables it).
    *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
    *  those superuser-only surfaces stay hidden. */
@@ -253,15 +251,8 @@ export function AdminSubnav({
     [
       { show: superuserSurfaces || profilesTab, id: "profiles", href: "/edit/profiles", label: "Profiles" },
       { show: unitsTab, id: "units", href: "/edit/units", label: "Org units" },
-      {
-        show: superuserSurfaces && pendingSlugRequests !== null,
-        id: "slug-requests",
-        href: "/edit/slug-requests",
-        label: "URL requests",
-        count: pendingSlugRequests ?? undefined,
-      },
       // Gated on `pendingHonors !== null` ALONE — deliberately without
-      // `superuserSurfaces`, unlike the slug tab above. This queue has a
+      // `superuserSurfaces`, unlike the Profile URLs tab. This queue has a
       // non-superuser tier (`honors_curator`, the Research Dean's office) for whom
       // `superuserSurfaces` is false, so ANDing it would hide the tab from the very
       // people the role exists to serve (#1767: "an honors surface nobody could
@@ -286,8 +277,15 @@ export function AdminSubnav({
         label: "Media highlights",
       },
       // Always visible to superusers — the slug namespace exists regardless of the
-      // slug-request flag.
-      { show: superuserSurfaces, id: "slugs", href: "/edit/slugs", label: "URL registry" },
+      // slug-request flag. The request queue lives on the same page (design canvas
+      // "Profile URLs", 2026-09-25), so its pending pill rides here.
+      {
+        show: superuserSurfaces,
+        id: "slugs",
+        href: "/edit/slugs",
+        label: "Profile URLs",
+        count: pendingSlugRequests ?? undefined,
+      },
       // Gap 3 fix — was `superuserSurfaces && administratorsTab !== null && ...`,
       // ANDing a role check its siblings (methods/dataQuality/dataSharing below)
       // don't. `administratorsTab` is now `0`-or-`null` FOR THE VIEWER already

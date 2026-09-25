@@ -1,87 +1,80 @@
-"use client";
-
 /**
- * "Methods" dialog for `/edit/data-sharing` — originally (08-16 follow-up
- * pass) three hardcoded prose blocks collecting the methodology notes that
- * used to sit inline on §1, plus the "One paragraph for reporting" copy
- * block.
+ * "Methods & definitions" for `/edit/data-sharing` — the last section of the
+ * page (2026-09 page revision: moved inline from the Methods dialog, reached
+ * from the rail's "Methods & definitions" link).
  *
- * v3 (2026-08-16 stakeholder pass): the hardcoded prose was replaced by
- * rendering `buildMethodsDoc`'s sections — ONE source of methods text shared
- * with the `?section=methods` markdown download, so the dialog and the file a
- * stakeholder forwards can't drift. The dashboard server component builds the
- * doc (`buildMethodsDoc(report, { shareRateYearFloor })`) and passes it down
- * whole; this stays a client island only for the Radix dialog and receives
- * everything as props — it must NEVER import the report lib or anything that
- * constructs prisma (the manageable-units trap in CLAUDE.md). The one
- * `MethodsDoc` import below is type-only against a pure module (no prisma/db
- * — see `lib/edit/data-sharing-methods-doc.ts`'s header), which is why it's
- * allowed. Widened to `max-w-2xl`, then `max-w-3xl` (2026-08-16 review: "widen
- * the modal") for the eight-section content; the Glossary section's body is
- * `\n`-delimited "Term — definition" lines, rendered as a plain list here
- * (full text — the dotted `DefinedTerm` hovers are the on-page affordance,
- * this dialog is where someone reads it all).
+ * History: originally (08-16 follow-up pass) three hardcoded prose blocks in a
+ * dialog; v3 (2026-08-16 stakeholder pass) replaced the prose with
+ * `buildMethodsDoc`'s sections — ONE source of methods text shared with the
+ * `?section=methods` markdown download, so the page and the file a
+ * stakeholder forwards can't drift. The dashboard builds the doc server-side
+ * and passes it down whole. This module must NEVER import the report lib or
+ * anything that constructs prisma (the manageable-units trap in CLAUDE.md);
+ * the one `MethodsDoc` import is type-only against a pure module. The
+ * Glossary section's body is `\n`-delimited "Term — definition" lines,
+ * rendered as a list (the dotted `DefinedTerm` hovers are the on-page
+ * affordance; this is where someone reads it all).
  */
 import { CopyButton } from "@/components/publication/copy-button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import type { MethodsDoc } from "@/lib/edit/data-sharing-methods-doc";
 
-export function DataSharingMethodsDialog({
-  doc,
-}: {
-  /** Built server-side by the dashboard via `buildMethodsDoc` — see the
-   *  module header for why it arrives as a prop rather than being built here. */
-  doc: MethodsDoc;
-}) {
+export function DataSharingMethodsSection({ doc }: { doc: MethodsDoc }) {
+  const glossary = doc.sections.find((s) => s.heading === "Glossary");
+  const prose = doc.sections.filter((s) => s !== glossary);
   return (
-    <Dialog>
-      <DialogTrigger className="text-sm hover:underline">Methods</DialogTrigger>
-      <DialogContent className="max-h-[80vh] max-w-3xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Methods</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 text-sm">
-          {doc.sections.map((section) => (
-            <div key={section.heading}>
-              <h3 className="font-medium">{section.heading}</h3>
-              {/* Only the Glossary body carries newlines (one term per line);
-                  every other section splits into a single paragraph — one
-                  generic renderer, no per-section special case to drift. */}
-              <div className="text-muted-foreground mt-1 space-y-1">
-                {section.body.split("\n").map((line, i) => (
-                  <p key={i}>{line}</p>
-                ))}
-              </div>
-            </div>
-          ))}
-
-          <div className="border-apollo-border rounded-md border p-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="font-medium">One paragraph for reporting</h3>
-              <span className="inline-flex items-center gap-1 text-xs">
-                <CopyButton value={doc.paragraph} label="Copy paragraph text" />
-                Copy paragraph
-              </span>
-            </div>
-            <p className="mt-2">{doc.paragraph}</p>
+    <section id="methods" className="flex scroll-mt-32 flex-col gap-3.5">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-xl font-semibold">Methods &amp; definitions</h2>
+        {/* Plain <a>, not <Link>: the target is a download route handler, and
+            <Link>'s client nav + prefetch would fetch the file itself. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a
+          href="/edit/data-sharing/export?section=methods"
+          className="text-apollo-slate ml-auto text-[13px] hover:underline"
+        >
+          Download methods
+        </a>
+      </div>
+      <div className="border-apollo-border-strong bg-apollo-surface grid grid-cols-[repeat(auto-fit,minmax(min(300px,100%),1fr))] gap-x-8 gap-y-4 rounded-[13px] border px-4 py-[18px] sm:px-[22px]">
+        {prose.map((section) => (
+          <div key={section.heading} className="flex flex-col gap-1">
+            <h3 className="text-sm font-semibold">{section.heading}</h3>
+            {section.body.split("\n").map((line, i) => (
+              <p key={i} className="text-apollo-ink-2 text-[13.5px] leading-relaxed">
+                {line}
+              </p>
+            ))}
           </div>
-
-          {/* Plain <a>, not <Link>, same rationale as the dashboard's
-              DownloadLink: the target is a download route handler, and
-              <Link>'s client nav + prefetch would fetch the file itself. */}
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a href="/edit/data-sharing/export?section=methods" className="text-xs hover:underline">
-            Download methods
-          </a>
+        ))}
+      </div>
+      {glossary ? (
+        <div className="border-apollo-border-strong bg-apollo-surface rounded-[13px] border px-4 py-[18px] sm:px-[22px]">
+          <h3 className="text-sm font-semibold">Glossary</h3>
+          <dl className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(min(300px,100%),1fr))] gap-x-8 gap-y-2">
+            {glossary.body.split("\n").map((line) => {
+              const [term, ...rest] = line.split(" — ");
+              return (
+                <div key={line} className="text-[13.5px] leading-relaxed">
+                  <dt className="inline font-medium">{term}</dt>
+                  {rest.length > 0 ? (
+                    <dd className="text-apollo-ink-2 inline"> — {rest.join(" — ")}</dd>
+                  ) : null}
+                </div>
+              );
+            })}
+          </dl>
         </div>
-      </DialogContent>
-    </Dialog>
+      ) : null}
+      <div className="border-apollo-border-strong bg-apollo-surface rounded-[13px] border px-4 py-[18px] sm:px-[22px]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">One paragraph for reporting</h3>
+          <span className="text-apollo-slate inline-flex items-center gap-1 text-[13px]">
+            <CopyButton value={doc.paragraph} label="Copy paragraph text" />
+            Copy paragraph
+          </span>
+        </div>
+        <p className="text-apollo-ink-2 mt-2 text-[13.5px] leading-relaxed">{doc.paragraph}</p>
+      </div>
+    </section>
   );
 }

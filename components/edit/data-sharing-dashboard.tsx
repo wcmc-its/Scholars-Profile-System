@@ -86,14 +86,38 @@
  * the same `DATA_SHARING_TERMS` glossary the Methods dialog renders in full.
  * (9) The Methods dialog rebuilt on `buildMethodsDoc` — the dashboard builds
  * the doc server-side and passes it down, see `data-sharing-methods.tsx`.
+ *
+ * 2026-09 page revision (the "Data Sharing" design-canvas mockup): a
+ * two-column layout — an "On this page" rail (`DataSharingRail`: audience
+ * chips, numbered sections with a headline stat each, scroll-spy) beside the
+ * body; "Data as of" + the FTE-denominator note as pills; a filter bar of
+ * segmented Deposit-years presets / NIH / tier chips (plain GET links; the
+ * custom from/to year form lives behind "Custom"); KPI tiles; the year chart
+ * and tier bars side by side; ONE funding × access table with totals (it
+ * carries all four old funding cards' numbers); Repositories and Departments
+ * split into their own sections; the department Open/Controlled/Registry
+ * columns folded into an access-mix bar; sub-types as per-category cards; a
+ * condensed Recent deposits table; and Methods rendered inline at the foot
+ * of the page instead of in a dialog. Every caveat the notes above call
+ * load-bearing (tier-only "concerning", strict floor, the PMC gap, the
+ * attribution-scope paragraph, n/N beside every rate) is still on the page.
  */
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
 import { CopyButton } from "@/components/publication/copy-button";
-import { DataSharingMethodsDialog } from "@/components/edit/data-sharing-methods";
+import { DataSharingMethodsSection } from "@/components/edit/data-sharing-methods";
+import {
+  DataSharingNavProvider,
+  DataSharingPendingRegion,
+  DataSharingPendingStatus,
+  SoftGetForm,
+  SoftLink,
+} from "@/components/edit/data-sharing-nav";
+import { DataSharingRail, ShowMoreRows, type RailItem } from "@/components/edit/data-sharing-rail";
 import { DefinedTerm } from "@/components/edit/data-sharing-term";
+import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { resolveDatasetUrl } from "@/components/profile/datasets-section";
 import {
   parseSensitiveSubtypes,
@@ -111,44 +135,65 @@ import {
   type SortDir,
 } from "@/lib/edit/data-sharing-dashboard";
 import { effectiveTierOf, urlOf } from "@/lib/repository-tier";
+import { cn } from "@/lib/utils";
 
-const thClass = "px-3 py-2 font-medium";
-const tdClass = "px-3 py-2";
-const sectionClass =
-  "border-apollo-border bg-apollo-surface mt-3 overflow-x-auto rounded-md border";
+/** Card chrome shared by every tile, chart and table on the page. */
+const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] border";
+/** Table shell: the card, clipped, scrolling sideways at phone width. */
+const tableWrapClass = `${cardClass} overflow-x-auto`;
+const theadClass =
+  "bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground border-b text-left text-[11.5px] font-medium tracking-[.06em] uppercase";
+const thClass = "px-3 py-2.5 font-medium first:pl-[18px] last:pr-[18px]";
+const tdClass = "px-3 py-2 first:pl-[18px] last:pr-[18px]";
+const rowClass = "border-apollo-border hover:bg-apollo-page border-t first:border-t-0";
+const linkActionClass = "text-apollo-slate text-[13px] hover:underline";
 
-/** "n/N (x%)" — deliberately never a bare percentage (a past review flagged
- *  that a naked percent on a small denominator implies false precision).
- *  `undefined` (row has no share-rate data merged) or a zero denominator both
- *  render "—" rather than "0/0 (NaN%)" or a misleading "0%". A nonzero
- *  numerator that rounds to 0% reads as "<1%" (2026-08-16 review: several
- *  departments' entire signal was being rounded away, and "0%" next to a
- *  nonzero numerator reads as an arithmetic error, not a small percentage). */
-function formatShareRate(numerator: number | undefined, denominator: number | undefined): string {
-  if (numerator === undefined || denominator === undefined || denominator === 0) return "—";
+/** Percent label for a share rate — a nonzero numerator that rounds to 0%
+ *  reads "<1%" (2026-08-16 review: "0%" next to a nonzero numerator reads as
+ *  an arithmetic error). `null` for no data / zero denominator. */
+function ratePct(numerator: number | undefined, denominator: number | undefined): string | null {
+  if (numerator === undefined || denominator === undefined || denominator === 0) return null;
   const pct = Math.round((numerator / denominator) * 100);
-  const pctLabel = pct === 0 && numerator > 0 ? "<1%" : `${pct}%`;
-  return `${numerator.toLocaleString()}/${denominator.toLocaleString()} (${pctLabel})`;
+  return pct === 0 && numerator > 0 ? "<1%" : `${pct}%`;
+}
+
+/** Share rate as the percentage WITH its "n/N" beside it — deliberately
+ *  never a bare percentage (a past review flagged that a naked percent on a
+ *  small denominator implies false precision). No data → "—". */
+function ShareRateCell({
+  numerator,
+  denominator,
+}: {
+  numerator: number | undefined;
+  denominator: number | undefined;
+}) {
+  const pct = ratePct(numerator, denominator);
+  if (pct === null) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="inline-flex items-baseline justify-end gap-2 whitespace-nowrap">
+      <span className="font-medium tabular-nums">{pct}</span>
+      <span className="text-muted-foreground text-xs tabular-nums">
+        {numerator!.toLocaleString()}/{denominator!.toLocaleString()}
+      </span>
+    </span>
+  );
 }
 
 /** Acronyms preserved as-is when `displayDepartmentName` title-cases an
  *  all-caps department string — 2026-08-16 adversarial-review finding: the
  *  fix's OWN motivating example, "WCMC QATAR," contains one (WCMC) that the
- *  naive title-case would mangle to "Wcmc," which the doc comment on this
- *  function previously (wrongly) claimed couldn't happen. Bounded allowlist,
- *  not a general acronym detector — add an entry only when a real
- *  all-caps department name surfaces one. */
+ *  naive title-case would mangle to "Wcmc." Bounded allowlist, not a general
+ *  acronym detector — add an entry only when a real all-caps department name
+ *  surfaces one. */
 const PRESERVED_DEPARTMENT_ACRONYMS = new Set(["WCMC", "ICU", "NIH"]);
 
 /** Title-cases a department name if it's stored fully uppercase (e.g. "WCMC
- *  QATAR" → "WCMC Qatar"), otherwise passes it through untouched — 2026-08-16
- *  review: cosmetic, but the audience notices. Bounded to the all-uppercase
- *  case on purpose: a normal Title Case or mixed-case name (which may
- *  legitimately contain an acronym) passes through unchanged. Within an
+ *  QATAR" → "WCMC Qatar"), otherwise passes it through untouched. Within an
  *  all-caps string, a token in `PRESERVED_DEPARTMENT_ACRONYMS` stays
- *  uppercase rather than being title-cased along with the rest. */
+ *  uppercase. */
 function displayDepartmentName(department: string): string {
-  if (department !== department.toUpperCase() || department === department.toLowerCase()) return department;
+  if (department !== department.toUpperCase() || department === department.toLowerCase())
+    return department;
   return department
     .split(" ")
     .map((word) => {
@@ -161,12 +206,10 @@ function displayDepartmentName(department: string): string {
 
 /** Repositories whose accession convention is a fixed-prefix uppercase code
  *  (GSExxxx, SRRxxxx…) — uppercased for display when the stored value isn't
- *  already (2026-08-16 review: "gse55096" vs GEO's own "GSE55096"
- *  convention). Deliberately NOT applied to every repository: DOI-bearing
- *  repositories (Dryad, Zenodo, figshare, …) use `accessionOrDoi` for a real
- *  DOI, and dbGaP's own convention is a LOWERCASE "phs" prefix (e.g.
- *  "phs000001.v1.p1") — uppercasing it would be wrong, not a fix (2026-08-16
- *  adversarial-review finding: dbGaP was wrongly included here). */
+ *  already. Deliberately NOT applied to every repository: DOI-bearing
+ *  repositories use `accessionOrDoi` for a real DOI, and dbGaP's own
+ *  convention is a LOWERCASE "phs" prefix (2026-08-16 adversarial-review
+ *  finding: dbGaP was wrongly included here). */
 const UPPERCASE_ACCESSION_REPOSITORIES = new Set(["GEO", "SRA", "GenBank", "BioProject/BioSample"]);
 
 function displayAccession(repository: string, accession: string): string {
@@ -180,22 +223,29 @@ function formatDate(d: Date | null): string {
 }
 
 /** Plain text since the 08-16 follow-up pass — the filled Badge pills read
- *  too heavy against the new tier-color scheme ("I don't like those dark
- *  pills"). Don't reintroduce a pill here. */
+ *  too heavy against the tier-color scheme. Don't reintroduce a pill here. */
 function AccessChip({ accessModel }: { accessModel: string | null }) {
   if (accessModel === null) return <span className="text-muted-foreground">—</span>;
   return <span>{accessModel === "open" ? "Open" : "Controlled"}</span>;
 }
 
-/** External <a> with the console's ArrowUpRight affordance (the
- *  email-card/coi-gap-card idiom) — for links that leave SPS. */
-function ExternalA({ href, children }: { href: string; children: ReactNode }) {
+/** External <a> with the console's ArrowUpRight affordance — for links that
+ *  leave SPS. */
+function ExternalA({
+  href,
+  children,
+  className,
+}: {
+  href: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-0.5 hover:underline"
+      className={cn("inline-flex items-center gap-0.5 hover:underline", className)}
     >
       {children}
       <ArrowUpRight className="size-3.5 shrink-0" aria-hidden />
@@ -204,46 +254,37 @@ function ExternalA({ href, children }: { href: string; children: ReactNode }) {
 }
 
 /** Per-table CSV link — a plain <a> because the target is a download route
- *  handler; <Link>'s client nav + prefetch would fetch the file itself.
- *  `label` defaults to the aggregate link's text; the `?grain=items`
- *  drill-down links pass "Download items CSV" (v3 — the stakeholder wants
- *  each table's underlying item rows one click away, not just the rollup).
- *
- *  No filter-aware relabeling here anymore (2026-08-16, GitHub #2470): every
- *  call site now passes an `href` already carrying the active filter via
- *  `withFilters` below, and the export route actually applies it, so the
- *  label can just say what the button does. A prior version of this
- *  component appended "(ignores filters)" here, back when every export on
- *  this page really did ignore the on-page filter state. */
+ *  handler; <Link>'s client nav + prefetch would fetch the file itself. Every
+ *  call site passes an `href` already carrying the active filter via
+ *  `withFilters` (2026-08-16, GitHub #2470), and the export route applies it,
+ *  so the label just says what the link does. */
 function DownloadLink({
   href,
   label = "Download CSV",
-  className = "text-xs hover:underline",
+  className = linkActionClass,
   testId,
+  title,
 }: {
   href: string;
   label?: string;
   className?: string;
   testId?: string;
+  title?: string;
 }) {
   return (
-    <a href={href} className={className} data-testid={testId}>
+    <a href={href} className={className} data-testid={testId} title={title}>
       {label}
     </a>
   );
 }
 
-/** `ui.filters` → the exact query-param shape `parseDataSharingParams`
- *  reads back (2026-08-16 adversarial-review fix): `DataSharingReportFilters
- *  .tiers` is plural (an array FIELD name) but the URL param it round-trips
- *  through is singular `tier=` (repeated once per value, `parseDataSharingParams`
- *  reads `searchParams.tier`) — spreading `...ui.filters` straight into
- *  `buildQuery` emitted a `tiers=` key nothing parses, silently dropping the
- *  active tier filter the instant someone clicked a sort-column or
- *  pagination link built that way. This is the one place that translation
- *  happens, so a sort/pagination href can't drift from the filter form's
- *  own `name="tier"` checkboxes again. */
-function filterQueryParams(filters: DataSharingUiParams["filters"]): Record<string, string | number | readonly string[] | undefined> {
+/** `ui.filters` → the exact query-param shape `parseDataSharingParams` reads
+ *  back (2026-08-16 adversarial-review fix): `DataSharingReportFilters.tiers`
+ *  is plural but the URL param is singular `tier=` (repeated once per value).
+ *  This is the one place that translation happens. */
+function filterQueryParams(
+  filters: DataSharingUiParams["filters"],
+): Record<string, string | number | readonly string[] | undefined> {
   return {
     yearFrom: filters.yearFrom,
     yearTo: filters.yearTo,
@@ -253,10 +294,10 @@ function filterQueryParams(filters: DataSharingUiParams["filters"]): Record<stri
 }
 
 /** Builds a query string, dropping `undefined`/empty-array values — the one
- *  place every sort-link/filter-form href on this page assembles its
- *  params, so none of them can drift on how a multi-value param (`tier=`)
- *  or an absent one is encoded. */
-function buildQuery(params: Record<string, string | number | readonly string[] | undefined>): string {
+ *  place every sort/filter/pagination href on this page assembles its params. */
+function buildQuery(
+  params: Record<string, string | number | readonly string[] | undefined>,
+): string {
   const sp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined) continue;
@@ -270,16 +311,9 @@ function buildQuery(params: Record<string, string | number | readonly string[] |
   return qs ? `?${qs}` : "";
 }
 
-/** Appends the active filter onto an existing `DownloadLink` href, merging
- *  with whatever query string the href already carries (2026-08-16, GitHub
- *  #2470). Some hrefs are already `?section=X&department=Y`-style per-row
- *  drill-down links, and this must not clobber those. The export route now
- *  actually applies the filter (`applyReportFilters`/`applyNihFilter` in
- *  `app/edit/data-sharing/export/route.ts`), so every download link needs to
- *  carry it, not just the on-page tables. Filter keys (`yearFrom`/`yearTo`/
- *  `tier`/`nihFunded`) never collide with a drill-down key (`section`/
- *  `grain`/`department`/`cwid`/`repository`/`category`/`subtype`), so this is
- *  a plain merge, not a precedence rule. */
+/** Appends the active filter onto an existing download href, merging with
+ *  whatever query string the href already carries (2026-08-16, GitHub #2470).
+ *  Filter keys never collide with a drill-down key, so this is a plain merge. */
 function withFilters(href: string, filters: DataSharingUiParams["filters"]): string {
   const [path, query = ""] = href.split("?");
   const sp = new URLSearchParams(query);
@@ -295,10 +329,8 @@ function withFilters(href: string, filters: DataSharingUiParams["filters"]): str
   return qs ? `${path}?${qs}` : path;
 }
 
-/** "Is any filter currently active", extracted 2026-08-16 out of
- *  `FilterBar`'s own local `active` computation: its "Clear filters" link
- *  and caption paragraph share this exact definition rather than a second
- *  copy that could quietly drift apart. */
+/** "Is any filter currently active" — the filter bar's Clear link and caption
+ *  share this one definition. */
 function hasActiveFilters(filters: DataSharingUiParams["filters"]): boolean {
   return (
     filters.yearFrom !== undefined ||
@@ -308,12 +340,11 @@ function hasActiveFilters(filters: DataSharingUiParams["filters"]): boolean {
   );
 }
 
-/** A sortable `<th>` — a plain link that reloads the page with the sort
- *  param toggled, not a client island (see `parseDataSharingParams`'s doc
- *  comment for why). Preserves every other active filter/sort param via
- *  `otherParams`. Clicking the currently-active column flips direction;
- *  clicking a different column switches to it, descending first (matches
- *  every table's current datasets-desc default). */
+/** A sortable `<th>` — a plain link that reloads the page with the sort param
+ *  toggled, not a client island (see `parseDataSharingParams`'s doc comment).
+ *  Preserves every other active filter/sort param via `otherParams`. Clicking
+ *  the active column flips direction; clicking another switches to it —
+ *  descending first for numbers, A–Z first for the name column. */
 function SortableTh({
   label,
   sortKey,
@@ -323,6 +354,7 @@ function SortableTh({
   sortParamName,
   dirParamName,
   align = "right",
+  title,
 }: {
   label: string;
   sortKey: string;
@@ -332,35 +364,34 @@ function SortableTh({
   sortParamName: string;
   dirParamName: string;
   align?: "left" | "right";
+  title?: string;
 }) {
   const isActive = activeSort === sortKey;
-  const nextDir: SortDir = isActive && activeDir === "desc" ? "asc" : "desc";
+  const firstDir: SortDir = sortKey === "name" ? "asc" : "desc";
+  const nextDir: SortDir = isActive ? (activeDir === "desc" ? "asc" : "desc") : firstDir;
   const href = buildQuery({ ...otherParams, [sortParamName]: sortKey, [dirParamName]: nextDir });
   return (
-    <th className={`${thClass} ${align === "right" ? "text-right" : ""}`}>
-      <a href={href} className="inline-flex items-center gap-1 hover:underline">
+    <th
+      className={cn(thClass, align === "right" && "text-right")}
+      aria-sort={isActive ? (activeDir === "desc" ? "descending" : "ascending") : undefined}
+    >
+      <SoftLink
+        href={href}
+        title={title}
+        className={cn(
+          "inline-flex items-center gap-1 hover:underline",
+          isActive && "text-foreground font-semibold",
+        )}
+      >
         {label}
         {isActive && <span aria-hidden>{activeDir === "desc" ? "↓" : "↑"}</span>}
-      </a>
+      </SoftLink>
     </th>
   );
 }
 
-/** The v2 mockup's `.newcol` band (its `#F2F8F4`), restored per the v3 pass:
- *  a faint tint that visually GROUPS the access-model/exposure columns — §3
- *  By department's Open/Controlled/Registry and §4 Named faculty's
- *  Open/Controlled/Concerning/Foreign-hosted, th + td alike — so they read
- *  as one lens over the row rather than four unrelated count columns.
- *  Expressed as the tier palette's US_CTRL green at 5% over the white table
- *  surface (≈ the mockup hex); a fixed color is safe because the /edit shell
- *  is light-theme-only (apollo warm-paper tokens, no dark variant on these
- *  surfaces — `app/globals.css`). ONE shared const on purpose: per-column
- *  copies would drift. */
-const exposureColClass = "bg-[#2E7D52]/5";
-
 /** Short display label per `tierOf` value (`@/lib/repository-tier`). Falls
- *  through to the bare tier string for `'UNKNOWN'` or any future tier this
- *  table hasn't been updated for. */
+ *  through to the bare tier string for any future tier. */
 const TIER_LABELS: Record<string, string> = {
   CONCERN: "Country of concern",
   FOREIGN_OPEN: "Foreign-hosted, open",
@@ -371,10 +402,21 @@ const TIER_LABELS: Record<string, string> = {
   UNKNOWN: "Unclassified",
 };
 
-/** Tier palette from the v2 mockup (`data-sharing-dashboard-v2-mockup.html`,
- *  adopted per the 2026-08-16 decision in the Projects handoff doc) — one hue
- *  per tier, severity-ordered warm→cool. The single source for every tier
- *  color on this page: chips, the §1 spectrum bar, and its legend. */
+/** Compact tier labels for the filter-bar chips (the full label is the chip's
+ *  tooltip). */
+const TIER_SHORT_LABELS: Record<string, string> = {
+  CONCERN: "Concern",
+  FOREIGN_OPEN: "Foreign · open",
+  FOREIGN_CTRL: "Foreign · controlled",
+  US_OPEN: "US · open",
+  US_CTRL: "US · controlled",
+  REGISTRY: "Registry",
+};
+
+/** Tier palette from the v2 mockup (adopted per the 2026-08-16 decision) —
+ *  one hue per tier, severity-ordered warm→cool. The single source for every
+ *  tier color on this page: dots, chips, bars, and the access-mix bar (open =
+ *  US_OPEN, controlled = US_CTRL, registry = REGISTRY). */
 const TIER_COLORS: Record<string, string> = {
   CONCERN: "#B31B1B",
   FOREIGN_OPEN: "#D97B29",
@@ -385,14 +427,9 @@ const TIER_COLORS: Record<string, string> = {
   UNKNOWN: "#C3C7D1",
 };
 
-/** Tier → `DATA_SHARING_TERMS` glossary key for the `DefinedTerm` hover on
- *  `TierChip` labels (v3 term-hover pass). FOREIGN_OPEN/FOREIGN_CTRL each get
- *  their OWN entry (2026-08-16 fix — a shared "Foreign-hosted" definition
- *  read identically for both tiers, which implied a live distinction that
- *  carried no information; see `DATA_SHARING_TERMS`'s matching split). US
- *  tiers and UNKNOWN are absent on purpose — the glossary defines the risk
- *  vocabulary, and "US-hosted, open" needs no definition; an absent key
- *  renders the label plain, no hover. */
+/** Tier → `DATA_SHARING_TERMS` glossary key for the `DefinedTerm` hover.
+ *  FOREIGN_OPEN/FOREIGN_CTRL each get their OWN entry (2026-08-16 fix). US
+ *  tiers and UNKNOWN are absent on purpose — an absent key renders plain. */
 const TIER_GLOSSARY_TERM: Record<string, string> = {
   CONCERN: "Country of concern",
   FOREIGN_OPEN: "Foreign-hosted, open",
@@ -400,52 +437,126 @@ const TIER_GLOSSARY_TERM: Record<string, string> = {
   REGISTRY: "Registry",
 };
 
-/** Colored tier dot + label, the mockup's `.tierdot` idiom — replaced the
- *  Badge-variant rendering when the mockup palette was adopted (08-16). The
- *  label carries a `DefinedTerm` glossary hover for the risk tiers
- *  (`TIER_GLOSSARY_TERM`). */
-function TierChip({ tier }: { tier: string }) {
+function TierDot({ tier, className }: { tier: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("inline-block size-2 shrink-0 rounded-full", className)}
+      style={{ backgroundColor: TIER_COLORS[tier] ?? TIER_COLORS.UNKNOWN }}
+    />
+  );
+}
+
+/** Tier label with its glossary hover when the tier has one. */
+function TierLabel({ tier }: { tier: string }) {
   const label = TIER_LABELS[tier] ?? tier;
   const term = TIER_GLOSSARY_TERM[tier];
+  return term ? <DefinedTerm term={term}>{label}</DefinedTerm> : <>{label}</>;
+}
+
+/** Colored tier dot + label. */
+function TierChip({ tier }: { tier: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span
-        aria-hidden
-        className="inline-block h-2 w-2 shrink-0 rounded-full"
-        style={{ backgroundColor: TIER_COLORS[tier] ?? TIER_COLORS.UNKNOWN }}
-      />
-      {term ? <DefinedTerm term={term}>{label}</DefinedTerm> : label}
+      <TierDot tier={tier} />
+      <TierLabel tier={tier} />
     </span>
   );
 }
 
-/** Per-tier horizontal bars (small multiples) against one shared 0–max axis —
- *  replaced the mockup's single stacked bar (2026-08-16 review): the
- *  caption already admits a publication counted in more than one tier is
- *  "counted in each," so the segments overlap and a STACKED bar's total
- *  length visually promises a partition it doesn't have. Small multiples say
- *  the same numbers without that implied promise. Zero-count tiers still get
- *  a full-width-empty row, not a hidden one — "Country of concern 0" stays a
- *  visible statement, same rationale as the old legend entries. */
-function TierSpectrum({ rows }: { rows: DataSharingReport["pubsByTier"] }) {
+/** Whether a tier is inside the active tier filter (every tier is, with no
+ *  tier filter) — out-of-filter tier rows render dimmed. */
+function tierInFilter(filters: DataSharingUiParams["filters"], tier: string): boolean {
+  return !filters.tiers?.length || filters.tiers.includes(tier);
+}
+
+/** Section heading row: title, a muted one-line description, and the
+ *  section's actions (downloads) pushed right. */
+function SectionHead({
+  title,
+  sub,
+  actions,
+}: {
+  title: string;
+  sub?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h2 className="text-xl font-semibold">{title}</h2>
+      {sub ? <span className="text-muted-foreground text-[13px]">{sub}</span> : null}
+      {actions ? (
+        <span className="ml-auto flex flex-wrap items-baseline gap-x-3.5 gap-y-1">{actions}</span>
+      ) : null}
+    </div>
+  );
+}
+
+/** One headline number. */
+function Kpi({
+  label,
+  value,
+  sub,
+  subClassName,
+  testId,
+}: {
+  label: string;
+  value: string;
+  sub: ReactNode;
+  subClassName?: string;
+  testId?: string;
+}) {
+  return (
+    <div className={cn(cardClass, "flex flex-col gap-[3px] px-4 py-3.5")}>
+      <span className="text-muted-foreground text-xs font-medium tracking-[.08em] uppercase">
+        {label}
+      </span>
+      <span
+        className="text-[28px] leading-tight font-semibold tracking-[-.01em] tabular-nums"
+        data-testid={testId}
+      >
+        {value}
+      </span>
+      <span className={cn("text-muted-foreground text-[12.5px] leading-snug", subClassName)}>
+        {sub}
+      </span>
+    </div>
+  );
+}
+
+/** Tier-labelled horizontal bars, one per tier against one shared 0–max axis
+ *  (small multiples, NOT a stacked bar — 2026-08-16 review: a publication
+ *  counted in more than one tier is "counted in each," so a stacked bar's
+ *  total would promise a partition it doesn't have). Zero-count tiers still
+ *  get a row — "Country of concern 0" stays a visible statement. */
+function TierBars({
+  rows,
+  filters,
+}: {
+  rows: DataSharingReport["pubsByTier"];
+  filters: DataSharingUiParams["filters"];
+}) {
   const max = Math.max(1, ...rows.map((t) => t.pubs));
   return (
-    <div className="mt-3 space-y-1.5">
+    <div className="flex flex-col gap-2.5" data-testid="ds-tier-bars">
       {rows.map((t) => (
-        <div key={t.tier} className="flex items-center gap-2 text-xs">
-          <span className="w-44 shrink-0 truncate text-right">
-            {TIER_GLOSSARY_TERM[t.tier] ? (
-              <DefinedTerm term={TIER_GLOSSARY_TERM[t.tier]}>
-                <span className="text-muted-foreground">{TIER_LABELS[t.tier] ?? t.tier}</span>
-              </DefinedTerm>
-            ) : (
-              <span className="text-muted-foreground">{TIER_LABELS[t.tier] ?? t.tier}</span>
-            )}
+        <div
+          key={t.tier}
+          className={cn(
+            "grid grid-cols-[minmax(0,150px)_minmax(0,1fr)_40px] items-center gap-2.5 text-[13px]",
+            !tierInFilter(filters, t.tier) && "opacity-35",
+          )}
+        >
+          <span className="inline-flex min-w-0 items-center gap-[7px]">
+            <TierDot tier={t.tier} />
+            <span className="truncate">
+              <TierLabel tier={t.tier} />
+            </span>
           </span>
-          <div className="border-apollo-border h-3 flex-1 overflow-hidden rounded border">
+          <div className="bg-apollo-surface-2 h-2.5 overflow-hidden rounded-full">
             {t.pubs > 0 && (
               <div
-                className="h-full"
+                className="h-full rounded-full"
                 style={{
                   width: `${(t.pubs / max) * 100}%`,
                   backgroundColor: TIER_COLORS[t.tier] ?? TIER_COLORS.UNKNOWN,
@@ -453,37 +564,78 @@ function TierSpectrum({ rows }: { rows: DataSharingReport["pubsByTier"] }) {
               />
             )}
           </div>
-          <span className="w-10 shrink-0 text-right font-semibold">{t.pubs.toLocaleString()}</span>
+          <span className="text-right font-medium tabular-nums">{t.pubs.toLocaleString()}</span>
         </div>
       ))}
     </div>
   );
 }
 
-/** Small CSS-bar trend chart, same small-multiples idiom as `TierSpectrum` —
- *  no chart library. 2026-08-16 ask: "leadership's first question after 'how
- *  much' is 'is it going up.'" Ascending year order (see `aggregateByYear`'s
- *  doc comment); the "Unknown year" bucket, if present, renders last and
- *  muted so it reads as a caveat, not a real trend point. */
-function DepositsByYearChart({ rows }: { rows: DataSharingReport["byYear"] }) {
+/** Datasets-by-deposit-year bars (no chart library). Ascending years; a year
+ *  outside the active year filter greys out, the current (partial) year is
+ *  hatched and labelled YTD, and the "Unknown year" bucket, if present,
+ *  renders last and muted so it reads as a caveat, not a trend point. */
+function DepositsByYearChart({
+  rows,
+  filters,
+  currentYear,
+}: {
+  rows: DataSharingReport["byYear"];
+  filters: DataSharingUiParams["filters"];
+  currentYear: number;
+}) {
   if (rows.length === 0) return null;
   const max = Math.max(1, ...rows.map((r) => r.datasets));
+  const hasYtd = rows.some((r) => r.year === currentYear);
+  const inRange = (y: number) =>
+    (filters.yearFrom === undefined || y >= filters.yearFrom) &&
+    (filters.yearTo === undefined || y <= filters.yearTo);
+  const label = (y: number | null) =>
+    y === null ? "Unknown" : y === currentYear ? `${y} YTD` : String(y);
   return (
-    <div className={`${sectionClass} mt-4 p-4`}>
-      <div className="text-sm font-medium">Deposits by year</div>
-      <p className="text-muted-foreground mt-1 text-xs">
-        Distinct datasets by deposit year (repository metadata, or publication year as a fallback).
-      </p>
-      <div className="mt-3 flex h-28 items-end gap-1.5">
+    <div className={cn(cardClass, "flex min-w-0 flex-col gap-3 px-4 py-4 sm:px-[18px]")}>
+      <div className="flex flex-col gap-0.5">
+        <h3 className="text-[15px] font-semibold">Datasets by deposit year</h3>
+        <span className="text-muted-foreground text-[12.5px]">
+          Repository metadata, or publication year as a fallback.
+          {hasYtd ? ` ${currentYear} is year to date.` : ""}
+        </span>
+      </div>
+      <div className="flex h-40 items-end gap-1.5 pt-4 sm:gap-2.5">
         {rows.map((r) => (
-          <div key={r.year ?? "unknown"} className="flex flex-1 flex-col items-center gap-1">
-            <div className="w-full text-center text-xs font-semibold">{r.datasets.toLocaleString()}</div>
+          <div
+            key={r.year ?? "unknown"}
+            className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1"
+          >
+            <span className="text-[12.5px] font-medium tabular-nums">
+              {r.datasets.toLocaleString()}
+            </span>
             <div
-              className={`w-full rounded-t ${r.year === null ? "bg-apollo-border" : "bg-[#3E6FB0]"}`}
-              style={{ height: `${Math.max(4, (r.datasets / max) * 100)}%` }}
+              className={cn(
+                "w-full rounded-t",
+                r.year === null
+                  ? "bg-apollo-border-strong"
+                  : inRange(r.year)
+                    ? "bg-apollo-slate"
+                    : "bg-apollo-surface-2",
+              )}
+              style={{
+                height: `${Math.max(2, (r.datasets / max) * 100)}%`,
+                backgroundImage:
+                  r.year === currentYear
+                    ? "repeating-linear-gradient(135deg, transparent 0 5px, rgba(255,255,255,.35) 5px 8px)"
+                    : undefined,
+              }}
+              title={`${label(r.year)}: ${r.datasets.toLocaleString()} datasets`}
             />
-            <div className="text-muted-foreground text-xs">{r.year ?? "Unknown"}</div>
           </div>
+        ))}
+      </div>
+      <div className="text-muted-foreground flex gap-1.5 text-xs sm:gap-2.5" aria-hidden>
+        {rows.map((r) => (
+          <span key={r.year ?? "unknown"} className="min-w-0 flex-1 text-center">
+            {label(r.year)}
+          </span>
         ))}
       </div>
     </div>
@@ -494,206 +646,244 @@ function RollupSection({
   report,
   doc,
   filters,
+  currentYear,
 }: {
   report: DataSharingReport;
   /** Built once in `DataSharingDashboard` (server side) and passed down —
-   *  the sticky nav (2026-08-16 ask) repeats the same Methods dialog trigger,
-   *  so the doc can't be built separately in two places without risking
-   *  drift. The dialog itself is a client island and must never import the
-   *  report lib directly; `buildMethodsDoc` is pure and `DataSharingReport`
-   *  satisfies its structural param type. */
+   *  the Copy summary shortcut and the Methods section read the same doc. */
   doc: ReturnType<typeof buildMethodsDoc>;
-  /** The active filter (2026-08-16, GitHub #2470). This section's own
-   *  export link is the item-level default export, and needs the same
-   *  `withFilters` treatment as every other `DownloadLink` on the page. */
   filters: DataSharingUiParams["filters"];
+  currentYear: number;
 }) {
   const { overall } = report;
+  const sharePct = ratePct(overall.shareRateNumerator, overall.shareRateDenominator);
+  const pmcPct = ratePct(overall.pmcCoveredPubs, overall.shareRateDenominator);
   return (
-    <section id="rollup" className="scroll-mt-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">1 · Institutional rollup</h2>
-        <span className="inline-flex items-center gap-4">
-          {/* The Methods dialog trigger now lives ONLY in the sticky nav
-              (2026-08-16 ask: "repeat the Methods link there rather than
-              only in section 1's corner") — one trigger, reachable from
-              anywhere on the page, not two that could drift or double up
-              in an accessibility tree query. */}
-          {/* Shortcut to the Methods dialog's "Copy paragraph" (2026-08-16
-              ask for a "copy summary" button) — reuses the same CopyButton +
-              paragraph rather than a second citation-text mechanism; the
-              gap was discoverability (buried in a dialog), not a missing
-              feature. */}
-          <span className="inline-flex items-center gap-1 text-sm">
-            <CopyButton value={doc.paragraph} label="Copy summary paragraph" />
-            Copy summary
-          </span>
-          <DownloadLink
-            href={withFilters("/edit/data-sharing/export", filters)}
-            className="text-sm hover:underline"
-            testId="ds-export-link"
-          />
-        </span>
+    <section id="rollup" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Institutional rollup"
+        sub="Headline numbers for research leadership and grant reporting"
+        actions={
+          <>
+            {/* Shortcut to the Methods section's "One paragraph for
+                reporting" — same CopyButton + paragraph, not a second
+                citation-text mechanism. */}
+            <span className="text-apollo-slate inline-flex items-center gap-1 text-[13px]">
+              <CopyButton value={doc.paragraph} label="Copy summary paragraph" />
+              Copy summary
+            </span>
+            <DownloadLink
+              href={withFilters("/edit/data-sharing/export", filters)}
+              testId="ds-export-link"
+            />
+          </>
+        }
+      />
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
+        <Kpi
+          label="Distinct datasets"
+          value={overall.datasets.toLocaleString()}
+          sub={<DefinedTerm term="Strict floor">Strict floor</DefinedTerm>}
+        />
+        <Kpi
+          label="Depositing faculty"
+          value={overall.faculty.toLocaleString()}
+          sub="with at least one deposit"
+        />
+        <Kpi
+          label="Departments"
+          value={report.byDepartment.length.toLocaleString()}
+          sub="represented"
+        />
+        <Kpi
+          label="Share rate"
+          value={sharePct ?? "—"}
+          testId="ds-share-rate"
+          sub={
+            sharePct === null
+              ? "no confirmed first/last-author pubs in the corpus"
+              : `${overall.shareRateNumerator.toLocaleString()} of ${overall.shareRateDenominator.toLocaleString()} confirmed first/last-author, full-time-faculty pubs since ${SHARE_RATE_YEAR_FLOOR}`
+          }
+        />
+        {/* PMC coverage (collapsed to ONE card 2026-08-16): kept as a raw
+            number, explicitly flagged as a known data-quality gap rather than
+            presented as a working denominator — see `overall.pmcCoveredPubs`'s
+            doc comment in the report lib. */}
+        <Kpi
+          label="In PMC"
+          value={pmcPct ?? "—"}
+          testId="ds-pmc"
+          subClassName="text-apollo-amber"
+          sub={
+            <>
+              {pmcPct !== null
+                ? `${overall.pmcCoveredPubs.toLocaleString()} of ${overall.shareRateDenominator.toLocaleString()}. `
+                : ""}
+              Known data-quality gap; see{" "}
+              <a href="#methods" className="underline">
+                Methods
+              </a>
+            </>
+          }
+        />
       </div>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Aggregate headline numbers for research leadership and compliance/grant reporting.
-      </p>
-
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">{overall.datasets.toLocaleString()}</div>
-          <div className="text-muted-foreground text-xs">
-            Distinct datasets (<DefinedTerm term="Strict floor">strict floor</DefinedTerm>)
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(360px,100%),1fr))] items-stretch gap-3.5">
+        <DepositsByYearChart rows={report.byYear} filters={filters} currentYear={currentYear} />
+        <div className={cn(cardClass, "flex min-w-0 flex-col gap-3 px-4 py-4 sm:px-[18px]")}>
+          <div className="flex flex-col gap-0.5">
+            <h3 className="text-[15px] font-semibold">Publications by repository risk tier</h3>
+            <span className="text-muted-foreground text-[12.5px]">
+              Host jurisdiction × access model. A publication with deposits in several tiers counts
+              in each.
+            </span>
           </div>
+          <TierBars rows={report.pubsByTier} filters={filters} />
         </div>
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">{overall.faculty.toLocaleString()}</div>
-          <div className="text-muted-foreground text-xs">Depositing faculty</div>
-        </div>
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">{report.byDepartment.length}</div>
-          <div className="text-muted-foreground text-xs">Departments represented</div>
-        </div>
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">
-            {formatShareRate(overall.shareRateNumerator, overall.shareRateDenominator)}
-          </div>
-          <div className="text-muted-foreground text-xs">
-            Confirmed first/last-author, full-time-faculty pubs with a detected deposit
-          </div>
-          <div className="text-muted-foreground mt-0.5 text-xs">since {SHARE_RATE_YEAR_FLOOR}</div>
-        </div>
-        {/* PMC coverage (v3, collapsed to ONE card 2026-08-16): both PMC
-            cards previously here read the same corpus-wide number twice
-            (pmcCoveredPubs == shareRateDenominator today, i.e. "100% in
-            PMC," confirmed via a live staging probe as institution-wide,
-            not a query bug — see `overall.pmcCoveredPubs`'s doc comment in
-            the report lib). Kept as ONE raw-count card, explicitly flagged
-            as a known data-quality gap rather than presented as a working
-            denominator — restoring the second card only makes sense once
-            the upstream PMC-identifier field is verified. */}
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">
-            {formatShareRate(overall.pmcCoveredPubs, overall.shareRateDenominator)}
-          </div>
-          <div className="text-muted-foreground text-xs">
-            <DefinedTerm term="PMC">In PMC</DefinedTerm>
-          </div>
-          <div className="text-muted-foreground mt-0.5 text-xs">
-            known data-quality gap — see Methods, &ldquo;PMC coverage&rdquo;
-          </div>
-        </div>
-      </div>
-
-      <DepositsByYearChart rows={report.byYear} />
-
-      {/* Methodology prose + the "One paragraph for reporting" copy block
-          moved into the Methods dialog above (08-16 follow-up pass). */}
-      <div className={`${sectionClass} mt-4 p-4`}>
-        <div className="text-sm font-medium">Publications by repository risk tier</div>
-        <p className="text-muted-foreground mt-1 text-xs">
-          Distinct publications with a detected deposit in a repository of each tier — tier-based
-          only (host jurisdiction × access model); a publication with deposits in repositories of
-          different tiers is counted in each.
-        </p>
-        <TierSpectrum rows={report.pubsByTier} />
       </div>
     </section>
   );
 }
 
-function FundingSection({ report }: { report: DataSharingReport }) {
-  const { overall } = report;
-  // Shared non-registry deposited-publication population both lenses below
-  // are built from — stated explicitly (2026-08-16 fix) so a reader doesn't
-  // subtract this from the §1 headline denominator and find "41 missing
-  // pubs": the two totals are DIFFERENT populations by design (this one is
-  // every detected non-registry deposit; §1's is scoped to the corpus), not
-  // a subset relationship.
+/** §2 as ONE table: access model (rows) × NIH funding (columns) with a Total
+ *  column and a Publications total row — the four old stat cards' numbers
+ *  (open/controlled/NIH/not-NIH publications) are its margins. An active NIH
+ *  filter tints its column and mutes the other. */
+function FundingSection({
+  report,
+  filters,
+}: {
+  report: DataSharingReport;
+  filters: DataSharingUiParams["filters"];
+}) {
+  const { overall, accessFundingCrossTab: cross } = report;
+  // Shared non-registry deposited-publication population both lenses are
+  // built from — stated explicitly (2026-08-16 fix) so a reader doesn't
+  // subtract this from the rollup denominator: DIFFERENT populations by
+  // design, not a subset relationship.
   const sharedTotal = overall.nihFundedPubs + overall.notNihFundedPubs;
-  const { accessFundingCrossTab: cross } = report;
+  const nih = filters.nihFunded;
+  const colTint = (col: "nih" | "not") =>
+    (col === "nih" && nih === true) || (col === "not" && nih === false)
+      ? "bg-apollo-slate-tint"
+      : "";
+  const colMute = (col: "nih" | "not") =>
+    (col === "nih" && nih === false) || (col === "not" && nih === true)
+      ? "text-muted-foreground/60"
+      : "";
+  const rows: { label: string; nih: number; not: number; total: number; strong?: boolean }[] = [
+    { label: "Open access", nih: cross.openNih, not: cross.openNotNih, total: overall.openPubs },
+    {
+      label: "Controlled access",
+      nih: cross.controlledNih,
+      not: cross.controlledNotNih,
+      total: overall.controlledPubs,
+    },
+    {
+      label: "Publications",
+      nih: overall.nihFundedPubs,
+      not: overall.notNihFundedPubs,
+      total: sharedTotal,
+      strong: true,
+    },
+  ];
   return (
-    <section id="funding" className="mt-10 scroll-mt-4">
-      <h2 className="text-base font-semibold">2 · Funding &amp; access</h2>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Access model and NIH funding, both over the same {sharedTotal.toLocaleString()} non-registry
-        deposited publications — a different, broader population than the §1 corpus-scoped share
-        rate (not a subset of it).
-      </p>
-
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">{overall.openPubs.toLocaleString()}</div>
-          <div className="text-muted-foreground text-xs">Open-access publications</div>
-        </div>
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">{overall.controlledPubs.toLocaleString()}</div>
-          <div className="text-muted-foreground text-xs">Controlled-access publications</div>
-        </div>
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">{overall.nihFundedPubs.toLocaleString()}</div>
-          <div className="text-muted-foreground text-xs">NIH-funded publications</div>
-        </div>
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">{overall.notNihFundedPubs.toLocaleString()}</div>
-          <div className="text-muted-foreground text-xs">Not NIH-funded publications</div>
-        </div>
-      </div>
-
-      <p className="text-muted-foreground mt-2 text-xs">
-        &quot;Not NIH-funded&quot; is not the same as non-federal: <code>nih_ic</code> is only ever
-        populated for NIH awards, so other federal funders (CDC, NSF, and the like) aren&apos;t
-        separately tracked here and are counted as not NIH-funded alongside genuinely non-federal
-        work. A publication with more than one deposit of different access models can count toward
-        both open and controlled — the two access columns don&apos;t need to sum to the total above.
-      </p>
-
-      {/* Access × NIH-funding cross-tab (2026-08-16 ask): the methods
-          guarantee the two lenses share a denominator; this is where they're
-          actually crossed instead of just adjacent. */}
-      <h3 className="mt-6 text-sm font-semibold">Access model × NIH funding</h3>
-      <div className={sectionClass}>
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass} />
-              <th className={`${thClass} text-right`}>NIH-funded</th>
-              <th className={`${thClass} text-right`}>Not NIH-funded</th>
+    <section id="funding" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Funding & access"
+        sub={`${sharedTotal.toLocaleString()} non-registry deposited publications: a broader population than the rollup share rate, not a subset of it`}
+      />
+      <div className={tableWrapClass}>
+        <table className="w-full min-w-[480px] text-[15px]" data-testid="ds-funding-table">
+          <thead className={theadClass}>
+            <tr>
+              <th className={thClass}>
+                <span className="sr-only">Access model</span>
+              </th>
+              <th className={cn(thClass, "text-right", colTint("nih"))}>NIH-funded</th>
+              <th className={cn(thClass, "text-right", colTint("not"))}>Not NIH-funded</th>
+              <th className={cn(thClass, "text-right")}>Total</th>
             </tr>
           </thead>
           <tbody>
-            <tr className="border-apollo-border border-b">
-              <td className={`${tdClass} font-medium`}>Open access</td>
-              <td className={`${tdClass} text-right`}>{cross.openNih.toLocaleString()}</td>
-              <td className={`${tdClass} text-right`}>{cross.openNotNih.toLocaleString()}</td>
-            </tr>
-            <tr>
-              <td className={`${tdClass} font-medium`}>Controlled access</td>
-              <td className={`${tdClass} text-right`}>{cross.controlledNih.toLocaleString()}</td>
-              <td className={`${tdClass} text-right`}>{cross.controlledNotNih.toLocaleString()}</td>
-            </tr>
+            {rows.map((r) => (
+              <tr
+                key={r.label}
+                className={cn(
+                  "border-apollo-border border-t first:border-t-0",
+                  r.strong && "bg-apollo-page",
+                )}
+              >
+                <th
+                  scope="row"
+                  className={cn(
+                    tdClass,
+                    "py-3 text-left",
+                    r.strong ? "font-semibold" : "font-medium",
+                  )}
+                >
+                  {r.label}
+                </th>
+                <td
+                  className={cn(
+                    tdClass,
+                    "py-3 text-right tabular-nums",
+                    colTint("nih"),
+                    colMute("nih"),
+                    r.strong && "font-semibold",
+                  )}
+                >
+                  {r.nih.toLocaleString()}
+                </td>
+                <td
+                  className={cn(
+                    tdClass,
+                    "py-3 text-right tabular-nums",
+                    colTint("not"),
+                    colMute("not"),
+                    r.strong && "font-semibold",
+                  )}
+                >
+                  {r.not.toLocaleString()}
+                </td>
+                <td className={cn(tdClass, "py-3 text-right font-semibold tabular-nums")}>
+                  {r.total.toLocaleString()}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+      <p className="text-muted-foreground max-w-[100ch] text-[12.5px] leading-normal">
+        &ldquo;Not NIH-funded&rdquo; is not the same as non-federal: other federal funders (CDC, NSF
+        and the like) aren&rsquo;t tracked separately and count here. A publication with deposits
+        under both access models counts in each row, so rows can exceed the total.
+      </p>
     </section>
   );
 }
 
-/** Sorts a copy of `byDepartment` — see `SortableTh`'s doc comment for why
- *  this is a plain server-side sort, not client state. `"shareRate"` sorts
- *  by the computed percentage (0 when the row has no denominator), not the
- *  numerator alone — that's the actual "rate-sorted" view the RDM team
- *  asked for, not a raw-count reorder. Undefined `key` returns the input's
- *  existing datasets-desc order unchanged (the report's own default). */
+/** Sorts a copy of `byDepartment` — a plain server-side sort, not client
+ *  state. `"shareRate"` sorts by the computed percentage (0 when the row has
+ *  no denominator); `"name"` A–Z. Undefined `key` keeps the report's own
+ *  datasets-desc order. */
 function sortDepartments(
   rows: readonly DepartmentRollup[],
   key: DepartmentSortKey | undefined,
   dir: SortDir,
 ): DepartmentRollup[] {
   if (!key) return [...rows];
+  if (key === "name") {
+    const sorted = [...rows].sort((a, b) =>
+      displayDepartmentName(a.department).localeCompare(displayDepartmentName(b.department)),
+    );
+    return dir === "desc" ? sorted.reverse() : sorted;
+  }
   const rate = (d: DepartmentRollup) =>
-    d.shareRateDenominator && d.shareRateDenominator > 0 ? (d.shareRateNumerator ?? 0) / d.shareRateDenominator : 0;
-  const value = (d: DepartmentRollup) => (key === "datasets" ? d.datasets : key === "faculty" ? d.faculty : rate(d));
+    d.shareRateDenominator && d.shareRateDenominator > 0
+      ? (d.shareRateNumerator ?? 0) / d.shareRateDenominator
+      : 0;
+  const value = (d: DepartmentRollup) =>
+    key === "datasets" ? d.datasets : key === "faculty" ? d.faculty : rate(d);
   const sorted = [...rows].sort((a, b) => value(a) - value(b));
   return dir === "desc" ? sorted.reverse() : sorted;
 }
@@ -707,273 +897,396 @@ function sortFaculty(
 ): NamedFacultyRow[] {
   if (!key) return [...rows];
   const rate = (f: NamedFacultyRow) =>
-    f.shareRateDenominator && f.shareRateDenominator > 0 ? (f.shareRateNumerator ?? 0) / f.shareRateDenominator : 0;
+    f.shareRateDenominator && f.shareRateDenominator > 0
+      ? (f.shareRateNumerator ?? 0) / f.shareRateDenominator
+      : 0;
   const value = (f: NamedFacultyRow) =>
     key === "datasets" ? f.datasets : key === "concerning" ? f.concerningDeposits : rate(f);
   const sorted = [...rows].sort((a, b) => value(a) - value(b));
   return dir === "desc" ? sorted.reverse() : sorted;
 }
 
-function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: DataSharingUiParams }) {
-  const otherParams = { ...filterQueryParams(ui.filters), facSort: ui.facSort, facDir: ui.facDir, facPage: ui.facPage };
-  const sortedDepartments = sortDepartments(report.byDepartment, ui.deptSort, ui.deptDir);
+function RepositoriesSection({
+  report,
+  ui,
+}: {
+  report: DataSharingReport;
+  ui: DataSharingUiParams;
+}) {
   // Contradiction check (2026-08-16 review): does any repository's
-  // tier-implied access model (open/controlled, from TIER_LABELS) disagree
-  // with its actually-observed per-deposit Access column? Originally written
-  // against Synapse (tiered US-hosted/open, all 11 observed deposits
-  // controlled). That specific case is now RESOLVED by issue #2471's
-  // access-aware `effectiveTierOf` fix (2026-08-16): `report.byRepository`'s
-  // `tier` for Synapse is no longer the bare static "US-hosted, open"
-  // default, it's the most-severe effective tier actually observed
-  // (`aggregateByRepository`'s doc comment), which for today's all-controlled
-  // Synapse data is "US-hosted, controlled", matching its own Access column,
-  // so this predicate no longer fires for Synapse. Left in place as a general
-  // safety net for any OTHER repository whose static tier and observed
-  // per-deposit access disagree (a real data-quality signal worth a
-  // footnote, whichever repository it turns up on next); the check itself
-  // was never Synapse-specific, only its one observed trigger case was.
+  // tier-implied access model disagree with its actually-observed Access
+  // column? Synapse (the original trigger) is resolved by #2471's
+  // access-aware `effectiveTierOf`; kept as a general safety net.
   const tierAccessMismatch = report.byRepository.some((r) => {
     const tierImpliesOpen = TIER_LABELS[r.tier]?.includes("open");
     const tierImpliesControlled = TIER_LABELS[r.tier]?.includes("controlled");
-    return (tierImpliesOpen && r.accessModel === "controlled") || (tierImpliesControlled && r.accessModel === "open");
+    return (
+      (tierImpliesOpen && r.accessModel === "controlled") ||
+      (tierImpliesControlled && r.accessModel === "open")
+    );
   });
   return (
-    <section id="repos" className="mt-10 scroll-mt-4">
-      <h2 className="text-base font-semibold">3 · Repositories &amp; departments</h2>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Audience: library / RDM team — targeting DMS training and repository support.
+    <section id="repos" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Repositories"
+        sub="For the library / RDM team: DMS training and repository support"
+        actions={
+          <DownloadLink href={withFilters("/edit/data-sharing/export?section=tiers", ui.filters)} />
+        }
+      />
+      <div className={cn(cardClass, "overflow-hidden")} data-testid="ds-repo-tiers">
+        {report.byRepositoryTier.map((t) => {
+          // Per-repo counts inline, from byRepository (already datasets-desc).
+          // Each repo name links out via `urlOf`; the count is SPS's number.
+          const repos = report.byRepository.filter((r) => r.tier === t.tier);
+          // Zero rows arrive from the report on purpose (`paddedTiers`):
+          // "Country of concern · 0" is a deliberate compliance statement.
+          return (
+            <div
+              key={t.tier}
+              className={cn(
+                "border-apollo-border grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3.5 gap-y-2 border-t px-4 py-3 first:border-t-0 sm:grid-cols-[190px_minmax(0,1fr)_60px] sm:px-[18px]",
+                !tierInFilter(ui.filters, t.tier) && "opacity-35",
+              )}
+            >
+              <span className="inline-flex items-center gap-[7px] text-sm font-medium">
+                <TierDot tier={t.tier} />
+                <TierLabel tier={t.tier} />
+              </span>
+              <span
+                className={cn(
+                  "text-right text-[15px] font-semibold tabular-nums sm:order-last",
+                  t.datasets === 0 && "text-muted-foreground",
+                )}
+              >
+                {t.datasets.toLocaleString()}
+              </span>
+              <div className="col-span-2 flex flex-wrap gap-1.5 sm:col-span-1">
+                {repos.length === 0 ? (
+                  <span className="text-muted-foreground text-[13px]">None detected</span>
+                ) : (
+                  repos.map((r) => {
+                    const url = urlOf(r.repository);
+                    const pill =
+                      "border-apollo-border-strong bg-apollo-page inline-flex items-baseline gap-1.5 rounded-full border px-2.5 py-0.5 text-[13px]";
+                    const inner = (
+                      <>
+                        {r.repository}
+                        <span className="text-muted-foreground tabular-nums">
+                          {r.datasets.toLocaleString()}
+                        </span>
+                      </>
+                    );
+                    return url ? (
+                      <a
+                        key={r.repository}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(pill, "hover:text-apollo-slate")}
+                      >
+                        {inner}
+                      </a>
+                    ) : (
+                      <span key={r.repository} className={pill}>
+                        {inner}
+                      </span>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-muted-foreground max-w-[100ch] text-[12.5px] leading-normal">
+        Tier is by host and access model only. It doesn&rsquo;t fold in sensitive-data-type
+        detection; see{" "}
+        <a href="#subtypes" className="underline">
+          Sub-types
+        </a>{" "}
+        for that lens.
       </p>
 
-      <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">Repositories by risk tier</h3>
-        <DownloadLink href={withFilters("/edit/data-sharing/export?section=tiers", ui.filters)} />
-      </div>
-      <p className="text-muted-foreground mt-1 text-xs">
-        The &ldquo;concerning&rdquo; flag elsewhere on this page is tier-based only (country-of-concern
-        host or foreign-hosted repository) and does not fold in sensitive-data-type detection —
-        §5 &ldquo;Deposits by data sub-type&rdquo; is a separate, not-yet-combined lens; see that
-        section for its own coverage.
-      </p>
-      <div className={sectionClass}>
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass}>Tier</th>
-              <th className={thClass}>Repositories</th>
-              <th className={`${thClass} text-right`}>Datasets</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.byRepositoryTier.map((t) => {
-              // Per-repo counts inline (mockup's "Zenodo 174 · figshare 67"
-              // chips) — derived from byRepository, which is already sorted
-              // datasets-desc and is the exact source byRepositoryTier
-              // groups from. Each repo name links out via `urlOf` (v3 — the
-              // count stays outside the link, it's SPS's number, not the
-              // repository's).
-              const repos = report.byRepository.filter((r) => r.tier === t.tier);
-              // Zero rows arrive from the report on purpose (`paddedTiers`):
-              // "Country of concern · 0" is a deliberate compliance statement
-              // — render it muted but PRESENT, never filter it out here.
-              const isZero = t.datasets === 0;
-              return (
-                <tr key={t.tier} className="border-apollo-border border-b">
-                  <td className={tdClass}>
-                    <TierChip tier={t.tier} />
-                  </td>
-                  <td className={`${tdClass} text-muted-foreground`}>
-                    {repos.length === 0
-                      ? "none detected"
-                      : repos.map((r, i) => {
-                          const url = urlOf(r.repository);
-                          return (
-                            <span key={r.repository} className="whitespace-nowrap">
-                              {i > 0 && " · "}
-                              {url ? <ExternalA href={url}>{r.repository}</ExternalA> : r.repository}{" "}
-                              {r.datasets.toLocaleString()}
-                            </span>
-                          );
-                        })}
-                  </td>
-                  <td className={`${tdClass} text-right${isZero ? " text-muted-foreground" : ""}`}>
-                    {t.datasets.toLocaleString()}
-                  </td>
+      {/* The per-repository table (observed access model + a per-repository
+          items CSV) predates this layout; kept behind a disclosure so the
+          tier card leads. */}
+      <details className="group">
+        <summary className="text-apollo-slate cursor-pointer text-[13px] hover:underline">
+          All {report.byRepository.length.toLocaleString()} repositories: access model and items
+        </summary>
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="flex flex-wrap justify-end gap-x-3.5">
+            <DownloadLink
+              href={withFilters("/edit/data-sharing/export?section=repositories", ui.filters)}
+            />
+            <DownloadLink
+              href={withFilters(
+                "/edit/data-sharing/export?section=repositories&grain=items",
+                ui.filters,
+              )}
+              label="Items CSV"
+            />
+          </div>
+          <div className={tableWrapClass}>
+            <table className="w-full min-w-[560px] text-sm" data-testid="ds-repo-table">
+              <thead className={theadClass}>
+                <tr>
+                  <th className={thClass}>Repository</th>
+                  <th className={thClass}>Tier</th>
+                  <th className={thClass}>Access</th>
+                  <th className={cn(thClass, "text-right")}>Datasets</th>
+                  <th className={thClass}>
+                    <span className="sr-only">Items</span>
+                  </th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-6 flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">By repository</h3>
-        <span className="inline-flex items-center gap-3">
-          <DownloadLink href={withFilters("/edit/data-sharing/export?section=repositories", ui.filters)} />
-          <DownloadLink
-            href={withFilters("/edit/data-sharing/export?section=repositories&grain=items", ui.filters)}
-            label="Download items CSV"
-          />
-        </span>
-      </div>
-      <div className={sectionClass}>
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass}>Repository</th>
-              <th className={thClass}>Tier</th>
-              <th className={thClass}>Access</th>
-              <th className={`${thClass} text-right`}>Datasets</th>
-              <th className={thClass} />
-            </tr>
-          </thead>
-          <tbody>
-            {report.byRepository.map((r) => {
-              const url = urlOf(r.repository);
-              return (
-                <tr key={r.repository} className="border-apollo-border border-b">
-                  <td className={`${tdClass} font-medium`}>
-                    {url ? <ExternalA href={url}>{r.repository}</ExternalA> : r.repository}
-                  </td>
-                  <td className={tdClass}>
-                    <TierChip tier={r.tier} />
-                  </td>
-                  <td className={tdClass}>
-                    <AccessChip accessModel={r.accessModel} />
-                  </td>
-                  <td className={`${tdClass} text-right`}>{r.datasets.toLocaleString()}</td>
-                  <td className={tdClass}>
-                    <DownloadLink
-                      href={withFilters(
-                        `/edit/data-sharing/export?section=repositories&grain=items&repository=${encodeURIComponent(r.repository)}`,
-                        ui.filters,
-                      )}
-                      label="Items"
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {tierAccessMismatch && (
-        <p className="text-muted-foreground mt-2 text-xs">
-          Tier is the shared risk catalog&apos;s platform-level classification (host jurisdiction ×
-          typical access model), not a per-deposit fact — a repository&apos;s Access column (the
-          actually observed access model on WCM&apos;s deposits there) can disagree with what its
-          tier name implies, e.g. a repository tiered &ldquo;open&rdquo; whose WCM deposits observed
-          today are all controlled.
-        </p>
-      )}
-
-      <div className="mt-6 flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">By department</h3>
-        <span className="inline-flex items-center gap-3">
-          <DownloadLink href={withFilters("/edit/data-sharing/export?section=departments", ui.filters)} />
-          <DownloadLink
-            href={withFilters("/edit/data-sharing/export?section=departments&grain=items", ui.filters)}
-            label="Download items CSV"
-          />
-        </span>
-      </div>
-      <div className={sectionClass}>
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass}>Department</th>
-              <SortableTh
-                label="Datasets"
-                sortKey="datasets"
-                activeSort={ui.deptSort}
-                activeDir={ui.deptDir}
-                otherParams={otherParams}
-                sortParamName="deptSort"
-                dirParamName="deptDir"
-              />
-              <SortableTh
-                label="Depositing faculty"
-                sortKey="faculty"
-                activeSort={ui.deptSort}
-                activeDir={ui.deptDir}
-                otherParams={otherParams}
-                sortParamName="deptSort"
-                dirParamName="deptDir"
-              />
-              {/* Access-model group — `exposureColClass` bands th + td, see
-                  the const's doc comment. */}
-              <th className={`${thClass} ${exposureColClass} text-right`}>Open</th>
-              <th className={`${thClass} ${exposureColClass} text-right`}>Controlled</th>
-              <th className={`${thClass} ${exposureColClass} text-right`}>Registry</th>
-              <SortableTh
-                label="Share rate"
-                sortKey="shareRate"
-                activeSort={ui.deptSort}
-                activeDir={ui.deptDir}
-                otherParams={otherParams}
-                sortParamName="deptSort"
-                dirParamName="deptDir"
-              />
-              <th className={thClass} />
-            </tr>
-          </thead>
-          <tbody>
-            {sortedDepartments.map((d) => (
-              <tr key={d.department} className="border-apollo-border border-b">
-                <td className={tdClass}>{displayDepartmentName(d.department)}</td>
-                <td className={`${tdClass} text-right`}>{d.datasets.toLocaleString()}</td>
-                <td className={`${tdClass} text-right`}>{d.faculty.toLocaleString()}</td>
-                <td className={`${tdClass} ${exposureColClass} text-right`}>
-                  {d.openDatasets.toLocaleString()}
-                </td>
-                <td className={`${tdClass} ${exposureColClass} text-right`}>
-                  {d.controlledDatasets.toLocaleString()}
-                </td>
-                <td className={`${tdClass} ${exposureColClass} text-right`}>
-                  {d.registryDatasets.toLocaleString()}
-                </td>
-                <td className={`${tdClass} text-right`}>
-                  {formatShareRate(d.shareRateNumerator, d.shareRateDenominator)}
-                </td>
-                <td className={tdClass}>
-                  <DownloadLink
-                    href={withFilters(
-                      `/edit/data-sharing/export?section=departments&grain=items&department=${encodeURIComponent(d.department)}`,
-                      ui.filters,
-                    )}
-                    label="Items"
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-muted-foreground mt-2 text-xs">
-        Department dataset counts don&apos;t sum to the institutional total — a dataset with
-        co-authors in two departments counts once in each. Don&apos;t treat this column as a
-        partition of the rollup above. Open, Controlled, and Registry don&apos;t sum to Datasets
-        either — a deposit with no recorded access model is uncounted in either of the first two.
-      </p>
-      <p className="text-muted-foreground mt-1 text-xs">
-        Datasets/Depositing-faculty attribute to whichever scholar actually holds the deposit; Share
-        rate attributes to whoever confirmed-first/last-authored the underlying publication —
-        different scopes on purpose. A publication can show a detected deposit even when the
-        depositing scholar is a co-author in a DIFFERENT department (any citing row counts, not just
-        the corresponding author&apos;s), so a department can show a nonzero share rate with zero
-        datasets of its own, or nonzero datasets with a 0% share rate (a dataset can be linked by any
-        co-author, while only first/last-authored publications count toward the rate). Neither is an
-        arithmetic error.
-      </p>
+              </thead>
+              <tbody>
+                {report.byRepository.map((r) => {
+                  const url = urlOf(r.repository);
+                  return (
+                    <tr key={r.repository} className={rowClass}>
+                      <td className={cn(tdClass, "font-medium")}>
+                        {url ? <ExternalA href={url}>{r.repository}</ExternalA> : r.repository}
+                      </td>
+                      <td className={tdClass}>
+                        <TierChip tier={r.tier} />
+                      </td>
+                      <td className={tdClass}>
+                        <AccessChip accessModel={r.accessModel} />
+                      </td>
+                      <td className={cn(tdClass, "text-right tabular-nums")}>
+                        {r.datasets.toLocaleString()}
+                      </td>
+                      <td className={cn(tdClass, "text-right")}>
+                        <DownloadLink
+                          href={withFilters(
+                            `/edit/data-sharing/export?section=repositories&grain=items&repository=${encodeURIComponent(r.repository)}`,
+                            ui.filters,
+                          )}
+                          label="Items"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {tierAccessMismatch && (
+            <p className="text-muted-foreground text-[12.5px]">
+              Tier is the shared risk catalog&apos;s platform-level classification (host
+              jurisdiction × typical access model), not a per-deposit fact — a repository&apos;s
+              Access column (the actually observed access model on WCM&apos;s deposits there) can
+              disagree with what its tier name implies, e.g. a repository tiered &ldquo;open&rdquo;
+              whose WCM deposits observed today are all controlled.
+            </p>
+          )}
+        </div>
+      </details>
     </section>
   );
 }
 
-/** Fixed caption text for the Concerning/Foreign-hosted columns — matches
- *  the SPEC's "Amended 08-13" caveat framing exactly. Don't soften or drop
- *  this; it's the boundary between the tier-only flag actually shipped here
- *  and the fuller 3-way "concerning" definition the SPEC describes but
- *  defers (open-deposit-of-sensitive-category needs raw MeSH per citing pub,
- *  cut this session). */
+/** Colors for the department access-mix bar and its legend — the tier
+ *  palette's US hues plus the registry grey, so "open"/"controlled" read the
+ *  same as the tier dots elsewhere on the page. */
+const MIX = [
+  { key: "open", label: "Open", color: TIER_COLORS.US_OPEN },
+  { key: "controlled", label: "Controlled", color: TIER_COLORS.US_CTRL },
+  { key: "registry", label: "Registry", color: TIER_COLORS.REGISTRY },
+] as const;
+
+/** Rows visible before "Show all" in the department table. */
+const DEPARTMENT_ROWS_SHOWN = 12;
+
+function DepartmentsSection({
+  report,
+  ui,
+}: {
+  report: DataSharingReport;
+  ui: DataSharingUiParams;
+}) {
+  const otherParams = {
+    ...filterQueryParams(ui.filters),
+    facSort: ui.facSort,
+    facDir: ui.facDir,
+    facPage: ui.facPage,
+  };
+  const sorted = sortDepartments(report.byDepartment, ui.deptSort, ui.deptDir);
+  const sortLabel =
+    ui.deptSort === "name"
+      ? "Sorted by name"
+      : ui.deptSort === "faculty"
+        ? "Sorted by faculty"
+        : ui.deptSort === "shareRate"
+          ? "Sorted by share rate"
+          : "Sorted by datasets";
+  const sortTh = (
+    label: string,
+    sortKey: DepartmentSortKey,
+    align: "left" | "right",
+    title?: string,
+  ) => (
+    <SortableTh
+      label={label}
+      sortKey={sortKey}
+      activeSort={ui.deptSort ?? "datasets"}
+      activeDir={ui.deptDir}
+      otherParams={otherParams}
+      sortParamName="deptSort"
+      dirParamName="deptDir"
+      align={align}
+      title={title}
+    />
+  );
+  return (
+    <section id="departments" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Departments"
+        sub={`${sortLabel}. Click a column to sort.`}
+        actions={
+          <>
+            <DownloadLink
+              href={withFilters("/edit/data-sharing/export?section=departments", ui.filters)}
+            />
+            <DownloadLink
+              href={withFilters(
+                "/edit/data-sharing/export?section=departments&grain=items",
+                ui.filters,
+              )}
+              label="Items CSV"
+            />
+          </>
+        }
+      />
+      <div className={tableWrapClass}>
+        <table className="w-full min-w-[620px] text-sm" data-testid="ds-dept-table">
+          <thead className={theadClass}>
+            <tr>
+              {sortTh("Department", "name", "left")}
+              {sortTh("Datasets", "datasets", "right")}
+              {sortTh("Faculty", "faculty", "right", "Depositing faculty")}
+              <th className={thClass} title="Open, controlled, registry">
+                Access mix
+              </th>
+              {sortTh(
+                "Share rate",
+                "shareRate",
+                "right",
+                "Confirmed first/last-authored full-time-faculty pubs with a detected deposit",
+              )}
+              <th className={thClass}>
+                <span className="sr-only">Items</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <ShowMoreRows initial={DEPARTMENT_ROWS_SHOWN} colSpan={6}>
+              {sorted.map((d) => {
+                const counts = {
+                  open: d.openDatasets,
+                  controlled: d.controlledDatasets,
+                  registry: d.registryDatasets,
+                };
+                const tot = Math.max(1, d.openDatasets + d.controlledDatasets + d.registryDatasets);
+                const mixText = `${d.openDatasets.toLocaleString()} open · ${d.controlledDatasets.toLocaleString()} controlled · ${d.registryDatasets.toLocaleString()} registry`;
+                return (
+                  <tr key={d.department} className={rowClass}>
+                    <td className={cn(tdClass, "font-medium [overflow-wrap:anywhere]")}>
+                      {displayDepartmentName(d.department)}
+                    </td>
+                    <td className={cn(tdClass, "text-right font-semibold tabular-nums")}>
+                      {d.datasets.toLocaleString()}
+                    </td>
+                    <td className={cn(tdClass, "text-right tabular-nums")}>
+                      {d.faculty.toLocaleString()}
+                    </td>
+                    <td className={cn(tdClass, "w-[22%] min-w-[90px]")}>
+                      <div
+                        className="bg-apollo-surface-2 flex h-2 overflow-hidden rounded-full"
+                        title={mixText}
+                        aria-hidden
+                      >
+                        {MIX.map((m) => (
+                          <div
+                            key={m.key}
+                            style={{
+                              width: `${(counts[m.key] / tot) * 100}%`,
+                              backgroundColor: m.color,
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <span className="sr-only">{mixText}</span>
+                    </td>
+                    <td className={cn(tdClass, "text-right")}>
+                      <ShareRateCell
+                        numerator={d.shareRateNumerator}
+                        denominator={d.shareRateDenominator}
+                      />
+                    </td>
+                    <td className={cn(tdClass, "text-right")}>
+                      <DownloadLink
+                        href={withFilters(
+                          `/edit/data-sharing/export?section=departments&grain=items&department=${encodeURIComponent(d.department)}`,
+                          ui.filters,
+                        )}
+                        label="Items"
+                        className="text-apollo-slate text-xs hover:underline"
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </ShowMoreRows>
+          </tbody>
+        </table>
+      </div>
+      <div className="text-muted-foreground flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px]">
+        {MIX.map((m) => (
+          <span key={m.key} className="inline-flex items-center gap-1.5">
+            <span
+              className="size-2.5 rounded-[3px]"
+              style={{ backgroundColor: m.color }}
+              aria-hidden
+            />
+            {m.label}
+          </span>
+        ))}
+      </div>
+      <details className="group">
+        <summary className="text-apollo-slate cursor-pointer text-[12.5px] hover:underline">
+          Why these don&rsquo;t add up
+        </summary>
+        <div
+          className={cn(
+            cardClass,
+            "text-apollo-ink-2 mt-2 flex flex-col gap-1.5 rounded-[10px] px-4 py-3 text-[13px] leading-relaxed",
+          )}
+        >
+          <p>
+            Department counts don&rsquo;t sum to the institutional total: a dataset with co-authors
+            in two departments counts once in each. Open, Controlled and Registry don&rsquo;t sum to
+            Datasets either; a deposit with no recorded access model is in none.
+          </p>
+          <p>
+            Datasets and depositing faculty count whoever holds the deposit. Share rate counts
+            whoever confirmed first/last authorship of the underlying publication — different scopes
+            on purpose. A publication can show a detected deposit even when the depositing scholar
+            is a co-author in a different department, so a department can show a nonzero share rate
+            with zero datasets of its own, or datasets with a 0% share rate. Neither is an error.
+          </p>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+/** Fixed caption text for the Concerning/Foreign-hosted columns — matches the
+ *  SPEC's "Amended 08-13" caveat framing exactly. Don't soften or drop this;
+ *  it's the boundary between the tier-only flag actually shipped here and the
+ *  fuller 3-way "concerning" definition the SPEC defers. */
 const CONCERNING_CAVEAT =
   "Tier-based only — country-of-concern host or foreign-hosted repository; does not include sensitive data-type detection.";
 
@@ -981,18 +1294,12 @@ function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSha
   const sorted = sortFaculty(report.byFaculty, ui.facSort, ui.facDir);
   const totalPages = Math.max(1, Math.ceil(sorted.length / FACULTY_ROW_CAP));
   // Clamped, not raw `ui.facPage` (2026-08-16 adversarial-review finding): a
-  // stale or hand-edited `facPage` past the end (e.g. a filter just shrank
-  // the row count) rendered an empty table under a nonsensical "page N of M"
-  // label instead of falling back to the last real page.
+  // stale facPage past the end falls back to the last real page.
   const facPage = Math.min(Math.max(ui.facPage, 1), totalPages);
   const start = (facPage - 1) * FACULTY_ROW_CAP;
   const rows = sorted.slice(start, start + FACULTY_ROW_CAP);
-  // Includes facSort/facDir too (not just deptSort/deptDir) even though the
-  // SortableTh calls below override them via their own sortKey/nextDir —
-  // the Prev/Next pagination links (further down) use this SAME object and
-  // have no such override, so omitting them here silently reset the sort
-  // the moment someone paged a non-default-sorted table (2026-08-16
-  // adversarial-review finding).
+  // Includes facSort/facDir too: the Prev/Next links use this SAME object and
+  // have no sort override (2026-08-16 adversarial-review finding).
   const otherParams = {
     ...filterQueryParams(ui.filters),
     deptSort: ui.deptSort,
@@ -1001,37 +1308,42 @@ function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSha
     facDir: ui.facDir,
   };
   // Concerning == Foreign-hosted by construction while country-of-concern is
-  // 0 institution-wide (2026-08-16 review): two identical columns imply a
-  // live distinction that carries no information today. Collapse to one
-  // "Concerning" column; the Foreign-hosted split comes back automatically
-  // the moment a CONCERN-tier deposit is actually detected anywhere — not a
-  // flag someone has to remember to flip.
-  const hasCountryOfConcern = report.byRepositoryTier.some((t) => t.tier === "CONCERN" && t.datasets > 0);
+  // 0 institution-wide (2026-08-16 review): collapse to one column; the split
+  // comes back automatically once a CONCERN-tier deposit is detected.
+  const hasCountryOfConcern = report.byRepositoryTier.some(
+    (t) => t.tier === "CONCERN" && t.datasets > 0,
+  );
+  const zeroInk = (n: number) => (n === 0 ? "text-muted-foreground/60" : "");
   return (
-    <section id="faculty" className="mt-10 scroll-mt-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold">4 · Named faculty</h2>
-        <span className="inline-flex items-center gap-3">
-          <DownloadLink href={withFilters("/edit/data-sharing/export?section=faculty", ui.filters)} />
-          <DownloadLink
-            href={withFilters("/edit/data-sharing/export?section=faculty&grain=items", ui.filters)}
-            label="Download items CSV"
-          />
-        </span>
-      </div>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Per-individual counts, page {facPage} of {totalPages} ({sorted.length.toLocaleString()} total) —
-        same access as sections 1–3 above, no separate review. No Registry column here (unlike
-        §3&apos;s department table): this table stays Open/Controlled-only by design.
-      </p>
-      <p className="text-muted-foreground mt-2 text-xs">
-        <strong>Concerning{hasCountryOfConcern ? " / Foreign-hosted" : ""}:</strong> {CONCERNING_CAVEAT}
-      </p>
-
-      <div className={sectionClass}>
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
+    <section id="faculty" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Faculty"
+        sub={
+          <>
+            {sorted.length.toLocaleString()} depositing faculty. &ldquo;Concerning&rdquo; =
+            country-of-concern host or foreign-hosted repository (tier-based only; no sensitive
+            data-type detection).
+          </>
+        }
+        actions={
+          <>
+            <DownloadLink
+              href={withFilters("/edit/data-sharing/export?section=faculty", ui.filters)}
+            />
+            <DownloadLink
+              href={withFilters(
+                "/edit/data-sharing/export?section=faculty&grain=items",
+                ui.filters,
+              )}
+              label="Items CSV"
+            />
+          </>
+        }
+      />
+      <div className={tableWrapClass}>
+        <table className="w-full min-w-[720px] text-sm" data-testid="ds-faculty-table">
+          <thead className={theadClass}>
+            <tr>
               <th className={thClass}>Faculty</th>
               <th className={thClass}>Department</th>
               <SortableTh
@@ -1043,31 +1355,22 @@ function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSha
                 sortParamName="facSort"
                 dirParamName="facDir"
               />
-              {/* Exposure group — `exposureColClass` bands th + td, see the
-                  const's doc comment. The Concerning header carries a
-                  `DefinedTerm` hover (glossary definition + the tier-only
-                  caveat) — the caveat text itself must survive any future
-                  restyle (SPEC "Amended 08-13"). */}
-              <th className={`${thClass} ${exposureColClass} text-right`}>Open</th>
-              <th className={`${thClass} ${exposureColClass} text-right`}>Controlled</th>
-              <th className={`${thClass} ${exposureColClass} text-right`}>
+              <th className={cn(thClass, "text-right")}>Open</th>
+              <th className={cn(thClass, "text-right")} title="Controlled">
+                Ctrl.
+              </th>
+              <th className={cn(thClass, "text-right")}>
                 {/* "Concerning", not "Country of concern": this column counts
-                    the union of the three highest-severity tiers, and leading
-                    the hover with the narrower COC definition overstated
-                    severity for foreign-hosted-only rows (review nit). */}
+                    the union of the highest-severity tiers. The hover carries
+                    the tier-only caveat (SPEC "Amended 08-13"). */}
                 <DefinedTerm term="Concerning" caveat={CONCERNING_CAVEAT}>
                   Concerning
                 </DefinedTerm>
               </th>
               {hasCountryOfConcern && (
-                <th className={`${thClass} ${exposureColClass} text-right`}>
-                  {/* Neutral "Foreign-hosted" glossary entry (2026-08-16
-                      adversarial-review fix) — this column SUMS both
-                      FOREIGN_OPEN and FOREIGN_CTRL deposit instances
-                      (`foreignHostedDeposits`), so hovering it with either
-                      access-specific entry (the tier chips/spectrum use)
-                      would falsely claim the whole column is one access
-                      model. */}
+                <th className={cn(thClass, "text-right")}>
+                  {/* Neutral "Foreign-hosted" glossary entry: this column
+                      SUMS both FOREIGN_OPEN and FOREIGN_CTRL instances. */}
                   <DefinedTerm term="Foreign-hosted" caveat={CONCERNING_CAVEAT}>
                     Foreign-hosted
                   </DefinedTerm>
@@ -1082,83 +1385,111 @@ function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSha
                 sortParamName="facSort"
                 dirParamName="facDir"
               />
-              <th className={thClass} />
+              <th className={thClass}>
+                <span className="sr-only">Items</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((f) => (
-              <tr key={f.cwid} className="border-apollo-border border-b">
-                <td className={tdClass}>
-                  <Link href={`/scholar/${f.slug}`} className="hover:underline">
-                    {f.name}
-                  </Link>
+              <tr key={f.cwid} className={rowClass}>
+                <td className={cn(tdClass, "font-medium")}>
+                  <ScholarHoverCard cwid={f.cwid}>
+                    <Link
+                      href={`/scholar/${f.slug}`}
+                      className="hover:text-apollo-slate hover:underline"
+                    >
+                      {f.name}
+                    </Link>
+                  </ScholarHoverCard>
                 </td>
-                <td className={tdClass}>{f.department ? displayDepartmentName(f.department) : "—"}</td>
-                <td className={`${tdClass} text-right`}>{f.datasets.toLocaleString()}</td>
-                <td className={`${tdClass} ${exposureColClass} text-right`}>
+                <td className={cn(tdClass, "text-muted-foreground text-[13px]")}>
+                  {f.department ? displayDepartmentName(f.department) : "—"}
+                </td>
+                <td className={cn(tdClass, "text-right font-semibold tabular-nums")}>
+                  {f.datasets.toLocaleString()}
+                </td>
+                <td className={cn(tdClass, "text-right tabular-nums", zeroInk(f.openDatasets))}>
                   {f.openDatasets.toLocaleString()}
                 </td>
-                <td className={`${tdClass} ${exposureColClass} text-right`}>
+                <td
+                  className={cn(tdClass, "text-right tabular-nums", zeroInk(f.controlledDatasets))}
+                >
                   {f.controlledDatasets.toLocaleString()}
                 </td>
-                <td className={`${tdClass} ${exposureColClass} text-right`}>
+                <td
+                  className={cn(
+                    tdClass,
+                    "text-right tabular-nums",
+                    f.concerningDeposits > 0 ? "text-apollo-amber font-semibold" : zeroInk(0),
+                  )}
+                >
                   {f.concerningDeposits.toLocaleString()}
                 </td>
                 {hasCountryOfConcern && (
-                  <td className={`${tdClass} ${exposureColClass} text-right`}>
+                  <td
+                    className={cn(
+                      tdClass,
+                      "text-right tabular-nums",
+                      zeroInk(f.foreignHostedDeposits),
+                    )}
+                  >
                     {f.foreignHostedDeposits.toLocaleString()}
                   </td>
                 )}
-                <td className={`${tdClass} text-right`}>
-                  {formatShareRate(f.shareRateNumerator, f.shareRateDenominator)}
+                <td className={cn(tdClass, "text-right")}>
+                  <ShareRateCell
+                    numerator={f.shareRateNumerator}
+                    denominator={f.shareRateDenominator}
+                  />
                 </td>
-                <td className={tdClass}>
+                <td className={cn(tdClass, "text-right")}>
                   <DownloadLink
                     href={withFilters(
                       `/edit/data-sharing/export?section=faculty&grain=items&cwid=${encodeURIComponent(f.cwid)}`,
                       ui.filters,
                     )}
                     label="Items"
+                    className="text-apollo-slate text-xs hover:underline"
                   />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-      {totalPages > 1 && (
-        <div className="mt-2 flex items-center justify-between text-xs">
-          {facPage > 1 ? (
-            <a href={buildQuery({ ...otherParams, facPage: facPage - 1 })} className="hover:underline">
-              ← Previous
-            </a>
-          ) : (
-            <span />
-          )}
-          {facPage < totalPages ? (
-            <a href={buildQuery({ ...otherParams, facPage: facPage + 1 })} className="hover:underline">
-              Next →
-            </a>
-          ) : (
-            <span />
-          )}
+        <div className="border-apollo-border bg-apollo-page text-muted-foreground flex min-w-[720px] items-center justify-between gap-3 border-t px-[18px] py-2.5 text-[13px]">
+          <span>
+            Page {facPage} of {totalPages}
+          </span>
+          <span className="flex gap-4">
+            {facPage > 1 && (
+              <SoftLink
+                href={buildQuery({ ...otherParams, facPage: facPage - 1 })}
+                className="text-apollo-slate hover:underline"
+              >
+                ← Previous
+              </SoftLink>
+            )}
+            {facPage < totalPages && (
+              <SoftLink
+                href={buildQuery({ ...otherParams, facPage: facPage + 1 })}
+                className="text-apollo-slate hover:underline"
+              >
+                Next →
+              </SoftLink>
+            )}
+          </span>
         </div>
-      )}
-      {/* The institution-wide concerning-instances footnote that used to sit
-          here moved to §7 (Compliance view) in the v3 pass — the per-column
-          caveat line above the table stays. */}
+      </div>
     </section>
   );
 }
 
-/** Display label per coarse sensitive category — the `sensitiveCats`/
- *  `sensitiveSubtypes` category prefix (`SENS` in `scripts/bulk-data-rule/
- *  attribute.py`, from `taxonomy.py`'s `tag()`). Falls through to the raw
- *  category string for any value not in this map, same pattern as
- *  `TIER_LABELS`. */
+/** Display label per coarse sensitive category — the `sensitiveSubtypes`
+ *  category prefix. Falls through to the raw category string. */
 const SUBTYPE_CATEGORY_LABELS: Record<string, string> = {
   genomic: "Genomic",
-  omic_other: "Other 'omic",
+  omic_other: "Other ’omic",
   health: "Health data",
   biometric: "Biometric",
   geolocation: "Geolocation",
@@ -1169,486 +1500,614 @@ function SubtypesSection({
   filters,
 }: {
   report: DataSharingReport;
-  /** The active filter (2026-08-16, GitHub #2470), threaded the same way
-   *  `filtersActive` used to be, so every `DownloadLink` href in this
-   *  section can carry it via `withFilters`. */
   filters: DataSharingUiParams["filters"];
 }) {
   if (report.bySubtype.length === 0) return null;
+  // One card per coarse category, biggest first; sub-types biggest first.
+  const groups = new Map<string, { subtype: string; count: number }[]>();
+  for (const s of report.bySubtype) {
+    const g = groups.get(s.category) ?? [];
+    g.push({ subtype: s.subtype, count: s.count });
+    groups.set(s.category, g);
+  }
+  const cards = [...groups.entries()]
+    .map(([category, items]) => ({
+      category,
+      items: [...items].sort((a, b) => b.count - a.count),
+      total: items.reduce((a, x) => a + x.count, 0),
+    }))
+    .sort((a, b) => b.total - a.total);
+  const { subtypeClassifiedInstances: classified, links } = report.overall;
+  const pct = ratePct(classified, links);
   return (
-    <section id="subtypes" className="scroll-mt-4 mt-10">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold">5 · Deposits by data sub-type</h2>
-        <span className="inline-flex items-center gap-3">
-          <DownloadLink href={withFilters("/edit/data-sharing/export?section=subtypes", filters)} />
-          <DownloadLink
-            href={withFilters("/edit/data-sharing/export?section=subtypes&grain=items", filters)}
-            label="Download items CSV"
-          />
+    <section id="subtypes" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Sensitive data sub-types"
+        sub="Deposit instances, not distinct datasets"
+        actions={
+          <>
+            <DownloadLink
+              href={withFilters("/edit/data-sharing/export?section=subtypes", filters)}
+            />
+            <DownloadLink
+              href={withFilters("/edit/data-sharing/export?section=subtypes&grain=items", filters)}
+              label="Items CSV"
+            />
+          </>
+        }
+      />
+      <div className="bg-apollo-amber-tint border-apollo-amber-tint-border flex flex-wrap items-baseline gap-x-2.5 gap-y-1 rounded-[10px] border px-3 py-2 text-[13px]">
+        <span className="text-apollo-amber font-semibold whitespace-nowrap">
+          Floor, not a census
+        </span>
+        <span>
+          Only {classified.toLocaleString()} of {links.toLocaleString()} deposit instances
+          {pct ? ` (${pct})` : ""} carry any sub-type at all. A deposit spanning several sub-types
+          counts once in each.
         </span>
       </div>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Granular sensitive sub-types detected per deposit, grouped by coarse category —
-        deposit-INSTANCE counts, same grain as the link counts elsewhere on this page, not
-        distinct datasets. A deposit spanning more than one sub-type counts once toward each.
-      </p>
-      <p className="text-muted-foreground mt-1 text-xs">
-        {formatShareRate(report.overall.subtypeClassifiedInstances, report.overall.links)} of every
-        deposit instance carries any sub-type classification at all — read the rows below as a
-        floor of a floor, not a census; most §6 Recent-activity rows show &ldquo;—&rdquo; for
-        sub-types for the same reason.
-      </p>
-      <div className={sectionClass}>
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass}>Category</th>
-              <th className={thClass}>Sub-type</th>
-              <th className={`${thClass} text-right`}>Deposit instances</th>
-              <th className={thClass} />
-            </tr>
-          </thead>
-          <tbody>
-            {report.bySubtype.map((s, i) => {
-              // Rows arrive pre-sorted by category (aggregateBySubtype's own
-              // contract), so a contiguous run shares one category — print
-              // the Category cell once per run (rowSpan), on an
-              // --apollo-surface-2 band, instead of repeating it down every
-              // row in the group (R11).
-              const rows = report.bySubtype;
-              const isGroupStart = i === 0 || rows[i - 1].category !== s.category;
-              const itemsHref = withFilters(
-                `/edit/data-sharing/export?section=subtypes&grain=items&category=${encodeURIComponent(s.category)}&subtype=${encodeURIComponent(s.subtype)}`,
-                filters,
-              );
-              if (!isGroupStart) {
-                return (
-                  <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
-                    <td className={tdClass}>{s.subtype}</td>
-                    <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
-                    <td className={tdClass}>
-                      <DownloadLink href={itemsHref} label="Items" />
-                    </td>
-                  </tr>
-                );
-              }
-              let span = 1;
-              while (rows[i + span] && rows[i + span].category === s.category) span++;
-              return (
-                <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
-                  <td className={`${tdClass} bg-apollo-surface-2 align-top font-medium`} rowSpan={span}>
-                    {SUBTYPE_CATEGORY_LABELS[s.category] ?? s.category}
-                  </td>
-                  <td className={tdClass}>{s.subtype}</td>
-                  <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
-                  <td className={tdClass}>
-                    <DownloadLink href={itemsHref} label="Items" />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(240px,100%),1fr))] items-start gap-3">
+        {cards.map((g) => {
+          const max = Math.max(1, ...g.items.map((x) => x.count));
+          return (
+            <div key={g.category} className={cn(cardClass, "flex flex-col gap-2 px-4 py-3.5")}>
+              <div className="flex items-baseline justify-between">
+                <h3 className="text-[14.5px] font-semibold">
+                  {SUBTYPE_CATEGORY_LABELS[g.category] ?? g.category}
+                </h3>
+                <span className="text-muted-foreground text-[13px] tabular-nums">
+                  {g.total.toLocaleString()}
+                </span>
+              </div>
+              {g.items.map((s) => (
+                <div
+                  key={s.subtype}
+                  className="grid grid-cols-[minmax(0,1fr)_34px] items-center gap-2 text-[13px]"
+                >
+                  <div className="relative overflow-hidden rounded px-1.5 py-0.5">
+                    <div
+                      className="bg-apollo-slate-tint absolute inset-y-0 left-0"
+                      style={{ width: `${(s.count / max) * 100}%` }}
+                      aria-hidden
+                    />
+                    <DownloadLink
+                      href={withFilters(
+                        `/edit/data-sharing/export?section=subtypes&grain=items&category=${encodeURIComponent(g.category)}&subtype=${encodeURIComponent(s.subtype)}`,
+                        filters,
+                      )}
+                      label={s.subtype}
+                      title="Download this sub-type's items CSV"
+                      className="hover:text-apollo-slate relative hover:underline"
+                    />
+                  </div>
+                  <span className="text-right font-medium tabular-nums">
+                    {s.count.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
 }
 
-function RecentActivitySection({
+function RecentDepositsSection({
   report,
   filters,
 }: {
   report: DataSharingReport;
-  /** This section's own export link is the same item-level default export as
-   *  Rollup's, and needs the identical `withFilters` treatment (2026-08-16,
-   *  GitHub #2470). */
   filters: DataSharingUiParams["filters"];
 }) {
   return (
-    <section id="recent" className="mt-10 scroll-mt-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold">6 · Recent activity</h2>
-        {/* Item grain — the default (no-section) export IS this table, in full. */}
-        <DownloadLink href={withFilters("/edit/data-sharing/export", filters)} />
-      </div>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Item-level — one row per (person, dataset) link, same grain as the CSV export (a dataset
-        with more than one depositing/citing faculty member can appear more than once). Sorted by
-        deposit year (repository metadata, or publication year as a fallback) — the only per-item
-        recency signal this data has. NOT &ldquo;when SPS detected this&rdquo;: every row in the
-        table is stamped with the same sync time on each weekly refresh (see &ldquo;Data as
-        of&rdquo; above), so a deposit found this week and one found months ago are
-        indistinguishable by that timestamp.
-        Ties within a year have no further real ordering.
-      </p>
-      <div className={sectionClass}>
-        <table className="w-full text-sm">
-          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-            <tr className="border-apollo-border border-b">
-              <th className={thClass}>Repository</th>
-              <th className={thClass}>Accession</th>
-              <th className={thClass}>Title</th>
-              <th className={thClass}>Type</th>
-              <th className={thClass}>Sub-types</th>
-              <th className={thClass}>PMIDs</th>
+    <section id="recent" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Recent deposits"
+        sub="One row per person–dataset link, newest deposit year first"
+        // Item grain — the default (no-section) export IS this table, in full.
+        actions={<DownloadLink href={withFilters("/edit/data-sharing/export", filters)} />}
+      />
+      <div className={tableWrapClass}>
+        <table className="w-full min-w-[760px] text-[13.5px]" data-testid="ds-recent-table">
+          <thead className={theadClass}>
+            <tr>
+              <th className={thClass}>Dataset</th>
+              <th className={thClass}>Title · type</th>
+              <th className={thClass}>Publication</th>
               <th className={thClass}>Tier</th>
-              <th className={thClass}>Access</th>
-              <th className={`${thClass} text-right`}>Deposit year</th>
-              <th className={thClass}>Faculty</th>
-              <th className={thClass}>Department</th>
+              <th className={cn(thClass, "text-right")}>Year</th>
             </tr>
           </thead>
           <tbody>
             {report.recentItems.map((r) => {
               const url = urlOf(r.repository);
-              // Per-accession deep link (v3, the "cryptic rows" complaint —
-              // GSE162435 should land on its GEO record, not just name it).
-              // Same resolver table as the public profile "Datasets" section;
-              // unresolvable → plain text, absent → "—".
+              // Per-accession deep link via the profile Datasets section's own
+              // resolver; unresolvable → plain text.
               const accessionUrl = r.accessionOrDoi
                 ? resolveDatasetUrl({ repository: r.repository, accessionOrDoi: r.accessionOrDoi })
                 : null;
-              // Same parser as the §5 rollup and the subtypes items export —
-              // labels only here, the category prefix is §5's job.
               const subtypeLabels = parseSensitiveSubtypes(r.sensitiveSubtypes).map(
                 (s) => s.subtype,
               );
+              const typeLine = [r.dataType ?? r.resourceType, ...subtypeLabels]
+                .filter(Boolean)
+                .join(" · ");
               return (
-                // (cwid, datasetId) is PersonDatasetDeposit's own primary key —
-                // already unique per row, no index needed.
-                <tr key={`${r.datasetId}|${r.cwid}`} className="border-apollo-border border-b">
-                  <td className={`${tdClass} font-medium`}>
-                    {url ? <ExternalA href={url}>{r.repository}</ExternalA> : r.repository}
-                  </td>
-                  <td className={tdClass}>
-                    {r.accessionOrDoi ? (
-                      accessionUrl ? (
-                        <ExternalA href={accessionUrl}>{displayAccession(r.repository, r.accessionOrDoi)}</ExternalA>
-                      ) : (
-                        displayAccession(r.repository, r.accessionOrDoi)
-                      )
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  {/* No accession fallback here anymore — the accession has
-                      its own adjacent column now (v3). Truncated to 2 lines
-                      (2026-08-16: long ClinicalTrials.gov titles were
-                      blowing row heights to 8+ lines) — native `title=`
-                      hover shows the full text instead of a JS expander. */}
-                  <td className={`${tdClass} max-w-xs`}>
-                    <span className="line-clamp-2" title={r.title ?? undefined}>
-                      {r.title || "—"}
-                    </span>
-                  </td>
-                  <td className={tdClass}>{r.dataType ?? r.resourceType ?? "—"}</td>
-                  <td className={`${tdClass} text-muted-foreground`}>
-                    {subtypeLabels.length > 0 ? subtypeLabels.join(", ") : "—"}
-                  </td>
-                  {/* Citing pubs for this (person, dataset) link — the only
-                      table naming specific publications, so the only PMIDs
-                      column (08-16 follow-up). */}
-                  <td className={tdClass}>
-                    {r.pmids?.length
-                      ? r.pmids.map((p, i) => (
-                          <span key={p} className="whitespace-nowrap">
-                            {i > 0 && ", "}
-                            <ExternalA href={`https://pubmed.ncbi.nlm.nih.gov/${p}/`}>{p}</ExternalA>
+                // (cwid, datasetId) is PersonDatasetDeposit's own primary key.
+                <tr key={`${r.datasetId}|${r.cwid}`} className={cn(rowClass, "align-top")}>
+                  <td className={cn(tdClass, "py-2.5")}>
+                    <div className="flex min-w-0 flex-col gap-px">
+                      <span className="font-medium">
+                        {url ? <ExternalA href={url}>{r.repository}</ExternalA> : r.repository}
+                      </span>
+                      {r.accessionOrDoi ? (
+                        accessionUrl ? (
+                          <ExternalA
+                            href={accessionUrl}
+                            className="text-apollo-slate font-mono text-xs [overflow-wrap:anywhere]"
+                          >
+                            {displayAccession(r.repository, r.accessionOrDoi)}
+                          </ExternalA>
+                        ) : (
+                          <span className="font-mono text-xs [overflow-wrap:anywhere]">
+                            {displayAccession(r.repository, r.accessionOrDoi)}
                           </span>
-                        ))
-                      : "—"}
+                        )
+                      ) : null}
+                    </div>
                   </td>
-                  <td className={tdClass}>
+                  <td className={cn(tdClass, "max-w-xs py-2.5")}>
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      {/* Truncated with a native title= for the full text
+                          (long ClinicalTrials.gov titles blew row heights). */}
+                      <span
+                        className={cn("line-clamp-2", !r.title && "text-muted-foreground")}
+                        title={r.title ?? undefined}
+                      >
+                        {r.title || "Untitled in repository metadata"}
+                      </span>
+                      {typeLine ? (
+                        <span className="text-muted-foreground text-[12.5px]">{typeLine}</span>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className={cn(tdClass, "py-2.5")}>
+                    <div className="flex flex-col gap-0.5">
+                      {/* Citing pubs for this (person, dataset) link — the only
+                          table naming specific publications. */}
+                      {r.pmids?.length ? (
+                        <span className="font-mono text-xs">
+                          {r.pmids.map((p, i) => (
+                            <span key={p} className="whitespace-nowrap">
+                              {i > 0 && ", "}
+                              <ExternalA
+                                href={`https://pubmed.ncbi.nlm.nih.gov/${p}/`}
+                                className="text-apollo-slate"
+                              >
+                                {`PMID ${p}`}
+                              </ExternalA>
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                      <span className="text-muted-foreground text-[12.5px]">
+                        <Link href={`/scholar/${r.scholarSlug}`} className="hover:underline">
+                          {r.scholarName}
+                        </Link>
+                        {r.department ? ` · ${displayDepartmentName(r.department)}` : ""}
+                      </span>
+                    </div>
+                  </td>
+                  <td className={cn(tdClass, "py-2.5")}>
                     <TierChip tier={effectiveTierOf(r)} />
                   </td>
-                  <td className={tdClass}>
-                    <AccessChip accessModel={r.accessModel} />
+                  <td
+                    className={cn(tdClass, "text-muted-foreground py-2.5 text-right tabular-nums")}
+                  >
+                    {r.depositYear ?? "—"}
                   </td>
-                  <td className={`${tdClass} text-right`}>{r.depositYear ?? "—"}</td>
-                  <td className={tdClass}>
-                    <Link href={`/scholar/${r.scholarSlug}`} className="hover:underline">
-                      {r.scholarName}
-                    </Link>
-                  </td>
-                  <td className={tdClass}>{r.department ? displayDepartmentName(r.department) : "—"}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        <p className="border-apollo-border bg-apollo-page text-muted-foreground min-w-[760px] border-t px-[18px] py-2.5 text-[12.5px]">
+          Deposit year is the only per-item recency signal. Every row carries the same weekly sync
+          time, so this week&rsquo;s finds and older ones look alike.
+        </p>
       </div>
     </section>
   );
 }
 
-/** Sublabel for the three §7 placeholder cards — one string so the three
- *  can't drift while they wait on the same missing input. */
-const COC_PULL_PENDING = "requires the country-of-concern coauthor pull — not yet ingested";
-
-/** §7 Compliance view (v3, mirrors the v2 mockup's compliance panel). One
- *  real number — `overall.concerningDepositInstances`, moved here from the
- *  old §4 footnote — beside three placeholder cards that render "—" until
- *  the country-of-concern coauthor pull is ingested. The empty cards ship ON
- *  PURPOSE: the stakeholder explicitly wants the section's shape present
- *  before the data exists, so the eventual numbers land in an already-familiar
- *  frame. The closing caveat paragraph is the section's point as much as the
- *  numbers — a flag here locates a QUESTION, it never determines a violation;
- *  don't drop or soften it. */
-function ComplianceSection({
-  report,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- No
-  // `DownloadLink` in this section today, so nothing reads this yet. The
-  // three placeholder cards ship before there's anything to export (see
-  // `COC_PULL_PENDING`). Accepted anyway so this section matches Rollup/
-  // Subtypes' shape and a future §7 export doesn't have to remember to add
-  // it (2026-08-16 filters-feedback pass; renamed from `filtersActive` to
-  // `filters` on 2026-08-16, GitHub #2470, the same rename every other
-  // section below got once real filtering replaced that prop).
-  filters,
-}: {
-  report: DataSharingReport;
-  filters: DataSharingUiParams["filters"];
-}) {
-  const { concerningDepositInstances } = report.overall;
-  return (
-    <section id="compliance" className="mt-10 scroll-mt-4">
-      <h2 className="text-base font-semibold">7 · Compliance view</h2>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Where the DOJ Bulk Data Rule covered-person-access question could arise — a screening
-        lens, not a determination.
-      </p>
-
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">
-            {concerningDepositInstances.toLocaleString()}
-          </div>
-          <div className="text-muted-foreground text-xs">Concerning deposit instances</div>
-          <div className="text-muted-foreground mt-0.5 text-xs">
-            country-of-concern or foreign-hosted repository — tier-derived only, no
-            sensitive-data-type detection
-          </div>
-          <div className="text-muted-foreground mt-0.5 text-xs">
-            deposit-instance count, not distinct datasets or publications — see §1&apos;s tier
-            spectrum for the publication-grain view of the same tiers
-          </div>
-        </div>
-        {/* Ghosted/disabled styling (2026-08-16 review: "style them as
-            visibly disabled so the section reads pending at a glance rather
-            than broken") — opacity + a "Pending" badge, same three cards,
-            same COC_PULL_PENDING caption. */}
-        <div className={`${sectionClass} p-4 opacity-50`} aria-disabled="true">
-          <div className="text-2xl font-semibold">—</div>
-          <div className="text-muted-foreground text-xs">
-            Pubs with a COC-affiliated coauthor{" "}
-            <span className="border-apollo-border rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide">
-              Pending
-            </span>
-          </div>
-          <div className="text-muted-foreground mt-0.5 text-xs">{COC_PULL_PENDING}</div>
-        </div>
-        <div className={`${sectionClass} p-4 opacity-50`} aria-disabled="true">
-          <div className="text-2xl font-semibold">—</div>
-          <div className="text-muted-foreground text-xs">
-            Combined exposure{" "}
-            <span className="border-apollo-border rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide">
-              Pending
-            </span>
-          </div>
-          <div className="text-muted-foreground mt-0.5 text-xs">{COC_PULL_PENDING}</div>
-        </div>
-        <div className={`${sectionClass} p-4 opacity-50`} aria-disabled="true">
-          <div className="text-2xl font-semibold">—</div>
-          <div className="text-muted-foreground text-xs">
-            Faculty on COC-coauthor pubs{" "}
-            <span className="border-apollo-border rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide">
-              Pending
-            </span>
-          </div>
-          <div className="text-muted-foreground mt-0.5 text-xs">{COC_PULL_PENDING}</div>
-        </div>
-      </div>
-
-      <p className="text-muted-foreground mt-3 text-sm">
-        A concerning flag or a COC-affiliated coauthor identifies where the covered-person-access
-        question arises; it is NOT a violation determination — much academic collaboration is
-        exempt, and each case needs a look at actual access and transaction type.
-      </p>
-    </section>
-  );
-}
-
-/** The §1–§7 anchors, in page order — one source list so the sticky nav
- *  (below) and the section headings can't drift apart. */
-const SECTION_NAV_ITEMS: { id: string; label: string }[] = [
-  { id: "rollup", label: "1 · Rollup" },
-  { id: "funding", label: "2 · Funding & access" },
-  { id: "repos", label: "3 · Repositories & departments" },
-  { id: "faculty", label: "4 · Faculty" },
-  { id: "subtypes", label: "5 · Sub-types" },
-  { id: "recent", label: "6 · Recent activity" },
-  { id: "compliance", label: "7 · Compliance" },
+/** The three COC-coauthor placeholder cards — one list so they can't drift
+ *  while they wait on the same missing input. */
+const COC_PENDING_CARDS = [
+  "Pubs with a COC-affiliated coauthor",
+  "Combined exposure",
+  "Faculty on COC-coauthor pubs",
 ];
+const COC_PULL_PENDING = "Needs the country-of-concern coauthor pull";
 
-/** Sticky section jump-nav (2026-08-16 ask: "the page is ~6 screens tall
- *  with no navigation"). Plain anchor links + `position: sticky` — no JS,
- *  no client island; native in-page anchors already do this. Repeats the
- *  Methods dialog trigger (same `doc` prop `RollupSection` uses) so it's
- *  reachable from anywhere on the page, not just §1's corner. */
-function SectionNav({ doc }: { doc: ReturnType<typeof buildMethodsDoc> }) {
+/** Compliance view: one real number — `overall.concerningDepositInstances` —
+ *  beside three placeholder cards (dashed, "Pending") that stay until the
+ *  country-of-concern coauthor pull is ingested; the stakeholder wants the
+ *  section's shape present before the data exists. The closing caveat is the
+ *  section's point as much as the numbers — a flag here locates a QUESTION,
+ *  it never determines a violation; don't drop or soften it. */
+function ComplianceSection({ report }: { report: DataSharingReport }) {
   return (
-    <nav className="bg-apollo-surface border-apollo-border sticky top-0 z-10 -mx-1 mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-1 py-2 text-xs">
-      {SECTION_NAV_ITEMS.map((item) => (
-        <a key={item.id} href={`#${item.id}`} className="hover:underline">
-          {item.label}
-        </a>
-      ))}
-      <span className="ml-auto">
-        <DataSharingMethodsDialog doc={doc} />
-      </span>
-    </nav>
+    <section id="compliance" className="flex scroll-mt-32 flex-col gap-3.5">
+      <SectionHead
+        title="Compliance"
+        sub="Where the DOJ Bulk Data Rule covered-person-access question could arise. A screening lens, not a determination."
+      />
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(200px,100%),1fr))] gap-3">
+        <div className={cn(cardClass, "flex flex-col gap-1 px-4 py-3.5")}>
+          <span className="text-muted-foreground text-xs font-medium tracking-[.08em] uppercase">
+            Concerning deposit instances
+          </span>
+          <span
+            className="text-[28px] leading-tight font-semibold tabular-nums"
+            data-testid="ds-concerning"
+          >
+            {report.overall.concerningDepositInstances.toLocaleString()}
+          </span>
+          <span className="text-muted-foreground text-[12.5px] leading-snug">
+            Country-of-concern or foreign-hosted repository. Tier-derived only; instances, not
+            distinct datasets.
+          </span>
+        </div>
+        {COC_PENDING_CARDS.map((label) => (
+          <div
+            key={label}
+            aria-disabled="true"
+            data-pending="true"
+            className="border-apollo-border-strong flex flex-col gap-1 rounded-[13px] border border-dashed px-4 py-3.5"
+          >
+            <span className="text-muted-foreground text-xs font-medium tracking-[.08em] uppercase">
+              {label}
+            </span>
+            <span className="text-muted-foreground mt-1 text-[13px]">
+              <span className="bg-apollo-surface-2 mr-1.5 rounded px-1.5 py-px text-[11px] font-semibold tracking-[.06em]">
+                PENDING
+              </span>
+              {COC_PULL_PENDING}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="text-muted-foreground max-w-[100ch] text-[12.5px] leading-normal">
+        A concerning flag or a COC-affiliated coauthor marks where the question arises. It is not a
+        violation determination: much academic collaboration is exempt, and each case needs a look
+        at actual access and transaction type.
+      </p>
+    </section>
   );
 }
 
-/** Tier codes offered in the filter form, in the same severity order as
- *  `TIER_LABELS`/`TIER_ORDER` — `UNKNOWN` excluded, same rationale as
- *  `paddedTiers` in the report lib (it's a port-lag bucket, not a real
- *  filterable category). */
-const FILTERABLE_TIERS = ["CONCERN", "FOREIGN_OPEN", "FOREIGN_CTRL", "US_OPEN", "US_CTRL", "REGISTRY"] as const;
+/** Tier codes offered as filter chips, in severity order — `UNKNOWN` excluded
+ *  (a port-lag bucket, not a real filterable category). */
+const FILTERABLE_TIERS = [
+  "CONCERN",
+  "FOREIGN_OPEN",
+  "FOREIGN_CTRL",
+  "US_OPEN",
+  "US_CTRL",
+  "REGISTRY",
+] as const;
 
-/** Year-range + tier + NIH-funded filter form (2026-08-16 ask, all three
- *  now shipped; see `DataSharingReportFilters`'s doc comment for why the
- *  NIH-funded field landed after year/tier). A plain GET `<form>`: a native
- *  platform feature, no client state, submitting reloads the page with the
- *  new query string, which `parseDataSharingParams`/`loadDataSharingReport`
- *  already handle. Preserves the current sort choice via hidden inputs so
- *  applying a filter doesn't silently reset it. */
+const segGroupClass = "bg-apollo-surface-2 border-apollo-border flex rounded-lg border p-[3px]";
+function segClass(on: boolean): string {
+  return cn(
+    "rounded-md px-2.5 py-1 text-[13px] whitespace-nowrap",
+    on
+      ? "bg-apollo-surface text-foreground shadow-[0_1px_2px_rgba(34,30,28,.12)]"
+      : "text-muted-foreground hover:text-foreground",
+  );
+}
+
+/** "2020–26". */
+function yearSpan(from: number, to: number): string {
+  return `${from}–${String(to).slice(-2)}`;
+}
+
+/** Filter bar (sticky at `lg`): Deposit-years presets, NIH funding, tier
+ *  chips — each a plain GET link to the same page with that one filter
+ *  changed (every other filter and both tables' sorts preserved; the faculty
+ *  page resets, since the row count under a new filter makes it
+ *  meaningless). The typed from/to year range is kept behind "Custom" as the
+ *  same GET form it always was. Links and the form are `SoftLink` /
+ *  `SoftGetForm` (`data-sharing-nav.tsx`): same hrefs, applied as a
+ *  client-side `router.push` with no scroll jump, the URL still the only
+ *  filter state. */
 function FilterBar({
   ui,
   bounds,
 }: {
   ui: DataSharingUiParams;
-  /** True min/max deposit year across the full corpus (2026-08-16 ask: "you
-   *  can type a year below the earliest real deposit and get a silently-
-   *  empty table"). Feeds each year input's ghost text (so the effective
-   *  range is visible without being a value someone has to keep in sync) and
-   *  its native `min`/`max` (the browser enforces the clamp, no JS needed).
-   *  `undefined` (rendered as no placeholder/no clamp) only when
-   *  `report.depositYearBounds` is null, i.e. no row anywhere carries a
-   *  `depositYear`. */
+  /** True min/max deposit year across the FULL corpus — the presets' span,
+   *  and each custom year input's ghost text + native min/max clamp (null
+   *  when no row carries a depositYear). */
   bounds: DataSharingReport["depositYearBounds"];
 }) {
-  const active = hasActiveFilters(ui.filters);
+  const f = ui.filters;
+  const sortParams = {
+    deptSort: ui.deptSort,
+    deptDir: ui.deptDir,
+    facSort: ui.facSort,
+    facDir: ui.facDir,
+  };
+  const hrefWith = (next: DataSharingUiParams["filters"]) =>
+    buildQuery({ ...filterQueryParams(next), ...sortParams }) || "?";
+  const active = hasActiveFilters(f);
+
+  const presets: { label: string; yearFrom: number | undefined }[] = [];
+  if (bounds) {
+    presets.push({ label: yearSpan(bounds.min, bounds.max), yearFrom: undefined });
+    for (const back of [4, 2]) {
+      const from = bounds.max - back;
+      if (from > bounds.min) presets.push({ label: yearSpan(from, bounds.max), yearFrom: from });
+    }
+  }
+  const presetActive = (p: { yearFrom: number | undefined }) =>
+    f.yearTo === undefined && f.yearFrom === p.yearFrom;
+  const customActive =
+    (f.yearFrom !== undefined || f.yearTo !== undefined) && !presets.some(presetActive);
+
+  const toggleTier = (tier: string) => {
+    const cur = f.tiers ?? [];
+    const next = cur.includes(tier) ? cur.filter((t) => t !== tier) : [...cur, tier];
+    return hrefWith({ ...f, tiers: next.length ? next : undefined });
+  };
+
   return (
-    <form method="get" className={`${sectionClass} mb-4 flex flex-wrap items-end gap-3 p-3 text-xs`}>
-      <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground">Deposit year from</span>
-        <input
-          type="number"
-          name="yearFrom"
-          defaultValue={ui.filters.yearFrom}
-          placeholder={bounds ? String(bounds.min) : undefined}
-          min={bounds?.min}
-          max={bounds?.max}
-          className="border-apollo-border w-20 rounded border px-2 py-1"
-        />
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground">to</span>
-        <input
-          type="number"
-          name="yearTo"
-          defaultValue={ui.filters.yearTo}
-          placeholder={bounds ? String(bounds.max) : undefined}
-          min={bounds?.min}
-          max={bounds?.max}
-          className="border-apollo-border w-20 rounded border px-2 py-1"
-        />
-      </label>
-      <fieldset className="flex flex-col gap-1">
-        <legend className="text-muted-foreground">Tier</legend>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {FILTERABLE_TIERS.map((tier) => (
-            <label key={tier} className="inline-flex items-center gap-1">
-              <input
-                type="checkbox"
-                name="tier"
-                value={tier}
-                defaultChecked={ui.filters.tiers?.includes(tier)}
-              />
-              {TIER_LABELS[tier]}
-            </label>
+    <div className="flex flex-col gap-2" data-testid="ds-filter-bar">
+      <div className="bg-apollo-page/95 border-apollo-border-strong z-10 -mx-1 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b px-1 py-2.5 backdrop-blur-sm lg:sticky lg:top-14">
+        <span className="text-muted-foreground text-[13px]">Deposit years</span>
+        <div className={segGroupClass} role="group" aria-label="Deposit years">
+          {presets.map((p) => (
+            <SoftLink
+              key={p.label}
+              href={hrefWith({ ...f, yearFrom: p.yearFrom, yearTo: undefined })}
+              className={segClass(presetActive(p))}
+              aria-current={presetActive(p) ? "true" : undefined}
+            >
+              {p.label}
+            </SoftLink>
+          ))}
+          <details className="relative">
+            <summary
+              className={cn(
+                segClass(customActive),
+                "cursor-pointer list-none [&::-webkit-details-marker]:hidden",
+              )}
+            >
+              {customActive
+                ? yearSpan(f.yearFrom ?? bounds?.min ?? 0, f.yearTo ?? bounds?.max ?? 0)
+                : "Custom"}
+            </summary>
+            {/* Keyed on the active range: the inputs are uncontrolled, so after a
+                preset or Clear (a soft nav that keeps this element mounted)
+                they'd otherwise still show the last typed values. */}
+            <SoftGetForm
+              key={`${f.yearFrom ?? ""}-${f.yearTo ?? ""}`}
+              className="border-apollo-border-strong bg-apollo-surface absolute top-[calc(100%+6px)] left-0 z-20 flex w-max items-end gap-2 rounded-[10px] border p-3 text-xs shadow-md"
+            >
+              <label className="flex flex-col gap-1">
+                <span className="text-muted-foreground">From</span>
+                <input
+                  type="number"
+                  name="yearFrom"
+                  defaultValue={f.yearFrom}
+                  placeholder={bounds ? String(bounds.min) : undefined}
+                  min={bounds?.min}
+                  max={bounds?.max}
+                  className="border-apollo-border-strong w-20 rounded border px-2 py-1"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-muted-foreground">To</span>
+                <input
+                  type="number"
+                  name="yearTo"
+                  defaultValue={f.yearTo}
+                  placeholder={bounds ? String(bounds.max) : undefined}
+                  min={bounds?.min}
+                  max={bounds?.max}
+                  className="border-apollo-border-strong w-20 rounded border px-2 py-1"
+                />
+              </label>
+              {/* Carry every other filter and both sorts across the submit. */}
+              {f.tiers?.map((t) => (
+                <input key={t} type="hidden" name="tier" value={t} />
+              ))}
+              {f.nihFunded !== undefined && (
+                <input type="hidden" name="nihFunded" value={String(f.nihFunded)} />
+              )}
+              {ui.deptSort && <input type="hidden" name="deptSort" value={ui.deptSort} />}
+              <input type="hidden" name="deptDir" value={ui.deptDir} />
+              {ui.facSort && <input type="hidden" name="facSort" value={ui.facSort} />}
+              <input type="hidden" name="facDir" value={ui.facDir} />
+              <button
+                type="submit"
+                className="border-apollo-border-strong hover:bg-apollo-surface-2 rounded border px-3 py-1.5"
+              >
+                Apply
+              </button>
+            </SoftGetForm>
+          </details>
+        </div>
+
+        <span className="text-muted-foreground text-[13px]">NIH</span>
+        <div className={segGroupClass} role="group" aria-label="NIH funding">
+          {(
+            [
+              [undefined, "Any"],
+              [true, "NIH-funded"],
+              [false, "Not NIH"],
+            ] as const
+          ).map(([value, label]) => (
+            <SoftLink
+              key={label}
+              href={hrefWith({ ...f, nihFunded: value })}
+              className={segClass(f.nihFunded === value)}
+              aria-current={f.nihFunded === value ? "true" : undefined}
+              data-nih={value === undefined ? "any" : String(value)}
+            >
+              {label}
+            </SoftLink>
           ))}
         </div>
-      </fieldset>
-      <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground">NIH funding</span>
-        <select
-          name="nihFunded"
-          defaultValue={ui.filters.nihFunded === undefined ? "" : String(ui.filters.nihFunded)}
-          className="border-apollo-border rounded border px-2 py-1"
-        >
-          <option value="">Any</option>
-          <option value="true">NIH-funded only</option>
-          <option value="false">Not NIH-funded</option>
-        </select>
-      </label>
-      {/* Preserve sort choice across a filter change — filters reset page 1
-          implicitly (no facPage hidden input), since the row count under a
-          new filter makes the old page number meaningless. */}
-      {ui.deptSort && <input type="hidden" name="deptSort" value={ui.deptSort} />}
-      <input type="hidden" name="deptDir" value={ui.deptDir} />
-      {ui.facSort && <input type="hidden" name="facSort" value={ui.facSort} />}
-      <input type="hidden" name="facDir" value={ui.facDir} />
-      <button type="submit" className="border-apollo-border rounded border px-3 py-1.5 hover:bg-apollo-surface-2">
-        Apply filters
-      </button>
+
+        <span className="text-muted-foreground text-[13px]">Tier</span>
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Tier">
+          {FILTERABLE_TIERS.map((tier) => {
+            const on = !!f.tiers?.includes(tier);
+            return (
+              <SoftLink
+                key={tier}
+                href={toggleTier(tier)}
+                title={TIER_LABELS[tier]}
+                aria-current={on ? "true" : undefined}
+                data-tier={tier}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12.5px] whitespace-nowrap",
+                  on ? "border-apollo-slate bg-apollo-surface" : "border-apollo-border-strong",
+                  !tierInFilter(f, tier) && "opacity-45",
+                )}
+              >
+                <TierDot tier={tier} />
+                {TIER_SHORT_LABELS[tier]}
+              </SoftLink>
+            );
+          })}
+        </div>
+
+        <span className="ml-auto flex items-center gap-3 text-[13px]">
+          <DataSharingPendingStatus className="text-muted-foreground" />
+          {active && (
+            <SoftLink href="/edit/data-sharing" className="text-apollo-slate hover:underline">
+              Clear filters
+            </SoftLink>
+          )}
+        </span>
+      </div>
       {active && (
-        <Link href="/edit/data-sharing" className="hover:underline">
-          Clear filters
-        </Link>
-      )}
-      {active && (
-        <p className="text-muted-foreground basis-full text-xs">
-          Narrows the datasets/repositories/faculty/tier tables below, and the funding totals in §2.
-          Every CSV download on this page (aggregate and per-row items alike) narrows the same way, via
-          the same filter. Share rate and PMC coverage on §1 stay institution-wide on purpose: a rate
-          over the full corpus, since pairing a filtered numerator against that unfiltered denominator
-          would read as sharing collapsing when nothing changed. Clear filters to confirm.
+        <p className="text-muted-foreground text-xs leading-normal">
+          Narrows the datasets/repositories/faculty/tier tables below, and the funding totals. Every
+          CSV download on this page (aggregate and per-row items alike) narrows the same way. Share
+          rate and PMC coverage stay institution-wide on purpose: pairing a filtered numerator with
+          the unfiltered denominator would read as sharing collapsing when nothing changed.
         </p>
       )}
-    </form>
+    </div>
   );
 }
 
-export function DataSharingDashboard({ report, ui }: { report: DataSharingReport; ui: DataSharingUiParams }) {
-  // Built once, passed to both the sticky nav and §1 — see `RollupSection`'s
-  // doc prop comment for why this can't be built twice.
+export function DataSharingDashboard({
+  report,
+  ui,
+  currentYear = new Date().getFullYear(),
+}: {
+  report: DataSharingReport;
+  ui: DataSharingUiParams;
+  /** The year the YTD bar marks — injectable for tests. */
+  currentYear?: number;
+}) {
+  // Built once: the Copy summary shortcut and the Methods section share it.
   const doc = buildMethodsDoc(report, { shareRateYearFloor: SHARE_RATE_YEAR_FLOOR });
+  const { overall } = report;
+  const railItems: RailItem[] = [
+    { id: "rollup", label: "Rollup", stat: overall.datasets.toLocaleString(), audiences: ["lead"] },
+    {
+      id: "funding",
+      label: "Funding & access",
+      stat: (overall.nihFundedPubs + overall.notNihFundedPubs).toLocaleString(),
+      audiences: ["lead"],
+    },
+    {
+      id: "repos",
+      label: "Repositories",
+      stat: report.byRepository.length.toLocaleString(),
+      audiences: ["rdm"],
+    },
+    {
+      id: "departments",
+      label: "Departments",
+      stat: report.byDepartment.length.toLocaleString(),
+      audiences: ["lead", "rdm"],
+    },
+    {
+      id: "faculty",
+      label: "Faculty",
+      stat: report.byFaculty.length.toLocaleString(),
+      audiences: ["lead", "rdm"],
+    },
+    // Sub-types hides itself when there's nothing to show; so does its rail row.
+    ...(report.bySubtype.length > 0
+      ? [
+          {
+            id: "subtypes",
+            label: "Sub-types",
+            stat: overall.subtypeClassifiedInstances.toLocaleString(),
+            audiences: ["rdm", "comp"] as const,
+          },
+        ]
+      : []),
+    { id: "recent", label: "Recent deposits", stat: "", audiences: ["rdm"] },
+    {
+      id: "compliance",
+      label: "Compliance",
+      stat: overall.concerningDepositInstances.toLocaleString(),
+      audiences: ["comp"],
+    },
+  ];
   return (
-    <>
-      <SectionNav doc={doc} />
-      <p className="text-muted-foreground mb-3 text-sm">Data as of {formatDate(report.dataAsOf)}.</p>
-      {/* Permanent methodology note (2026-08-16), NOT conditional on filter
-          state. Unlike everything else in this component, this is a fixed
-          historical marker. The FTE-narrowed share-rate denominator
-          (`loadShareRateCorpus`'s doc comment in the report lib) roughly
-          halved every corpus size on this page and roughly doubled every
-          rate; a reader reconciling an old percentage against a new one
-          needs the answer right here, at the source, not buried in the
-          Methods dialog. */}
-      <p className="text-muted-foreground mb-3 text-xs">
-        Aug 2026: share-rate denominator narrowed to full-time faculty; rates roughly doubled vs.
-        figures published before this date.
-      </p>
-      <FilterBar ui={ui} bounds={report.depositYearBounds} />
-      <RollupSection report={report} doc={doc} filters={ui.filters} />
-      <FundingSection report={report} />
-      <RepositoriesSection report={report} ui={ui} />
-      <FacultySection report={report} ui={ui} />
-      <SubtypesSection report={report} filters={ui.filters} />
-      <RecentActivitySection report={report} filters={ui.filters} />
-      <ComplianceSection report={report} filters={ui.filters} />
-    </>
+    <DataSharingNavProvider>
+      <div className="grid items-start gap-[22px] lg:grid-cols-[170px_minmax(0,1fr)]">
+        <DataSharingRail items={railItems} />
+        <div className="flex min-w-0 flex-col gap-9">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2.5 text-[13px]">
+              <span className="border-apollo-border-strong bg-apollo-surface rounded-full border px-2.5 py-[3px] whitespace-nowrap">
+                Data as of {formatDate(report.dataAsOf)}
+              </span>
+              {/* Permanent methodology note (2026-08-16), NOT conditional on
+                filter state — a fixed historical marker: the FTE-narrowed
+                share-rate denominator roughly doubled every rate, and a reader
+                reconciling an old percentage needs the answer at the source. */}
+              <span
+                className="bg-apollo-amber-tint text-apollo-amber rounded-full px-2.5 py-[3px]"
+                data-testid="ds-fte-note"
+              >
+                Aug 2026: share-rate denominator narrowed to full-time faculty; rates roughly
+                doubled vs. earlier published figures
+              </span>
+            </div>
+            <FilterBar ui={ui} bounds={report.depositYearBounds} />
+          </div>
+          <DataSharingPendingRegion className="flex flex-col gap-9">
+            <RollupSection
+              report={report}
+              doc={doc}
+              filters={ui.filters}
+              currentYear={currentYear}
+            />
+            <FundingSection report={report} filters={ui.filters} />
+            <RepositoriesSection report={report} ui={ui} />
+            <DepartmentsSection report={report} ui={ui} />
+            <FacultySection report={report} ui={ui} />
+            <SubtypesSection report={report} filters={ui.filters} />
+            <RecentDepositsSection report={report} filters={ui.filters} />
+            <ComplianceSection report={report} />
+            <DataSharingMethodsSection doc={doc} />
+          </DataSharingPendingRegion>
+        </div>
+      </div>
+    </DataSharingNavProvider>
   );
 }
