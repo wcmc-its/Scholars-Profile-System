@@ -21,7 +21,8 @@ const {
   mockPublicationTopicGroupBy,
   mockPublicationAuthorGroupBy,
   mockTopAreasQueryRaw,
-  mockPublicationTopicCount,
+  mockPubCountQueryRaw,
+  mockPublicationAuthorFindMany,
   mockTopicFindMany,
   mockDivisionFindMany,
   mockDivisionFindFirst,
@@ -52,7 +53,8 @@ const {
   mockPublicationTopicGroupBy: vi.fn(),
   mockPublicationAuthorGroupBy: vi.fn(),
   mockTopAreasQueryRaw: vi.fn(),
-  mockPublicationTopicCount: vi.fn(),
+  mockPubCountQueryRaw: vi.fn(),
+  mockPublicationAuthorFindMany: vi.fn(),
   mockTopicFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockDivisionFindFirst: vi.fn(),
@@ -87,11 +89,11 @@ vi.mock("@/lib/db", () => ({
       findMany: mockScholarFamilyFindMany,
     },
     appointment: { findFirst: mockAppointmentFindFirst },
-    publicationTopic: {
-      groupBy: mockPublicationTopicGroupBy,
-      count: mockPublicationTopicCount,
+    publicationTopic: { groupBy: mockPublicationTopicGroupBy },
+    publicationAuthor: {
+      groupBy: mockPublicationAuthorGroupBy,
+      findMany: mockPublicationAuthorFindMany,
     },
-    publicationAuthor: { groupBy: mockPublicationAuthorGroupBy },
     topic: { findMany: mockTopicFindMany },
     division: {
       findMany: mockDivisionFindMany,
@@ -103,8 +105,12 @@ vi.mock("@/lib/db", () => ({
       findMany: mockGrantFindMany,
     },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
-    // Top research areas: COUNT(DISTINCT pmid) raw query (Prisma.sql).
-    $queryRaw: mockTopAreasQueryRaw,
+    // Two raw reads: the hero publications stat (COUNT DISTINCT pa.pmid) and
+    // the top research areas (COUNT DISTINCT pt.pmid). Routed by SQL text.
+    $queryRaw: (q: { sql: string }) =>
+      q.sql.includes("COUNT(DISTINCT pa.pmid)")
+        ? mockPubCountQueryRaw(q)
+        : mockTopAreasQueryRaw(q),
     suppression: {
       findFirst: mockSuppressionFindFirst,
       findMany: mockSuppressionFindMany,
@@ -216,7 +222,8 @@ function mockDefaultDeptSetup() {
   mockScholarFindMany.mockResolvedValue([CHIEF_SCHOLAR]);
   mockScholarCount.mockResolvedValue(200);
   mockScholarGroupBy.mockResolvedValue([]);
-  mockPublicationTopicCount.mockResolvedValue(1500);
+  mockPubCountQueryRaw.mockResolvedValue([{ n: BigInt(1500) }]);
+  mockPublicationAuthorFindMany.mockResolvedValue([]);
   mockGrantCount.mockResolvedValue(25);
   // #481(b)/#2066 — activeGrants derives from grant.findMany + #160 suppression,
   // then groups by funding PROJECT (`coreProjectNum ?? accountNumber`) via the
@@ -302,7 +309,8 @@ describe("getDepartment", () => {
     mockDivisionFindMany.mockResolvedValue([]);
     mockScholarFindMany.mockResolvedValue([]);
     mockScholarCount.mockResolvedValue(100);
-    mockPublicationTopicCount.mockResolvedValue(500);
+    mockPubCountQueryRaw.mockResolvedValue([{ n: 500 }]);
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
     mockGrantCount.mockResolvedValue(10);
     mockGrantFindMany.mockResolvedValue([]);
     mockFieldOverrideFindMany.mockResolvedValue([]);
@@ -372,6 +380,28 @@ describe("getDepartment", () => {
     expect(result!.stats.activeGrants).toBe(25);
   });
 
+  it("publications stat counts DISTINCT confirmed pmids of active dept scholars, minus unit-dark pmids", async () => {
+    mockDefaultDeptSetup();
+    // One whole-paper takedown (contributorCwid null) on a paper a dept
+    // scholar authored: the stat must exclude it, as the Publications tab does.
+    mockSuppressionFindMany.mockResolvedValue([
+      { entityId: "900001", contributorCwid: null },
+    ]);
+    mockPublicationAuthorFindMany.mockResolvedValue([{ pmid: "900001" }]);
+    await getDepartment("medicine");
+
+    expect(mockPubCountQueryRaw).toHaveBeenCalledTimes(1);
+    const sql = mockPubCountQueryRaw.mock.calls[0][0] as { sql: string; values: unknown[] };
+    const text = sql.sql.replace(/\s+/g, " ");
+    expect(text).toContain("COUNT(DISTINCT pa.pmid)");
+    expect(text).toContain("pa.is_confirmed = 1");
+    expect(text).toContain("s.dept_code = ?");
+    expect(text).toContain("s.deleted_at IS NULL");
+    expect(text).toContain("s.status = 'active'");
+    expect(text).toContain("pa.pmid NOT IN (?)");
+    expect(sql.values).toEqual(["MED", "900001"]);
+  });
+
   it("returns dept shape with code, name, slug, description", async () => {
     mockDefaultDeptSetup();
     const result = await getDepartment("medicine");
@@ -395,8 +425,12 @@ describe("getDepartment", () => {
 
     expect(result!.stats.activeGrants).toBe(3);
     // the suppression lookup is scoped to active (non-revoked) grant suppressions
-    const supCall = mockSuppressionFindMany.mock.calls[0][0];
-    expect(supCall.where.entityType).toBe("grant");
+    // The publications stat also reads suppressions (entityType "publication");
+    // pick out the grant read.
+    const supCall = mockSuppressionFindMany.mock.calls
+      .map((c) => c[0])
+      .find((a) => a.where.entityType === "grant");
+    expect(supCall).toBeDefined();
     expect(supCall.where.revokedAt).toBeNull();
   });
 

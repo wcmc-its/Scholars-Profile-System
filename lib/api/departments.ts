@@ -37,8 +37,10 @@ import {
 import { resolveUnitLeader, resolveUnitLeaderCwids } from "@/lib/api/unit-leader";
 import {
   isUnitSuppressed,
+  loadAllPublicationSuppressions,
   loadUnitFieldOverrides,
   mergeUnitFields,
+  resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 import { loadUnitGrantProjects } from "@/lib/api/unit-grant-projects";
 import {
@@ -116,6 +118,29 @@ export type DepartmentDetail = {
   divisions: DepartmentDivisionSummary[];
   stats: DepartmentStats;
 };
+
+
+/** Distinct confirmed, non-dark publications of a department's active scholars. */
+async function countDeptPublications(deptCode: string): Promise<number> {
+  const membership = { scholar: { deptCode, deletedAt: null, status: "active" } };
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const darkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
+  const notDark =
+    darkPmids.length > 0
+      ? Prisma.sql`AND pa.pmid NOT IN (${Prisma.join(darkPmids)})`
+      : Prisma.empty;
+  const rows = (await prisma.$queryRaw(
+    Prisma.sql`SELECT COUNT(DISTINCT pa.pmid) AS n
+                 FROM publication_author pa
+                 JOIN scholar s ON s.cwid = pa.cwid
+                WHERE pa.is_confirmed = 1
+                  AND s.dept_code = ${deptCode}
+                  AND s.deleted_at IS NULL
+                  AND s.status = 'active'
+                  ${notDark}`,
+  )) as Array<{ n: number | bigint }> | undefined;
+  return Number(rows?.[0]?.n ?? 0);
+}
 
 async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | null> {
   const dept = await prisma.department.findUnique({ where: { slug } });
@@ -314,9 +339,10 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
     // NOT carved (deliberate): #718 retains a hidden scholar's publications and
     // grants. The unit's publication / grant / research-area aggregates below
     // keep counting them — only the counts of PEOPLE carve.
-    prisma.publicationTopic.count({
-      where: { scholar: { deptCode: dept.code, deletedAt: null, status: "active" } },
-    }),
+    // Distinct visible papers — the same set the Publications tab totals
+    // (`getDeptPublicationsList`: confirmed dept author, minus unit-dark pmids).
+    // Was a publication_topic ROW count: one per (paper, author, topic).
+    countDeptPublications(dept.code),
     // #2066/#481(b) — count active funding PROJECTS (`coreProjectNum ??
     // accountNumber`), not investigator-award rows, through the SAME call
     // `getDeptGrantsList` paginates. The hero stat and the Grants-tab total are
