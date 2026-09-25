@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * The shared who-filter island (`PersonFilterFacets`; report 8 and
- * `/edit/orcid-coverage`, `lib/edit/person-filter.ts`) — the Profiles roster's own
+ * The shared who-filter island (`PersonFilterFacets`; report 9 and
+ * `/edit/orcid-coverage`, `lib/edit/person-filter.ts`; report 8's redesigned
+ * rail puts each facet in its own section with `ReportFacetList` instead) — the Profiles roster's own
  * (`components/edit/profiles-filters.tsx`): `RosterFacet` typeaheads for
  * "Person type", "Department / division", "Centers" and "Institution", over
  * the same `loadDataQualityFacets` options and the same `type` / `unit`
@@ -131,5 +132,5 @@ export function PersonFilterFacets({
   );
 }
 
-/** Report 8's name for the island. */
+/** The island's original (report 8) name, kept for its test. */
 export const ArticleCountFacets = PersonFilterFacets;
