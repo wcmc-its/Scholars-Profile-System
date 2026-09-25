@@ -57,6 +57,9 @@ export type UnitLeaderCardProps = {
   };
   canClear: boolean;
   hasOverride: boolean;
+  /** Heading id — override when this card is one section of the single-scroll
+   *  unit editor (several headings on one page). */
+  headingId?: string;
 };
 
 function initialMode(leader: UnitLeaderCardProps["leader"]): LeaderMode {
@@ -71,6 +74,7 @@ export function UnitLeaderCard({
   leader,
   canClear,
   hasOverride,
+  headingId,
 }: UnitLeaderCardProps) {
   const noun = LEADER_NOUN[entityType];
 
@@ -161,8 +165,9 @@ export function UnitLeaderCard({
   return (
     <EditPanel
       slot="unit-leader-card"
+      headingId={headingId}
       heading="Leadership"
-      description={`Set the ${noun} for this ${entityType}, mark the role vacant, or clear the override to let the directory decide.`}
+      description={`Appears on the ${entityType}’s public page. Set the ${noun}, mark the role vacant, or clear the override to let the directory decide.`}
     >
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
