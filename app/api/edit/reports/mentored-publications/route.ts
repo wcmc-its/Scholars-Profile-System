@@ -1,8 +1,11 @@
 /**
  * GET /api/edit/reports/mentored-publications — the Mentored publications
  * report (`/edit/reports/7`) as a three-sheet `.xlsx` attachment. Same query
- * string the page renders (`years`, `mtype`, `tail`, `pubs` — see
- * `parseMentoredPubsParams`; `view` is accepted and ignored, it is page-only),
+ * string the page renders (`years`, `mtype`, `tail`, `pubs`, and the rail's
+ * post-load facets `window` / `position` / `pubyear` / `mentor` / `withpubs`,
+ * applied by the same `applyMentoredPubsFacets` the page uses, so the
+ * workbook holds what the page shows — see `parseMentoredPubsParams`; `view`
+ * and `q` are accepted and ignored, they are page-only),
  * same scope gate (`getReportScopes`), same type resolution
  * (`resolveMentorshipTypes`: absent → the caller's default, a roster type
  * outside their scopes silently dropped, never widened). `pubs=all` builds
@@ -19,9 +22,11 @@
 import { NextResponse } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { applyMentoredPubsFacets } from "@/lib/edit/mentored-publications-facets";
 import { parseMentoredPubsParams } from "@/lib/edit/mentored-publications-params";
 import {
   defaultMentoredPubsYears,
+  HIGH_IMPACT_THRESHOLD,
   loadMentoredGradYears,
   loadMentoredPublicationsReport,
 } from "@/lib/edit/mentored-publications-report";
@@ -57,13 +62,17 @@ export async function GET(request: Request) {
   const years =
     parsed.value.years ??
     defaultMentoredPubsYears(await loadMentoredGradYears(loaderScopes, types));
-  const report = await loadMentoredPublicationsReport({
-    scopes: loaderScopes,
-    types,
-    gradYears: years.length > 0 ? years : null,
-    tail,
-    pubs,
-  });
+  const report = applyMentoredPubsFacets(
+    await loadMentoredPublicationsReport({
+      scopes: loaderScopes,
+      types,
+      gradYears: years.length > 0 ? years : null,
+      tail,
+      pubs,
+    }),
+    parsed.value,
+    HIGH_IMPACT_THRESHOLD,
+  );
   const buffer = await buildMentoredPublicationsWorkbook(report);
   // ponytail: up to two type labels fit a filename; more reads "Mixed" — the
   // Query & Assumptions sheet carries the full list.

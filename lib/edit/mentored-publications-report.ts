@@ -148,6 +148,7 @@ import { db } from "@/lib/db";
 import { HIGH_IMPACT_THRESHOLD } from "@/lib/edit/cancer-center-publications-report";
 import { validateManualMentees, type ManualMentee } from "@/lib/edit/manual-mentee";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
+import type { AppliedMentoredPubsFacets } from "@/lib/edit/mentored-publications-facets";
 import {
   mentorshipKey,
   mentorshipLabel,
@@ -318,6 +319,10 @@ export type MentoredPublicationsReport = {
   /** Faculty-asserted mentees entered without a CWID — no pair to join on,
    *  so not shown (0 unless `faculty` is selected). */
   droppedNoCwid: number;
+  /** The post-load facets this report was narrowed by — set only by
+   *  `applyMentoredPubsFacets` (`mentored-publications-facets.ts`), absent
+   *  when none were given. The workbook states them. */
+  facets?: AppliedMentoredPubsFacets;
 };
 
 /** Whether `year` falls in the learner's program window. Unknown grad year
