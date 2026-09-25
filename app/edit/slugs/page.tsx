@@ -145,7 +145,7 @@ export default async function EditSlugsPage({
       countSlugRegistrySegments(query, db.read, { requested: requestedEnabled }),
       resolveVerdict(query),
       // The "Requests to review" card; `null` when the slug-request feature is
-      // off, which also hides the console's "URL requests" tab + pill.
+      // off, which also drops the pending pill from the console's "Profile URLs" tab.
       requestedEnabled ? loadSlugRequestQueue(db.read) : Promise.resolve(null),
       requestedEnabled ? loadLastSlugDecision(db.read) : Promise.resolve(null),
       // #1762 — drives the "Honors" tab + its pending badge. `null` hides the

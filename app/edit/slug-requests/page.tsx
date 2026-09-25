@@ -2,8 +2,8 @@
  * `/edit/slug-requests` — the old address of the superuser Profile-URL
  * approval queue (#497 PR-3c). The queue now lives at the top of Profile URLs
  * (`/edit/slugs`, design canvas "Profile URLs", 2026-09-25), beside the
- * registry it writes into; this route keeps old links and the console's
- * "URL requests" entry working by redirecting there.
+ * registry it writes into; this route keeps old links and bookmarks
+ * working by redirecting there.
  *
  * Still flag-gated behind `SELF_EDIT_SLUG_REQUEST` (off ⇒ 404, mirroring the
  * endpoints), and still sends a signed-out visitor to SAML login first.
