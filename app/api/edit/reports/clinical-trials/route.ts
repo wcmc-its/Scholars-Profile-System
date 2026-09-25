@@ -1,5 +1,5 @@
 /**
- * GET /api/edit/reports/clinical-trials?center=<code>[&q=&status=&phase=] —
+ * GET /api/edit/reports/clinical-trials?center=<code>[&q=&status=&phase=&sponsorType=] —
  * report 5 as an `.xlsx` (Trials, Investigators — withheld above
  * SCHOLAR_EXPORT_CAP — and Criteria), for the same filters as the page
  * (`parseClinicalTrialsParams`, `filterTrials`).

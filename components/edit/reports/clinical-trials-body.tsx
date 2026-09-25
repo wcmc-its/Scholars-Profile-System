@@ -2,8 +2,8 @@
  * Report 5 — "Clinical Trials" body (reports redesign, 2026-09-25; mockup
  * `Clinical Trials Redesign.dc.html`, plan decision D4). The center's trials,
  * one per OnCore protocol number, with the members on each, plus a By member
- * roll-up; search / status / phase filters narrow the tabs, the headline
- * numbers and the `.xlsx` (`/api/edit/reports/clinical-trials`).
+ * roll-up; search / status / phase / sponsor-type filters narrow the tabs,
+ * the headline numbers and the `.xlsx` (`/api/edit/reports/clinical-trials`).
  *
  * The query is `loadClinicalTrialsReport`
  * (`lib/center-collaboration/clinical-trials-report.ts`: current members,

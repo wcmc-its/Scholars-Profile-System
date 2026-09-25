@@ -13,14 +13,37 @@
  * Investigator (OnCore lists the active PI only), so there is no role filter
  * and no "As investigator" count.
  *
- * Deliberately NOT here yet: the mockup's sponsor-type filter and sub-line.
- * There is no sponsor-class column; it is a follow-up (CT.gov
- * LeadSponsorClass plus a migration).
+ * Sponsor type is `ClinicalTrial.sponsorClass` (CT.gov LeadSponsorClass, else
+ * a best-effort read of OnCore's sponsor name; `lib/clinical-trial-sponsor-class.ts`).
+ * A null class is "Unknown", and is a filter value of its own.
  *
  * No `@/lib/db`, no Prisma value import: the client results component
  * imports this module.
  */
 import type { ClinicalTrialsReportRow } from "@/lib/center-collaboration/clinical-trials-report";
+import {
+  isSponsorClass,
+  SPONSOR_CLASS_OPTIONS,
+  sponsorClassLabel,
+  UNKNOWN_SPONSOR_LABEL,
+  type SponsorClass,
+} from "@/lib/clinical-trial-sponsor-class";
+
+/** The sponsor-type filter's values: the seven classes, then Unknown (null). */
+export type SponsorTypeKey = SponsorClass | "unknown";
+
+export const SPONSOR_TYPE_OPTIONS: ReadonlyArray<{ value: SponsorTypeKey; label: string }> = [
+  ...SPONSOR_CLASS_OPTIONS,
+  { value: "unknown", label: UNKNOWN_SPONSOR_LABEL },
+];
+
+export function sponsorTypeKey(sponsorClass: string | null): SponsorTypeKey {
+  return isSponsorClass(sponsorClass) ? sponsorClass : "unknown";
+}
+
+export function sponsorTypeLabel(key: SponsorTypeKey): string {
+  return sponsorClassLabel(key);
+}
 
 /** The four OnCore statuses, plus a bucket for anything else (or none). */
 export type TrialStatusKey = "open" | "closed" | "irb" | "suspended" | "other";
@@ -96,6 +119,7 @@ export type ClinicalTrialsParams = {
   q: string;
   status: TrialStatusKey | "";
   phase: string;
+  sponsorType: SponsorTypeKey | "";
 };
 
 export const CLINICAL_TRIALS_DEFAULTS: ClinicalTrialsParams = {
@@ -103,17 +127,22 @@ export const CLINICAL_TRIALS_DEFAULTS: ClinicalTrialsParams = {
   q: "",
   status: "",
   phase: "",
+  sponsorType: "",
 };
 
 /** One parser for the page and the download. Unknown values read as "any". */
 export function parseClinicalTrialsParams(sp: URLSearchParams): ClinicalTrialsParams {
   const status = sp.get("status") ?? "";
   const phase = sp.get("phase") ?? "";
+  const sponsorType = sp.get("sponsorType") ?? "";
   return {
     view: sp.get("view") === "members" ? "members" : "trials",
     q: (sp.get("q") ?? "").trim().slice(0, 200),
     status: STATUS_OPTIONS.some((o) => o.value === status) ? (status as TrialStatusKey) : "",
     phase: PHASE_OPTIONS.some((o) => o.value === phase) ? phase : "",
+    sponsorType: SPONSOR_TYPE_OPTIONS.some((o) => o.value === sponsorType)
+      ? (sponsorType as SponsorTypeKey)
+      : "",
   };
 }
 
@@ -125,6 +154,7 @@ export function clinicalTrialsQueryString(p: ClinicalTrialsParams, withView = tr
   if (p.q) sp.set("q", p.q);
   if (p.status) sp.set("status", p.status);
   if (p.phase) sp.set("phase", p.phase);
+  if (p.sponsorType) sp.set("sponsorType", p.sponsorType);
   return sp.toString();
 }
 
@@ -136,6 +166,7 @@ export type TrialGroup = {
   nctNumber: string | null;
   title: string;
   sponsor: string | null;
+  sponsorType: SponsorTypeKey;
   phaseKey: string;
   status: string | null;
   statusKey: TrialStatusKey;
@@ -162,6 +193,7 @@ export function groupTrials(rows: ReadonlyArray<ClinicalTrialsReportRow>): Trial
         nctNumber: r.nctNumber,
         title: r.title,
         sponsor: r.principalSponsor,
+        sponsorType: sponsorTypeKey(r.sponsorClass),
         phaseKey: phaseKey(r.phase),
         status: r.status,
         statusKey: trialStatusKey(r.status),
@@ -191,6 +223,7 @@ export function filterTrials(
     (t) =>
       (!p.status || t.statusKey === p.status) &&
       (!p.phase || t.phaseKey === p.phase) &&
+      (!p.sponsorType || t.sponsorType === p.sponsorType) &&
       (!q ||
         [t.title, t.nctNumber, t.sponsor, t.protocolNumber, ...t.members.map((m) => m.name)]
           .join(" ")
@@ -284,9 +317,14 @@ export function describeClinicalTrialsCriteria(
     ["Search", p.q || "All"],
     ["Status", STATUS_OPTIONS.find((o) => o.value === p.status)?.label ?? "All"],
     ["Phase", p.phase ? phaseLabel(p.phase) : "All"],
+    ["Sponsor type", p.sponsorType ? sponsorTypeLabel(p.sponsorType) : "All"],
     [
       "Scope",
       "Trials from the WCM clinical trials management system (OnCore) whose Principal Investigator is a current center member, matched by CWID. Suspended trials are included.",
+    ],
+    [
+      "Sponsor type source",
+      "Registered trials (with an NCT) use the ClinicalTrials.gov lead sponsor class: Industry; NIH; Other federal (FED); Cooperative group (NETWORK); WCM (investigator-initiated) when the class is OTHER and the lead sponsor is Weill Cornell; Other academic (the rest of OTHER, which also covers hospitals and foundations); Other (non-US, state or local government, or an individual). If ClinicalTrials.gov could not be read that week, the trial keeps its last class. Trials with no NCT use a best-effort reading of the OnCore principal sponsor name: NIH institutes; federal agencies; cooperative groups (including the Canadian Cancer Trials Group); Weill Cornell; foundations, societies and charities (as Other academic, like ClinicalTrials.gov); companies; universities and hospitals. Unknown when the source does not say.",
     ],
   ];
 }

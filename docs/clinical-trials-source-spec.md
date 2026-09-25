@@ -107,6 +107,7 @@ model ClinicalTrial {
   studyType       String?  @map("study_type") @db.VarChar(64)
   phases          String?  @db.VarChar(64)
   principalSponsor String? @map("principal_sponsor") @db.VarChar(255)
+  sponsorClass    String?  @map("sponsor_class") @db.VarChar(16) // sponsor type key; null = Unknown
   conditions      String?  @db.Text
   meshTerms       String?  @map("mesh_terms") @db.Text
   briefSummary    String?  @map("brief_summary") @db.Text

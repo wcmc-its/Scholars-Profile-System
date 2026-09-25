@@ -3,14 +3,14 @@
 /**
  * Report 5's results (reports redesign, `Clinical Trials Redesign.dc.html`):
  * the headline numbers with the `.xlsx` button, the Trials / By member tabs,
- * the inline search / status / phase bar, and the tab's table.
+ * the inline search / status / phase / sponsor-type bar, and the tab's table.
  *
  * Every trial for the center arrives once from the server; the filters narrow
  * it here, with no server trip, and are mirrored into the URL (`view`, `q`,
- * `status`, `phase`, via `history.replaceState`) so a shared link or a reload
+ * `status`, `phase`, `sponsorType`, via `history.replaceState`) so a shared link or a reload
  * reopens the same view, and the download link carries the same filters to
  * the route, which parses them with the same `parseClinicalTrialsParams`.
- * Inline selects rather than `ReportRail`: two small facets and a search box
+ * Inline selects rather than `ReportRail`: three small facets and a search box
  * (plan D4: the rail is for four or more facets).
  *
  * Mobile: the filter bar wraps, and each table scrolls inside its own box,
@@ -31,6 +31,8 @@ import {
   filterTrials,
   PHASE_OPTIONS,
   phaseLabel,
+  SPONSOR_TYPE_OPTIONS,
+  sponsorTypeLabel,
   STATUS_OPTIONS,
   summarizeMembers,
   trialStatusLabel,
@@ -162,7 +164,7 @@ export function ClinicalTrialsResults({
   ]
     .filter(Boolean)
     .join("&");
-  const anyFilter = Boolean(params.q || params.status || params.phase);
+  const anyFilter = Boolean(params.q || params.status || params.phase || params.sponsorType);
 
   const tab = (v: ClinicalTrialsView, label: string) => (
     <a
@@ -280,12 +282,29 @@ export function ClinicalTrialsResults({
             </option>
           ))}
         </select>
+        <select
+          name="sponsorType"
+          value={params.sponsorType}
+          onChange={(e) =>
+            set({ sponsorType: e.target.value as ClinicalTrialsParams["sponsorType"] })
+          }
+          aria-label="Sponsor type"
+          className={selectClass(Boolean(params.sponsorType))}
+          data-testid="ct-sponsor-type"
+        >
+          <option value="">Any sponsor type</option>
+          {SPONSOR_TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         {anyFilter && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => set({ q: "", status: "", phase: "" })}
+            onClick={() => set({ q: "", status: "", phase: "", sponsorType: "" })}
             data-testid="ct-clear"
           >
             Clear filters
@@ -364,7 +383,13 @@ function TrialsTable({ trials }: { trials: TrialGroup[] }) {
                   </div>
                 </td>
                 <td className={cn(TD, "leading-[1.4]")}>
-                  {t.sponsor ?? <span className="text-muted-foreground">—</span>}
+                  <div>{t.sponsor ?? <span className="text-muted-foreground">—</span>}</div>
+                  <div
+                    className="text-muted-foreground mt-0.5 text-xs"
+                    data-testid="ct-sponsor-type-line"
+                  >
+                    {sponsorTypeLabel(t.sponsorType)}
+                  </div>
                 </td>
                 <td className={TD}>
                   <div

@@ -2,7 +2,8 @@
  * Report 5's redesigned page: `clinical-trials-body.tsx` (the card, the
  * empty state, the footer note, the URL filters handed to the client) and
  * `clinical-trials-results.tsx` (headline numbers, download link and note,
- * Trials / By member tabs, search / status / phase filters narrowing the
+ * Trials / By member tabs, search / status / phase / sponsor-type filters
+ * narrowing the
  * numbers, the tabs and the download, the URL kept in step, "Local only ·
  * no NCT", the By member sort and expand, the empty state). Assertions are
  * scoped to the rendered container, never `document.body`. Fixture people
@@ -47,6 +48,7 @@ function row(over: Partial<ClinicalTrialsReportRow>): ClinicalTrialsReportRow {
     title: "A study",
     phase: "PHASE2",
     principalSponsor: "Acme Pharma",
+    sponsorClass: "industry",
     status: "OPEN TO ACCRUAL",
     isActive: true,
     ...over,
@@ -61,6 +63,7 @@ const ROWS = [
     status: "SUSPENDED",
     nctNumber: null,
     phase: null,
+    sponsorClass: null,
   }),
   row({
     protocolNumber: "P-3",
@@ -70,6 +73,8 @@ const ROWS = [
     cwid: "bbb2002",
     personName: "Bo Brandt",
     department: "Surgery",
+    principalSponsor: "NRG Oncology",
+    sponsorClass: "network",
   }),
 ];
 
@@ -111,7 +116,7 @@ describe("ClinicalTrialsResults", () => {
     );
   });
 
-  it("offers all four OnCore statuses and no role or sponsor-type filter", () => {
+  it("offers all four OnCore statuses, the sponsor types, and no role filter", () => {
     const { container } = renderResults();
     const opts = Array.from(
       within(container).getByTestId("ct-status").querySelectorAll("option"),
@@ -123,8 +128,50 @@ describe("ClinicalTrialsResults", () => {
       "Closed (IRB study closure)",
       "Temporarily suspended",
     ]);
-    expect(within(container).getByTestId("ct-filters").querySelectorAll("select")).toHaveLength(2);
-    expect(container.textContent).not.toMatch(/Any role|sponsor type|As investigator/i);
+    expect(within(container).getByTestId("ct-filters").querySelectorAll("select")).toHaveLength(3);
+    const types = Array.from(
+      within(container).getByTestId("ct-sponsor-type").querySelectorAll("option"),
+    ).map((o) => o.textContent);
+    expect(types).toEqual([
+      "Any sponsor type",
+      "Industry",
+      "Cooperative group",
+      "NIH",
+      "Other federal",
+      "WCM (investigator-initiated)",
+      "Other academic",
+      "Other",
+      "Unknown",
+    ]);
+    expect(container.textContent).not.toMatch(/Any role|As investigator/i);
+  });
+
+  it("shows each trial's sponsor type under the sponsor, null as Unknown", () => {
+    const { container } = renderResults();
+    const lines = within(container)
+      .getAllByTestId("ct-sponsor-type-line")
+      .map((l) => l.textContent);
+    // Rows sort open first: P-1 (industry), P-2 (suspended, null), P-3 (IRB, network).
+    expect(lines).toEqual(["Industry", "Unknown", "Cooperative group"]);
+  });
+
+  it("a sponsor-type filter narrows the numbers, the tabs, the download and the URL", () => {
+    const { container } = renderResults();
+    fireEvent.change(within(container).getByTestId("ct-sponsor-type"), {
+      target: { value: "unknown" },
+    });
+    expect(statValues(container)).toEqual(["1", "1", "0", "0"]);
+    expect(within(container).getByTestId("ct-view-trials").textContent).toBe("Trials (1)");
+    expect(within(container).getAllByTestId("ct-trial-row")[0].textContent).toContain(
+      "Alpha local study",
+    );
+    expect(within(container).getByTestId("ct-download").getAttribute("href")).toBe(
+      "/api/edit/reports/clinical-trials?center=CC&sponsorType=unknown",
+    );
+    expect(window.location.search).toBe("?center=CC&sponsorType=unknown");
+    fireEvent.click(within(container).getByTestId("ct-clear"));
+    expect(within(container).getAllByTestId("ct-trial-row")).toHaveLength(3);
+    expect((within(container).getByTestId("ct-sponsor-type") as HTMLSelectElement).value).toBe("");
   });
 
   it("labels a trial with no NCT 'Local only · no NCT' with the not-registered tooltip, and links the rest", () => {

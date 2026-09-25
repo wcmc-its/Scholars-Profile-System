@@ -9,6 +9,12 @@
  */
 import { db } from "../../lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
+import {
+  isSponsorClass,
+  sponsorClassFromCtgov,
+  sponsorClassFromOncore,
+  type SponsorClass,
+} from "@/lib/clinical-trial-sponsor-class";
 
 export const INSERT_BATCH = 1000;
 
@@ -100,6 +106,7 @@ export type TrialBuild = {
   studyType: string | null;
   phase: string | null;
   principalSponsor: string | null;
+  sponsorClass: SponsorClass | null;
   conditions: string | null;
   meshTerms: string | null;
   briefSummary: string | null;
@@ -158,14 +165,21 @@ export async function readReciterdbTables(): Promise<{
 export const INACTIVE_STATUSES = new Set(["IRB STUDY CLOSURE", "CLOSED TO ACCRUAL"]);
 
 /** A ClinicalTrials.gov study in the `clinical_trials_enriched` shape, plus the
- *  ACTUAL primary completion date (null when absent or only ANTICIPATED). */
-export type CtgovStudy = EnrichedRow & { primaryCompletionActual: string | null };
+ *  ACTUAL primary completion date (null when absent or only ANTICIPATED) and
+ *  the raw lead-sponsor class (INDUSTRY, NIH, FED, OTHER, ...) and name (to
+ *  tell WCM's own trials apart within OTHER). */
+export type CtgovStudy = EnrichedRow & {
+  primaryCompletionActual: string | null;
+  leadSponsorClass: string | null;
+  leadSponsorName?: string | null;
+};
 
 const CTGOV_URL = "https://clinicaltrials.gov/api/v2/studies";
 const CTGOV_FIELDS = [
   "NCTId", "BriefTitle", "OfficialTitle", "BriefSummary", "StudyType", "Phase",
   "Condition", "ConditionMeshTerm", "EnrollmentCount",
-  "PrimaryCompletionDate", "PrimaryCompletionDateType",
+  "PrimaryCompletionDate", "PrimaryCompletionDateType", "LeadSponsorClass",
+  "LeadSponsorName",
 ].join(",");
 /** The subset of a v2 study we read (`fields=` limits the response to it). */
 type CtgovApiStudy = {
@@ -175,6 +189,7 @@ type CtgovApiStudy = {
     descriptionModule?: { briefSummary?: string };
     conditionsModule?: { conditions?: string[] };
     designModule?: { studyType?: string; phases?: string[]; enrollmentInfo?: { count?: number } };
+    sponsorCollaboratorsModule?: { leadSponsor?: { class?: string; name?: string } };
   };
   derivedSection?: { conditionBrowseModule?: { meshes?: Array<{ term?: string }> } };
 };
@@ -221,6 +236,8 @@ export async function fetchCtgovStudies(
           ),
           enrollment: ps.designModule?.enrollmentInfo?.count ?? null,
           primaryCompletionActual: pc?.type === "ACTUAL" ? (pc.date ?? null) : null,
+          leadSponsorClass: ps.sponsorCollaboratorsModule?.leadSponsor?.class ?? null,
+          leadSponsorName: ps.sponsorCollaboratorsModule?.leadSponsor?.name ?? null,
         });
       }
     } catch (e) {
@@ -265,6 +282,32 @@ function ctaDate(
   return nct && !ctgovComplete ? oncore : null;
 }
 
+/** Sponsor class (mapping: lib/clinical-trial-sponsor-class.ts). A trial with
+ *  no NCT: a best-effort read of OnCore's sponsor name. A registered trial:
+ *  CT.gov's class only (AMBIG/UNKNOWN stays null). If CT.gov did not return the
+ *  study because the fetch was incomplete (or never ran: the bridge import),
+ *  keep the class the trial already had, so a failed fetch does not flip it. */
+function trialSponsorClass(
+  r: InstitutionalRow,
+  nct: string | null,
+  study: CtgovStudy | undefined,
+  ctgovComplete: boolean,
+  prior: string | null | undefined,
+): SponsorClass | null {
+  if (!nct) return sponsorClassFromOncore(r.principalSponsor);
+  if (study) return sponsorClassFromCtgov(study.leadSponsorClass, study.leadSponsorName);
+  return !ctgovComplete && isSponsorClass(prior) ? prior : null;
+}
+
+/** protocolNumber → the sponsor class stored now, for `buildTrialsAndLinks`
+ *  to keep when CT.gov could not be read this run. */
+export async function loadPriorSponsorClasses(): Promise<Map<string, string | null>> {
+  const rows = await db.write.clinicalTrial.findMany({
+    select: { protocolNumber: true, sponsorClass: true },
+  });
+  return new Map(rows.map((t) => [t.protocolNumber, t.sponsorClass]));
+}
+
 /** Join institutional + enriched, dedup to one trial per protocol, build the
  *  per-(cwid, protocol) link. The feed lists the active PI only, so every link is
  *  "Principal Investigator". A live ClinicalTrials.gov study (`ctgov`) wins over
@@ -276,6 +319,7 @@ export function buildTrialsAndLinks(
   scholars: Map<string, { cwid: string; name: string }>,
   now: Date,
   ctgov: { studies: Map<string, CtgovStudy>; complete: boolean } = { studies: new Map(), complete: false },
+  priorSponsorClass: ReadonlyMap<string, string | null> = new Map(),
 ): { trials: TrialBuild[]; links: LinkBuild[]; stats: BuildStats } {
   const enrichedByNct = new Map<string, EnrichedRow>();
   for (const e of enriched) {
@@ -326,6 +370,13 @@ export function buildTrialsAndLinks(
         studyType: nonEmpty(enrichedRow?.studyType),
         phase: nonEmpty(enrichedRow?.phases),
         principalSponsor: nonEmpty(r.principalSponsor),
+        sponsorClass: trialSponsorClass(
+          r,
+          nct,
+          study,
+          ctgov.complete,
+          priorSponsorClass.get(protocol),
+        ),
         conditions: nonEmpty(enrichedRow?.conditions),
         meshTerms: nonEmpty(enrichedRow?.meshTerms),
         briefSummary: nonEmpty(enrichedRow?.briefSummary),

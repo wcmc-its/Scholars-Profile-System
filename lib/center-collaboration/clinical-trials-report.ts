@@ -50,6 +50,8 @@ export type ClinicalTrialsReportRow = {
   title: string;
   phase: string | null;
   principalSponsor: string | null;
+  /** `ClinicalTrial.sponsorClass` key (industry, nih, ...); null = unknown. */
+  sponsorClass: string | null;
   status: string | null;
   /** Coarse active/completed split, via the same `isActiveTrialStatus` the
    *  public profile section uses — drives the active-first sort. */
@@ -107,6 +109,7 @@ export async function loadClinicalTrialsReport(
     title: link.trial.title,
     phase: link.trial.phase,
     principalSponsor: link.trial.principalSponsor,
+    sponsorClass: link.trial.sponsorClass,
     status: link.trial.status,
     isActive: isActiveTrialStatus(link.trial.status),
   }));
