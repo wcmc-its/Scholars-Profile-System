@@ -12,7 +12,7 @@ const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 import { buildListSections, HonorsQueue, rosterSourceUrl } from "@/components/edit/honors-queue";
-import type { HonorQueueGroup, HonorQueueRow } from "@/lib/edit/honor-queue";
+import type { HonorQueueGroup, HonorQueueRow, HonorSourcesSummary } from "@/lib/edit/honor-queue";
 
 function row(over: Partial<HonorQueueRow>): HonorQueueRow {
   return {
@@ -33,6 +33,9 @@ function row(over: Partial<HonorQueueRow>): HonorQueueRow {
     sourceRef: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     decidedAt: "2026-01-01T00:00:00.000Z",
+    decidedByName: null,
+    rejectionReason: null,
+    superseded: false,
     competingCwids: [],
     ...over,
   };
@@ -45,6 +48,8 @@ function grp(
 ): HonorQueueGroup {
   return { key, rows, rosterMatchedName, contested: new Set(rows.map((r) => r.cwid)).size > 1 };
 }
+
+const NO_SOURCES: HonorSourcesSummary = { sources: [], runs: [] };
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -83,7 +88,13 @@ const single = grp("single", [row({ id: "s1" })], "Ada Example");
 describe("HonorsQueue redesign — Possible", () => {
   it("opens on Possible with an amber count and the tab note", () => {
     const { container } = render(
-      <HonorsQueue pending={[single, contested]} approved={[]} rejected={[]} userAsserted={[]} />,
+      <HonorsQueue
+        pending={[single, contested]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
     );
     const tab = screen.getByRole("tab", { name: /Possible/ });
     expect(tab.getAttribute("aria-selected")).toBe("true");
@@ -96,7 +107,13 @@ describe("HonorsQueue redesign — Possible", () => {
 
   it("contested: Approve is blocked until a pick, then approves the picked candidate", async () => {
     const { container } = render(
-      <HonorsQueue pending={[contested]} approved={[]} rejected={[]} userAsserted={[]} />,
+      <HonorsQueue
+        pending={[contested]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
     );
     const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
     const blocked = within(card).getByRole("button", {
@@ -119,7 +136,13 @@ describe("HonorsQueue redesign — Possible", () => {
 
   it("single: Reject posts a reject and marks the card Rejected", async () => {
     const { container } = render(
-      <HonorsQueue pending={[single]} approved={[]} rejected={[]} userAsserted={[]} />,
+      <HonorsQueue
+        pending={[single]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
     );
     const card = container.querySelector('[data-slot="honor-group"]') as HTMLElement;
     expect(within(card).getByRole("button", { name: "Approve for Ada Example" })).toBeTruthy();
@@ -162,7 +185,13 @@ describe("HonorsQueue redesign — read-only tabs", () => {
 
   it("Known groups by scholar by default, A–Z by surname, and search narrows it", () => {
     const { container } = render(
-      <HonorsQueue pending={[]} approved={known} rejected={[]} userAsserted={[]} />,
+      <HonorsQueue
+        pending={[]}
+        approved={known}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
     );
     fireEvent.click(screen.getByRole("tab", { name: /Known/ }));
     const headings = [...container.querySelectorAll('[data-slot="honor-list-heading"]')].map(
@@ -183,7 +212,13 @@ describe("HonorsQueue redesign — read-only tabs", () => {
 
   it("Award grouping puts the biggest honor first", () => {
     const { container } = render(
-      <HonorsQueue pending={[]} approved={known} rejected={[]} userAsserted={[]} />,
+      <HonorsQueue
+        pending={[]}
+        approved={known}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
     );
     fireEvent.click(screen.getByRole("tab", { name: /Known/ }));
     fireEvent.click(screen.getByRole("button", { name: "Award" }));
@@ -235,5 +270,245 @@ describe("rosterSourceUrl", () => {
     );
     expect(rosterSourceUrl("asci|A. Person|2020")).toBeNull();
     expect(rosterSourceUrl(null)).toBeNull();
+  });
+});
+
+describe("HonorsQueue: undo, reasons, decided-by", () => {
+  beforeEach(() => {
+    // A fresh Response per call: a body can be read once, and these tests POST twice.
+    fetchMock.mockImplementation(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+  });
+
+  it("approve shows a toast; its Undo posts undo for the approved row and reopens the card", async () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[contested]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
+    fireEvent.click(within(card).getByRole("radio", { name: "Bea Sample" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Approve for Bea Sample" }));
+    const toast = await waitFor(() => {
+      const t = container.querySelector('[data-slot="honors-toast"]') as HTMLElement | null;
+      expect(t).not.toBeNull();
+      return t as HTMLElement;
+    });
+    expect(toast.textContent).toContain(
+      "Approved Investigator, Invented Institute for Bea Sample.",
+    );
+
+    fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ id: "c2", decision: "undo" });
+    await waitFor(() => expect(container.querySelector('[data-slot="honors-toast"]')).toBeNull());
+    // The line is open again: pick-then-approve, and the count is back.
+    expect(within(card).getByRole("button", { name: /Approve/ })).toBeTruthy();
+    expect(within(card).queryByText("Approved for Bea Sample")).toBeNull();
+    expect(within(screen.getByRole("tab", { name: /Possible/ })).getByText("2")).toBeTruthy();
+  });
+
+  it("None of these sends the picked reason with every reject; the card's Undo reverts each", async () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[contested]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
+    fireEvent.change(within(card).getByRole("combobox", { name: "Rejection reason (optional)" }), {
+      target: { value: "Name collision" },
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "None of these" }));
+    await waitFor(() => expect(within(card).getByText("Rejected")).toBeTruthy());
+    expect(fetchMock.mock.calls.map((c) => JSON.parse(c[1].body))).toEqual([
+      { id: "c1", decision: "reject", reason: "Name collision" },
+      { id: "c2", decision: "reject", reason: "Name collision" },
+    ]);
+
+    fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls.slice(2).map((c) => JSON.parse(c[1].body))).toEqual([
+      { id: "c1", decision: "undo" },
+      { id: "c2", decision: "undo" },
+    ]);
+    await waitFor(() => expect(within(card).queryByText("Rejected")).toBeNull());
+  });
+
+  it("a failed undo keeps the decision and says so", async () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[single]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    const card = container.querySelector('[data-slot="honor-group"]') as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(within(card).getByText("Rejected")).toBeTruthy());
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ ok: false, error: "not_undoable" }), { status: 409 }),
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/can't be undone/));
+    expect(within(card).getByText("Rejected")).toBeTruthy();
+  });
+
+  it("Rejected shows the Reason column with the date and curator under it", () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[]}
+        approved={[]}
+        rejected={[
+          grp("r1", [
+            row({
+              id: "r1",
+              rejectionReason: "Different person",
+              decidedByName: "Cora Curator",
+              decidedAt: "2026-09-15T12:00:00.000Z",
+            }),
+          ]),
+          grp("r2", [row({ id: "r2", cwid: "zzz1002", scholarName: "Bo Example" })]),
+        ]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Rejected/ }));
+    const table = container.querySelector('[data-slot="honors-rejected-table"]') as HTMLElement;
+    expect(within(table).getByText("Reason")).toBeTruthy();
+    expect(within(table).getByText("Different person")).toBeTruthy();
+    const by = [...table.querySelectorAll('[data-slot="honor-decided-by"]')].map(
+      (e) => e.textContent,
+    );
+    expect(by).toContain("Sep 15, 2026 by Cora Curator");
+    // No reason recorded ⇒ an em dash, never a blank cell.
+    expect(within(table).getByText("—", { selector: "span:not([data-slot])" })).toBeTruthy();
+  });
+
+  it("Known's Added reads 'date by curator' when a decider is recorded", () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[]}
+        approved={[
+          grp("k1", [
+            row({
+              id: "k1",
+              decidedByName: "Cora Curator",
+              decidedAt: "2026-09-15T12:00:00.000Z",
+            }),
+          ]),
+        ]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Known/ }));
+    const table = container.querySelector('[data-slot="honors-approved-table"]') as HTMLElement;
+    expect(within(table).getByText("Sep 15, 2026 by Cora Curator")).toBeTruthy();
+  });
+});
+
+describe("HonorsQueue: Sources tab", () => {
+  const summary: HonorSourcesSummary = {
+    sources: [
+      {
+        key: "https://example.org/members",
+        name: "Member",
+        organization: "Invented Academy",
+        url: "https://example.org/members",
+        host: "example.org",
+        lines: 12,
+        pendingLines: 3,
+        approved: 8,
+        rejected: 1,
+      },
+      {
+        key: "invented-list",
+        name: "Fellow",
+        organization: "Made-up Society",
+        url: null,
+        host: null,
+        lines: 4,
+        pendingLines: 0,
+        approved: 4,
+        rejected: 0,
+      },
+    ],
+    runs: [
+      {
+        source: "HonorsSeed-Import",
+        startedAt: "2026-09-01T15:00:00.000Z",
+        completedAt: null,
+        status: "failed",
+        rowsProcessed: 0,
+        errorMessage: "invented failure",
+      },
+      {
+        source: "HonorsSeed-Import",
+        startedAt: "2026-08-01T15:00:00.000Z",
+        completedAt: "2026-08-01T15:01:00.000Z",
+        status: "success",
+        rowsProcessed: 250,
+        errorMessage: null,
+      },
+    ],
+  };
+
+  it("lists each roster read-only, with the last load and its error, and no Run now", () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[single]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={summary}
+      />,
+    );
+    const tab = screen.getByRole("tab", { name: /Sources/ });
+    expect(within(tab).getByText("2")).toBeTruthy();
+    fireEvent.click(tab);
+    const panel = container.querySelector('[data-slot="honors-sources"]') as HTMLElement;
+    expect(panel.querySelectorAll('[data-slot="honors-source"]')).toHaveLength(2);
+    const link = within(panel).getByRole("link", { name: "example.org" });
+    expect(link.getAttribute("href")).toBe("https://example.org/members");
+    expect(panel.querySelector('[data-slot="honors-sources-last-run"]')?.textContent).toMatch(
+      /Last load Sep 1, 2026.*Failed/,
+    );
+    expect(panel.querySelector('[data-slot="honors-sources-error"]')?.textContent).toBe(
+      "invented failure",
+    );
+    expect(panel.querySelector('[data-slot="honors-sources-runs"]')).not.toBeNull();
+    expect(within(panel).queryByRole("button", { name: /Run now/ })).toBeNull();
+    // The Possible-only toolbar is gone here.
+    expect(container.querySelector('[data-slot="honors-person-filter"]')).toBeNull();
+  });
+
+  it("an empty summary says no load is recorded", () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Sources/ }));
+    const panel = container.querySelector('[data-slot="honors-sources"]') as HTMLElement;
+    expect(panel.textContent).toContain("No load recorded yet");
+    expect(panel.textContent).toContain("No honor lists loaded yet.");
   });
 });

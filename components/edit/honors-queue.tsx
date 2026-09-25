@@ -29,6 +29,14 @@
  * read-only tabs are a table grouped by scholar (default), by award, or not at
  * all, with a search box.
  *
+ * Decisions are undoable: a dark toast names the last decision with an Undo, and
+ * every decided card keeps an Undo link. Undo POSTs `decision: "undo"` per row
+ * the decision wrote (the approved row, or each rejected candidate); the server
+ * restores the siblings an approval auto-rejected. A reject may carry a reason
+ * from the select beside the button (optional, so one click still rejects).
+ * Sources lists the honor rosters the queue's rows came from and the recorded
+ * load runs — read-only, with no Run now (nothing in the console can start one).
+ *
  * Kept from the shipped queue although the mockup omits them on Possible: the
  * person-type filter (and its "All" chip, on every tab), the Possible sort, and
  * the Possible group-by. Group-by is ORTHOGONAL to the contested-pair mechanic —
@@ -38,8 +46,13 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
-import type { HonorQueueGroup, HonorQueueRow } from "@/lib/edit/honor-queue";
-import { isFullTimeFaculty, yearPlausibilityNote } from "@/lib/edit/honor-queue";
+import type {
+  HonorQueueGroup,
+  HonorQueueRow,
+  HonorSourceRun,
+  HonorSourcesSummary,
+} from "@/lib/edit/honor-queue";
+import { isFullTimeFaculty, REJECTION_REASONS, yearPlausibilityNote } from "@/lib/edit/honor-queue";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -49,9 +62,11 @@ type Props = {
   /** Round 5: honors a scholar entered about themselves (`source='SELF'`), shown
    *  in their own read-only "User asserted" tab and kept out of Known. */
   userAsserted: HonorQueueGroup[];
+  /** The Sources tab: honor rosters and recorded load runs. */
+  sources: HonorSourcesSummary;
 };
 
-type Tab = "pending" | "approved" | "rejected" | "self";
+type Tab = "pending" | "approved" | "rejected" | "self" | "sources";
 type PersonFilter = "faculty" | "affiliated" | "other" | "all";
 type SortKey = "prestige" | "recent" | "confident";
 /** Possible's group-by (the shipped control). */
@@ -59,13 +74,19 @@ export type GroupBy = "none" | "person" | "award";
 /** The read-only tabs' group-by (the redesign's segmented control). */
 export type ListGroupBy = "scholar" | "award" | "none";
 
-/** A card's outcome this session. The card stays put, showing it. */
-type Decided = { kind: "approved"; scholarName: string } | { kind: "rejected" };
+/** A card's outcome this session. The card stays put, showing it. `rowIds` are
+ *  the rows the decision wrote directly — what an undo reverts. */
+type Decided =
+  | { kind: "approved"; scholarName: string; rowIds: string[] }
+  | { kind: "rejected"; rowIds: string[] };
 
 /** Contested lines span people, so they can't sit under any one person heading —
  *  they bucket together here under group-by "person". The double-underscore
  *  sentinel can't collide with a real cwid (alphanumeric, no underscores). */
 const CONTESTED_BUCKET = "__contested__";
+
+/** Sources has no honor groups; a stable empty array keeps the memos below steady. */
+const NO_GROUPS: HonorQueueGroup[] = [];
 
 /** All rows on one group share a roster line ⇒ one honor ⇒ one prestige/year, so
  *  the group's sort key is `rows[0]`'s. Comparators return standard <0/0/>0. */
@@ -249,6 +270,7 @@ function emptyMessage(tab: Tab, sourceEmpty: boolean): string {
   if (tab === "pending") return "Nothing pending. Every honor has been decided.";
   if (tab === "approved") return "No honors approved yet.";
   if (tab === "rejected") return "No honors rejected yet.";
+  if (tab === "sources") return "No honor lists loaded yet.";
   return "No self-asserted honors yet.";
 }
 
@@ -257,9 +279,10 @@ const TAB_LABEL: Record<Tab, string> = {
   approved: "Known",
   rejected: "Rejected",
   self: "User asserted",
+  sources: "Sources",
 };
 
-export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props) {
+export function HonorsQueue({ pending, approved, rejected, userAsserted, sources }: Props) {
   const router = useRouter();
   // Possible first — the redesign: land on the working queue.
   const [tab, setTab] = useState<Tab>("pending");
@@ -276,6 +299,10 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
   /** Contested line key → the candidate row id the curator picked. */
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [decided, setDecided] = useState<Record<string, Decided>>({});
+  /** Line key → the rejection reason picked beside its Reject (optional). */
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  /** The last decision, offered for undo in the toast. */
+  const [toast, setToast] = useState<{ groupKey: string; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -290,7 +317,9 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
         ? approved
         : tab === "rejected"
           ? rejected
-          : userAsserted;
+          : tab === "self"
+            ? userAsserted
+            : NO_GROUPS;
 
   const undecided = useMemo(() => groups.filter((g) => !decided[g.key]), [groups, decided]);
 
@@ -302,8 +331,9 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
       approved: approved.reduce((n, g) => n + g.rows.length, 0),
       rejected: rejected.reduce((n, g) => n + g.rows.length, 0),
       self: userAsserted.reduce((n, g) => n + g.rows.length, 0),
+      sources: sources.sources.length,
     }),
-    [undecided, approved, rejected, userAsserted],
+    [undecided, approved, rejected, userAsserted, sources],
   );
   const contestedOpen = undecided.filter((g) => g.contested).length;
 
@@ -358,7 +388,9 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
         ? "Approved honors. These show on profiles."
         : tab === "rejected"
           ? "Matches that were ruled out. They won’t be suggested again."
-          : "Honors scholars added to their own profiles. Shown as self-reported.";
+          : tab === "sources"
+            ? "Honor lists the matches come from, and when a list was last loaded."
+            : "Honors scholars added to their own profiles. Shown as self-reported.";
 
   function switchTab(next: Tab) {
     setTab(next);
@@ -366,19 +398,25 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
   }
 
   /** POST one decision. Returns whether it saved; sets the error line if not. */
-  async function post(row: HonorQueueRow, decision: "approve" | "reject"): Promise<boolean> {
+  async function post(
+    rowId: string,
+    decision: "approve" | "reject" | "undo",
+    reason?: string,
+  ): Promise<boolean> {
     try {
       const res = await fetch("/api/edit/honor/decision", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: row.id, decision }),
+        body: JSON.stringify(reason ? { id: rowId, decision, reason } : { id: rowId, decision }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !json.ok) {
         setError(
           json.error === "not_pending"
             ? "Someone already decided that one. Refresh to see the current queue."
-            : "That didn't save. Nothing was changed.",
+            : json.error === "not_undoable" || json.error === "superseded"
+              ? "That decision can't be undone any more. Refresh to see the current queue."
+              : "That didn't save. Nothing was changed.",
         );
         return false;
       }
@@ -395,11 +433,15 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
     setBusy(group.key);
     setError(null);
     // Approving resolves the WHOLE line (siblings rejected server-side).
-    if (await post(row, "approve")) {
+    if (await post(row.id, "approve")) {
       setDecided((d) => ({
         ...d,
-        [group.key]: { kind: "approved", scholarName: row.scholarName },
+        [group.key]: { kind: "approved", scholarName: row.scholarName, rowIds: [row.id] },
       }));
+      setToast({
+        groupKey: group.key,
+        text: `Approved ${row.name}, ${row.organization} for ${shortName(row.scholarName)}.`,
+      });
       // Reconcile Known/Rejected (and the subnav pending pill) with the server.
       router.refresh();
     }
@@ -410,14 +452,17 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
     setBusy(group.key);
     setError(null);
     const done: string[] = [];
+    const reason = reasons[group.key] || undefined;
     for (const row of group.rows) {
       // Sequential on purpose: each is its own transaction + audit row, and a
       // parallel burst would race the pending re-check for no benefit at this size.
-      if (!(await post(row, "reject"))) break;
+      if (!(await post(row.id, "reject", reason))) break;
       done.push(row.id);
     }
     if (done.length === group.rows.length) {
-      setDecided((d) => ({ ...d, [group.key]: { kind: "rejected" } }));
+      setDecided((d) => ({ ...d, [group.key]: { kind: "rejected", rowIds: done } }));
+      const head = group.rows[0];
+      setToast({ groupKey: group.key, text: `Rejected ${head.name}, ${head.organization}.` });
     } else if (done.length > 0) {
       // A partial "None of these": drop the candidates that did reject; the rest
       // are still live.
@@ -433,7 +478,33 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
     setBusy(null);
   }
 
-  const isList = tab !== "pending";
+  /** Revert a decision made on this page. The server restores any siblings an
+   *  approval auto-rejected, so one undo per written row brings the line back. */
+  async function undo(groupKey: string) {
+    const d = decided[groupKey];
+    if (!d) return;
+    setBusy(groupKey);
+    setError(null);
+    let all = true;
+    for (const id of d.rowIds) {
+      if (!(await post(id, "undo"))) {
+        all = false;
+        break;
+      }
+    }
+    if (all) {
+      setDecided((cur) => {
+        const next = { ...cur };
+        delete next[groupKey];
+        return next;
+      });
+      setToast((t) => (t?.groupKey === groupKey ? null : t));
+    }
+    router.refresh();
+    setBusy(null);
+  }
+
+  const isList = tab !== "pending" && tab !== "sources";
 
   return (
     <div className="flex flex-col gap-[22px]" data-slot="honors-queue">
@@ -444,7 +515,7 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
           className="border-apollo-border-strong flex flex-wrap items-end gap-x-7 border-b"
           role="tablist"
         >
-          {(["pending", "approved", "rejected", "self"] as const).map((t) => (
+          {(["pending", "approved", "rejected", "self", "sources"] as const).map((t) => (
             <TabButton
               key={t}
               active={tab === t}
@@ -469,95 +540,117 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="flex flex-wrap gap-1.5" data-slot="honors-person-filter">
-          <FilterChip
-            active={filter === "faculty"}
-            onClick={() => setFilter("faculty")}
-            label="Full-time faculty"
-            count={counts.faculty}
-          />
-          <FilterChip
-            active={filter === "affiliated"}
-            onClick={() => setFilter("affiliated")}
-            label="Affiliated faculty"
-            count={counts.affiliated}
-          />
-          <FilterChip
-            active={filter === "other"}
-            onClick={() => setFilter("other")}
-            label="Trainees & other"
-            count={counts.other}
-          />
-          <FilterChip
-            active={filter === "all"}
-            onClick={() => setFilter("all")}
-            label="All"
-            count={counts.all}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5 sm:ml-auto">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Scholar, honor or org…"
-            aria-label="Search honors"
-            className="border-apollo-border-strong bg-apollo-surface h-[34px] w-full rounded-lg border px-2.5 text-[13.5px] outline-none sm:w-[200px]"
-            data-slot="honors-search"
-          />
-          {isList ? (
-            <div className="flex items-center gap-2.5" data-slot="honors-list-group-by">
-              <span className="text-muted-foreground text-[13px]">Group</span>
-              <Segmented
-                label="Group"
-                value={listGroupBy}
-                onChange={setListGroupBy}
-                options={[
-                  ["scholar", "Scholar"],
-                  ["award", "Award"],
-                  ["none", "None"],
-                ]}
-              />
-            </div>
-          ) : (
-            <>
-              <label
-                className="text-muted-foreground flex items-center gap-2 text-[13px]"
-                data-slot="honors-group-by"
-              >
-                Group
-                <select
-                  value={groupBy}
-                  onChange={(e) => setGroupBy(e.target.value as GroupBy)}
-                  className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
+      {tab === "sources" ? null : (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap gap-1.5" data-slot="honors-person-filter">
+            <FilterChip
+              active={filter === "faculty"}
+              onClick={() => setFilter("faculty")}
+              label="Full-time faculty"
+              count={counts.faculty}
+            />
+            <FilterChip
+              active={filter === "affiliated"}
+              onClick={() => setFilter("affiliated")}
+              label="Affiliated faculty"
+              count={counts.affiliated}
+            />
+            <FilterChip
+              active={filter === "other"}
+              onClick={() => setFilter("other")}
+              label="Trainees & other"
+              count={counts.other}
+            />
+            <FilterChip
+              active={filter === "all"}
+              onClick={() => setFilter("all")}
+              label="All"
+              count={counts.all}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 sm:ml-auto">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Scholar, honor or org…"
+              aria-label="Search honors"
+              className="border-apollo-border-strong bg-apollo-surface h-[34px] w-full rounded-lg border px-2.5 text-[13.5px] outline-none sm:w-[200px]"
+              data-slot="honors-search"
+            />
+            {isList ? (
+              <div className="flex items-center gap-2.5" data-slot="honors-list-group-by">
+                <span className="text-muted-foreground text-[13px]">Group</span>
+                <Segmented
+                  label="Group"
+                  value={listGroupBy}
+                  onChange={setListGroupBy}
+                  options={[
+                    ["scholar", "Scholar"],
+                    ["award", "Award"],
+                    ["none", "None"],
+                  ]}
+                />
+              </div>
+            ) : (
+              <>
+                <label
+                  className="text-muted-foreground flex items-center gap-2 text-[13px]"
+                  data-slot="honors-group-by"
                 >
-                  <option value="none">No grouping</option>
-                  <option value="person">By person</option>
-                  <option value="award">By award</option>
-                </select>
-              </label>
-              <label
-                className="text-muted-foreground flex items-center gap-2 text-[13px]"
-                data-slot="honors-sort"
-              >
-                Sort
-                <select
-                  value={sortKey}
-                  onChange={(e) => setSortKey(e.target.value as SortKey)}
-                  className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
+                  Group
+                  <select
+                    value={groupBy}
+                    onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+                    className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
+                  >
+                    <option value="none">No grouping</option>
+                    <option value="person">By person</option>
+                    <option value="award">By award</option>
+                  </select>
+                </label>
+                <label
+                  className="text-muted-foreground flex items-center gap-2 text-[13px]"
+                  data-slot="honors-sort"
                 >
-                  <option value="prestige">Most prestigious</option>
-                  <option value="recent">Most recent</option>
-                  <option value="confident">Most confident match</option>
-                </select>
-              </label>
-            </>
-          )}
+                  Sort
+                  <select
+                    value={sortKey}
+                    onChange={(e) => setSortKey(e.target.value as SortKey)}
+                    className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
+                  >
+                    <option value="prestige">Most prestigious</option>
+                    <option value="recent">Most recent</option>
+                    <option value="confident">Most confident match</option>
+                  </select>
+                </label>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {tab === "pending" ? (
+      {tab === "pending" && toast ? (
+        <div
+          className="bg-apollo-bar flex items-center gap-3 rounded-[10px] px-3.5 py-2.5 text-[13.5px] text-white"
+          role="status"
+          data-slot="honors-toast"
+        >
+          <span className="flex-1">{toast.text}</span>
+          <button
+            type="button"
+            onClick={() => undo(toast.groupKey)}
+            disabled={busy !== null}
+            className="rounded-md border border-white/35 px-2.5 py-[3px] text-[13px]"
+          >
+            Undo
+          </button>
+        </div>
+      ) : null}
+
+      {tab === "sources" ? (
+        <SourcesPanel summary={sources} empty={emptyMessage("sources", true)} />
+      ) : tab === "pending" ? (
         filtered.length === 0 ? (
           <EmptyCard slot="honors-queue-empty">{emptyMessage(tab, source.length === 0)}</EmptyCard>
         ) : (
@@ -567,9 +660,12 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
             busy={busy}
             picks={picks}
             decided={decided}
+            reasons={reasons}
             onPick={(groupKey, rowId) => setPicks((p) => ({ ...p, [groupKey]: rowId }))}
+            onReason={(groupKey, reason) => setReasons((r) => ({ ...r, [groupKey]: reason }))}
             onApprove={approve}
             onRejectAll={rejectAll}
+            onUndo={undo}
           />
         )
       ) : (
@@ -719,18 +815,24 @@ function PendingSections({
   busy,
   picks,
   decided,
+  reasons,
   onPick,
+  onReason,
   onApprove,
   onRejectAll,
+  onUndo,
 }: {
   sections: Section[];
   sortKey: SortKey;
   busy: string | null;
   picks: Record<string, string>;
   decided: Record<string, Decided>;
+  reasons: Record<string, string>;
   onPick: (groupKey: string, rowId: string) => void;
+  onReason: (groupKey: string, reason: string) => void;
   onApprove: (group: HonorQueueGroup) => void;
   onRejectAll: (group: HonorQueueGroup) => void;
+  onUndo: (groupKey: string) => void;
 }) {
   const ordered = sections
     .map((s) => ({ ...s, groups: [...s.groups].sort((a, b) => compareGroups(a, b, sortKey)) }))
@@ -761,9 +863,12 @@ function PendingSections({
               busy={busy}
               pick={picks[group.key] ?? null}
               decided={decided[group.key] ?? null}
+              reason={reasons[group.key] ?? ""}
               onPick={onPick}
+              onReason={onReason}
               onApprove={onApprove}
               onRejectAll={onRejectAll}
+              onUndo={onUndo}
             />
           ))}
         </section>
@@ -777,17 +882,23 @@ function PendingGroup({
   busy,
   pick,
   decided,
+  reason,
   onPick,
+  onReason,
   onApprove,
   onRejectAll,
+  onUndo,
 }: {
   group: HonorQueueGroup;
   busy: string | null;
   pick: string | null;
   decided: Decided | null;
+  reason: string;
   onPick: (groupKey: string, rowId: string) => void;
+  onReason: (groupKey: string, reason: string) => void;
   onApprove: (group: HonorQueueGroup) => void;
   onRejectAll: (group: HonorQueueGroup) => void;
+  onUndo: (groupKey: string) => void;
 }) {
   const head = group.rows[0];
   const choosing = group.contested && !decided;
@@ -867,7 +978,17 @@ function PendingGroup({
         ))}
       </div>
 
-      {decided ? null : (
+      {decided ? (
+        <button
+          type="button"
+          onClick={() => onUndo(group.key)}
+          disabled={busy !== null}
+          className="text-muted-foreground hover:text-foreground self-start text-[12.5px]"
+          data-slot="honor-undo"
+        >
+          Undo
+        </button>
+      ) : (
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
@@ -890,6 +1011,21 @@ function PendingGroup({
           >
             {group.contested ? "None of these" : "Reject"}
           </Button>
+          <select
+            value={reason}
+            onChange={(e) => onReason(group.key, e.target.value)}
+            disabled={busy !== null}
+            aria-label="Rejection reason (optional)"
+            className="border-apollo-border bg-apollo-surface text-muted-foreground h-8 rounded-md border px-2 text-[12.5px]"
+            data-slot="honor-reject-reason"
+          >
+            <option value="">Reason (optional)</option>
+            {REJECTION_REASONS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
         </div>
       )}
     </article>
@@ -1009,7 +1145,8 @@ function DecidedTable({
   total: number;
   empty: string;
 }) {
-  const dateHead = kind === "rejected" ? "Rejected" : "Added";
+  // Rejected: the mockup's Reason column, with the date and curator under it.
+  const dateHead = kind === "rejected" ? "Reason" : "Added";
   const heads: string[] =
     mode === "scholar"
       ? ["Honor", "Organization", "Year", dateHead]
@@ -1022,15 +1159,27 @@ function DecidedTable({
       : mode === "scholar"
         ? "sm:grid-cols-[minmax(0,1.4fr)_minmax(0,2fr)_56px_150px]"
         : "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1.4fr)_56px_150px]";
-  const dateCell = (row: HonorQueueRow) =>
+  const addedBy = (row: HonorQueueRow) =>
     kind === "self"
       ? `${formatDecided(row.decidedAt)} by the scholar`
-      : formatDecided(row.decidedAt);
+      : row.decidedByName
+        ? `${formatDecided(row.decidedAt)} by ${row.decidedByName}`
+        : formatDecided(row.decidedAt);
   const cells = (
     row: HonorQueueRow,
-  ): Array<{ v: string; strong?: boolean; muted?: boolean; right?: boolean; year?: boolean }> => {
+  ): Array<{
+    v: string;
+    sub?: string;
+    strong?: boolean;
+    muted?: boolean;
+    right?: boolean;
+    year?: boolean;
+  }> => {
     const year = { v: row.year === null ? "—" : String(row.year), right: true, year: true };
-    const date = { v: dateCell(row), right: true, muted: true };
+    const date =
+      kind === "rejected"
+        ? { v: row.rejectionReason ?? "—", sub: addedBy(row), right: true, muted: true }
+        : { v: addedBy(row), right: true, muted: true };
     if (mode === "scholar")
       return [{ v: row.name, strong: true }, { v: row.organization, muted: true }, year, date];
     if (mode === "award")
@@ -1106,7 +1255,7 @@ function DecidedTable({
                   {cells(row).map((c, ci) => (
                     <span
                       key={ci}
-                      title={c.v}
+                      title={c.sub ? `${c.v} · ${c.sub}` : c.v}
                       className={cn(
                         "min-w-0 leading-snug [overflow-wrap:anywhere] tabular-nums",
                         c.strong && "font-medium",
@@ -1119,6 +1268,14 @@ function DecidedTable({
                       )}
                     >
                       {c.v}
+                      {c.sub ? (
+                        <span
+                          className="text-muted-foreground block text-xs"
+                          data-slot="honor-decided-by"
+                        >
+                          {c.sub}
+                        </span>
+                      ) : null}
                     </span>
                   ))}
                 </li>
@@ -1133,6 +1290,181 @@ function DecidedTable({
       >
         Showing {shown} of {total} honors.
       </div>
+    </div>
+  );
+}
+
+/** "Sep 1, 2026, 3:04 PM UTC" — when a load ran. */
+function formatRunTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
+}
+
+function runStatus(run: HonorSourceRun): { label: string; dot: string; ink: string } {
+  if (run.status === "success")
+    return { label: "Succeeded", dot: "bg-apollo-slate", ink: "text-muted-foreground" };
+  if (run.status === "failed")
+    return { label: "Failed", dot: "bg-destructive", ink: "text-destructive" };
+  return { label: "Running", dot: "bg-apollo-amber", ink: "text-apollo-amber" };
+}
+
+const SOURCE_COLS = "sm:grid-cols-[minmax(0,2.2fr)_90px_80px_80px_80px]";
+
+/**
+ * Sources: the honor rosters the queue's rows came from, with how many lines
+ * each matched and where they stand, and the recorded load runs. Read-only.
+ * There is no Run now: loads are operator-run jobs with no console trigger, so
+ * every list's schedule is "Manual" and one load covers every list.
+ */
+function SourcesPanel({ summary, empty }: { summary: HonorSourcesSummary; empty: string }) {
+  const { sources, runs } = summary;
+  const last = runs[0] ?? null;
+  const lastStatus = last ? runStatus(last) : null;
+  const waiting = sources.reduce((n, s) => n + s.pendingLines, 0);
+  return (
+    <div className="flex flex-col gap-4" data-slot="honors-sources">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[15px]">
+        <span className="text-muted-foreground whitespace-nowrap">
+          <span className="text-foreground font-semibold tabular-nums">{sources.length}</span> honor
+          list{sources.length === 1 ? "" : "s"}
+        </span>
+        <span className="text-muted-foreground whitespace-nowrap">
+          <span className="text-apollo-amber font-semibold tabular-nums">{waiting}</span> waiting
+        </span>
+        <span
+          className="text-muted-foreground inline-flex flex-wrap items-center gap-1.5 text-[13.5px]"
+          data-slot="honors-sources-last-run"
+        >
+          {last && lastStatus ? (
+            <>
+              <span className={cn("size-2 flex-none rounded-full", lastStatus.dot)} aria-hidden />
+              Last load {formatRunTime(last.startedAt)} ·{" "}
+              <span className={lastStatus.ink}>{lastStatus.label}</span> ·{" "}
+              {last.rowsProcessed.toLocaleString("en-US")} rows
+            </>
+          ) : (
+            "No load recorded yet"
+          )}
+        </span>
+      </div>
+
+      {last?.status === "failed" && last.errorMessage ? (
+        <div
+          className="border-apollo-red-tint-border bg-apollo-red-tint text-destructive rounded-md border px-2.5 py-1.5 font-mono text-[12.5px] [overflow-wrap:anywhere]"
+          data-slot="honors-sources-error"
+        >
+          {last.errorMessage}
+        </div>
+      ) : null}
+
+      <div
+        className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[var(--apollo-radius-card)] border"
+        data-slot="honors-sources-table"
+      >
+        <div
+          className={cn(
+            "bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground hidden gap-3.5 border-b px-5 py-2.5 text-xs font-medium tracking-[0.08em] uppercase sm:grid",
+            SOURCE_COLS,
+          )}
+          aria-hidden
+        >
+          <span>Honor list</span>
+          <span>Schedule</span>
+          <span className="text-right">Matched</span>
+          <span className="text-right">Waiting</span>
+          <span className="text-right">Approved</span>
+        </div>
+        {sources.length === 0 ? (
+          <div className="text-muted-foreground p-8 text-center text-sm">{empty}</div>
+        ) : (
+          <ul>
+            {sources.map((s, i) => (
+              <li
+                key={s.key}
+                className={cn(
+                  "flex flex-wrap gap-x-3.5 gap-y-0.5 px-5 py-2.5 text-sm sm:grid sm:items-center",
+                  SOURCE_COLS,
+                  i > 0 && "border-apollo-border border-t",
+                )}
+                data-slot="honors-source"
+              >
+                <span className="flex min-w-0 basis-full flex-col gap-0.5 sm:basis-auto">
+                  <span className="truncate font-medium">{s.name}</span>
+                  <span className="text-muted-foreground truncate text-[12.5px]">
+                    {s.organization}
+                    {s.url && s.host ? (
+                      <>
+                        {" · "}
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-apollo-slate font-mono text-xs hover:underline"
+                        >
+                          {s.host}
+                        </a>
+                      </>
+                    ) : null}
+                  </span>
+                </span>
+                <span className="text-muted-foreground text-[13px]">Manual</span>
+                <span className="text-[13px] tabular-nums sm:text-right sm:text-sm">
+                  {s.lines}
+                  <span className="text-muted-foreground sm:hidden"> matched</span>
+                </span>
+                <span
+                  className={cn(
+                    "text-[13px] tabular-nums sm:text-right sm:text-sm",
+                    s.pendingLines > 0 && "text-apollo-amber font-medium",
+                  )}
+                >
+                  {s.pendingLines}
+                  <span className="text-muted-foreground font-normal sm:hidden"> waiting</span>
+                </span>
+                <span className="text-[13px] font-medium tabular-nums sm:text-right sm:text-sm">
+                  {s.approved}
+                  <span className="text-muted-foreground font-normal sm:hidden"> approved</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="bg-apollo-page border-apollo-border text-muted-foreground border-t px-5 py-3 text-[13px]">
+          New matches from each load land in Possible. &ldquo;Matched&rdquo; counts list entries
+          matched to at least one Weill Cornell scholar. Lists are loaded by an operator, so there
+          is no automatic schedule yet.
+        </div>
+      </div>
+
+      {runs.length > 1 ? (
+        <details className="text-[13px]" data-slot="honors-sources-runs">
+          <summary className="text-muted-foreground cursor-pointer">Earlier loads</summary>
+          <ul className="mt-2 flex flex-col gap-1">
+            {runs.slice(1).map((r) => {
+              const st = runStatus(r);
+              return (
+                <li
+                  key={`${r.source}-${r.startedAt}`}
+                  className="text-muted-foreground flex flex-wrap items-center gap-1.5"
+                >
+                  <span className={cn("size-2 flex-none rounded-full", st.dot)} aria-hidden />
+                  {formatRunTime(r.startedAt)} · <span className={st.ink}>{st.label}</span> ·{" "}
+                  {r.rowsProcessed.toLocaleString("en-US")} rows
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }

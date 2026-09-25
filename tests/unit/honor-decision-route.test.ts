@@ -146,7 +146,7 @@ describe("a roster line is awarded at most once", () => {
     expect(await res.json()).toMatchObject({ siblingsRejected: 2 });
     expect(h.tx.honor.update).toHaveBeenCalledWith({
       where: { id: "honor-2" },
-      data: { status: "rejected" },
+      data: expect.objectContaining({ status: "rejected", supersededById: "honor-1" }),
     });
     // Only PENDING siblings are touched: an already-rejected one is terminal and
     // re-writing it would emit an audit row that says nothing.
@@ -232,10 +232,162 @@ describe("one decision, one timestamp", () => {
     await POST(request({ id: "honor-1", decision: "approve" }, SUPERUSER) as never);
     expect(h.appendAuditRow.mock.calls[0][1]).toMatchObject({
       action: "honor_update",
-      fieldsChanged: ["status"],
+      fieldsChanged: ["status", "decidedByCwid", "decidedAt"],
       targetEntityType: "honor",
       beforeValues: expect.objectContaining({ status: "pending" }),
       afterValues: expect.objectContaining({ status: "published" }),
     });
+  });
+});
+
+describe("decision metadata", () => {
+  it("stamps the REAL actor and the decision's one ts on the decided row", async () => {
+    await POST(request({ id: "honor-1", decision: "approve" }, CURATOR) as never);
+    const data = h.tx.honor.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      status: "published",
+      decidedByCwid: "cur1001",
+      rejectionReason: null,
+      supersededById: null,
+    });
+    expect(data.decidedAt).toBeInstanceOf(Date);
+    expect(data.decidedAt).toEqual(h.appendAuditRow.mock.calls[0][1].ts);
+  });
+
+  it("stores a trimmed rejection reason and lists it in fieldsChanged", async () => {
+    const res = await POST(
+      request(
+        { id: "honor-1", decision: "reject", reason: "  Different person " },
+        CURATOR,
+      ) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(h.tx.honor.update.mock.calls[0][0].data).toMatchObject({
+      status: "rejected",
+      rejectionReason: "Different person",
+    });
+    expect(h.appendAuditRow.mock.calls[0][1].fieldsChanged).toContain("rejectionReason");
+  });
+
+  it("a blank reason stores NULL", async () => {
+    await POST(request({ id: "honor-1", decision: "reject", reason: "   " }, CURATOR) as never);
+    expect(h.tx.honor.update.mock.calls[0][0].data.rejectionReason).toBeNull();
+  });
+
+  it("400s an over-long reason rather than truncating it", async () => {
+    const res = await POST(
+      request({ id: "honor-1", decision: "reject", reason: "x".repeat(256) }, CURATOR) as never,
+    );
+    expect(res.status).toBe(400);
+    expect(h.tx.honor.update).not.toHaveBeenCalled();
+  });
+
+  it("400s a reason on an approve", async () => {
+    const res = await POST(
+      request({ id: "honor-1", decision: "approve", reason: "Different person" }, CURATOR) as never,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("undo", () => {
+  const DECIDED_AT = new Date("2026-09-20T12:00:00Z");
+
+  it("🔴 refuses a published row the queue never decided (it would vanish from a profile)", async () => {
+    // A hand-entered or self-asserted honor is `published` with no decidedAt.
+    // Knocking it back to pending would hide it on the public page.
+    h.tx.honor.findUnique.mockResolvedValue({ ...ROW, status: "published", decidedAt: null });
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_undoable" });
+    expect(h.tx.honor.update).not.toHaveBeenCalled();
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("refuses a row that is still pending", async () => {
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(409);
+    expect(h.tx.honor.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an auto-rejected sibling on its own; the approval is what gets undone", async () => {
+    h.tx.honor.findUnique.mockResolvedValue({
+      ...ROW,
+      status: "rejected",
+      decidedAt: DECIDED_AT,
+      supersededById: "honor-9",
+    });
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "superseded" });
+    expect(h.tx.honor.update).not.toHaveBeenCalled();
+  });
+
+  it("reverts a rejection to pending and clears the decision columns", async () => {
+    h.tx.honor.findUnique.mockResolvedValue({
+      ...ROW,
+      status: "rejected",
+      decidedAt: DECIDED_AT,
+      decidedByCwid: "cur1001",
+      rejectionReason: "Name collision",
+    });
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, status: "pending", siblingsRestored: 0 });
+    expect(h.tx.honor.update).toHaveBeenCalledWith({
+      where: { id: "honor-1" },
+      data: {
+        status: "pending",
+        decidedByCwid: null,
+        decidedAt: null,
+        rejectionReason: null,
+        supersededById: null,
+      },
+    });
+    // Undoing a rejection never touches siblings.
+    expect(h.tx.honor.findMany).not.toHaveBeenCalled();
+    expect(h.appendAuditRow.mock.calls[0][1]).toMatchObject({
+      action: "honor_update",
+      targetEntityId: "honor-1",
+      beforeValues: expect.objectContaining({
+        status: "rejected",
+        rejectionReason: "Name collision",
+      }),
+      afterValues: expect.objectContaining({ status: "pending", rejectionReason: null }),
+    });
+  });
+
+  it("undoing an approval restores exactly the siblings it auto-rejected, audited under one ts", async () => {
+    h.tx.honor.findUnique.mockResolvedValue({
+      ...ROW,
+      status: "published",
+      decidedAt: DECIDED_AT,
+      decidedByCwid: "cur1001",
+    });
+    h.tx.honor.findMany.mockResolvedValue([
+      { ...ROW, id: "honor-2", cwid: "def2002", status: "rejected", supersededById: "honor-1" },
+    ]);
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(await res.json()).toMatchObject({ ok: true, siblingsRestored: 1 });
+    expect(h.tx.honor.findMany).toHaveBeenCalledWith({
+      where: { supersededById: "honor-1", status: "rejected" },
+    });
+    expect(h.tx.honor.update).toHaveBeenCalledWith({
+      where: { id: "honor-2" },
+      data: expect.objectContaining({ status: "pending", supersededById: null }),
+    });
+    const audits = h.appendAuditRow.mock.calls.map(
+      (c) => c[1] as { targetEntityId: string; ts: Date },
+    );
+    expect(audits.map((a) => a.targetEntityId)).toEqual(["honor-1", "honor-2"]);
+    expect(new Set(audits.map((a) => a.ts.getTime())).size).toBe(1);
+    // Both owners' cached profiles change: the winner loses the honor.
+    const reflected = h.resolveAffectedProfiles.mock.calls.map((c) => c[1]).sort();
+    expect(reflected).toEqual(["abc1001", "def2002"]);
+  });
+
+  it("403s a non-curator", async () => {
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, NOBODY) as never);
+    expect(res.status).toBe(403);
   });
 });

@@ -29,11 +29,26 @@
  * per row — the shape `core-claim/bulk` uses and the plain honor route does not
  * (it has no batch).
  *
+ * UNDO (`decision: "undo"`). Reverts ONE queue decision to `pending`: the row's
+ * `decidedAt` must be set, so a hand-entered or self-asserted `published` row (which
+ * the queue never decided) can never be knocked back into the queue and off a
+ * profile. Undoing an APPROVAL also restores the siblings that approval
+ * auto-rejected — exactly the rows whose `supersededById` names it — in the same
+ * transaction, so the line comes back whole. An auto-rejected sibling cannot be
+ * undone on its own (409 `superseded`): reopening it next to a published winner
+ * would put a second live claim on an awarded line; undo the approval instead.
+ * Each reverted row gets its own `honor_update` audit row under the one `ts`.
+ *
+ * DECISION METADATA. Every approve/reject stamps `decidedByCwid` (the REAL actor,
+ * never the impersonated identity — same as the audit row) and `decidedAt`; a
+ * reject may carry a short `reason`. An undo clears all four decision columns.
+ *
  * TERMINALITY IS ENFORCED HERE OR NOWHERE. The migration asserts `rejected` is
  * terminal so a re-run of the feed cannot re-propose a row a human turned down,
  * but nothing in the DB enforces it: `status` is a bare ENUM with no CHECK and no
  * trigger, and all 9 transitions are legal. The `status !== "pending"` guard below
- * IS that enforcement.
+ * IS that enforcement. Undo is the one deliberate exception, and it is scoped to
+ * rows the queue itself decided.
  */
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -54,7 +69,22 @@ type StoredRow = {
   year: number | null;
   /** The roster-LINE identity. Siblings share it — see the sibling note above. */
   sourceRef: string | null;
+  decidedByCwid?: string | null;
+  decidedAt?: Date | null;
+  rejectionReason?: string | null;
+  supersededById?: string | null;
 };
+
+/** Longest reason stored — the column is VARCHAR(255). */
+const REJECTION_REASON_MAX = 255;
+
+/** The four decision columns an undo clears. */
+const CLEARED_DECISION = {
+  decidedByCwid: null,
+  decidedAt: null,
+  rejectionReason: null,
+  supersededById: null,
+} as const;
 
 /** The audit before/after payload. Deliberately small: identity + what moved. */
 function snapshot(row: StoredRow) {
@@ -65,6 +95,9 @@ function snapshot(row: StoredRow) {
     name: row.name,
     organization: row.organization,
     year: row.year,
+    decidedByCwid: row.decidedByCwid ?? null,
+    rejectionReason: row.rejectionReason ?? null,
+    supersededById: row.supersededById ?? null,
   };
 }
 
@@ -93,9 +126,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const honorId = typeof body.id === "string" ? body.id : null;
   const decision =
-    body.decision === "approve" || body.decision === "reject" ? body.decision : null;
+    body.decision === "approve" || body.decision === "reject" || body.decision === "undo"
+      ? body.decision
+      : null;
   if (!honorId) return editError(400, "invalid_body", "id");
   if (!decision) return editError(400, "invalid_body", "decision");
+  // Optional, reject-only. Blank ⇒ no reason. Over-long is a 400 rather than a
+  // silent truncation: the column is VARCHAR(255) and MySQL strict mode would
+  // otherwise fail the whole transaction.
+  let reason: string | null = null;
+  if (body.reason !== undefined && body.reason !== null) {
+    if (typeof body.reason !== "string" || decision !== "reject") {
+      return editError(400, "invalid_body", "reason");
+    }
+    const trimmed = body.reason.trim();
+    if (trimmed.length > REJECTION_REASON_MAX) return editError(400, "invalid_body", "reason");
+    reason = trimmed.length > 0 ? trimmed : null;
+  }
 
   // Hoisted: ONE timestamp for every audit row this decision writes. See the note
   // above — per-row `new Date()` would make the N+1 rows look unrelated.
@@ -105,6 +152,63 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await db.write.$transaction(async (tx) => {
       const row = (await tx.honor.findUnique({ where: { id: honorId } })) as StoredRow | null;
       if (!row) return { kind: "not_found" as const };
+
+      if (decision === "undo") {
+        // Only a decision the QUEUE made is undoable — see the undo note above.
+        if (row.status === "pending" || !row.decidedAt) {
+          return { kind: "not_undoable" as const };
+        }
+        if (row.supersededById) return { kind: "superseded" as const };
+        const reverted = (await tx.honor.update({
+          where: { id: row.id },
+          data: { status: "pending", ...CLEARED_DECISION },
+        })) as StoredRow;
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "honor",
+          requestId,
+          targetEntityId: row.id,
+          action: "honor_update",
+          fieldsChanged: ["status", "decidedByCwid", "decidedAt", "rejectionReason"],
+          beforeValues: snapshot(row),
+          afterValues: snapshot(reverted),
+          ts,
+        });
+        const affected = new Set<string>([row.cwid]);
+        let siblingsRestored = 0;
+        if (row.status === "published") {
+          const superseded = (await tx.honor.findMany({
+            where: { supersededById: row.id, status: "rejected" },
+          })) as StoredRow[];
+          for (const sibling of superseded) {
+            const after = (await tx.honor.update({
+              where: { id: sibling.id },
+              data: { status: "pending", ...CLEARED_DECISION },
+            })) as StoredRow;
+            await appendAuditRow(tx, {
+              actorCwid: realCwid,
+              impersonatedCwid,
+              targetEntityType: "honor",
+              requestId,
+              targetEntityId: sibling.id,
+              action: "honor_update",
+              fieldsChanged: ["status", "decidedByCwid", "decidedAt", "supersededById"],
+              beforeValues: snapshot(sibling),
+              afterValues: snapshot(after),
+              ts,
+            });
+            affected.add(sibling.cwid);
+            siblingsRestored++;
+          }
+        }
+        return {
+          kind: "undone" as const,
+          siblingsRestored,
+          affectedCwids: [...affected],
+        };
+      }
+
       // Only a pending row is decidable, re-checked INSIDE the transaction so two
       // curators racing the same row cannot both decide it. This is also what
       // enforces `rejected` being terminal — the DB does not.
@@ -127,7 +231,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const nextStatus = decision === "approve" ? "published" : "rejected";
       const updated = (await tx.honor.update({
         where: { id: honorId },
-        data: { status: nextStatus },
+        data: {
+          status: nextStatus,
+          decidedByCwid: realCwid,
+          decidedAt: ts,
+          rejectionReason: decision === "reject" ? reason : null,
+          supersededById: null,
+        },
       })) as StoredRow;
 
       await appendAuditRow(tx, {
@@ -137,7 +247,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         requestId,
         targetEntityId: row.id,
         action: "honor_update",
-        fieldsChanged: ["status"],
+        fieldsChanged:
+          decision === "reject" && reason
+            ? ["status", "decidedByCwid", "decidedAt", "rejectionReason"]
+            : ["status", "decidedByCwid", "decidedAt"],
         beforeValues: snapshot(row),
         afterValues: snapshot(updated),
         ts,
@@ -160,7 +273,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         for (const sibling of siblings) {
           const after = (await tx.honor.update({
             where: { id: sibling.id },
-            data: { status: "rejected" },
+            // `supersededById` is what lets an undo of THIS approval find and
+            // restore exactly these rows.
+            data: {
+              status: "rejected",
+              decidedByCwid: realCwid,
+              decidedAt: ts,
+              rejectionReason: null,
+              supersededById: row.id,
+            },
           })) as StoredRow;
           await appendAuditRow(tx, {
             actorCwid: realCwid,
@@ -169,7 +290,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             requestId,
             targetEntityId: sibling.id,
             action: "honor_update",
-            fieldsChanged: ["status"],
+            fieldsChanged: ["status", "decidedByCwid", "decidedAt", "supersededById"],
             beforeValues: snapshot(sibling),
             afterValues: snapshot(after),
             ts,
@@ -187,6 +308,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
     if (result.kind === "not_found") return editError(404, "not_found", "id");
+    if (result.kind === "not_undoable") return editError(409, "not_undoable", "id");
+    if (result.kind === "superseded") return editError(409, "superseded", "id");
     if (result.kind === "not_pending") return editError(409, "not_pending", "id");
     if (result.kind === "line_already_awarded") {
       return editError(409, "line_already_awarded", "id");
@@ -215,6 +338,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ),
     );
 
+    if (result.kind === "undone") {
+      return editOk({ status: "pending", siblingsRestored: result.siblingsRestored });
+    }
     return editOk({ status: result.status, siblingsRejected: result.siblingsRejected });
   } catch {
     return editError(500, "write_failed");

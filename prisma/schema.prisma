@@ -284,22 +284,36 @@ enum ProfileAppointmentCategory {
 /// identifier; `sourceRef` is the roster URL the row came from, kept for de-dup
 /// and audit (NULL for hand-entered rows).
 model Honor {
-  id            String        @id @default(uuid()) @db.VarChar(64)
-  cwid          String        @db.VarChar(32)
-  scholar       Scholar       @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  category      HonorCategory
-  name          String        @db.VarChar(255) // free text: "Member", "Fellow", "Lasker Award"
-  organization  String        @db.VarChar(255) // conferring body, free text
-  year          Int? // election/award year; NULL when unknown
-  status        HonorStatus   @default(published)
-  showOnProfile Boolean       @default(true) @map("show_on_profile")
-  source        String        @default("CURATOR") @db.VarChar(32) // CURATOR | SELF | <feed>
-  sourceRef     String?       @map("source_ref") @db.VarChar(512) // roster URL; de-dup + audit
-  enteredByCwid String        @map("entered_by_cwid") @db.VarChar(32)
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  id              String        @id @default(uuid()) @db.VarChar(64)
+  cwid            String        @db.VarChar(32)
+  scholar         Scholar       @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  category        HonorCategory
+  name            String        @db.VarChar(255) // free text: "Member", "Fellow", "Lasker Award"
+  organization    String        @db.VarChar(255) // conferring body, free text
+  year            Int? // election/award year; NULL when unknown
+  status          HonorStatus   @default(published)
+  showOnProfile   Boolean       @default(true) @map("show_on_profile")
+  source          String        @default("CURATOR") @db.VarChar(32) // CURATOR | SELF | <feed>
+  sourceRef       String?       @map("source_ref") @db.VarChar(512) // roster URL; de-dup + audit
+  enteredByCwid   String        @map("entered_by_cwid") @db.VarChar(32)
+  /// Who decided this row in the approval queue, and when. NULL for a row the
+  /// queue never decided (hand-entered, self-asserted, seeded straight to
+  /// published, or decided before these columns existed). The decision route's
+  /// undo only reverts a row whose `decidedAt` is set.
+  decidedByCwid   String?       @map("decided_by_cwid") @db.VarChar(32)
+  decidedAt       DateTime?     @map("decided_at")
+  /// The curator's reason for a rejection (the Rejected tab's Reason column).
+  /// NULL on an approval and on a rejection given without one.
+  rejectionReason String?       @map("rejection_reason") @db.VarChar(255)
+  /// Set when this row was auto-rejected because a competing candidate on the
+  /// same roster line was approved: that approved row's id. Undoing the approval
+  /// restores exactly these rows to pending.
+  supersededById  String?       @map("superseded_by_id") @db.VarChar(64)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
   @@index([cwid, status, showOnProfile])
+  @@index([supersededById])
   @@map("honor")
 }
 
