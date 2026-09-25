@@ -13,12 +13,16 @@
  *     with the name marked; the matched scholar on the right; Approve /
  *     Approve but hide / Reject in the card footer.
  *   - A focused card (click, or J / K) takes A / H / R from the keyboard.
- *   - Ticked cards go through the dark bulk bar at the bottom.
+ *   - Ticked cards go through the dark bulk bar at the bottom. A selection is
+ *     capped at NEWS_UNDO_MAX_DECISIONS (Select all picks the first that many),
+ *     so a bulk action's Undo is always one all-or-nothing call.
  *   - A dark status bar confirms each decision and offers Undo (POST
- *     /api/edit/news-mention/undo with the decision ids the route returned).
+ *     /api/edit/news-mention/undo with the decision ids the route returned),
+ *     also for the part of a "None of these" that saved when the rest failed.
  *   - "Wrong person? Reassign" on a pending card searches the directory for the
  *     right scholar; Approve / Approve but hide / A / H and the bulk bar then
- *     credit that scholar instead (the decision route's `cwid`).
+ *     credit that scholar instead (the decision route's `cwid`). A staged pick
+ *     is dropped when a refresh turns its group contested.
  *
  * Everything filterable is ALREADY in the props: Pending is loaded unbounded
  * (only the history tabs are capped at NEWS_HISTORY_LIMIT), so filtering and
@@ -52,6 +56,7 @@ import {
   type ScholarOverride,
 } from "@/components/edit/news-review-shared";
 import { mapChunked } from "@/components/edit/selection-bar";
+import { NEWS_UNDO_MAX_DECISIONS } from "@/lib/edit/news-undo-limit";
 import { Button } from "@/components/ui/button";
 import { NEWS_HISTORY_LIMIT, sortNewsQueueGroups } from "@/lib/edit/news-queue";
 import type {
@@ -182,6 +187,18 @@ export function MediaHighlightsQueue({
   const [undoing, setUndoing] = useState(false);
   /** Pending group key -> the "Wrong person? Reassign" scholar staged for it. */
   const [overrides, setOverrides] = useState<Record<string, ScholarOverride>>({});
+  // A refresh can turn a staged group contested (the nightly match added a second
+  // candidate) or decide it elsewhere. Reassign is offered on uncontested cards
+  // only, so a staged pick on such a group is dropped rather than left to ride
+  // along on its next Approve. Adjusted during render, on the new `pending` prop.
+  const [overridesFor, setOverridesFor] = useState(pending);
+  if (overridesFor !== pending) {
+    setOverridesFor(pending);
+    const open = new Set(pending.filter((g) => !g.contested).map((g) => g.key));
+    if (Object.keys(overrides).some((k) => !open.has(k))) {
+      setOverrides((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => open.has(k))));
+    }
+  }
   const cardRefs = useRef(new Map<string, HTMLElement>());
 
   const base = tab === "pending" ? pending : tab === "approved" ? approved : rejected;
@@ -225,7 +242,13 @@ export function MediaHighlightsQueue({
   // Selection: Pending only, uncontested groups only, and only what is on screen.
   const selectable = tab === "pending" ? visible.filter((g) => !g.contested) : [];
   const selectedVisible = selectable.filter((g) => selected.has(g.key));
-  const allSelected = selectable.length > 0 && selectedVisible.length === selectable.length;
+  // One bulk action is at most what one Undo call takes back (the route's cap),
+  // so its Undo stays a single all-or-nothing request. Select all picks the
+  // first NEWS_UNDO_MAX_DECISIONS cards on screen.
+  const selectAllTargets = selectable.slice(0, NEWS_UNDO_MAX_DECISIONS);
+  const allSelected =
+    selectAllTargets.length > 0 && selectAllTargets.every((g) => selected.has(g.key));
+  const atCap = selectedVisible.length >= NEWS_UNDO_MAX_DECISIONS;
 
   function switchTab(t: Tab) {
     setTab(t);
@@ -327,8 +350,17 @@ export function MediaHighlightsQueue({
     markBusy(ids, false);
     const decisionIds = results.flatMap((r) => (r.decisionId ? [r.decisionId] : []));
     const failed = results.map((r) => r.failure).filter(Boolean);
-    if (failed.length > 0) setError(failed[0]);
-    else {
+    if (failed.length > 0) {
+      setError(failed[0]);
+      // Some rejections did save: they can still be taken back.
+      const saved = results.length - failed.length;
+      if (saved > 0) {
+        setToast({
+          text: `Rejected ${saved} of ${ids.length} candidates for “${g.rows[0]!.articleTitle}”.`,
+          decisionIds,
+        });
+      }
+    } else {
       setToast({ text: `Rejected every candidate for “${g.rows[0]!.articleTitle}”.`, decisionIds });
       setFocusKey(nextFocusAfter([g.key]));
     }
@@ -339,6 +371,13 @@ export function MediaHighlightsQueue({
     const groups = selectedVisible;
     if (groups.length === 0) return;
     setError(null);
+    if (groups.length > NEWS_UNDO_MAX_DECISIONS) {
+      // The selection UI stops here; this guards a selection built before it.
+      setError(
+        `Select at most ${NEWS_UNDO_MAX_DECISIONS} clips at a time, so the action can be undone in one step.`,
+      );
+      return;
+    }
     const ids = groups.map((g) => g.rows[0]!.id);
     markBusy(ids, true);
     const results = await mapChunked(groups, (g) => post(stepFor(g.rows[0]!, decision, g.key)));
@@ -530,11 +569,15 @@ export function MediaHighlightsQueue({
                   checked={allSelected}
                   disabled={selectable.length === 0}
                   onChange={() =>
-                    setSelected(allSelected ? new Set() : new Set(selectable.map((g) => g.key)))
+                    setSelected(
+                      allSelected ? new Set() : new Set(selectAllTargets.map((g) => g.key)),
+                    )
                   }
                   data-testid="mh-queue-select-all"
                 />
-                Select all
+                {selectable.length > NEWS_UNDO_MAX_DECISIONS
+                  ? `Select first ${NEWS_UNDO_MAX_DECISIONS}`
+                  : "Select all"}
               </label>
             )}
             <span
@@ -646,7 +689,13 @@ export function MediaHighlightsQueue({
                   else cardRefs.current.delete(g.key);
                 }}
                 selected={selected.has(g.key)}
-                onSelect={() => setSelected((prev) => toggleIn(prev, g.key))}
+                onSelect={() =>
+                  setSelected((prev) =>
+                    prev.has(g.key) || prev.size < NEWS_UNDO_MAX_DECISIONS
+                      ? toggleIn(prev, g.key)
+                      : prev,
+                  )
+                }
                 busy={busy}
                 pendingByCwid={pendingByCwid}
                 pendingBySourceRef={pendingBySourceRef}
@@ -674,7 +723,10 @@ export function MediaHighlightsQueue({
               className="bg-apollo-bar sticky bottom-5 z-20 flex max-w-full flex-wrap items-center gap-3 self-center rounded-xl py-2.5 pr-3 pl-[18px] text-sm text-white shadow-[0_8px_30px_rgba(34,30,28,.25)]"
               data-testid="mh-queue-bulk-bar"
             >
-              <span aria-live="polite">{selectedVisible.length} selected</span>
+              <span aria-live="polite">
+                {selectedVisible.length} selected
+                {atCap ? ` · ${NEWS_UNDO_MAX_DECISIONS} max at a time` : ""}
+              </span>
               <BulkButton primary disabled={busy.size > 0} onClick={() => decideBulk("approve")}>
                 Approve
               </BulkButton>

@@ -240,6 +240,53 @@ describe("MediaHighlightsQueue", () => {
       await waitFor(() => expect(undoBody().decisionIds).toHaveLength(2));
       expect([...undoBody().decisionIds].sort()).toEqual(["dec-1", "dec-2"]);
     });
+
+    it("caps a bulk action at what one Undo call accepts (100)", async () => {
+      routeFetch();
+      const many = Array.from({ length: 101 }, (_, i) => single({ id: `clip-${i + 100}` }));
+      renderQueue(many);
+      const selectAll = screen.getByTestId("mh-queue-select-all");
+      expect(selectAll.parentElement!.textContent).toContain("Select first 100");
+      fireEvent.click(selectAll);
+      const bar = within(screen.getByTestId("mh-queue-bulk-bar"));
+      expect(bar.getByText(/100 selected/).textContent).toContain("100 max at a time");
+      // A card past the cap cannot be added to the selection.
+      fireEvent.click(screen.getByTestId("mh-queue-select-clip-200"));
+      expect(bar.getByText(/100 selected/)).toBeTruthy();
+      fireEvent.click(bar.getByText("Reject"));
+      fireEvent.click(await screen.findByTestId("mh-queue-toast-undo"));
+      await waitFor(() => expect(undoBody().decisionIds).toHaveLength(100));
+    });
+
+    it("None of these: a partial failure still offers Undo for the rejections that saved", async () => {
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === "/api/edit/news-mention/undo") {
+          return new Response(JSON.stringify({ ok: true, restored: 1 }), { status: 200 });
+        }
+        const { id } = JSON.parse(init!.body as string) as { id: string };
+        return id === "clip-6"
+          ? new Response(JSON.stringify({ ok: false, error: "write_failed" }), { status: 500 })
+          : new Response(JSON.stringify({ ok: true, decisionId: `dec-${id}` }), { status: 200 });
+      });
+      renderQueue([
+        {
+          key: "ref-1",
+          rows: [
+            row({ id: "clip-5" }),
+            row({ id: "clip-6", cwid: "ghi3003", scholarName: "Invented Person-Other" }),
+          ],
+          detectedName: "Invented Person",
+          contested: true,
+        },
+      ]);
+      fireEvent.click(screen.getByText("None of these"));
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      expect(screen.getByTestId("mh-queue-toast").textContent).toContain(
+        "Rejected 1 of 2 candidates",
+      );
+      fireEvent.click(screen.getByTestId("mh-queue-toast-undo"));
+      await waitFor(() => expect(undoBody()).toEqual({ decisionIds: ["dec-clip-5"] }));
+    });
   });
 
   describe("Wrong person? Reassign", () => {
@@ -309,6 +356,34 @@ describe("MediaHighlightsQueue", () => {
       await pickQuinn();
       await screen.findByTestId("mh-queue-override");
       fireEvent.click(screen.getByTestId("mh-queue-reassign-clip-1-revert"));
+      expect(screen.queryByTestId("mh-queue-override")).toBeNull();
+      fireEvent.click(screen.getByTestId("mh-queue-approve-clip-1"));
+      await waitFor(() => expect(decisionBodies()).toHaveLength(1));
+      expect(decisionBodies()[0]).toEqual({ id: "clip-1", decision: "approve" });
+    });
+
+    it("drops a staged pick when a refresh turns the group contested", async () => {
+      directory(true);
+      const { rerender } = renderQueue();
+      await pickQuinn();
+      await screen.findByTestId("mh-queue-override");
+      const contested: NewsQueueGroup = {
+        key: "clip-1",
+        rows: [
+          row({ id: "clip-1" }),
+          row({ id: "clip-7", cwid: "ghi3003", scholarName: "Invented Person-Other" }),
+        ],
+        detectedName: "Invented Person",
+        contested: true,
+      };
+      rerender(
+        <MediaHighlightsQueue pending={[contested]} approved={[]} rejected={[]} counts={COUNTS} />,
+      );
+      expect(screen.queryByTestId("mh-queue-override")).toBeNull();
+      // Even if a later refresh makes it uncontested again, the pick is gone.
+      rerender(
+        <MediaHighlightsQueue pending={PENDING} approved={[]} rejected={[]} counts={COUNTS} />,
+      );
       expect(screen.queryByTestId("mh-queue-override")).toBeNull();
       fireEvent.click(screen.getByTestId("mh-queue-approve-clip-1"));
       await waitFor(() => expect(decisionBodies()).toHaveLength(1));
