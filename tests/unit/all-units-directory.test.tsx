@@ -326,6 +326,17 @@ describe("AllUnitsDirectory", () => {
     expect(screen.getByTestId("all-units-stat-units").textContent).toBe("1 units");
   });
 
+  it("'Both missing' needs BOTH gaps, not either", () => {
+    const describedNoLeader = { ...interimCenter, code: "man-x", leaderName: null };
+    const { container } = render(
+      <AllUnitsDirectory units={[curatedDept, degradedDivision, describedNoLeader]} />,
+    );
+    expect(screen.getByTestId("all-units-gap-lead-rail").textContent).toContain("2");
+    expect(screen.getByTestId("all-units-gap-both-rail").textContent).toContain("1");
+    fireEvent.click(screen.getByTestId("all-units-gap-both-rail"));
+    expect(rowIds(container)).toEqual(["all-units-row-division-D-CARD"]);
+  });
+
   it("Kind, Type and Source facets narrow the list; Clear resets everything", () => {
     const { container } = render(<AllUnitsDirectory units={[...allFour, fakeCore]} />);
     fireEvent.click(screen.getByTestId("all-units-facet-kinds-center-rail"));
