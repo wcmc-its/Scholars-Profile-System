@@ -29,6 +29,7 @@ const {
   mockAwardFindUnique,
   mockTxAwardUpdate,
   mockGrantFindMany,
+  mockMembershipFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -41,6 +42,7 @@ const {
   mockAwardFindUnique: vi.fn(),
   mockTxAwardUpdate: vi.fn(),
   mockGrantFindMany: vi.fn(),
+  mockMembershipFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -66,6 +68,7 @@ vi.mock("@/lib/db", () => ({
         findUnique: mockAwardFindUnique,
       },
       grant: { findMany: mockGrantFindMany },
+      centerMembership: { findMany: mockMembershipFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -107,6 +110,7 @@ beforeEach(() => {
   mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: CENTER.code, role: "curator" }]);
   mockCenterProgramFindMany.mockResolvedValue(PROGRAMS);
   mockGrantFindMany.mockResolvedValue([]);
+  mockMembershipFindMany.mockResolvedValue([]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockExecuteRaw.mockResolvedValue(1);
   mockTxAwardUpdate.mockResolvedValue({ id: "award-1" });
@@ -214,6 +218,44 @@ describe("GET /api/edit/center/[code]/nci-2a", () => {
     expect(award.applId).toBe(999);
     expect(json.awards[1].applId).toBeNull(); // matched Grant, but its applId is null
     expect(json.awards[2].applId).toBeNull(); // no matching Grant at all
+  });
+
+  it("resolves Program live from the PI's center membership, falling back to the stored allocation", async () => {
+    const award = (id: string, grantCwid: string | null) => ({
+      id,
+      pi: `PI ${id}`,
+      specificFundingSource: "NCI",
+      projectNumber: `P-${id}`,
+      projectTitle: "t",
+      projectStartDate: new Date("2024-01-01T00:00:00Z"),
+      projectEndDate: new Date("2028-12-31T00:00:00Z"),
+      annualProjectDirectCosts: 100000,
+      cancerRelevantPercent: 50,
+      cancerRelevantPercentSource: "llm",
+      cancerRelevantRationale: null,
+      isPeerReviewed: true,
+      grantCwid,
+      allocations: [{ id: `alloc-${id}`, programCode: "CB", programPercent: 100, source: "membership" }],
+    });
+    mockAwardFindMany.mockResolvedValue([award("a", "zzz0001"), award("b", "zzz0002"), award("c", null)]);
+    // zzz0001 has since moved to CGE; zzz0002 has no program on the roster.
+    mockMembershipFindMany.mockResolvedValue([{ cwid: "zzz0001", programCode: "CGE" }]);
+    const res = await GET(get("http://localhost/x?cycle=osra-2026-07-14"), {
+      params: Promise.resolve({ code: "meyer_cancer_center" }),
+    });
+    const { awards } = await res.json();
+    expect(mockMembershipFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { centerCode: "meyer_cancer_center", cwid: { in: ["zzz0001", "zzz0002"] }, programCode: { not: null } },
+      }),
+    );
+    expect(awards[0].programFrom).toBe("membership");
+    expect(awards[0].allocations).toEqual([
+      expect.objectContaining({ programCode: "CGE", programLabel: "Cancer Genetics & Epigenetics", programPercent: 100, annualProgramDirectCosts: 50000 }),
+    ]);
+    expect(awards[1].programFrom).toBe("stored");
+    expect(awards[1].allocations[0]).toEqual(expect.objectContaining({ id: "alloc-b", programCode: "CB" }));
+    expect(awards[2].programFrom).toBe("stored");
   });
 
   it("leaves applId null when the same award number resolves to two different Grant.applId values — never guesses", async () => {

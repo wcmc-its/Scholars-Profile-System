@@ -13,6 +13,10 @@
  * center has any rows for (`reportingCycle` sorts lexicographically by
  * design: `osra-YYYY-MM-DD`, so `desc` is chronological).
  *
+ * The rows come from `loadNci2aReport` (`lib/edit/nci-2a-report.server.ts`),
+ * the same loader the report body uses: applId and the program (the PI's
+ * current center membership, else the stored allocation) resolve at read time.
+ *
  * Returns nested JSON (award + its allocations), NOT the flat multi-row-per-
  * program table shape from the NCI worksheet — that's a presentation concern
  * the UI panel and the CSV export both derive from this same shape, so it
@@ -26,16 +30,12 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
-import { normalizeAwardNumber } from "@/lib/award-number";
 import { db } from "@/lib/db";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
+import { loadNci2aReport } from "@/lib/edit/nci-2a-report.server";
 import { editError, editOk, resolveEditIdentity } from "@/lib/edit/request";
 
 const PATH = "/api/edit/center/[code]/nci-2a";
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
 
 export async function GET(
   request: NextRequest,
@@ -67,107 +67,5 @@ export async function GET(
     return editError(403, authz.reason);
   }
 
-  const requestedCycle = request.nextUrl.searchParams.get("cycle");
-  // Independent reads — none depends on another's result — so they run
-  // concurrently (the import script's own analogous three-way read already
-  // does this; this route didn't follow its own sibling's pattern).
-  //
-  // `grants` re-does the SAME award-number join the import script's own
-  // `normalizeAwardNumber` does to resolve `grantCwid`, but for `applId`
-  // instead — done at READ TIME (not backfilled onto the award row at import)
-  // so a later RePORTER-matching ETL run that fills in more `Grant.applId`
-  // values shows up here immediately, with no re-import needed.
-  const [programs, latestCycle, grants] = await Promise.all([
-    db.read.centerProgram.findMany({
-      where: { centerCode: center.code },
-      orderBy: { sortOrder: "asc" },
-      select: { code: true, label: true },
-    }),
-    requestedCycle
-      ? Promise.resolve(null)
-      : db.read.cancerCenterFundingAward.findFirst({
-          where: { centerCode: center.code },
-          orderBy: { reportingCycle: "desc" },
-          select: { reportingCycle: true },
-        }),
-    db.read.grant.findMany({
-      where: { awardNumber: { not: null } },
-      select: { awardNumber: true, applId: true },
-    }),
-  ]);
-  const programLabel = new Map(programs.map((p) => [p.code, p.label]));
-  // Mirrors `buildAwardNumberIndex`'s ambiguous-never-guessed posture (see
-  // `scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts`): when a
-  // normalized award number matches more than one DISTINCT applId across
-  // `Grant` rows, which one is "right" is undefined, so leave the key unset
-  // rather than picking whichever DB-ordering happens to come last — a wrong
-  // applId is a live outbound link to a specific (possibly wrong) RePORTER
-  // project page, silently wrong until clicked. Multiple Grant rows sharing
-  // the SAME award number and the SAME applId are not ambiguous and resolve
-  // normally.
-  const applIdsSeenByAwardNumber = new Map<string, Set<number>>();
-  for (const g of grants) {
-    if (!g.awardNumber || g.applId == null) continue;
-    const key = normalizeAwardNumber(g.awardNumber);
-    if (!applIdsSeenByAwardNumber.has(key)) applIdsSeenByAwardNumber.set(key, new Set());
-    applIdsSeenByAwardNumber.get(key)!.add(g.applId);
-  }
-  const applIdByAwardNumber = new Map<string, number>();
-  for (const [key, applIds] of applIdsSeenByAwardNumber) {
-    if (applIds.size === 1) applIdByAwardNumber.set(key, [...applIds][0]);
-    // size > 1: ambiguous — leave unset, resolves to null at lookup below.
-  }
-
-  const cycle = requestedCycle ?? latestCycle?.reportingCycle ?? null;
-  if (!cycle) return editOk({ cycle: null, programs, awards: [] });
-
-  const awards = await db.read.cancerCenterFundingAward.findMany({
-    where: { centerCode: center.code, reportingCycle: cycle },
-    orderBy: [{ pi: "asc" }, { projectNumber: "asc" }],
-    include: { allocations: { orderBy: { sortOrder: "asc" } } },
-  });
-
-  const shaped = awards.map((a) => {
-    const pct = a.cancerRelevantPercent != null ? Number(a.cancerRelevantPercent) : null;
-    const projectDc = Number(a.annualProjectDirectCosts);
-    // Keep the UNROUNDED intermediate for chaining into the per-allocation
-    // figure below — rounding this once for display, then rounding AGAIN off
-    // the already-rounded value for annualProgramDirectCosts, compounds a
-    // cent or two of drift per row that a hand-recomputed total wouldn't
-    // reproduce. Round exactly once, at each figure's own final display value.
-    const cancerRelevantAnnualProjectDcRaw = pct != null ? projectDc * (pct / 100) : null;
-    const cancerRelevantAnnualProjectDc = cancerRelevantAnnualProjectDcRaw != null ? round2(cancerRelevantAnnualProjectDcRaw) : null;
-    return {
-      id: a.id,
-      pi: a.pi,
-      specificFundingSource: a.specificFundingSource,
-      projectNumber: a.projectNumber,
-      projectTitle: a.projectTitle,
-      projectStartDate: a.projectStartDate.toISOString().slice(0, 10),
-      projectEndDate: a.projectEndDate.toISOString().slice(0, 10),
-      annualProjectDirectCosts: projectDc,
-      cancerRelevantPercent: pct,
-      cancerRelevantPercentSource: a.cancerRelevantPercentSource,
-      cancerRelevantRationale: a.cancerRelevantRationale,
-      cancerRelevantAnnualProjectDc,
-      isPeerReviewed: a.isPeerReviewed,
-      grantCwid: a.grantCwid,
-      applId: applIdByAwardNumber.get(normalizeAwardNumber(a.projectNumber)) ?? null,
-      allocations: a.allocations.map((al) => {
-        const programPercent = Number(al.programPercent);
-        const annualProgramDirectCosts =
-          cancerRelevantAnnualProjectDcRaw != null ? round2(cancerRelevantAnnualProjectDcRaw * (programPercent / 100)) : null;
-        return {
-          id: al.id,
-          programCode: al.programCode,
-          programLabel: al.programCode ? (programLabel.get(al.programCode) ?? al.programCode) : null,
-          programPercent,
-          source: al.source,
-          annualProgramDirectCosts,
-        };
-      }),
-    };
-  });
-
-  return editOk({ cycle, programs, awards: shaped });
+  return editOk(await loadNci2aReport(center.code, request.nextUrl.searchParams.get("cycle")));
 }
