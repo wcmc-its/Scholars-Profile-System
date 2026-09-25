@@ -41,6 +41,7 @@ function row(over: Partial<ClinicalTrialsReportRow>): ClinicalTrialsReportRow {
     title: "A study",
     phase: "PHASE2",
     principalSponsor: "Acme Pharma",
+    sponsorClass: "industry",
     status: "OPEN TO ACCRUAL",
     isActive: true,
     ...over,
@@ -60,6 +61,7 @@ const ROWS = [
     status: "SUSPENDED",
     nctNumber: null,
     phase: null,
+    sponsorClass: null,
   }),
   row({
     protocolNumber: "P-3",
@@ -69,6 +71,7 @@ const ROWS = [
     personName: "Bo Brandt",
     department: null,
     principalSponsor: "Weill Cornell Medical College",
+    sponsorClass: "academic",
     phase: "NA",
   }),
   row({
@@ -116,25 +119,33 @@ describe("parseClinicalTrialsParams / clinicalTrialsQueryString", () => {
   it("reads view, q, status and phase, and ignores unknown values", () => {
     expect(
       parseClinicalTrialsParams(
-        new URLSearchParams("view=members&q=%20lung%20&status=suspended&phase=1/2"),
+        new URLSearchParams(
+          "view=members&q=%20lung%20&status=suspended&phase=1/2&sponsorType=network",
+        ),
       ),
     ).toEqual({
       view: "members",
       q: "lung",
       status: "suspended",
       phase: "1/2",
+      sponsorType: "network",
     });
+    expect(parseClinicalTrialsParams(new URLSearchParams("sponsorType=unknown")).sponsorType).toBe(
+      "unknown",
+    );
     expect(
-      parseClinicalTrialsParams(new URLSearchParams("view=x&status=bogus&phase=9&role=pi")),
+      parseClinicalTrialsParams(
+        new URLSearchParams("view=x&status=bogus&phase=9&role=pi&sponsorType=Industry"),
+      ),
     ).toEqual(CLINICAL_TRIALS_DEFAULTS);
   });
 
   it("round-trips, leaves defaults out, and drops the view for the download", () => {
     const p = parseClinicalTrialsParams(
-      new URLSearchParams("view=members&q=lung&status=open&phase=2"),
+      new URLSearchParams("view=members&q=lung&status=open&phase=2&sponsorType=nih"),
     );
     expect(parseClinicalTrialsParams(new URLSearchParams(clinicalTrialsQueryString(p)))).toEqual(p);
-    expect(clinicalTrialsQueryString(p, false)).toBe("q=lung&status=open&phase=2");
+    expect(clinicalTrialsQueryString(p, false)).toBe("q=lung&status=open&phase=2&sponsorType=nih");
     expect(clinicalTrialsQueryString(CLINICAL_TRIALS_DEFAULTS)).toBe("");
   });
 });
@@ -168,6 +179,26 @@ describe("groupTrials / filterTrials", () => {
     expect(f("q=delta")).toEqual(["P-4"]); // title
     expect(f("q=p-2")).toEqual(["P-2"]); // protocol number
     expect(f("status=open&phase=3")).toEqual([]);
+    expect(f("sponsorType=academic")).toEqual(["P-3"]);
+    expect(f("sponsorType=unknown")).toEqual(["P-2"]); // null class
+    expect(f("sponsorType=industry")).toEqual(["P-1", "P-4"]);
+    expect(f("sponsorType=nih")).toEqual([]);
+  });
+
+  it("carries each trial's sponsor type, null as unknown", () => {
+    const byP = new Map(groupTrials(ROWS).map((t) => [t.protocolNumber, t.sponsorType]));
+    expect(byP.get("P-1")).toBe("industry");
+    expect(byP.get("P-2")).toBe("unknown");
+    expect(byP.get("P-3")).toBe("academic");
+    expect(groupTrials([row({ sponsorClass: "bogus" })])[0].sponsorType).toBe("unknown");
+  });
+
+  it("narrows the totals with the sponsor type", () => {
+    const filtered = filterTrials(
+      groupTrials(ROWS),
+      parseClinicalTrialsParams(new URLSearchParams("sponsorType=industry")),
+    );
+    expect(clinicalTrialsTotals(filtered)).toMatchObject({ trials: 2, open: 1, registered: 2 });
   });
 });
 
@@ -211,9 +242,12 @@ describe("summarizeMembers / totals / note / criteria", () => {
       Status: "All",
       Phase: "All",
     });
+    expect(rows["Sponsor type"]).toBe("All");
+    expect(rows["Sponsor type source"]).toContain("ClinicalTrials.gov lead sponsor class");
+    expect(rows["Sponsor type source"]).toContain("OnCore principal sponsor");
     const set = Object.fromEntries(
       describeClinicalTrialsCriteria(
-        { view: "trials", q: "lung", status: "irb", phase: "1/2" },
+        { view: "trials", q: "lung", status: "irb", phase: "1/2", sponsorType: "unknown" },
         "C",
         at,
       ),
@@ -223,6 +257,13 @@ describe("summarizeMembers / totals / note / criteria", () => {
       Status: "Closed (IRB study closure)",
       Phase: "Phase 1/2",
     });
+    expect(
+      describeClinicalTrialsCriteria(
+        { ...CLINICAL_TRIALS_DEFAULTS, sponsorType: "unknown" },
+        "C",
+        at,
+      ).find(([k]) => k === "Sponsor type")?.[1],
+    ).toBe("Unknown");
   });
 });
 
@@ -253,9 +294,13 @@ describe("buildClinicalTrialsWorkbook", () => {
     expect(trials[0]).toContain("Principal investigator(s)");
     expect(trials).toHaveLength(5);
     const p2 = trials.find((r) => r[0] === "P-2")!;
+    expect(trials[0][4]).toBe("Sponsor type");
     expect(p2[1]).toBe("Local only · no NCT");
-    expect(p2[5]).toBe("Temporarily suspended");
-    expect(p2[6]).toBe("Ada Anders");
+    expect(p2[4]).toBe("Unknown");
+    expect(p2[6]).toBe("Temporarily suspended");
+    expect(p2[7]).toBe("Ada Anders");
+    expect(trials.find((r) => r[0] === "P-3")![4]).toBe("Other academic");
+    expect(trials.find((r) => r[0] === "P-1")![4]).toBe("Industry");
     const inv = values("Investigators");
     expect(inv[0]).toEqual([
       "CWID",

@@ -9,6 +9,11 @@
  */
 import { db } from "../../lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
+import {
+  sponsorClassFromCtgov,
+  sponsorClassFromOncore,
+  type SponsorClass,
+} from "@/lib/clinical-trial-sponsor-class";
 
 export const INSERT_BATCH = 1000;
 
@@ -100,6 +105,7 @@ export type TrialBuild = {
   studyType: string | null;
   phase: string | null;
   principalSponsor: string | null;
+  sponsorClass: SponsorClass | null;
   conditions: string | null;
   meshTerms: string | null;
   briefSummary: string | null;
@@ -158,14 +164,18 @@ export async function readReciterdbTables(): Promise<{
 export const INACTIVE_STATUSES = new Set(["IRB STUDY CLOSURE", "CLOSED TO ACCRUAL"]);
 
 /** A ClinicalTrials.gov study in the `clinical_trials_enriched` shape, plus the
- *  ACTUAL primary completion date (null when absent or only ANTICIPATED). */
-export type CtgovStudy = EnrichedRow & { primaryCompletionActual: string | null };
+ *  ACTUAL primary completion date (null when absent or only ANTICIPATED) and
+ *  the raw lead-sponsor class (INDUSTRY, NIH, FED, OTHER, ...). */
+export type CtgovStudy = EnrichedRow & {
+  primaryCompletionActual: string | null;
+  leadSponsorClass: string | null;
+};
 
 const CTGOV_URL = "https://clinicaltrials.gov/api/v2/studies";
 const CTGOV_FIELDS = [
   "NCTId", "BriefTitle", "OfficialTitle", "BriefSummary", "StudyType", "Phase",
   "Condition", "ConditionMeshTerm", "EnrollmentCount",
-  "PrimaryCompletionDate", "PrimaryCompletionDateType",
+  "PrimaryCompletionDate", "PrimaryCompletionDateType", "LeadSponsorClass",
 ].join(",");
 /** The subset of a v2 study we read (`fields=` limits the response to it). */
 type CtgovApiStudy = {
@@ -175,6 +185,7 @@ type CtgovApiStudy = {
     descriptionModule?: { briefSummary?: string };
     conditionsModule?: { conditions?: string[] };
     designModule?: { studyType?: string; phases?: string[]; enrollmentInfo?: { count?: number } };
+    sponsorCollaboratorsModule?: { leadSponsor?: { class?: string } };
   };
   derivedSection?: { conditionBrowseModule?: { meshes?: Array<{ term?: string }> } };
 };
@@ -221,6 +232,7 @@ export async function fetchCtgovStudies(
           ),
           enrollment: ps.designModule?.enrollmentInfo?.count ?? null,
           primaryCompletionActual: pc?.type === "ACTUAL" ? (pc.date ?? null) : null,
+          leadSponsorClass: ps.sponsorCollaboratorsModule?.leadSponsor?.class ?? null,
         });
       }
     } catch (e) {
@@ -326,6 +338,13 @@ export function buildTrialsAndLinks(
         studyType: nonEmpty(enrichedRow?.studyType),
         phase: nonEmpty(enrichedRow?.phases),
         principalSponsor: nonEmpty(r.principalSponsor),
+        // CT.gov's class for a registered trial; otherwise (no NCT, CT.gov
+        // AMBIG/UNKNOWN, a failed fetch, or the bridge import, which never
+        // calls CT.gov) a best-effort read of OnCore's sponsor name. The
+        // mapping is documented in lib/clinical-trial-sponsor-class.ts.
+        sponsorClass:
+          sponsorClassFromCtgov(study?.leadSponsorClass) ??
+          sponsorClassFromOncore(r.principalSponsor),
         conditions: nonEmpty(enrichedRow?.conditions),
         meshTerms: nonEmpty(enrichedRow?.meshTerms),
         briefSummary: nonEmpty(enrichedRow?.briefSummary),

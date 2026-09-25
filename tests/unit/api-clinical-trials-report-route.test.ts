@@ -46,7 +46,12 @@ const session = { cwid: "cur0001", isSuperuser: false, isCommsSteward: false };
 const req = (qs: string) =>
   new NextRequest(`http://localhost/api/edit/reports/clinical-trials?${qs}`);
 
-function link(protocolNumber: string, status: string, cwid = "aaa1001") {
+function link(
+  protocolNumber: string,
+  status: string,
+  cwid = "aaa1001",
+  sponsorClass: string | null = "industry",
+) {
   return {
     cwid,
     personName: `Person ${cwid}`,
@@ -57,6 +62,7 @@ function link(protocolNumber: string, status: string, cwid = "aaa1001") {
     title: `Trial ${protocolNumber}`,
     phase: "PHASE2",
     principalSponsor: "Acme",
+    sponsorClass,
     status,
     isActive: status === "OPEN TO ACCRUAL",
   };
@@ -69,7 +75,10 @@ beforeEach(() => {
   h.programFind.mockResolvedValue({ centerCode: "CC" });
   h.role.mockResolvedValue("curator");
   h.ctx.mockResolvedValue({ unit: { name: "Test Center" } });
-  h.load.mockResolvedValue([link("P-1", "OPEN TO ACCRUAL"), link("P-2", "SUSPENDED", "bbb2002")]);
+  h.load.mockResolvedValue([
+    link("P-1", "OPEN TO ACCRUAL"),
+    link("P-2", "SUSPENDED", "bbb2002", null),
+  ]);
 });
 
 describe("GET /api/edit/reports/clinical-trials — gate", () => {
@@ -139,5 +148,24 @@ describe("GET /api/edit/reports/clinical-trials — workbook", () => {
       ]),
     );
     expect(criteria).toMatchObject({ Center: "Test Center", Status: "Temporarily suspended" });
+  });
+
+  it("narrows the .xlsx by sponsor type, with a Sponsor type column and criterion", async () => {
+    const res = await GET(req("center=CC&sponsorType=industry"));
+    expect(res.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const trials = wb.getWorksheet("Trials")!;
+    expect(trials.rowCount).toBe(2);
+    expect(trials.getRow(1).getCell(5).value).toBe("Sponsor type");
+    expect(trials.getRow(2).getCell(1).value).toBe("P-1");
+    expect(trials.getRow(2).getCell(5).value).toBe("Industry");
+    const criteria = Object.fromEntries(
+      (wb.getWorksheet("Criteria")!.getSheetValues().filter(Boolean) as unknown[][]).map((r) => [
+        r[1],
+        r[2],
+      ]),
+    );
+    expect(criteria["Sponsor type"]).toBe("Industry");
   });
 });

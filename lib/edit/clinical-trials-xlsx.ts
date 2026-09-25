@@ -18,6 +18,7 @@ import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import {
   describeClinicalTrialsCriteria,
   phaseLabel,
+  sponsorTypeLabel,
   summarizeMembers,
   trialStatusLabel,
   type ClinicalTrialsParams,
@@ -47,6 +48,7 @@ export async function buildClinicalTrialsWorkbook(
     "NCT number",
     "Title",
     "Sponsor",
+    "Sponsor type",
     "Phase",
     "Status",
     "Principal investigator(s)",
@@ -59,13 +61,14 @@ export async function buildClinicalTrialsWorkbook(
       t.nctNumber ?? "Local only · no NCT",
       t.title,
       t.sponsor ?? "",
+      sponsorTypeLabel(t.sponsorType),
       phaseLabel(t.phaseKey),
       trialStatusLabel(t.status),
       t.members.map((m) => m.name).join("; "),
       t.nctNumber ? ctgovUrl(t.nctNumber) : "",
     ]);
   }
-  [18, 16, 80, 36, 16, 26, 36, 44].forEach((w, i) => (ts.getColumn(i + 1).width = w));
+  [18, 16, 80, 36, 18, 16, 26, 36, 44].forEach((w, i) => (ts.getColumn(i + 1).width = w));
 
   const is = wb.addWorksheet("Investigators");
   const members = summarizeMembers(trials);

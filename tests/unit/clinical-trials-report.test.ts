@@ -28,6 +28,7 @@ function fakeClient(overrides: {
       status: string | null;
       phase: string | null;
       principalSponsor: string | null;
+      sponsorClass: string | null;
     };
   }>;
 }): ClinicalTrialsReportClient {
@@ -50,6 +51,7 @@ function trial(over: Partial<{
   status: string | null;
   phase: string | null;
   principalSponsor: string | null;
+  sponsorClass: string | null;
 }> = {}) {
   return {
     nctNumber: null,
@@ -57,6 +59,7 @@ function trial(over: Partial<{
     status: null,
     phase: null,
     principalSponsor: null,
+    sponsorClass: null,
     ...over,
   };
 }
@@ -98,6 +101,7 @@ describe("loadClinicalTrialsReport", () => {
             status: "Recruiting",
             phase: "Phase 2",
             principalSponsor: "Acme Pharma",
+            sponsorClass: "industry",
           }),
         },
       ],
@@ -114,6 +118,7 @@ describe("loadClinicalTrialsReport", () => {
         title: "A Study of Widgets",
         phase: "Phase 2",
         principalSponsor: "Acme Pharma",
+        sponsorClass: "industry",
         status: "Recruiting",
         isActive: true,
       },
