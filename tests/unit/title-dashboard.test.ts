@@ -214,13 +214,16 @@ describe("findRoleConflicts", () => {
     );
   });
 
-  it("does not read 'Chair of Neurological Surgery' as a claim on Surgery, nor a holder's own title", () => {
+  it("does not read 'Chair of Neurological Surgery' or a Vice/Associate Chair as a claim on Surgery, nor a holder's own title", () => {
     const out = findRoleConflicts({
       assignments: [a("department", "D-SURG", "zzx0002"), a("department", "D-NSURG", "zzx0003")],
       units,
       claims: [
         { cwid: "zzx0003", title: "Chair of Neurological Surgery" },
         { cwid: "zzx0002", title: "Chair of Surgery" },
+        { cwid: "zzx0009", title: "Vice Chairman of Surgery for Example Campus" },
+        { cwid: "zzx0010", title: "Vice-Chair of Surgery" },
+        { cwid: "zzx0011", title: "Associate Chair of Surgery" },
       ],
     });
     expect(out.size).toBe(0);

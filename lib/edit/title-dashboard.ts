@@ -438,7 +438,8 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  *     of that name is not in conflict (two divisions share "Cardiology").
  *
  * "Names" is the ED ETL's own chair wording, "Chair of {name}", so "Chair of
- * Neurological Surgery" never reads as a claim on Surgery.
+ * Neurological Surgery" never reads as a claim on Surgery, and — like the
+ * ETL — a Vice / Associate / Deputy / Assistant Chair is not the chair.
  */
 export function findRoleConflicts(input: {
   assignments: readonly { entityType: string; entityId: string; cwid: string; interim: boolean }[];
@@ -472,7 +473,7 @@ export function findRoleConflicts(input: {
     const name = escapeRe(u.name);
     const office =
       u.entityType === "department"
-        ? `\\bchair(?:man|woman|person)? of (?:the )?(?:department of )?${name}\\b`
+        ? `\\b(?<!(?:vice|associate|deputy|assistant)[- ])chair(?:man|woman|person)? of (?:the )?(?:department of )?${name}\\b`
         : u.entityType === "division"
           ? `\\bchief(?:,| of)(?: the)?(?: division of)? ${name}\\b`
           : `\\b(?<!associate |assistant |deputy |co-)director(?:,| of)(?: the)? ${name}\\b`;
