@@ -26,6 +26,13 @@
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadTitleCandidates, type TitleResolutionClient, type TitleCandidates } from "@/etl/ed/title-resolution";
 import { isTitleResolutionEnabled, loadChairedDepartments } from "@/lib/edit/title-picker";
+import { NON_ACADEMIC_DEPT_NAMES } from "@/lib/non-academic-units";
+import {
+  CENTER_ENTITY_TYPE,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import {
   rankTitleText,
   resolveFromOptions,
@@ -42,7 +49,8 @@ export type TitleReason =
   | "contested"
   | "leadershipLost"
   | "mismatch"
-  | "unverifiedWorkingTitle";
+  | "unverifiedWorkingTitle"
+  | "conflictingRoles";
 
 export const TITLE_REASONS: readonly TitleReason[] = [
   "leadership",
@@ -51,6 +59,7 @@ export const TITLE_REASONS: readonly TitleReason[] = [
   "leadershipLost",
   "mismatch",
   "unverifiedWorkingTitle",
+  "conflictingRoles",
 ] as const;
 
 export const TITLE_REASON_LABEL: Record<TitleReason, string> = {
@@ -60,12 +69,19 @@ export const TITLE_REASON_LABEL: Record<TitleReason, string> = {
   leadershipLost: "Leadership lost",
   mismatch: "Mismatch",
   unverifiedWorkingTitle: "Unverified working title",
+  conflictingRoles: "Conflicting roles",
 };
 
 /** Rank 1–8.5: Dean through Vice Chair. */
 const isLeadershipRank = (rank: number) => rank <= TITLE_RANK.viceChair;
 
-export type TitleRoles = { chair: boolean; chief: boolean; centerDirector: boolean };
+export type TitleRoles = {
+  chair: boolean;
+  chief: boolean;
+  centerDirector: boolean;
+  /** Operator notes from {@link findRoleConflicts}, already formatted. */
+  conflicts?: string[];
+};
 
 export type TitleDashboardRow = {
   cwid: string;
@@ -86,6 +102,8 @@ export type TitleDashboardRow = {
   /** Why `unverifiedWorkingTitle` fired, plus any ended appointment that
    *  explains the claim (filled by the loader). Empty when it did not. */
   unverifiedNotes: string[];
+  /** Why `conflictingRoles` fired: who else holds or claims the unit. */
+  conflictNotes: string[];
   /** Every tier row, for the inline picker. */
   options: TitleOption[];
 };
@@ -159,6 +177,8 @@ export function classifyTitleRow(
   }
   if (mismatchNotes.length > 0) reasons.push("mismatch");
   if (unverifiedNotes.length > 0) reasons.push("unverifiedWorkingTitle");
+  const conflictNotes = roles.conflicts ?? [];
+  if (conflictNotes.length > 0) reasons.push("conflictingRoles");
   if (reasons.length === 0) return null;
 
   return {
@@ -172,6 +192,7 @@ export function classifyTitleRow(
     reasons,
     mismatchNotes,
     unverifiedNotes,
+    conflictNotes,
     options: c.options,
   };
 }
@@ -180,18 +201,54 @@ type DashboardClient = TitleResolutionClient & Pick<PrismaClient, "scholar">;
 
 /** Every listed scholar, by name. One pass over ~9.4k candidates in memory. */
 export async function loadTitleDashboard(client: DashboardClient): Promise<TitleDashboardRow[]> {
-  const [candidates, chairRows, chiefRows, centerRows] = await Promise.all([
-    loadTitleCandidates(client, { applyDerivedTiers: isTitleResolutionEnabled() }),
-    // Chairs of academic departments only (`loadChairedDepartments`): not an
-    // administrative department's `director`, not Graduate School / MD-PhD.
-    loadChairedDepartments(client),
-    roleCwids(client, "division"),
-    roleCwids(client, "center", "director"),
-  ]);
+  const [candidates, chairRows, chiefRows, centerRows, assignments, departments, divisions, centers] =
+    await Promise.all([
+      loadTitleCandidates(client, { applyDerivedTiers: isTitleResolutionEnabled() }),
+      // Chairs of academic departments only (`loadChairedDepartments`): not an
+      // administrative department's `director`, not Graduate School / MD-PhD.
+      loadChairedDepartments(client),
+      roleCwids(client, "division"),
+      roleCwids(client, "center", "director"),
+      client.orgUnitRoleAssignment.findMany({
+        where: {
+          OR: [
+            { entityType: "department", role: { key: DEPARTMENT_CHAIR_ROLE_KEY } },
+            { entityType: "division", role: { key: DIVISION_CHIEF_ROLE_KEY } },
+            { entityType: CENTER_ENTITY_TYPE, role: { key: DIRECTOR_ROLE_KEY } },
+          ],
+        },
+        select: { entityType: true, entityId: true, cwid: true, interim: true },
+      }),
+      client.department.findMany({ select: { code: true, name: true } }),
+      client.division.findMany({ select: { code: true, name: true } }),
+      client.center.findMany({ select: { code: true, name: true, officialName: true } }),
+    ]);
+  const conflicts = findRoleConflicts({
+    assignments,
+    units: [
+      ...departments
+        .filter((d) => !NON_ACADEMIC_DEPT_NAMES.has(d.name))
+        .map((d) => ({ entityType: "department", code: d.code, name: d.name })),
+      ...divisions.map((d) => ({ entityType: "division", code: d.code, name: d.name })),
+      ...centers.map((c) => ({ entityType: CENTER_ENTITY_TYPE, code: c.code, name: c.officialName ?? c.name })),
+    ],
+    claims: candidates.flatMap((c) => c.texts.map((t) => ({ cwid: c.cwid, title: t.title }))),
+  });
+  const involved = [...new Set([...conflicts.values()].flat().flatMap((x) => [...x.others]))];
+  const otherNames = new Map(
+    (
+      await client.scholar.findMany({ where: { cwid: { in: involved } }, select: { cwid: true, preferredName: true } })
+    ).map((n) => [n.cwid, n.preferredName]),
+  );
   const listed = candidates.flatMap((c) => {
     const row = classifyTitleRow(
       c,
-      { chair: chairRows.has(c.cwid), chief: chiefRows.has(c.cwid), centerDirector: centerRows.has(c.cwid) },
+      {
+        chair: chairRows.has(c.cwid),
+        chief: chiefRows.has(c.cwid),
+        centerDirector: centerRows.has(c.cwid),
+        conflicts: (conflicts.get(c.cwid) ?? []).map((x) => formatConflict(x, (id) => otherNames.get(id) ?? id)),
+      },
       "",
     );
     return row ? [row] : [];
@@ -275,7 +332,7 @@ export function formatTitleRank(rank: number | null | undefined): string {
 
 /** The operator notes on a row: the mismatch reasons, then the redundant pin. */
 export function titleRowNotes(r: TitleDashboardRow): string[] {
-  return [...r.mismatchNotes, ...r.unverifiedNotes, ...(r.pinRedundant ? ["Pin matches ladder — can unpin"] : [])];
+  return [...r.mismatchNotes, ...r.unverifiedNotes, ...r.conflictNotes, ...(r.pinRedundant ? ["Pin matches ladder — can unpin"] : [])];
 }
 
 /** The rank of what is displayed by rule: the pin's (its tier row when it is
@@ -345,4 +402,107 @@ export function titleDashboardCriteria(p: TitleDashboardParams): Array<readonly 
     ["Winning rule", p.rule ? titleRuleLabel(p.rule) : "All"],
     ["Search", p.q || "All"],
   ];
+}
+
+/** One leadership role on one unit that another person also holds or claims. */
+export type RoleConflict = {
+  /** "shared": 2+ people hold the role. "claimed": this person's title
+   *  names the unit, someone else holds its role. "claimedBy": this person
+   *  holds the role, someone else's title names the unit. */
+  kind: "shared" | "claimed" | "claimedBy";
+  role: "Chair" | "Chief" | "Director";
+  unit: string;
+  others: string[];
+  /** The claiming title, for "claimed" / "claimedBy". */
+  title?: string;
+};
+
+const ROLE_BY_ENTITY: Record<string, RoleConflict["role"]> = {
+  department: "Chair",
+  division: "Chief",
+  [CENTER_ENTITY_TYPE]: "Director",
+};
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Leadership conflicts per cwid. Pure, so the rules are testable without a
+ * database:
+ *
+ *   - two or more people hold the same leadership role (department chair,
+ *     division chief, center director) on one unit — an interim beside a
+ *     permanent holder included, since one of them is usually stale;
+ *   - a title names a unit's office ("Chair of Surgery", "Chief, Cardiology",
+ *     "Director, <center>") whose role someone ELSE holds — flagged on both
+ *     the claimant and the holder. A claimant who holds that role on ANY unit
+ *     of that name is not in conflict (two divisions share "Cardiology").
+ *
+ * "Names" is the ED ETL's own chair wording, "Chair of {name}", so "Chair of
+ * Neurological Surgery" never reads as a claim on Surgery.
+ */
+export function findRoleConflicts(input: {
+  assignments: readonly { entityType: string; entityId: string; cwid: string; interim: boolean }[];
+  units: readonly { entityType: string; code: string; name: string }[];
+  claims: readonly { cwid: string; title: string }[];
+}): Map<string, RoleConflict[]> {
+  const out = new Map<string, RoleConflict[]>();
+  const add = (cwid: string, c: RoleConflict) => {
+    const list = out.get(cwid) ?? [];
+    if (!list.some((x) => x.kind === c.kind && x.unit === c.unit && x.role === c.role && x.title === c.title)) {
+      list.push(c);
+    }
+    out.set(cwid, list);
+  };
+  const unitByKey = new Map(input.units.map((u) => [`${u.entityType}:${u.code}`, u]));
+  const holders = new Map<string, string[]>();
+  for (const a of input.assignments) {
+    const key = `${a.entityType}:${a.entityId}`;
+    if (!unitByKey.has(key)) continue;
+    holders.set(key, [...new Set([...(holders.get(key) ?? []), a.cwid])]);
+  }
+  for (const [key, cwids] of holders) {
+    if (cwids.length < 2) continue;
+    const u = unitByKey.get(key)!;
+    for (const cwid of cwids) {
+      add(cwid, { kind: "shared", role: ROLE_BY_ENTITY[u.entityType], unit: u.name, others: cwids.filter((x) => x !== cwid) });
+    }
+  }
+
+  const patterns = input.units.map((u) => {
+    const name = escapeRe(u.name);
+    const office =
+      u.entityType === "department"
+        ? `\\bchair(?:man|woman|person)? of (?:the )?(?:department of )?${name}\\b`
+        : u.entityType === "division"
+          ? `\\bchief(?:,| of)(?: the)?(?: division of)? ${name}\\b`
+          : `\\b(?<!associate |assistant |deputy |co-)director(?:,| of)(?: the)? ${name}\\b`;
+    return { unit: u, re: new RegExp(office, "i") };
+  });
+  for (const claim of input.claims) {
+    const hits = patterns.filter((p) => p.re.test(claim.title));
+    // Group by (role, unit name): a claimant holding the role on ANY
+    // same-named unit is not in conflict.
+    const byName = new Map<string, typeof hits>();
+    for (const h of hits) {
+      const k = `${h.unit.entityType}:${h.unit.name.toLowerCase()}`;
+      byName.set(k, [...(byName.get(k) ?? []), h]);
+    }
+    for (const group of byName.values()) {
+      const held = group.flatMap((h) => holders.get(`${h.unit.entityType}:${h.unit.code}`) ?? []);
+      if (held.length === 0 || held.includes(claim.cwid)) continue;
+      const u = group[0].unit;
+      const role = ROLE_BY_ENTITY[u.entityType];
+      add(claim.cwid, { kind: "claimed", role, unit: u.name, others: held, title: claim.title });
+      for (const h of held) add(h, { kind: "claimedBy", role, unit: u.name, others: [claim.cwid], title: claim.title });
+    }
+  }
+  return out;
+}
+
+/** One conflict as an operator note, names resolved by `nameOf`. */
+export function formatConflict(c: RoleConflict, nameOf: (cwid: string) => string): string {
+  const who = c.others.map(nameOf).join(", ");
+  if (c.kind === "shared") return `${c.role} of ${c.unit} is also held by ${who}`;
+  if (c.kind === "claimed") return `Title "${c.title}" names ${c.unit}, whose ${c.role.toLowerCase()} role is held by ${who}`;
+  return `${who}'s title "${c.title}" claims this ${c.role.toLowerCase()} role on ${c.unit}`;
 }

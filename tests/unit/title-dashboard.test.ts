@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   classifyTitleRow,
+  findRoleConflicts,
+  formatConflict,
   filterTitleDashboard,
   parseTitleDashboardParams,
 } from "@/lib/edit/title-dashboard";
@@ -176,5 +178,72 @@ describe("loadChairedDepartments", () => {
     };
     const out = await loadChairedDepartments(client as never);
     expect([...out.entries()]).toEqual([["zzc0001", ["Surgery"]]]);
+  });
+});
+
+describe("findRoleConflicts", () => {
+  const units = [
+    { entityType: "department", code: "D-SURG", name: "Surgery" },
+    { entityType: "department", code: "D-NSURG", name: "Neurological Surgery" },
+    { entityType: "division", code: "V-CARD1", name: "Cardiology" },
+    { entityType: "division", code: "V-CARD2", name: "Cardiology" },
+    { entityType: "center", code: "C-EX", name: "Example Cancer Center" },
+  ];
+  const a = (entityType: string, entityId: string, cwid: string, interim = false) => ({ entityType, entityId, cwid, interim });
+
+  it("flags two holders of one unit's role on both, including interim beside permanent", () => {
+    const out = findRoleConflicts({
+      assignments: [a("department", "D-SURG", "zzx0001"), a("department", "D-SURG", "zzx0002", true)],
+      units,
+      claims: [],
+    });
+    expect(out.get("zzx0001")).toEqual([{ kind: "shared", role: "Chair", unit: "Surgery", others: ["zzx0002"] }]);
+    expect(out.get("zzx0002")?.[0].others).toEqual(["zzx0001"]);
+  });
+
+  it("flags a stale 'Chair of Surgery' on the claimant and the current chair", () => {
+    const out = findRoleConflicts({
+      assignments: [a("department", "D-SURG", "zzx0002")],
+      units,
+      claims: [{ cwid: "zzx0001", title: "Chair of Surgery" }],
+    });
+    expect(out.get("zzx0001")?.[0]).toMatchObject({ kind: "claimed", unit: "Surgery", others: ["zzx0002"] });
+    expect(out.get("zzx0002")?.[0]).toMatchObject({ kind: "claimedBy", others: ["zzx0001"] });
+    expect(formatConflict(out.get("zzx0001")![0], (c) => `Name ${c}`)).toBe(
+      'Title "Chair of Surgery" names Surgery, whose chair role is held by Name zzx0002',
+    );
+  });
+
+  it("does not read 'Chair of Neurological Surgery' as a claim on Surgery, nor a holder's own title", () => {
+    const out = findRoleConflicts({
+      assignments: [a("department", "D-SURG", "zzx0002"), a("department", "D-NSURG", "zzx0003")],
+      units,
+      claims: [
+        { cwid: "zzx0003", title: "Chair of Neurological Surgery" },
+        { cwid: "zzx0002", title: "Chair of Surgery" },
+      ],
+    });
+    expect(out.size).toBe(0);
+  });
+
+  it("does not flag a chief who holds the role on EITHER same-named division", () => {
+    const out = findRoleConflicts({
+      assignments: [a("division", "V-CARD1", "zzx0004"), a("division", "V-CARD2", "zzx0005")],
+      units,
+      claims: [{ cwid: "zzx0004", title: "Chief, Cardiology" }],
+    });
+    expect(out.size).toBe(0);
+  });
+
+  it("flags a center director claim, but never an associate director's", () => {
+    const out = findRoleConflicts({
+      assignments: [a("center", "C-EX", "zzx0006")],
+      units,
+      claims: [
+        { cwid: "zzx0007", title: "Associate Director, Example Cancer Center" },
+        { cwid: "zzx0008", title: "Director, Example Cancer Center" },
+      ],
+    });
+    expect([...out.keys()].sort()).toEqual(["zzx0006", "zzx0008"]);
   });
 });
