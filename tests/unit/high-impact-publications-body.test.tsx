@@ -417,4 +417,63 @@ describe("RailChecklist (roomy)", () => {
     fireEvent.click(q.getByRole("checkbox", { name: /Dept 4/ }));
     expect(onChange).toHaveBeenCalledTimes(1);
   });
+
+  // The rules below are report 9's list as #2794 shipped it (the old
+  // `rail-check-list.tsx`); `roomy` must keep them so the merge changed nothing.
+  const visibleLabels = (c: HTMLElement) =>
+    [...c.querySelectorAll("li")].filter((l) => !l.hidden).map((l) => l.textContent);
+
+  it("a list no longer than the cap still gets its search box", () => {
+    const r = render(
+      <RailChecklist
+        roomy
+        name="unit"
+        options={OPTS.slice(0, 3)}
+        selected={[]}
+        searchPlaceholder="Search centers…"
+        collapseAfter={6}
+      />,
+    );
+    expect(within(r.container).getByRole("searchbox", { name: "Search centers…" })).toBeTruthy();
+    expect(within(r.container).queryByRole("button")).toBeNull();
+  });
+
+  it("a search hides a ticked non-match, which still submits", () => {
+    const r = render(
+      <form data-testid="f">
+        <RailChecklist
+          roomy
+          name="unit"
+          options={OPTS}
+          selected={["dept:D1"]}
+          searchPlaceholder="Search departments…"
+          collapseAfter={8}
+        />
+      </form>,
+    );
+    const q = within(r.container);
+    fireEvent.change(q.getByRole("searchbox"), { target: { value: "Dept 4" } });
+    expect(visibleLabels(r.container)).toEqual(["Dept 46"]);
+    expect(new FormData(q.getByTestId("f") as HTMLFormElement).getAll("unit")).toEqual(["dept:D1"]);
+  });
+
+  it("Show all stays offered when every option past the cap is ticked", () => {
+    const r = render(
+      <RailChecklist roomy name="unit" options={OPTS.slice(0, 4)} selected={["dept:D3"]} collapseAfter={3} />,
+    );
+    expect(visibleLabels(r.container)).toHaveLength(4);
+    expect(within(r.container).getByRole("button", { name: "Show all 4" })).toBeTruthy();
+  });
+
+  it("an empty list keeps its wrapper and header and says No matches.", () => {
+    const r = render(
+      <RailChecklist roomy name="unit" options={[]} selected={[]} countLabel="People" testId="empty" />,
+    );
+    expect(within(r.container).getByTestId("empty").textContent).toBe("PeopleNo matches.");
+  });
+
+  it("labels are not force-wrapped", () => {
+    const r = render(<RailChecklist roomy name="unit" options={OPTS.slice(0, 1)} selected={[]} />);
+    expect(r.container.querySelector("li span")!.className).not.toContain("break-words");
+  });
 });

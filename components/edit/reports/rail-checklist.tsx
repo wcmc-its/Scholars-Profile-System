@@ -39,7 +39,13 @@ export function RailChecklist({
   collapseAfter?: number;
   /** Given → a search box (shown when the list is longer than the cap). */
   searchPlaceholder?: string;
-  /** Report 9's rail: looser rows, larger boxes, zero counts not dimmed. */
+  /**
+   * Report 9's rail, as #2794 shipped it: looser rows, larger boxes, zero
+   * counts not dimmed, labels not force-wrapped, and its own rules: the search
+   * box shows whenever asked for, a search hides even a ticked non-match
+   * (still submitted), "Show all N" shows whenever the list outruns the cap,
+   * and an empty list keeps its header and says "No matches.".
+   */
   roomy?: boolean;
   testId?: string;
 }) {
@@ -47,18 +53,19 @@ export function RailChecklist({
   const [showAll, setShowAll] = useState(false);
   const chosen = new Set(selected);
   const q = query.trim().toLowerCase();
-  const showSearch = searchPlaceholder !== undefined && options.length > collapseAfter;
+  const showSearch = searchPlaceholder !== undefined && (roomy || options.length > collapseAfter);
 
   let visibleCount = 0;
   const rows = options.map((o, i) => {
     const checked = chosen.has(o.value);
-    const shown = checked || (q ? o.label.toLowerCase().includes(q) : showAll || i < collapseAfter);
+    const matches = o.label.toLowerCase().includes(q);
+    const shown = q ? matches || (checked && !roomy) : checked || showAll || i < collapseAfter;
     if (shown) visibleCount += 1;
     return { ...o, checked, shown };
   });
   const hiddenCount = q ? 0 : options.length - visibleCount;
 
-  if (options.length === 0) return <p className="text-muted-foreground text-[13px]">None in this selection.</p>;
+  if (options.length === 0 && !roomy) return <p className="text-muted-foreground text-[13px]">None in this selection.</p>;
   return (
     <div className={`flex flex-col ${roomy ? "gap-0.5" : "gap-1"}`} data-testid={testId}>
       {showSearch && (
@@ -108,7 +115,7 @@ export function RailChecklist({
                       : "mt-[3px] accent-[var(--apollo-maroon)]"
                   }
                 />
-                <span className="min-w-0 flex-1 leading-[1.35] break-words">{o.label}</span>
+                <span className={`min-w-0 flex-1 leading-[1.35] ${roomy ? "" : "break-words"}`}>{o.label}</span>
                 {o.count !== undefined && (
                   <span className="text-muted-foreground text-[13px] tabular-nums">
                     {o.count.toLocaleString()}
@@ -119,8 +126,8 @@ export function RailChecklist({
           );
         })}
       </ul>
-      {q && visibleCount === 0 && <p className="text-muted-foreground py-1 text-[13px]">No matches.</p>}
-      {!q && (hiddenCount > 0 || (showAll && options.length > collapseAfter)) && (
+      {(q || roomy) && visibleCount === 0 && <p className="text-muted-foreground py-1 text-[13px]">No matches.</p>}
+      {!q && (hiddenCount > 0 || ((showAll || roomy) && options.length > collapseAfter)) && (
         <button
           type="button"
           onClick={() => setShowAll((v) => !v)}
