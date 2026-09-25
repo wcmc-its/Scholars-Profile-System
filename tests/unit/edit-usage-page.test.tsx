@@ -52,6 +52,7 @@ vi.mock("@/lib/db", () => ({ db: { read: { scholar: { findMany: h.mockFindMany }
 
 import EditUsagePage from "@/app/edit/usage/page";
 import { isWeekend, monthLabel, niceCeil, pctLabel, shortDay } from "@/app/edit/usage/usage-format";
+import { PageviewsChart } from "@/app/edit/usage/usage-widgets";
 
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 
@@ -249,6 +250,27 @@ describe("/edit/usage range", () => {
     expect(h.mockPush).toHaveBeenLastCalledWith(
       "/edit/usage?range=custom&from=2026-08-01&to=2026-08-15",
     );
+  });
+});
+
+describe("PageviewsChart", () => {
+  const series = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      day: new Date(Date.UTC(2026, 6, 1 + i)).toISOString().slice(0, 10),
+      views: 10 + i,
+    }));
+  const labelled = (n: number) => {
+    const { getByTestId } = render(<PageviewsChart data={series(n)} />);
+    const axis = getByTestId("usage-pageviews-chart").querySelector('[aria-hidden="true"].flex');
+    return [...(axis?.children ?? [])].filter((s) => s.textContent !== "").length;
+  };
+
+  it("labels every 4th day for a month and about eight days for a long range", () => {
+    expect(labelled(30)).toBe(8); // i = 0, 4, ..., 28
+    document.body.innerHTML = "";
+    expect(labelled(90)).toBe(8); // stride 12: i = 0, 12, ..., 84
+    document.body.innerHTML = "";
+    expect(labelled(7)).toBe(7);
   });
 });
 
