@@ -49,6 +49,25 @@ describe("rosterStatusOf (mirrors center-roster-card statusOf)", () => {
   it("active on the inclusive boundaries", () => {
     expect(rosterStatusOf({ startDate: TODAY, endDate: TODAY }, TODAY)).toBe("active");
   });
+  it("invited for the #2779 Invited role, whatever its dates (matches the card badge)", () => {
+    expect(
+      rosterStatusOf({ startDate: null, endDate: null, membershipRoleKey: "invited" }, TODAY),
+    ).toBe("invited");
+    expect(
+      rosterStatusOf(
+        { startDate: "2999-01-01", endDate: "2000-01-01", membershipRoleKey: "invited" },
+        TODAY,
+      ),
+    ).toBe("invited");
+  });
+  it("a non-invited role key (or a division's null key) keeps date-derived status", () => {
+    expect(
+      rosterStatusOf({ startDate: null, endDate: null, membershipRoleKey: "member" }, TODAY),
+    ).toBe("active");
+    expect(
+      rosterStatusOf({ startDate: null, endDate: "2000-01-01", membershipRoleKey: null }, TODAY),
+    ).toBe("inactive");
+  });
   it("pending wins over inactive when both apply (matches UI precedence)", () => {
     expect(rosterStatusOf({ startDate: "2999-01-01", endDate: "2000-01-01" }, TODAY)).toBe(
       "pending",
@@ -112,6 +131,22 @@ describe("buildUnitRosterRows", () => {
     const lines = csv.trim().split("\r\n");
     expect(lines).toHaveLength(3); // header + 2 members
     expect(csv).toContain(",pending,ED");
+  });
+
+  it("an invitee's status cell is `invited` (the card badge) and activeOnly drops it", () => {
+    const invitee = {
+      ...roster[0],
+      cwid: "i1",
+      name: "Invitee",
+      membershipRoleKey: "invited",
+    };
+    const c = ctx([...roster, invitee], programs);
+    const statusIdx = ROSTER_EXPORT_HEADERS.indexOf("status");
+    const rows = buildUnitRosterRows(c, { today: TODAY });
+    expect(rows.find((r) => r[0] === "i1")?.[statusIdx]).toBe("invited");
+    const active = buildUnitRosterRows(c, { today: TODAY, activeOnly: true });
+    expect(active.map((r) => r[0])).toEqual(["a1"]);
+    expect(countRosterExportRows(c, { today: TODAY, activeOnly: true })).toBe(1);
   });
 
   it("activeOnly drops non-active rows", () => {

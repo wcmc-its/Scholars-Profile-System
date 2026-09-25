@@ -41,6 +41,7 @@
  */
 import type { UnitEditContext } from "@/lib/api/unit-edit-context";
 import { institutionDisplayName } from "@/lib/institutions";
+import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 import { exportEmailCell } from "@/lib/profile/email-visibility-flags";
 
 /**
@@ -52,17 +53,20 @@ export function isUnitRosterExportEnabled(): boolean {
   return process.env.EDIT_UNIT_ROSTER_EXPORT === "on";
 }
 
-export type RosterStatus = "active" | "pending" | "inactive";
+export type RosterStatus = "active" | "pending" | "inactive" | "invited";
 
 /**
  * The membership status, mirroring `statusOf` in `center-roster-card.tsx`
  * (#552 §3.3 active filter, inclusive boundaries, nulls open). Kept in lock-step
  * with the UI so the export's `status` column matches the table badge exactly.
+ * An invitee (#2779 `INVITED_ROLE_KEY`) is `invited` whatever its dates; a
+ * division row has no role key, so it never hits that case.
  */
 export function rosterStatusOf(
-  member: { startDate: string | null; endDate: string | null },
+  member: { startDate: string | null; endDate: string | null; membershipRoleKey?: string | null },
   today: string,
 ): RosterStatus {
+  if (member.membershipRoleKey === INVITED_ROLE_KEY) return "invited";
   if (member.startDate && member.startDate > today) return "pending";
   if (member.endDate && member.endDate < today) return "inactive";
   return "active";
