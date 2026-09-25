@@ -217,9 +217,28 @@ export function formatRefreshed(iso: string | Date): string {
   });
 }
 
+/** Counts in one fixed locale, so the server render and the browser agree
+ *  (a de-DE browser would otherwise hydrate "2.400" over "2,400"). */
+export const fmtCount = (n: number): string => n.toLocaleString("en-US");
+
+/** What actually shrinks each list below the cap. Remove ignores the
+ *  thresholds; raising the collaboration bar GROWS recruits (people fall out
+ *  of collaborators into it), so each list gets its own advice. */
+const WITHHELD_ADVICE: Record<OptimizeTab, string> = {
+  remove: "narrow the search or institution filter",
+  collab: "raise either threshold, or narrow the search or institution filter",
+  recruit:
+    "raise the cancer-relevance threshold, lower the collaboration threshold, or narrow the search or institution filter",
+};
+
 /** One list sheet's stand-in above the cap: never a truncated list. */
-export function listWithheldNote(label: string, people: number, cap: number): string {
-  return `${label}: ${people.toLocaleString()} people exceeds the ${cap}-person export limit, so this list is withheld. Raise the thresholds or narrow the search to ${cap} or fewer to include it.`;
+export function listWithheldNote(
+  tab: OptimizeTab,
+  label: string,
+  people: number,
+  cap: number,
+): string {
+  return `${label}: ${fmtCount(people)} people exceeds the ${cap}-person export limit, so this list is withheld. To include it, ${WITHHELD_ADVICE[tab]} to bring it to ${cap} or fewer.`;
 }
 
 /** The download button's subtext: which lists this view's workbook carries. */
@@ -234,9 +253,11 @@ export function optimizeDownloadNote(
       withheld: false,
     };
   }
-  const names = over.map((t) => `${t.label} (${lists[t.key].length.toLocaleString()})`).join(", ");
+  const each = over
+    .map((t) => `${t.label} (${fmtCount(lists[t.key].length)}): ${WITHHELD_ADVICE[t.key]}.`)
+    .join(" ");
   return {
-    text: `One sheet per list, plus Criteria. A list over ${cap} people is withheld, not cut short: ${names}. Raise the thresholds to include it.`,
+    text: `One sheet per list, plus Criteria. A list over ${cap} people is withheld, not cut short. To include it: ${each}`,
     withheld: true,
   };
 }

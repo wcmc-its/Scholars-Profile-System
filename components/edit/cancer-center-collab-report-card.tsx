@@ -63,6 +63,7 @@ import {
   sortRows,
   THRESHOLD_DEFAULTS,
   clampThreshold,
+  fmtCount,
   type CollabRow,
   type OptimizeParams,
   type OptimizeSortKey,
@@ -141,6 +142,27 @@ function ThresholdControl({
       </div>
     </div>
   );
+}
+
+/** How far (px) a finger may drift and still count as a tap. */
+const TAP_SLOP = 10;
+const touchOrigin = new WeakMap<Element, { x: number; y: number }>();
+
+function tapStart(e: React.TouchEvent<HTMLElement>) {
+  const t = e.touches[0];
+  if (t) touchOrigin.set(e.currentTarget, { x: t.clientX, y: t.clientY });
+}
+
+/** The #2588 re-fire, skipped when the touch moved: a flick that starts on a
+ *  name is a scroll, not a download. */
+function tapEnd(e: React.TouchEvent<HTMLElement>) {
+  const el = e.currentTarget;
+  const from = touchOrigin.get(el);
+  touchOrigin.delete(el);
+  const t = e.changedTouches[0];
+  if (from && t && Math.hypot(t.clientX - from.x, t.clientY - from.y) > TAP_SLOP) return;
+  e.preventDefault();
+  el.click();
 }
 
 /** A count, its percent of the row's papers, and a thin bar. */
@@ -236,9 +258,13 @@ export function CancerCenterCollabReportCard({
   const enc = encodeURIComponent(centerCode);
   const downloadQs = optimizeQueryString(params, false);
   const downloadHref = `/api/edit/center/${enc}/collab-report/xlsx${downloadQs ? `?${downloadQs}` : ""}`;
+  // The selection spans the tab's whole list (a search never un-picks
+  // anyone), so the search and institution filter don't describe it: only
+  // the thresholds ride along, for the workbook's Criteria sheet.
+  const selectionQs = optimizeQueryString({ ...params, q: "", inst: "" }, false);
   const selectedHref = `/api/edit/center/${enc}/collab-report/selected?${[
     ...tabSelected.map((c) => `cwid=${encodeURIComponent(c)}`),
-    downloadQs,
+    selectionQs,
   ]
     .filter(Boolean)
     .join("&")}`;
@@ -355,7 +381,7 @@ export function CancerCenterCollabReportCard({
                     : "text-muted-foreground hover:text-foreground border-transparent",
                 )}
               >
-                {t.label} ({lists[t.key].length.toLocaleString()})
+                {t.label} ({fmtCount(lists[t.key].length)})
               </button>
             );
           })}
@@ -487,6 +513,10 @@ export function CancerCenterCollabReportCard({
                       <tr
                         key={r.cwid}
                         onClick={(e) => {
+                          // The hover card portals out of the row, but React
+                          // still bubbles its clicks here: only a click inside
+                          // the row's own DOM toggles it.
+                          if (!e.currentTarget.contains(e.target as Node)) return;
                           if ((e.target as HTMLElement).closest("a,button,input,select,label"))
                             return;
                           toggle(r.cwid);
@@ -513,11 +543,11 @@ export function CancerCenterCollabReportCard({
                               title={`Download ${name}'s papers (CSV)`}
                               aria-label={`${name}: download papers (CSV)`}
                               // The hover trigger preventDefaults touchstart, which on
-                              // iOS cancels this tap's click: re-issue it (#2588).
-                              onTouchEnd={(e) => {
-                                e.preventDefault();
-                                e.currentTarget.click();
-                              }}
+                              // iOS cancels this tap's click: re-issue it (#2588), but
+                              // only for a tap (a scroll that starts here also ends in
+                              // touchend, and this click saves a file).
+                              onTouchStart={tapStart}
+                              onTouchEnd={tapEnd}
                               className="hover:text-apollo-maroon inline-flex items-center gap-1 font-semibold"
                             >
                               {name}

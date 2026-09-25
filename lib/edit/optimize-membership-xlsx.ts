@@ -50,7 +50,7 @@ export async function buildOptimizeMembershipWorkbook(
     const rows = lists[t.key];
     if (rows.length > cap) {
       const ws = wb.addWorksheet(t.sheet);
-      ws.addRow([listWithheldNote(t.label, rows.length, cap)]);
+      ws.addRow([listWithheldNote(t.key, t.label, rows.length, cap)]);
       ws.getColumn(1).width = 120;
     } else {
       addListSheet(wb, t.sheet, rows);
@@ -71,8 +71,13 @@ export async function buildOptimizeSelectedWorkbook(
   const wb = new ExcelJS.Workbook();
   wb.created = generatedAt;
   addListSheet(wb, "Selected", rows);
+  // The selection spans the tab's whole list whatever the search or
+  // institution filter showed when each row was ticked, so those filters
+  // don't describe it: leave them out rather than name the last one typed.
   addCriteriaSheet(wb, [
-    ...describeOptimizeCriteria(p, centerName, generatedAt, refreshedAt, cap),
+    ...describeOptimizeCriteria(p, centerName, generatedAt, refreshedAt, cap).filter(
+      ([k]) => k !== "Search" && k !== "Institution",
+    ),
     ["Selection", `${rows.length} people chosen on the page (${cap} at most).`],
   ]);
   return workbookBuffer(wb);

@@ -8,8 +8,8 @@
  * (`loadCollabReportRows`, shared with the `.xlsx` routes), parses the URL's
  * thresholds and filters (`parseOptimizeParams`), and hands both to the
  * client half (`CancerCenterCollabReportCard`), which does the thresholding,
- * tabs, sort, paging and selection and keeps the URL in step. The "Last
- * refreshed" stamp goes in the header's subtitle slot.
+ * tabs, sort, paging and selection and keeps the URL in step. The center's
+ * name and the "Last refreshed" stamp go in the header's subtitle slot.
  *
  * Unit-gated, center-only (`REPORT_NUMBERS_BY_KIND`); the frame is the
  * dynamic page's (`lib/edit/report-registry.ts`).
@@ -31,6 +31,7 @@ function toSearchParams(sp: UnitReportProps["searchParams"]): URLSearchParams {
 
 export async function renderOptimizeMembershipReport({
   code,
+  ctx,
   searchParams,
   basePath,
 }: UnitReportProps): Promise<ReportRender> {
@@ -39,11 +40,23 @@ export async function renderOptimizeMembershipReport({
   const center = sp.get("center");
 
   return {
-    subtitle: lastRefreshedAt ? (
-      <p className="text-muted-foreground text-[13px]" data-testid="om-refreshed">
-        Last refreshed {formatRefreshed(lastRefreshedAt)}
+    // The center's name, so a superuser who switched `?center=` can see
+    // which one this is (the shared header says only "Report 1").
+    subtitle: (
+      <p className="text-muted-foreground text-[13px]">
+        <span className="text-foreground font-medium" data-testid="om-center">
+          {ctx.unit.name}
+        </span>
+        {lastRefreshedAt && (
+          <>
+            {" · "}
+            <span data-testid="om-refreshed">
+              Last refreshed {formatRefreshed(lastRefreshedAt)}
+            </span>
+          </>
+        )}
       </p>
-    ) : undefined,
+    ),
     main: (
       <div className="mt-7">
         <CancerCenterCollabReportCard

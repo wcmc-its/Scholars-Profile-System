@@ -12,6 +12,7 @@ import {
   DEFAULT_OPTIMIZE_PARAMS,
   describeOptimizeCriteria,
   filterRows,
+  fmtCount,
   formatRefreshed,
   institutionOptions,
   listWithheldNote,
@@ -187,9 +188,50 @@ describe("downloads", () => {
     expect(note.withheld).toBe(true);
     expect(note.text).toContain("withheld");
     expect(note.text).toContain("Add: recruits (51)");
-    expect(listWithheldNote("Remove", 60, 50)).toContain(
+    expect(listWithheldNote("remove", "Remove", 60, 50)).toContain(
       "60 people exceeds the 50-person export limit",
     );
+  });
+
+  it("each withheld list gets advice that actually shrinks it", () => {
+    // Remove ignores the thresholds; raising collaboration GROWS recruits.
+    const remove = listWithheldNote("remove", "Remove", 60, 50);
+    expect(remove).toContain("narrow the search or institution filter");
+    expect(remove).not.toMatch(/threshold/i);
+    const recruit = listWithheldNote("recruit", "Add: recruits", 60, 50);
+    expect(recruit).toContain("raise the cancer-relevance threshold");
+    expect(recruit).toContain("lower the collaboration threshold");
+    expect(recruit).not.toContain("raise either threshold");
+    expect(listWithheldNote("collab", "Add: collaborators", 60, 50)).toContain(
+      "raise either threshold",
+    );
+    const lists = bucketLists(ROWS, P());
+    const note = optimizeDownloadNote(
+      { ...lists, remove: Array.from({ length: 51 }, (_, i) => row({ cwid: `x${i}` })) },
+      50,
+    );
+    expect(note.text).toContain("Remove (51): narrow the search or institution filter.");
+    expect(note.text).not.toMatch(/raise the thresholds/i);
+  });
+
+  it("formats counts in en-US whatever the runtime's default locale", () => {
+    const orig = Number.prototype.toLocaleString;
+    Number.prototype.toLocaleString = function (
+      this: number,
+      loc?: Intl.LocalesArgument,
+      opts?: Intl.NumberFormatOptions,
+    ) {
+      return orig.call(this, loc ?? "de-DE", opts);
+    };
+    try {
+      expect(fmtCount(2400)).toBe("2,400");
+      expect(listWithheldNote("remove", "Remove", 2400, 50)).toContain("2,400 people");
+      const lists = bucketLists(ROWS, P());
+      const many = Array.from({ length: 1200 }, (_, i) => row({ cwid: `x${i}` }));
+      expect(optimizeDownloadNote({ ...lists, remove: many }, 50).text).toContain("Remove (1,200)");
+    } finally {
+      Number.prototype.toLocaleString = orig;
+    }
   });
 
   it("Criteria records every threshold and filter, All when unset", () => {

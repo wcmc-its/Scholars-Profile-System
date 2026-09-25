@@ -22,9 +22,18 @@ import {
   type OptimizeParams,
 } from "@/lib/edit/optimize-membership-report";
 
-vi.mock("@/components/edit/scholar-hover-card", () => ({
-  ScholarHoverCard: ({ children }: { children: React.ReactNode }) => children,
-}));
+// Like the real card, the hover content portals out to document.body.
+vi.mock("@/components/edit/scholar-hover-card", async () => {
+  const { createPortal } = await import("react-dom");
+  return {
+    ScholarHoverCard: ({ cwid, children }: { cwid: string; children: React.ReactNode }) => (
+      <>
+        {children}
+        {createPortal(<div data-testid={`hc-${cwid}`}>Hover card body</div>, document.body)}
+      </>
+    ),
+  };
+});
 
 function row(over: Partial<CollabRow> & { cwid: string }): CollabRow {
   return {
@@ -299,6 +308,30 @@ describe("CancerCenterCollabReportCard — selection", () => {
     expect(within(container).queryByTestId("om-selection")).toBeNull();
   });
 
+  it("a click inside the (portalled) hover card doesn't toggle the row", () => {
+    const { container } = renderCard();
+    const content = document.body.querySelector('[data-testid="hc-m1"]')!;
+    expect(container.contains(content)).toBe(false);
+    fireEvent.click(content);
+    expect(within(container).queryByTestId("om-selection")).toBeNull();
+  });
+
+  it("Export selected carries the thresholds but not the search it outlives", () => {
+    const { container } = renderCard({ initial: { tab: "recruit", c: 3 } });
+    const c = within(container);
+    fireEvent.click(c.getByLabelText("Select R2 Recruitperson"));
+    fireEvent.change(c.getByLabelText("Search name, department or institution"), {
+      target: { value: "aard" },
+    });
+    fireEvent.change(c.getByLabelText("Institution"), {
+      target: { value: "Hospital for Special Surgery" },
+    });
+    fireEvent.click(c.getByLabelText("Select A Aardvark"));
+    expect(c.getByTestId("om-export-selected").getAttribute("href")).toBe(
+      "/api/edit/center/meyer_cancer_center/collab-report/selected?cwid=r1&cwid=r2&c=3",
+    );
+  });
+
   it("select-all ticks the shown rows; above the cap Export selected is disabled", () => {
     const { container } = renderCard({ initial: { tab: "recruit" }, cap: 1 });
     const c = within(container);
@@ -310,6 +343,39 @@ describe("CancerCenterCollabReportCard — selection", () => {
     expect(c.getByText("Select 1 or fewer people to export.")).toBeTruthy();
     fireEvent.click(c.getByLabelText("Select all shown"));
     expect(c.queryByTestId("om-selection")).toBeNull();
+  });
+
+  it("a tap on the name re-fires its click; a finger that moved (a scroll) does not", () => {
+    const { container } = renderCard();
+    const link = within(container).getByLabelText("R Removeperson: download papers (CSV)");
+    const clicks = vi.fn((e: Event) => e.preventDefault());
+    link.addEventListener("click", clicks);
+    fireEvent.touchStart(link, { touches: [{ clientX: 10, clientY: 100 }] });
+    fireEvent.touchEnd(link, { changedTouches: [{ clientX: 12, clientY: 102 }] });
+    expect(clicks).toHaveBeenCalledTimes(1);
+    fireEvent.touchStart(link, { touches: [{ clientX: 10, clientY: 100 }] });
+    fireEvent.touchEnd(link, { changedTouches: [{ clientX: 10, clientY: 40 }] });
+    expect(clicks).toHaveBeenCalledTimes(1);
+  });
+
+  it("formats tab counts in en-US whatever the browser's locale", () => {
+    const orig = Number.prototype.toLocaleString;
+    Number.prototype.toLocaleString = function (
+      this: number,
+      loc?: Intl.LocalesArgument,
+      opts?: Intl.NumberFormatOptions,
+    ) {
+      return orig.call(this, loc ?? "de-DE", opts);
+    };
+    try {
+      const many = Array.from({ length: 1200 }, (_, i) =>
+        row({ cwid: `m${i}`, isCurrentMember: true }),
+      );
+      const { container } = renderCard({ rows: many });
+      expect(within(container).getByTestId("om-tab-remove").textContent).toBe("Remove (1,200)");
+    } finally {
+      Number.prototype.toLocaleString = orig;
+    }
   });
 
   it("the advisory note links to the roster editor", () => {

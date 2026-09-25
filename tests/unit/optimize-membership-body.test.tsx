@@ -25,7 +25,7 @@ function props(searchParams: UnitReportProps["searchParams"]): UnitReportProps {
     n: "1",
     code: "meyer_cancer_center",
     kind: "center",
-    ctx: {} as UnitReportProps["ctx"],
+    ctx: { unit: { name: "Sandra and Edward Meyer Cancer Center" } },
     session: {} as UnitReportProps["session"],
     searchParams,
     basePath: "/edit/reports/optimize-membership",
@@ -46,6 +46,9 @@ describe("renderOptimizeMembershipReport", () => {
         {out.main}
       </>,
     );
+    expect(within(container).getByTestId("om-center").textContent).toBe(
+      "Sandra and Edward Meyer Cancer Center",
+    );
     expect(within(container).getByTestId("om-refreshed").textContent).toBe(
       "Last refreshed Sep 20, 2026, 8:05 AM",
     );
@@ -61,9 +64,13 @@ describe("renderOptimizeMembershipReport", () => {
     );
   });
 
-  it("has no refreshed stamp before the first weekly run", async () => {
+  it("names the center but has no refreshed stamp before the first weekly run", async () => {
     h.load.mockResolvedValue({ rows: [], lastRefreshedAt: null });
     const out = await renderOptimizeMembershipReport(props({}));
-    expect(out.subtitle).toBeUndefined();
+    const { container } = render(<>{out.subtitle}</>);
+    expect(within(container).getByTestId("om-center").textContent).toBe(
+      "Sandra and Edward Meyer Cancer Center",
+    );
+    expect(within(container).queryByTestId("om-refreshed")).toBeNull();
   });
 });

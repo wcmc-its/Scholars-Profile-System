@@ -10,7 +10,8 @@
  *   - every CWID must be one of THIS center's `CenterCollabCandidate` rows,
  *     else 400 `not_a_candidate` (no pulling arbitrary people through it).
  * The thresholds ride along only so the Criteria sheet records the view the
- * selection was made in.
+ * selection was made in. The search and institution filter do not: a
+ * selection is kept across searches, so they would misdescribe it.
  *
  * Gate: `gateCollabReportRoute`, the same as the other report 1 downloads.
  */

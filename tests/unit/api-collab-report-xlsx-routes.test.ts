@@ -189,6 +189,7 @@ describe("GET …/collab-report/xlsx", () => {
     expect(String(rec[0][0])).toContain(
       `${SCHOLAR_EXPORT_CAP + 2} people exceeds the ${SCHOLAR_EXPORT_CAP}-person export limit`,
     );
+    expect(String(rec[0][0])).toContain("lower the collaboration threshold");
     // The lists under the cap still ship in full.
     expect(values(wb.getWorksheet("Remove")!)).toHaveLength(2);
   });
@@ -217,6 +218,20 @@ describe("GET …/collab-report/selected", () => {
     ).toEqual(["c1", "r1"]);
     const crit = new Map(values(wb.getWorksheet("Criteria")!).map((r) => [r[0], r[1]]));
     expect(crit.get("Selection")).toContain("2 people");
+  });
+
+  it("records the thresholds but not a search or filter the selection outlives", async () => {
+    const wb = await sheets(await SELECTED(req("/x?cwid=r1&cwid=c1&c=4&q=smith&inst=NYP"), ctx));
+    const crit = new Map(values(wb.getWorksheet("Criteria")!).map((r) => [r[0], r[1]]));
+    expect(crit.get("Collaboration threshold")).toBe("At least 4 co-authored with members (count)");
+    expect(crit.has("Search")).toBe(false);
+    expect(crit.has("Institution")).toBe(false);
+    // The rows are the chosen ones regardless of the search.
+    expect(
+      values(wb.getWorksheet("Selected")!)
+        .slice(1)
+        .map((r) => r[0]),
+    ).toEqual(["c1", "r1"]);
   });
 
   it("400s with no CWIDs", async () => {
