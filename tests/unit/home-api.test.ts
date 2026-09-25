@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   publicationFindMany: vi.fn(),
   publicationCount: vi.fn(),
   subtopicFindMany: vi.fn().mockResolvedValue([]),
+  subtopicCount: vi.fn().mockResolvedValue(1615),
   spotlightFindMany: vi.fn(),
   scholarFindMany: vi.fn(),
   scholarCount: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock("@/lib/db", () => ({
     },
     subtopic: {
       findMany: mocks.subtopicFindMany,
+      count: mocks.subtopicCount,
     },
     publication: {
       findMany: mocks.publicationFindMany,
@@ -674,6 +676,7 @@ describe("getHomeStats — advertised scholars == findable scholars (#2222)", ()
     expect(stats.scholarCount).toBe(8722);
     expect(stats.publicationCount).toBe(189_144);
     expect(stats.researchAreaCount).toBe(67);
+    expect(stats.subtopicCount).toBe(1615);
   });
 
   it("ALSO applies isPubliclyDisplayed — an out-of-band suffixed student passes the denylist and must not be advertised", async () => {

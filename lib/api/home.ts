@@ -134,6 +134,7 @@ export type HomeStats = {
   scholarCount: number;
   publicationCount: number;
   researchAreaCount: number;
+  subtopicCount: number;
 };
 
 export type ParentTopic = {
@@ -664,7 +665,7 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
   // role_category is admitted by both (an un-backfilled scholar is absent data,
   // not an unrecognized token); see publicRoleWhere() for the three-valued-logic
   // trap that makes a bare `notIn` hide every un-backfilled scholar.
-  const [publicScholars, publicationCount, researchAreaCount] = await Promise.all([
+  const [publicScholars, publicationCount, researchAreaCount, subtopicCount] = await Promise.all([
     prisma.scholar.findMany({
       where: { deletedAt: null, status: "active", ...publicRoleWhere() },
       select: { roleCategory: true },
@@ -673,6 +674,7 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
       where: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
     }),
     prisma.topic.count(),
+    prisma.subtopic.count(),
   ]);
   // ponytail: counted in-process over one column for ~8.7k rows, behind
   // cachedHomeRead. If the corpus ever outgrows that, push the prefix into SQL
@@ -681,7 +683,7 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
   const scholarCount = publicScholars.filter((s) =>
     isPubliclyDisplayed(s.roleCategory),
   ).length;
-  return { scholarCount, publicationCount, researchAreaCount };
+  return { scholarCount, publicationCount, researchAreaCount, subtopicCount };
 }
 
 // ---------------------------------------------------------------------------
