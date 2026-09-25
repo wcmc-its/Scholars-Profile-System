@@ -49,6 +49,12 @@ describe("parseDataSharingParams", () => {
     expect(parsed.facSort).toBe("concerning");
   });
 
+  it("accepts the department-name sort (2026-09 revision) for departments only", () => {
+    const parsed = parseDataSharingParams({ deptSort: "name", facSort: "name" });
+    expect(parsed.deptSort).toBe("name");
+    expect(parsed.facSort).toBeUndefined();
+  });
+
   it("parses sort direction, defaulting anything but 'asc' to 'desc'", () => {
     expect(parseDataSharingParams({ deptDir: "asc" }).deptDir).toBe("asc");
     expect(parseDataSharingParams({ deptDir: "garbage" }).deptDir).toBe("desc");

@@ -41,34 +41,32 @@ function stubFetch(body: unknown, status = 200) {
   );
 }
 
-describe("OrgUnitRoleRoster — delete button disabled reasons", () => {
-  it("is ENABLED for a manual role with zero holders", () => {
+describe("OrgUnitRoleRoster — delete control and lock reasons", () => {
+  it("offers Delete for a manual role with zero holders", () => {
     render(<OrgUnitRoleRoster roles={[row({})]} />);
     const btn = screen.getByTestId("roles-delete-center:deputy_director");
     expect(btn.hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByTestId("roles-delete-locked-center:deputy_director")).toBeNull();
   });
 
-  it("is DISABLED with a holder-count reason when holderCount > 0", () => {
+  it("shows a lock with a holder-count reason when holderCount > 0", () => {
     render(<OrgUnitRoleRoster roles={[row({ holderCount: 3 })]} />);
-    const btn = screen.getByTestId("roles-delete-center:deputy_director");
-    expect(btn.hasAttribute("disabled")).toBe(true);
-    expect(btn.getAttribute("title")).toBe("3 holders");
-    const describedBy = btn.getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    expect(document.getElementById(describedBy!)?.textContent).toBe("3 holders");
+    expect(screen.queryByTestId("roles-delete-center:deputy_director")).toBeNull();
+    const lock = screen.getByTestId("roles-delete-locked-center:deputy_director");
+    expect(lock.getAttribute("title")).toBe("Has 3 current holders");
+    expect(lock.getAttribute("aria-label")).toBe("Can\u2019t delete: Has 3 current holders");
   });
 
-  it("is DISABLED with a seeded-default reason when source !== 'manual'", () => {
+  it("shows a lock with a seeded-default reason when source !== 'manual'", () => {
     render(<OrgUnitRoleRoster roles={[row({ source: "seed", holderCount: 0 })]} />);
-    const btn = screen.getByTestId("roles-delete-center:deputy_director");
-    expect(btn.hasAttribute("disabled")).toBe(true);
-    expect(btn.getAttribute("title")).toBe("Seeded default — cannot be deleted here.");
+    const lock = screen.getByTestId("roles-delete-locked-center:deputy_director");
+    expect(lock.getAttribute("title")).toBe("Seeded defaults can\u2019t be deleted");
   });
 
   it("a seeded role WITH holders shows the seeded reason, not the holder-count one", () => {
     render(<OrgUnitRoleRoster roles={[row({ source: "seed", holderCount: 5 })]} />);
-    const btn = screen.getByTestId("roles-delete-center:deputy_director");
-    expect(btn.getAttribute("title")).toBe("Seeded default — cannot be deleted here.");
+    const lock = screen.getByTestId("roles-delete-locked-center:deputy_director");
+    expect(lock.getAttribute("title")).toBe("Seeded defaults can\u2019t be deleted");
   });
 });
 
@@ -79,7 +77,9 @@ describe("OrgUnitRoleRoster — delete flow", () => {
 
     fireEvent.click(screen.getByTestId("roles-delete-center:deputy_director"));
     expect(await screen.findByText('Delete role "Deputy Director" (Center)?')).toBeTruthy();
-    expect(screen.getByText(/No one holds it; 0 allowlist rows will be removed too\./)).toBeTruthy();
+    expect(
+      screen.getByText(/No one holds it; 0 allowlist rows will be removed too\./),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
@@ -87,17 +87,25 @@ describe("OrgUnitRoleRoster — delete flow", () => {
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/edit/roles");
     expect(init.method).toBe("DELETE");
-    expect(JSON.parse(init.body as string)).toEqual({ entityType: "center", key: "deputy_director" });
+    expect(JSON.parse(init.body as string)).toEqual({
+      entityType: "center",
+      key: "deputy_director",
+    });
 
     await waitFor(() =>
       expect(screen.queryByTestId("roles-row-center:deputy_director")).toBeNull(),
+    );
+    expect(screen.getByTestId("roles-toast").textContent).toContain(
+      "Deleted \u201cDeputy Director\u201d.",
     );
   });
 
   it("singular 'allowlist row' when scopeRowCount is 1", async () => {
     render(<OrgUnitRoleRoster roles={[row({ scopeRowCount: 1 })]} />);
     fireEvent.click(screen.getByTestId("roles-delete-center:deputy_director"));
-    expect(await screen.findByText(/No one holds it; 1 allowlist row will be removed too\./)).toBeTruthy();
+    expect(
+      await screen.findByText(/No one holds it; 1 allowlist row will be removed too\./),
+    ).toBeTruthy();
   });
 
   it("a 409 (role gained a holder after page load) surfaces the server reason inline and keeps the row", async () => {
@@ -150,8 +158,8 @@ describe("OrgUnitRoleRoster — delete flow", () => {
   });
 });
 
-describe("OrgUnitRoleRoster — unit-kind section order", () => {
-  it("renders center_program directly under center, and above core", () => {
+describe("OrgUnitRoleRoster — unit-kind tabs", () => {
+  it("orders the tabs center, center program, department, division, core, with counts", () => {
     render(
       <OrgUnitRoleRoster
         roles={[
@@ -159,19 +167,38 @@ describe("OrgUnitRoleRoster — unit-kind section order", () => {
           row({ entityType: "department", key: "chair" }),
           row({ entityType: "center_program", key: "leader" }),
           row({ entityType: "center", key: "director" }),
+          row({ entityType: "center", key: "member", roleGroup: "membership" }),
           row({ entityType: "division", key: "chief" }),
         ]}
       />,
     );
-    const sectionIds = screen
-      .getAllByTestId(/^roles-section-/)
-      .map((el) => el.getAttribute("data-testid"));
-    expect(sectionIds).toEqual([
-      "roles-section-center",
-      "roles-section-center_program",
-      "roles-section-department",
-      "roles-section-division",
-      "roles-section-core",
+    const tabs = screen.getAllByRole("tab").map((el) => el.getAttribute("data-testid"));
+    expect(tabs).toEqual([
+      "roles-tab-center",
+      "roles-tab-center_program",
+      "roles-tab-department",
+      "roles-tab-division",
+      "roles-tab-core",
     ]);
+    expect(screen.getByTestId("roles-tab-center").textContent).toBe("Center2");
+  });
+
+  it("shows only the selected kind, leadership above membership", () => {
+    render(
+      <OrgUnitRoleRoster
+        roles={[
+          row({ entityType: "center", key: "member", roleGroup: "membership" }),
+          row({ entityType: "center", key: "director" }),
+          row({ entityType: "department", key: "chair" }),
+        ]}
+      />,
+    );
+    expect(
+      screen.getAllByTestId(/^roles-section-/).map((el) => el.getAttribute("data-testid")),
+    ).toEqual(["roles-section-leadership", "roles-section-membership"]);
+    expect(screen.queryByTestId("roles-row-department:chair")).toBeNull();
+    fireEvent.click(screen.getByTestId("roles-tab-department"));
+    expect(screen.getByTestId("roles-row-department:chair")).toBeTruthy();
+    expect(screen.queryByTestId("roles-row-center:director")).toBeNull();
   });
 });

@@ -25,29 +25,29 @@ vi.mock("@/components/site/account-menu", () => ({
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 
 describe("AdminSubnav", () => {
-  it("renders both tabs with the pending-count pill when the feature is on", () => {
+  it("puts the pending-request pill on the one Profile URLs tab when the feature is on", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={3} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
-    expect(screen.getByTestId("admin-tab-slug-requests")).toBeTruthy();
+    expect(screen.getByTestId("admin-tab-slugs").textContent).toContain("Profile URLs");
     expect(screen.getByTestId("admin-subnav-pending-count").textContent).toBe("3");
+    // The queue and the registry share one page — no separate queue tab.
+    expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
   });
 
   it("marks the active tab with aria-current and links the inactive one", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={1} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles").getAttribute("aria-current")).toBe("page");
     // The inactive tab is a link to its surface.
-    expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("href")).toBe(
-      "/edit/slug-requests",
-    );
+    expect(screen.getByTestId("admin-tab-slugs").getAttribute("href")).toBe("/edit/slugs");
   });
 
-  it("hides the URL-requests tab when the feature is off (pendingSlugRequests null)", () => {
+  it("drops the pill when the feature is off (pendingSlugRequests null)", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
-    expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
-  it("always shows the Slug-registry tab — even when the URL-requests tab is hidden", () => {
+  it("always shows the Profile URLs tab — even when the request feature is off", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     const tab = screen.getByTestId("admin-tab-slugs");
     expect(tab).toBeTruthy();
@@ -63,8 +63,8 @@ describe("AdminSubnav", () => {
   });
 
   it("omits the count pill when zero pending", () => {
-    render(<AdminSubnav active="slug-requests" pendingSlugRequests={0} pendingHonors={null} />);
-    expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("aria-current")).toBe("page");
+    render(<AdminSubnav active="slugs" pendingSlugRequests={0} pendingHonors={null} />);
+    expect(screen.getByTestId("admin-tab-slugs").getAttribute("aria-current")).toBe("page");
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
@@ -383,7 +383,7 @@ describe("AdminSubnav", () => {
       // …and a tab that was passed no hover opens nothing. The wait is load-bearing: Radix opens
       // on a 200ms delay, so asserting absence synchronously would pass before any card COULD
       // have opened — which is exactly how the first version of this test was vacuous.
-      fireEvent.focus(screen.getByTestId("admin-tab-slug-requests"));
+      fireEvent.focus(screen.getByTestId("admin-tab-slugs"));
       await new Promise((r) => setTimeout(r, 350));
       expect(screen.getAllByText(/Paste the ask\. Get the shortlist\./)).toHaveLength(1);
       vi.doUnmock("@/lib/api/matcha");
@@ -610,9 +610,9 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
   it("links a group entry to its first visible member's existing href — no route moved", () => {
     grouped();
     render(<AdminSubnav active="profiles" {...allOn} />);
-    // Queues' first visible member is URL requests. A group entry is a plain
+    // Queues' first visible member is Honors. A group entry is a plain
     // <Link>, never a hover menu or a button (#1783).
-    expect(screen.getByTestId("admin-group-queues").getAttribute("href")).toBe("/edit/slug-requests");
+    expect(screen.getByTestId("admin-group-queues").getAttribute("href")).toBe("/edit/honors-queue");
     expect(screen.getByTestId("admin-group-registries").getAttribute("href")).toBe("/edit/slugs");
     expect(screen.getByTestId("admin-group-insights").getAttribute("href")).toBe("/edit/activity");
     expect(screen.getByTestId("admin-group-tools").getAttribute("href")).toBe("/edit/matcha");
@@ -622,7 +622,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     // The map is the whole mechanism — a mis-slotted id sends the wrong group
     // entry maroon.
     const expected: Record<string, string> = {
-      "slug-requests": "queues", "honors-queue": "queues", "news-queue": "queues", cores: "queues",
+      "honors-queue": "queues", "news-queue": "queues", cores: "queues",
       slugs: "registries", administrators: "registries", methods: "registries",
       activity: "insights", usage: "insights", "etl-status": "insights",
       matcha: "tools", "grant-matcha": "tools",
@@ -706,13 +706,13 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(usage.getAttribute("href")).toBe("/edit/usage");
     expect(usage.getAttribute("aria-current")).toBe("page");
     // Only the current page's group starts open; Queues shows its item count.
-    expect([...dialog.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/edit/slug-requests")).toBe(false);
-    const queues = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Queues"))!;
-    expect(queues.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(queues);
-    // Pending count carried onto the URL-requests link.
-    const slug = [...dialog.querySelectorAll("a")].find((a) => a.getAttribute("href") === "/edit/slug-requests")!;
-    expect(slug.textContent).toBe("URL requests2");
+    expect([...dialog.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/edit/slugs")).toBe(false);
+    const registries = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Registries"))!;
+    expect(registries.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(registries);
+    // Pending count carried onto the Profile URLs link.
+    const slug = [...dialog.querySelectorAll("a")].find((a) => a.getAttribute("href") === "/edit/slugs")!;
+    expect(slug.textContent).toBe("Profile URLs2");
   });
 
   it("the sub-xl menu's Jump to filters every item into one list, tagged with its group", () => {
@@ -722,7 +722,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     const dialog = screen.getByRole("dialog");
     fireEvent.change(screen.getByLabelText("Jump to"), { target: { value: "url" } });
     const hrefs = [...dialog.querySelectorAll("nav a")].map((a) => a.getAttribute("href"));
-    expect(hrefs).toContain("/edit/slug-requests");
+    expect(hrefs).toContain("/edit/slugs");
     expect(hrefs).not.toContain("/edit/usage");
     fireEvent.change(screen.getByLabelText("Jump to"), { target: { value: "zzz" } });
     expect(dialog.textContent).toContain("No pages match “zzz”");
@@ -739,7 +739,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
   it("omits a group entirely when all its members are hidden", () => {
     grouped();
     // A comms_steward: no superuser surfaces, no admin/data-quality props ⇒
-    // Registries loses URL registry + Administrators, Insights loses everything.
+    // Registries loses Profile URLs + Administrators, Insights loses everything.
     render(
       <AdminSubnav
         active="profiles"
@@ -905,7 +905,6 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     render(<AdminSubnav active="profiles" {...allOn} />);
     fireEvent.focus(screen.getByTestId("admin-group-queues"));
     expect(order(await screen.findByTestId("admin-group-menu-queues"))).toEqual([
-      "admin-tab-slug-requests",
       "admin-tab-honors-queue",
       "admin-tab-news-queue",
       "admin-tab-cores",
@@ -934,7 +933,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     render(<AdminSubnav active="profiles" {...allOn} />);
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
-        "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
+        "profiles", "units", "honors-queue", "news-queue", "slugs",
         "administrators", "methods", "reports", "activity", "usage", "orcid-coverage", "etl-status", "cores",
       ].map((id) => `admin-tab-${id}`),
     );

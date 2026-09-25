@@ -82,6 +82,15 @@ function request(body: Record<string, unknown>, session: Record<string, unknown>
 
 const STEWARD = { cwid: "cms1001", isSuperuser: false, isCommsSteward: true };
 
+/** The undo stamp every decision write carries (lib/edit/news-decision.ts). */
+const stamp = (prevStatus: string, prevShowOnProfile?: boolean) => ({
+  decisionId: "req-1",
+  decisionAt: expect.any(Date),
+  prevStatus,
+  prevShowOnProfile,
+  prevEnteredByCwid: null,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.NEWS_APPROVAL_QUEUE = "on";
@@ -110,7 +119,7 @@ describe("case 1 — un-rejecting an UNCONTESTED row", () => {
       // `entered_by_cwid` is what stops etl/news re-proposing the row on the next
       // scrape — the reason un-rejecting is safe at all. Dropping it would let a
       // re-scrape quietly overwrite the reviewer's second thought.
-      data: { status: "published", enteredByCwid: "cms1001" },
+      data: { status: "published", enteredByCwid: "cms1001", ...stamp("rejected") },
     });
     // A null sourceRef must never join siblings: MySQL groups all NULLs together.
     expect(h.tx.newsMention.findFirst).not.toHaveBeenCalled();
@@ -151,7 +160,7 @@ describe("case 2 — contested, but nobody is published", () => {
     expect(await res.json()).toMatchObject({ status: "published", siblingsRejected: 2 });
     expect(h.tx.newsMention.update).toHaveBeenCalledWith({
       where: { id: "news-2" },
-      data: { status: "rejected", enteredByCwid: "cms1001" },
+      data: { status: "rejected", enteredByCwid: "cms1001", ...stamp("pending") },
     });
     // Only PENDING siblings are swept — an already-rejected one would just get an
     // audit row that says nothing.

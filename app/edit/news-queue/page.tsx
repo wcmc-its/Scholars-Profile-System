@@ -18,7 +18,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
-import { NewsQueue } from "@/components/edit/news-queue";
+import { NewsApprovalQueue } from "@/components/edit/news-approval-queue";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -51,8 +51,6 @@ export default async function NewsQueuePage() {
     // from `approved` — they are counted at the DB.
     loadNewsQueueCounts(db.read),
   ]);
-  const pendingCount = pending.reduce((sum, g) => sum + g.rows.length, 0);
-  const contestedCount = pending.filter((g) => g.contested).length;
 
   // Sub-nav tabs — mirrors `/edit/methods`, the sibling comms surface.
   const superuserSurfaces = session.isSuperuser;
@@ -67,22 +65,20 @@ export default async function NewsQueuePage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-        <h1 className="mb-1 text-xl font-bold">News approval</h1>
-        <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
-          {pendingCount === 0
-            ? "News mentions detected by name (not a VIVO link) awaiting confirmation. Nothing here shows on a profile until it is approved."
-            : `${pendingCount} name-matched mention${pendingCount === 1 ? "" : "s"} awaiting confirmation${
-                contestedCount > 0
-                  ? `, including ${contestedCount} where more than one scholar matches the same name`
-                  : ""
-              }. Nothing here shows on a profile until it is approved.`}
+      <div className="mb-[22px] flex flex-col gap-1.5">
+        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">News approval</h1>
+        <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
+          Newsroom stories matched to scholars by name. Nothing shows on a profile until it&rsquo;s
+          approved. Mentions are grouped by story, so one article naming several scholars is
+          reviewed once.
         </p>
-        <NewsQueue
-          pending={pending}
-          approved={approved}
-          rejected={rejected}
-          counts={counts}
-        />
+      </div>
+      <NewsApprovalQueue
+        pending={pending}
+        approved={approved}
+        rejected={rejected}
+        counts={counts}
+      />
     </ConsoleShell>
   );
 }

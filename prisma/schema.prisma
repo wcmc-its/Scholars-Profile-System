@@ -3641,11 +3641,30 @@ model NewsMention {
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
 
+  /// Undo for the review queues (lib/edit/news-decision.ts). The request id of
+  /// the last POST /api/edit/news-mention/decision that wrote this row; every row
+  /// one decision touched (the row, its copies, the swept siblings, a reassign's
+  /// new row) shares it. Cleared by undo, and on EVERY row of the decision by any
+  /// later /edit write to one of them, so an undo is all or nothing and never
+  /// overwrites a newer human decision. Null otherwise.
+  decisionId        String?            @map("decision_id") @db.VarChar(64)
+  /// When that decision was made; undo is refused after a short window.
+  decisionAt        DateTime?          @map("decision_at")
+  /// The row's status BEFORE that decision. Null with `decisionId` set means the
+  /// decision CREATED the row (a "wrong person" reassign), so undo deletes it.
+  prevStatus        NewsMentionStatus? @map("prev_status")
+  /// `showOnProfile` before that decision.
+  prevShowOnProfile Boolean?           @map("prev_show_on_profile")
+  /// `enteredByCwid` before that decision — restoring it hands an untouched row
+  /// back to the ETL exactly as it was.
+  prevEnteredByCwid String?            @map("prev_entered_by_cwid") @db.VarChar(32)
+
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@unique([cwid, url])
   @@index([cwid, status, showOnProfile])
   @@index([duplicateOf])
+  @@index([decisionId])
   @@map("news_mention")
 }
 

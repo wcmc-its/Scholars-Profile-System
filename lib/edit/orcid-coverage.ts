@@ -298,7 +298,60 @@ export type OrcidCoverage = {
   byRole: CoverageRow[];
   /** Filtered by `type` + `unit` + `nih`; NIH-funded-without-ORCID desc (the action list). */
   byDept: CoverageRow[];
+  /** People (active, unfiltered) behind each inference rule, for the "Where
+   *  inferences come from" panel. Counts overlap — one person can match several
+   *  rules — and are NOT tiers: the fold still gives each person one tier. */
+  sources: InferenceSourceCounts;
 };
+
+/** Distinct people with a (non-dismissed) candidate row matching each rule. */
+export type InferenceSourceCounts = {
+  /** `rpm_inferred` with `STRONG_MIN_ACCEPTED`+ accepted articles and none rejected. */
+  rpmStrong: number;
+  /** `rpm_inferred`, but no row meeting the strong rule. */
+  rpmWeak: number;
+  /** `orcid_email`: a public email on the registry record belongs to the person. */
+  registryEmail: number;
+  /** `orcid_works` with `STRONG_MIN_ACCEPTED`+ shared works. */
+  registryWorks: number;
+  /** `orcid_name`, or an `orcid_works` row under the strong bar, and no strong registry row. */
+  registryWeak: number;
+};
+
+/** Pure: the per-rule people counts behind {@link OrcidCoverage.sources}. */
+export function inferenceSourceCounts(
+  candidates: readonly CandidateRow[],
+  population: ReadonlySet<string>,
+): InferenceSourceCounts {
+  const sets = {
+    rpmStrong: new Set<string>(),
+    rpmAny: new Set<string>(),
+    registryEmail: new Set<string>(),
+    registryWorks: new Set<string>(),
+    registryAny: new Set<string>(),
+  };
+  for (const c of candidates) {
+    if (!population.has(c.cwid)) continue;
+    if (c.source === "rpm_inferred") {
+      sets.rpmAny.add(c.cwid);
+      if (c.articlesAccepted >= STRONG_MIN_ACCEPTED && c.articlesRejected === 0)
+        sets.rpmStrong.add(c.cwid);
+    } else if (isRegistrySource(c.source)) {
+      sets.registryAny.add(c.cwid);
+      if (c.source === "orcid_email") sets.registryEmail.add(c.cwid);
+      else if (c.source === "orcid_works" && c.articlesAccepted >= STRONG_MIN_ACCEPTED)
+        sets.registryWorks.add(c.cwid);
+    }
+  }
+  const registryStrong = new Set([...sets.registryEmail, ...sets.registryWorks]);
+  return {
+    rpmStrong: sets.rpmStrong.size,
+    rpmWeak: [...sets.rpmAny].filter((c) => !sets.rpmStrong.has(c)).length,
+    registryEmail: sets.registryEmail.size,
+    registryWorks: sets.registryWorks.size,
+    registryWeak: [...sets.registryAny].filter((c) => !registryStrong.has(c)).length,
+  };
+}
 
 export const neither = (c: CoverageCounts) => c.people - c.orcid - c.era + c.both;
 export const nihNoOrcid = (c: CoverageCounts) => c.nihPeople - c.nihOrcid;
@@ -429,6 +482,10 @@ export function buildOrcidCoverage(
     },
     byRole,
     byDept,
+    sources: inferenceSourceCounts(
+      withoutDismissed(candidates, dismissals),
+      new Set(scholars.map((s) => s.cwid)),
+    ),
   };
 }
 

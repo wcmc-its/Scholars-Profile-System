@@ -151,19 +151,29 @@ describe("/edit/orcid-coverage", () => {
     );
     const page = within(getByTestId("orcid-coverage-page"));
     expect(h.mockLoad).toHaveBeenCalledWith({}, { types: [], units: [], nih: "ever" });
-    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
-      "2 of 4 with an asserted ORCID iD",
-    );
-    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
-      "+1 strong inference (75.0% incl.)",
-    );
+    const tiles = page.getByTestId("orcid-coverage-tiles").textContent;
+    expect(tiles).toContain("50.0%asserted · 75.0% with strong inference");
     // The asserted split: f1 confirmed its iD here, f3's came from Identity.
-    expect(page.getByTestId("orcid-coverage-tiles").textContent).toContain(
-      "1 confirmed here · 1 from Identity or RPM admin",
-    );
+    expect(tiles).toContain("2 of 4 asserted (1 confirmed here, 1 from Identity or RPM admin)");
+    expect(tiles).toContain("+1 more by strong inference");
     const byRole = within(page.getByTestId("orcid-coverage-by-role"));
     expect(byRole.getByText("Full-time faculty")).toBeTruthy();
     expect(byRole.queryByText("Postdoc")).toBeNull(); // nih=ever drops p1
+    // Summary columns by default; the full set is one click away and applies
+    // to BOTH tables.
+    const headerTexts = (testId: string) =>
+      [...page.getByTestId(testId).querySelectorAll("thead th")].map((th) => th.textContent);
+    expect(headerTexts("orcid-coverage-by-dept")).toEqual([
+      "Department",
+      "People",
+      "Coverage",
+      "Asserted",
+      "NIH-funded",
+      "NIH-funded, no ORCID ↓",
+      "NIH PI, no eRA",
+    ]);
+    fireEvent.click(page.getByTestId("orcid-coverage-columns-all"));
+    expect(headerTexts("orcid-coverage-by-role")).toHaveLength(15);
     const byDept = within(page.getByTestId("orcid-coverage-by-dept"));
     // Dept A under nih=ever: f1 (confirmed), f2 (none), f3 (Identity) → People 3,
     // Asserted 2, Confirmed 1, strong 0 — every column distinct, so a swapped cell shows.
@@ -174,7 +184,7 @@ describe("/edit/orcid-coverage", () => {
     ].map((th) => th.textContent);
     const cell = (h: string) => cells[headers.indexOf(h)];
     expect(cell("People")).toBe("3");
-    expect(cell("Asserted ORCID")).toBe("2");
+    expect(cell("Asserted")).toBe("2");
     expect(cell("Confirmed")).toBe("1");
     expect(cell("Inferred, strong")).toBe("0");
     expect(page.getByTestId("orcid-coverage-download").getAttribute("href")).toBe(
@@ -191,10 +201,99 @@ describe("/edit/orcid-coverage", () => {
     expect(getByTestId("orcid-coverage-page").textContent).not.toMatch(/f1|0000-0002/);
     // The weak definition must match the fold: a second candidate demotes only when it is
     // itself strong-eligible (orcidTiers r6), so the copy must not say "several candidates".
-    expect(getByTestId("orcid-coverage-page").textContent).toContain(
-      "weak = no single strong candidate (a name-only registry match, thin support, a contradiction, or two or more strong candidate ORCIDs)",
+    // The definitions sit behind "How we count", closed by default but in the DOM.
+    const defs = page.getByTestId("orcid-coverage-definitions");
+    expect(defs.hasAttribute("hidden")).toBe(true);
+    fireEvent.click(page.getByTestId("orcid-coverage-how-we-count"));
+    expect(defs.hasAttribute("hidden")).toBe(false);
+    expect(defs.textContent).toContain(
+      "No single strong candidate: a name-only registry match, thin support, a contradiction, or two or more strong candidate iDs.",
     );
     expect(getByTestId("orcid-coverage-page").textContent).not.toContain("several candidate");
+  });
+
+  it("names where inferences come from, with people per rule", async () => {
+    const { getByTestId } = render(await EditOrcidCoveragePage({ searchParams: sp() }));
+    const sources = within(getByTestId("orcid-coverage-page")).getByTestId(
+      "orcid-coverage-sources",
+    );
+    const cards = within(sources).getAllByTestId("orcid-coverage-source");
+    expect(cards).toHaveLength(2);
+    // The fixture's one candidate: p1, rpm_inferred with 5 accepted, 0 rejected → strong.
+    const rpmRows = [...cards[0].querySelectorAll(".grid")].map((r) => r.textContent);
+    expect(rpmRows[0]).toMatch(/^rpm_inferred.*Strong1people$/);
+    expect(rpmRows[1]).toMatch(/^rpm_inferred.*Weak0people$/);
+  });
+
+  it("pins full-time faculty first, and the department table filters, sorts and folds", async () => {
+    const depts = Array.from({ length: 17 }, (_, i) => ({
+      key: `D${i}`,
+      label: `Dept ${String(i).padStart(2, "0")}`,
+      people: 20 - i,
+      orcid: 0,
+      confirmed: 0,
+      strong: 0,
+      weak: 0,
+      era: 0,
+      both: 0,
+      nihPeople: i,
+      nihOrcid: 0,
+      nihStrong: 0,
+      nihPi: 0,
+      nihPiEra: 0,
+    }));
+    const role = (key: string, label: string, people: number) => ({
+      ...depts[0],
+      key,
+      label,
+      people,
+    });
+    h.mockLoad.mockResolvedValue({
+      params: { types: [], units: [], nih: "all" },
+      tiles: { overall: depts[0], fullTime: depts[0], nihFullTime: depts[0] },
+      byRole: [
+        role("affiliated", "Affiliated faculty", 50),
+        role("full_time_faculty", "Full-time faculty", 9),
+      ],
+      // Loader order: outreach (NIH-funded without ORCID) desc.
+      byDept: [...depts].reverse(),
+      sources: { rpmStrong: 0, rpmWeak: 0, registryEmail: 0, registryWorks: 0, registryWeak: 0 },
+    });
+    const { getByTestId } = render(await EditOrcidCoveragePage({ searchParams: sp() }));
+    const page = within(getByTestId("orcid-coverage-page"));
+    const firstCells = (testId: string) =>
+      [...page.getByTestId(testId).querySelectorAll("tbody tr")].map(
+        (tr) => tr.querySelector("td")?.textContent,
+      );
+    expect(firstCells("orcid-coverage-by-role")).toEqual([
+      "Full-time faculty",
+      "Affiliated faculty",
+    ]);
+    // Top 15 of 17 in the loader's order, then the fold.
+    expect(firstCells("orcid-coverage-by-dept")).toHaveLength(15);
+    expect(firstCells("orcid-coverage-by-dept")[0]).toBe("Dept 16");
+    const more = page.getByTestId("orcid-coverage-dept-more");
+    expect(more.textContent).toBe("Show all 17");
+    fireEvent.click(more);
+    expect(firstCells("orcid-coverage-by-dept")).toHaveLength(17);
+    // Click a header to re-sort: Department ascending.
+    fireEvent.click(within(page.getByTestId("orcid-coverage-by-dept")).getByText("Department"));
+    expect(firstCells("orcid-coverage-by-dept")[0]).toBe("Dept 00");
+    // The text filter narrows and bypasses the fold.
+    fireEvent.change(page.getByTestId("orcid-coverage-dept-filter"), {
+      target: { value: "dept 1" },
+    });
+    expect(firstCells("orcid-coverage-by-dept")).toEqual([
+      "Dept 10",
+      "Dept 11",
+      "Dept 12",
+      "Dept 13",
+      "Dept 14",
+      "Dept 15",
+      "Dept 16",
+    ]);
+    fireEvent.change(page.getByTestId("orcid-coverage-dept-filter"), { target: { value: "zzz" } });
+    expect(firstCells("orcid-coverage-by-dept")).toEqual(["No departments match."]);
   });
 
   it("type + unit selection: hidden inputs, captions name the selection, CSV link carries it", async () => {
@@ -215,9 +314,9 @@ describe("/edit/orcid-coverage", () => {
       );
     expect(hidden("type")).toEqual(["postdoc"]);
     expect(hidden("unit")).toEqual(["dept:AA1", "center:CC1"]);
-    expect(
-      page.getByTestId("orcid-coverage-by-role").querySelector("caption")?.textContent,
-    ).toBe("Every person type in Dept A or Center Q.");
+    expect(page.getByTestId("orcid-coverage-by-role").querySelector("caption")?.textContent).toBe(
+      "Every person type in Dept A or Center Q.",
+    );
     expect(
       page.getByTestId("orcid-coverage-by-dept").querySelector("caption")?.textContent,
     ).toMatch(/^Postdoc in Dept A or Center Q, sorted by/);

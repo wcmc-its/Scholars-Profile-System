@@ -1,7 +1,9 @@
 /**
- * `/edit/core` — the cores review-queue index. Lists every core facility, each
- * linking to its owner review queue (`/edit/core/[coreId]`). Reached from the
- * "Cores" tab in the admin sub-nav.
+ * `/edit/core` — the cores review-queue index. One summary row per core
+ * facility (review backlog, confirmed count, clients, staff-feed coverage,
+ * leaders, owners, public state — `loadCoreConsoleIndex`), each linking to its
+ * owner review queue (`/edit/core/[coreId]/review`) and its editor
+ * (`/edit/core/[coreId]`). Reached from the "Cores" tab in the admin sub-nav.
  *
  * Audience: superuser or comms_steward (2026-08-26 policy widening, decision
  * #6 — full curator-parity on cores, `comms-steward-profile-editing-spec.md`
@@ -13,16 +15,17 @@
  * rest of `/edit/*`.
  */
 import { redirect } from "next/navigation";
-import Link from "next/link";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
+import { CoreFacilitiesIndex } from "@/components/edit/core-facilities-index";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { getCoreList } from "@/lib/api/cores";
+import { loadCoreConsoleIndex } from "@/lib/api/core-console-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { isCorePagesEnabled, isCorePubModalEnabled } from "@/lib/profile/cores-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +53,13 @@ export default async function EditCoresIndexPage() {
     );
   }
 
-  const cores = await getCoreList(db.read);
+  const cores = await loadCoreConsoleIndex(db.read);
+  // The public-surface flags a core ALSO needs (beside its own `visible`
+  // toggle) to show publicly. Names only — never a value — reach the client.
+  const offFlags = [
+    ...(isCorePagesEnabled() ? [] : ["CORE_PAGES"]),
+    ...(isCorePubModalEnabled() ? [] : ["CORE_PUB_MODAL"]),
+  ];
 
   // The "URL requests" admin tab + pending-count pill; `null` when the
   // slug-request feature is off (hides the tab). Mirrors the sibling console pages.
@@ -70,32 +79,17 @@ export default async function EditCoresIndexPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-        <h1 className="mb-1 text-xl font-bold">Core facilities</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Review the engine-suggested publications for each core facility. Confirmed publications
-          appear on the public core page; rejected ones are hidden. A core with no staff feed yet
-          has nothing to review.
+      <div className="mb-5 flex flex-col gap-1.5">
+        <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
+          Core facilities
+        </h1>
+        <p className="text-muted-foreground m-0 max-w-[84ch] text-[14.5px] leading-normal">
+          Review engine-suggested publications for each core. Confirmed publications appear on the
+          public core page; rejected ones are hidden. A core with no staff feed yet has nothing to
+          review.
         </p>
-        <ul className="divide-apollo-border bg-apollo-surface divide-y rounded-md border border-apollo-border" data-testid="edit-cores-list">
-          {cores.map((c) => (
-            <li key={c.id}>
-              <Link
-                href={`/edit/core/${encodeURIComponent(c.id)}`}
-                className="hover:bg-muted/50 flex items-center justify-between gap-3 px-4 py-3"
-              >
-                <span>
-                  <span className="font-medium">{c.name}</span>
-                  {c.facility && c.facility !== c.name ? (
-                    <span className="text-muted-foreground block text-sm">{c.facility}</span>
-                  ) : null}
-                </span>
-                <span className="text-muted-foreground shrink-0 text-sm" aria-hidden>
-                  Review →
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+      </div>
+      <CoreFacilitiesIndex cores={cores} offFlags={offFlags} />
     </ConsoleShell>
   );
 }

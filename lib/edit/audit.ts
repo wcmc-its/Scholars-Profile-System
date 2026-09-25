@@ -60,6 +60,14 @@ export type AuditAction =
    *  before/after carry the old and new iD and, when the value came from the
    *  "Is this your ORCID iD?" suggestion, `confirmed_suggestion: true`. */
   | "orcid_set"
+  /** a superuser removed a former-URL redirect (a `slug_history` row) from the
+   *  Profile URLs registry (`POST /api/edit/slug-redirect`); the old URL stops
+   *  redirecting and 404s. `targetEntityType='scholar'`, `targetEntityId` is
+   *  the cwid the old URL forwarded to; `beforeValues` carries
+   *  `{ oldSlug, currentSlug, recordedAt }`, `afterValues` is `null`. Requires
+   *  the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "slug_redirect_remove"
   /** a scholar rejected a publication as not theirs via /edit → ReCiter gold
    *  standard (#746); `targetEntityId` is the pmid, `afterValues` carries the
    *  suppression + pending-refresh ids and the rejected contributor cwid */

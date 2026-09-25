@@ -1,20 +1,19 @@
 /**
  * #2542 Phase C — CenterLeadershipCard: the vocabulary-driven leadership
- * editor on `/edit/center/[code]`.
+ * editor on `/edit/center/[code]`, in its Edit Center mockup layout
+ * (2026-09-25): one list of every holder in role order + ONE add row
+ * ("Add [person] as [role] [Interim] Add") + a "Not filled: …" line.
  *
- *  - renders one section per role, in the order the (server-filtered) `roles`
- *    prop arrives — a role the actor isn't allowed at this center is simply
- *    absent from that prop (`isRoleAllowedAtUnit`, computed server-side by
- *    `lib/api/unit-edit-context.ts`), so this card never re-derives allowlist
- *    logic itself;
- *  - a singleHolder role with no holder offers "Add"; with a holder it shows
- *    the holder AND relabels the add control "Replace" (POSTing
- *    `replace: true`), swapping the local list from the response's
- *    `replacedCwid`;
- *  - a non-singleHolder role always offers a plain "Add" and lists every
- *    holder;
+ *  - holders render in the order the (server-filtered) `roles` prop arrives —
+ *    a role the actor isn't allowed at this center is simply absent from that
+ *    prop (`isRoleAllowedAtUnit`, computed server-side), so it is never offered
+ *    in the add row's role select either;
+ *  - picking a singleHolder role that already has a holder relabels the add
+ *    button "Replace" (POSTing `replace: true`), swapping the local list from
+ *    the response's `replacedCwid`;
+ *  - a non-singleHolder role always offers a plain "Add";
  *  - Remove goes through ConfirmDialog before POSTing;
- *  - the interim checkbox POSTs `set_interim`.
+ *  - the per-row interim checkbox POSTs `set_interim`.
  *
  * The directory typeahead is stubbed (its own tests cover it); fetch is mocked.
  */
@@ -38,6 +37,9 @@ vi.mock("@/components/edit/directory-people-typeahead", () => ({
     </button>
   ),
 }));
+vi.mock("@/components/edit/scholar-hover-card", () => ({
+  ScholarHoverCard: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
 import { CenterLeadershipCard } from "@/components/edit/center-leadership-card";
 
@@ -49,6 +51,10 @@ function okFetch(extra: Record<string, unknown> = {}) {
 
 function bodyOf(call: unknown[]): Record<string, unknown> {
   return JSON.parse((call[1] as RequestInit).body as string);
+}
+
+function pickRole(key: string) {
+  fireEvent.change(screen.getByTestId("leadership-add-role"), { target: { value: key } });
 }
 
 beforeEach(() => {
@@ -82,52 +88,69 @@ const ROLES = [
   },
 ];
 
-describe("CenterLeadershipCard (#2542 Phase C)", () => {
-  it("renders one section per role, in prop order, with holders listed", () => {
+describe("CenterLeadershipCard (#2542 Phase C, Edit Center mockup layout)", () => {
+  it("lists every holder in one list, in role (prop) order", () => {
     global.fetch = okFetch() as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
-    const sections = screen
-      .getAllByTestId(/^role-editor-/)
+    const rows = screen
+      .getAllByTestId(/^role-holder-(director|co_director|associate_director)-/)
       .map((el) => el.getAttribute("data-testid"));
-    expect(sections).toEqual([
-      "role-editor-director",
-      "role-editor-co_director",
-      "role-editor-associate_director",
+    expect(rows).toEqual([
+      "role-holder-director-dir001",
+      "role-holder-co_director-cod001",
+      "role-holder-co_director-cod002",
     ]);
-    expect(screen.getByTestId("role-holder-director-dir001")).toBeTruthy();
-    expect(screen.getByTestId("role-holder-co_director-cod001")).toBeTruthy();
-    expect(screen.getByTestId("role-holder-co_director-cod002")).toBeTruthy();
+    // The role is named on each row; an interim holder is flagged inline.
+    expect(screen.getByTestId("role-holder-label-co_director-cod002").textContent).toBe(
+      "Co-Director · interim",
+    );
   });
 
-  it("a role absent from the props renders no section at all (server-side allowlist)", () => {
+  it("names the unfilled roles under the add row", () => {
     global.fetch = okFetch() as unknown as typeof fetch;
-    render(<CenterLeadershipCard centerCode="meyer" roles={[ROLES[0]]} />);
-    expect(screen.queryByTestId("role-editor-co_director")).toBeNull();
-    expect(screen.queryByTestId("role-editor-associate_director")).toBeNull();
+    render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
+    expect(screen.getByTestId("center-leadership-unfilled").textContent).toBe(
+      "Not filled: Associate Director.",
+    );
   });
 
-  it("no assignable roles at all → the empty-state message, no sections", () => {
+  it("the add row's role select offers exactly the server-allowed roles, defaulting to an empty one", () => {
+    global.fetch = okFetch() as unknown as typeof fetch;
+    render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
+    const select = screen.getByTestId("leadership-add-role") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual([
+      "director",
+      "co_director",
+      "associate_director",
+    ]);
+    expect(select.value).toBe("associate_director");
+  });
+
+  it("no assignable roles at all → the empty-state message, no add row", () => {
     global.fetch = okFetch() as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={[]} />);
     expect(screen.getByText(/no assignable leadership roles/i)).toBeTruthy();
-    expect(screen.queryByTestId(/^role-editor-/)).toBeNull();
+    expect(screen.queryByTestId("leadership-add")).toBeNull();
   });
 
-  it("a singleHolder role with a holder labels the control 'Replace'; an empty role labels it 'Add'", () => {
+  it("picking a filled singleHolder role labels the button 'Replace'; other roles say 'Add'", () => {
     global.fetch = okFetch() as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
-    expect(screen.getByTestId("role-add-director").textContent).toBe("Replace");
-    expect(screen.getByTestId("role-add-associate_director").textContent).toBe("Add");
-    // Multi-holder role also stays "Add" even though it already has holders.
-    expect(screen.getByTestId("role-add-co_director").textContent).toBe("Add");
+    pickRole("director");
+    expect(screen.getByTestId("leadership-add").textContent).toBe("Replace");
+    pickRole("co_director");
+    expect(screen.getByTestId("leadership-add").textContent).toBe("Add");
+    pickRole("associate_director");
+    expect(screen.getByTestId("leadership-add").textContent).toBe("Add");
   });
 
   it("adding to an empty multi-holder role POSTs add with no replace flag", async () => {
     const fetchMock = okFetch();
     global.fetch = fetchMock as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
-    fireEvent.click(screen.getByTestId("pick-role-associate_director"));
-    fireEvent.click(screen.getByTestId("role-add-associate_director"));
+    pickRole("associate_director");
+    fireEvent.click(screen.getByTestId("pick-leadership-add"));
+    fireEvent.click(screen.getByTestId("leadership-add"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = bodyOf(fetchMock.mock.calls[0]);
     expect(body).toMatchObject({
@@ -137,7 +160,11 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
       cwid: "new001",
     });
     expect(body).not.toHaveProperty("replace");
-    expect(screen.getByTestId("role-holder-associate_director-new001")).toBeTruthy();
+    expect(body).not.toHaveProperty("interim");
+    await waitFor(() =>
+      expect(screen.getByTestId("role-holder-associate_director-new001")).toBeTruthy(),
+    );
+    expect(screen.getByTestId("center-leadership-unfilled").textContent).toBe("All roles filled.");
   });
 
   it("replacing a singleHolder incumbent POSTs add with replace:true and swaps the holder", async () => {
@@ -147,8 +174,9 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
     });
     global.fetch = fetchMock as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
-    fireEvent.click(screen.getByTestId("pick-role-director"));
-    fireEvent.click(screen.getByTestId("role-add-director"));
+    pickRole("director");
+    fireEvent.click(screen.getByTestId("pick-leadership-add"));
+    fireEvent.click(screen.getByTestId("leadership-add"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = bodyOf(fetchMock.mock.calls[0]);
     expect(body).toMatchObject({ roleKey: "director", action: "add", cwid: "new001", replace: true });
@@ -157,30 +185,22 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
       expect(screen.queryByTestId("role-holder-director-dir001")).toBeNull();
       expect(screen.getByTestId("role-holder-director-new001")).toBeTruthy();
     });
-    // The replacement is reconciled to the ROUTE's response, not carried over
-    // from the (interim) incumbent it replaced — the interim checkbox on the
-    // new row must be unchecked even though `dir001` was not interim to begin
-    // with; the point under test is that this comes from `data.holder`, not
-    // a client-side guess.
     expect(screen.getByTestId("role-interim-director-new001").getAttribute("data-state")).toBe(
       "unchecked",
     );
   });
 
   it("a replacement holder renders the interim state the ROUTE returns, never a hardcoded false", async () => {
-    // #2542 Phase C bug: replacing an INTERIM incumbent must not leave the
-    // card showing "not interim" while the DB (via the route) actually wrote
-    // interim=true because the curator asked for it. The appended row must
-    // reflect `data.holder.interim`, whatever it is.
     const fetchMock = okFetch({
       replacedCwid: "dir001",
       holder: { cwid: "new001", name: "New Person", title: "Professor", interim: true },
     });
     global.fetch = fetchMock as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
-    fireEvent.click(screen.getByTestId("pick-role-director"));
-    fireEvent.click(screen.getByTestId("role-add-interim-director"));
-    fireEvent.click(screen.getByTestId("role-add-director"));
+    pickRole("director");
+    fireEvent.click(screen.getByTestId("pick-leadership-add"));
+    fireEvent.click(screen.getByTestId("leadership-add-interim"));
+    fireEvent.click(screen.getByTestId("leadership-add"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = bodyOf(fetchMock.mock.calls[0]);
     expect(body).toMatchObject({ action: "add", cwid: "new001", replace: true, interim: true });
@@ -192,19 +212,6 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
     );
   });
 
-  it("the add-time Interim checkbox is unchecked by default and omits `interim` from the POST", async () => {
-    const fetchMock = okFetch({
-      holder: { cwid: "new001", name: "New Person", title: "Professor", interim: false },
-    });
-    global.fetch = fetchMock as unknown as typeof fetch;
-    render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
-    fireEvent.click(screen.getByTestId("pick-role-associate_director"));
-    fireEvent.click(screen.getByTestId("role-add-associate_director"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = bodyOf(fetchMock.mock.calls[0]);
-    expect(body).not.toHaveProperty("interim");
-  });
-
   it("a 409 single-holder conflict surfaces an inline error and does not touch the list", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -212,8 +219,9 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
     });
     global.fetch = fetchMock as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
-    fireEvent.click(screen.getByTestId("pick-role-director"));
-    fireEvent.click(screen.getByTestId("role-add-director"));
+    pickRole("director");
+    fireEvent.click(screen.getByTestId("pick-leadership-add"));
+    fireEvent.click(screen.getByTestId("leadership-add"));
     await waitFor(() => expect(screen.getByText(/someone else was just assigned/i)).toBeTruthy());
     expect(screen.getByTestId("role-holder-director-dir001")).toBeTruthy();
   });
@@ -238,7 +246,6 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
     global.fetch = fetchMock as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
     fireEvent.click(screen.getByTestId("role-remove-co_director-cod002"));
-    // Not yet POSTed — the dialog must be confirmed first.
     expect(fetchMock).not.toHaveBeenCalled();
     const confirmButtons = screen.getAllByRole("button", { name: "Remove" });
     fireEvent.click(confirmButtons[confirmButtons.length - 1]);
@@ -248,7 +255,6 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("role-holder-co_director-cod002")).toBeNull();
     });
-    // The untouched co-director stays.
     expect(screen.getByTestId("role-holder-co_director-cod001")).toBeTruthy();
   });
 
@@ -261,10 +267,8 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
     expect(screen.getByTestId("role-holder-director-dir001")).toBeTruthy();
   });
 
-  it("picking someone already holding the role shows an inline error instead of POSTing", () => {
+  it("picking someone already holding the chosen role shows an inline error instead of POSTing", () => {
     global.fetch = okFetch() as unknown as typeof fetch;
-    // The typeahead stub always "picks" cwid new001 — give this role an
-    // existing holder with that exact cwid so the duplicate guard fires.
     const rolesWithDupe = [
       {
         key: "co_director",
@@ -275,8 +279,8 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
       },
     ];
     render(<CenterLeadershipCard centerCode="meyer" roles={rolesWithDupe} />);
-    fireEvent.click(screen.getByTestId("pick-role-co_director"));
-    fireEvent.click(screen.getByTestId("role-add-co_director"));
+    fireEvent.click(screen.getByTestId("pick-leadership-add"));
+    fireEvent.click(screen.getByTestId("leadership-add"));
     expect(global.fetch).not.toHaveBeenCalled();
     expect(screen.getByText(/already holds this role/i)).toBeTruthy();
   });

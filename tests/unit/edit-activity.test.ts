@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EDIT_ACTIVITY_RECENT_LIMIT,
   EDIT_ACTIVITY_WINDOW_DAYS,
   type EditActivitySummary,
   buildChanges,
   coerceValue,
   collectCwids,
+  decodeCursor,
+  easternOffset,
+  encodeCursor,
+  isSystemActor,
   loadEditActivitySummary,
+  loadOlderEdits,
+  parseAsOf,
   shapeSummary,
   toDay,
 } from "@/lib/api/edit-activity";
@@ -234,5 +241,231 @@ describe("loadEditActivitySummary name resolution", () => {
     expect(summary.people).toEqual({});
     expect(summary.totalEdits).toBe(1);
     expect(summary.topEditors).toEqual([{ actorCwid: "act0001", edits: 1 }]);
+  });
+});
+
+describe("activity redesign — KPIs, day buckets, entity names", () => {
+  it("easternOffset follows DST", () => {
+    expect(easternOffset(new Date("2026-07-01T12:00:00Z"))).toBe("-04:00");
+    expect(easternOffset(new Date("2026-01-15T12:00:00Z"))).toBe("-05:00");
+  });
+
+  it("isSystemActor is the system- prefix only", () => {
+    expect(isSystemActor("system-autolock")).toBe(true);
+    expect(isSystemActor("abc1234")).toBe(false);
+  });
+
+  it("shapeSummary reads window-wide editor stats (bigint) and stamps generatedAt", () => {
+    const now = new Date("2026-09-24T15:00:00Z");
+    const s = shapeSummary(
+      [{ day: "2026-09-24", edits: 10 }],
+      [{ actor_cwid: "abc1234", edits: 10n }],
+      [],
+      [],
+      [{ editors: 7n, automated_editors: 1n, automated_edits: 4n }],
+      now,
+    );
+    expect(s.editorStats).toEqual({ editors: 7, automatedEditors: 1, automatedEdits: 4 });
+    expect(s.generatedAt).toBe("2026-09-24T15:00:00.000Z");
+  });
+
+  it("without a stats row, editor stats fall back to the capped list", () => {
+    const s = shapeSummary(
+      [],
+      [
+        { actor_cwid: "system-autolock", edits: 3n },
+        { actor_cwid: "abc1234", edits: 2n },
+      ],
+      [],
+      [],
+    );
+    expect(s.editorStats).toEqual({ editors: 2, automatedEditors: 1, automatedEdits: 3 });
+  });
+
+  it("buckets days in Eastern time with a bound offset, and names centers + cores", async () => {
+    const sqls: string[] = [];
+    const params: unknown[][] = [];
+    const answers = [
+      [{ day: "2026-09-24", edits: 2 }],
+      [{ actor_cwid: "abc1234", edits: 2 }],
+      [
+        { target_entity_type: "center", target_entity_id: "ctr_one", edits: 1 },
+        { target_entity_type: "core", target_entity_id: "7", edits: 1 },
+      ],
+      [],
+      [{ editors: 1, automated_editors: 0, automated_edits: 0 }],
+    ];
+    let call = 0;
+    const client = {
+      $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        sqls.push(strings.join("?"));
+        params.push(values);
+        return answers[call++] ?? [];
+      },
+      scholar: { findMany: async () => [] },
+      center: { findMany: async () => [{ code: "ctr_one", name: "Center One" }] },
+      core: { findMany: async () => [{ id: "7", name: "Core Seven" }] },
+    } as never;
+    const summary = await loadEditActivitySummary(client, new Date("2026-09-24T15:00:00Z"));
+    expect(sqls[0]).toContain("CONVERT_TZ(ts, '+00:00', ?)");
+    expect(params[0]![0]).toBe("-04:00");
+    expect(sqls[4]).toContain("COUNT(DISTINCT actor_cwid)");
+    expect(summary.editorStats.editors).toBe(1);
+    expect(summary.entityNames).toEqual({ "center:ctr_one": "Center One", "core:7": "Core Seven" });
+  });
+});
+
+describe("Load older: cursor + paged read", () => {
+  /** A raw audit row; `n` is the id and walks the timestamp back by n seconds. */
+  const raw = (n: number, over: Record<string, unknown> = {}) => ({
+    id: BigInt(n),
+    ts: new Date(Date.UTC(2026, 8, 24, 12, 0, 0) - n * 1000),
+    actor_cwid: "abc1234",
+    impersonated_cwid: null,
+    action: "field_override",
+    target_entity_type: "scholar",
+    target_entity_id: "sch0001",
+    fields_changed: null,
+    before_values: null,
+    after_values: null,
+    ...over,
+  });
+
+  it("encodeCursor / decodeCursor round-trip (ts, id)", () => {
+    const c = encodeCursor({ ts: "2026-09-24T12:00:00.123Z", id: "98765" });
+    expect(c).toBe("2026-09-24T12:00:00.123Z_98765");
+    expect(decodeCursor(c)).toEqual({ ts: new Date("2026-09-24T12:00:00.123Z"), id: 98765n });
+  });
+
+  it("decodeCursor rejects anything malformed", () => {
+    for (const bad of [
+      null,
+      "",
+      "garbage",
+      "2026-09-24T12:00:00.000Z",
+      "2026-09-24T12:00:00.000Z_",
+      "2026-09-24T12:00:00.000Z_12a",
+      "2026-09-24T12:00:00.000Z_-1",
+      "2026-13-45T12:00:00.000Z_1",
+      "not-a-date_1",
+      "1' OR 1=1_1",
+      `2026-09-24T12:00:00.000Z_${"9".repeat(40)}`,
+    ]) {
+      expect(decodeCursor(bad)).toBeNull();
+    }
+  });
+
+  it("shapeSummary stringifies bigint ids and sets nextCursor only when the first page filled and more exist", () => {
+    const full = Array.from({ length: EDIT_ACTIVITY_RECENT_LIMIT }, (_, i) => raw(i + 1));
+    const s = shapeSummary([{ day: "2026-09-24", edits: 150 }], [], [], full);
+    expect(s.recent[0]!.id).toBe("1");
+    expect(JSON.stringify(s.recent[0])).toContain('"id":"1"');
+    expect(s.nextCursor).toBe(encodeCursor(s.recent[EDIT_ACTIVITY_RECENT_LIMIT - 1]!));
+
+    // Every edit in the window is already loaded.
+    expect(shapeSummary([{ day: "2026-09-24", edits: 100 }], [], [], full).nextCursor).toBeNull();
+    // A short first page is the whole window.
+    expect(
+      shapeSummary([{ day: "2026-09-24", edits: 150 }], [], [], [raw(1)]).nextCursor,
+    ).toBeNull();
+  });
+
+  const pagedClient = (rows: unknown[]) => {
+    const sqls: string[] = [];
+    const params: unknown[][] = [];
+    const client = {
+      $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        sqls.push(strings.join("?"));
+        params.push(values);
+        return rows;
+      },
+      scholar: {
+        findMany: async () => [
+          { cwid: "abc1234", preferredName: "Ada Editor", primaryTitle: null },
+        ],
+      },
+      center: { findMany: async () => [{ code: "ctr_one", name: "Center One" }] },
+      core: { findMany: async () => [] },
+    } as never;
+    return { client, sqls, params };
+  };
+
+  it("loadOlderEdits reads strictly after the (ts, id) cursor, window-bounded, one look-ahead row", async () => {
+    const rows = Array.from({ length: EDIT_ACTIVITY_RECENT_LIMIT + 1 }, (_, i) => raw(i + 200));
+    const { client, sqls, params } = pagedClient(rows);
+    const cursor = decodeCursor("2026-09-24T11:56:40.000Z_200")!;
+    const now = new Date("2026-09-24T15:00:00Z");
+    const page = await loadOlderEdits(client, cursor, now);
+
+    expect(sqls).toHaveLength(1);
+    const sql = sqls[0]!.replace(/\s+/g, " ");
+    expect(sql).toContain("WHERE ts >= ? AND (ts < ? OR (ts = ? AND id < ?))");
+    expect(sql).toContain("ORDER BY ts DESC, id DESC");
+    expect(sql).toContain(`LIMIT ${EDIT_ACTIVITY_RECENT_LIMIT + 1}`);
+    expect(params[0]).toEqual([
+      new Date(now.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 86_400_000),
+      cursor.ts,
+      cursor.ts,
+      200n,
+    ]);
+
+    // The look-ahead row is dropped; the cursor points at the last row returned.
+    expect(page.recent).toHaveLength(EDIT_ACTIVITY_RECENT_LIMIT);
+    expect(page.nextCursor).toBe(encodeCursor(page.recent[EDIT_ACTIVITY_RECENT_LIMIT - 1]!));
+    expect(page.people).toEqual({ abc1234: { name: "Ada Editor", title: null } });
+  });
+
+  it("parseAsOf accepts an ISO instant, clamps a future one to now, rejects the rest", () => {
+    const now = new Date("2026-09-24T20:00:00.000Z");
+    expect(parseAsOf("2026-09-24T19:00:00.000Z", now)).toEqual(
+      new Date("2026-09-24T19:00:00.000Z"),
+    );
+    expect(parseAsOf("2026-09-25T09:00:00Z", now)).toEqual(now);
+    for (const bad of [null, undefined, "", "2026-09-24", "yesterday", "2026-13-45T99:99:99Z"]) {
+      expect(parseAsOf(bad, now)).toBeNull();
+    }
+  });
+
+  it("loadOlderEdits cuts the window off at asOf (the summary's generatedAt), not request time", async () => {
+    const { client, params } = pagedClient([]);
+    const asOf = new Date("2026-09-24T20:00:00.000Z");
+    await loadOlderEdits(client, decodeCursor("2026-09-24T12:00:00.000Z_9")!, asOf);
+    expect(params[0]![0]).toEqual(
+      new Date(asOf.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 86_400_000),
+    );
+  });
+
+  it("loadOlderEdits returns nextCursor null on the last page and names centers", async () => {
+    const { client } = pagedClient([
+      raw(5, { target_entity_type: "center", target_entity_id: "ctr_one" }),
+    ]);
+    const page = await loadOlderEdits(client, decodeCursor("2026-09-24T12:00:00.000Z_9")!);
+    expect(page.recent.map((r) => r.id)).toEqual(["5"]);
+    expect(page.nextCursor).toBeNull();
+    expect(page.entityNames).toEqual({ "center:ctr_one": "Center One" });
+  });
+
+  it("loadOlderEdits throws when the audit read fails, but name lookups fail soft", async () => {
+    const failing = {
+      $queryRaw: async () => {
+        throw new Error("SELECT command denied");
+      },
+      scholar: { findMany: async () => [] },
+    } as never;
+    await expect(
+      loadOlderEdits(failing, decodeCursor("2026-09-24T12:00:00.000Z_9")!),
+    ).rejects.toThrow("SELECT command denied");
+
+    const softNames = {
+      $queryRaw: async () => [raw(1)],
+      scholar: {
+        findMany: async () => {
+          throw new Error("denied");
+        },
+      },
+    } as never;
+    const page = await loadOlderEdits(softNames, decodeCursor("2026-09-24T12:00:00.000Z_9")!);
+    expect(page.recent).toHaveLength(1);
+    expect(page.people).toEqual({});
   });
 });
