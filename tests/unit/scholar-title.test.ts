@@ -108,6 +108,12 @@ describe("rankTitleText — the EA ladder (2026-09-24)", () => {
     ["Instructor in Medicine", 12],
     ["Postdoctoral Associate", 12],
     ["Director of Example Center and Professor of Medicine", 10], // not endowed
+    // Endowed Scholars count as endowed (EA, 2026-09-25); unnamed ones do not.
+    ["Jane Example Research Scholar in Lung Cancer", 9],
+    ["The Example Family Clinical Scholar", 9],
+    ["Example Foundation Educational Scholar in Surgery", 9],
+    ["Research Scholar", 13],
+    ["Clinical Scholar in Medicine", 13],
     ["Anne Example, M.D. Assistant Professor of Otolaryngology", 9], // comma in a name
     ["Vice Chair for Research and Professor of Medicine", 8.5], // an office, not a name
     ["Professor Emeritus of Medicine", 12],

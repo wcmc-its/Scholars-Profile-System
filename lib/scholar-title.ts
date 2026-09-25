@@ -67,7 +67,7 @@ export const TITLE_RANK_LABEL: Record<keyof typeof TITLE_RANK, string> = {
   associateDean: "Associate / Assistant Dean",
   associateViceProvost: "Associate / Assistant Vice Provost",
   viceChair: "Vice Chair",
-  endowed: "Endowed / named professorship",
+  endowed: "Endowed title of any academic rank (incl. endowed Clinical / Research / Educational Scholars)",
   unitCenterDirector: "Unit-based Center / Institute Director",
   unitProgramDirector: "Unit-based Program Director",
   academic: "Academic rank (Professor, Instructor …)",
@@ -144,7 +144,8 @@ export function rankTitleText(
   return TITLE_RANK.unranked;
 }
 
-/** "Gale and Ira Drukier Professor of …", "… Chair in …", "Endowed …". A
+/** "Gale and Ira Drukier Professor of …", "… Chair in …", "Endowed …", a
+ *  named Clinical / Research / Educational Scholar. A
  *  professorship is named when a non-rank word precedes "Professor" —
  *  "Associate Professor of Clinical Medicine" is not. A lead naming an office
  *  or carrying of/for/in is another role joined on ("Director of X and
@@ -152,7 +153,11 @@ export function rankTitleText(
  *  Assistant Professor"). */
 function isEndowed(t: string): boolean {
   if (/\bendowed\b|\bchair in\b/i.test(t)) return true;
-  const m = /^(.*?)\bprofessor\b/i.exec(t);
+  // "Endowed academic titles of any rank" includes the endowed Clinical /
+  // Research / Educational Scholars (EA, 2026-09-25: EFC stressed these for
+  // junior faculty). Same named-lead test as a professorship: "Jane Example
+  // Research Scholar in Lung Cancer" is named, a bare "Research Scholar" not.
+  const m = /^(.*?)\b(?:professor|(?:clinical|research|education(?:al)?) scholar)\b/i.exec(t);
   if (!m || /\b(?:of|for|in|director|chief|chair|dean|provost|president|head)\b/i.test(m[1])) {
     return false;
   }
