@@ -40,6 +40,7 @@ export type AdminSubnavActive =
   | "honors-queue"
   | "news-queue"
   | "media-highlights-queue"
+  | "titles-queue"
   | "slugs"
   | "administrators"
   | "methods"
@@ -97,6 +98,8 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   "honors-queue": "queues",
   "news-queue": "queues",
   "media-highlights-queue": "queues",
+  /** Display titles needing review, resolved by pinning (formerly report 10). */
+  "titles-queue": "queues",
   cores: "queues",
   /** Reference/config data you look up; rarely mutated. */
   slugs: "registries",
@@ -137,6 +140,8 @@ export function AdminSubnav({
   active,
   pendingSlugRequests,
   pendingHonors,
+  titlesTab = false,
+  pendingTitles = null,
   administratorsTab,
   methodsTab,
   roleVocabularyTab,
@@ -167,6 +172,14 @@ export function AdminSubnav({
    * makes the compiler the test.
    */
   pendingHonors: number | null;
+  /** Show the "Titles" queue tab (`/edit/titles-queue`): superuser or comms
+   *  steward, the people who can pin a display title (`TAB_PREDICATES.titles`
+   *  in `lib/edit/console-tabs.server.ts`). Default `false`. */
+  titlesTab?: boolean;
+  /** The Titles tab's pill: the "Needs review" count
+   *  (`countTitlesNeedingReview`). `null` (the count failed, or was not read)
+   *  shows the tab with no pill; it never hides the tab. */
+  pendingTitles?: number | null;
   /** `null` hides the "Administrators" tab — the feature is flag-gated
    *  (`SELF_EDIT_ADMINISTRATORS_TAB`), mirroring the `pendingSlugRequests`
    *  hide pattern. A number shows the tab (Phase B passes `0` — no badge). */
@@ -275,6 +288,16 @@ export function AdminSubnav({
         id: "media-highlights-queue",
         href: "/edit/media-highlights-queue",
         label: "Media highlights",
+      },
+      // Display titles needing review (formerly report 10 under Reports). The
+      // tab rides the role (`titlesTab`), the pill rides the count, so a
+      // failed count drops the pill and keeps the tab.
+      {
+        show: titlesTab,
+        id: "titles-queue",
+        href: "/edit/titles-queue",
+        label: "Titles",
+        count: pendingTitles ?? undefined,
       },
       // Always visible to superusers — the slug namespace exists regardless of the
       // slug-request flag. The request queue lives on the same page (design canvas

@@ -197,9 +197,9 @@ describe("FUNCTIONAL_ROLES_AUTHZ on: Reporting", () => {
       { role: "reporting", cwid: "fake007", scopes: ["*"] },
       { role: "reporting", cwid: "fake008", scopes: ["article-count"] },
     ]);
-    expect([...(await loadReportScopesForCwid("fake007", "display-titles"))]).toEqual(["*"]);
+    expect([...(await loadReportScopesForCwid("fake007", "high-impact-publications"))]).toEqual(["*"]);
     expect([...(await registryReportScopes("fake008", "article-count"))]).toEqual(["*"]);
-    expect([...(await registryReportScopes("fake008", "display-titles"))]).toEqual([]);
+    expect([...(await registryReportScopes("fake008", "high-impact-publications"))]).toEqual([]);
   });
 
   it("additive: report_access rows still count, and the registry only adds to them", async () => {

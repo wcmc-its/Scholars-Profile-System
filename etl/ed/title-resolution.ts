@@ -125,18 +125,18 @@ export type TitleCandidates = {
   /** The raw `field_override(primaryTitle)` value; `""` means un-pinned. */
   override: string | null;
   /** ED `weillCornellEduWorkingTitle` as stored, whatever the flag: the
-   *  display-titles report checks its office claims against the roles. */
+   *  Titles queue checks its office claims against the roles. */
   workingTitle: string | null;
   options: TitleOption[];
   /** Every raw title string (working, ED primary, EACH current appointment) —
    *  the options keep only the best appointment, which hides a second office
-   *  (a Dean who is also Chair). Only the display-titles report reads it. */
+   *  (a Dean who is also Chair). Only the Titles queue reads it. */
   texts: AppointmentTitle[];
 };
 
 /**
  * Every non-deleted scholar's title options — the ONE computation both this
- * post-pass and the `/edit` display-titles report read, so the report can
+ * post-pass and the `/edit` Titles queue read, so the queue can
  * never show a winner the nightly would not write.
  */
 export async function loadTitleCandidates(

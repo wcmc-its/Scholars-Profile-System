@@ -1,5 +1,5 @@
 /**
- * The display-titles report (`/edit/reports/display-titles`) — who is listed
+ * The Titles queue (`/edit/titles-queue`, formerly report 10) — who is listed
  * and why. Plan: `2026-09-25-display-title-dashboard-plan.md` (Projects).
  *
  * NOT all ~9.4k scholars: the ~100–150 whose title an operator may want to

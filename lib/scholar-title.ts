@@ -54,7 +54,7 @@ export const TITLE_RANK = {
   unranked: 13,
 } as const;
 
-/** The rubric's wording per rank — what `/edit/reports/display-titles` and
+/** The rubric's wording per rank — what `/edit/titles-queue` and
  *  `docs/title-hierarchy.md` show (a test pins the doc to this and
  *  {@link TITLE_RANK}). */
 export const TITLE_RANK_LABEL: Record<keyof typeof TITLE_RANK, string> = {

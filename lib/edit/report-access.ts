@@ -86,25 +86,40 @@ export const MENTORED_PUBS_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string
  *  a grant is the wildcard alone. */
 export const ARTICLE_COUNT_REPORT = "article-count";
 export const HIGH_IMPACT_PUBS_REPORT = "high-impact-publications";
-/** Report 10 (Display titles): superuser / comms_steward always; a grant
- *  lets someone else VIEW it (setting a title stays superuser / comms_steward). */
-export const DISPLAY_TITLES_REPORT = "display-titles";
 export const WHOLE_REPORT_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string]> = [[ALL_SCOPES, "Whole report"]];
 
 /** Every grantable `reportKey` → the `[scopeKey, label]` pairs it accepts.
- *  The route validates against this; a new person-granted report is one entry. */
+ *  The route validates against this; a new person-granted report is one entry.
+ *
+ *  `"display-titles"` (report 10) is gone: it became the Titles queue, gated
+ *  on superuser / comms_steward alone, so no grant reaches it. A leftover
+ *  `report_access` row for it gates nothing (no page reads that key), cannot
+ *  be re-granted (the route refuses the key), and is skipped by the
+ *  functional-roles import and parity list (`isGrantableReportKey`). */
 export const REPORT_ACCESS_SCOPE_OPTIONS: Readonly<Record<string, ReadonlyArray<readonly [string, string]>>> = {
   [MENTORED_PUBS_REPORT]: MENTORED_PUBS_SCOPE_OPTIONS,
   [ARTICLE_COUNT_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
   [HIGH_IMPACT_PUBS_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
-  [DISPLAY_TITLES_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
 };
+
+/** Whether `reportKey` is a report a `report_access` row can still grant — a
+ *  key of {@link REPORT_ACCESS_SCOPE_OPTIONS}. False for a retired report's
+ *  leftover rows. */
+export function isGrantableReportKey(reportKey: string): boolean {
+  return Object.hasOwn(REPORT_ACCESS_SCOPE_OPTIONS, reportKey);
+}
 
 /** Whether `cwid` holds a grant on ANY report — the `/edit` landing and the
  *  console's Reports tab use it to give a grant-only holder a way in. */
 export async function hasAnyReportAccess(cwid: string): Promise<boolean> {
   if (!cwid) return false;
-  const rows = await db.read.reportAccess.findMany({ where: { cwid }, select: { cwid: true }, take: 1 });
+  // Grantable reports only: a leftover row on a retired report (report 10)
+  // must not light up a Reports tab that leads to nothing.
+  const rows = await db.read.reportAccess.findMany({
+    where: { cwid, reportKey: { in: Object.keys(REPORT_ACCESS_SCOPE_OPTIONS) } },
+    select: { cwid: true },
+    take: 1,
+  });
   if (rows.length > 0) return true;
   // Additive: a Reporting grant in the functional-roles registry, only while
   // FUNCTIONAL_ROLES_AUTHZ is "on" (false without a read otherwise).

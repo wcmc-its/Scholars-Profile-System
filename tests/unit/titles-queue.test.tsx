@@ -1,12 +1,11 @@
 /**
- * Report 10 (Display titles): the rubric is rendered FROM `TITLE_RANK` /
+ * The Titles queue body (`/edit/titles-queue`, formerly report 10): the rubric is rendered FROM `TITLE_RANK` /
  * `TITLE_RANK_LABEL` (a ladder change shows up without touching the body)
  * and sits collapsed behind a toggle that `#rubric` opens; the export's
  * Criteria rows state every filter, "All" when unset; the sheet row's
  * columns; the page opens on the "Needs review" tab with per-tab counts; the
  * reason chips count within the tab and toggle `?reason=`; the pin control is
- * for superuser / comms_steward only (a person-gate grantee may look, not
- * set) and posts the existing `/api/edit/field` write; and the download link
+ * for superuser / comms_steward only (the pin gate) and posts the existing `/api/edit/field` write; and the download link
  * carries the page's own query string, tab included. Fixture people are
  * invented.
  */
@@ -22,10 +21,7 @@ vi.mock("@/lib/edit/title-dashboard", async (orig) => ({
   loadTitleDashboard: h.load,
 }));
 
-import {
-  renderDisplayTitlesReport,
-  RUBRIC_ROWS,
-} from "@/components/edit/reports/display-titles-body";
+import { loadTitlesQueue, RUBRIC_ROWS, TitlesQueue } from "@/components/edit/titles-queue";
 import {
   classifyTitleRow,
   parseTitleDashboardParams,
@@ -91,18 +87,19 @@ const PIN_CLEAN = fixture("zzd9004", "Dee Mockford", "Professor of Pediatrics", 
 const ROWS: TitleDashboardRow[] = [CHAIR, PINNED, MISMATCH, PIN_CLEAN];
 
 const SUPER = { cwid: "zzs0001", isSuperuser: true, isCommsSteward: false };
-const GRANTEE = { cwid: "zzg0001", isSuperuser: false, isCommsSteward: false };
-const BASE = "/edit/reports/display-titles";
+const STEWARD = { cwid: "zzc0001", isSuperuser: false, isCommsSteward: true };
+const NEITHER = { cwid: "zzg0001", isSuperuser: false, isCommsSteward: false };
+const BASE = "/edit/titles-queue";
 
-async function renderBody(session: object, searchParams: Record<string, string> = {}) {
-  const { main } = await renderDisplayTitlesReport({
-    n: "10",
-    scopes: new Set(["*"]),
-    session,
-    searchParams,
-    basePath: BASE,
-  } as unknown as Parameters<typeof renderDisplayTitlesReport>[0]);
-  const r = render(<div data-testid="body">{main}</div>);
+type Session = { isSuperuser: boolean; isCommsSteward: boolean };
+
+async function renderBody(session: Session, searchParams: Record<string, string> = {}) {
+  const data = await loadTitlesQueue();
+  const r = render(
+    <div data-testid="body">
+      <TitlesQueue data={data} session={session} searchParams={searchParams} basePath={BASE} />
+    </div>,
+  );
   return within(r.getByTestId("body"));
 }
 
@@ -193,7 +190,15 @@ describe("export rows", () => {
   });
 });
 
-describe("report 10 body", () => {
+describe("loadTitlesQueue", () => {
+  it("counts every listed row into exactly one of review / pinned / fyi", async () => {
+    const { all, counts } = await loadTitlesQueue();
+    expect(all).toHaveLength(4);
+    expect(counts).toEqual({ review: 2, pinned: 1, fyi: 1, all: 4 });
+  });
+});
+
+describe("Titles queue body", () => {
   it("opens on Needs review, with each tab's count over every listed scholar", async () => {
     const q = await renderBody(SUPER);
     const tab = (t: string) => q.getByTestId(`display-titles-tab-${t}`);
@@ -239,22 +244,32 @@ describe("report 10 body", () => {
   it("the download carries the same query string, tab included", async () => {
     const q = await renderBody(SUPER, { reason: "pinned", q: "bob", tab: "all" });
     expect(q.getByTestId("display-titles-download").getAttribute("href")).toBe(
-      "/api/edit/reports/display-titles?tab=all&reason=pinned&q=bob",
+      "/edit/titles-queue/export?tab=all&reason=pinned&q=bob",
     );
     cleanup();
     const d = await renderBody(SUPER);
     expect(d.getByTestId("display-titles-download").getAttribute("href")).toBe(
-      "/api/edit/reports/display-titles?tab=review",
+      "/edit/titles-queue/export?tab=review",
     );
   });
 
-  it("superuser gets Change per row; a grantee does not", async () => {
+  it("superuser and comms steward get Change per row; the control never shows to anyone else", async () => {
     const su = await renderBody(SUPER);
     expect(su.getByTestId("title-change-zzc9003")).toBeTruthy();
     cleanup();
-    const g = await renderBody(GRANTEE);
+    const cs = await renderBody(STEWARD);
+    expect(cs.getByTestId("title-change-zzc9003")).toBeTruthy();
+    cleanup();
+    // The page 404s this viewer; the body still refuses them the control.
+    const g = await renderBody(NEITHER);
     expect(g.getByTestId("title-row-zzc9003")).toBeTruthy();
     expect(g.queryByTestId("title-change-zzc9003")).toBeNull();
+  });
+
+  it("carries no report chrome (no 'Report 10', no '← All reports')", async () => {
+    const q = await renderBody(SUPER);
+    expect(q.queryByText(/Report 10/)).toBeNull();
+    expect(q.queryByText(/All reports/)).toBeNull();
   });
 
   it("Change opens the pin panel; Pin this posts the existing field write and refreshes", async () => {

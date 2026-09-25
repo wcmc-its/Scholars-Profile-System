@@ -1,5 +1,5 @@
 /**
- * The display-titles report's listing rules (`lib/edit/title-dashboard.ts`).
+ * The Titles queue listing rules (`lib/edit/title-dashboard.ts`).
  * Options come from the real `buildTitleOptions`, so a ladder change that
  * shifts who is listed shows up here.
  */

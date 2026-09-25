@@ -24,7 +24,7 @@
  * page refreshes so the identity header above picks up the new title.
  *
  * `rubricHref` adds a "How titles are chosen" link to the published ladder
- * (`/edit/reports/display-titles#rubric`, docs/title-hierarchy.md). The page
+ * (`/edit/titles-queue#rubric`, docs/title-hierarchy.md). The page
  * passes it only to a superuser / comms steward, who can open that report.
  *
  * Imports ONLY `@/lib/scholar-title` (pure, import-free) — never
@@ -128,7 +128,7 @@ export type TitleFieldProps = {
   /** Operator posture (pick outright) vs scholar/proxy posture (request). */
   canSet: boolean;
   /** Where "How titles are chosen" points. Omitted = no link (only a
-   *  superuser / comms steward can open the display-titles report). */
+   *  superuser / comms steward can open the Titles queue). */
   rubricHref?: string;
 };
 

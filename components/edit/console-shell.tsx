@@ -2,6 +2,7 @@ import { AdminSubnav, type AdminSubnavActive } from "@/components/edit/admin-sub
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { db } from "@/lib/db";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import { countTitlesNeedingReview } from "@/lib/edit/titles-queue";
 import type { EditSession } from "@/lib/auth/superuser";
 
 /**
@@ -42,6 +43,7 @@ export async function ConsoleShell({
   session,
   pendingSlugRequests,
   pendingHonors,
+  pendingTitles,
   unitsTab,
   reportsTab,
   children,
@@ -51,6 +53,12 @@ export async function ConsoleShell({
   /** DB counts — a read per request, so the page resolves them, not this shell. */
   pendingSlugRequests: number | null;
   pendingHonors: number | null;
+  /** The Titles queue pill ("Needs review" count). Omitted, the shell reads
+   *  it itself for a viewer who has the tab (`countTitlesNeedingReview`:
+   *  memoized, fail-soft to null = no pill), so every console page shows
+   *  the same pill with no per-page wiring. `/edit/titles-queue` passes the
+   *  exact count it just computed. */
+  pendingTitles?: number | null;
   /** OR-in escape hatch for `/edit/units`, which has no unit-admin gate of its
    *  own (any signed-in viewer can land there) — see the module doc comment. */
   unitsTab?: boolean;
@@ -62,6 +70,11 @@ export async function ConsoleShell({
   children: React.ReactNode;
 }) {
   const tabs = await loadConsoleTabs(session, db.read);
+  const titlesPill = !tabs.titles
+    ? null
+    : pendingTitles !== undefined
+      ? pendingTitles
+      : await countTitlesNeedingReview(db.read);
   return (
     <div className="bg-apollo-page min-h-screen">
       {/* Skip link — first focusable element, jumps past the bar's tabs to the page. */}
@@ -76,6 +89,8 @@ export async function ConsoleShell({
           active={active}
           pendingSlugRequests={pendingSlugRequests}
           pendingHonors={pendingHonors}
+          titlesTab={tabs.titles}
+          pendingTitles={titlesPill}
           superuserSurfaces={session.isSuperuser}
           profilesTab={tabs.profiles}
           unitsTab={tabs.units || unitsTab}

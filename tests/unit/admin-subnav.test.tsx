@@ -562,6 +562,66 @@ describe("AdminSubnav — the Honors tab (#1762)", () => {
   });
 });
 
+describe("AdminSubnav — the Titles queue tab (formerly report 10)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("is hidden unless the caller says the viewer has it", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} pendingTitles={5} />);
+    expect(screen.queryByTestId("admin-tab-titles-queue")).toBeNull();
+  });
+
+  it("shows 'Titles' linking to /edit/titles-queue, with the Needs review count as its pill", () => {
+    render(
+      <AdminSubnav
+        active="profiles"
+        superuserSurfaces={false}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        titlesTab
+        pendingTitles={12}
+      />,
+    );
+    const tab = screen.getByTestId("admin-tab-titles-queue");
+    expect(tab.getAttribute("href")).toBe("/edit/titles-queue");
+    expect(tab.textContent).toBe("Titles12");
+    expect(tab.querySelector('[data-testid="admin-subnav-pending-count"]')?.textContent).toBe("12");
+  });
+
+  it("a failed count (null) keeps the tab and drops only the pill; zero shows no pill", () => {
+    const { unmount } = render(
+      <AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} titlesTab pendingTitles={null} />,
+    );
+    expect(screen.getByTestId("admin-tab-titles-queue").textContent).toBe("Titles");
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+    unmount();
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} titlesTab pendingTitles={0} />);
+    expect(screen.getByTestId("admin-tab-titles-queue")).toBeTruthy();
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+  });
+
+  it("is marked current on its own page", () => {
+    render(
+      <AdminSubnav active="titles-queue" pendingSlugRequests={null} pendingHonors={null} titlesTab pendingTitles={3} />,
+    );
+    expect(screen.getByTestId("admin-tab-titles-queue").getAttribute("aria-current")).toBe("page");
+  });
+
+  it("lands in the Queues group menu, pill included, when CONSOLE_SUBNAV_GROUPED is on", async () => {
+    vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+    vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+    render(
+      <AdminSubnav active="titles-queue" pendingSlugRequests={null} pendingHonors={0} titlesTab pendingTitles={4} />,
+    );
+    const group = screen.getByTestId("admin-group-queues");
+    expect(group.getAttribute("aria-current")).toBe("page");
+    fireEvent.focus(group);
+    const menu = await screen.findByTestId("admin-group-menu-queues");
+    const tab = menu.querySelector('[data-testid="admin-tab-titles-queue"]');
+    expect(tab?.getAttribute("href")).toBe("/edit/titles-queue");
+    expect(tab?.querySelector('[data-testid="admin-subnav-pending-count"]')?.textContent).toBe("4");
+  });
+});
+
 // ── Two-tier grouping, behind CONSOLE_SUBNAV_GROUPED ────────────────────────
 //
 // `docs/2026-07-20-console-subnav-two-tier-spec.md`. The flag defaults OFF, so
@@ -622,7 +682,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     // The map is the whole mechanism — a mis-slotted id sends the wrong group
     // entry maroon.
     const expected: Record<string, string> = {
-      "honors-queue": "queues", "news-queue": "queues", cores: "queues",
+      "honors-queue": "queues", "news-queue": "queues", "titles-queue": "queues", cores: "queues",
       slugs: "registries", administrators: "registries", methods: "registries",
       activity: "insights", usage: "insights", "etl-status": "insights",
       matcha: "tools", "grant-matcha": "tools",

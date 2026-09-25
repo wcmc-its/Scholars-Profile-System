@@ -13,7 +13,7 @@ drifts from the code. Change the code first, then this table.
 **Where the ranks come from:** the title pecking order supplied by External Affairs
 (Institutional Communications), 2026-09-24, with follow-up rulings 2026-09-25 (#2771).
 
-**Where it is reviewed:** `/edit/reports/display-titles` lists every scholar whose title is
+**Where it is reviewed:** the Titles queue (`/edit/titles-queue`, Queues → Titles) lists every scholar whose title is
 decided by leadership, a pin, a close contest or a mismatch, with the rule that decided it.
 
 ## The rank table

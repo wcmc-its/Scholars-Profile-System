@@ -45,8 +45,15 @@ import { db } from "@/lib/db";
 // db-free module directly — this one drags `@/lib/db` into any bundle.
 export { isValidReportSlug, REPORT_SLUG_MAX } from "@/lib/edit/report-slug";
 
-/** The seven numbered reports, as the `report_key` column spells them. */
-export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] as const;
+/** The numbered reports, as the `report_key` column spells them.
+ *
+ *  "10" (Display titles) is RETIRED: it moved to the Titles queue
+ *  (`/edit/titles-queue`). Its number is not reused, and a stored
+ *  `report_meta` row for it is simply never read — `loadReportMeta` iterates
+ *  these keys, not the table's rows, so an orphaned row cannot resurface it
+ *  or break a load (`scripts/sql/retire-report-10-display-titles.sql` is the
+ *  optional cleanup). */
+export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
 /** Whether `v` is one of {@link REPORT_KEYS} — a string, never the number. */
@@ -150,13 +157,6 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Top clinical and high-impact journal publications",
     summary:
       "Articles in top-tier journals (JAMA, Lancet, NEJM, JCO, Sci Transl Med, Nature, Blood, Circulation, Science, Cell) with impact factor, WCM first/last authors, Entrez date and NIH citations. Access is granted per person.",
-    descriptionHtml: null,
-  },
-  "10": {
-    slug: "display-titles",
-    name: "Display titles",
-    summary:
-      "Scholars whose displayed title is worth a look — leadership, pinned, contested, leadership lost, or role and title disagreeing — with the ladder's pick, the runner-up and a pin/unpin control.",
     descriptionHtml: null,
   },
 };

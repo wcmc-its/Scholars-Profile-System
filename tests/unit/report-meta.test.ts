@@ -111,7 +111,7 @@ describe("loadReportMeta", () => {
       summary: REPORT_META_DEFAULTS["4"].summary,
       descriptionHtml: null,
     });
-    expect(meta.size).toBe(10);
+    expect(meta.size).toBe(9);
   });
 
   it("a row the catalog doesn't know is ignored, not added", async () => {
@@ -119,8 +119,24 @@ describe("loadReportMeta", () => {
       { reportKey: "99", name: "X", summary: "Y", descriptionHtml: null },
     ]);
     const meta = await loadReportMeta();
-    expect(meta.size).toBe(10);
+    expect(meta.size).toBe(9);
     expect(meta.has("99" as never)).toBe(false);
+  });
+
+  it("an orphaned row for retired report 10 (Display titles, now the Titles queue) is ignored, never a crash", async () => {
+    h.mockFindMany.mockResolvedValue([
+      {
+        reportKey: "10",
+        slug: "display-titles",
+        name: "Display titles",
+        summary: "S",
+        descriptionHtml: null,
+      },
+    ]);
+    const meta = await loadReportMeta();
+    expect(meta.size).toBe(9);
+    expect(meta.has("10" as never)).toBe(false);
+    expect([...meta.values()].map((m) => m.slug)).not.toContain("display-titles");
   });
 
   it("reportMetaFor narrows to one key", async () => {
@@ -133,10 +149,11 @@ describe("loadReportMeta", () => {
 });
 
 describe("isReportKey", () => {
-  it.each(["1", "2", "3", "4", "5", "6", "7", "10"])("accepts %j", (v) => {
+  it.each(["1", "2", "3", "4", "5", "6", "7", "8", "9"])("accepts %j", (v) => {
     expect(isReportKey(v)).toBe(true);
   });
-  it.each(["11", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
+  // "10" is retired (Display titles moved to the Titles queue).
+  it.each(["10", "11", "0", "", 7, null, undefined, "1 ", ["1"]])("rejects %j", (v) => {
     expect(isReportKey(v)).toBe(false);
   });
 });

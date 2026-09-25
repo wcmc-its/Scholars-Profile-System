@@ -164,9 +164,10 @@ describe("scope helpers", () => {
         "mentored-publications:md",
         "article-count",
         "high-impact-publications",
-        "display-titles",
       ]),
     );
+    // Report 10 (Display titles) is the Titles queue now: not a Reporting scope.
+    expect(keys.some((k) => k === "display-titles" || k.startsWith("display-titles:"))).toBe(false);
     const md = reportingScopeOptions().find((o) => o.key === "mentored-publications:md");
     expect(md?.label).toBe("Mentored publications · MD");
   });
@@ -369,7 +370,7 @@ describe("grantFunctionalRole", () => {
       ...ACTOR,
       role: "reporting",
       cwid: "fake001",
-      scopes: ["display-titles"],
+      scopes: ["high-impact-publications"],
     });
     expect(result).toMatchObject({ changed: false, conflict: true });
     expect(h.transaction).not.toHaveBeenCalled();
@@ -549,9 +550,18 @@ describe("importFunctionalRoles (reconcile)", () => {
         granteeName: "Pat Example",
       },
       {
-        reportKey: "display-titles",
+        reportKey: "high-impact-publications",
         scopeKey: "*",
         cwid: "fake004",
+        grantedBy: "adm0002",
+        grantedAt: T1,
+        granteeName: null,
+      },
+      // A leftover grant on retired report 10: skipped, so fake010 gets no row.
+      {
+        reportKey: "display-titles",
+        scopeKey: "*",
+        cwid: "fake010",
         grantedBy: "adm0002",
         grantedAt: T1,
         granteeName: null,
@@ -595,7 +605,7 @@ describe("importFunctionalRoles (reconcile)", () => {
       grantedAt: T0,
     });
     expect(t.get("external_affairs:fake005:allowlist")!.grantedAt).toBeInstanceOf(Date);
-    expect(t.get("reporting:fake004:report_access")!.scopes).toEqual(["display-titles"]);
+    expect(t.get("reporting:fake004:report_access")!.scopes).toEqual(["high-impact-publications"]);
     // Writes are bulk: one createMany and one deleteMany, all under explicit tx options.
     expect(h.txCreateMany).toHaveBeenCalledTimes(1);
     expect(h.txDeleteMany).toHaveBeenCalledTimes(1);
@@ -816,6 +826,8 @@ describe("listGateHolders", () => {
       .fn()
       .mockResolvedValue([
         { reportKey: "article-count", scopeKey: "*", cwid: "FAKE001", granteeName: "Pat Example" },
+        // A leftover grant on retired report 10 gates nothing: not listed.
+        { reportKey: "display-titles", scopeKey: "*", cwid: "FAKE002", granteeName: null },
       ]);
     const holders = await listGateHolders({ reportAccess: { findMany } } as never);
     expect(holders).toEqual([

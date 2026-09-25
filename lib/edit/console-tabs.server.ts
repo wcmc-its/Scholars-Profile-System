@@ -49,6 +49,7 @@ import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isOrgUnitRoleConsoleTabVisible } from "@/lib/edit/org-unit-role-flags";
+import { canReviewTitles } from "@/lib/edit/titles-queue";
 
 // ---------------------------------------------------------------------------
 // Tab ids — one per `AdminSubnavActive` entry in `admin-subnav.tsx`, minus
@@ -75,6 +76,7 @@ export const CONSOLE_TAB_IDS = [
   "matcha",
   "grantMatcha",
   "roleVocabulary",
+  "titles",
 ] as const;
 
 export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
@@ -199,6 +201,11 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // the bundled `isXTabVisible` (flag + role together), per the convention
   // above: nothing here re-reads `ORG_UNIT_ROLE_CONSOLE` on its own.
   roleVocabulary: (s) => isOrgUnitRoleConsoleTabVisible(s),
+
+  // The Titles queue (`/edit/titles-queue`, formerly report 10). Its gate is
+  // the display-title pin gate, superuser or comms_steward; the page and its
+  // export read the same `canReviewTitles`. No report grant reaches it.
+  titles: (s) => canReviewTitles(s),
 };
 
 // ---------------------------------------------------------------------------

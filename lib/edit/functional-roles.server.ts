@@ -62,7 +62,7 @@ import {
   type FunctionalRoleScopeOption,
   type FunctionalRoleScopeOptions,
 } from "@/lib/edit/functional-roles";
-import { REPORT_ACCESS_SCOPE_OPTIONS } from "@/lib/edit/report-access";
+import { isGrantableReportKey, REPORT_ACCESS_SCOPE_OPTIONS } from "@/lib/edit/report-access";
 import { REPORT_META_DEFAULTS } from "@/lib/edit/report-meta";
 
 /** Superuser only: these are institution-wide roles, so a unit Owner (who
@@ -185,6 +185,9 @@ export async function listGateHolders(
     orderBy: [{ cwid: "asc" }, { reportKey: "asc" }, { scopeKey: "asc" }],
   });
   for (const r of reportAccess) {
+    // A leftover row on a retired report (report 10) gates nothing, so it is
+    // not a gate to hold.
+    if (!isGrantableReportKey(r.reportKey)) continue;
     out.push({
       role: "reporting",
       cwid: r.cwid.toLowerCase(),
@@ -453,6 +456,9 @@ export function desiredImportedRows(inputs: ImportInputs): ImportedRow[] {
   const out: ImportedRow[] = [];
   const byCwid = new Map<string, ImportInputs["reportAccess"][number][]>();
   for (const r of inputs.reportAccess) {
+    // Skip a retired report's leftover rows (report 10): importing them would
+    // write a Reporting scope that admits nothing and fails `validScopes`.
+    if (!isGrantableReportKey(r.reportKey)) continue;
     const list = byCwid.get(r.cwid) ?? [];
     list.push(r);
     byCwid.set(r.cwid, list);
