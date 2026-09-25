@@ -4,11 +4,12 @@
  * editor / category / system filters, same-minute grouping, and day headers
  * in Eastern time. All people and ids here are fake.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 
 import {
   EditActivityDashboard,
+  appendOlder,
   dayAxis,
   easternDayKey,
   groupFeed,
@@ -85,6 +86,7 @@ function summary(over: Partial<EditActivitySummary> = {}): EditActivitySummary {
       edt0001: { name: "Ada Editor", title: "Librarian" },
       sch0001: { name: "Sam Scholar", title: null },
     },
+    nextCursor: null,
     ...over,
   };
 }
@@ -178,5 +180,149 @@ describe("EditActivityDashboard", () => {
     expect(row.textContent).toContain("Primary title");
     expect(row.textContent).toContain("empty");
     expect(row.textContent).toContain("Professor of Examples");
+  });
+});
+
+describe("Load older", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** One older page: row "e" repeats row "d" in the same minute (so the group
+   *  must merge across the page boundary), "f" is a new, older day by another
+   *  editor, and "d" itself is repeated (a retried page) to prove dedupe. */
+  const olderPage = (nextCursor: string | null) => ({
+    ok: true,
+    recent: [
+      edit({
+        id: "d",
+        ts: "2026-09-23T14:00:00.000Z",
+        actorCwid: "edt0002",
+        action: "roster_change",
+        entityType: "center",
+        entityId: "ctr_one",
+      }),
+      edit({
+        id: "e",
+        ts: "2026-09-23T14:00:00.000Z",
+        actorCwid: "edt0002",
+        action: "roster_change",
+        entityType: "center",
+        entityId: "ctr_one",
+      }),
+      edit({
+        id: "f",
+        ts: "2026-09-22T16:00:00.000Z",
+        actorCwid: "edt0003",
+        entityId: "sch0009",
+        changes: [{ field: "Overview", before: "old text", after: "new text" }],
+      }),
+    ],
+    nextCursor,
+    people: { edt0003: { name: "Olga Older", title: null } },
+    entityNames: {},
+  });
+
+  const stubFetch = (...responses: Array<{ status: number; body: unknown }>) => {
+    const fn = vi.fn();
+    for (const r of responses) {
+      fn.mockResolvedValueOnce({
+        ok: r.status === 200,
+        status: r.status,
+        json: async () => r.body,
+      });
+    }
+    vi.stubGlobal("fetch", fn);
+    return fn;
+  };
+
+  it("appendOlder keeps order and drops ids already loaded", () => {
+    const merged = appendOlder(
+      [edit({ id: "a" }), edit({ id: "b" })],
+      [edit({ id: "b" }), edit({ id: "c" }), edit({ id: "c" })],
+    );
+    expect(merged.map((e) => e.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("shows no Load older control when the summary has no cursor", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    expect(screen.queryByTestId("edit-activity-load-older")).toBeNull();
+  });
+
+  it("appends the older page: merges a same-minute group across the boundary, adds a day, keeps filters", async () => {
+    const fetchMock = stubFetch({ status: 200, body: olderPage(null) });
+    render(
+      <EditActivityDashboard
+        summary={summary({ totalEdits: 40, nextCursor: "2026-09-23T14:00:00.000Z_4" })}
+      />,
+    );
+    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toContain(
+      "The feed holds the latest 4",
+    );
+
+    // Filter to editor edt0002 first; the filter must still apply after loading.
+    fireEvent.click(screen.getByTestId("edit-activity-editor-edt0002"));
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId("edit-activity-row-d").textContent).toContain("×2"),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      "/api/edit/activity/recent?cursor=2026-09-23T14%3A00%3A00.000Z_4",
+    );
+    // Row "d" absorbed "e" (same minute, same edit): no separate "e" row.
+    expect(screen.queryByTestId("edit-activity-row-e")).toBeNull();
+    // The older-day row is hidden by the editor filter...
+    expect(screen.queryByTestId("edit-activity-row-f")).toBeNull();
+    // ...and appears under its own day heading, with its fetched name, once cleared.
+    fireEvent.click(screen.getByRole("button", { name: "Clear the editor filter" }));
+    const day = screen.getByTestId("edit-activity-day-2026-09-22");
+    expect(day.textContent).toContain("Tue, Sep 22");
+    expect(within(day).getByTestId("edit-activity-row-f").textContent).toContain("Olga Older");
+    // 4 + 2 new ids (the repeated "d" is dropped); no cursor left, so no button.
+    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toContain(
+      "The feed holds the latest 6",
+    );
+    expect(screen.queryByTestId("edit-activity-load-older")).toBeNull();
+  });
+
+  it("keeps the button, with the next cursor, while more pages remain", async () => {
+    const fetchMock = stubFetch(
+      { status: 200, body: olderPage("2026-09-22T16:00:00.000Z_2") },
+      {
+        status: 200,
+        body: { ok: true, recent: [], nextCursor: null, people: {}, entityNames: {} },
+      },
+    );
+    render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    await screen.findByTestId("edit-activity-row-f");
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    await vi.waitFor(() => expect(screen.queryByTestId("edit-activity-load-older")).toBeNull());
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("cursor=2026-09-22T16%3A00%3A00.000Z_2");
+  });
+
+  it("a failed page shows an error and offers Try again without dropping rows", async () => {
+    stubFetch(
+      { status: 503, body: { ok: false, error: "activity_unavailable" } },
+      { status: 200, body: olderPage(null) },
+    );
+    render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    expect(await screen.findByTestId("edit-activity-load-older-error")).toBeTruthy();
+    expect(screen.getByTestId("edit-activity-load-older").textContent).toBe("Try again");
+    expect(screen.getByTestId("edit-activity-row-a")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    expect(await screen.findByTestId("edit-activity-row-f")).toBeTruthy();
+    expect(screen.queryByTestId("edit-activity-load-older-error")).toBeNull();
+  });
+
+  it("an empty filtered feed points at Load older while older pages exist", () => {
+    render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);
+    fireEvent.click(screen.getByTestId("edit-activity-category-access"));
+    expect(screen.getByTestId("edit-activity-feed-empty").textContent).toBe(
+      "No loaded edits match these filters. Load older edits to look further back.",
+    );
   });
 });

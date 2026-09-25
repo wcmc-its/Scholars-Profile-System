@@ -4,11 +4,13 @@
  * a Recent activity feed grouped by day. Clicking a day's bar, an editor, a
  * category chip or "Hide system edits" narrows the feed client-side.
  *
- * Everything here is a view over the one server read
- * (`loadEditActivitySummary`): the feed filters act on the most recent
- * {@link EDIT_ACTIVITY_RECENT_LIMIT} edits that read loaded, and the footer
- * says so. The page stays superuser-gated server-side; this component never
- * fetches.
+ * The KPIs, chart and rankings are a view over the one server read
+ * (`loadEditActivitySummary`). The feed starts with the most recent
+ * `EDIT_ACTIVITY_RECENT_LIMIT` edits that read loaded; "Load older"
+ * appends the next page from `GET /api/edit/activity/recent` (a `(ts, id)`
+ * cursor, same superuser gate). Day grouping, same-minute grouping and every
+ * filter re-run over the whole loaded list, so a group or a day that straddles
+ * a page boundary merges, and the footer says how much is loaded.
  *
  * Client-safe: imports only pure helpers (`edit-activity.ts` and
  * `scholar-audit.ts` carry type-only Prisma imports).
@@ -20,8 +22,8 @@ import Link from "next/link";
 import { X } from "lucide-react";
 
 import {
-  EDIT_ACTIVITY_RECENT_LIMIT,
   EDIT_ACTIVITY_TZ,
+  type EditActivityPage,
   type EditActivitySummary,
   type FieldChange,
   type RecentEdit,
@@ -218,8 +220,65 @@ export function groupFeed(edits: ReadonlyArray<RecentEdit>): FeedGroup[] {
 const CARD = "bg-apollo-surface border-apollo-border-strong rounded-[13px] border";
 const SMALL_CAPS = "text-muted-foreground text-xs font-medium tracking-[0.08em] uppercase";
 
+/** Append `older` to `loaded`, dropping any id already present (a retried or
+ *  double-clicked page must never duplicate rows). */
+export function appendOlder(
+  loaded: ReadonlyArray<RecentEdit>,
+  older: ReadonlyArray<RecentEdit>,
+): RecentEdit[] {
+  const seen = new Set(loaded.map((e) => e.id));
+  const fresh = older.filter((e) => {
+    if (seen.has(e.id)) return false;
+    seen.add(e.id);
+    return true;
+  });
+  return [...loaded, ...fresh];
+}
+
+/** Older feed pages loaded by "Load older", with the names they brought. */
+type Older = {
+  rows: RecentEdit[];
+  people: EditActivityPage["people"];
+  entityNames: EditActivityPage["entityNames"];
+};
+
 export function EditActivityDashboard({ summary }: { summary: EditActivitySummary }) {
-  const { people, entityNames } = summary;
+  const [older, setOlder] = React.useState<Older>({ rows: [], people: {}, entityNames: {} });
+  const [cursor, setCursor] = React.useState<string | null>(summary.nextCursor);
+  const [loadingOlder, setLoadingOlder] = React.useState(false);
+  const [olderError, setOlderError] = React.useState(false);
+  const people = { ...older.people, ...summary.people };
+  const entityNames = { ...older.entityNames, ...summary.entityNames };
+  const recent = React.useMemo(
+    () => appendOlder(summary.recent, older.rows),
+    [summary.recent, older.rows],
+  );
+
+  async function loadOlder() {
+    if (!cursor || loadingOlder) return;
+    setLoadingOlder(true);
+    setOlderError(false);
+    try {
+      const res = await fetch(`/api/edit/activity/recent?cursor=${encodeURIComponent(cursor)}`, {
+        cache: "no-store",
+      });
+      const body = (await res.json().catch(() => null)) as
+        | ({ ok: true } & EditActivityPage)
+        | { ok: false }
+        | null;
+      if (!res.ok || !body || !body.ok) throw new Error(`load older failed: ${res.status}`);
+      setOlder((o) => ({
+        rows: appendOlder(o.rows, body.recent),
+        people: { ...o.people, ...body.people },
+        entityNames: { ...o.entityNames, ...body.entityNames },
+      }));
+      setCursor(body.nextCursor);
+    } catch {
+      setOlderError(true);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
 
   const [hover, setHover] = React.useState<string | null>(null);
   const [day, setDay] = React.useState<string | null>(null);
@@ -297,7 +356,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
 
   // ── Feed ───────────────────────────────────────────────────────────────────
   const cat = CATEGORIES.find((c) => c.key === category);
-  const filtered = summary.recent.filter(
+  const filtered = recent.filter(
     (e) =>
       (!cat?.actions || cat.actions.has(e.action)) &&
       (!hideSystem || !isSystemActor(e.actorCwid)) &&
@@ -811,20 +870,40 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
               className="text-muted-foreground m-0 px-7 py-7 text-center text-sm"
               data-testid="edit-activity-feed-empty"
             >
-              {summary.recent.length === 0
+              {recent.length === 0
                 ? `No edits recorded in the last ${summary.windowDays} days.`
-                : "No edits match these filters."}
+                : cursor
+                  ? "No loaded edits match these filters. Load older edits to look further back."
+                  : "No edits match these filters."}
             </p>
           )}
-          <div
-            className="bg-apollo-page text-muted-foreground px-5 py-3 text-[13px]"
-            data-testid="edit-activity-feed-footer"
-          >
-            Showing {fmt(filtered.length)} of {fmt(total)} edits{isFiltered ? " (filtered)" : ""}.
-            {total > summary.recent.length
-              ? ` The feed holds the latest ${fmt(Math.min(summary.recent.length, EDIT_ACTIVITY_RECENT_LIMIT))}; filters apply to those.`
-              : ""}{" "}
-            Repeated edits in the same minute are grouped.
+          <div className="bg-apollo-page text-muted-foreground flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-3 text-[13px]">
+            <span data-testid="edit-activity-feed-footer">
+              Showing {fmt(filtered.length)} of {fmt(total)} edits{isFiltered ? " (filtered)" : ""}.
+              {total > recent.length
+                ? ` The feed holds the latest ${fmt(recent.length)}; filters apply to those.`
+                : ""}{" "}
+              Repeated edits in the same minute are grouped.
+            </span>
+            {cursor && (
+              <span className="flex items-center gap-2 whitespace-nowrap">
+                {olderError && (
+                  <span role="alert" data-testid="edit-activity-load-older-error">
+                    Couldn&rsquo;t load older edits.
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={loadOlder}
+                  disabled={loadingOlder}
+                  aria-busy={loadingOlder}
+                  className="text-apollo-slate hover:underline disabled:cursor-wait disabled:no-underline disabled:opacity-60"
+                  data-testid="edit-activity-load-older"
+                >
+                  {loadingOlder ? "Loading…" : olderError ? "Try again" : "Load older"}
+                </button>
+              </span>
+            )}
           </div>
         </div>
       </section>
