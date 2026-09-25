@@ -2,7 +2,7 @@
  * GET /api/edit/activity/recent — the "Load older" page of the /edit/activity
  * feed. Verifies the superuser gate (401 / 403 with a logged denial, the read
  * never runs), cursor validation (400, the read never runs), the decoded
- * cursor reaching the loader, and a 503 (not a 500) when the audit read fails.
+ * cursor and the summary's `asOf` reaching the loader, and a 503 (not a 500) when the audit read fails.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
@@ -26,6 +26,8 @@ vi.mock("@/lib/api/edit-activity", async (importOriginal) => ({
 import { GET } from "@/app/api/edit/activity/recent/route";
 
 const CURSOR = "2026-09-24T12:00:00.123Z_4242";
+const AS_OF = "2026-09-24T20:00:00.000Z";
+const QS = `?cursor=${encodeURIComponent(CURSOR)}&asOf=${encodeURIComponent(AS_OF)}`;
 const req = (qs: string) => new NextRequest(`https://app.example/api/edit/activity/recent${qs}`);
 
 const PAGE = {
@@ -57,14 +59,14 @@ describe("GET /api/edit/activity/recent", () => {
 
   it("401 without a session; the audit read never runs", async () => {
     mockGetSession.mockResolvedValue(null);
-    const res = await GET(req(`?cursor=${encodeURIComponent(CURSOR)}`));
+    const res = await GET(req(QS));
     expect(res.status).toBe(401);
     expect(mockLoadOlder).not.toHaveBeenCalled();
   });
 
   it("403 for a non-superuser, with a logged denial; the audit read never runs", async () => {
     mockGetSession.mockResolvedValue({ cwid: "usr0001", isSuperuser: false });
-    const res = await GET(req(`?cursor=${encodeURIComponent(CURSOR)}`));
+    const res = await GET(req(QS));
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ ok: false, error: "not_superuser" });
     expect(mockLogDenial).toHaveBeenCalledWith(
@@ -82,8 +84,18 @@ describe("GET /api/edit/activity/recent", () => {
     expect(mockLoadOlder).not.toHaveBeenCalled();
   });
 
+  it("400 for a missing or malformed asOf; the window is never recomputed from request time", async () => {
+    const c = `?cursor=${encodeURIComponent(CURSOR)}`;
+    for (const qs of [c, `${c}&asOf=`, `${c}&asOf=yesterday`, `${c}&asOf=2026-09-24`]) {
+      const res = await GET(req(qs));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: "invalid_as_of", field: "asOf" });
+    }
+    expect(mockLoadOlder).not.toHaveBeenCalled();
+  });
+
   it("passes the decoded (ts, id) cursor to the read and returns the page", async () => {
-    const res = await GET(req(`?cursor=${encodeURIComponent(CURSOR)}`));
+    const res = await GET(req(QS));
     expect(res.status).toBe(200);
     expect(mockLoadOlder).toHaveBeenCalledWith(
       { tag: "read-client" },
@@ -91,13 +103,14 @@ describe("GET /api/edit/activity/recent", () => {
         ts: new Date("2026-09-24T12:00:00.123Z"),
         id: 4242n,
       },
+      new Date(AS_OF),
     );
     expect(await res.json()).toEqual({ ok: true, ...PAGE });
   });
 
   it("503 (not a 500) when the audit read throws", async () => {
     mockLoadOlder.mockRejectedValue(new Error("SELECT command denied"));
-    const res = await GET(req(`?cursor=${encodeURIComponent(CURSOR)}`));
+    const res = await GET(req(QS));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ ok: false, error: "activity_unavailable" });
   });

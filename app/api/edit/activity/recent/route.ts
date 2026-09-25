@@ -1,9 +1,11 @@
 /**
- * GET /api/edit/activity/recent?cursor=… — one "Load older" page of the
- * `/edit/activity` Recent activity feed: the next
+ * GET /api/edit/activity/recent?cursor=…&asOf=… — one "Load older" page of
+ * the `/edit/activity` Recent activity feed: the next
  * {@link EDIT_ACTIVITY_RECENT_LIMIT} audit rows strictly older than `cursor`
  * (the opaque `(ts, id)` cursor the page or the previous call returned), still
- * inside the trailing 30-day window, plus the names those rows need.
+ * inside the 30-day window ending at `asOf` (the summary's `generatedAt`, so
+ * the window matches the page's KPIs and chart), plus the names those rows
+ * need.
  *
  * Superuser-only, like the page, re-checked on every GET. A read has no CSRF
  * surface and a cross-origin read can't see the response (CORS), so the
@@ -13,7 +15,7 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
-import { decodeCursor, loadOlderEdits } from "@/lib/api/edit-activity";
+import { decodeCursor, loadOlderEdits, parseAsOf } from "@/lib/api/edit-activity";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
@@ -38,9 +40,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const cursor = decodeCursor(request.nextUrl.searchParams.get("cursor"));
   if (!cursor) return editError(400, "invalid_cursor", "cursor");
+  const asOf = parseAsOf(request.nextUrl.searchParams.get("asOf"));
+  if (!asOf) return editError(400, "invalid_as_of", "asOf");
 
   try {
-    const page = await loadOlderEdits(db.read, cursor);
+    const page = await loadOlderEdits(db.read, cursor, asOf);
     return editOk({ ...page });
   } catch (err) {
     console.error(

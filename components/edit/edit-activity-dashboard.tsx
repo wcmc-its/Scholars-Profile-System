@@ -247,6 +247,24 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   const [cursor, setCursor] = React.useState<string | null>(summary.nextCursor);
   const [loadingOlder, setLoadingOlder] = React.useState(false);
   const [olderError, setOlderError] = React.useState(false);
+  // A new summary (router.refresh, a re-render with fresh data) starts a new
+  // feed: the loaded older pages and their cursor belong to the OLD window and
+  // would otherwise sit under the new first page with a stale cursor. Reset
+  // them during render (React's "adjust state on prop change" pattern), and
+  // bump the generation so a page still in flight for the old summary is
+  // dropped when it lands.
+  const [feedAsOf, setFeedAsOf] = React.useState(summary.generatedAt);
+  const feedGeneration = React.useRef(summary.generatedAt);
+  if (feedAsOf !== summary.generatedAt) {
+    setFeedAsOf(summary.generatedAt);
+    setOlder({ rows: [], people: {}, entityNames: {} });
+    setCursor(summary.nextCursor);
+    setLoadingOlder(false);
+    setOlderError(false);
+  }
+  React.useEffect(() => {
+    feedGeneration.current = summary.generatedAt;
+  }, [summary.generatedAt]);
   const people = { ...older.people, ...summary.people };
   const entityNames = { ...older.entityNames, ...summary.entityNames };
   const recent = React.useMemo(
@@ -256,16 +274,21 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
 
   async function loadOlder() {
     if (!cursor || loadingOlder) return;
+    // The window every page is cut off at is the summary's, not the request's.
+    const asOf = summary.generatedAt;
+    const stale = () => feedGeneration.current !== asOf;
     setLoadingOlder(true);
     setOlderError(false);
     try {
-      const res = await fetch(`/api/edit/activity/recent?cursor=${encodeURIComponent(cursor)}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/edit/activity/recent?cursor=${encodeURIComponent(cursor)}&asOf=${encodeURIComponent(asOf)}`,
+        { cache: "no-store" },
+      );
       const body = (await res.json().catch(() => null)) as
         | ({ ok: true } & EditActivityPage)
         | { ok: false }
         | null;
+      if (stale()) return;
       if (!res.ok || !body || !body.ok) throw new Error(`load older failed: ${res.status}`);
       setOlder((o) => ({
         rows: appendOlder(o.rows, body.recent),
@@ -274,9 +297,9 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       }));
       setCursor(body.nextCursor);
     } catch {
-      setOlderError(true);
+      if (!stale()) setOlderError(true);
     } finally {
-      setLoadingOlder(false);
+      if (!stale()) setLoadingOlder(false);
     }
   }
 

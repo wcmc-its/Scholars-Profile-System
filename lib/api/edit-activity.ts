@@ -270,6 +270,20 @@ export function decodeCursor(raw: string | null | undefined): FeedCursor | null 
 }
 
 /**
+ * Parse the `asOf` a "Load older" call carries: the summary's `generatedAt`,
+ * so every page is cut off at the SAME window start as the KPIs, chart and day
+ * counts it sits under (not a window recomputed from each request's own
+ * time). Null for anything malformed. An `asOf` later than `now` is clamped to
+ * `now`; an earlier one is honoured as-is.
+ */
+export function parseAsOf(raw: string | null | undefined, now: Date = new Date()): Date | null {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(raw)) return null;
+  const asOf = new Date(raw);
+  if (Number.isNaN(asOf.getTime())) return null;
+  return asOf.getTime() > now.getTime() ? now : asOf;
+}
+
+/**
  * Pure row-shaper: raw query rows -> the view model. Split out from the DB call
  * so it is unit-testable without a database (mirrors queries.ts in cf-usage-rollup).
  */
@@ -468,15 +482,17 @@ export type EditActivityPage = {
  * `cursor` (same `ts DESC, id DESC` order as the summary's first page), still
  * bounded to the trailing {@link EDIT_ACTIVITY_WINDOW_DAYS} days so the feed
  * never outruns the KPIs, chart and "N edits that day" counts it sits under.
+ * `asOf` is the summary's `generatedAt` ({@link parseAsOf}), so the window
+ * start is the one the page was rendered with, not one recomputed per request.
  * Reads one look-ahead row to know whether another page exists. Throws if the
  * audit table is unreadable (the route answers 503); name lookups fail soft.
  */
 export async function loadOlderEdits(
   client: EditActivityClient,
   cursor: FeedCursor,
-  now: Date = new Date(),
+  asOf: Date = new Date(),
 ): Promise<EditActivityPage> {
-  const cutoff = new Date(now.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(asOf.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   // LIMIT 101 = EDIT_ACTIVITY_RECENT_LIMIT + 1 look-ahead row (a literal, like
   // the first page's LIMIT 100: a bound LIMIT is driver-fragile).
   const rows = await client.$queryRaw<RawRecent[]>`

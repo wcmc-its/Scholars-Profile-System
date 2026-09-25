@@ -269,7 +269,7 @@ describe("Load older", () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toBe(
-      "/api/edit/activity/recent?cursor=2026-09-23T14%3A00%3A00.000Z_4",
+      "/api/edit/activity/recent?cursor=2026-09-23T14%3A00%3A00.000Z_4&asOf=2026-09-24T20%3A00%3A00.000Z",
     );
     // Row "d" absorbed "e" (same minute, same edit): no separate "e" row.
     expect(screen.queryByTestId("edit-activity-row-e")).toBeNull();
@@ -316,6 +316,65 @@ describe("Load older", () => {
     fireEvent.click(screen.getByTestId("edit-activity-load-older"));
     expect(await screen.findByTestId("edit-activity-row-f")).toBeTruthy();
     expect(screen.queryByTestId("edit-activity-load-older-error")).toBeNull();
+  });
+
+  it("a new summary (router.refresh) drops loaded older pages and restarts from its own cursor", async () => {
+    const fetchMock = stubFetch(
+      { status: 200, body: olderPage("2026-09-22T16:00:00.000Z_2") },
+      { status: 200, body: olderPage(null) },
+    );
+    const { rerender } = render(
+      <EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />,
+    );
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    await screen.findByTestId("edit-activity-row-f");
+
+    rerender(
+      <EditActivityDashboard
+        summary={summary({
+          totalEdits: 41,
+          generatedAt: "2026-09-24T21:00:00.000Z",
+          nextCursor: "c2_9",
+        })}
+      />,
+    );
+    // The old window's loaded rows are gone and the footer counts only the new first page.
+    expect(screen.queryByTestId("edit-activity-row-f")).toBeNull();
+    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toContain(
+      "The feed holds the latest 4",
+    );
+    // The next Load older uses the NEW summary's cursor and generatedAt, not the old page's.
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    await screen.findByTestId("edit-activity-row-f");
+    expect(String(fetchMock.mock.calls[1]![0])).toBe(
+      "/api/edit/activity/recent?cursor=c2_9&asOf=2026-09-24T21%3A00%3A00.000Z",
+    );
+  });
+
+  it("a page still in flight for the old summary is dropped when it lands", async () => {
+    let resolve!: (v: unknown) => void;
+    const fn = vi.fn(() => new Promise((r) => (resolve = r)));
+    vi.stubGlobal("fetch", fn);
+    const { rerender } = render(
+      <EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />,
+    );
+    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    rerender(
+      <EditActivityDashboard
+        summary={summary({
+          totalEdits: 41,
+          generatedAt: "2026-09-24T21:00:00.000Z",
+          nextCursor: "c2_9",
+        })}
+      />,
+    );
+    // The new summary's button is live, not stuck on "Loading…".
+    expect(screen.getByTestId("edit-activity-load-older").textContent).toBe("Load older");
+    resolve({ ok: true, status: 200, json: async () => olderPage(null) });
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId("edit-activity-row-f")).toBeNull();
+    expect(screen.getByTestId("edit-activity-load-older").textContent).toBe("Load older");
   });
 
   it("an empty filtered feed points at Load older while older pages exist", () => {

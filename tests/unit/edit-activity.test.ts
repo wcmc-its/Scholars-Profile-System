@@ -13,6 +13,7 @@ import {
   isSystemActor,
   loadEditActivitySummary,
   loadOlderEdits,
+  parseAsOf,
   shapeSummary,
   toDay,
 } from "@/lib/api/edit-activity";
@@ -412,6 +413,26 @@ describe("Load older: cursor + paged read", () => {
     expect(page.recent).toHaveLength(EDIT_ACTIVITY_RECENT_LIMIT);
     expect(page.nextCursor).toBe(encodeCursor(page.recent[EDIT_ACTIVITY_RECENT_LIMIT - 1]!));
     expect(page.people).toEqual({ abc1234: { name: "Ada Editor", title: null } });
+  });
+
+  it("parseAsOf accepts an ISO instant, clamps a future one to now, rejects the rest", () => {
+    const now = new Date("2026-09-24T20:00:00.000Z");
+    expect(parseAsOf("2026-09-24T19:00:00.000Z", now)).toEqual(
+      new Date("2026-09-24T19:00:00.000Z"),
+    );
+    expect(parseAsOf("2026-09-25T09:00:00Z", now)).toEqual(now);
+    for (const bad of [null, undefined, "", "2026-09-24", "yesterday", "2026-13-45T99:99:99Z"]) {
+      expect(parseAsOf(bad, now)).toBeNull();
+    }
+  });
+
+  it("loadOlderEdits cuts the window off at asOf (the summary's generatedAt), not request time", async () => {
+    const { client, params } = pagedClient([]);
+    const asOf = new Date("2026-09-24T20:00:00.000Z");
+    await loadOlderEdits(client, decodeCursor("2026-09-24T12:00:00.000Z_9")!, asOf);
+    expect(params[0]![0]).toEqual(
+      new Date(asOf.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 86_400_000),
+    );
   });
 
   it("loadOlderEdits returns nextCursor null on the last page and names centers", async () => {
