@@ -21,7 +21,7 @@
  *  - the status emoji becoming the only carrier of the status.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 const {
   mockSession,
@@ -77,6 +77,14 @@ import { TRACKED, type TrackedSpec } from "@/lib/etl/freshness-policy";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+
+/** An ack's ISO `until` date the way the page prints it ("Sep 30"). */
+const untilLabel = (until: string) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(`${until}T12:00:00Z`));
 
 /** A fixed instant so nothing in this file can start failing on a calendar day. */
 const NOW = Date.parse("2026-08-06T12:00:00Z");
@@ -521,18 +529,24 @@ describe("/edit/etl-status page", () => {
     render(await Page({}));
     const row = screen.getByTestId(`etl-status-row-${source}`);
     expect(row.getAttribute("data-state")).toBe("known-issue");
-    expect(row.textContent).toContain("Known issue");
+    const pill = row.querySelector("[data-testid='etl-status-pill']");
+    expect(pill?.textContent).toBe(`Accepted until ${untilLabel(ack.until)}`);
     // Not the green state and not either red one.
     expect(row.textContent).not.toContain("Up to date");
     expect(row.textContent).not.toContain("Failed");
-    expect(row.textContent).toContain(ack.until);
+    expect(row.textContent).toContain(ack.reason);
     // The COLOUR, not just the word: a status board that paints an accepted
     // staleness green lies, and one that paints it red cries wolf nightly. The
-    // label alone would survive a repaint, so pin the palette too.
-    const pill = row.querySelector("[data-testid='etl-status-pill']");
-    expect(pill?.className).not.toMatch(/emerald|green|red/);
-    // …and it is not counted against the operator.
-    expect(screen.getByTestId("etl-status-headline").textContent).not.toContain("Known issue");
+    // label alone would survive a repaint, so pin the palette too — the pill
+    // AND the card's left stripe.
+    expect(pill?.className).not.toMatch(/emerald|green|red|destructive|amber/);
+    const stripe = row.querySelector("[data-testid='etl-status-stripe']");
+    expect(stripe?.className).not.toMatch(/emerald|green|red|destructive|amber/);
+    // …and it is not counted against the operator: the summary bar files it as
+    // accepted, never as failing.
+    expect(screen.getByTestId("etl-status-count-accepted").textContent).toContain(
+      "known issue, accepted",
+    );
   });
 
   it("shows the error text and when it happened for a failed import", async () => {
@@ -584,7 +598,7 @@ describe("/edit/etl-status page", () => {
     render(await Page({}));
     const row = screen.getByTestId(`etl-status-row-${source}`);
     expect(row.getAttribute("data-state")).toBe("never-ran");
-    expect(row.textContent).toContain(ack.until);
+    expect(row.textContent).toContain(untilLabel(ack.until));
     expect(row.textContent).toContain(ack.reason);
     // Every other source is never-ran too, so each ack still in force at this
     // instant (this one, plus any other not yet lapsed) is an exclusion.
@@ -594,8 +608,12 @@ describe("/edit/etl-status page", () => {
       (s) => s.ack !== undefined && Date.parse(s.ack.until) >= now,
     ).length;
     expect(inForce).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId("etl-status-headline").textContent).toContain(
-      `${total - inForce} of ${total} imports need attention`,
+    // The summary bar counts it as accepted, not failing.
+    expect(screen.getByTestId("etl-status-count-failing").textContent).toBe(
+      `${total - inForce}failing`,
+    );
+    expect(screen.getByTestId("etl-status-count-accepted").textContent).toMatch(
+      new RegExp(`^${inForce}known issues?, accepted$`),
     );
   });
 
@@ -621,6 +639,8 @@ describe("/edit/etl-status page", () => {
   it("still renders the board when only a tab-badge count fails", async () => {
     mockHonorsTabVisible.mockReturnValue(true);
     mockPendingHonors.mockRejectedValue(new Error("SELECT command denied"));
+    // Healthy fixtures: the table only renders when something is running normally.
+    fixtures = allHealthy();
     const { container } = render(await Page({}));
     expect(container.querySelector("[data-testid='etl-status-unavailable']")).toBeNull();
     expect(screen.getByTestId("etl-status-table")).toBeTruthy();
@@ -653,42 +673,92 @@ describe("/edit/etl-status triage layout", () => {
     // <details>, which is strictly worse than the flat table it replaced.
     expect(within(attention).getByTestId("etl-status-row-ASMS")).toBeTruthy();
     expect(within(table).queryByTestId("etl-status-row-ASMS")).toBeNull();
-    expect(attention.textContent).toContain("Needs attention (1)");
+    expect(screen.getByTestId("etl-status-count-failing").textContent).toBe("1failing");
+    expect(screen.getByTestId("etl-status-count-normal").textContent).toBe(
+      `${total() - 1}running normally`,
+    );
     // …and the converse, so this is about routing and not about an empty table.
     expect(within(table).getByTestId("etl-status-row-ED")).toBeTruthy();
     expect(within(attention).queryByTestId("etl-status-row-ED")).toBeNull();
     expect(within(table).getAllByTestId(/^etl-status-row-/).length).toBe(total() - 1);
   });
 
-  it("puts the healthy imports in a native disclosure, open by default", async () => {
+  it("shows the healthy imports open by default, and can still hide them", async () => {
     fixtures = allHealthy();
     render(await Page({}));
-    const details = screen.getByTestId("etl-status-normal");
-    // A native <details> is the entire feature: this page is a server
-    // component, and a client island here would be state nobody needs.
-    expect(details.tagName).toBe("DETAILS");
+    const section = screen.getByTestId("etl-status-normal");
     // OPEN by default: the section split already does the triage, so hiding the
     // healthy detail behind a click bought nothing and took every raw source key
-    // out of find-in-page range. Still a <details>, so it can still be collapsed.
-    expect(details.hasAttribute("open")).toBe(true);
-    const summary = details.querySelector("summary");
-    expect(summary?.textContent).toContain(`Running normally (${total()})`);
-    // The collapsed line has to carry a fact, not just a count.
-    expect(summary?.textContent).toContain(`All ${total()} imports are up to date.`);
-    // The OLDEST healthy import, not the freshest — every row here is up to date
+    // out of find-in-page range. Collapsing stays available; it is not the default.
+    const toggle = within(section).getByTestId("etl-status-normal-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(within(section).getByTestId("etl-status-table")).toBeTruthy();
+    // The line beside the heading has to carry a fact, not just a count — and
+    // the OLDEST healthy import, not the freshest: every row here is up to date
     // by construction, so the freshest is trivially fresh and says nothing.
-    expect(summary?.textContent).toContain("Oldest:");
+    const line = within(section).getByTestId("etl-status-normal-summary").textContent ?? "";
+    expect(line).toContain(`All ${total()} up to date.`);
+    expect(line).toContain("Oldest data:");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(section.querySelector("#etl-status-normal-body")?.hasAttribute("hidden")).toBe(true);
   });
 
   it("says so plainly when nothing needs attention, rather than showing an empty box", async () => {
     fixtures = allHealthy();
     render(await Page({}));
     const attention = screen.getByTestId("etl-status-attention");
-    expect(attention.textContent).toContain("Needs attention (0)");
     expect(attention.textContent).toContain(
-      `All ${total()} imports are current or already accounted for.`,
+      `Nothing needs attention. All ${total()} imports are up to date.`,
     );
     expect(attention.querySelectorAll("[data-testid^='etl-status-row-']").length).toBe(0);
+    // Zero-count segments are left out of the summary bar entirely.
+    expect(screen.queryByTestId("etl-status-count-failing")).toBeNull();
+  });
+
+  it("groups the healthy imports by how often they run, with a run-time total per group", async () => {
+    fixtures = allHealthy();
+    fixtures.ED.attempt = {
+      status: "success",
+      startedAt: new Date(NOW - 2 * HOUR - 7 * 60 * 1000),
+      completedAt: new Date(NOW - 2 * HOUR),
+      errorMessage: null,
+    };
+    render(await Page({}));
+    const nightly = screen.getByTestId("etl-status-group-nightly");
+    expect(within(nightly).getByTestId("etl-status-row-ED")).toBeTruthy();
+    const nightlyCount = expectedSources().filter((s) =>
+      ["nightly", "nightly-mirrored"].includes(TRACKED[s].cadence),
+    ).length;
+    // Only ED has a measurable run; every other fixture is a zero-gap legacy row.
+    expect(nightly.textContent).toContain(
+      `Total run time, ${nightlyCount} imports (${nightlyCount - 1} not recorded)`,
+    );
+    expect(nightly.textContent).toContain("7 min");
+    // A yearly import files under its own group, never under Nightly.
+    expect(within(nightly).queryByTestId("etl-status-row-Hierarchy")).toBeNull();
+    expect(
+      within(screen.getByTestId("etl-status-group-yearly")).getByTestId("etl-status-row-Hierarchy"),
+    ).toBeTruthy();
+  });
+
+  it("filters the healthy imports by text and by where the data comes from", async () => {
+    fixtures = allHealthy();
+    render(await Page({}));
+    const table = () => screen.getByTestId("etl-status-table");
+    fireEvent.change(screen.getByTestId("etl-status-filter"), { target: { value: "coi-gap" } });
+    expect(within(table()).getAllByTestId(/^etl-status-row-/).map((r) => r.dataset.testid)).toEqual([
+      "etl-status-row-COI-Gap",
+    ]);
+    fireEvent.change(screen.getByTestId("etl-status-filter"), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("etl-status-origin-internal"));
+    const internal = within(table())
+      .getAllByTestId(/^etl-status-row-/)
+      .map((r) => r.dataset.testid!.replace("etl-status-row-", ""));
+    expect(internal.length).toBeGreaterThan(0);
+    for (const source of internal) expect(SOURCE_COPY[source]?.origin).toBe("internal");
+    fireEvent.change(screen.getByTestId("etl-status-filter"), { target: { value: "zzz-nothing" } });
+    expect(screen.getByTestId("etl-status-no-match").textContent).toBe("No imports match.");
   });
 
   it("still renders a source with no etl_run row at all, up in the attention section", async () => {
@@ -736,14 +806,13 @@ describe("/edit/etl-status triage layout", () => {
     const attention = screen.getByTestId("etl-status-attention");
     const row = within(attention).getByTestId(`etl-status-row-${source}`);
     expect(row.getAttribute("data-state")).toBe("known-issue");
-    expect(row.textContent).toContain("Known issue");
+    expect(row.textContent).toContain(`Accepted until ${untilLabel(spec.ack!.until)}`);
     // Neither of the two lies a status board can tell about an accepted staleness.
     expect(row.textContent).not.toContain("Up to date");
     expect(row.textContent).not.toContain("Failed");
     expect(row.querySelector("[data-testid='etl-status-pill']")?.className).not.toMatch(
-      /emerald|green|red/,
+      /emerald|green|red|destructive/,
     );
-    expect(row.textContent).toContain(spec.ack!.until);
     // Every other source is healthy, so the section holds the live-acked row
     // under test plus any source whose ack has LAPSED by `now` — a lapsed ack
     // routes here even on fresh data (the test further down pins that). Derived
@@ -754,15 +823,17 @@ describe("/edit/etl-status triage layout", () => {
       const other = TRACKED[s]?.ack;
       return other !== undefined && s !== source && Date.parse(other.until) <= now;
     }).length;
-    expect(attention.textContent).toContain(`Needs attention (${1 + lapsedElsewhere})`);
-    // NOT counted as a failure — but the headline must not then claim a clean
-    // board, or the page reads "Needs attention (1)" directly above "All N
-    // imports are current". The heading counts SECTION MEMBERSHIP; this line
-    // counts FAILURES; when they differ the line has to say why.
-    const headline = screen.getByTestId("etl-status-headline").textContent ?? "";
-    expect(headline).toContain("Nothing is failing.");
-    expect(headline).toContain("already accepted");
-    expect(headline).not.toContain(`All ${total()} imports are current`);
+    expect(attention.querySelectorAll("[data-testid^='etl-status-row-']").length).toBe(
+      1 + lapsedElsewhere,
+    );
+    // NOT counted as a failure — the summary bar files it (and any lapsed ack on
+    // fresh data) as accepted, and shows no failing segment at all, so the page
+    // never claims a clean board with a card sitting under it unexplained.
+    expect(screen.queryByTestId("etl-status-count-failing")).toBeNull();
+    expect(screen.getByTestId("etl-status-count-accepted").textContent).toMatch(
+      new RegExp(`^${1 + lapsedElsewhere}known issues?, accepted$`),
+    );
+    expect(screen.queryByTestId("etl-status-headline")).toBeNull();
     expect(
       within(screen.getByTestId("etl-status-table")).queryByTestId(`etl-status-row-${source}`),
     ).toBeNull();
@@ -772,63 +843,55 @@ describe("/edit/etl-status triage layout", () => {
     fixtures = allHealthy();
     fixtures["COI-Gap"] = crashed();
     render(await Page({}));
-    for (const testid of ["etl-status-row-COI-Gap", "etl-status-row-ED"]) {
-      const row = screen.getByTestId(testid);
-      const source = testid.replace("etl-status-row-", "");
-      const copy = SOURCE_COPY[source];
-      expect(row.textContent).toContain(copy.label);
-      // The raw `etl_run.source` key stays on the page — it is what anyone
-      // reporting the problem onward has to quote — just not as the name. It's
-      // qualified with whether a failure here is ours or someone else's system.
-      const prefix = copy.origin === "external" ? "External" : "Internal";
-      expect(within(row).getByTestId("etl-status-source-key").textContent).toBe(
-        `${prefix}: ${source}`,
-      );
-    }
+    // The raw `etl_run.source` key stays on the page — it is what anyone
+    // reporting the problem onward has to quote — just not as the name. It's
+    // qualified with whether a failure here is ours or someone else's system:
+    // spelled out on an attention card, a worded badge in the healthy table.
+    const card = screen.getByTestId("etl-status-row-COI-Gap");
+    expect(card.textContent).toContain(SOURCE_COPY["COI-Gap"].label);
+    expect(within(card).getByTestId("etl-status-source-key").textContent).toBe(
+      "Internal: COI-Gap",
+    );
+    const row = screen.getByTestId("etl-status-row-ED");
+    expect(row.textContent).toContain(SOURCE_COPY.ED.label);
+    expect(within(row).getByTestId("etl-status-source-key").textContent).toBe("ED");
+    expect(within(row).getByTestId("etl-status-origin").textContent).toContain(
+      SOURCE_COPY.ED.origin === "external" ? "External" : "Internal",
+    );
     // The description is the point of the label: it says what breaks.
     expect(screen.getByTestId("etl-status-row-COI-Gap").textContent).toContain(
       SOURCE_COPY["COI-Gap"].description,
     );
   });
 
-  it("pairs the status emoji with the worded pill, and hides the emoji from assistive tech", async () => {
+  it("pairs the card's colour stripe with a worded pill, and hides the stripe from assistive tech", async () => {
     fixtures = allHealthy();
     fixtures.ASMS = crashed();
     render(await Page({}));
-    // The emoji must never be the ONLY carrier of the status: the pill beside
-    // it is what a screen reader gets, and what survives a font that has no
-    // colour glyph.
-    for (const [testid, emoji, label] of [
-      ["etl-status-row-ASMS", "🔴", "Failed"],
-      ["etl-status-row-ED", "🟢", "Up to date"],
-    ] as const) {
-      const row = screen.getByTestId(testid);
-      const icon = row.querySelector("[data-testid='etl-status-emoji']");
-      expect(icon?.textContent).toBe(emoji);
-      expect(icon?.getAttribute("aria-hidden")).toBe("true");
-      expect(row.querySelector("[data-testid='etl-status-pill']")?.textContent).toBe(label);
-    }
+    // Colour must never be the ONLY carrier of the status: the pill beside it
+    // is what a screen reader gets.
+    const row = screen.getByTestId("etl-status-row-ASMS");
+    const stripe = row.querySelector("[data-testid='etl-status-stripe']");
+    expect(stripe?.className).toContain("bg-destructive");
+    expect(stripe?.getAttribute("aria-hidden")).toBe("true");
+    expect(row.querySelector("[data-testid='etl-status-pill']")?.textContent).toBe("Failed");
+    // The summary bar is decoration too; its legend carries the numbers in words.
+    const bar = screen.getByTestId("etl-status-summary").firstElementChild;
+    expect(bar?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("gives the healthy table a run-duration column instead of a permanently blank one", async () => {
+  it("gives the healthy table freshness and run-time columns, not a permanently green status one", async () => {
     fixtures = allHealthy();
     render(await Page({}));
-    // The column this replaced ("What this means") could only ever be an em
-    // dash here: the collapsed section is up-to-date rows ONLY, and that is the
-    // one state the explanation has nothing to say about. Pinning the whole
-    // header list means a future column cannot be appended without a decision.
+    // Every row here is up to date by construction, so a Status column could
+    // only ever say one thing, and "How often" is the group heading now.
+    // Pinning the whole header list means a future column cannot be appended
+    // without a decision.
     expect(
       Array.from(screen.getByTestId("etl-status-table").querySelectorAll("thead th")).map(
         (th) => th.textContent,
       ),
-    ).toEqual([
-      "Data import",
-      "Source",
-      "How often",
-      "Status",
-      "Last good data",
-      "Run duration",
-    ]);
+    ).toEqual(["Data import", "Source", "Freshness", "Last good data", "Took"]);
   });
 
   it("sorts the healthy table by a clicked column, longest run duration first", async () => {
@@ -857,7 +920,7 @@ describe("/edit/etl-status triage layout", () => {
     // The clicked header carries the active state — the only visible sign a
     // reader gets that the table is no longer in its default order. The sort
     // arrow is aria-hidden, so the accessible name stays just the column name.
-    const durationHeader = within(table).getByRole("columnheader", { name: "Run duration" });
+    const durationHeader = within(table).getByRole("columnheader", { name: "Took" });
     expect(durationHeader.getAttribute("aria-sort")).toBe("descending");
     // A plain "v", not a filled triangle glyph.
     expect(durationHeader.textContent).toContain(" v");
@@ -867,15 +930,16 @@ describe("/edit/etl-status triage layout", () => {
   it("sorts the Source column by the displayed external/internal qualifier, not just the bare key", async () => {
     fixtures = allHealthy();
     render(await Page({ searchParams: Promise.resolve({ sort: "source", dir: "asc" }) }));
-    const table = screen.getByTestId("etl-status-table");
-    const order = within(table)
+    // Sorting applies inside each cadence group, so compare two nightly rows.
+    const nightly = screen.getByTestId("etl-status-group-nightly");
+    const order = within(nightly)
       .getAllByTestId(/^etl-status-row-/)
       .map((r) => r.getAttribute("data-testid"));
-    // "External: …" sorts before "Internal: …" ascending, even though "COI-Gap"
-    // alone would alphabetize before "ED" — the qualifier this column shows is
-    // also what it sorts by.
-    expect(order.indexOf("etl-status-row-ED")).toBeLessThan(
-      order.indexOf("etl-status-row-COI-Gap"),
+    // External sorts before Internal ascending, even though "FamilySensitivity"
+    // alone would alphabetize before "Jenzabar" — the origin badge this column
+    // shows is also what it sorts by.
+    expect(order.indexOf("etl-status-row-Jenzabar")).toBeLessThan(
+      order.indexOf("etl-status-row-FamilySensitivity"),
     );
   });
 
@@ -905,7 +969,8 @@ describe("/edit/etl-status triage layout", () => {
     fixtures.News = success({ completedAt: new Date(NOW - 2 * HOUR), manifestGeneratedAt: null });
     render(await Page({}));
     const row = screen.getByTestId("etl-status-row-News");
-    expect(row.textContent).toContain("not recorded");
+    const took = row.querySelectorAll("td")[4];
+    expect(took.textContent).toBe("—");
     expect(row.textContent).not.toContain("0 sec");
   });
 
