@@ -283,3 +283,48 @@ describe("PUT /api/edit/report-meta/[n] — the write", () => {
     expect(await res.json()).toMatchObject({ ok: false, error: "write_failed" });
   });
 });
+
+describe("PUT /api/edit/report-meta/[n] — the request record", () => {
+  type UpsertArgs = { create: Record<string, unknown>; update: Record<string, unknown> };
+  const lastArgs = () => h.mockUpsert.mock.calls.at(-1)![0] as UpsertArgs;
+
+  it("absent fields are left out of the write, so a stored record survives a save without them", async () => {
+    const res = await put("3", VALID);
+    expect(res.status).toBe(200);
+    for (const k of ["requestedBy", "requestedOn", "requestMemo"]) {
+      expect(lastArgs().update[k]).toBeUndefined();
+      expect(lastArgs().create[k]).toBeUndefined();
+    }
+  });
+
+  it("stores trimmed text, the date as UTC midnight, and clears a blank field to NULL", async () => {
+    const res = await put("3", { ...VALID, requestedBy: "  Radiology office ", requestedOn: "2026-09-01", requestMemo: "" });
+    expect(res.status).toBe(200);
+    expect(lastArgs().update).toMatchObject({ requestedBy: "Radiology office", requestMemo: null });
+    expect((lastArgs().update.requestedOn as Date).toISOString()).toBe("2026-09-01T00:00:00.000Z");
+    expect(lastArgs().create).toMatchObject({ requestedBy: "Radiology office", requestMemo: null });
+  });
+
+  it("null clears; an empty date clears", async () => {
+    await put("3", { ...VALID, requestedBy: null, requestedOn: "" });
+    expect(lastArgs().update).toMatchObject({ requestedBy: null, requestedOn: null });
+  });
+
+  it.each([
+    ["requestedBy", "x".repeat(201), "invalid_requested_by"],
+    ["requestedBy", 7, "invalid_requested_by"],
+    ["requestedOn", "09/01/2026", "invalid_requested_on"],
+    ["requestedOn", "2026-02-30", "invalid_requested_on"],
+    ["requestMemo", "x".repeat(5001), "invalid_request_memo"],
+  ])("400 when %s is %j", async (field, value, code) => {
+    const res = await put("3", { ...VALID, [field]: value });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: code });
+    expect(h.mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("at the caps: 200-character requester and 5,000-character memo pass", async () => {
+    const res = await put("3", { ...VALID, requestedBy: "x".repeat(200), requestMemo: "y".repeat(5000) });
+    expect(res.status).toBe(200);
+  });
+});

@@ -34,9 +34,16 @@ the grantee's directory name (`grantee_name`, stored because the app runtime can
   Report 7 has program scopes (`md`, `mdphd`, `ecr`, or `*`). Reports 8 and 9 take the whole-report
   wildcard `*` only.
 - **Who can grant:** superusers and comms stewards (`canManageReportAccess`).
-- **Where:** the people icon beside a report's title, "Who can run this report", on the report page
-  and on its row in the reports index. It lists current grantees for every viewer, and shows Add /
-  Remove only to someone who can grant. Writes go to `POST /api/edit/report-access`.
+- **Where:** on the report page, the badge beside the title names the default audience ("All unit
+  administrators" for report 8, "Superusers and comms stewards" for 7 and 9, "Unit owners and
+  curators" for 1–6) plus "+ N others" for the grantees, and opens a read-only list of them. Add /
+  Remove live in the page's "Edit details" sheet (its Access section; "Manage access" for a comms
+  steward who is not a superuser). On the reports index, each row's people icon still opens the list
+  with Add / Remove. Both list current grantees for every viewer and show Add / Remove only to
+  someone who can grant. Writes go to `POST /api/edit/report-access` and apply at once.
+- **Request record:** "Edit details" also holds who asked for the report, when, and a memo
+  (`report_meta.requested_by` / `requested_on` / `request_memo`). Superusers only; never shown on
+  the report.
 - **Audit:** each grant or revoke writes a B03 audit row in the same transaction
   (`report_access_grant` / `report_access_revoke`, entity `report_access`).
 - **Landing:** a grant-only holder who opens `/edit` (no Scholar row, no role, no proxy grant) is sent
@@ -48,7 +55,7 @@ Grantee CWIDs live in the table, never in this repo.
 ## Report 9 — Top clinical and high-impact journal publications
 
 `/edit/reports/9` redirects to `/edit/reports/high-impact-publications` (the slug is renameable from
-the report's pencil, like every report). It was built for the yearly request for nominees for the
+the report's "Edit details", like every report). It was built for the yearly request for nominees for the
 Top Ten Clinical Research Achievement Awards: original research in top journals by full-time WCM
 faculty as first or last author.
 
