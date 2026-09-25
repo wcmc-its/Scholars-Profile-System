@@ -1,10 +1,12 @@
 -- Functional role assignments (/edit/administrators → Functional roles):
--- access not tied to an org unit (External communications, Development,
--- Reporting). One row = (role, cwid, source). source = 'manual' for an
--- assignment made on the Administrators page, or the mechanism an import
--- mirrored ('report_access', 'allowlist'); imported rows are read-only on the
--- page. scopes is a JSON string array ('*' = everything the role covers).
--- Registry only: no authorization gate reads this table yet. Managed from
+-- access not tied to an org unit. role = 'external_affairs' (one role; its
+-- functions 'communications' / 'development' are the row's scopes) or
+-- 'reporting' (scopes = '*', a report key, or 'reportKey:scope'). One row =
+-- (role, cwid, source). source = 'manual' for an assignment made on the
+-- Administrators page, or the mechanism an import mirrored ('report_access',
+-- 'allowlist'); imported rows are read-only on the page. scopes is a JSON
+-- string array. Gates read this table only while FUNCTIONAL_ROLES_AUTHZ is
+-- 'on', and then only to ADD access (lib/auth/functional-role-authz.ts). Managed from
 -- app/api/edit/functional-roles, audited as functional_role_grant /
 -- functional_role_scope_set / functional_role_revoke. Additive; the table
 -- starts empty (#584: migrations never INSERT) — the page's "Import from

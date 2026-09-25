@@ -1,15 +1,19 @@
 /**
  * The Administrators page's "Functional roles" tab: access that isn't tied to
- * an org unit (External communications, Development, Reporting), one row per
- * `functional_role_grant` row. Superuser-only (the page only mounts it for a
- * superuser; `POST /api/edit/functional-roles` re-checks).
+ * an org unit (External Affairs, with its Communications / Development
+ * functions, and Reporting), one row per `functional_role_grant` row.
+ * Superuser-only (the page only mounts it for a superuser;
+ * `POST /api/edit/functional-roles` re-checks).
  *
- * Manual rows ("Granted here") get Edit scope + Revoke; imported rows (report
- * grants, the break-glass allowlists) render "Read-only" with a lock, like
- * ED-sourced unit grants. "Import from sources" re-runs the reconcile.
+ * Manual rows ("Granted here") get Edit scope / Edit functions + Revoke;
+ * imported rows (report grants, the break-glass allowlists) render
+ * "Read-only" with a lock, like ED-sourced unit grants. "Import from sources"
+ * re-runs the reconcile.
  *
- * Registry only: the copy says so, because a row made here does not yet open
- * anything (access still comes from the ED groups and report grants).
+ * The copy follows `FUNCTIONAL_ROLES_AUTHZ` (`authzEnabled`): off, the
+ * registry is tracking-only and says so; on, a row here also grants access,
+ * in addition to the existing sources. The parity line lists current holders
+ * by the existing gates that the registry does not cover yet.
  */
 "use client";
 
@@ -36,20 +40,39 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   ALL_SCOPE,
+  defaultScopes,
   FUNCTIONAL_ROLE_DESCRIPTION,
   FUNCTIONAL_ROLE_LABEL,
+  FUNCTIONAL_ROLE_SCOPE_NOUN,
   FUNCTIONAL_ROLES,
+  gateHolderNeed,
   isImportedSource,
+  parityGaps,
   scopeLabel,
   type FunctionalRole,
   type FunctionalRoleRow,
   type FunctionalRoleScopeOptions,
+  type GateHolder,
 } from "@/lib/edit/functional-roles";
 import { cn } from "@/lib/utils";
 
-/** The note every "not yet a gate" surface carries. */
+/** The note every surface carries while `FUNCTIONAL_ROLES_AUTHZ` is off. */
 export const FUNCTIONAL_ROLES_TRACKING_NOTE =
   "Recorded here for tracking. Access itself still comes from the Web Directory groups and each report's own access list.";
+
+/** The note while `FUNCTIONAL_ROLES_AUTHZ` is on: rows grant access too. */
+export const FUNCTIONAL_ROLES_AUTHZ_NOTE =
+  "Assignments here grant access, in addition to the Web Directory groups and each report's own access list.";
+
+export function functionalRolesNote(authzEnabled: boolean): string {
+  return authzEnabled ? FUNCTIONAL_ROLES_AUTHZ_NOTE : FUNCTIONAL_ROLES_TRACKING_NOTE;
+}
+
+const GATE_VIA_LABEL: Record<GateHolder["via"], string> = {
+  report_access: "Report access",
+  comms_steward_allowlist: "Communications allowlist",
+  development_allowlist: "Development allowlist",
+};
 
 const SEGMENT_ITEM =
   "cursor-pointer rounded-md px-[11px] py-1 text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=checked]:bg-apollo-surface data-[state=checked]:font-medium data-[state=checked]:text-foreground data-[state=checked]:shadow-[0_1px_2px_rgba(34,30,28,.12)] data-[state=unchecked]:text-muted-foreground data-[state=unchecked]:hover:text-foreground";
@@ -114,9 +137,9 @@ function mapError(code: string | undefined): string {
     case "invalid_cwid":
       return "That person couldn't be found. Try a different search.";
     case "invalid_scopes":
-      return "Pick at least one scope.";
+      return "Pick at least one scope or function.";
     case "already_granted":
-      return "This person already holds this role. Use Edit scope on their row to change its scope.";
+      return "This person already holds this role. Use Edit scope (Edit functions for External Affairs) on their row to change it.";
     case "not_found":
       return "That assignment no longer exists. Reload the page.";
     default:
@@ -147,7 +170,7 @@ function ScopePicker({
 }) {
   return (
     <fieldset className="m-0 flex flex-col gap-1 border-0 p-0" data-testid={`${idPrefix}-scopes`}>
-      <legend className="mb-1 p-0 text-sm font-medium">Scope</legend>
+      <legend className="mb-1 p-0 text-sm font-medium">{FUNCTIONAL_ROLE_SCOPE_NOUN[role]}</legend>
       <div className="flex max-h-60 flex-col gap-0.5 overflow-y-auto">
         {options[role].map((o) => (
           <label key={o.key} className="flex cursor-pointer items-center gap-2.5 py-1 text-sm">
@@ -171,14 +194,17 @@ function ScopePicker({
 export function AssignFunctionalRoleDialog({
   scopeOptions,
   onAssigned,
+  authzEnabled = false,
 }: {
   scopeOptions: FunctionalRoleScopeOptions;
   onAssigned: (rows: FunctionalRoleRow[]) => void;
+  /** `FUNCTIONAL_ROLES_AUTHZ`: picks the dialog's access note. */
+  authzEnabled?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [grantee, setGrantee] = React.useState<DirectoryValue | null>(null);
   const [role, setRole] = React.useState<FunctionalRole>("reporting");
-  const [scopes, setScopes] = React.useState<string[]>([ALL_SCOPE]);
+  const [scopes, setScopes] = React.useState<string[]>(() => defaultScopes(scopeOptions.reporting));
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -186,11 +212,11 @@ export function AssignFunctionalRoleDialog({
     if (open) {
       setGrantee(null);
       setRole("reporting");
-      setScopes([ALL_SCOPE]);
+      setScopes(defaultScopes(scopeOptions.reporting));
       setSending(false);
       setError(null);
     }
-  }, [open]);
+  }, [open, scopeOptions]);
 
   const canSubmit = grantee !== null && scopes.length > 0 && !sending;
 
@@ -233,7 +259,7 @@ export function AssignFunctionalRoleDialog({
         <DialogContent data-testid="functional-roles-assign-dialog">
           <DialogHeader className="gap-1 text-left">
             <DialogTitle>Assign a functional role</DialogTitle>
-            <DialogDescription>{FUNCTIONAL_ROLES_TRACKING_NOTE}</DialogDescription>
+            <DialogDescription>{functionalRolesNote(authzEnabled)}</DialogDescription>
           </DialogHeader>
           {error && (
             <Alert variant="destructive" data-testid="functional-roles-assign-error">
@@ -259,7 +285,7 @@ export function AssignFunctionalRoleDialog({
                     checked={role === r}
                     onChange={() => {
                       setRole(r);
-                      setScopes([ALL_SCOPE]);
+                      setScopes(defaultScopes(scopeOptions[r]));
                     }}
                     className="accent-apollo-maroon m-0 mt-0.5 size-4 flex-none cursor-pointer"
                     data-testid={`functional-roles-assign-role-${r}`}
@@ -311,6 +337,11 @@ export type FunctionalRolesPanelProps = {
   scopeOptions: FunctionalRoleScopeOptions;
   actorCwid: string;
   canImpersonate?: boolean;
+  /** `FUNCTIONAL_ROLES_AUTHZ`: whether rows here also grant access. */
+  authzEnabled?: boolean;
+  /** Current holders by the existing, enumerable gates, for the parity line.
+   *  Absent ⇒ no parity line. */
+  gateHolders?: ReadonlyArray<GateHolder>;
 };
 
 export function FunctionalRolesPanel({
@@ -319,6 +350,8 @@ export function FunctionalRolesPanel({
   scopeOptions,
   actorCwid,
   canImpersonate = false,
+  authzEnabled = false,
+  gateHolders,
 }: FunctionalRolesPanelProps) {
   const [query, setQuery] = React.useState("");
   const [filters, setFilters] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -331,7 +364,13 @@ export function FunctionalRolesPanel({
   const [scopeDraft, setScopeDraft] = React.useState<string[]>([]);
   const [savingScope, setSavingScope] = React.useState(false);
 
-  const scopeKind = (r: FunctionalRoleRow) => (r.scopes.includes(ALL_SCOPE) ? "all" : "some");
+  // External Affairs is institution-wide whatever its functions; only
+  // Reporting can be narrowed to specific reports.
+  const scopeKind = (r: FunctionalRoleRow) =>
+    r.role === "external_affairs" || r.scopes.includes(ALL_SCOPE) ? "all" : "some";
+  // Recomputed from the live rows, so an import or an assignment updates it.
+  const gaps = gateHolders ? parityGaps(gateHolders, rows) : null;
+  const note = functionalRolesNote(authzEnabled);
   const matches = (group: FilterGroup, value: string, r: FunctionalRoleRow) =>
     group === "role"
       ? r.role === value
@@ -626,6 +665,44 @@ export function FunctionalRolesPanel({
           </Alert>
         )}
 
+        {gaps && gateHolders && (
+          <div className="text-[13px]" data-testid="functional-roles-parity">
+            {gaps.length === 0 ? (
+              <p className="text-muted-foreground m-0">
+                Parity: all {gateHolders.length} current{" "}
+                {gateHolders.length === 1 ? "grant" : "grants"} from report access and the
+                allowlists {gateHolders.length === 1 ? "has" : "have"} a matching row here. Web
+                Directory group members can’t be listed, so they aren’t checked.
+              </p>
+            ) : (
+              <details className="text-muted-foreground">
+                <summary className="text-foreground cursor-pointer">
+                  Parity: {gaps.length} current {gaps.length === 1 ? "grant has" : "grants have"} no
+                  matching row here.
+                </summary>
+                <p className="m-0 mt-1.5">
+                  These people hold access through report access or an allowlist but would not
+                  through this registry. Import from sources, or assign them. Web Directory group
+                  members can’t be listed, so they aren’t checked.
+                </p>
+                <ul className="m-0 mt-1.5 flex list-none flex-col gap-0.5 p-0">
+                  {gaps.map((h) => (
+                    <li
+                      key={`${h.role}:${h.cwid}:${h.via}:${gateHolderNeed(h)}`}
+                      data-testid={`functional-roles-parity-gap-${h.cwid}`}
+                    >
+                      <span className="text-foreground">{h.name ?? h.cwid}</span>{" "}
+                      <span className="font-mono text-xs">{h.cwid}</span> ·{" "}
+                      {FUNCTIONAL_ROLE_LABEL[h.role]} · {gateHolderNeed(h)} · via{" "}
+                      {GATE_VIA_LABEL[h.via]}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+
         <div className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[13px] border">
           <div
             className={cn(
@@ -747,7 +824,7 @@ export function FunctionalRolesPanel({
                               className="text-apollo-slate -ml-2 h-7 px-2 text-[13px] font-normal"
                               data-testid={`functional-role-edit-scope-${key}`}
                             >
-                              Edit scope
+                              {r.role === "external_affairs" ? "Edit functions" : "Edit scope"}
                             </Button>
                           )}
                           <Button
@@ -773,7 +850,7 @@ export function FunctionalRolesPanel({
             data-testid="functional-roles-footer"
           >
             Showing {shown.length} of {rows.length}{" "}
-            {rows.length === 1 ? "assignment" : "assignments"}. {FUNCTIONAL_ROLES_TRACKING_NOTE}
+            {rows.length === 1 ? "assignment" : "assignments"}. {note}
           </div>
         </div>
       </section>
@@ -781,7 +858,9 @@ export function FunctionalRolesPanel({
       <Dialog open={scopeTarget !== null} onOpenChange={(o) => !o && setScopeTarget(null)}>
         <DialogContent data-testid="functional-roles-scope-dialog">
           <DialogHeader className="gap-1 text-left">
-            <DialogTitle>Edit scope</DialogTitle>
+            <DialogTitle>
+              {scopeTarget?.role === "external_affairs" ? "Edit functions" : "Edit scope"}
+            </DialogTitle>
             <DialogDescription>
               {scopeTarget
                 ? `${scopeTarget.name} · ${FUNCTIONAL_ROLE_LABEL[scopeTarget.role]}`
@@ -808,7 +887,7 @@ export function FunctionalRolesPanel({
               disabled={savingScope || scopeDraft.length === 0}
               data-testid="functional-roles-scope-save"
             >
-              {savingScope ? "Saving…" : "Save scope"}
+              {savingScope ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

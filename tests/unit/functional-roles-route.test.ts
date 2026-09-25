@@ -132,7 +132,13 @@ describe("POST /api/edit/functional-roles — validation", () => {
     [{ ...GRANT, scopes: "article-count" }, "invalid_scopes"],
     [{ ...GRANT, scopes: ["nope"] }, "invalid_scopes"],
     [{ ...GRANT, scopes: [3] }, "invalid_scopes"],
-    [{ ...GRANT, role: "development", scopes: ["article-count"] }, "invalid_scopes"],
+    [{ ...GRANT, role: "external_affairs", scopes: ["article-count"] }, "invalid_scopes"],
+    // External Affairs has no wildcard: functions are named explicitly.
+    [{ ...GRANT, role: "external_affairs", scopes: ["*"] }, "invalid_scopes"],
+    [{ ...GRANT, role: "external_affairs", scopes: ["communications", "x"] }, "invalid_scopes"],
+    // The retired split roles are not in the vocabulary.
+    [{ ...GRANT, role: "external_communications", scopes: ["*"] }, "invalid_role"],
+    [{ ...GRANT, role: "development", scopes: ["*"] }, "invalid_role"],
     [{ ...GRANT, op: "set_scopes", scopes: [] }, "invalid_scopes"],
   ])("400 for %j → %s", async (body, error) => {
     const res = await POST(post(body));
@@ -157,6 +163,20 @@ describe("POST /api/edit/functional-roles — dispatch", () => {
       granteeName: "Pat Example",
     });
     expect(await res.json()).toMatchObject({ ok: true, op: "grant", changed: true, rows: ROWS });
+  });
+
+  it("grant External Affairs: the functions are the scopes, normalized", async () => {
+    const res = await POST(
+      post({ ...GRANT, role: "external_affairs", scopes: ["development", "communications"] }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.grant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "external_affairs",
+        cwid: "fake001",
+        scopes: ["communications", "development"],
+      }),
+    );
   });
 
   it("grant for someone who already holds the role manually with other scopes → 409 already_granted", async () => {
@@ -189,10 +209,10 @@ describe("POST /api/edit/functional-roles — dispatch", () => {
   });
 
   it("revoke needs no scopes", async () => {
-    const res = await POST(post({ op: "revoke", role: "development", cwid: "fake001" }));
+    const res = await POST(post({ op: "revoke", role: "external_affairs", cwid: "fake001" }));
     expect(res.status).toBe(200);
     expect(h.revoke).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "development", cwid: "fake001" }),
+      expect.objectContaining({ role: "external_affairs", cwid: "fake001" }),
     );
   });
 

@@ -2945,6 +2945,18 @@ export class AppStack extends Stack {
         DEVELOPMENT_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
         SCHOLARS_DEVELOPMENT_ALLOWLIST: "",
+        // Functional roles authorization cutover (/edit/administrators →
+        // Functional roles, `functional_role_grant`). When "on", the gates ALSO
+        // admit registry grants -- ADDITIVE only, nobody loses access:
+        // isCommsSteward admits an External Affairs grant with the
+        // Communications function, isDeveloper one with Development, and the
+        // report gate admits Reporting grants per scope
+        // (lib/auth/functional-role-authz.ts). The kill switches above still
+        // win. OFF in both envs; before a flip, check the tab's parity line (or
+        // `npx tsx scripts/functional-roles-parity.ts` on the ETL task family)
+        // and run "Import from sources". Kept as a per-env ternary so a
+        // staging-first flip is a one-word change + `cdk deploy Sps-App-staging`.
+        FUNCTIONAL_ROLES_AUTHZ: env === "staging" ? "off" : "off",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the

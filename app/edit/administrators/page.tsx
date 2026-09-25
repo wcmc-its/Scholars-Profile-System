@@ -27,11 +27,17 @@ import {
   loadOwnerManagedUnitScope,
 } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
-import type { FunctionalRoleRow, FunctionalRoleScopeOptions } from "@/lib/edit/functional-roles";
+import { isFunctionalRolesAuthzEnabled } from "@/lib/auth/functional-role-authz";
+import type {
+  FunctionalRoleRow,
+  FunctionalRoleScopeOptions,
+  GateHolder,
+} from "@/lib/edit/functional-roles";
 import {
   canManageFunctionalRoles,
   functionalRoleScopeOptions,
   listFunctionalRoles,
+  listGateHolders,
 } from "@/lib/edit/functional-roles.server";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -50,12 +56,34 @@ export const metadata = {
  * is the page's job and must not depend on the newer table.
  */
 async function loadFunctionalRolesTab(): Promise<
-  { rows: FunctionalRoleRow[]; scopeOptions: FunctionalRoleScopeOptions } | undefined
+  | {
+      rows: FunctionalRoleRow[];
+      scopeOptions: FunctionalRoleScopeOptions;
+      authzEnabled: boolean;
+      gateHolders?: GateHolder[];
+    }
+  | undefined
 > {
   try {
+    const [rows, gateHolders] = await Promise.all([
+      listFunctionalRoles(db.read),
+      // The parity line is advisory: a failed holder read drops the line,
+      // not the tab.
+      listGateHolders(db.read).catch((err: unknown) => {
+        console.warn(
+          JSON.stringify({
+            event: "functional_roles_parity_load_failed",
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        return undefined;
+      }),
+    ]);
     return {
-      rows: await listFunctionalRoles(db.read),
+      rows,
       scopeOptions: functionalRoleScopeOptions(),
+      authzEnabled: isFunctionalRolesAuthzEnabled(),
+      gateHolders,
     };
   } catch (err) {
     console.warn(

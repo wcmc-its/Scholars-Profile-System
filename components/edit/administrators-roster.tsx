@@ -43,7 +43,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AdminRosterEntry, AdminRosterGrant } from "@/lib/api/administrators-roster";
-import type { FunctionalRoleRow, FunctionalRoleScopeOptions } from "@/lib/edit/functional-roles";
+import type {
+  FunctionalRoleRow,
+  FunctionalRoleScopeOptions,
+  GateHolder,
+} from "@/lib/edit/functional-roles";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
 import { cn } from "@/lib/utils";
 import { INSTITUTIONS } from "@/lib/institutions";
@@ -184,6 +188,10 @@ export type AdministratorsRosterProps = {
   functionalRoles?: {
     rows: ReadonlyArray<FunctionalRoleRow>;
     scopeOptions: FunctionalRoleScopeOptions;
+    /** `FUNCTIONAL_ROLES_AUTHZ`: whether rows also grant access. */
+    authzEnabled?: boolean;
+    /** Current holders by the existing gates, for the parity line. */
+    gateHolders?: ReadonlyArray<GateHolder>;
   };
 };
 
@@ -933,6 +941,7 @@ export function AdministratorsRoster({
           <AssignFunctionalRoleDialog
             scopeOptions={functionalRoles.scopeOptions}
             onAssigned={setFunctionalRows}
+            authzEnabled={functionalRoles.authzEnabled}
           />
         ) : (
           <AddAdministratorDialog units={unitOptions(roster, allCores)} onGranted={handleGranted} />
@@ -994,6 +1003,8 @@ export function AdministratorsRoster({
             scopeOptions={functionalRoles.scopeOptions}
             actorCwid={actorCwid}
             canImpersonate={canImpersonate}
+            authzEnabled={functionalRoles.authzEnabled}
+            gateHolders={functionalRoles.gateHolders}
           />
         </>
       ) : (

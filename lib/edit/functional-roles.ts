@@ -3,14 +3,27 @@
  * Administrators page's second tab). The vocabulary, labels, sources and scope
  * helpers live here so the client roster and the server loader/route share one
  * definition. Pure: no `@/lib/db`, no Node-only imports, safe in a
- * `"use client"` component. The DB side is `functional-roles.server.ts`.
+ * `"use client"` component. The DB side is `functional-roles.server.ts`; the
+ * gate-side reads are `lib/auth/functional-role-authz.ts`.
  *
- * Registry only. No authorization gate reads `functional_role_grant` today;
- * access still comes from the ED groups (`comms_steward`, `development`) and
- * `report_access`. A row here records who holds the role and why.
+ * Two roles:
+ *   - External Affairs (`external_affairs`): ONE operational unit. Its
+ *     functions, Communications and Development, are recorded on the grant
+ *     as its scopes (`communications`, `development`). A person who works in
+ *     both holds one grant with both functions. Communications corresponds to
+ *     the existing `comms_steward` role, Development to the `development` role.
+ *   - Reporting (`reporting`): report access, scoped per report.
+ *
+ * Authorization: while `FUNCTIONAL_ROLES_AUTHZ` is not "on" (the default in
+ * every env), no gate reads `functional_role_grant` and the table is a
+ * registry only. When it is "on", a grant ADDS access: External Affairs with
+ * Communications admits `isCommsSteward`, with Development admits
+ * `isDeveloper`, and a Reporting grant admits the report gate per scope. The
+ * existing sources (ED groups, allowlists, `report_access`) keep working
+ * either way.
  */
 
-export const FUNCTIONAL_ROLES = ["external_communications", "development", "reporting"] as const;
+export const FUNCTIONAL_ROLES = ["external_affairs", "reporting"] as const;
 export type FunctionalRole = (typeof FUNCTIONAL_ROLES)[number];
 
 export function isFunctionalRole(value: unknown): value is FunctionalRole {
@@ -18,16 +31,32 @@ export function isFunctionalRole(value: unknown): value is FunctionalRole {
 }
 
 export const FUNCTIONAL_ROLE_LABEL: Record<FunctionalRole, string> = {
-  external_communications: "External communications",
-  development: "Development",
+  external_affairs: "External Affairs",
   reporting: "Reporting",
 };
 
 /** One line under the role name: what the role is for. */
 export const FUNCTIONAL_ROLE_DESCRIPTION: Record<FunctionalRole, string> = {
-  external_communications: "Edit overviews, headshots and Spotlight across all profiles",
-  development: "Read-only access to profiles, funding and Reports for prospect research",
+  external_affairs:
+    "Communications edits overviews, headshots and Spotlight; Development gets prospect-research tools",
   reporting: "Reports and Insights for the scopes shown",
+};
+
+/** What a role's scope keys are called in the UI: External Affairs records
+ *  functions, Reporting records report scopes. */
+export const FUNCTIONAL_ROLE_SCOPE_NOUN: Record<FunctionalRole, string> = {
+  external_affairs: "Functions",
+  reporting: "Scope",
+};
+
+/** External Affairs functions: the scope keys an `external_affairs` grant
+ *  carries. */
+export const EXTERNAL_AFFAIRS_FUNCTIONS = ["communications", "development"] as const;
+export type ExternalAffairsFunction = (typeof EXTERNAL_AFFAIRS_FUNCTIONS)[number];
+
+export const EXTERNAL_AFFAIRS_FUNCTION_LABEL: Record<ExternalAffairsFunction, string> = {
+  communications: "Communications",
+  development: "Development",
 };
 
 /** Where a row came from. "manual" rows are made on the Administrators page
@@ -45,23 +74,30 @@ export function isImportedSource(source: string): boolean {
  *  precedent on `unit_admin`). */
 export const ALLOWLIST_GRANTER = "ALLOWLIST";
 
-/** The wildcard scope: everything the role covers. */
+/** The wildcard scope: everything the role covers (Reporting only). */
 export const ALL_SCOPE = "*";
 
 /** A scope choice: the stored key and its label. */
 export type FunctionalRoleScopeOption = { key: string; label: string };
 
-/** Scope options per role. External communications and Development are
- *  institution-wide only; Reporting's options are built server-side from the
- *  person-granted report catalog (`reportingScopeOptions`). */
+/** Scope options per role. External Affairs' options are its functions;
+ *  Reporting's are built server-side from the person-granted report catalog
+ *  (`reportingScopeOptions`). */
 export type FunctionalRoleScopeOptions = Record<
   FunctionalRole,
   ReadonlyArray<FunctionalRoleScopeOption>
 >;
 
-export const INSTITUTION_SCOPE_OPTIONS: ReadonlyArray<FunctionalRoleScopeOption> = [
-  { key: ALL_SCOPE, label: "All of WCM" },
-];
+/** External Affairs has no wildcard: each function is chosen explicitly. */
+export const EXTERNAL_AFFAIRS_SCOPE_OPTIONS: ReadonlyArray<FunctionalRoleScopeOption> =
+  EXTERNAL_AFFAIRS_FUNCTIONS.map((f) => ({ key: f, label: EXTERNAL_AFFAIRS_FUNCTION_LABEL[f] }));
+
+/** The scopes a new assignment starts with in the Assign dialog: the wildcard
+ *  when the role offers one (Reporting), else nothing (External Affairs: the
+ *  functions are picked explicitly). */
+export function defaultScopes(options: ReadonlyArray<FunctionalRoleScopeOption>): string[] {
+  return options.some((o) => o.key === ALL_SCOPE) ? [ALL_SCOPE] : [];
+}
 
 /**
  * Normalize a scope list for storage: de-duplicated, sorted, and collapsed to
@@ -94,7 +130,7 @@ export function scopeLabel(
   role: FunctionalRole,
   key: string,
 ): string {
-  if (key === ALL_SCOPE) return role === "reporting" ? "All reports" : "All of WCM";
+  if (key === ALL_SCOPE) return role === "reporting" ? "All reports" : "All functions";
   return options[role].find((o) => o.key === key)?.label ?? key;
 }
 
@@ -115,3 +151,90 @@ export type FunctionalRoleRow = {
   /** ISO timestamp. */
   grantedAt: string;
 };
+
+// ─── Authorization mapping (pure: shared by the gates and the parity check) ──
+
+/** Whether a set of External Affairs grant scopes carries `fn`. */
+export function scopesCarryFunction(
+  scopes: ReadonlyArray<string>,
+  fn: ExternalAffairsFunction,
+): boolean {
+  return scopes.includes(fn);
+}
+
+/**
+ * The `report_access`-shaped scope keys a Reporting grant's scopes admit on
+ * `reportKey`: `"*"` (the whole report) for the wildcard or the bare report
+ * key, plus the `scope` of each `reportKey:scope` sub-scope. Empty when the
+ * grant says nothing about this report.
+ */
+export function reportScopesFromRegistry(
+  scopes: ReadonlyArray<string>,
+  reportKey: string,
+): Set<string> {
+  const out = new Set<string>();
+  for (const s of scopes) {
+    if (s === ALL_SCOPE || s === reportKey) out.add(ALL_SCOPE);
+    else if (s.startsWith(`${reportKey}:`)) out.add(s.slice(reportKey.length + 1));
+  }
+  return out;
+}
+
+/** Someone who holds access through an EXISTING, enumerable gate, as the
+ *  parity check sees them: External Affairs by allowlist, Reporting by
+ *  `report_access`. (ED group members cannot be listed; see the server lib.) */
+export type GateHolder =
+  | {
+      role: "external_affairs";
+      cwid: string;
+      name: string | null;
+      /** The function the gate confers. */
+      scope: ExternalAffairsFunction;
+      via: "comms_steward_allowlist" | "development_allowlist";
+    }
+  | {
+      role: "reporting";
+      cwid: string;
+      name: string | null;
+      reportKey: string;
+      /** The `report_access.scope_key` (`"*"` = whole report). */
+      scope: string;
+      via: "report_access";
+    };
+
+/** What a registry row must carry to cover a holder, in words. */
+export function gateHolderNeed(h: GateHolder): string {
+  if (h.role === "external_affairs") return EXTERNAL_AFFAIRS_FUNCTION_LABEL[h.scope];
+  return h.scope === ALL_SCOPE ? h.reportKey : `${h.reportKey}:${h.scope}`;
+}
+
+/**
+ * The parity check: every current holder by an existing gate whose access the
+ * registry would NOT reproduce, i.e. no row (from any source) for that role
+ * and person that carries the function or admits the report scope. Pure; the
+ * Functional roles tab and `scripts/functional-roles-parity.ts` both call it,
+ * with the same mapping the gates use, so `FUNCTIONAL_ROLES_AUTHZ` can be
+ * checked before the registry is ever relied on alone.
+ */
+export function parityGaps(
+  holders: ReadonlyArray<GateHolder>,
+  rows: ReadonlyArray<Pick<FunctionalRoleRow, "role" | "cwid" | "scopes">>,
+): GateHolder[] {
+  const byKey = new Map<string, string[][]>();
+  for (const r of rows) {
+    const k = `${r.role}:${r.cwid.toLowerCase()}`;
+    const list = byKey.get(k) ?? [];
+    list.push(r.scopes);
+    byKey.set(k, list);
+  }
+  return holders.filter((h) => {
+    const held = byKey.get(`${h.role}:${h.cwid.toLowerCase()}`) ?? [];
+    if (h.role === "external_affairs") {
+      return !held.some((s) => scopesCarryFunction(s, h.scope));
+    }
+    return !held.some((s) => {
+      const admitted = reportScopesFromRegistry(s, h.reportKey);
+      return admitted.has(ALL_SCOPE) || admitted.has(h.scope);
+    });
+  });
+}

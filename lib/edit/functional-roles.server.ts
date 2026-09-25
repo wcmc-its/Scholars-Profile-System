@@ -3,20 +3,24 @@
  * audited manual writes behind `POST /api/edit/functional-roles`, and the
  * import that mirrors existing holders into the table.
  *
- * REGISTRY ONLY. No authorization gate reads this table. Access still comes
- * from where it came from before:
- *   - External communications = the `comms_steward` role (ED group, or the
- *     `SCHOLARS_COMMS_STEWARD_ALLOWLIST` break-glass list);
- *   - Development = the `development` role (ED group, or
+ * Roles (`lib/edit/functional-roles.ts`): External Affairs, one role whose
+ * functions (Communications, Development) are the grant's scopes, and
+ * Reporting. Access has always come from:
+ *   - External Affairs · Communications = the `comms_steward` role (ED group,
+ *     or the `SCHOLARS_COMMS_STEWARD_ALLOWLIST` break-glass list);
+ *   - External Affairs · Development = the `development` role (ED group, or
  *     `SCHOLARS_DEVELOPMENT_ALLOWLIST`);
  *   - Reporting = `report_access` rows.
- * A manual row made here records an assignment; it grants nothing until a
- * gate is cut over to read the table.
+ * Those keep working. With `FUNCTIONAL_ROLES_AUTHZ` "on" the gates ALSO admit
+ * a registry grant (additive, `lib/auth/functional-role-authz.ts`); while it
+ * is off, a manual row here records an assignment and grants nothing.
  *
  * What the import can see. `report_access` is a table, so every holder is
  * imported (one Reporting row per person, scopes = the reports they hold).
  * The two allowlists are env lists and are imported as-is (both are empty in
- * every deployed env today). The ED groups CANNOT be imported: the read-only
+ * every deployed env today) into ONE External Affairs row per person, with
+ * Communications for the comms-steward list and Development for the
+ * development list (both when on both). The ED groups CANNOT be imported: the read-only
  * bind account can `compare` a member but not read the member list
  * (`lib/auth/ldap-group.ts`), so group-only holders are invisible to any
  * enumeration. Record them as manual rows, or get a bind that can read
@@ -43,14 +47,16 @@ import { appendAuditRow } from "@/lib/edit/audit";
 import {
   ALL_SCOPE,
   ALLOWLIST_GRANTER,
+  EXTERNAL_AFFAIRS_SCOPE_OPTIONS,
   FUNCTIONAL_ROLES,
-  INSTITUTION_SCOPE_OPTIONS,
   isFunctionalRole,
   normalizeScopes,
   sameScopes,
   scopesFromJson,
+  type ExternalAffairsFunction,
   type FunctionalRole,
   type FunctionalRoleRow,
+  type GateHolder,
   type FunctionalRoleScopeOption,
   type FunctionalRoleScopeOptions,
 } from "@/lib/edit/functional-roles";
@@ -94,8 +100,7 @@ export function reportingScopeOptions(): FunctionalRoleScopeOption[] {
 /** Every role's scope options, for the page and for route validation. */
 export function functionalRoleScopeOptions(): FunctionalRoleScopeOptions {
   return {
-    external_communications: INSTITUTION_SCOPE_OPTIONS,
-    development: INSTITUTION_SCOPE_OPTIONS,
+    external_affairs: EXTERNAL_AFFAIRS_SCOPE_OPTIONS,
     reporting: reportingScopeOptions(),
   };
 }
@@ -153,6 +158,58 @@ export async function listFunctionalRoles(
       FUNCTIONAL_ROLES.indexOf(a.role) - FUNCTIONAL_ROLES.indexOf(b.role) ||
       a.source.localeCompare(b.source),
   );
+  return out;
+}
+
+/**
+ * Everyone who holds a functional role through an EXISTING gate that can be
+ * enumerated, for the parity check (`parityGaps`): every `report_access` row
+ * (Reporting), and each cwid on the comms-steward / development break-glass
+ * allowlists (External Affairs · Communications / · Development; empty while
+ * that role's kill switch is off, since the list then confers nothing).
+ *
+ * NOT included, because they cannot be listed: members of the comms-steward
+ * and development ED groups (the bind account can only `compare` a member,
+ * `lib/auth/ldap-group.ts`). The parity check is therefore complete for
+ * Reporting and the allowlists, and blind to group-only holders; the page and
+ * the script both say so.
+ */
+export async function listGateHolders(
+  client: Pick<PrismaClient, "reportAccess"> = db.read,
+): Promise<GateHolder[]> {
+  const out: GateHolder[] = [];
+  const reportAccess = await client.reportAccess.findMany({
+    select: { reportKey: true, scopeKey: true, cwid: true, granteeName: true },
+    orderBy: [{ cwid: "asc" }, { reportKey: "asc" }, { scopeKey: "asc" }],
+  });
+  for (const r of reportAccess) {
+    out.push({
+      role: "reporting",
+      cwid: r.cwid.toLowerCase(),
+      name: r.granteeName,
+      reportKey: r.reportKey,
+      scope: r.scopeKey,
+      via: "report_access",
+    });
+  }
+  for (const cwid of listCommsStewardCwids()) {
+    out.push({
+      role: "external_affairs",
+      cwid,
+      name: null,
+      scope: "communications",
+      via: "comms_steward_allowlist",
+    });
+  }
+  for (const cwid of listDevelopmentAllowlistCwids()) {
+    out.push({
+      role: "external_affairs",
+      cwid,
+      name: null,
+      scope: "development",
+      via: "development_allowlist",
+    });
+  }
   return out;
 }
 
@@ -386,7 +443,9 @@ function collapseReportScopes(keys: ReadonlyArray<string>): string[] {
  * What the imported part of the table should hold, from its sources. Pure.
  *   - `report_access`: one Reporting row per cwid, scopes = every report
  *     scope they hold; the earliest grant's granter/time/name stand for the row.
- *   - allowlists: one row per listed cwid, institution-wide.
+ *   - allowlists: one External Affairs row per listed cwid. Its functions
+ *     are the lists the cwid is on: the comms-steward list adds
+ *     Communications, the development list adds Development.
  */
 export function desiredImportedRows(inputs: ImportInputs): ImportedRow[] {
   const out: ImportedRow[] = [];
@@ -408,22 +467,30 @@ export function desiredImportedRows(inputs: ImportInputs): ImportedRow[] {
       grantedAt: first.grantedAt,
     });
   }
-  const allowlisted: Array<[FunctionalRole, ReadonlyArray<string>]> = [
-    ["external_communications", inputs.commsStewardCwids],
+  // One External Affairs row per allowlisted person; the lists they appear on
+  // are its functions (someone on both lists gets one row with both).
+  const functions = new Map<string, Set<ExternalAffairsFunction>>();
+  const allowlisted: Array<[ExternalAffairsFunction, ReadonlyArray<string>]> = [
+    ["communications", inputs.commsStewardCwids],
     ["development", inputs.developmentCwids],
   ];
-  for (const [role, cwids] of allowlisted) {
-    for (const cwid of new Set(cwids.map((c) => c.trim().toLowerCase()).filter(Boolean))) {
-      out.push({
-        role,
-        cwid,
-        source: "allowlist",
-        scopes: [ALL_SCOPE],
-        granteeName: null,
-        grantedBy: ALLOWLIST_GRANTER,
-        grantedAt: null,
-      });
+  for (const [fn, cwids] of allowlisted) {
+    for (const cwid of cwids.map((c) => c.trim().toLowerCase()).filter(Boolean)) {
+      const set = functions.get(cwid) ?? new Set<ExternalAffairsFunction>();
+      set.add(fn);
+      functions.set(cwid, set);
     }
+  }
+  for (const [cwid, fns] of functions) {
+    out.push({
+      role: "external_affairs",
+      cwid,
+      source: "allowlist",
+      scopes: normalizeScopes([...fns]),
+      granteeName: null,
+      grantedBy: ALLOWLIST_GRANTER,
+      grantedAt: null,
+    });
   }
   return out;
 }

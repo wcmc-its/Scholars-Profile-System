@@ -16,6 +16,9 @@
  *   - anyone else → the union of their rows' `scopeKey`s for the report;
  *   - no rows → the EMPTY set, and the page/route treat empty as forbidden.
  * Fail closed: there is NO env flag — an empty table is the dark state.
+ * With `FUNCTIONAL_ROLES_AUTHZ` "on", a Reporting grant in the functional-roles
+ * registry ADDS scopes on top of the rows here (a union, never a narrowing;
+ * `lib/auth/functional-role-authz.ts`).
  *
  * Grants are written only through `grantReportAccess` / `revokeReportAccess`
  * (each inside one transaction with a B03 audit row), from
@@ -48,6 +51,7 @@ import { db } from "@/lib/db";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { EditSession } from "@/lib/auth/superuser";
 import { appendAuditRow } from "@/lib/edit/audit";
+import { registryHasAnyReporting, registryReportScopes } from "@/lib/auth/functional-role-authz";
 import { PROGRAM_LABEL } from "@/lib/edit/mentorship-type";
 
 /** The one report this table gates today. `reportKey` is a column, not an
@@ -101,7 +105,10 @@ export const REPORT_ACCESS_SCOPE_OPTIONS: Readonly<Record<string, ReadonlyArray<
 export async function hasAnyReportAccess(cwid: string): Promise<boolean> {
   if (!cwid) return false;
   const rows = await db.read.reportAccess.findMany({ where: { cwid }, select: { cwid: true }, take: 1 });
-  return rows.length > 0;
+  if (rows.length > 0) return true;
+  // Additive: a Reporting grant in the functional-roles registry, only while
+  // FUNCTIONAL_ROLES_AUTHZ is "on" (false without a read otherwise).
+  return registryHasAnyReporting(cwid);
 }
 
 /** Whether `value` is a grantable scope key for the Mentored publications
@@ -136,7 +143,12 @@ export async function loadReportScopesForCwid(
     where: { reportKey, cwid },
     select: { scopeKey: true },
   });
-  return new Set(rows.map((r) => r.scopeKey));
+  const scopes = new Set(rows.map((r) => r.scopeKey));
+  // Additive: the scopes a Reporting grant in the functional-roles registry
+  // admits on this report, only while FUNCTIONAL_ROLES_AUTHZ is "on" (an
+  // empty set without a read otherwise). A union: nothing is taken away.
+  for (const s of await registryReportScopes(cwid, reportKey)) scopes.add(s);
+  return scopes;
 }
 
 /**

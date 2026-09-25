@@ -9,7 +9,9 @@
  *   - `role`: a `FUNCTIONAL_ROLES` key (not read for "import");
  *   - `cwid`: lowercased, then `/^[a-z][a-z0-9]{1,11}$/` (not for "import");
  *   - `scopes` ("grant", "set_scopes"): a non-empty string array, each key
- *     one of the role's scope options; normalized ("*" swallows the rest);
+ *     one of the role's scope options (External Affairs: its functions,
+ *     `communications` / `development`; Reporting: `"*"`, a report key, or
+ *     `reportKey:scope`); normalized ("*" swallows the rest);
  *   - `name` ("grant", optional): the picker's directory display name,
  *     stored as `grantee_name` when 1–255 chars, else null (never a 400).
  *
@@ -23,7 +25,10 @@
  * same scopes again is an idempotent 200 with `changed: false`.
  * Responds with the full list the write re-read on the writer.
  *
- * Registry only: nothing here changes who can open anything (see the lib).
+ * While `FUNCTIONAL_ROLES_AUTHZ` is off, nothing here changes who can open
+ * anything. When it is "on", a manual External Affairs or Reporting row ADDS
+ * access through the existing gates (`lib/auth/functional-role-authz.ts`), so
+ * a grant or revoke here takes effect on the grantee's next request.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 

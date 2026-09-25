@@ -49,10 +49,16 @@ vi.mock("@/lib/auth/development", () => ({
 }));
 
 import {
+  defaultScopes,
+  FUNCTIONAL_ROLES,
+  isFunctionalRole,
   normalizeScopes,
+  parityGaps,
+  reportScopesFromRegistry,
   sameScopes,
   scopeLabel,
   scopesFromJson,
+  type GateHolder,
 } from "@/lib/edit/functional-roles";
 import {
   canManageFunctionalRoles,
@@ -63,6 +69,7 @@ import {
   IMPORT_TX_OPTIONS,
   importFunctionalRoles,
   listFunctionalRoles,
+  listGateHolders,
   reportAccessScopeKey,
   reportingScopeOptions,
   revokeFunctionalRole,
@@ -164,20 +171,33 @@ describe("scope helpers", () => {
     expect(md?.label).toBe("Mentored publications · MD");
   });
 
-  it("comms and development are institution-wide only", () => {
+  it("the roles are External Affairs and Reporting; EA's scopes are its two functions", () => {
+    expect(FUNCTIONAL_ROLES).toEqual(["external_affairs", "reporting"]);
+    expect(isFunctionalRole("external_communications")).toBe(false);
+    expect(isFunctionalRole("development")).toBe(false);
     const opts = functionalRoleScopeOptions();
-    expect(opts.external_communications.map((o) => o.key)).toEqual(["*"]);
-    expect(opts.development.map((o) => o.key)).toEqual(["*"]);
-    expect(scopeLabel(opts, "development", "*")).toBe("All of WCM");
+    expect(opts.external_affairs).toEqual([
+      { key: "communications", label: "Communications" },
+      { key: "development", label: "Development" },
+    ]);
+    expect(scopeLabel(opts, "external_affairs", "development")).toBe("Development");
     expect(scopeLabel(opts, "reporting", "*")).toBe("All reports");
     expect(scopeLabel(opts, "reporting", "gone-report")).toBe("gone-report");
+    // The Assign dialog starts Reporting at "All reports" and EA at nothing.
+    expect(defaultScopes(opts.reporting)).toEqual(["*"]);
+    expect(defaultScopes(opts.external_affairs)).toEqual([]);
   });
 
   it("validScopes rejects empty, unknown, and cross-role keys", () => {
     expect(validScopes("reporting", ["article-count"])).toBe(true);
     expect(validScopes("reporting", [])).toBe(false);
     expect(validScopes("reporting", ["nope"])).toBe(false);
-    expect(validScopes("development", ["article-count"])).toBe(false);
+    expect(validScopes("external_affairs", ["article-count"])).toBe(false);
+    expect(validScopes("external_affairs", ["communications", "development"])).toBe(true);
+    expect(validScopes("external_affairs", ["development"])).toBe(true);
+    // No wildcard for EA: each function is chosen explicitly.
+    expect(validScopes("external_affairs", ["*"])).toBe(false);
+    expect(validScopes("reporting", ["communications"])).toBe(false);
   });
 
   it("only a superuser manages", () => {
@@ -251,16 +271,20 @@ describe("desiredImportedRows (pure)", () => {
     expect(reportAccessScopeKey("x", "md")).toBe("x:md");
   });
 
-  it("allowlists become institution-wide rows, lowercased and de-duplicated", () => {
+  it("allowlists become ONE External Affairs row per person, the lists as its functions", () => {
     const rows = desiredImportedRows({
       reportAccess: [],
-      commsStewardCwids: ["FAKE002", "fake002"],
-      developmentCwids: ["fake003"],
+      commsStewardCwids: ["FAKE002", "fake002", "fake004"],
+      developmentCwids: ["fake003", " FAKE004 "],
     });
     expect(rows.map((r) => [r.role, r.cwid, r.source, r.scopes, r.grantedBy])).toEqual([
-      ["external_communications", "fake002", "allowlist", ["*"], "ALLOWLIST"],
-      ["development", "fake003", "allowlist", ["*"], "ALLOWLIST"],
+      ["external_affairs", "fake002", "allowlist", ["communications"], "ALLOWLIST"],
+      // On both lists: one grant carrying both functions, not two rows.
+      ["external_affairs", "fake004", "allowlist", ["communications", "development"], "ALLOWLIST"],
+      ["external_affairs", "fake003", "allowlist", ["development"], "ALLOWLIST"],
     ]);
+    // Every imported EA row passes the route's own scope validation.
+    for (const r of rows) expect(validScopes(r.role, r.scopes)).toBe(true);
   });
 });
 
@@ -268,7 +292,7 @@ describe("listFunctionalRoles", () => {
   it("resolves holder + granter names from Scholar, falls back to granteeName then cwid, skips unknown roles", async () => {
     h.readFindMany.mockResolvedValue([
       stored({ cwid: "fake001", granteeName: null, grantedBy: "adm0001" }),
-      stored({ cwid: "fake002", granteeName: "Sam Sample", role: "development" }),
+      stored({ cwid: "fake002", granteeName: "Sam Sample", role: "external_affairs" }),
       stored({ cwid: "fake003", granteeName: null, role: "future_role" }),
     ]);
     h.readScholarFindMany.mockResolvedValue([
@@ -430,27 +454,37 @@ describe("setFunctionalRoleScopes", () => {
 
 describe("revokeFunctionalRole", () => {
   it("no manual row → idempotent no-op", async () => {
-    const result = await revokeFunctionalRole({ ...ACTOR, role: "development", cwid: "fake001" });
+    const result = await revokeFunctionalRole({
+      ...ACTOR,
+      role: "external_affairs",
+      cwid: "fake001",
+    });
     expect(result.changed).toBe(false);
     expect(h.txDelete).not.toHaveBeenCalled();
   });
 
   it("deletes the manual row with a functional_role_revoke audit row carrying the deleted row", async () => {
-    h.writeFindUnique.mockResolvedValue(stored({ role: "development" }));
-    const result = await revokeFunctionalRole({ ...ACTOR, role: "development", cwid: "fake001" });
+    h.writeFindUnique.mockResolvedValue(
+      stored({ role: "external_affairs", scopes: ["communications", "development"] }),
+    );
+    const result = await revokeFunctionalRole({
+      ...ACTOR,
+      role: "external_affairs",
+      cwid: "fake001",
+    });
     expect(result.changed).toBe(true);
     expect(h.txDelete).toHaveBeenCalledWith({
-      where: { role_cwid_source: { role: "development", cwid: "fake001", source: "manual" } },
+      where: { role_cwid_source: { role: "external_affairs", cwid: "fake001", source: "manual" } },
     });
     expect(h.appendAuditRow).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         action: "functional_role_revoke",
-        targetEntityId: "development:fake001:manual",
+        targetEntityId: "external_affairs:fake001:manual",
         beforeValues: expect.objectContaining({
-          role: "development",
+          role: "external_affairs",
           source: "manual",
-          scopes: ["*"],
+          scopes: ["communications", "development"],
         }),
         afterValues: null,
       }),
@@ -550,7 +584,7 @@ describe("importFunctionalRoles (reconcile)", () => {
     }
     expect(t.get("reporting:fake004:manual")).toEqual(manual);
     expect([...t.keys()].sort()).toEqual([
-      "development:fake005:allowlist",
+      "external_affairs:fake005:allowlist",
       "reporting:fake001:report_access",
       "reporting:fake004:manual",
       "reporting:fake004:report_access",
@@ -560,7 +594,7 @@ describe("importFunctionalRoles (reconcile)", () => {
       grantedBy: "adm0002",
       grantedAt: T0,
     });
-    expect(t.get("development:fake005:allowlist")!.grantedAt).toBeInstanceOf(Date);
+    expect(t.get("external_affairs:fake005:allowlist")!.grantedAt).toBeInstanceOf(Date);
     expect(t.get("reporting:fake004:report_access")!.scopes).toEqual(["display-titles"]);
     // Writes are bulk: one createMany and one deleteMany, all under explicit tx options.
     expect(h.txCreateMany).toHaveBeenCalledTimes(1);
@@ -584,10 +618,10 @@ describe("importFunctionalRoles (reconcile)", () => {
     }
     // The allowlist grant's audit snapshot carries the same time the row got.
     const devAudit = h.appendAuditRow.mock.calls.find(
-      (c) => c[1].targetEntityId === "development:fake005:allowlist",
+      (c) => c[1].targetEntityId === "external_affairs:fake005:allowlist",
     )!;
     expect(devAudit[1].afterValues.granted_at).toBe(
-      t.get("development:fake005:allowlist")!.grantedAt.toISOString(),
+      t.get("external_affairs:fake005:allowlist")!.grantedAt.toISOString(),
     );
     // The list comes back from the writer, never the reader.
     expect(result.rows.map((r) => r.cwid).sort()).toEqual([
@@ -694,5 +728,126 @@ describe("importFunctionalRoles (reconcile)", () => {
     h.txCreateMany.mockResolvedValueOnce({ count: 0 });
     await expect(importFunctionalRoles(ACTOR)).rejects.toThrow(/created 0 rows, expected 1/);
     expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+});
+
+describe("reportScopesFromRegistry (the gate mapping)", () => {
+  it("wildcard or the bare report key admits the whole report", () => {
+    expect([...reportScopesFromRegistry(["*"], "article-count")]).toEqual(["*"]);
+    expect([...reportScopesFromRegistry(["article-count"], "article-count")]).toEqual(["*"]);
+  });
+
+  it("a sub-scope admits only that bucket, and only on its own report", () => {
+    const scopes = ["mentored-publications:md", "mentored-publications:ecr", "article-count"];
+    expect([...reportScopesFromRegistry(scopes, "mentored-publications")].sort()).toEqual([
+      "ecr",
+      "md",
+    ]);
+    expect([...reportScopesFromRegistry(scopes, "high-impact-publications")]).toEqual([]);
+  });
+
+  it("a report key that prefixes another does not leak", () => {
+    expect([...reportScopesFromRegistry(["article-count-x"], "article-count")]).toEqual([]);
+  });
+});
+
+describe("parityGaps", () => {
+  const holders: GateHolder[] = [
+    {
+      role: "reporting",
+      cwid: "fake001",
+      name: null,
+      reportKey: "mentored-publications",
+      scope: "md",
+      via: "report_access",
+    },
+    {
+      role: "reporting",
+      cwid: "fake002",
+      name: null,
+      reportKey: "article-count",
+      scope: "*",
+      via: "report_access",
+    },
+    {
+      role: "external_affairs",
+      cwid: "fake003",
+      name: null,
+      scope: "communications",
+      via: "comms_steward_allowlist",
+    },
+    {
+      role: "external_affairs",
+      cwid: "fake003",
+      name: null,
+      scope: "development",
+      via: "development_allowlist",
+    },
+  ];
+
+  it("an empty registry leaves every enumerable holder as a gap", () => {
+    expect(parityGaps(holders, [])).toEqual(holders);
+  });
+
+  it("covered by any source's row that carries the function or admits the scope", () => {
+    const gaps = parityGaps(holders, [
+      { role: "reporting", cwid: "FAKE001", scopes: ["mentored-publications"] },
+      // A sub-scope row does NOT cover a whole-report holder.
+      { role: "reporting", cwid: "fake002", scopes: ["article-count:x"] },
+      // EA with Communications only: the Development holder stays a gap.
+      { role: "external_affairs", cwid: "fake003", scopes: ["communications"] },
+    ]);
+    expect(gaps.map((g) => `${g.cwid}:${g.scope}`)).toEqual(["fake002:*", "fake003:development"]);
+  });
+
+  it("a Reporting row never covers an External Affairs holder", () => {
+    const gaps = parityGaps(holders.slice(2, 3), [
+      { role: "reporting", cwid: "fake003", scopes: ["*"] },
+    ]);
+    expect(gaps).toHaveLength(1);
+  });
+});
+
+describe("listGateHolders", () => {
+  it("lists report_access rows and both allowlists, each as the function it confers", async () => {
+    h.listCommsStewardCwids.mockReturnValue(["fake010"]);
+    h.listDevelopmentAllowlistCwids.mockReturnValue(["fake010", "fake011"]);
+    const findMany = vi
+      .fn()
+      .mockResolvedValue([
+        { reportKey: "article-count", scopeKey: "*", cwid: "FAKE001", granteeName: "Pat Example" },
+      ]);
+    const holders = await listGateHolders({ reportAccess: { findMany } } as never);
+    expect(holders).toEqual([
+      {
+        role: "reporting",
+        cwid: "fake001",
+        name: "Pat Example",
+        reportKey: "article-count",
+        scope: "*",
+        via: "report_access",
+      },
+      {
+        role: "external_affairs",
+        cwid: "fake010",
+        name: null,
+        scope: "communications",
+        via: "comms_steward_allowlist",
+      },
+      {
+        role: "external_affairs",
+        cwid: "fake010",
+        name: null,
+        scope: "development",
+        via: "development_allowlist",
+      },
+      {
+        role: "external_affairs",
+        cwid: "fake011",
+        name: null,
+        scope: "development",
+        via: "development_allowlist",
+      },
+    ]);
   });
 });

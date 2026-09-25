@@ -16,8 +16,10 @@ const {
   mockRoster,
   mockForbidden,
   mockListFunctionalRoles,
+  mockListGateHolders,
 } = vi.hoisted(() => ({
   mockListFunctionalRoles: vi.fn(),
+  mockListGateHolders: vi.fn(),
   mockGetEditSession: vi.fn(),
   mockIsTabEnabled: vi.fn(),
   mockLoadOwnerScope: vi.fn(),
@@ -54,7 +56,8 @@ vi.mock("@/lib/edit/slug-request", () => ({
 vi.mock("@/lib/edit/functional-roles.server", () => ({
   canManageFunctionalRoles: (s: { isSuperuser: boolean }) => s.isSuperuser,
   listFunctionalRoles: mockListFunctionalRoles,
-  functionalRoleScopeOptions: () => ({ external_communications: [], development: [], reporting: [] }),
+  listGateHolders: mockListGateHolders,
+  functionalRoleScopeOptions: () => ({ external_affairs: [], reporting: [] }),
 }));
 vi.mock("@/lib/db", () => ({
   db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
@@ -76,6 +79,8 @@ beforeEach(() => {
   mockLoadRoster.mockResolvedValue({ entries: [], nameResolutionDegraded: false });
   mockGetCoreList.mockResolvedValue([]);
   mockListFunctionalRoles.mockResolvedValue([]);
+  mockListGateHolders.mockResolvedValue([]);
+  vi.unstubAllEnvs();
 });
 
 /** The AdministratorsRoster element the page rendered. */
@@ -93,8 +98,38 @@ describe("/edit/administrators — Functional roles tab data", () => {
     const props = rosterProps(asEl(await AdministratorsPage()));
     expect(props.functionalRoles).toEqual({
       rows: [{ role: "reporting", cwid: "fake001" }],
-      scopeOptions: { external_communications: [], development: [], reporting: [] },
+      scopeOptions: { external_affairs: [], reporting: [] },
+      authzEnabled: false,
+      gateHolders: [],
     });
+  });
+
+  it("carries the FUNCTIONAL_ROLES_AUTHZ state and the parity holders", async () => {
+    vi.stubEnv("FUNCTIONAL_ROLES_AUTHZ", "on");
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const holder = {
+      role: "reporting",
+      cwid: "fake002",
+      name: null,
+      reportKey: "article-count",
+      scope: "*",
+      via: "report_access",
+    };
+    mockListGateHolders.mockResolvedValue([holder]);
+    const props = rosterProps(asEl(await AdministratorsPage()));
+    expect(props.functionalRoles).toMatchObject({ authzEnabled: true, gateHolders: [holder] });
+  });
+
+  it("a failed parity read drops only the parity line, not the tab", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockListGateHolders.mockRejectedValue(new Error("boom"));
+    const props = rosterProps(asEl(await AdministratorsPage()));
+    const fr = props.functionalRoles as Record<string, unknown>;
+    expect(fr.rows).toEqual([]);
+    expect(fr.gateHolders).toBeUndefined();
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("functional_roles_parity_load_failed"),
+    );
   });
 
   it("unit Owner → no functionalRoles and no registry read", async () => {

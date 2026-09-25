@@ -26,8 +26,10 @@ vi.mock("@/components/edit/directory-people-typeahead", () => ({
 }));
 
 const SCOPES: FunctionalRoleScopeOptions = {
-  external_communications: [{ key: "*", label: "All of WCM" }],
-  development: [{ key: "*", label: "All of WCM" }],
+  external_affairs: [
+    { key: "communications", label: "Communications" },
+    { key: "development", label: "Development" },
+  ],
   reporting: [
     { key: "*", label: "All reports" },
     { key: "article-count", label: "Article counts" },
@@ -80,5 +82,28 @@ describe("AssignFunctionalRoleDialog", () => {
       scopes: ["*"],
     });
     await waitFor(() => expect(screen.queryByTestId("functional-roles-assign-dialog")).toBeNull());
+  });
+
+  it("External Affairs: one grant carrying the ticked functions; none ticked cannot submit", async () => {
+    const fetchSpy = stubRoute(200, { ok: true, op: "grant", changed: true, rows: [] });
+    const onAssigned = vi.fn();
+    render(<AssignFunctionalRoleDialog scopeOptions={SCOPES} onAssigned={onAssigned} />);
+    fireEvent.click(screen.getByTestId("functional-roles-assign-trigger"));
+    await screen.findByTestId("functional-roles-assign-dialog");
+    fireEvent.click(screen.getByTestId("mock-pick-grantee"));
+    fireEvent.click(screen.getByTestId("functional-roles-assign-role-external_affairs"));
+    const submit = screen.getByTestId("functional-roles-assign-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("functional-roles-assign-scope-communications"));
+    fireEvent.click(screen.getByTestId("functional-roles-assign-scope-development"));
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(onAssigned).toHaveBeenCalledWith([]));
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]![1]!.body))).toMatchObject({
+      op: "grant",
+      role: "external_affairs",
+      cwid: "fake001",
+      scopes: ["communications", "development"],
+    });
   });
 });

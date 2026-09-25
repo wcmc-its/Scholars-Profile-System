@@ -11,11 +11,17 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { AdministratorsRoster } from "@/components/edit/administrators-roster";
 import { toggleScope } from "@/components/edit/functional-roles-panel";
 import type { AdminRosterEntry } from "@/lib/api/administrators-roster";
-import type { FunctionalRoleRow, FunctionalRoleScopeOptions } from "@/lib/edit/functional-roles";
+import type {
+  FunctionalRoleRow,
+  FunctionalRoleScopeOptions,
+  GateHolder,
+} from "@/lib/edit/functional-roles";
 
 const SCOPES: FunctionalRoleScopeOptions = {
-  external_communications: [{ key: "*", label: "All of WCM" }],
-  development: [{ key: "*", label: "All of WCM" }],
+  external_affairs: [
+    { key: "communications", label: "Communications" },
+    { key: "development", label: "Development" },
+  ],
   reporting: [
     { key: "*", label: "All reports" },
     { key: "article-count", label: "Article counts" },
@@ -48,11 +54,11 @@ const IMPORTED = row({
   grantedByName: "Other Admin",
 });
 const ALLOW = row({
-  role: "development",
+  role: "external_affairs",
   cwid: "fake003",
   name: "Lee Placeholder",
   source: "allowlist",
-  scopes: ["*"],
+  scopes: ["communications", "development"],
   grantedBy: "ALLOWLIST",
   grantedByName: null,
 });
@@ -94,14 +100,17 @@ function stubFetch(reply: (body: Record<string, unknown>) => Record<string, unkn
   return calls;
 }
 
-function renderRoster(rows: FunctionalRoleRow[] | null) {
+function renderRoster(
+  rows: FunctionalRoleRow[] | null,
+  extra: { authzEnabled?: boolean; gateHolders?: GateHolder[] } = {},
+) {
   return render(
     <AdministratorsRoster
       entries={[UNIT_ENTRY]}
       isSuperuser
       actorCwid="adm0001"
       nameResolutionDegraded={false}
-      functionalRoles={rows ? { rows, scopeOptions: SCOPES } : undefined}
+      functionalRoles={rows ? { rows, scopeOptions: SCOPES, ...extra } : undefined}
     />,
   );
 }
@@ -183,8 +192,19 @@ describe("Functional roles rows", () => {
     expect(within(imported).queryByText("Revoke")).toBeNull();
     expect(within(imported).queryByText("Edit scope")).toBeNull();
 
-    const allow = screen.getByTestId("functional-role-development:fake003:allowlist");
-    expect(within(allow).getByText("All of WCM")).toBeTruthy();
+    const allow = screen.getByTestId("functional-role-external_affairs:fake003:allowlist");
+    expect(within(allow).getByText("External Affairs")).toBeTruthy();
+    // The functions render as the row's scope pills.
+    expect(
+      within(
+        screen.getByTestId("functional-role-scopes-external_affairs:fake003:allowlist"),
+      ).getByText("Communications"),
+    ).toBeTruthy();
+    expect(
+      within(
+        screen.getByTestId("functional-role-scopes-external_affairs:fake003:allowlist"),
+      ).getByText("Development"),
+    ).toBeTruthy();
     expect(within(allow).getByText("Break-glass allowlist")).toBeTruthy();
 
     expect(screen.getByTestId("functional-roles-stats").textContent).toContain("3 people");
@@ -198,16 +218,36 @@ describe("Functional roles rows", () => {
     );
   });
 
-  it("an institution-wide-only manual role has no Edit scope (nothing to choose)", () => {
-    stubFetch(() => ({ ok: true }));
-    renderRoster([row({ role: "external_communications", scopes: ["*"] })]);
+  it("a manual External Affairs row offers Edit functions, which posts the chosen functions", async () => {
+    const calls = stubFetch(() => ({
+      ok: true,
+      rows: [row({ role: "external_affairs", scopes: ["communications", "development"] })],
+    }));
+    renderRoster([row({ role: "external_affairs", scopes: ["communications"] })]);
     openRolesTab();
-    expect(
-      screen.queryByTestId("functional-role-edit-scope-external_communications:fake001:manual"),
-    ).toBeNull();
-    expect(
-      screen.getByTestId("functional-role-revoke-external_communications:fake001:manual"),
-    ).toBeTruthy();
+    const edit = screen.getByTestId("functional-role-edit-scope-external_affairs:fake001:manual");
+    expect(edit.textContent).toBe("Edit functions");
+    fireEvent.click(edit);
+    const dialog = await screen.findByTestId("functional-roles-scope-dialog");
+    expect(within(dialog).getByText("Functions")).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId("functional-roles-scope-scope-development"));
+    fireEvent.click(screen.getByTestId("functional-roles-scope-save"));
+    await waitFor(() => expect(screen.queryByTestId("functional-roles-scope-dialog")).toBeNull());
+    expect(calls.find((c) => c.url.includes("functional-roles"))?.body).toEqual({
+      op: "set_scopes",
+      role: "external_affairs",
+      cwid: "fake001",
+      scopes: ["communications", "development"],
+    });
+  });
+
+  it("External Affairs counts as institution-wide in the Scope filter", () => {
+    stubFetch(() => ({ ok: true }));
+    renderRoster([MANUAL, IMPORTED, ALLOW]);
+    openRolesTab();
+    fireEvent.click(screen.getByTestId("functional-roles-filter-scope-all"));
+    expect(screen.getByTestId("functional-role-external_affairs:fake003:allowlist")).toBeTruthy();
+    expect(screen.getByTestId("functional-roles-footer").textContent).toContain("Showing 1 of 3");
   });
 
   it("empty registry → the import prompt", () => {
@@ -226,7 +266,7 @@ describe("Functional roles rows", () => {
     fireEvent.click(screen.getByTestId("functional-roles-filter-src-imported"));
     expect(screen.queryByTestId("functional-role-reporting:fake001:manual")).toBeNull();
     expect(screen.getByTestId("functional-roles-footer").textContent).toContain("Showing 2 of 3");
-    fireEvent.click(screen.getByTestId("functional-roles-filter-role-development"));
+    fireEvent.click(screen.getByTestId("functional-roles-filter-role-external_affairs"));
     expect(screen.getByTestId("functional-roles-footer").textContent).toContain("Showing 1 of 3");
     fireEvent.click(screen.getByTestId("functional-roles-filters-clear"));
     expect(screen.getByTestId("functional-roles-footer").textContent).toContain("Showing 3 of 3");
@@ -310,13 +350,98 @@ describe("Functional roles writes", () => {
     fireEvent.click(screen.getByTestId("functional-roles-assign-trigger"));
     const dialog = await screen.findByTestId("functional-roles-assign-dialog");
     expect(dialog.textContent).toContain("Recorded here for tracking");
-    // Reporting is the default role and offers scopes; switching to
-    // Development hides the picker (institution-wide only).
-    expect(within(dialog).getByTestId("functional-roles-assign-scopes")).toBeTruthy();
-    fireEvent.click(within(dialog).getByTestId("functional-roles-assign-role-development"));
-    expect(within(dialog).queryByTestId("functional-roles-assign-scopes")).toBeNull();
+    // Only two roles: External Affairs (one role, not Comms/Development) and Reporting.
+    expect(within(dialog).queryByTestId("functional-roles-assign-role-development")).toBeNull();
+    // Reporting is the default role and starts at "All reports".
+    expect(
+      (within(dialog).getByTestId("functional-roles-assign-scope-*") as HTMLInputElement).checked,
+    ).toBe(true);
+    // External Affairs shows its functions, none ticked: they are chosen explicitly.
+    fireEvent.click(within(dialog).getByTestId("functional-roles-assign-role-external_affairs"));
+    const picker = within(dialog).getByTestId("functional-roles-assign-scopes");
+    expect(within(picker).getByText("Functions")).toBeTruthy();
+    expect(
+      (
+        within(dialog).getByTestId(
+          "functional-roles-assign-scope-communications",
+        ) as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(
+      (within(dialog).getByTestId("functional-roles-assign-scope-development") as HTMLInputElement)
+        .checked,
+    ).toBe(false);
     expect(
       (screen.getByTestId("functional-roles-assign-submit") as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("with FUNCTIONAL_ROLES_AUTHZ on, the dialog and footer say rows grant access", async () => {
+    stubFetch(() => ({ ok: true }));
+    renderRoster([MANUAL], { authzEnabled: true });
+    openRolesTab();
+    expect(screen.getByTestId("functional-roles-footer").textContent).toContain(
+      "Assignments here grant access, in addition to",
+    );
+    expect(screen.getByTestId("functional-roles-footer").textContent).not.toContain(
+      "Recorded here for tracking",
+    );
+    fireEvent.click(screen.getByTestId("functional-roles-assign-trigger"));
+    const dialog = await screen.findByTestId("functional-roles-assign-dialog");
+    expect(dialog.textContent).toContain("Assignments here grant access");
+  });
+});
+
+describe("Functional roles parity line", () => {
+  const HOLDERS: GateHolder[] = [
+    {
+      role: "reporting",
+      cwid: "fake002",
+      name: "Sam Sample",
+      reportKey: "mentored-publications",
+      scope: "md",
+      via: "report_access",
+    },
+    {
+      role: "external_affairs",
+      cwid: "fake020",
+      name: null,
+      scope: "development",
+      via: "development_allowlist",
+    },
+  ];
+
+  it("no parity line without gate holders", () => {
+    stubFetch(() => ({ ok: true }));
+    renderRoster([MANUAL]);
+    openRolesTab();
+    expect(screen.queryByTestId("functional-roles-parity")).toBeNull();
+  });
+
+  it("lists holders with no covering row, and clears after an import covers them", async () => {
+    const covering = row({
+      role: "external_affairs",
+      cwid: "fake020",
+      source: "allowlist",
+      scopes: ["development"],
+    });
+    stubFetch(() => ({ ok: true, added: 1, updated: 0, removed: 0, rows: [IMPORTED, covering] }));
+    renderRoster([IMPORTED], { gateHolders: HOLDERS });
+    openRolesTab();
+    const parity = screen.getByTestId("functional-roles-parity");
+    expect(parity.textContent).toContain("1 current grant has no matching row here");
+    expect(screen.getByTestId("functional-roles-parity-gap-fake020").textContent).toContain(
+      "External Affairs · Development · via Development allowlist",
+    );
+    expect(screen.queryByTestId("functional-roles-parity-gap-fake002")).toBeNull();
+    // Web Directory group members are called out as unchecked.
+    expect(parity.textContent).toContain("Web Directory group members can’t be listed");
+
+    fireEvent.click(screen.getByTestId("functional-roles-import"));
+    await waitFor(() =>
+      expect(screen.getByTestId("functional-roles-parity").textContent).toContain(
+        "all 2 current grants from report access and the allowlists have a matching row",
+      ),
+    );
   });
 });
