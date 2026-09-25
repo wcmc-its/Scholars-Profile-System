@@ -17,6 +17,7 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { splitName } from "@/lib/center-collaboration/recommendations-core";
 import { db } from "@/lib/db";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
@@ -59,7 +60,9 @@ export async function GET(
     where: { centerCode: center.code },
     orderBy: [{ collaborationsWithCenter: "desc" }, { cwid: "asc" }],
   });
-  if (candidates.length === 0) return editOk({ generatedAt: null, rows: [] });
+  // `exportCap` lets the client card hide the whole-report CSV above the
+  // standing bulk-export cap without importing the db-backed cap module.
+  if (candidates.length === 0) return editOk({ generatedAt: null, rows: [], exportCap: SCHOLAR_EXPORT_CAP });
 
   const scholars = await db.read.scholar.findMany({
     where: { cwid: { in: candidates.map((c) => c.cwid) } },
@@ -87,5 +90,5 @@ export async function GET(
   // stamp — cheap to derive rather than a second query.
   const generatedAt = new Date(Math.max(...candidates.map((c) => c.lastRefreshedAt.getTime()))).toISOString();
 
-  return editOk({ generatedAt, rows });
+  return editOk({ generatedAt, rows, exportCap: SCHOLAR_EXPORT_CAP });
 }

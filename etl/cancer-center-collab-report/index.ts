@@ -26,7 +26,12 @@
  *
  * Usage: npm run etl:cancer-center-collab-report
  */
-import { isCancerRelated, loadCancerTaxonomy } from "@/lib/cancer-taxonomy";
+import {
+  assertCancerTaxonomyPopulated,
+  isCancerRelated,
+  loadCancerTaxonomy,
+  type TaxonomyLookup,
+} from "@/lib/cancer-taxonomy";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import {
   computeCollabCandidateMetrics,
@@ -37,7 +42,7 @@ import {
 import { db, disconnect } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
 
-async function computeForCenter(centerCode: string, cutoffYear: number): Promise<number> {
+async function computeForCenter(centerCode: string, cutoffYear: number, lookup: TaxonomyLookup): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
 
   // Only full-time faculty can be Cancer Center members — the full-time-
@@ -90,7 +95,6 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
     },
     select: { pmid: true, cwid: true, publication: { select: { meshTerms: true } } },
   });
-  const lookup = await loadCancerTaxonomy(db.write.cancerTaxonomyDescriptor, db.write.meshDescriptor);
   const rows: CollabAuthorRow[] = authorRows
     .filter((r): r is typeof r & { cwid: string } => r.cwid !== null)
     .map((r) => {
@@ -122,9 +126,14 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
 
 async function main(): Promise<number> {
   // Data-driven, like the Programs/NCI-2a tabs — no hardcoded center check.
+  // Load and check the taxonomy BEFORE touching any center: an empty taxonomy
+  // would score every paper as not cancer-relevant, and the truncate-and-reload
+  // below would then wipe good rows with that degraded read.
+  const lookup = await loadCancerTaxonomy(db.write.cancerTaxonomyDescriptor, db.write.meshDescriptor);
+  assertCancerTaxonomyPopulated(lookup);
   const centers = await db.write.center.findMany({ where: { programs: { some: {} } }, select: { code: true } });
   let total = 0;
-  for (const c of centers) total += await computeForCenter(c.code, DEFAULT_CUTOFF_YEAR);
+  for (const c of centers) total += await computeForCenter(c.code, DEFAULT_CUTOFF_YEAR, lookup);
   console.log(JSON.stringify({ event: "cancer_center_collab_report", centers: centers.length, rows: total, ts: new Date().toISOString() }));
   return total;
 }

@@ -33,14 +33,14 @@ const TAXONOMY_SUMMARY = { totalRelevant: 878, ruleCount: 165, meshRelease: "MeS
 
 /** Branches by URL — the card fetches BOTH the report data and (lazily, once
  *  the modal opens) the taxonomy detail. */
-function mockFetch() {
+function mockFetch({ exportCap = 50, taxonomy = { topics: TAXONOMY_TOPICS, ...TAXONOMY_SUMMARY } } = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
       if (String(url).includes("cancer-center-mesh-taxonomy")) {
-        return { ok: true, json: async () => ({ ok: true, topics: TAXONOMY_TOPICS, ...TAXONOMY_SUMMARY }) };
+        return { ok: true, json: async () => ({ ok: true, ...taxonomy }) };
       }
-      return { ok: true, json: async () => ({ generatedAt: "2026-08-10T00:00:00Z", rows: ROWS }) };
+      return { ok: true, json: async () => ({ generatedAt: "2026-08-10T00:00:00Z", rows: ROWS, exportCap }) };
     }),
   );
 }
@@ -163,5 +163,47 @@ describe("CancerCenterCollabReportCard", () => {
     expect(screen.getByText(/12 descriptors, including Breast Neoplasms, Male/)).toBeTruthy();
     expect(screen.getByText("Future bucket")).toBeTruthy(); // uncurated slug: space-joined fallback, not "Future and bucket"
     expect(screen.getByText("Hide topic buckets")).toBeTruthy();
+  });
+
+  it("hides the whole-report CSV above the export cap (server refuses there), keeping per-person CSVs", async () => {
+    mockFetch({ exportCap: ROWS.length - 1 });
+    const { container } = render(
+      <CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />,
+    );
+    const card = within(container);
+    await waitFor(() => expect(card.getByText(/REMOVE/)).toBeTruthy());
+
+    expect(card.queryByLabelText("Download full report (CSV)")).toBeNull();
+    expect(card.getByText(`Full-report CSV isn't offered above ${ROWS.length - 1} people; use each person's CSV link.`)).toBeTruthy();
+    const removeSection = card.getByText(/REMOVE/).closest("section")!;
+    expect(within(removeSection).getByLabelText(/Download R Removeperson's papers/)).toBeTruthy();
+  });
+
+  it("keeps the whole-report CSV in the header when the report fails to load", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    const { container } = render(
+      <CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />,
+    );
+    const card = within(container);
+    await waitFor(() => expect(card.getByText(/Failed to load/)).toBeTruthy());
+    expect(card.getByLabelText("Download full report (CSV)")).toBeTruthy();
+  });
+
+  it("the mesh-logic modal says the taxonomy hasn't been generated when it is empty, not '0 descriptors'", async () => {
+    mockFetch({ taxonomy: { topics: [], totalRelevant: 0, ruleCount: 165, meshRelease: "MeSH 2026" } });
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);
+    await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
+
+    fireEvent.click(screen.getByText("How cancer-relevance is determined"));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(
+        within(dialog).getByText(
+          "The cancer taxonomy hasn't been generated in this environment yet, so no publications are classified as cancer-relevant.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(within(dialog).queryByText(/0 cancer-relevant descriptors/)).toBeNull();
+    expect(within(dialog).queryByText(/0 disease-site buckets/)).toBeNull();
   });
 });
