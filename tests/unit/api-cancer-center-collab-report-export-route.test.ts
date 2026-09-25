@@ -6,8 +6,8 @@
  * justification, synopsis) and the taxonomy "why": matched or not, which
  * term(s)/topic(s). `matchedTopics`/`matchedUis`/`loadCancerTaxonomy` are
  * mocked here — their own correctness is covered by `cancer-taxonomy.test.ts`;
- * this test is about the route's CSV shape, filename, and scoping (`?cwid=`
- * vs. whole report).
+ * this test is about the route's CSV shape, filename, and scoping to one
+ * `?cwid=`. The whole-report mode (no `cwid`) is retired (plan D1): 400.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -65,7 +65,6 @@ vi.mock("@/lib/cancer-taxonomy", () => ({
 }));
 
 import { GET } from "@/app/api/edit/center/[code]/collab-report/export/route";
-import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 
 const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
@@ -145,10 +144,9 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
   });
 
   it("200s a CSV with one row per paper, full citation detail + the match reasoning", async () => {
-    const res = await GET(get("http://localhost/x"), params());
+    const res = await GET(get("http://localhost/x?cwid=c1"), params());
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("text/csv");
-    expect(res.headers.get("Content-Disposition")).toContain('filename="meyer_cancer_center-cancer-relevance-full.csv"');
     const csv = await res.text();
     const lines = csv.trim().split("\r\n");
     expect(lines[0]).toBe(
@@ -170,32 +168,22 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
     expect(res.headers.get("Content-Disposition")).toContain('filename="meyer_cancer_center-c1-cancer-relevance.csv"');
   });
 
-  it("returns just the header row when the center has no candidates", async () => {
+  it("returns just the header row when the cwid isn't one of the center's candidates", async () => {
     mockCandidateFindMany.mockResolvedValue([]);
-    const res = await GET(get("http://localhost/x"), params());
+    const res = await GET(get("http://localhost/x?cwid=zz9"), params());
     expect(res.status).toBe(200);
     const csv = await res.text();
     expect(csv.trim().split("\r\n")).toHaveLength(1);
   });
 
-  it("refuses (422) a whole-report export above SCHOLAR_EXPORT_CAP — never truncates, never reads papers", async () => {
-    mockCandidateFindMany.mockResolvedValue(
-      Array.from({ length: SCHOLAR_EXPORT_CAP + 1 }, (_, i) => ({ cwid: `c${i}` })),
-    );
+  it("400s without ?cwid= — the whole-report CSV is retired — never reading candidates or papers", async () => {
     const res = await GET(get("http://localhost/x"), params());
-    expect(res.status).toBe(422);
-    const body = await res.json();
-    // Same `{ ok, error }` shape as every other error path (editError).
-    expect(body).toEqual({ ok: false, error: "export_cap_exceeded" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "missing_cwid", field: "cwid" });
+    expect(mockCandidateFindMany).not.toHaveBeenCalled();
     expect(mockAuthorFindMany).not.toHaveBeenCalled();
-  });
-
-  it("still serves a whole-report export at exactly the cap", async () => {
-    mockCandidateFindMany.mockResolvedValue(
-      Array.from({ length: SCHOLAR_EXPORT_CAP }, (_, i) => ({ cwid: `c${i}` })),
-    );
-    const res = await GET(get("http://localhost/x"), params());
-    expect(res.status).toBe(200);
+    // Blank is the same as missing.
+    expect((await GET(get("http://localhost/x?cwid=%20"), params())).status).toBe(400);
   });
 
   it("keeps the per-person (?cwid=) export working regardless of the cohort cap", async () => {
