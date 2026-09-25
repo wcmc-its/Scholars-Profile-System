@@ -24,10 +24,12 @@ import {
   articleCountQueryString,
   describeCriteria,
   parseArticleCountParams,
+  POSITION_LABEL,
   scopeSql,
   type ArticleCountParams,
 } from "@/lib/edit/article-count-report";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
+import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { formatRoleCategory } from "@/lib/role-display";
 
@@ -80,7 +82,11 @@ export type HighImpactParams = ArticleCountParams & {
 };
 
 /** A bare URL (nothing but `view`) gets the awards defaults; any filter in
- *  the URL means the form was submitted, and the URL is taken as-is. */
+ *  the URL means the form was submitted, and the URL is taken as-is. The year
+ *  basis is report 8's (`basis=fy`: fiscal year July–June by the PubMed add
+ *  date, `scopeSql`); absent = calendar year, which is what every link made
+ *  before the redesign meant (they never carried `basis`). `jif` is ignored:
+ *  an impact-factor floor belongs to report 8. */
 export function parseHighImpactParams(sp: URLSearchParams): HighImpactParams {
   const hasFilters = [...sp.keys()].some((k) => k !== "view");
   const year = String(new Date().getFullYear());
@@ -97,7 +103,6 @@ export function parseHighImpactParams(sp: URLSearchParams): HighImpactParams {
   const journals = src.getAll("journal").filter((k) => known.has(k));
   return {
     ...parseArticleCountParams(src),
-    basis: "cy",
     jif: 0,
     journals: journals.length > 0 ? journals : [...known],
     view: sp.get("view") === "publications" ? "publications" : "summary",
@@ -107,19 +112,27 @@ export function parseHighImpactParams(sp: URLSearchParams): HighImpactParams {
 export function highImpactQueryString(p: HighImpactParams, view: HighImpactView = p.view): string {
   const q = new URLSearchParams(articleCountQueryString(p));
   q.delete("jif");
-  q.delete("basis");
+  if (p.basis === "cy") q.delete("basis");
   for (const j of p.journals) q.append("journal", j);
   q.set("view", view);
   return q.toString();
 }
 
-/** Distinct articles in scope — decides whether the list is loaded. */
-export async function loadHighImpactTotal(p: HighImpactParams): Promise<number> {
+export type HighImpactTotals = {
+  /** Distinct articles in scope — decides whether the list is loaded. */
+  articles: number;
+  /** Distinct matching scholars — the headline number, and whether the
+   *  download's People sheet is withheld (`SCHOLAR_EXPORT_CAP`). Known even
+   *  when the list is over its cap. */
+  scholars: number;
+};
+
+export async function loadHighImpactTotals(p: HighImpactParams): Promise<HighImpactTotals> {
   const { fromWhere } = scopeSql(p, journalSql(p.journals));
-  const [row] = await db.read.$queryRaw<{ n: bigint | number }[]>`
-    SELECT COUNT(DISTINCT pa.pmid) AS n
+  const [row] = await db.read.$queryRaw<{ n: bigint | number; s: bigint | number }[]>`
+    SELECT COUNT(DISTINCT pa.pmid) AS n, COUNT(DISTINCT pa.cwid) AS s
     ${fromWhere}`;
-  return Number(row?.n ?? 0);
+  return { articles: Number(row?.n ?? 0), scholars: Number(row?.s ?? 0) };
 }
 
 /** The list is built only up to this many articles (report 8's cap). */
@@ -136,13 +149,51 @@ export type HighImpactRow = {
   /** NIH iCite citation count (`publication.cited_by_count`); null = none on file. */
   citations: number | null;
   doi: string | null;
+  /** `2024;83(4):500-510.` — the citation after the journal name. */
+  cite: string;
+  /** The identifier as the page prints it (`citationIdentifier`): `PMID`
+   *  linked to PubMed, an external source unlinked. */
+  id: { label: string; value: string; href: string | null };
+  /** The byline, shortened for the page (`authorSegments`); `wcm` marks a
+   *  matching WCM author, `gap` an elision. Empty when no author string is on file. */
+  byline: BylineSegment[];
   /** Matching WCM authors: `Name (first author)` / `(last author)` / `(middle author)`. */
   authors: string[];
   /** The same authors, structured, for the people summary. */
   people: { cwid: string; name: string; department: string | null; personType: string; position: AuthorRole }[];
 };
 
-type AuthorRole = "first" | "last" | "middle";
+export type AuthorRole = "first" | "last" | "middle";
+
+/** `cwid` is the matching scholar's, on a `wcm` segment whose rank is known. */
+export type BylineSegment = { text: string; wcm?: boolean; cwid?: string; gap?: boolean };
+
+/** The byline the page prints: every author up to `max`; past that the first
+ *  three, each matching WCM author (whatever their rank) and the last author,
+ *  with a `gap` wherever authors were skipped — a consortium paper's 400
+ *  names never bury the WCM author the report is about. `wcm` holds 0-based
+ *  indexes into `tokens` — as a map, each to the matching scholar's CWID,
+ *  which the segment carries. */
+export function authorSegments(
+  tokens: readonly string[],
+  wcm: ReadonlySet<number> | ReadonlyMap<number, string>,
+  max = 10,
+): BylineSegment[] {
+  const keep =
+    tokens.length <= max
+      ? tokens.map((_, i) => i)
+      : [...new Set([0, 1, 2, ...[...wcm.keys()].filter((i) => i >= 0 && i < tokens.length), tokens.length - 1])].sort(
+          (a, b) => a - b,
+        );
+  const out: BylineSegment[] = [];
+  keep.forEach((i, k) => {
+    if (k > 0 && i !== keep[k - 1] + 1) out.push({ text: "…", gap: true });
+    if (!wcm.has(i)) out.push({ text: tokens[i] });
+    else if (wcm instanceof Map) out.push({ text: tokens[i], wcm: true, cwid: wcm.get(i) });
+    else out.push({ text: tokens[i], wcm: true });
+  });
+  return out;
+}
 
 type RawRow = {
   pmid: string;
@@ -154,6 +205,12 @@ type RawRow = {
   date_added_to_entrez: Date | null;
   cited_by_count: number | null;
   doi: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  full_authors_string: string | null;
+  authors_string: string | null;
+  position: number;
   preferred_name: string;
   cwid: string;
   primary_department: string | null;
@@ -162,19 +219,35 @@ type RawRow = {
   is_last: number | boolean;
 };
 
-/** One row per article, highest impact factor first. */
+/** One row per article, highest impact factor first (the download's order;
+ *  the page re-sorts). */
 export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpactRow[]> {
   const { fromWhere } = scopeSql(p, journalSql(p.journals));
   const raw = await db.read.$queryRaw<RawRow[]>`
     SELECT p.pmid, p.title, p.journal, p.year, p.publication_type, j.impact_score_1 AS jif,
-           p.date_added_to_entrez, p.cited_by_count, p.doi, s.preferred_name, s.cwid,
+           p.date_added_to_entrez, p.cited_by_count, p.doi, p.volume, p.issue, p.pages,
+           p.full_authors_string, p.authors_string, pa.position, s.preferred_name, s.cwid,
            s.primary_department, s.role_category, pa.is_first, pa.is_last
     ${fromWhere}
      ORDER BY j.impact_score_1 DESC, p.date_added_to_entrez DESC, p.pmid, pa.position`;
   const byPmid = new Map<string, HighImpactRow>();
+  // The matching authors' byline ranks (1-based `position`; 0 = rank unknown,
+  // never bolded) → their CWIDs, gathered before each byline is shortened.
+  // `ranked` is false on the truncated fallback byline, whose ranks no longer
+  // line up with `position`: nobody is bolded there.
+  const ranks = new Map<string, { tokens: string[]; ranked: boolean; wcm: Map<number, string> }>();
   for (const r of raw) {
     let row = byPmid.get(r.pmid);
     if (!row) {
+      // `full_authors_string` is comma-separated `Lastname Initials` tokens;
+      // `authors_string` is the truncated fallback with `((...))` WCM markup.
+      const tokens = (r.full_authors_string ?? r.authors_string ?? "")
+        .replace(/\(\(|\)\)/g, "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      ranks.set(r.pmid, { tokens, ranked: r.full_authors_string !== null, wcm: new Map() });
+      const vip = formatVolIssuePages(r.volume, r.issue, r.pages);
       row = {
         pmid: r.pmid,
         title: r.title,
@@ -185,11 +258,16 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
         dateAdded: r.date_added_to_entrez ? r.date_added_to_entrez.toISOString().slice(0, 10) : null,
         citations: r.cited_by_count === null ? null : Number(r.cited_by_count),
         doi: r.doi,
+        cite: r.year === null ? "" : vip ? `${r.year};${vip}.` : `${r.year}.`,
+        id: citationIdentifier(r.pmid),
+        byline: [],
         authors: [],
         people: [],
       };
       byPmid.set(r.pmid, row);
     }
+    const rank = ranks.get(r.pmid)!;
+    if (rank.ranked && r.position > 0) rank.wcm.set(Number(r.position) - 1, r.cwid);
     const position: AuthorRole = r.is_first ? "first" : r.is_last ? "last" : "middle";
     row.authors.push(`${r.preferred_name} (${position} author)`);
     row.people.push({
@@ -199,6 +277,10 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
       personType: formatRoleCategory(r.role_category) ?? "",
       position,
     });
+  }
+  for (const row of byPmid.values()) {
+    const { tokens, wcm } = ranks.get(row.pmid)!;
+    row.byline = authorSegments(tokens, wcm);
   }
   return [...byPmid.values()];
 }
@@ -215,6 +297,9 @@ export type PersonSummaryRow = {
   citations: number;
   /** Distinct journals, most articles first. */
   journals: string[];
+  /** Their articles in the list, with their position on each (first wins
+   *  over last when somehow listed twice) — the page's expanded row. */
+  pubs: { pmid: string; position: AuthorRole }[];
 };
 
 /** One row per matching scholar, most articles first. An article where the
@@ -237,13 +322,17 @@ export function summarizePeople(list: HighImpactRow[]): PersonSummaryRow[] {
           lastAuthor: 0,
           citations: 0,
           journals: [],
+          pubs: [],
           journalCounts: new Map(),
         };
         byCwid.set(cwid, row);
       }
       row.articles++;
-      if (roles.some((x) => x.position === "first")) row.firstAuthor++;
-      if (roles.some((x) => x.position === "last")) row.lastAuthor++;
+      const first = roles.some((x) => x.position === "first");
+      const last = roles.some((x) => x.position === "last");
+      if (first) row.firstAuthor++;
+      if (last) row.lastAuthor++;
+      row.pubs.push({ pmid: a.pmid, position: first ? "first" : last ? "last" : "middle" });
       row.citations += a.citations ?? 0;
       if (a.journal) row.journalCounts.set(a.journal, (row.journalCounts.get(a.journal) ?? 0) + 1);
     }
@@ -261,9 +350,7 @@ export function describeHighImpactCriteria(
   generatedAt: Date,
   labels?: ReadonlyMap<string, string>,
 ): [string, string][] {
-  const rows = describeCriteria(p, generatedAt, labels).filter(
-    ([k]) => k !== "Year basis" && k !== "Minimum Journal Impact Factor",
-  );
+  const rows = describeCriteria(p, generatedAt, labels).filter(([k]) => k !== "Minimum Journal Impact Factor");
   rows[0] = ["Report", "9. Top clinical and high-impact journal publications"];
   rows.splice(2, 0, [
     "Journals",
@@ -293,7 +380,7 @@ export async function buildHighImpactWorkbook(
     summary.addRow([overCap]);
   } else if (people.length > SCHOLAR_EXPORT_CAP) {
     summary.addRow([
-      `${people.length.toLocaleString()} people match. The people list is only included for ${SCHOLAR_EXPORT_CAP} or fewer; narrow the filters (e.g. by department) to include it. The page's Summary tab lists everyone.`,
+      `${people.length.toLocaleString()} people match. The people list is only included for ${SCHOLAR_EXPORT_CAP} or fewer; narrow the filters (e.g. by department) to include it. The page's Scholars tab lists everyone.`,
     ]);
     summary.getColumn(1).width = 100;
   } else {
@@ -335,7 +422,7 @@ export async function buildHighImpactWorkbook(
       "Journal",
       "Journal impact factor",
       "WCM first/last author(s)",
-      "Date added to Entrez",
+      "Date added to PubMed",
       "NIH citation count",
       "Article type",
       "Year",
@@ -373,4 +460,113 @@ export async function buildHighImpactWorkbook(
   criteria.getColumn(2).alignment = { wrapText: true, vertical: "top" };
 
   return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+/** The bare-URL (awards) defaults, the "Reset to defaults" target. */
+export function isHighImpactDefault(p: HighImpactParams): boolean {
+  const d = parseHighImpactParams(new URLSearchParams());
+  const same = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((x) => b.includes(x));
+  return (
+    same(p.types, d.types) &&
+    same(p.units, d.units) &&
+    same(p.atypes, d.atypes) &&
+    same(p.journals, d.journals) &&
+    p.pos === d.pos &&
+    p.basis === d.basis &&
+    p.from === d.from &&
+    p.to === d.to
+  );
+}
+
+/** A year as the rail and chips print it: `2026`, or `FY2026` on the fiscal basis. */
+export function yearLabel(p: Pick<HighImpactParams, "basis">, y: number): string {
+  return p.basis === "fy" ? `FY${y}` : String(y);
+}
+
+export function yearRangeLabel(p: Pick<HighImpactParams, "basis" | "from" | "to">): string {
+  return p.from === p.to ? yearLabel(p, p.from) : `${yearLabel(p, p.from)}–${yearLabel(p, p.to)}`;
+}
+
+export type HighImpactChip = {
+  group: string;
+  value: string;
+  /** The query string without this filter; null = not removable. */
+  removeQuery: string | null;
+};
+
+/**
+ * The active filters as chips (the mockup's rules): years and — when every
+ * family is on — journals always show, unremovable; each other facet shows
+ * one chip per value up to three, else one "N selected" chip that clears it;
+ * author position shows unless it is "Any". Removing a chip never yields a
+ * bare URL (`from` / `to` / `pos` always ride along), so the awards defaults
+ * never come back by surprise.
+ */
+export function highImpactChips(
+  p: HighImpactParams,
+  unitLabel: ReadonlyMap<string, string> = new Map(),
+): HighImpactChip[] {
+  const qs = (next: Partial<HighImpactParams>) => highImpactQueryString({ ...p, ...next });
+  const chips: HighImpactChip[] = [{ group: "Years", value: yearRangeLabel(p), removeQuery: null }];
+  const facet = (
+    group: string,
+    values: readonly string[],
+    label: (v: string) => string,
+    without: (keep: (v: string) => boolean) => Partial<HighImpactParams>,
+  ) => {
+    if (values.length === 0) return;
+    if (values.length > 3) {
+      chips.push({ group, value: `${values.length} selected`, removeQuery: qs(without((v) => !values.includes(v))) });
+      return;
+    }
+    for (const v of values) chips.push({ group, value: label(v), removeQuery: qs(without((x) => x !== v)) });
+  };
+  if (p.journals.length === JOURNAL_FAMILIES.length) {
+    chips.push({ group: "Journals", value: `All ${JOURNAL_FAMILIES.length} top-tier families`, removeQuery: null });
+  } else {
+    // An empty list means every family, so clearing is dropping them all.
+    facet(
+      "Journals",
+      p.journals,
+      (k) => JOURNAL_FAMILIES.find((f) => f.key === k)?.label ?? k,
+      (keep) => ({ journals: p.journals.filter(keep) }),
+    );
+  }
+  facet("Person type", p.types, (t) => formatRoleCategory(t) ?? t, (keep) => ({ types: p.types.filter(keep) }));
+  const unitGroups: [string, (u: string) => boolean][] = [
+    ["Department / division", (u) => u.startsWith("dept:") || u.startsWith("div:")],
+    ["Centers", (u) => u.startsWith("center:")],
+    ["Institution", (u) => u.startsWith("inst:")],
+  ];
+  for (const [group, inGroup] of unitGroups) {
+    const mine = p.units.filter(inGroup);
+    facet(
+      group,
+      mine,
+      (u) => unitLabel.get(u) ?? u,
+      (keep) => ({ units: p.units.filter((u) => !inGroup(u) || keep(u)) }),
+    );
+  }
+  facet("Article type", p.atypes, (a) => a, (keep) => ({ atypes: p.atypes.filter(keep) }));
+  if (p.pos !== "any") chips.push({ group: "Author", value: POSITION_LABEL[p.pos], removeQuery: qs({ pos: "any" }) });
+  return chips;
+}
+
+/** The note under the Download button: which sheets the workbook carries,
+ *  and why one is left out. `withheld` → the page shows it as a warning. */
+export function highImpactDownloadNote(totals: HighImpactTotals): { text: string; withheld: boolean } {
+  if (totals.articles > HIGH_IMPACT_LIST_CAP) {
+    return {
+      text: `Includes the Criteria sheet only: ${totals.articles.toLocaleString()} articles is more than ${HIGH_IMPACT_LIST_CAP.toLocaleString()}. Narrow the filters to include the People and Publications sheets.`,
+      withheld: true,
+    };
+  }
+  if (totals.scholars > SCHOLAR_EXPORT_CAP) {
+    return {
+      text: `Includes the Criteria and Publications sheets. The People sheet is left out above ${SCHOLAR_EXPORT_CAP} people (${totals.scholars.toLocaleString()} match); narrow the filters to include it.`,
+      withheld: true,
+    };
+  }
+  return { text: "Includes the Criteria, People and Publications sheets.", withheld: false };
 }
