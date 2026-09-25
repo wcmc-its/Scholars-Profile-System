@@ -17,11 +17,17 @@ const {
   mockGetCenterPrograms,
   mockGetCenterPublicationsList,
   mockGetCenterGrantsList,
+  mockGetCenterPublicationCount,
+  mockGetCenterGrantCount,
+  mockGetUnitAreaPreviews,
   mockGetCenterTopResearchAreas,
   mockCenterHasPrograms,
   mockGetSpotlightCardsForCenter,
   mockProgramPagesEnabled,
 } = vi.hoisted(() => ({
+  mockGetCenterPublicationCount: vi.fn(),
+  mockGetCenterGrantCount: vi.fn(),
+  mockGetUnitAreaPreviews: vi.fn(),
   mockProgramPagesEnabled: vi.fn(),
   mockGetCenter: vi.fn(),
   mockGetCenterMembers: vi.fn(),
@@ -39,9 +45,17 @@ vi.mock("@/lib/api/centers", () => ({
   getCenterPrograms: mockGetCenterPrograms,
   getCenterPublicationsList: mockGetCenterPublicationsList,
   getCenterGrantsList: mockGetCenterGrantsList,
+  getCenterPublicationCount: mockGetCenterPublicationCount,
+  getCenterGrantCount: mockGetCenterGrantCount,
   getCenterTopResearchAreas: mockGetCenterTopResearchAreas,
   centerHasPrograms: mockCenterHasPrograms,
 }));
+vi.mock("@/lib/api/unit-area-previews", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/unit-area-previews")>(
+    "@/lib/api/unit-area-previews",
+  );
+  return { ...actual, getUnitAreaPreviews: mockGetUnitAreaPreviews };
+});
 vi.mock("@/lib/api/spotlight", () => ({
   getSpotlightCardsForCenter: mockGetSpotlightCardsForCenter,
 }));
@@ -111,6 +125,9 @@ beforeEach(() => {
   mockGetSpotlightCardsForCenter.mockResolvedValue(null);
   mockGetCenterPublicationsList.mockResolvedValue(FACULTY_PAGE);
   mockGetCenterGrantsList.mockResolvedValue(FACULTY_PAGE);
+  mockGetCenterPublicationCount.mockResolvedValue(0);
+  mockGetCenterGrantCount.mockResolvedValue(0);
+  mockGetUnitAreaPreviews.mockResolvedValue({});
   mockGetCenterMembers.mockResolvedValue(FACULTY_PAGE);
   mockGetCenterPrograms.mockResolvedValue([]);
   mockCenterHasPrograms.mockResolvedValue(false);
@@ -214,7 +231,10 @@ describe("CenterPage — Unit Page v2 hero", () => {
     const section = container.querySelector("section")!;
     const chip = screen.getByRole("link", { name: /Cancer Biology/ });
     expect(section.contains(chip)).toBe(true);
-    expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center/programs/CB");
+    // Unit Page v2 — the chip filters the grouped roster in place; its href
+    // (other tabs / new-tab clicks) lands on the roster, which seeds the
+    // Program facet from `?program=` on its client mount.
+    expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center?program=CB#people");
     expect(chip.textContent).toContain("2");
     expect(screen.getByRole("link", { name: "2 programs" }).getAttribute("href")).toBe(
       "#subunits",
@@ -222,6 +242,24 @@ describe("CenterPage — Unit Page v2 hero", () => {
     expect(screen.getByRole("link", { name: "42 scholars" }).getAttribute("href")).toBe(
       "/centers/meyer-cancer-center#people",
     );
+  });
+
+  it("program chips fall back to the program page when the roster has no such section", async () => {
+    mockProgramPagesEnabled.mockReturnValue(true);
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    mockGetCenterPrograms.mockResolvedValue([{ code: "CB", label: "Cancer Biology" }]);
+    mockGetCenterMembers.mockResolvedValue({
+      mode: "flat",
+      hits: [],
+      total: 0,
+      page: 1,
+      pageSize: 20,
+      roleCategoryCounts: {},
+    });
+    render(await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }));
+    expect(
+      screen.getByRole("link", { name: /Cancer Biology/ }).getAttribute("href"),
+    ).toBe("/centers/meyer-cancer-center/programs/CB");
   });
 
   it("keeps the 'Membership data pending' fallback when both counts are 0", async () => {
@@ -250,16 +288,64 @@ describe("CenterPage — Grants tab", () => {
     });
   });
 
-  it("scholars tab loads only the page-0 grants count", async () => {
+  it("scholars tab loads only the count loaders — no page of publication or grant cards", async () => {
     mockGetCenter.mockResolvedValue(baseDetail([]));
+    mockGetCenterPublicationCount.mockResolvedValue(7);
+    mockGetCenterGrantCount.mockResolvedValue(3);
     const { container } = render(
       await CenterPage({ centerSlug: "meyer-cancer-center", page: 1 }),
     );
     expect(container.querySelector('[data-testid="mock-grants-list"]')).toBeNull();
-    expect(mockGetCenterGrantsList).toHaveBeenCalledTimes(1);
-    expect(mockGetCenterGrantsList).toHaveBeenCalledWith("meyer_cancer_center", {
-      page: 0,
-      sort: "most_recent",
+    expect(container.querySelector('[data-testid="mock-pubs-list"]')).toBeNull();
+    expect(mockGetCenterGrantsList).not.toHaveBeenCalled();
+    expect(mockGetCenterPublicationsList).not.toHaveBeenCalled();
+    expect(mockGetCenterPublicationCount).toHaveBeenCalledWith("meyer_cancer_center");
+    expect(mockGetCenterGrantCount).toHaveBeenCalledWith("meyer_cancer_center");
+    // The hero stat reads the count loader.
+    expect(container.textContent).toContain("7");
+  });
+
+  it("tab=publications loads the requested page; the stat still reads the unfiltered count", async () => {
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    mockGetCenterPublicationCount.mockResolvedValue(9);
+    render(
+      await CenterPage({
+        centerSlug: "meyer-cancer-center",
+        page: 2,
+        tab: "publications",
+        sort: "most_cited",
+        area: { id: "topic_a", label: "Topic A" },
+      }),
+    );
+    expect(mockGetCenterPublicationsList).toHaveBeenCalledTimes(1);
+    expect(mockGetCenterPublicationsList).toHaveBeenCalledWith("meyer_cancer_center", {
+      page: 1,
+      sort: "most_cited",
+      area: "topic_a",
     });
+    expect(mockGetCenterPublicationCount).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CenterPage — research-area previews", () => {
+  it("starts the previews as soon as the area rollup resolves, not after every other loader", async () => {
+    mockGetCenter.mockResolvedValue(baseDetail([]));
+    mockGetCenterTopResearchAreas.mockResolvedValue([
+      { topicId: "topic_a", topicLabel: "Topic A", topicSlug: "topic_a", pubCount: 5 },
+    ]);
+    // A slow sibling loader: the previews must be requested before it settles.
+    let releaseSpotlight: (v: null) => void = () => {};
+    mockGetSpotlightCardsForCenter.mockReturnValue(
+      new Promise<null>((resolve) => {
+        releaseSpotlight = resolve;
+      }),
+    );
+    const pagePromise = CenterPage({ centerSlug: "meyer-cancer-center", page: 1 });
+    await vi.waitFor(() => expect(mockGetUnitAreaPreviews).toHaveBeenCalled());
+    expect(mockGetUnitAreaPreviews).toHaveBeenCalledWith("center", "meyer_cancer_center", [
+      "topic_a",
+    ]);
+    releaseSpotlight(null);
+    await pagePromise;
   });
 });

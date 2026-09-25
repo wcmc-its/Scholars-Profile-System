@@ -24,6 +24,12 @@ import {
   PaginationEllipsis,
 } from "@/components/ui/pagination";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
+import {
+  applySubunitSelect,
+  broadcastSubunitSelection,
+  onSubunitSelect,
+  urlWithQuery,
+} from "@/lib/unit-subunit-filter";
 
 export function DepartmentFacultyClient({
   faculty,
@@ -52,8 +58,9 @@ export function DepartmentFacultyClient({
   /** Unit Page v2 — the department's divisions (value = division code, count =
    *  the division's static scholarCount). Only offered when the filter route is
    *  live (`methodFacet` defined ⇒ the org-unit facet flag is on); a division
-   *  roster never passes it. */
-  divisionFacet?: FacetOption[];
+   *  roster never passes it. `href` = the division's own page, linked under the
+   *  facet while exactly that one division is selected. */
+  divisionFacet?: Array<FacetOption & { href?: string }>;
   /** #974 Phase 2 — unit identity for the client-fetch filter route. */
   unitKind?: "department" | "division";
   unitCode?: string;
@@ -169,6 +176,34 @@ export function DepartmentFacultyClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Unit Page v2 — the hero's division chips (`UnitSubunitChipRow`) drive the
+  // Division facet through window events: apply a chip click here (only for a
+  // known division code; anything else stays unhandled and the chip navigates),
+  // and broadcast the selection back so the chips' active state tracks the
+  // facet checkboxes too.
+  useEffect(() => {
+    if (!hasDivisionFacet) return;
+    const valid = new Set(divisionFacet!.map((o) => o.value));
+    return onSubunitSelect("div", (value, action) => {
+      if (!valid.has(value)) return false;
+      setSelDivs((prev) => applySubunitSelect(prev, value, action));
+      setFetchPage(1);
+      return true;
+    });
+  }, [hasDivisionFacet, divisionFacet]);
+  useEffect(() => {
+    if (hasDivisionFacet) broadcastSubunitSelection("div", selDivs);
+  }, [hasDivisionFacet, selDivs]);
+  // Unmount (a Publications / Grants / Collaboration tab switch is a soft
+  // navigation: the hero chips stay mounted, this roster does not) ⇒ announce
+  // an empty selection, or a chip stays lit for a filter nobody applies and its
+  // click would ask to "remove" it — unhandled — and navigate to its href,
+  // re-SELECTING the division the user meant to clear.
+  useEffect(() => {
+    if (!hasDivisionFacet) return;
+    return () => broadcastSubunitSelection("div", []);
+  }, [hasDivisionFacet]);
+
   // Debounce the name input into `q` (250ms); a new query starts at page 1.
   useEffect(() => {
     const next = normalizeRosterQuery(nameQ);
@@ -211,7 +246,8 @@ export function DepartmentFacultyClient({
       params.set("page", String(page));
     }
     const qs = params.toString();
-    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+    // Keeps the hash: a hero division chip lands the URL on `?div=<code>#people`.
+    window.history.replaceState(null, "", urlWithQuery(qs));
   }, [
     selMethods,
     selDivs,
@@ -334,6 +370,10 @@ export function DepartmentFacultyClient({
     setFetchPage(1);
   }, []);
   const anySidebarSelected = selMethods.size > 0 || selDivs.size > 0;
+  const selectedDivisionPage =
+    hasDivisionFacet && selDivs.size === 1
+      ? (divisionFacet!.find((o) => selDivs.has(o.value) && o.href) ?? null)
+      : null;
   // Empty-state "Clear filters": sidebar facets, the Appointment chip AND the
   // name filter (mock `clearAll`). The sort is a view choice, not a filter.
   const clearAllFilters = () => {
@@ -499,6 +539,14 @@ export function DepartmentFacultyClient({
           ? "Loading…"
           : `Showing ${start}–${end} of ${renderedTotal.toLocaleString()} ${scholarsLabel}`}
       </div>
+      {/* Announce a filter change (a facet tick or a hero division chip) to
+          assistive tech, like the center roster's live count. Silent while
+          loading so only the settled count is read. */}
+      <p className="sr-only" aria-live="polite">
+        {serverView && loading
+          ? ""
+          : `${renderedTotal.toLocaleString()} ${scholarsLabel} shown`}
+      </p>
       {serverView && error ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
           Couldn’t load matching scholars.{" "}
@@ -571,14 +619,28 @@ export function DepartmentFacultyClient({
             </button>
           )}
           {hasDivisionFacet && (
-            <RosterFacet
-              variant="unit"
-              title="Division"
-              options={divisionFacet!}
-              selected={selDivs}
-              onToggle={toggleDivision}
-              collapseAfter={8}
-            />
+            <div className="flex flex-col gap-1.5">
+              <RosterFacet
+                variant="unit"
+                title="Division"
+                options={divisionFacet!}
+                selected={selDivs}
+                onToggle={toggleDivision}
+                collapseAfter={8}
+              />
+              {/* The hero chips now filter in place, so the division's own page
+                  is reached from here: one link, only while exactly one
+                  division is selected. */}
+              {selectedDivisionPage && (
+                <a
+                  href={selectedDivisionPage.href}
+                  aria-label={`View ${selectedDivisionPage.label} division page`}
+                  className="self-start text-[12px] text-apollo-slate no-underline hover:underline"
+                >
+                  View division page →
+                </a>
+              )}
+            </div>
           )}
           {hasMethodFacet && (
             <RosterFacet
@@ -595,7 +657,16 @@ export function DepartmentFacultyClient({
           )}
         </div>
       </aside>
-      <div className="min-w-0 md:flex-[1_1_520px]">{body}</div>
+      {/* `#people-results` — a hero division chip scrolls here on a narrow
+          viewport (the facet aside stacks ABOVE the roster below md) and moves
+          focus here so the next Tab continues in the results. */}
+      <div
+        id="people-results"
+        tabIndex={-1}
+        className="min-w-0 scroll-mt-16 focus:outline-none md:flex-[1_1_520px]"
+      >
+        {body}
+      </div>
     </div>
   );
 }

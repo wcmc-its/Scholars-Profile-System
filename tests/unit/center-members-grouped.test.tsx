@@ -14,7 +14,7 @@
  *  - Program facet hides when the center has a single program.
  * PersonRow is stubbed so the test targets the facet/grouping logic.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 
@@ -116,6 +116,12 @@ const grouped: CenterMembersResult = {
 
 const personCwids = () =>
   screen.getAllByTestId("person").map((el) => el.getAttribute("data-cwid"));
+
+// The grouped roster mirrors its Program selection into `?program=` and seeds
+// from it on mount (Unit Page v2 hero chips), so reset the URL between tests.
+beforeEach(() => {
+  window.history.replaceState(null, "", "/centers/x");
+});
 
 describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
   it("renders the three facets + Appointment + a section per group", () => {

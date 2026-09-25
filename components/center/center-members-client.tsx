@@ -36,6 +36,12 @@ import {
   rankRoster,
   type RosterSort,
 } from "@/lib/roster-sort";
+import {
+  applySubunitSelect,
+  broadcastSubunitSelection,
+  onSubunitSelect,
+  urlWithQuery,
+} from "@/lib/unit-subunit-filter";
 
 /** Unit Page v2 — mirror the roster toolbar's sort (only when not the default)
  *  and name query into the address bar without a navigation. */
@@ -190,7 +196,7 @@ function GroupedRoster({
     const params = new URLSearchParams(window.location.search);
     syncToolbarParams(params, sort, q);
     const qs = params.toString();
-    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+    window.history.replaceState(null, "", urlWithQuery(qs));
   }, [sort, q]);
   const [selPrograms, setSelPrograms] = useState<ReadonlySet<string>>(new Set());
   const [selTypes, setSelTypes] = useState<ReadonlySet<string>>(new Set());
@@ -215,6 +221,58 @@ function GroupedRoster({
     () => new Map(groups.map((g) => [g.label, g.code])),
     [groups],
   );
+  // Unit Page v2 — the Program facet is keyed by label, the URL (`?program=`)
+  // and the hero's program chips by program code. Coded groups only; the
+  // synthetic "Other" group has no code and no URL form.
+  const labelByCode = useMemo(
+    () =>
+      new Map(
+        groups.filter((g) => g.code !== null).map((g) => [g.code as string, g.label]),
+      ),
+    [groups],
+  );
+  // Seed the Program facet from `?program=<code>` (a hero program chip's href
+  // followed from another tab, or a shared link) — not on a dedicated program page (one group).
+  useEffect(() => {
+    if (singleProgram) return;
+    const labels = new URLSearchParams(window.location.search)
+      .getAll("program")
+      .map((c) => labelByCode.get(c))
+      .filter((l): l is string => !!l);
+    if (labels.length > 0) setSelPrograms(new Set(labels));
+    // mount-only, like the toolbar seed above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Mirror the Program selection into `?program=` (codes) and to the hero's
+  // program chips; apply a chip click to the facet (a known code only —
+  // anything else stays unhandled and the chip navigates to its href).
+  useEffect(() => {
+    if (singleProgram) return;
+    const codes = Array.from(selPrograms)
+      .map((l) => codeByLabel.get(l))
+      .filter((c): c is string => !!c);
+    const params = new URLSearchParams(window.location.search);
+    params.delete("program");
+    for (const c of codes) params.append("program", c);
+    window.history.replaceState(null, "", urlWithQuery(params.toString()));
+    broadcastSubunitSelection("program", codes);
+  }, [singleProgram, selPrograms, codeByLabel]);
+  // Unmount (a tab switch soft-navigates away from the roster while the hero's
+  // chips stay mounted) ⇒ clear the chips' active state; see the same effect in
+  // `DepartmentFacultyClient`.
+  useEffect(() => {
+    if (singleProgram) return;
+    return () => broadcastSubunitSelection("program", []);
+  }, [singleProgram]);
+  useEffect(() => {
+    if (singleProgram) return;
+    return onSubunitSelect("program", (code, action) => {
+      const label = labelByCode.get(code);
+      if (!label) return false;
+      setSelPrograms((prev) => applySubunitSelect(prev, label, action));
+      return true;
+    });
+  }, [singleProgram, labelByCode]);
 
   const deptKey = (m: RowWithProgram) => m.departmentName || NO_DEPT;
   const rankKey = (m: RowWithProgram) => m.professorialRank || NO_RANK;
@@ -382,6 +440,14 @@ function GroupedRoster({
   // On a dedicated program page (#1105, `singleProgram`) the header is likewise
   // redundant with the page title, so it's always hidden.
   const hideHeaders = singleProgram || selPrograms.size === 1;
+  const selectedProgramPage = (() => {
+    if (singleProgram || selPrograms.size !== 1 || !programPagesEnabled) return null;
+    const [label] = selPrograms;
+    const code = codeByLabel.get(label) ?? null;
+    return code && !PROGRAM_PAGE_EXCLUDED_CODES.has(code)
+      ? { label, href: `/centers/${centerSlug}/programs/${code}` }
+      : null;
+  })();
   const anySelected =
     selPrograms.size +
       selTypes.size +
@@ -429,14 +495,30 @@ function GroupedRoster({
               Clear
             </button>
           )}
-          {programOptions.length >= 2 && (
-            <RosterFacet
-              variant="unit"
-              title="Program"
-              options={programOptions}
-              selected={selPrograms}
-              onToggle={makeToggle(selPrograms, setSelPrograms)}
-            />
+          {(programOptions.length >= 2 || selectedProgramPage) && (
+            <div className="flex flex-col gap-1.5">
+              {programOptions.length >= 2 && (
+                <RosterFacet
+                  variant="unit"
+                  title="Program"
+                  options={programOptions}
+                  selected={selPrograms}
+                  onToggle={makeToggle(selPrograms, setSelPrograms)}
+                />
+              )}
+              {/* One program selected hides its section header (and with it the
+                  header's page link), so the program's own page is linked here
+                  instead — the hero chips filter in place now. */}
+              {selectedProgramPage && (
+                <a
+                  href={selectedProgramPage.href}
+                  aria-label={`View ${selectedProgramPage.label} program page`}
+                  className="self-start text-[12px] text-apollo-slate no-underline hover:underline"
+                >
+                  View program page →
+                </a>
+              )}
+            </div>
           )}
           {/* #1570 — hide the Membership-type facet when every shown member shares
               a single type (Meyer is all-Research): a one-option facet can't filter
@@ -503,7 +585,13 @@ function GroupedRoster({
         </div>
       </aside>
 
-      <div className="min-w-0 md:flex-[1_1_520px]">
+      {/* `#people-results` — a hero program chip's scroll (narrow viewports)
+          and focus target; see `UnitSubunitChipRow`. */}
+      <div
+        id="people-results"
+        tabIndex={-1}
+        className="min-w-0 scroll-mt-16 focus:outline-none md:flex-[1_1_520px]"
+      >
         <RosterToolbar query={nameQ} onQueryChange={setNameQ} sort={sort} onSortChange={setSort} />
         <div className="mt-[14px]">
           <RoleChipRow faculty={allRows} active={appointment} onChange={setAppointment} />

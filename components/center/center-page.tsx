@@ -3,9 +3,11 @@ import { buildOrganizationJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   centerHasPrograms,
   getCenter,
+  getCenterGrantCount,
   getCenterGrantsList,
   getCenterMembers,
   getCenterPrograms,
+  getCenterPublicationCount,
   getCenterPublicationsList,
   getCenterTopResearchAreas,
 } from "@/lib/api/centers";
@@ -75,23 +77,36 @@ export async function CenterPage({
   // All viewer-independent loaders are cached (lib/api/swr-cache) and mutually
   // independent once we have detail.code — fire them in one batch so their
   // (cold-miss) DB scans overlap instead of stacking latency. Conditional
-  // loaders resolve to a cheap constant when their tab/flag is off. The page-0
-  // pubs result doubles as the always-needed count (stat + tab label + Spotlight
-  // view-all); the publications tab additionally loads the requested page/sort.
+  // loaders resolve to a cheap constant when their tab/flag is off. The
+  // always-needed publication and grant totals (stat, tab labels, Spotlight
+  // view-all) come from count-only loaders; a page of cards loads only on its
+  // own tab.
   const [
-    topResearchAreas,
+    [topResearchAreas, areaPreviews],
     spotlightCards,
-    pubsCountResult,
-    pubsListMaybe,
-    grantsCountResult,
-    grantsListMaybe,
+    publicationsCount,
+    pubsList,
+    grantsCount,
+    grantsList,
     members,
     programs,
     hasPrograms,
   ] = await Promise.all([
-    getCenterTopResearchAreas(detail.code),
+    // Hero research-area hover previews need the area ids, so they chain off
+    // the rollup inside the batch rather than waiting for all of it.
+    getCenterTopResearchAreas(detail.code).then(
+      async (areas) =>
+        [
+          areas,
+          await getUnitAreaPreviews(
+            "center",
+            detail.code,
+            areas.map((t) => t.topicId),
+          ),
+        ] as const,
+    ),
     getSpotlightCardsForCenter(detail.code),
-    getCenterPublicationsList(detail.code, { page: 0, sort: "newest" }),
+    getCenterPublicationCount(detail.code),
     tab === "publications"
       ? getCenterPublicationsList(detail.code, {
           page: Math.max(0, page - 1),
@@ -99,8 +114,7 @@ export async function CenterPage({
           area: area?.id ?? null,
         })
       : Promise.resolve(null),
-    // Grants tab: page-0 doubles as the tab count (same pattern as pubs).
-    getCenterGrantsList(detail.code, { page: 0, sort: "most_recent" }),
+    getCenterGrantCount(detail.code),
     tab === "grants"
       ? getCenterGrantsList(detail.code, {
           page: Math.max(0, page - 1),
@@ -114,16 +128,8 @@ export async function CenterPage({
     collaborationFlag ? centerHasPrograms(detail.code) : Promise.resolve(false),
   ]);
 
-  const pubsList = pubsListMaybe ?? pubsCountResult;
-  const grantsList = grantsListMaybe ?? grantsCountResult;
-
-  // Hero research-area hover previews; the pill counts become each preview's
-  // visible total (= its "See all" and the filtered tab), re-sorted by it.
-  const areaPreviews = await getUnitAreaPreviews(
-    "center",
-    detail.code,
-    topResearchAreas.map((t) => t.topicId),
-  );
+  // Hero research-area pills: each count becomes its preview's visible total
+  // (= its "See all" and the filtered tab), re-sorted by it.
   const researchAreas = applyAreaPreviewCounts(topResearchAreas, areaPreviews);
 
   // Unit Page v2 — program chips carry a member count. The grouped roster
@@ -161,9 +167,9 @@ export async function CenterPage({
           href: "#subunits",
         }
       : null,
-    pubsCountResult.total > 0
+    publicationsCount > 0
       ? {
-          value: pubsCountResult.total,
+          value: publicationsCount,
           label: "publications",
           href: `${basePath}?tab=publications#people`,
         }
@@ -176,7 +182,7 @@ export async function CenterPage({
   const spotlightData = spotlightCards
     ? {
         cards: spotlightCards,
-        totalCount: pubsCountResult.total,
+        totalCount: publicationsCount,
         viewAllHref: `${basePath}?tab=publications#tab-content`,
       }
     : null;
@@ -270,12 +276,23 @@ export async function CenterPage({
         <UnitSubunitChips
           noun={["program", "programs"]}
           ariaLabel="Programs"
-          chips={programs.map((p) => ({
-            key: p.code,
-            label: p.label,
-            href: `/centers/${detail.slug}/programs/${p.code}`,
-            count: programMemberCount.get(p.code) ?? null,
-          }))}
+          chips={programs.map((p) => {
+            // Unit Page v2 — a chip filters the grouped roster's Program facet
+            // in place (href `?program=<code>#people` for other tabs / new-tab
+            // clicks, filtered client-side on mount — JS-off lands unfiltered)
+            // when the roster has that program's section; otherwise it links
+            // the program page as before.
+            const inPlace = programMemberCount.has(p.code);
+            return {
+              key: p.code,
+              label: p.label,
+              href: inPlace
+                ? `${basePath}?program=${encodeURIComponent(p.code)}#people`
+                : `/centers/${detail.slug}/programs/${p.code}`,
+              count: programMemberCount.get(p.code) ?? null,
+              filter: inPlace ? { param: "program" as const, value: p.code } : undefined,
+            };
+          })}
         />
 
         <UnitResearchAreas
@@ -296,7 +313,7 @@ export async function CenterPage({
         <UnitStatsLine
           stats={stats}
           fallback={
-            detail.scholarCount === 0 && pubsCountResult.total === 0 ? (
+            detail.scholarCount === 0 && publicationsCount === 0 ? (
               <span>Membership data pending</span>
             ) : null
           }
@@ -314,8 +331,8 @@ export async function CenterPage({
             active={tab}
             basePath={basePath}
             scholarsCount={detail.scholarCount}
-            publicationsCount={pubsCountResult.total}
-            grantsCount={grantsCountResult.total}
+            publicationsCount={publicationsCount}
+            grantsCount={grantsCount}
             showCollaboration={showCollaboration}
             scholarsLabel={detail.hasExternalMembers ? "Members" : "Scholars"}
           />
@@ -330,7 +347,7 @@ export async function CenterPage({
             />
           )}
 
-          {tab === "publications" && (
+          {tab === "publications" && pubsList && (
             <DeptPublicationsList
               hits={pubsList.hits}
               total={pubsList.total}
@@ -347,7 +364,7 @@ export async function CenterPage({
             />
           )}
 
-          {tab === "grants" && (
+          {tab === "grants" && grantsList && (
             <DeptGrantsList
               hits={grantsList.hits}
               total={grantsList.total}

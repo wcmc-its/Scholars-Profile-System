@@ -18,19 +18,27 @@ import "server-only";
  *     who hid the paper (`isAuthorHidden`), exactly as PublicationCard drops
  *     their chips.
  *
+ * Cost: ONE ranking statement for every area at once (`areaPreviewRankSql`),
+ * then one publication and one author read for the <= 3 x areas winning pmids.
+ * The former shape — a Prisma `count` + `findMany` per area — made the
+ * optimizer scan the whole `publication` table once per area (a correlated
+ * EXISTS per row), ~1s an area and ~5s for a 10-area department.
+ *
  * server-only: constructs Prisma queries. The client pill imports only the
  * TYPES from here (`import type`).
  */
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { cachedRead } from "@/lib/api/swr-cache";
 import {
   isAuthorHidden,
   loadAllPublicationSuppressions,
   resolveUnitDarkPmids,
+  type PublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { loadActiveCenterMemberCwids } from "@/lib/api/centers";
 import { loadDivisionMemberCwids } from "@/lib/api/divisions";
-import { unitPublicationWhere, type UnitMembershipWhere } from "@/lib/api/unit-publication-where";
+import type { UnitMembershipWhere } from "@/lib/api/unit-publication-where";
 import type { DepartmentTopicArea } from "@/lib/api/departments";
 
 export type UnitKind = "department" | "center" | "division";
@@ -54,32 +62,6 @@ export type UnitAreaPreviews = Record<string, UnitAreaPreview>;
 
 const PREVIEW_PAPERS = 3;
 
-/**
- * Areas computed at once on a cache miss. Each area is a count + a findMany
- * (whose nested `authors` include is a follow-up query), so 2 areas hold at
- * most ~4 of the 15 pool connections — the preview rides on every unit-page
- * render and must not starve the tab queries rendering beside it.
- */
-const AREA_CONCURRENCY = 2;
-
-/** `fn` over `items`, at most `limit` in flight; results in input order. */
-async function mapBounded<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await fn(items[i]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return out;
-}
-
 async function resolveMembership(
   kind: UnitKind,
   code: string,
@@ -94,6 +76,96 @@ async function resolveMembership(
   return cwids.length > 0 ? { cwid: { in: cwids } } : null;
 }
 
+/**
+ * `unitPublicationWhere`'s member predicate over a row alias carrying `cwid`
+ * (`publication_topic` / `publication_author`), in SQL. Returned as a JOIN
+ * (empty for a cwid list) plus a WHERE condition:
+ *   - department — `{ scholar: { deptCode, deletedAt: null, status } }`: the
+ *     row's scholar is in the department, not soft-deleted, with that status.
+ *     A JOIN, not an EXISTS, so the planner can drive from
+ *     `scholar(dept_code)` into the row's `cwid` index;
+ *   - center / division — `{ cwid: { in } }`: the row's cwid is in the list.
+ */
+function memberSql(
+  alias: "pt" | "pa",
+  membership: UnitMembershipWhere,
+): { join: Prisma.Sql; where: Prisma.Sql } {
+  const col = Prisma.raw(`${alias}.cwid`);
+  if ("scholar" in membership) {
+    const { deptCode, status } = membership.scholar;
+    const s = Prisma.raw(`${alias}_s`);
+    return {
+      join: Prisma.sql`JOIN scholar ${s} ON ${s}.cwid = ${col}`,
+      where: Prisma.sql`${s}.dept_code = ${deptCode} AND ${s}.deleted_at IS NULL AND ${s}.status = ${status}`,
+    };
+  }
+  return { join: Prisma.empty, where: Prisma.sql`${col} IN (${Prisma.join(membership.cwid.in)})` };
+}
+
+/**
+ * The preview ranking for every area in ONE statement. Per area, the rows of
+ * `unitPublicationWhere({ membership, darkPmids, area })` — the area-filtered
+ * Publications tab's predicate — ranked in the tab's "Most cited" order
+ * (`citation_count DESC, pmid ASC`), keeping the first `PREVIEW_PAPERS` plus
+ * the area's full count:
+ *   1. `area_pmid` — clause 2 + 3: a member `publication_topic` row for the
+ *      area, pmid not dark. DISTINCT: a paper counts once per area however
+ *      many members tagged it.
+ *   2. `visible` — clause 1: a CONFIRMED member author exists. The join to
+ *      `publication` is total (`publication_topic.pmid` is an FK to it) and
+ *      supplies `citation_count`.
+ *   3. `ranked` — `COUNT(*) OVER` is the tab's total; `ROW_NUMBER() OVER` its
+ *      row order.
+ *
+ * KEEP IN STEP with `unitPublicationWhere` (lib/api/unit-publication-where.ts):
+ * a clause added there must be added here, or the pill count and its "See all"
+ * destination disagree. Exported for tests only.
+ */
+export function areaPreviewRankSql({
+  membership,
+  darkPmids,
+  areas,
+}: {
+  membership: UnitMembershipWhere;
+  darkPmids: string[];
+  areas: string[];
+}): Prisma.Sql {
+  const ptMember = memberSql("pt", membership);
+  const paMember = memberSql("pa", membership);
+  const notDark =
+    darkPmids.length > 0
+      ? Prisma.sql`AND pt.pmid NOT IN (${Prisma.join(darkPmids)})`
+      : Prisma.empty;
+  return Prisma.sql`
+    WITH area_pmid AS (
+      SELECT DISTINCT pt.parent_topic_id AS area, pt.pmid
+        FROM publication_topic pt
+        ${ptMember.join}
+       WHERE pt.parent_topic_id IN (${Prisma.join(areas)})
+         AND ${ptMember.where}
+         ${notDark}
+    ),
+    visible AS (
+      SELECT ap.area, ap.pmid, p.citation_count
+        FROM area_pmid ap
+        JOIN publication p ON p.pmid = ap.pmid
+       WHERE EXISTS (SELECT 1 FROM publication_author pa
+                        ${paMember.join}
+                      WHERE pa.pmid = ap.pmid
+                        AND pa.is_confirmed = 1
+                        AND ${paMember.where})
+    ),
+    ranked AS (
+      SELECT area, pmid,
+             COUNT(*) OVER (PARTITION BY area) AS total,
+             ROW_NUMBER() OVER (PARTITION BY area ORDER BY citation_count DESC, pmid ASC) AS rn
+        FROM visible
+    )
+    SELECT area, pmid, total, rn FROM ranked WHERE rn <= ${PREVIEW_PAPERS} ORDER BY area, rn`;
+}
+
+type RankRow = { area: string; pmid: string; total: number | bigint; rn: number | bigint };
+
 async function getUnitAreaPreviewsUncached(
   kind: UnitKind,
   code: string,
@@ -105,44 +177,78 @@ async function getUnitAreaPreviewsUncached(
 
   const suppressions = await loadAllPublicationSuppressions(prisma);
   const darkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
+  return computeUnitAreaPreviews({ membership, darkPmids, suppressions, topicIds });
+}
 
-  const entries = await mapBounded(topicIds, AREA_CONCURRENCY, async (area) => {
-    const where = unitPublicationWhere({ membership, darkPmids, area });
-    const [total, pubs] = await Promise.all([
-      prisma.publication.count({ where }),
-      prisma.publication.findMany({
-        where,
-        orderBy: [{ citationCount: "desc" }, { pmid: "asc" }],
-        take: PREVIEW_PAPERS,
-        select: {
-          pmid: true,
-          title: true,
-          journal: true,
-          year: true,
-          doi: true,
-          pubmedUrl: true,
-          authors: {
-            where: { isConfirmed: true, ...membership },
-            select: { cwid: true },
-          },
-        },
-      }),
-    ]);
-    const papers: UnitAreaPreviewPaper[] = pubs.map((p) => ({
+/**
+ * The previews for an already-resolved unit: its membership predicate, its
+ * dark pmids (`resolveUnitDarkPmids`) and the site's suppressions (for the
+ * per-author hides). Exported for tests and the parity harness; pages call
+ * `getUnitAreaPreviews`.
+ */
+export async function computeUnitAreaPreviews({
+  membership,
+  darkPmids,
+  suppressions,
+  topicIds,
+}: {
+  membership: UnitMembershipWhere;
+  darkPmids: string[];
+  suppressions: PublicationSuppressions;
+  topicIds: string[];
+}): Promise<UnitAreaPreviews> {
+  if (topicIds.length === 0) return {};
+  const ranked =
+    ((await prisma.$queryRaw(
+      areaPreviewRankSql({ membership, darkPmids, areas: topicIds }),
+    )) as RankRow[] | undefined) ?? [];
+
+  const pmids = [...new Set(ranked.map((r) => r.pmid))];
+  const [pubs, authors] =
+    pmids.length === 0
+      ? [[], []]
+      : await Promise.all([
+          prisma.publication.findMany({
+            where: { pmid: { in: pmids } },
+            select: { pmid: true, title: true, journal: true, year: true, doi: true, pubmedUrl: true },
+          }),
+          // The paper's confirmed member authors — the same filter the per-area
+          // `authors` include used.
+          prisma.publicationAuthor.findMany({
+            where: { pmid: { in: pmids }, isConfirmed: true, ...membership },
+            select: { pmid: true, cwid: true },
+          }),
+        ]);
+  const pubByPmid = new Map(pubs.map((p) => [p.pmid, p]));
+  const authorCwids = new Map<string, Set<string>>();
+  for (const a of authors) {
+    if (!a.cwid || isAuthorHidden(suppressions, a.pmid, a.cwid)) continue;
+    const set = authorCwids.get(a.pmid) ?? new Set<string>();
+    set.add(a.cwid);
+    authorCwids.set(a.pmid, set);
+  }
+
+  const byArea = new Map<string, UnitAreaPreview>();
+  // Rows arrive ordered by (area, rn), so each area's papers are in tab order.
+  for (const r of ranked) {
+    const entry = byArea.get(r.area) ?? { total: Number(r.total), papers: [] };
+    byArea.set(r.area, entry);
+    const p = pubByPmid.get(r.pmid);
+    if (!p) continue;
+    entry.papers.push({
       pmid: p.pmid,
       title: p.title,
       venue: p.journal,
       year: p.year,
       href: p.doi ? `https://doi.org/${p.doi}` : (p.pubmedUrl ?? null),
-      unitAuthorCount: new Set(
-        p.authors
-          .map((a) => a.cwid)
-          .filter((c): c is string => !!c && !isAuthorHidden(suppressions, p.pmid, c)),
-      ).size,
-    }));
-    return [area, { total, papers }] as const;
-  });
-  return Object.fromEntries(entries);
+      unitAuthorCount: authorCwids.get(p.pmid)?.size ?? 0,
+    });
+  }
+  // Every requested area gets an entry, in request order; one with no visible
+  // paper is `{ total: 0 }` so `applyAreaPreviewCounts` drops its pill.
+  return Object.fromEntries(
+    topicIds.map((area) => [area, byArea.get(area) ?? { total: 0, papers: [] }]),
+  );
 }
 
 /**
