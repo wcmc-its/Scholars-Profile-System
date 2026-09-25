@@ -52,7 +52,8 @@ export function canViewDataSharingDashboard(session: EditSession): boolean {
  *  same rationale, a 500+-row wall was the original complaint). */
 export const FACULTY_ROW_CAP = 25;
 
-export const DEPARTMENT_SORT_KEYS = ["datasets", "faculty", "shareRate"] as const;
+/** `name` (2026-09 page revision): the Department column header sorts A–Z too. */
+export const DEPARTMENT_SORT_KEYS = ["name", "datasets", "faculty", "shareRate"] as const;
 export type DepartmentSortKey = (typeof DEPARTMENT_SORT_KEYS)[number];
 export const FACULTY_SORT_KEYS = ["datasets", "shareRate", "concerning"] as const;
 export type FacultySortKey = (typeof FACULTY_SORT_KEYS)[number];

@@ -65,10 +65,10 @@ export default async function EditDataSharingPage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-bold">Data sharing</h1>
-      <p className="text-muted-foreground mb-6 text-sm">
-        Dataset deposits synced from reciterdb via the weekly data-sharing bridge — aggregate
-        views for research leadership, compliance/grant reporting, and the library/RDM team.
+      <h1 className="text-[30px] leading-tight font-semibold tracking-[-.01em]">Data sharing</h1>
+      <p className="text-muted-foreground mt-2.5 mb-6 max-w-[86ch] text-[14.5px] leading-normal">
+        Dataset deposits synced from reciterdb by the weekly data-sharing bridge. Aggregate views
+        for research leadership, compliance and grant reporting, and the library / RDM team.
       </p>
       {/* The report streams under a body-only skeleton; keyed on the query so
           a filter or sort change shows it again. */}
@@ -84,25 +84,28 @@ async function DataSharingBody({ ui }: { ui: ReturnType<typeof parseDataSharingP
   return <DataSharingDashboard report={report} ui={ui} />;
 }
 
-/** Stat cards, the spectrum bar and two tables — the dashboard's shape, so
+/** Rail, stat tiles, the two charts and a table — the dashboard's shape, so
  *  the swap barely shifts. The shell and title are already on screen. */
 function DataSharingBodySkeleton() {
   return (
-    <div aria-busy="true">
+    <div aria-busy="true" className="grid items-start gap-[22px] lg:grid-cols-[170px_minmax(0,1fr)]">
       <div role="status" className="sr-only">
         Loading data-sharing dashboard…
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="border-apollo-border bg-apollo-surface rounded-md border p-4">
-            <Skeleton className="mb-2 h-7 w-16" />
-            <Skeleton className="h-3 w-28" />
-          </div>
-        ))}
+      <Skeleton className="hidden h-80 w-full rounded-[13px] lg:block" />
+      <div className="min-w-0">
+        <Skeleton className="h-10 w-full rounded-md" />
+        <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="border-apollo-border-strong bg-apollo-surface rounded-[13px] border p-4">
+              <Skeleton className="mb-2 h-3 w-24" />
+              <Skeleton className="h-7 w-16" />
+            </div>
+          ))}
+        </div>
+        <Skeleton className="mt-4 h-56 w-full rounded-[13px]" />
+        <Skeleton className="mt-9 h-48 w-full rounded-[13px]" />
       </div>
-      <Skeleton className="mt-4 h-24 w-full rounded-md" />
-      <Skeleton className="mt-10 h-48 w-full rounded-md" />
-      <Skeleton className="mt-10 h-48 w-full rounded-md" />
     </div>
   );
 }
