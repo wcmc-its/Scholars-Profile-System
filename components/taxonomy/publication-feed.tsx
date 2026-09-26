@@ -279,12 +279,17 @@ export function PublicationFeed({
   if (data) {
     if (formatCount) {
       countLabel = formatCount(data, filter);
-    } else if (relevanceTiers && tierTotals) {
-      // One count definition (phase 4): every relevance tier under the active
-      // type filter, whatever Show says — the same number as the rail row
-      // (`getSubtopicRail`). The Show options keep their per-tier counts; the
-      // Load more denominator is the current Show option's count (`total`).
-      countLabel = (tierTotals.strongly + tierTotals.also).toLocaleString();
+    } else if (relevanceTiers) {
+      // One count definition (phase 4): DISTINCT pmids across every relevance
+      // tier under the active type filter, whatever Show says — the same
+      // number as the rail row (`getSubtopicRail`). Not strongly + also:
+      // `score` is per (pmid, cwid, topic), so a paper whose co-authors' rows
+      // straddle the threshold is in BOTH tier counts. The Show options keep
+      // their per-tier counts; the Load more denominator is the current Show
+      // option's count (`total`).
+      countLabel = (
+        filter === "all" ? data.totalAllTypes : data.totalResearchOnly
+      ).toLocaleString();
     } else {
       countLabel = data.total.toLocaleString();
     }

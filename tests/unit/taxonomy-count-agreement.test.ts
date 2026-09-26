@@ -230,17 +230,32 @@ describe("topic: rail row == feed heading == Load more denominator", () => {
     const rail = (await getSubtopicRail("cardio"))!;
     for (const s of rail.subtopics) {
       const feed = (await getTopicPublications("cardio", { sort: "newest", subtopic: s.id, tier: "strongly" }))!;
-      const heading = feed.tierTotals.strongly + feed.tierTotals.also;
+      // The feed's "Publications N" (publication-feed.tsx): the distinct
+      // count under the active type filter, every tier.
+      const heading = feed.totalResearchOnly;
       expect(heading, s.id).toBe(s.pubCount);
       // Show = All relevant: the Load more denominator is the untiered total.
       const all = (await getTopicPublications("cardio", { sort: "newest", subtopic: s.id }))!;
       expect(all.total, s.id).toBe(s.pubCount);
     }
     const feed = (await getTopicPublications("cardio", { sort: "newest", tier: "strongly" }))!;
-    expect(feed.tierTotals.strongly + feed.tierTotals.also).toBe(rail.totalPubCount);
+    expect(feed.totalResearchOnly).toBe(rail.totalPubCount);
     // Show = Strongly relevant: the denominator is the strongly count.
     expect(feed.total).toBe(feed.tierTotals.strongly);
     expect(feed.total).toBe(3); // p1, p4, p5
+  });
+
+  it("co-author scores that straddle the threshold still count the paper once", async () => {
+    // p1's second co-author row falls in the also tier: p1 is now in BOTH
+    // tier counts, so strongly + also (5) over-counts; the heading must not.
+    db.pt[1] = { ...db.pt[1], score: 0.4 };
+    const rail = (await getSubtopicRail("cardio"))!;
+    const feed = (await getTopicPublications("cardio", { sort: "newest", tier: "strongly" }))!;
+    expect(feed.tierTotals.strongly + feed.tierTotals.also).toBe(5);
+    expect(feed.totalResearchOnly).toBe(rail.totalPubCount);
+    expect(rail.totalPubCount).toBe(4);
+    const sub = (await getTopicPublications("cardio", { sort: "newest", subtopic: "sub_a", tier: "strongly" }))!;
+    expect(sub.totalResearchOnly).toBe(rail.subtopics.find((s) => s.id === "sub_a")!.pubCount);
   });
 
   it("the type toggle moves the feed off the rail's default-filter count, as designed", async () => {
