@@ -40,7 +40,7 @@ const WCM: Source[] = [
   { name: "ASMS", data: "Education and training", cad: "nightly" },
   { name: "InfoEd (Weill Research Gateway)", data: "Grants and grant roles", cad: "nightly" },
   { name: "External Relationships / COI (WRG)", data: "Disclosures, which you manage in the Weill Research Gateway", cad: "nightly" },
-  { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts, ORCID iD", cad: "nightly" },
+  { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts, suggested ORCID iDs from your PubMed author records", cad: "nightly" },
   { name: "ReciterAI", data: "Research areas, Impact, synopses, methods, core facilities, Spotlight", cad: "nightly" },
   { name: "OnCore", data: "Which clinical trials you are on", cad: "occasional" },
   { name: "Jenzabar", data: "PhD thesis advisees, Graduate School appointments", cad: "nightly" },
@@ -54,6 +54,7 @@ const WCM: Source[] = [
 
 const EXT: Source[] = [
   { name: "PubMed", data: "Publication records, retractions", cad: "nightly" },
+  { name: "ORCID", data: "Suggested ORCID iDs, from public ORCID records that name WCM", cad: "weekly" },
   { name: "Scopus", data: "Citation counts, papers not in PubMed", cad: "nightly" },
   { name: "OpenAlex", data: "Papers not in PubMed", cad: "nightly" },
   { name: "Web of Science", data: "Papers not in PubMed", cad: "nightly" },
@@ -106,7 +107,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
       { field: "Degrees after your name", source: "Enterprise Directory, from ASMS", cadence: "Nightly", tag: "Request a change", how: "Routes to the Office of Faculty Affairs." },
       { field: "Photo", source: "Web Directory", cadence: "Live", tag: "Yours · Web Directory", how: <>Add, change or remove it in the {WebDir}. It shows right away.</> },
       { field: "Email and who can see it", source: "Web Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change the address or its &ldquo;Publish to&rdquo; setting in the {WebDir}.</> },
-      { field: "ORCID iD", source: "Scholars, synced with ReCiter", cadence: "On save", tag: "Yours to edit", how: "Confirm or enter it under Identifiers & profiles." },
+      { field: "ORCID iD", source: "Scholars (copied to ReCiter nightly)", cadence: "On save", tag: "Yours to edit", how: "Confirm or enter it under Identifiers & profiles." },
       { field: "Profile links", detail: "LinkedIn, X, Bluesky, Google Scholar, ResearchGate", source: "Scholars", cadence: "On save", tag: "Yours to edit", how: "Add or remove them under Identifiers & profiles." },
     ],
   },
