@@ -58,6 +58,36 @@ describe("RailLayout (topic)", () => {
     target.remove();
   });
 
+  it("subhead: red 'Subarea' eyebrow, serif regular title + Clear pill, muted description", () => {
+    mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    const head = screen.getByTestId("rail-subhead");
+    const [eyebrow, row, desc] = Array.from(head.children) as HTMLElement[];
+    expect(eyebrow.textContent).toBe("Subarea");
+    expect(eyebrow.className).toContain("uppercase");
+    expect(eyebrow.className).toContain("text-[var(--color-primary-cornell-red)]");
+    expect(eyebrow.className).toContain("tracking-[0.1em]");
+    // Mockup weight 600; `font-semibold` is remapped to 500 in globals.css.
+    expect(eyebrow.className).toContain("font-[600]");
+    expect(eyebrow.className).not.toContain("font-semibold");
+    const h2 = within(row).getByRole("heading", { level: 2, name: "Cardiac Surgery" });
+    expect(h2.className).toContain("font-serif");
+    expect(h2.className).toContain("text-[28px]");
+    expect(h2.className).toContain("font-normal");
+    // The pill sits on the title row, beside the title.
+    expect(within(row).getByRole("button", { name: /Clear Cardiac Surgery/ })).toBeTruthy();
+    expect(desc.textContent).toBe("Procedures on the heart");
+    expect(desc.className).toContain("text-muted-foreground");
+  });
+
+  it("no divider above the rail and no red rule on the results panel", () => {
+    mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
+    const { container } = render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    expect(container.querySelector("hr")).toBeNull();
+    const results = document.getElementById("publications-results")!;
+    expect(results.className).not.toMatch(/border-l|primary-cornell-red/);
+  });
+
   it("ignores an unknown ?subtopic= value", () => {
     mockGet.mockReturnValue("nope");
     render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);

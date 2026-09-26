@@ -9,7 +9,7 @@ import {
   getDistinctScholarCountForTopic,
   fetchTopSubtopicsForScholars,
 } from "@/lib/api/topics";
-import { getSpotlightCardsForTopic } from "@/lib/api/spotlight";
+import { getSpotlightCardsForTopic, TOPIC_SPOTLIGHT_POOL_MAX } from "@/lib/api/spotlight";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import {
   ScholarCardGrid,
@@ -74,7 +74,8 @@ export default async function TopicPage({
 
   const [topScholars, spotlightCards, subtopics, scholarCount] = await Promise.all([
     getTopScholarsForTopic(slug).catch(() => null),
-    getSpotlightCardsForTopic(slug).catch(() => null),
+    // Up to 9 cards, paged 3 at a time; ≤3 renders exactly as before.
+    getSpotlightCardsForTopic(slug, { limit: TOPIC_SPOTLIGHT_POOL_MAX }).catch(() => null),
     getSubtopicsForTopic(slug).catch(() => null),
     loadScholarCount(slug).catch(() => 0),
   ]);
@@ -196,7 +197,7 @@ export default async function TopicPage({
       </section>
 
       {/* Spotlight (§16) — replaces the prior Recent Highlights surface. */}
-      <Spotlight data={spotlightData} />
+      <Spotlight data={spotlightData} paged />
 
       {/* Layout B: subtopic rail (sheet below lg) + CSR publication feed.
           id="publications" anchors deep-links from the home page spotlight
@@ -205,7 +206,7 @@ export default async function TopicPage({
         <TopicRailLayout
           topicSlug={slug}
           subtopics={subtopicList}
-          scholarFilter={scholarCards}
+          scholarNames={scholarCards}
         />
       </section>
     </main>

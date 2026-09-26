@@ -13,8 +13,10 @@
  *     server round trip; Next syncs `useSearchParams` from it);
  *   - the scroll-once deep-link behavior (scroll the section into view once per
  *     distinct requested value, never for a value this layout just wrote);
- *   - the subhead (selected item's title + body + "Clear ×");
- *   - desktop (`lg`+): the sticky rail column + the WCM-red divider;
+ *   - the subhead (red kind eyebrow, the selected item's serif title + "Clear ×",
+ *     then the body);
+ *   - desktop (`lg`+): the sticky rail column (the selected row's spine is the
+ *     only red connector; the panel has no rule of its own);
  *   - below `lg`: an in-flow trigger bar opening a left Sheet with the same
  *     rail (shared filter state). Picking closes the sheet, scrolls to and
  *     focuses the results region, and announces the change politely.
@@ -212,7 +214,6 @@ function RailLayoutInner({
 
   return (
     <div className="mt-16">
-      <hr className="border-border mb-10" />
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
         {hasItems && (
           <div className="hidden lg:sticky lg:top-[84px] lg:block lg:w-[280px] lg:shrink-0 lg:self-start">
@@ -293,29 +294,32 @@ function RailLayoutInner({
           </div>
         )}
         {/* Issue #172: the panel reads heading → description → scholars →
-            controls → publications. The WCM-red left border couples it to the
-            selected rail item; red is reserved for that structural connector. */}
+            controls → publications. No left rule: the selected rail row's
+            maroon spine is the connector (mockup). */}
         <div
           id={resultsId}
           ref={resultsRef}
           tabIndex={-1}
           role="region"
           aria-label={`Results: ${subhead?.title ?? triggerLabel}`}
-          className={`min-w-0 flex-1 scroll-mt-20 outline-none ${
-            hasItems ? "lg:border-l-[3px] lg:border-[var(--color-primary-cornell-red)] lg:pl-6" : ""
-          }`}
+          className="min-w-0 flex-1 scroll-mt-20 outline-none"
         >
           {subhead && (
-            <header className="mb-4">
-              <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                <h2 className="min-w-0 text-xl leading-tight font-semibold [overflow-wrap:anywhere]">
+            <header className="mb-7 flex flex-col gap-1.5" data-testid="rail-subhead">
+              {/* Mockup subHeadStyle="Eyebrow": the item kind in WCM red. */}
+              {/* font-[600], not font-semibold: the token remap makes semibold 500. */}
+              <span className="text-xs font-[600] tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase">
+                {mobile.eyebrow}
+              </span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <h2 className="min-w-0 font-serif text-[28px] leading-[1.2] font-normal [overflow-wrap:anywhere]">
                   {subhead.title}
                 </h2>
                 <button
                   type="button"
                   onClick={clear}
                   aria-label={`Clear ${subhead.title}, show ${mobile.allLabel.toLowerCase()}`}
-                  className="border-border bg-background text-muted-foreground inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[13px] hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] max-lg:h-11 max-lg:px-3.5"
+                  className="border-apollo-border-strong bg-background text-muted-foreground inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[13px] hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] max-lg:h-11 max-lg:px-3.5"
                 >
                   Clear
                   <X className="size-3.5" aria-hidden />

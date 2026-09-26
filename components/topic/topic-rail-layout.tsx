@@ -9,12 +9,6 @@ import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
 import { PublicationFeed } from "@/components/topic/publication-feed";
 import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
-import {
-  SCHOLAR_FILTER_PARAM,
-  ScholarFilterAnnouncer,
-  ScholarFilterChip,
-  useScholarFilter,
-} from "@/components/taxonomy/scholar-filter";
 
 export type SubtopicRailItem = {
   id: string;
@@ -31,13 +25,13 @@ const LESS_COMMON_THRESHOLD = 10;
 export function TopicRailLayout({
   topicSlug,
   subtopics,
-  scholarFilter = false,
+  scholarNames = false,
 }: {
   topicSlug: string;
   subtopics: SubtopicRailItem[];
-  /** TAXONOMY_SCHOLAR_CARDS — the selected subarea's scholars become
-   *  pick-to-filter cards and the pick lives in `?scholar=`. */
-  scholarFilter?: boolean;
+  /** TAXONOMY_SCHOLAR_CARDS — the selected subarea's scholars render as a
+   *  "Scholars N" heading over plain name links. */
+  scholarNames?: boolean;
 }) {
   const items: TaxonomyRailItem[] = subtopics.map((s) => ({
     id: s.id,
@@ -57,7 +51,6 @@ export function TopicRailLayout({
     <RailLayout
       items={items}
       paramKey="subtopic"
-      clearParamsOnChange={scholarFilter ? [SCHOLAR_FILTER_PARAM] : undefined}
       deepLinkScrollTargetId="publications"
       idPrefix="publications"
       rail={{
@@ -76,25 +69,14 @@ export function TopicRailLayout({
         const desc = byId(id)?.shortDescription ?? null;
         return {
           title: label,
-          body: desc ? <p className="mt-1 text-sm text-muted-foreground">{desc}</p> : null,
+          body: desc ? (
+            <p className="text-muted-foreground max-w-[62ch] text-[14.5px] text-pretty">{desc}</p>
+          ) : null,
         };
       }}
     >
       {(activeSubtopic) => {
         const subtopicLabel = labelFor(activeSubtopic);
-        const showSubtopicHeader =
-          activeSubtopic !== null && subtopicLabel !== null && subtopicLabel.length > 0;
-        if (scholarFilter) {
-          return (
-            <TopicScholarFilterPanel
-              topicSlug={topicSlug}
-              activeSubtopic={activeSubtopic}
-              subtopicLabel={subtopicLabel}
-              subtopicShortDescription={byId(activeSubtopic)?.shortDescription ?? null}
-              suppressSubtopicHeader={showSubtopicHeader}
-            />
-          );
-        }
         return (
           <>
             {activeSubtopic && (
@@ -102,63 +84,16 @@ export function TopicRailLayout({
                 topicSlug={topicSlug}
                 subtopicId={activeSubtopic}
                 subtopicLabel={subtopicLabel}
+                variant={scholarNames ? "names" : "inline"}
               />
             )}
             <PublicationFeed
               topicSlug={topicSlug}
               activeSubtopic={activeSubtopic}
-              subtopicLabel={subtopicLabel}
-              subtopicShortDescription={byId(activeSubtopic)?.shortDescription ?? null}
-              // The layout's subhead already shows the heading + description.
-              suppressSubtopicHeader={showSubtopicHeader}
             />
           </>
         );
       }}
     </RailLayout>
-  );
-}
-
-/** Flag-on panel: pick-to-filter scholars + the filter chip + the feed. A
- *  component (not inline in the render prop) so it can own the filter hook. */
-function TopicScholarFilterPanel({
-  topicSlug,
-  activeSubtopic,
-  subtopicLabel,
-  subtopicShortDescription,
-  suppressSubtopicHeader,
-}: {
-  topicSlug: string;
-  activeSubtopic: string | null;
-  subtopicLabel: string | null;
-  subtopicShortDescription: string | null;
-  suppressSubtopicHeader: boolean;
-}) {
-  const filter = useScholarFilter(activeSubtopic);
-  return (
-    <>
-      {activeSubtopic && (
-        <SubtopicScholarsRow
-          topicSlug={topicSlug}
-          subtopicId={activeSubtopic}
-          subtopicLabel={subtopicLabel}
-          pick={{
-            selectedCwid: filter.selectedCwid,
-            onToggle: filter.toggle,
-            onRosterLoaded: filter.onRosterLoaded,
-          }}
-        />
-      )}
-      <ScholarFilterAnnouncer message={filter.announcement} />
-      {filter.active && <ScholarFilterChip scholar={filter.active} onClear={filter.clear} />}
-      <PublicationFeed
-        topicSlug={topicSlug}
-        activeSubtopic={activeSubtopic}
-        subtopicLabel={subtopicLabel}
-        subtopicShortDescription={subtopicShortDescription}
-        suppressSubtopicHeader={suppressSubtopicHeader}
-        scholarCwid={filter.active?.cwid ?? null}
-      />
-    </>
   );
 }

@@ -313,9 +313,21 @@ async function fillTier2(
 // Topic page — kicker = subtopic.displayName
 // ---------------------------------------------------------------------------
 
+/** Upper bound for a topic Spotlight pool (3 pages of 3 on the topic page). */
+export const TOPIC_SPOTLIGHT_POOL_MAX = 9;
+
 export async function getSpotlightCardsForTopic(
   topicSlug: string,
+  opts: {
+    /** Pool size. Defaults to the historical 3; the topic page asks for up to
+     *  `TOPIC_SPOTLIGHT_POOL_MAX` to page through. Clamped to 1..9. */
+    limit?: number;
+  } = {},
 ): Promise<SpotlightCard[] | null> {
+  const target = Math.min(
+    TOPIC_SPOTLIGHT_POOL_MAX,
+    Math.max(1, Math.floor(opts.limit ?? SPOTLIGHT_TARGET)),
+  );
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
 
@@ -371,16 +383,16 @@ export async function getSpotlightCardsForTopic(
   const suppressions = await loadPublicationSuppressions(candidatePmids, prisma);
   const darkPmids = await resolveDarkPmids(candidatePmids, suppressions, prisma);
   const visible = normalized.filter((r) => !darkPmids.has(r.pmid));
-  let top = sortForSpotlight(dedupeByPmid(visible)).slice(0, SPOTLIGHT_TARGET);
+  let top = sortForSpotlight(dedupeByPmid(visible)).slice(0, target);
 
   // Issue #68 — top up sparse topic surfaces with middle-author publications.
-  if (top.length < SPOTLIGHT_TARGET) {
+  if (top.length < target) {
     const seenPmids = new Set(top.map((r) => r.pmid));
     const tier2 = await fillTier2(
       {}, // no scholar carve-out beyond active FT faculty — topic membership
       //  comes from the publication being tagged to this topic.
       seenPmids,
-      SPOTLIGHT_TARGET - top.length,
+      target - top.length,
       topicSlug,
     );
     // Tier-2 candidates inherit the topic via publication_topic, so their

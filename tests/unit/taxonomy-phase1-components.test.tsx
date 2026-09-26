@@ -6,7 +6,7 @@
  *       `lazyAbstract` (#1537), keyed on the hit's `hasAbstract` (#1881).
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("@/components/topic/top-scholar-chip", () => ({
   TopScholarChip: ({ scholar }: { scholar: { cwid: string } }) => (
@@ -138,4 +138,38 @@ describe("(c) method feeds pass lazyAbstract from hasAbstract", () => {
       ["2", false],
     ]);
   });
+
+  it("family feed toolbar: 'Publications' h3 + count and Sort only (no Show select)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              hits: [hit("1", true)],
+              total: 1234,
+              totalAllTypes: 1300,
+              totalResearchOnly: 1234,
+              page: 0,
+              pageSize: 20,
+            }),
+        }),
+      ),
+    );
+    render(
+      <FamilyPublicationFeed supercategorySlug="sc" familySegment="fam-fam_1" familyLabel="Fam" />,
+    );
+    const row = await screen.findByTestId("publications-heading-row");
+    expect(within(row).getByRole("heading", { level: 3, name: "Publications" })).toBeTruthy();
+    await waitFor(() =>
+      expect(within(row).getByTestId("publications-count").textContent).toBe("1,234"),
+    );
+    expect(within(row).getByText("Sort by")).toBeTruthy();
+    expect(within(row).queryByText("Show")).toBeNull();
+    expect(screen.queryByText(/\bresults\b/)).toBeNull();
+    // The pub-type toggle survives, below the row.
+    expect(screen.getByText(/Show all publication types \(66 more\)/)).toBeTruthy();
+  });
 });
+

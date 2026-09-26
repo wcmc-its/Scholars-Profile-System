@@ -16,12 +16,6 @@ import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
 import { FamilyPublicationFeed } from "@/components/method/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
-import {
-  SCHOLAR_FILTER_PARAM,
-  ScholarFilterAnnouncer,
-  ScholarFilterChip,
-  useScholarFilter,
-} from "@/components/taxonomy/scholar-filter";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { familySegmentFor, resolveFamilyParam } from "@/lib/method-url";
 import { entityKindNounForCount } from "@/lib/methods/entity-kind-noun";
@@ -75,7 +69,7 @@ export function SupercategoryRailLayout({
   families,
   familyMeta,
   allWorkPubs,
-  scholarFilter = false,
+  scholarNames = false,
 }: {
   supercategorySlug: string;
   supercategoryLabel: string;
@@ -84,9 +78,9 @@ export function SupercategoryRailLayout({
   /** Representative recent publications across all families, the default
    *  "all work" panel shown until a family is selected (§A2). */
   allWorkPubs: MethodPublicationHit[];
-  /** TAXONOMY_SCHOLAR_CARDS — the selected family's scholars become
-   *  pick-to-filter cards and the pick lives in `?scholar=`. */
-  scholarFilter?: boolean;
+  /** TAXONOMY_SCHOLAR_CARDS — the selected family's scholars render as a
+   *  "Scholars N" heading over plain name links. */
+  scholarNames?: boolean;
 }) {
   const items = families.map(familyRailRow);
 
@@ -103,7 +97,6 @@ export function SupercategoryRailLayout({
       paramKey="family"
       resolveParam={(raw) => resolveFamilyParam(raw, families)}
       serializeParam={segmentFor}
-      clearParamsOnChange={scholarFilter ? [SCHOLAR_FILTER_PARAM] : undefined}
       deepLinkScrollTargetId="families"
       idPrefix="families"
       rail={{
@@ -131,8 +124,8 @@ export function SupercategoryRailLayout({
               {/* #879: generated capability gloss, mirroring the standalone
                   family page. Em-dashes render verbatim (house style). */}
               {meta.definition && (
-                <div className="mt-2 max-w-prose">
-                  <p className="text-sm leading-relaxed text-muted-foreground">
+                <div className="max-w-[62ch]">
+                  <p className="text-muted-foreground text-[14.5px] leading-relaxed text-pretty">
                     {meta.definition}
                   </p>
                   {meta.definitionSource === "generated" && (
@@ -164,18 +157,6 @@ export function SupercategoryRailLayout({
     >
       {(activeFamilyId) => {
         const label = activeFamilyId ? familyMeta[activeFamilyId]?.familyLabel ?? null : null;
-        if (scholarFilter) {
-          return (
-            <FamilyScholarFilterPanel
-              supercategorySlug={supercategorySlug}
-              supercategoryLabel={supercategoryLabel}
-              activeFamilyId={activeFamilyId && label ? activeFamilyId : null}
-              familyLabel={label}
-              familySegment={activeFamilyId && label ? segmentFor(activeFamilyId) : null}
-              allWorkPubs={allWorkPubs}
-            />
-          );
-        }
         if (!activeFamilyId || !label) {
           return <SupercategoryAllWorkFeed pubs={allWorkPubs} supercategoryLabel={supercategoryLabel} />;
         }
@@ -185,6 +166,7 @@ export function SupercategoryRailLayout({
               supercategorySlug={supercategorySlug}
               familyId={activeFamilyId}
               familyLabel={label}
+              variant={scholarNames ? "names" : "chips"}
             />
             <FamilyPublicationFeed
               supercategorySlug={supercategorySlug}
@@ -195,51 +177,5 @@ export function SupercategoryRailLayout({
         );
       }}
     </RailLayout>
-  );
-}
-
-/** Flag-on panel: pick-to-filter family scholars + the filter chip + the feed.
- *  One component across both branches so the filter hook sees every change of
- *  selection (including back to "All families"). */
-function FamilyScholarFilterPanel({
-  supercategorySlug,
-  supercategoryLabel,
-  activeFamilyId,
-  familyLabel,
-  familySegment,
-  allWorkPubs,
-}: {
-  supercategorySlug: string;
-  supercategoryLabel: string;
-  activeFamilyId: string | null;
-  familyLabel: string | null;
-  familySegment: string | null;
-  allWorkPubs: MethodPublicationHit[];
-}) {
-  const filter = useScholarFilter(activeFamilyId);
-  if (!activeFamilyId || !familyLabel || !familySegment) {
-    return <SupercategoryAllWorkFeed pubs={allWorkPubs} supercategoryLabel={supercategoryLabel} />;
-  }
-  return (
-    <>
-      <FamilyScholarsRow
-        supercategorySlug={supercategorySlug}
-        familyId={activeFamilyId}
-        familyLabel={familyLabel}
-        pick={{
-          selectedCwid: filter.selectedCwid,
-          onToggle: filter.toggle,
-          onRosterLoaded: filter.onRosterLoaded,
-        }}
-      />
-      <ScholarFilterAnnouncer message={filter.announcement} />
-      {filter.active && <ScholarFilterChip scholar={filter.active} onClear={filter.clear} />}
-      <FamilyPublicationFeed
-        supercategorySlug={supercategorySlug}
-        familySegment={familySegment}
-        familyLabel={familyLabel}
-        scholarCwid={filter.active?.cwid ?? null}
-      />
-    </>
   );
 }

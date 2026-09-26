@@ -40,6 +40,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { CuratedTag } from "@/components/topic/curated-tag";
+import { PublicationsHeadingRow } from "@/components/taxonomy/publications-heading-row";
 import { sanitizePubTitle } from "@/lib/utils";
 
 type Sort = "newest" | "most_cited" | "by_impact";
@@ -92,19 +93,16 @@ export function FamilyPublicationFeed({
   familySegment,
   familyLabel,
   cellLineLabels,
-  scholarCwid = null,
 }: {
   /** The supercategory URL slug segment (path part 1). */
   supercategorySlug: string;
   /** The family URL segment (`${labelSlug}-fam_NNNN`, path part 2). */
   familySegment: string;
-  /** Resolved family label, used for the feed heading. */
+  /** Resolved family label (empty-state copy). */
   familyLabel: string;
   /** #1166 — entity id → display label, so the `?entity=` context-bar chip can
    *  name the active cell line. Absent (or unknown id) ⇒ no cell-line filter UI. */
   cellLineLabels?: Record<string, string>;
-  /** TAXONOMY_SCHOLAR_CARDS — restrict the feed to this scholar (`?cwid=`). */
-  scholarCwid?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -120,15 +118,10 @@ export function FamilyPublicationFeed({
   const [page, setPage] = useState(1);
 
   const isCuratedSort = sort === "by_impact";
-  const heading =
-    filter === "research_articles_only"
-      ? "Research articles using this method"
-      : "All publications using this method";
-
   // Reset pagination on sort / filter / cell-line change.
   useEffect(() => {
     setPage(1);
-  }, [sort, filter, cellLine, scholarCwid]);
+  }, [sort, filter, cellLine]);
 
   const { data, loading, error } = useFeedFetch({
     supercategorySlug,
@@ -137,16 +130,15 @@ export function FamilyPublicationFeed({
     filter,
     page,
     cellLine,
-    scholarCwid,
   });
 
   // Filtered count is `total`; the family denominator is `totalResearchOnly`
   // (research filter) / `totalAllTypes` (all) — for the "N of M articles" copy.
   const denom = data ? (filter === "all" ? data.totalAllTypes : data.totalResearchOnly) : 0;
-  const sortRowLabel = data
+  const countLabel = data
     ? cellLine
       ? `${data.total.toLocaleString()} of ${denom.toLocaleString()} articles`
-      : `${data.total.toLocaleString()} results`
+      : data.total.toLocaleString()
     : null;
 
   const clearCellLine = () => {
@@ -160,15 +152,13 @@ export function FamilyPublicationFeed({
 
   return (
     <section className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex flex-col gap-1 min-w-0">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <span>{heading}</span>
-            {isCuratedSort && <CuratedTag surface="publication_centric" />}
-          </h2>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Sort by</span>
+      <PublicationsHeadingRow
+        countLabel={countLabel}
+        badge={isCuratedSort ? <CuratedTag surface="publication_centric" /> : null}
+      >
+        {/* No "Show" scope select on method pages (no tier split, §OQ-3b). */}
+        <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
+          Sort by
           <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
             <SelectTrigger className="w-[200px]" aria-label="Sort by">
               <SelectValue />
@@ -180,7 +170,7 @@ export function FamilyPublicationFeed({
             </SelectContent>
           </Select>
         </div>
-      </header>
+      </PublicationsHeadingRow>
 
       {cellLine && cellLineLabel && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -210,7 +200,6 @@ export function FamilyPublicationFeed({
         data={data}
         filter={filter}
         setFilter={setFilter}
-        sortRowLabel={sortRowLabel}
       />
 
       <FeedSection
@@ -234,19 +223,18 @@ function FilterToggleRow({
   data,
   filter,
   setFilter,
-  sortRowLabel,
 }: {
   data: FeedResponse | null;
   filter: Filter;
   setFilter: (f: Filter) => void;
-  sortRowLabel: string | null;
 }) {
   if (!data || data.total === 0) return null;
   const { totalAllTypes, totalResearchOnly } = data;
   const hasDelta = totalAllTypes > totalResearchOnly;
+  if (!hasDelta) return null;
+  // The count lives in the "Publications N" row; this row only holds the toggle.
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-      <span>{sortRowLabel ?? ""}</span>
+    <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-muted-foreground">
       {filter === "research_articles_only" && hasDelta ? (
         <button
           type="button"
@@ -412,7 +400,6 @@ function useFeedFetch({
   filter,
   page,
   cellLine,
-  scholarCwid,
 }: {
   supercategorySlug: string;
   familySegment: string;
@@ -420,7 +407,6 @@ function useFeedFetch({
   filter: Filter;
   page: number;
   cellLine: string | null;
-  scholarCwid: string | null;
 }): { data: FeedResponse | null; loading: boolean; error: string | null } {
   const [data, setData] = useState<FeedResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -441,7 +427,6 @@ function useFeedFetch({
     url.searchParams.set("page", String(page));
     url.searchParams.set("filter", filter);
     if (cellLine) url.searchParams.set("entity", cellLine);
-    if (scholarCwid) url.searchParams.set("cwid", scholarCwid);
 
     fetch(url.toString())
       .then((r) => {
@@ -461,7 +446,7 @@ function useFeedFetch({
     return () => {
       cancelled = true;
     };
-  }, [supercategorySlug, familySegment, sort, filter, page, cellLine, scholarCwid]);
+  }, [supercategorySlug, familySegment, sort, filter, page, cellLine]);
 
   return { data, loading, error };
 }

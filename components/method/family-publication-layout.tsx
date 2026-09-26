@@ -22,8 +22,8 @@ export function FamilyPublicationLayout({
   /** #1166 — entity id → label for the feed's `?entity=` context-bar chip. */
   cellLineLabels?: Record<string, string>;
   /** #1166 — when the layout is the RIGHT column of the family-page master-detail,
-   *  the page supplies its own `mt-16`+`<hr>` wrapper, so suppress this one's to
-   *  avoid a stray rule above the feed inside the grid. */
+   *  the page supplies its own spacing wrapper, so suppress this one's `mt-16`
+   *  inside the grid. No rule below Spotlight on either path (mockup). */
   embedded?: boolean;
 }) {
   const feed = (
@@ -43,7 +43,6 @@ export function FamilyPublicationLayout({
 
   return (
     <div className="mt-16">
-      <hr className="mb-10 border-border" />
       {feed}
     </div>
   );

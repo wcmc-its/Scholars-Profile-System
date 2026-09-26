@@ -1,8 +1,8 @@
 /**
  * Phase 3 (TAXONOMY_SCHOLAR_CARDS) page wiring: flag off renders today's
- * `TopScholarsChipRow` (and passes no scholar filter to the rail adapters);
+ * `TopScholarsChipRow` (and does not turn on the rail adapters' scholar-names mode);
  * flag on renders `ScholarCardGrid` with the right chips, heading and
- * "View all" link, and turns the rail's scholar filter on.
+ * "View all" link, and turns the rail's scholar-names mode on.
  *   topic    → chips = top subareas, View all → /topics/<slug>/scholars
  *   family   → no chips, View all → the family scholars page
  *   category → chips = the scholar's families, no View all (no page exists)
@@ -45,7 +45,10 @@ vi.mock("@/components/scholar-export/scholar-list-export-button", () => ({
 }));
 vi.mock("@/lib/export/scholar-export-flags", () => ({ isScholarListExportEnabled: () => false }));
 vi.mock("@/lib/api/export-scholars", () => ({ isSupercategoryExportInRange: async () => false }));
-vi.mock("@/lib/api/spotlight", () => ({ getSpotlightCardsForTopic: async () => null }));
+vi.mock("@/lib/api/spotlight", () => ({
+  getSpotlightCardsForTopic: async () => null,
+  TOPIC_SPOTLIGHT_POOL_MAX: 9,
+}));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodPagesEnabled: () => true,
   isMethodsFamilyDefinitionsOn: () => false,
@@ -163,11 +166,11 @@ describe("flag off (today's behavior)", () => {
     expect(h.fetchTopSubtopicsForScholars).not.toHaveBeenCalled();
   });
 
-  it("rail adapters get no scholar filter", async () => {
+  it("rail adapters get no scholar-names mode", async () => {
     await renderTopic();
     await renderCategory();
-    expect((h.topicRail.mock.calls[0][0] as { scholarFilter: boolean }).scholarFilter).toBe(false);
-    expect((h.scRail.mock.calls[0][0] as { scholarFilter: boolean }).scholarFilter).toBe(false);
+    expect((h.topicRail.mock.calls[0][0] as { scholarNames: boolean }).scholarNames).toBe(false);
+    expect((h.scRail.mock.calls[0][0] as { scholarNames: boolean }).scholarNames).toBe(false);
   });
 });
 
@@ -188,7 +191,7 @@ describe("flag on", () => {
       "cardio",
       top(6).map((s) => s.cwid),
     );
-    expect((h.topicRail.mock.calls[0][0] as { scholarFilter: boolean }).scholarFilter).toBe(true);
+    expect((h.topicRail.mock.calls[0][0] as { scholarNames: boolean }).scholarNames).toBe(true);
   });
 
   it("category: family chips and NO View all link", async () => {
@@ -197,7 +200,7 @@ describe("flag on", () => {
     expect(p.heading).toBe("Scholars using this");
     expect(p.scholars[0].areas).toEqual(["MRI", "PET"]);
     expect(p.viewAll).toBeUndefined();
-    expect((h.scRail.mock.calls[0][0] as { scholarFilter: boolean }).scholarFilter).toBe(true);
+    expect((h.scRail.mock.calls[0][0] as { scholarNames: boolean }).scholarNames).toBe(true);
   });
 
   it("family: no chips, View all → the family scholars page", async () => {

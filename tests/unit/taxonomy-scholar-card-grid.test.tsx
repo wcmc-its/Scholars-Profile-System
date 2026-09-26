@@ -1,6 +1,6 @@
 /**
  * Phase 3 (TAXONOMY_SCHOLAR_CARDS) — `ScholarCardGrid`: top 6 portrait cards
- * that are profile links, up to 3 area chips, "View all N scholars →" only when
+ * that are profile links, up to 3 area bullets, "View all N scholars →" only when
  * given, the original "…in this research area" info copy, and the classes that
  * keep a long title from overflowing a 390px viewport. Fake scholars only.
  */
@@ -52,7 +52,7 @@ describe("ScholarCardGrid", () => {
     expect(wide.className).toContain("hidden md:flex");
   });
 
-  it("renders up to 3 area chips, and none when the scholar has no areas", () => {
+  it("renders up to 3 area bullets, and none when the scholar has no areas", () => {
     render(
       <ScholarCardGrid
         heading="Scholars in this area"
@@ -64,6 +64,17 @@ describe("ScholarCardGrid", () => {
     expect(chipRows).toHaveLength(2);
     expect(within(chipRows[0]).getAllByText(/Alpha|Beta|Gamma/)).toHaveLength(3);
     expect(within(chipRows[0]).queryByText("Delta")).toBeNull();
+  });
+
+  it("no-photo avatar: beige rail circle with serif initials (mockup), not the gradient", () => {
+    render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(2)]} />);
+    const fallback = cardLinks()[0].querySelector("[data-fallback-tone]") as HTMLElement;
+    expect(fallback.getAttribute("data-fallback-tone")).toBe("rail");
+    expect(fallback.textContent).toBe("TP");
+    expect(fallback.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["bg-apollo-rail", "text-apollo-bar", "font-serif", "text-[17px]"]),
+    );
+    expect(fallback.getAttribute("style") ?? "").not.toContain("gradient");
   });
 
   it("shows 'View all N scholars →' only when a scholars page exists", () => {
@@ -90,7 +101,7 @@ describe("ScholarCardGrid", () => {
     ).toBeTruthy();
   });
 
-  it("guards 390px overflow: min-w-0 containers, truncated name, clamped title", () => {
+  it("guards 390px overflow: min-w-0 containers, truncated name + title", () => {
     render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(1, ["A"])]} />);
     const grid = screen.getByTestId("scholar-card-grid");
     expect(grid.className).toContain("min-w-0");
@@ -105,9 +116,12 @@ describe("ScholarCardGrid", () => {
     expect(card.className).toContain("min-h-11");
     const name = within(card).getByText("Test Person 1");
     expect(name.className).toContain("truncate");
+    // Mockup Portrait card: sans 14px / 650 (not the serif name of the spine card).
+    expect(name.className).toContain("text-[14px]");
+    expect(name.className).toContain("font-[650]");
+    expect(name.className).not.toContain("font-serif");
     const title = within(card).getByText(LONG_TITLE);
     expect(title.className).toContain("truncate");
-    expect(title.className).toContain("sm:line-clamp-2");
     expect(title.parentElement!.className).toContain("min-w-0");
   });
 
