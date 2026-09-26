@@ -79,6 +79,15 @@ describe("Spotlight paging (topic)", () => {
     expect(screen.getByTestId("spotlight-position").textContent).toContain("3 of 3");
   });
 
+  it("a short last page keeps the fixed 3-column grid (no re-flow while paging)", () => {
+    renderSpot(7, { paged: true });
+    const grid = () => screen.getByRole("button", { name: /^Card title/ }).closest(".grid")!;
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(titles()).toEqual(["Card title 7"]);
+    expect(grid().className).toContain("md:grid-cols-3");
+    expect(grid().className).not.toContain("md:max-w-[600px]");
+  });
+
   it("the buttons are keyboard-operable native buttons (Enter / Space activate them)", () => {
     renderSpot(6, { paged: true });
     const next = screen.getByRole("button", { name: "Next" });

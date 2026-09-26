@@ -84,8 +84,10 @@ function SpotlightInner({
     ? data.cards.slice(current * SPOTLIGHT_PAGE_SIZE, (current + 1) * SPOTLIGHT_PAGE_SIZE)
     : data.cards;
 
+  // While paging, hold the mockup's fixed 3-column grid so a short last page
+  // (e.g. 1 card of 7) keeps its column width instead of re-flowing.
   const gridClass =
-    cards.length === 3
+    cycling || cards.length === 3
       ? "md:grid-cols-3"
       : cards.length === 2
         ? "md:grid-cols-2"
