@@ -1,6 +1,6 @@
 /**
  * Phase 3 (TAXONOMY_SCHOLAR_CARDS) — `ScholarCardGrid`: top 6 portrait cards
- * that are profile links, up to 3 area chips, "View all N scholars →" only when
+ * that are profile links, up to 3 area bullets, "View all N scholars →" only when
  * given, the original "…in this research area" info copy, and the classes that
  * keep a long title from overflowing a 390px viewport. Fake scholars only.
  */
@@ -52,7 +52,7 @@ describe("ScholarCardGrid", () => {
     expect(wide.className).toContain("hidden md:flex");
   });
 
-  it("renders up to 3 area chips, and none when the scholar has no areas", () => {
+  it("renders up to 3 area bullets, and none when the scholar has no areas", () => {
     render(
       <ScholarCardGrid
         heading="Scholars in this area"
@@ -90,7 +90,7 @@ describe("ScholarCardGrid", () => {
     ).toBeTruthy();
   });
 
-  it("guards 390px overflow: min-w-0 containers, truncated name, clamped title", () => {
+  it("guards 390px overflow: min-w-0 containers, truncated name + title", () => {
     render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(1, ["A"])]} />);
     const grid = screen.getByTestId("scholar-card-grid");
     expect(grid.className).toContain("min-w-0");
@@ -107,7 +107,6 @@ describe("ScholarCardGrid", () => {
     expect(name.className).toContain("truncate");
     const title = within(card).getByText(LONG_TITLE);
     expect(title.className).toContain("truncate");
-    expect(title.className).toContain("sm:line-clamp-2");
     expect(title.parentElement!.className).toContain("min-w-0");
   });
 
