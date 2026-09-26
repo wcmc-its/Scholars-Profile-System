@@ -25,6 +25,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { CuratedTag } from "@/components/topic/curated-tag";
+import { PublicationsHeadingRow } from "@/components/taxonomy/publications-heading-row";
 import { sanitizePubTitle } from "@/lib/utils";
 
 type Sort = "newest" | "most_cited" | "by_impact";
@@ -143,19 +144,15 @@ type FeedResponse = {
 export function PublicationFeed({
   topicSlug,
   activeSubtopic,
-  subtopicLabel,
-  subtopicShortDescription,
-  suppressSubtopicHeader = false,
 }: {
   topicSlug: string;
   activeSubtopic: string | null;
   subtopicLabel: string | null;
   subtopicShortDescription: string | null;
   /**
-   * When the parent layout renders the subtopic heading + description above
-   * the researcher list (issue #172 reorder), suppress the duplicate heading
-   * here. The result count and sort control stay; only the title/subtitle
-   * block is hidden.
+   * Retained for callers; the feed no longer renders a subtopic title or
+   * description of its own (the rail layout's subhead does). The toolbar is
+   * always the "Publications N" row.
    */
   suppressSubtopicHeader?: boolean;
 }) {
@@ -168,13 +165,6 @@ export function PublicationFeed({
   const [showTier, setShowTier] = useState<ShowTier>("strongly");
 
   const isCuratedSort = sort === "by_impact";
-  const heading =
-    activeSubtopic && subtopicLabel
-      ? subtopicLabel
-      : filter === "research_articles_only"
-        ? "Research articles in this area"
-        : "All publications in this area";
-
   // Reset both page counters on sort/subtopic/filter change.
   useEffect(() => {
     setStronglyPage(1);
@@ -246,60 +236,34 @@ export function PublicationFeed({
         ? tierTotals.strongly + tierTotals.also
         : strongly.data.total
     : null;
-  const sortRowLabel =
-    sortRowCount !== null ? `${sortRowCount.toLocaleString()} results` : null;
+  const countLabel = sortRowCount !== null ? sortRowCount.toLocaleString() : null;
 
   return (
     <section className="flex flex-col gap-4">
-      <header
-        className={
-          suppressSubtopicHeader
-            ? "flex flex-wrap items-center justify-between gap-3 border-y border-border py-2"
-            : "flex flex-wrap items-start justify-between gap-4"
-        }
+      <PublicationsHeadingRow
+        countLabel={countLabel}
+        badge={isCuratedSort ? <CuratedTag surface="publication_centric" /> : null}
       >
-        {suppressSubtopicHeader ? (
-          // Issue #172: heading + description moved above the researcher list.
-          // Header collapses to a "sort-row" — results count on the left,
-          // sort control on the right, hairline border top + bottom.
-          <span className="text-sm text-muted-foreground">{sortRowLabel ?? ""}</span>
-        ) : (
-          <div className="flex flex-col gap-1 min-w-0">
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <span>{heading}</span>
-              {isCuratedSort && <CuratedTag surface="publication_centric" />}
-            </h2>
-            {activeSubtopic !== null &&
-              subtopicShortDescription !== null &&
-              subtopicShortDescription.trim() !== "" && (
-                <p className="text-sm text-muted-foreground">{subtopicShortDescription}</p>
-              )}
+        {showTierSelect && tierTotals && (
+          <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
+            Show
+            <Select value={showTier} onValueChange={(v) => setShowTier(v as ShowTier)}>
+              <SelectTrigger className="w-[200px]" aria-label="Show">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="strongly">
+                  Strongly relevant ({tierTotals.strongly.toLocaleString()})
+                </SelectItem>
+                <SelectItem value="all">
+                  All relevant ({(tierTotals.strongly + tierTotals.also).toLocaleString()})
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          {showTierSelect && tierTotals && (
-            <>
-              <span className="text-sm text-muted-foreground">Show</span>
-              <Select
-                value={showTier}
-                onValueChange={(v) => setShowTier(v as ShowTier)}
-              >
-                <SelectTrigger className="w-[200px]" aria-label="Show">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="strongly">
-                    Strongly relevant ({tierTotals.strongly.toLocaleString()})
-                  </SelectItem>
-                  <SelectItem value="all">
-                    All relevant (
-                    {(tierTotals.strongly + tierTotals.also).toLocaleString()})
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </>
-          )}
-          <span className="text-sm text-muted-foreground">Sort by</span>
+        <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
+          Sort by
           <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
             <SelectTrigger className="w-[200px]" aria-label="Sort by">
               <SelectValue />
@@ -311,14 +275,12 @@ export function PublicationFeed({
             </SelectContent>
           </Select>
         </div>
-      </header>
+      </PublicationsHeadingRow>
 
       <FilterToggleRow
         data={strongly.data}
         filter={filter}
         setFilter={setFilter}
-        suppressSubtopicHeader={suppressSubtopicHeader}
-        sortRowLabel={sortRowLabel}
       />
 
       {/* Strongly relevant tier (default visible). Renders only when the
@@ -340,7 +302,7 @@ export function PublicationFeed({
       {(showTier === "all" || renderAlsoInline) && (
         <div className={renderAlsoInline ? "" : "mt-2 border-t border-border pt-4"}>
           {!renderAlsoInline && (
-            <h3 className="mb-3 text-base font-semibold">Also relevant</h3>
+            <h4 className="mb-3 text-base font-semibold">Also relevant</h4>
           )}
           <TierSection
             loading={also.loading}
@@ -366,25 +328,19 @@ function FilterToggleRow({
   data,
   filter,
   setFilter,
-  suppressSubtopicHeader,
-  sortRowLabel,
 }: {
   data: FeedResponse | null;
   filter: Filter;
   setFilter: (f: Filter) => void;
-  suppressSubtopicHeader: boolean;
-  sortRowLabel: string | null;
 }) {
   if (!data || data.total === 0 && data.tierTotals.also === 0) return null;
   const totalAllTypes = data.totalAllTypes;
   const totalResearchOnly = data.totalResearchOnly;
   const hasDelta = totalAllTypes > totalResearchOnly;
-  if (!hasDelta && suppressSubtopicHeader) return null;
+  if (!hasDelta) return null;
+  // The count lives in the "Publications N" row; this row only holds the toggle.
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-      {/* In subtopic mode the count lives in the sticky header row; here
-          we keep the row so the filter-toggle still has a home. */}
-      {suppressSubtopicHeader ? <span /> : <span>{sortRowLabel ?? ""}</span>}
+    <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-muted-foreground">
       {filter === "research_articles_only" && hasDelta ? (
         <button
           type="button"

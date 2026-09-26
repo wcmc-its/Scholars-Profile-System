@@ -487,3 +487,60 @@ describe("PublicationFeed — inline best-fit label (#327)", () => {
     expect(within(row as HTMLElement).getByText(/Best fit:/)).toBeDefined();
   });
 });
+
+describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
+  it("h3 'Publications' + muted count, Show and Sort on the same row, divider below", async () => {
+    mockFetchByTier({
+      strongly: makeTierResponse({
+        hits: [makeHit({ pmid: "111" })],
+        total: 28,
+        tierTotals: { strongly: 28, also: 4 },
+      }),
+    });
+    renderFeed({ activeSubtopic: "s1", subtopicLabel: "Sub", suppressSubtopicHeader: true });
+    const row = await screen.findByTestId("publications-heading-row");
+    expect(within(row).getByRole("heading", { level: 3, name: "Publications" })).toBeTruthy();
+    await waitFor(() => expect(within(row).getByTestId("publications-count").textContent).toBe("28"));
+    expect(within(row).getByTestId("publications-count").className).toContain(
+      "text-muted-foreground",
+    );
+    // Both controls live inside the heading row.
+    expect(row.querySelector("optgroup[data-trigger-aria='Show']")).not.toBeNull();
+    expect(row.querySelector("optgroup[data-trigger-aria='Sort by']")).not.toBeNull();
+    expect(row.className).toContain("border-b");
+    // The old "N results" copy is gone.
+    expect(screen.queryByText(/\bresults\b/)).toBeNull();
+    // No subtopic title / description of the feed's own.
+    expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  });
+
+  it("the count follows the scope: 'All relevant' shows the combined tier total", async () => {
+    mockFetchByTier({
+      strongly: makeTierResponse({
+        hits: [makeHit({ pmid: "111" })],
+        total: 3,
+        tierTotals: { strongly: 3, also: 2 },
+      }),
+      also: makeTierResponse({
+        hits: [makeHit({ pmid: "222" })],
+        total: 2,
+        tierTotals: { strongly: 3, also: 2 },
+      }),
+    });
+    renderFeed();
+    await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("3"));
+    fireEvent.change(getShowSelect()!, { target: { value: "all" } });
+    await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("5"));
+    // "Also relevant" sits one level under "Publications".
+    expect(screen.getByRole("heading", { level: 4, name: "Also relevant" })).toBeTruthy();
+  });
+
+  it("unselected topic: same 'Publications' heading (no 'Research articles in this area')", async () => {
+    mockFetchByTier({
+      strongly: makeTierResponse({ hits: [makeHit({ pmid: "111" })], total: 1 }),
+    });
+    renderFeed();
+    await screen.findByRole("heading", { level: 3, name: "Publications" });
+    expect(screen.queryByText(/Research articles in this area/)).toBeNull();
+  });
+});
