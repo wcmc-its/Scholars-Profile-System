@@ -810,6 +810,9 @@ async function collectSupercategoryFamilyPmids(
   supercategory: string,
   gate: FamilyOverlayGate,
 ): Promise<{ pmidsByFamilyLabel: Map<string, string[]>; unionPmids: string[] }> {
+  // No role filter: a pub is never hidden because of its author's role. A
+  // paper that reaches a family only through a hidden-role scholar still
+  // counts; only the PERSON is hidden (roster scholarCount, scholar lists).
   const rows = await prisma.scholarFamily.findMany({
     where: { supercategory, scholar: { deletedAt: null, status: "active" } },
     select: { familyLabel: true, pmids: true },
@@ -933,6 +936,10 @@ export type SupercategoryRollup = {
   families: FamilyRosterEntry[];
   /** Representative recent publications across ALL visible families (§A2). */
   allWorkPubs: MethodPublicationHit[];
+  /** The "All families" rail count: DISTINCT research-article pmids across the
+   *  category (`getSupercategoryAllWork().researchCount`) — never the row sum,
+   *  which double-counts pubs in several families (PLAN open question 10). */
+  allPubCount: number;
 };
 
 /**
@@ -953,7 +960,7 @@ export async function getSupercategoryRollup(
   supercategory: string,
   opts?: { allWorkLimit?: number },
 ): Promise<SupercategoryRollup> {
-  if (!isMethodsLensEnabled()) return { families: [], allWorkPubs: [] };
+  if (!isMethodsLensEnabled()) return { families: [], allWorkPubs: [], allPubCount: 0 };
   const allWorkLimit = opts?.allWorkLimit ?? 12;
   return cachedRead(`methods:rollup:${supercategory}:${allWorkLimit}`, () =>
     loadSupercategoryRollup(supercategory, allWorkLimit),
@@ -970,12 +977,16 @@ async function loadSupercategoryRollup(
   const base = await getFamiliesForSupercategory(supercategory, gate, {
     skipExemplars: true,
   });
-  if (base.length === 0) return { families: [], allWorkPubs: [] };
+  if (base.length === 0) return { families: [], allWorkPubs: [], allPubCount: 0 };
 
   const { pmidsByFamilyLabel, unionPmids } = await collectSupercategoryFamilyPmids(
     supercategory,
     gate,
   );
+  // Phase 4 count definition: a family row counts its DISTINCT research-article
+  // pmids — the value its feed shows by default (`totalResearchOnly`,
+  // `getDistinctPmidCountForFamily`). It used to count every type.
+  const researchPmids = await loadResearchPmids(unionPmids);
   const exemplarsByLabel = await loadUnionExemplars(
     supercategory,
     base.map((f) => f.familyLabel),
@@ -987,7 +998,8 @@ async function loadSupercategoryRollup(
 
   const families: FamilyRosterEntry[] = base.map((f) => ({
     ...f,
-    pubCount: pmidsByFamilyLabel.get(f.familyLabel)?.length ?? 0,
+    pubCount: (pmidsByFamilyLabel.get(f.familyLabel) ?? []).filter((p) => researchPmids.has(p))
+      .length,
     exemplarTools: exemplarsByLabel.get(f.familyLabel) ?? [],
     definition: definitionsByLabel.get(f.familyLabel)?.definition ?? null,
     definitionSource: definitionsByLabel.get(f.familyLabel)?.definitionSource ?? null,
@@ -1010,7 +1022,169 @@ async function loadSupercategoryRollup(
     );
   }
 
-  return { families, allWorkPubs };
+  // "All families" = DISTINCT research pmids of the union (never the row sum,
+  // PLAN open Q10). The union is gated exactly as `loadSupercategoryAllWork`
+  // gates the category feed, so this equals its `researchCount` without a
+  // second scholar_family scan on the page's cold path.
+  const allPubCount = unionPmids.filter((p) => researchPmids.has(p)).length;
+  return { families, allWorkPubs, allPubCount };
+}
+
+/** The subset of `pmids` that are research articles (the feeds' default type
+ *  filter). A NULL publication type is excluded, exactly as Prisma's `notIn`. */
+async function loadResearchPmids(pmids: string[]): Promise<Set<string>> {
+  if (pmids.length === 0) return new Set();
+  const rows = await prisma.publication.findMany({
+    where: { pmid: { in: pmids }, publicationType: { notIn: HARD_EXCLUDE_TYPES } },
+    select: { pmid: true },
+  });
+  return new Set(rows.map((r) => r.pmid));
+}
+
+// ---------------------------------------------------------------------------
+// Category-wide ("All families") publication set — phase 4
+// ---------------------------------------------------------------------------
+
+/** One publication in a category's "All families" set, with just what the
+ *  feed needs to sort, filter and label it. */
+export type AllWorkEntry = {
+  pmid: string;
+  year: number;
+  /** `dateAddedToEntrez` as epoch ms; null sorts last. */
+  added: number | null;
+  citationCount: number | null;
+  impactScore: number | null;
+  /** Research article (the feed's default type filter). */
+  research: boolean;
+  /** The row's family label: see `pickFamilyLabel`. */
+  familyLabel: string;
+};
+
+export type SupercategoryAllWork = {
+  entries: AllWorkEntry[];
+  /** DISTINCT research-article pmids: the "All families" count. */
+  researchCount: number;
+  /** DISTINCT pmids of every type. */
+  allTypesCount: number;
+};
+
+const EMPTY_ALL_WORK: SupercategoryAllWork = { entries: [], researchCount: 0, allTypesCount: 0 };
+
+/**
+ * Per-row family label rule for a pub that sits in several families: the
+ * family with the MOST research-article pubs in this category among the pub's
+ * own families (the rail's count), ties broken by the family label A→Z so the
+ * choice is deterministic. The biggest family is the one a reader is most
+ * likely to recognize and the one the rail lists first.
+ */
+export function pickFamilyLabel(
+  labels: Iterable<string>,
+  familyCounts: ReadonlyMap<string, number>,
+): string | null {
+  let best: string | null = null;
+  let bestCount = -1;
+  for (const label of labels) {
+    const n = familyCounts.get(label) ?? 0;
+    if (n > bestCount || (n === bestCount && best !== null && label.localeCompare(best) < 0)) {
+      best = label;
+      bestCount = n;
+    }
+  }
+  return best;
+}
+
+/**
+ * Every publication across a category's publicly visible families, for the
+ * "All families" feed and its count. Applies, in order:
+ *   1. the master lens gate;
+ *   2. the #800 suppression / #801 sensitivity overlay gate per family;
+ *   3. active scholars only. NO role filter: a pub is never hidden because of
+ *      its author's role (a paper reached only through a hidden-role scholar
+ *      stays), exactly as the family feeds, so this set is the union of the
+ *      family sets and All families is never below one family;
+ *   4. #356 whole-pub takedowns / derived-dark pubs removed.
+ * Served through the swr-cache (`methods:` prefix): the gate edits that bust
+ * the rollup (family tier route, suppress/revoke) bust this too, and the
+ * force-dynamic page and route stop re-scanning the pmid union per request.
+ */
+export async function getSupercategoryAllWork(
+  supercategory: string,
+): Promise<SupercategoryAllWork> {
+  if (!isMethodsLensEnabled()) return EMPTY_ALL_WORK;
+  return cachedRead(`methods:allwork:${supercategory}`, () =>
+    loadSupercategoryAllWork(supercategory),
+  );
+}
+
+async function loadSupercategoryAllWork(supercategory: string): Promise<SupercategoryAllWork> {
+  const gate = await loadFamilyOverlayGate();
+  const rows = await prisma.scholarFamily.findMany({
+    where: { supercategory, scholar: { deletedAt: null, status: "active" } },
+    select: { familyLabel: true, pmids: true },
+  });
+
+  const familiesByPmid = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!isFamilyPubliclyVisible(supercategory, r.familyLabel, gate)) continue;
+    if (!Array.isArray(r.pmids)) continue;
+    for (const p of r.pmids as unknown[]) {
+      const pmid = String(p);
+      let set = familiesByPmid.get(pmid);
+      if (!set) {
+        set = new Set();
+        familiesByPmid.set(pmid, set);
+      }
+      set.add(r.familyLabel);
+    }
+  }
+  const candidates = [...familiesByPmid.keys()];
+  if (candidates.length === 0) return EMPTY_ALL_WORK;
+
+  const suppressions = await loadPublicationSuppressions(candidates, prisma);
+  const dark = await resolveDarkPmids(candidates, suppressions, prisma);
+  const visible = candidates.filter((p) => !dark.has(p));
+  if (visible.length === 0) return EMPTY_ALL_WORK;
+
+  // Only pmids with a publication row can render (the feeds resolve through
+  // `publication`), so the counts are over the same set.
+  const pubs = await prisma.publication.findMany({
+    where: { pmid: { in: visible } },
+    select: {
+      pmid: true,
+      year: true,
+      dateAddedToEntrez: true,
+      citationCount: true,
+      impactScore: true,
+      publicationType: true,
+    },
+  });
+  const excluded = new Set<string>(HARD_EXCLUDE_TYPES);
+  const isResearch = (t: string | null) => t !== null && !excluded.has(t);
+
+  const familyCounts = new Map<string, number>();
+  for (const p of pubs) {
+    if (!isResearch(p.publicationType)) continue;
+    for (const label of familiesByPmid.get(p.pmid) ?? []) {
+      familyCounts.set(label, (familyCounts.get(label) ?? 0) + 1);
+    }
+  }
+
+  let researchCount = 0;
+  const entries: AllWorkEntry[] = pubs.map((p) => {
+    const research = isResearch(p.publicationType);
+    if (research) researchCount += 1;
+    const impact = p.impactScore === null || p.impactScore === undefined ? null : Number(p.impactScore);
+    return {
+      pmid: p.pmid,
+      year: p.year ?? 0,
+      added: p.dateAddedToEntrez ? new Date(p.dateAddedToEntrez).getTime() : null,
+      citationCount: p.citationCount ?? null,
+      impactScore: impact !== null && Number.isFinite(impact) ? impact : null,
+      research,
+      familyLabel: pickFamilyLabel(familiesByPmid.get(p.pmid) ?? [], familyCounts) ?? "",
+    };
+  });
+  return { entries, researchCount, allTypesCount: entries.length };
 }
 
 /**
@@ -1427,6 +1601,8 @@ async function collectFamilyPmids(
 ): Promise<string[]> {
   if (!isFamilyPubliclyVisible(supercategory, familyLabel, gate)) return [];
 
+  // No role filter (same as `collectSupercategoryFamilyPmids` and
+  // `loadSupercategoryAllWork`): pubs are never hidden by author role.
   const rows = await prisma.scholarFamily.findMany({
     where: {
       supercategory,
@@ -1549,6 +1725,9 @@ export async function getFamilyPublications(
      *  `total` becomes the filtered count. An unknown, inactive or #536-hidden
      *  cwid yields an empty feed (the same answer as an unknown one). */
     cwid?: string;
+    /** TAXONOMY_FEED_LOAD_MORE — rows per page (route-validated: whole 20-row
+     *  chunks, at most 200); `page` is 0-indexed in units of it. Default 20. */
+    pageSize?: number;
   },
 ): Promise<MethodPublicationsResult | null> {
   if (!isMethodsLensEnabled()) return null;
@@ -1558,6 +1737,7 @@ export async function getFamilyPublications(
   const allPmids = await collectFamilyPmids(supercategory, familyLabel, gate);
   const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
   const page = Math.max(0, opts.page ?? 0);
+  const pageSize = opts.pageSize ?? METHOD_PUBLICATIONS_PAGE_SIZE;
   const filter = opts.filter ?? "research_articles_only";
 
   // Resolved BEFORE the empty-family early return so a refused cwid always
@@ -1576,7 +1756,7 @@ export async function getFamilyPublications(
       totalAllTypes: 0,
       totalResearchOnly: 0,
       page,
-      pageSize: METHOD_PUBLICATIONS_PAGE_SIZE,
+      pageSize,
     };
   }
 
@@ -1619,7 +1799,7 @@ export async function getFamilyPublications(
         ? [{ citationCount: "desc" as const }]
         : [{ impactScore: "desc" as const }, { year: "desc" as const }];
 
-  const skip = page * METHOD_PUBLICATIONS_PAGE_SIZE;
+  const skip = page * pageSize;
   const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
     prisma.publication.findMany({
       where: { pmid: { in: feedPmids }, ...typeWhere },
@@ -1627,7 +1807,7 @@ export async function getFamilyPublications(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       orderBy: orderBy as any,
       skip,
-      take: METHOD_PUBLICATIONS_PAGE_SIZE,
+      take: pageSize,
     }),
     // `total` tracks the (possibly entity-filtered) feed; the two family-level
     // counts stay over the whole family for the "N of <family total>" denominator.
@@ -1669,7 +1849,108 @@ export async function getFamilyPublications(
     totalAllTypes,
     totalResearchOnly,
     page,
-    pageSize: METHOD_PUBLICATIONS_PAGE_SIZE,
+    pageSize,
+  };
+}
+
+/** A category-wide feed hit: a family hit plus the row's family label. */
+export type SupercategoryPublicationHit = MethodPublicationHit & { familyLabel: string };
+
+export type SupercategoryPublicationsResult = {
+  hits: SupercategoryPublicationHit[];
+  total: number;
+  totalAllTypes: number;
+  totalResearchOnly: number;
+  page: number;
+  pageSize: number;
+};
+
+/** Sort comparators over `AllWorkEntry`, mirroring the family feed's SQL
+ *  order (MySQL puts NULLs last under DESC) plus a pmid tiebreak so paging is
+ *  stable across requests. */
+const ALL_WORK_ORDER: Record<MethodPublicationSort, (a: AllWorkEntry, b: AllWorkEntry) => number> = {
+  newest: (a, b) => b.year - a.year || nullsLastDesc(a.added, b.added) || pmidDesc(a, b),
+  most_cited: (a, b) => nullsLastDesc(a.citationCount, b.citationCount) || pmidDesc(a, b),
+  by_impact: (a, b) =>
+    nullsLastDesc(a.impactScore, b.impactScore) || b.year - a.year || pmidDesc(a, b),
+};
+
+function nullsLastDesc(a: number | null, b: number | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b - a;
+}
+
+function pmidDesc(a: AllWorkEntry, b: AllWorkEntry): number {
+  return b.pmid.length - a.pmid.length || (b.pmid < a.pmid ? -1 : b.pmid > a.pmid ? 1 : 0);
+}
+
+/** Pure: order + type-filter + page the category set. Exported for tests. */
+export function pageAllWork(
+  entries: AllWorkEntry[],
+  opts: { sort: MethodPublicationSort; filter: MethodPublicationFilter; page: number; pageSize: number },
+): { slice: AllWorkEntry[]; total: number } {
+  const scoped =
+    opts.filter === "research_articles_only" ? entries.filter((e) => e.research) : entries.slice();
+  scoped.sort(ALL_WORK_ORDER[opts.sort]);
+  const start = opts.page * opts.pageSize;
+  return { slice: scoped.slice(start, start + opts.pageSize), total: scoped.length };
+}
+
+/**
+ * TAXONOMY_FEED_LOAD_MORE — the method category page's "All families" feed: a
+ * page of `getSupercategoryAllWork` (lens + overlay gated, active + public-role
+ * scholars only, dark pubs removed, swr-cached), sorted and type-filtered in
+ * process, then only the page's rows resolved to full hits + author chips.
+ * `total` is the count under the active type filter, so the default view's
+ * denominator is the "All families" rail count. Lens off ⇒ null.
+ *
+ * Security: the route allow-lists sort/filter/slug and validates page/limit.
+ */
+export async function getSupercategoryPublications(
+  supercategory: string,
+  opts: {
+    sort: MethodPublicationSort;
+    filter?: MethodPublicationFilter;
+    page?: number;
+    pageSize?: number;
+  },
+): Promise<SupercategoryPublicationsResult | null> {
+  if (!isMethodsLensEnabled()) return null;
+  const page = Math.max(0, opts.page ?? 0);
+  const pageSize = opts.pageSize ?? METHOD_PUBLICATIONS_PAGE_SIZE;
+  const filter = opts.filter ?? "research_articles_only";
+  const allWork = await getSupercategoryAllWork(supercategory);
+  const { slice, total } = pageAllWork(allWork.entries, { sort: opts.sort, filter, page, pageSize });
+
+  const pmids = slice.map((e) => e.pmid);
+  const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
+  const [pubs, authorsByPmid, withAbstract] =
+    pmids.length === 0
+      ? [[], new Map(), new Set<string>()]
+      : await Promise.all([
+          prisma.publication.findMany({ where: { pmid: { in: pmids } }, select: PUB_SELECT }),
+          fetchWcmAuthorsForPmids(pmids),
+          loadPmidsWithAbstract(pmids),
+        ]);
+  const byPmid = new Map(pubs.map((p) => [p.pmid, p]));
+  const hits: SupercategoryPublicationHit[] = [];
+  for (const e of slice) {
+    const p = byPmid.get(e.pmid);
+    if (!p) continue;
+    hits.push({
+      ...mapPublicationHit(p, authorsByPmid.get(e.pmid), includeImpact, withAbstract.has(e.pmid)),
+      familyLabel: e.familyLabel,
+    });
+  }
+  return {
+    hits,
+    total,
+    totalAllTypes: allWork.allTypesCount,
+    totalResearchOnly: allWork.researchCount,
+    page,
+    pageSize,
   };
 }
 

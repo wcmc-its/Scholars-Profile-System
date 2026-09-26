@@ -41,12 +41,15 @@ export function FamilyEntityRailLayout({
   familySegment,
   familyLabel,
   cellLineLabels,
+  loadMore = false,
 }: {
   entities: CellLineEntity[];
   supercategorySlug: string;
   familySegment: string;
   familyLabel: string;
   cellLineLabels: Record<string, string>;
+  /** TAXONOMY_FEED_LOAD_MORE. */
+  loadMore?: boolean;
 }) {
   // #1168: the noun follows the family's dominant entity kind (shared by all
   // entities in a family), so a reagent family doesn't read "Cell lines".
@@ -57,8 +60,9 @@ export function FamilyEntityRailLayout({
     <RailLayout
       items={entities.map(entityRailRow)}
       paramKey="entity"
-      // Reset the feed to page 1 on a filter change and keep the section anchor.
-      clearParamsOnChange={["page"]}
+      // Reset the feed to page 1 (and its Load more depth) on a filter change
+      // and keep the section anchor.
+      clearParamsOnChange={["page", "shown"]}
       urlHash="publications"
       idPrefix="publications"
       rail={{
@@ -82,6 +86,7 @@ export function FamilyEntityRailLayout({
           familyLabel={familyLabel}
           cellLineLabels={cellLineLabels}
           embedded
+          loadMore={loadMore}
         />
       )}
     </RailLayout>

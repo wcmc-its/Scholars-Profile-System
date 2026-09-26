@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/method/family-scholars-row", () => ({
   FamilyScholarsRow: () => null,
 }));
-vi.mock("@/components/method/publication-feed", () => ({
+vi.mock("@/components/taxonomy/publication-feed", () => ({
   FamilyPublicationFeed: () => null,
 }));
 vi.mock("@/components/method/supercategory-all-work-feed", () => ({

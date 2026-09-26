@@ -34,7 +34,7 @@ vi.mock("@/components/publication/publication-meta", () => ({
 
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
-import { FamilyPublicationFeed } from "@/components/method/publication-feed";
+import { FamilyPublicationFeed } from "@/components/taxonomy/publication-feed";
 import type { MethodPublicationHit } from "@/lib/api/methods";
 
 const scholars = ["a", "b", "c"].map((cwid, i) => ({

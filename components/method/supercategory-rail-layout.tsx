@@ -14,7 +14,10 @@
  */
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
-import { FamilyPublicationFeed } from "@/components/method/publication-feed";
+import {
+  CategoryPublicationFeed,
+  FamilyPublicationFeed,
+} from "@/components/taxonomy/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { familySegmentFor, resolveFamilyParam } from "@/lib/method-url";
@@ -69,7 +72,9 @@ export function SupercategoryRailLayout({
   families,
   familyMeta,
   allWorkPubs,
+  allPubCount,
   scholarNames = false,
+  loadMore = false,
 }: {
   supercategorySlug: string;
   supercategoryLabel: string;
@@ -78,9 +83,15 @@ export function SupercategoryRailLayout({
   /** Representative recent publications across all families, the default
    *  "all work" panel shown until a family is selected (§A2). */
   allWorkPubs: MethodPublicationHit[];
+  /** Distinct research-article pmids across the category (the "All families"
+   *  count). Omitted ⇒ no count on the row (no honest total). */
+  allPubCount?: number;
   /** TAXONOMY_SCHOLAR_CARDS — the selected family's scholars render as a
    *  "Scholars N" heading over plain name links. */
   scholarNames?: boolean;
+  /** TAXONOMY_FEED_LOAD_MORE — the paged "All families" feed replaces the
+   *  12-newest list, and the family feed pages with Load more. */
+  loadMore?: boolean;
 }) {
   const items = families.map(familyRailRow);
 
@@ -98,18 +109,21 @@ export function SupercategoryRailLayout({
       resolveParam={(raw) => resolveFamilyParam(raw, families)}
       serializeParam={segmentFor}
       deepLinkScrollTargetId="families"
+      // Switching All families ↔ a family swaps Category/FamilyPublicationFeed,
+      // and a freshly mounted feed reads a leftover ?shown as a Back-restore.
+      clearParamsOnChange={["shown"]}
       idPrefix="families"
       rail={{
         railLabel: "Method families",
         headerText: `FAMILIES (${families.length})`,
         filterPlaceholder: "Filter families…",
         noMatchNoun: "families",
-        // No count: summing the rail counts double-counts pubs in several
-        // families, and no distinct category total is loaded (PLAN open Q10).
-        allRow: { label: "All families" },
+        // The DISTINCT category count, never the row sum: a pub in several
+        // families would be counted once per family (PLAN open Q10).
+        allRow: { label: "All families", count: allPubCount, countLabel: "pubs" },
         variant: "captioned",
       }}
-      mobile={{ eyebrow: "Family", allLabel: "All families" }}
+      mobile={{ eyebrow: "Family", allLabel: "All families", allCount: allPubCount }}
       renderSubhead={(familyId) => {
         const meta = familyMeta[familyId];
         if (!meta?.familyLabel) return null;
@@ -158,7 +172,11 @@ export function SupercategoryRailLayout({
       {(activeFamilyId) => {
         const label = activeFamilyId ? familyMeta[activeFamilyId]?.familyLabel ?? null : null;
         if (!activeFamilyId || !label) {
-          return <SupercategoryAllWorkFeed pubs={allWorkPubs} supercategoryLabel={supercategoryLabel} />;
+          return loadMore ? (
+            <CategoryPublicationFeed supercategorySlug={supercategorySlug} />
+          ) : (
+            <SupercategoryAllWorkFeed pubs={allWorkPubs} supercategoryLabel={supercategoryLabel} />
+          );
         }
         return (
           <>
@@ -172,6 +190,7 @@ export function SupercategoryRailLayout({
               supercategorySlug={supercategorySlug}
               familySegment={segmentFor(activeFamilyId)}
               familyLabel={label}
+              loadMore={loadMore}
             />
           </>
         );

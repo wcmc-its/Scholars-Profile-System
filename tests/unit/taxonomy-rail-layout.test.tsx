@@ -12,8 +12,8 @@ const mockGet = vi.fn();
 vi.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: mockGet }),
 }));
-vi.mock("@/components/topic/publication-feed", () => ({
-  PublicationFeed: ({ activeSubtopic }: { activeSubtopic: string | null }) => (
+vi.mock("@/components/taxonomy/publication-feed", () => ({
+  TopicPublicationFeed: ({ activeSubtopic }: { activeSubtopic: string | null }) => (
     <div data-testid="feed">{activeSubtopic ?? "all"}</div>
   ),
 }));
@@ -51,7 +51,7 @@ describe("RailLayout (topic)", () => {
     target.id = "publications";
     target.scrollIntoView = vi.fn();
     document.body.appendChild(target);
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     expect(screen.getByTestId("feed").textContent).toBe("s2");
     expect(screen.getByRole("heading", { level: 2, name: "Oncology" })).toBeTruthy();
     await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalledTimes(1));
@@ -60,7 +60,7 @@ describe("RailLayout (topic)", () => {
 
   it("subhead: red 'Subarea' eyebrow, serif regular title + Clear pill, muted description", () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     const head = screen.getByTestId("rail-subhead");
     const [eyebrow, row, desc] = Array.from(head.children) as HTMLElement[];
     expect(eyebrow.textContent).toBe("Subarea");
@@ -82,7 +82,7 @@ describe("RailLayout (topic)", () => {
 
   it("no divider above the rail and no red rule on the results panel", () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
-    const { container } = render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    const { container } = render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     expect(container.querySelector("hr")).toBeNull();
     const results = document.getElementById("publications-results")!;
     expect(results.className).not.toMatch(/border-l|primary-cornell-red/);
@@ -90,7 +90,7 @@ describe("RailLayout (topic)", () => {
 
   it("ignores an unknown ?subtopic= value", () => {
     mockGet.mockReturnValue("nope");
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     expect(screen.getByTestId("feed").textContent).toBe("all");
   });
 
@@ -98,7 +98,7 @@ describe("RailLayout (topic)", () => {
     mockGet.mockReturnValue(null);
     window.history.replaceState(null, "", "/topics/cardio#publications");
     replaceSpy.mockClear();
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     fireEvent.click(within(desktopRail()).getByText("Oncology"));
     expect(screen.getByTestId("feed").textContent).toBe("s2");
     expect(replaceSpy).toHaveBeenLastCalledWith(null, "", "/topics/cardio?subtopic=s2#publications");
@@ -109,11 +109,13 @@ describe("RailLayout (topic)", () => {
     expect(replaceSpy).toHaveBeenLastCalledWith(null, "", "/topics/cardio#publications");
   });
 
-  it("the 'All subareas' row shows the summed total and clears the selection", () => {
+  it("the 'All subareas' row shows the distinct topic total and clears the selection", () => {
     mockGet.mockReturnValue("s1");
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     const all = within(desktopRail()).getByText("All subareas").closest("button")!;
-    expect(all.textContent).toContain("284");
+    expect(all.textContent).toContain("270");
+    // The distinct topic total, not the row sum (234 + 50 = 284).
+    expect(all.textContent).not.toContain("284");
     expect(all.getAttribute("aria-current")).toBeNull();
     fireEvent.click(all);
     expect(screen.getByTestId("feed").textContent).toBe("all");
@@ -122,7 +124,7 @@ describe("RailLayout (topic)", () => {
 
   it("Clear × in the subhead clears the selection and the URL", () => {
     mockGet.mockReturnValue("s1");
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     expect(screen.getByText("Procedures on the heart")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Clear Cardiac Surgery/ }));
     expect(screen.getByTestId("feed").textContent).toBe("all");
@@ -132,7 +134,7 @@ describe("RailLayout (topic)", () => {
 
   it("Clear × moves focus to the named results region and announces, not to <body>", () => {
     mockGet.mockReturnValue("s1");
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     const clear = screen.getByRole("button", { name: /^Clear Cardiac Surgery/ });
     clear.focus();
     fireEvent.click(clear);
@@ -144,7 +146,7 @@ describe("RailLayout (topic)", () => {
 
   it("mobile: opening the sheet focuses the current row, not the filter input", async () => {
     mockGet.mockReturnValue("s2");
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     fireEvent.click(screen.getByTestId("taxonomy-rail-trigger"));
     const dialog = screen.getByRole("dialog");
     const current = within(dialog).getByText("Oncology").closest("button")!;
@@ -166,7 +168,7 @@ describe("RailLayout (topic)", () => {
     const orig = window.matchMedia;
     window.matchMedia = vi.fn(() => mq) as unknown as typeof window.matchMedia;
     try {
-      render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+      render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
       fireEvent.click(screen.getByTestId("taxonomy-rail-trigger"));
       expect(screen.getByRole("dialog")).toBeTruthy();
       mq.matches = true;
@@ -179,8 +181,8 @@ describe("RailLayout (topic)", () => {
 
   it("mobile: the trigger count carries a screen-reader unit", () => {
     mockGet.mockReturnValue(null);
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
-    expect(screen.getByTestId("taxonomy-rail-trigger").textContent).toContain("284 publications");
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
+    expect(screen.getByTestId("taxonomy-rail-trigger").textContent).toContain("270 publications");
   });
 
   it("does not scroll when the selection comes from a rail click", async () => {
@@ -191,11 +193,11 @@ describe("RailLayout (topic)", () => {
     target.id = "publications";
     target.scrollIntoView = vi.fn();
     document.body.appendChild(target);
-    const { rerender } = render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    const { rerender } = render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     fireEvent.click(within(desktopRail()).getByText("Oncology"));
     // Next syncs useSearchParams from replaceState; simulate that re-render.
     mockGet.mockReturnValue("s2");
-    rerender(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    rerender(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     expect(target.scrollIntoView).not.toHaveBeenCalled();
     target.remove();
@@ -203,11 +205,11 @@ describe("RailLayout (topic)", () => {
 
   it("mobile: the trigger names the state, opens the sheet, and a pick closes it and focuses results", async () => {
     mockGet.mockReturnValue(null);
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     const trigger = screen.getByTestId("taxonomy-rail-trigger");
     expect(trigger.textContent).toContain("Subarea");
     expect(trigger.textContent).toContain("All subareas");
-    expect(trigger.textContent).toContain("284");
+    expect(trigger.textContent).toContain("270");
     expect(trigger.textContent).toContain("Change");
 
     fireEvent.click(trigger);
@@ -227,7 +229,7 @@ describe("RailLayout (topic)", () => {
 
   it("mobile: the sheet and desktop rail share one filter", () => {
     mockGet.mockReturnValue(null);
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
     fireEvent.change(within(desktopRail()).getByPlaceholderText("Filter subareas…"), {
       target: { value: "onc" },
     });
@@ -241,7 +243,7 @@ describe("RailLayout (topic)", () => {
 
   it("renders the feed full-width with no rail or trigger when there are no subtopics", () => {
     mockGet.mockReturnValue(null);
-    render(<TopicRailLayout topicSlug="cardio" subtopics={[]} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={[]} totalPubCount={0} />);
     expect(screen.queryByTestId("taxonomy-rail-trigger")).toBeNull();
     expect(screen.queryByRole("complementary")).toBeNull();
     expect(screen.getByTestId("feed")).toBeTruthy();

@@ -18,3 +18,25 @@
 export function isTaxonomyScholarCardsOn(): boolean {
   return process.env.TAXONOMY_SCHOLAR_CARDS === "on";
 }
+
+/**
+ * Topic / method page phase 4 flag (server-only, read like the one above).
+ *
+ * `TAXONOMY_FEED_LOAD_MORE=on` turns on, together, on the topic, method family
+ * and method category publication feeds:
+ *   - "Show 20 more · 40 of 279" Load more in place of numbered pages, with
+ *     `?shown=N` kept in the URL so Back restores the loaded rows, and the
+ *     routes' bounded `limit` param that restores them in one request;
+ *   - on topics, ONE "All relevant" list instead of the strongly list plus a
+ *     separate "Also relevant" section;
+ *   - the per-row area label ("· {subarea}" / "· {family}") when no rail item
+ *     is selected;
+ *   - on the category page, the paged, sortable "All families" feed over every
+ *     family's pubs (`/api/methods/[sc]/all/publications`) in place of the
+ *     fixed 12-newest list.
+ *
+ * Off (the default) is today's behavior, and the new route answers 404.
+ */
+export function isTaxonomyFeedLoadMoreOn(): boolean {
+  return process.env.TAXONOMY_FEED_LOAD_MORE === "on";
+}

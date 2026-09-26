@@ -1031,6 +1031,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "TAXONOMY_FEED_LOAD_MORE",
+                "Value": "off",
+              },
+              {
                 "Name": "SECURITY_CSP_MODE",
                 "Value": "enforce",
               },
@@ -5560,6 +5564,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "TAXONOMY_SCHOLAR_CARDS",
+                "Value": "on",
+              },
+              {
+                "Name": "TAXONOMY_FEED_LOAD_MORE",
                 "Value": "on",
               },
               {
