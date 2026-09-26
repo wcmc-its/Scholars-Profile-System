@@ -22,6 +22,8 @@
  *   scholar filter (TAXONOMY_SCHOLAR_CARDS) → CWID_PATTERN; the loader refuses
  *                                    unknown / inactive / #536-hidden cwids with
  *                                    the same empty feed. Flag off ⇒ ignored.
+ *   rows per page (TAXONOMY_FEED_LOAD_MORE) → `parseFeedLimit` (whole 20-row
+ *                                    chunks, at most 200). Flag off ⇒ ignored.
  *
  * The overlay gate (#800 suppression / #801 sensitivity) + master lens gate live
  * in the loader (`getFamilyPublications`), which returns null for a gated/unknown
@@ -39,7 +41,8 @@ import {
   type MethodPublicationFilter,
 } from "@/lib/api/methods";
 import { CWID_PATTERN } from "@/lib/cwid";
-import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { FEED_CHUNK, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +103,15 @@ export async function GET(
     return apiError("invalid tier", 400);
   }
 
+  let pageSize = FEED_CHUNK;
+  if (isTaxonomyFeedLoadMoreOn()) {
+    const limit = parseFeedLimit(sp.get("limit"));
+    if (limit === "invalid") {
+      return apiError("invalid limit", 400);
+    }
+    pageSize = limit;
+  }
+
   const pageStr = sp.get("page") ?? "1";
   const pageNum = parseInt(pageStr, 10);
   if (!Number.isFinite(pageNum) || pageNum < 1) {
@@ -140,7 +152,14 @@ export async function GET(
   const result = await getFamilyPublications(
     resolved.supercategory,
     resolved.familyLabel,
-    { sort, page, filter, entityId, ...(cwid ? { cwid } : {}) },
+    {
+      sort,
+      page,
+      filter,
+      entityId,
+      ...(cwid ? { cwid } : {}),
+      ...(pageSize !== FEED_CHUNK ? { pageSize } : {}),
+    },
   );
   if (result === null) {
     return apiError("family not found", 404);

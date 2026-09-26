@@ -16,6 +16,9 @@
  *   scholar filter (TAXONOMY_SCHOLAR_CARDS) → CWID_PATTERN; the loader refuses
  *     unknown / inactive / #536-hidden cwids with the same empty feed. Flag off
  *     ⇒ the param is ignored entirely (pre-flag behavior).
+ *   rows per page (TAXONOMY_FEED_LOAD_MORE) → `parseFeedLimit`: digits only, a
+ *     whole number of 20-row chunks, at most 200 (the `?shown=` restore in one
+ *     request). Flag off ⇒ ignored, 20 rows as before.
  *
  * Does NOT add CORS headers (same-origin only, matching all other /api/* routes).
  * Does NOT log request URL or param values (silent rejection per T-03-05-06).
@@ -29,7 +32,8 @@ import {
   type TopicPublicationTier,
 } from "@/lib/api/topics";
 import { CWID_PATTERN } from "@/lib/cwid";
-import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { FEED_CHUNK, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +110,15 @@ export async function GET(
     }
   }
 
+  let pageSize = FEED_CHUNK;
+  if (isTaxonomyFeedLoadMoreOn()) {
+    const limit = parseFeedLimit(sp.get("limit"));
+    if (limit === "invalid") {
+      return apiError("invalid limit", 400);
+    }
+    pageSize = limit;
+  }
+
   const pageStr = sp.get("page") ?? "1";
   const pageNum = parseInt(pageStr, 10);
   if (!Number.isFinite(pageNum) || pageNum < 1) {
@@ -121,6 +134,7 @@ export async function GET(
     filter,
     tier,
     ...(cwid ? { cwid } : {}),
+    ...(pageSize !== FEED_CHUNK ? { pageSize } : {}),
   });
   if (result === null) {
     return apiError("topic not found", 404);

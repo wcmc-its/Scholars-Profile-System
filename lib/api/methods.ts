@@ -1720,6 +1720,9 @@ export async function getFamilyPublications(
      *  `total` becomes the filtered count. An unknown, inactive or #536-hidden
      *  cwid yields an empty feed (the same answer as an unknown one). */
     cwid?: string;
+    /** TAXONOMY_FEED_LOAD_MORE — rows per page (route-validated: whole 20-row
+     *  chunks, at most 200); `page` is 0-indexed in units of it. Default 20. */
+    pageSize?: number;
   },
 ): Promise<MethodPublicationsResult | null> {
   if (!isMethodsLensEnabled()) return null;
@@ -1729,6 +1732,7 @@ export async function getFamilyPublications(
   const allPmids = await collectFamilyPmids(supercategory, familyLabel, gate);
   const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
   const page = Math.max(0, opts.page ?? 0);
+  const pageSize = opts.pageSize ?? METHOD_PUBLICATIONS_PAGE_SIZE;
   const filter = opts.filter ?? "research_articles_only";
 
   // Resolved BEFORE the empty-family early return so a refused cwid always
@@ -1747,7 +1751,7 @@ export async function getFamilyPublications(
       totalAllTypes: 0,
       totalResearchOnly: 0,
       page,
-      pageSize: METHOD_PUBLICATIONS_PAGE_SIZE,
+      pageSize,
     };
   }
 
@@ -1790,7 +1794,7 @@ export async function getFamilyPublications(
         ? [{ citationCount: "desc" as const }]
         : [{ impactScore: "desc" as const }, { year: "desc" as const }];
 
-  const skip = page * METHOD_PUBLICATIONS_PAGE_SIZE;
+  const skip = page * pageSize;
   const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
     prisma.publication.findMany({
       where: { pmid: { in: feedPmids }, ...typeWhere },
@@ -1798,7 +1802,7 @@ export async function getFamilyPublications(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       orderBy: orderBy as any,
       skip,
-      take: METHOD_PUBLICATIONS_PAGE_SIZE,
+      take: pageSize,
     }),
     // `total` tracks the (possibly entity-filtered) feed; the two family-level
     // counts stay over the whole family for the "N of <family total>" denominator.
@@ -1840,7 +1844,108 @@ export async function getFamilyPublications(
     totalAllTypes,
     totalResearchOnly,
     page,
-    pageSize: METHOD_PUBLICATIONS_PAGE_SIZE,
+    pageSize,
+  };
+}
+
+/** A category-wide feed hit: a family hit plus the row's family label. */
+export type SupercategoryPublicationHit = MethodPublicationHit & { familyLabel: string };
+
+export type SupercategoryPublicationsResult = {
+  hits: SupercategoryPublicationHit[];
+  total: number;
+  totalAllTypes: number;
+  totalResearchOnly: number;
+  page: number;
+  pageSize: number;
+};
+
+/** Sort comparators over `AllWorkEntry`, mirroring the family feed's SQL
+ *  order (MySQL puts NULLs last under DESC) plus a pmid tiebreak so paging is
+ *  stable across requests. */
+const ALL_WORK_ORDER: Record<MethodPublicationSort, (a: AllWorkEntry, b: AllWorkEntry) => number> = {
+  newest: (a, b) => b.year - a.year || nullsLastDesc(a.added, b.added) || pmidDesc(a, b),
+  most_cited: (a, b) => nullsLastDesc(a.citationCount, b.citationCount) || pmidDesc(a, b),
+  by_impact: (a, b) =>
+    nullsLastDesc(a.impactScore, b.impactScore) || b.year - a.year || pmidDesc(a, b),
+};
+
+function nullsLastDesc(a: number | null, b: number | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b - a;
+}
+
+function pmidDesc(a: AllWorkEntry, b: AllWorkEntry): number {
+  return b.pmid.length - a.pmid.length || (b.pmid < a.pmid ? -1 : b.pmid > a.pmid ? 1 : 0);
+}
+
+/** Pure: order + type-filter + page the category set. Exported for tests. */
+export function pageAllWork(
+  entries: AllWorkEntry[],
+  opts: { sort: MethodPublicationSort; filter: MethodPublicationFilter; page: number; pageSize: number },
+): { slice: AllWorkEntry[]; total: number } {
+  const scoped =
+    opts.filter === "research_articles_only" ? entries.filter((e) => e.research) : entries.slice();
+  scoped.sort(ALL_WORK_ORDER[opts.sort]);
+  const start = opts.page * opts.pageSize;
+  return { slice: scoped.slice(start, start + opts.pageSize), total: scoped.length };
+}
+
+/**
+ * TAXONOMY_FEED_LOAD_MORE — the method category page's "All families" feed: a
+ * page of `getSupercategoryAllWork` (lens + overlay gated, active + public-role
+ * scholars only, dark pubs removed, swr-cached), sorted and type-filtered in
+ * process, then only the page's rows resolved to full hits + author chips.
+ * `total` is the count under the active type filter, so the default view's
+ * denominator is the "All families" rail count. Lens off ⇒ null.
+ *
+ * Security: the route allow-lists sort/filter/slug and validates page/limit.
+ */
+export async function getSupercategoryPublications(
+  supercategory: string,
+  opts: {
+    sort: MethodPublicationSort;
+    filter?: MethodPublicationFilter;
+    page?: number;
+    pageSize?: number;
+  },
+): Promise<SupercategoryPublicationsResult | null> {
+  if (!isMethodsLensEnabled()) return null;
+  const page = Math.max(0, opts.page ?? 0);
+  const pageSize = opts.pageSize ?? METHOD_PUBLICATIONS_PAGE_SIZE;
+  const filter = opts.filter ?? "research_articles_only";
+  const allWork = await getSupercategoryAllWork(supercategory);
+  const { slice, total } = pageAllWork(allWork.entries, { sort: opts.sort, filter, page, pageSize });
+
+  const pmids = slice.map((e) => e.pmid);
+  const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
+  const [pubs, authorsByPmid, withAbstract] =
+    pmids.length === 0
+      ? [[], new Map(), new Set<string>()]
+      : await Promise.all([
+          prisma.publication.findMany({ where: { pmid: { in: pmids } }, select: PUB_SELECT }),
+          fetchWcmAuthorsForPmids(pmids),
+          loadPmidsWithAbstract(pmids),
+        ]);
+  const byPmid = new Map(pubs.map((p) => [p.pmid, p]));
+  const hits: SupercategoryPublicationHit[] = [];
+  for (const e of slice) {
+    const p = byPmid.get(e.pmid);
+    if (!p) continue;
+    hits.push({
+      ...mapPublicationHit(p, authorsByPmid.get(e.pmid), includeImpact, withAbstract.has(e.pmid)),
+      familyLabel: e.familyLabel,
+    });
+  }
+  return {
+    hits,
+    total,
+    totalAllTypes: allWork.allTypesCount,
+    totalResearchOnly: allWork.researchCount,
+    page,
+    pageSize,
   };
 }
 

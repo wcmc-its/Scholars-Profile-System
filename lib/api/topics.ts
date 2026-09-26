@@ -745,6 +745,10 @@ export type TopicPublicationHit = {
    * null automatically (Prisma `SetNull` onDelete + relation include).
    */
   topTopic: { id: string; label: string } | null;
+  /** The row's primary subtopic within this topic (the rail's grain), for the
+   *  feed's per-row "· {subarea}" label (TAXONOMY_FEED_LOAD_MORE). Null when
+   *  the pub has none. */
+  primarySubtopicId: string | null;
 };
 
 export type TopicPublicationsResult = {
@@ -844,6 +848,10 @@ export async function getTopicPublications(
      * same empty result (no existence leak). The route validates the shape.
      */
     cwid?: string;
+    /** TAXONOMY_FEED_LOAD_MORE — rows per page (the route validates a whole
+     *  number of 20-row chunks, at most 200). `page` stays 0-indexed in units
+     *  of this size. Default 20. */
+    pageSize?: number;
   },
   now: Date = new Date(),
 ): Promise<TopicPublicationsResult | null> {
@@ -865,6 +873,7 @@ export async function getTopicPublications(
   const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
 
   const page = Math.max(0, opts.page ?? 0);
+  const pageSize = opts.pageSize ?? TOPIC_PUBLICATIONS_PAGE_SIZE;
   const filter = opts.filter ?? "research_articles_only";
   const subtopicFilter = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
   // Issue #326 — `displayThreshold` is nullable in the catalog (NULL =
@@ -965,7 +974,7 @@ export async function getTopicPublications(
             { publication: { impactScore: "desc" as const } },
             { year: "desc" as const },
           ];
-  const skip = page * TOPIC_PUBLICATIONS_PAGE_SIZE;
+  const skip = page * pageSize;
   const pubSelectFields = {
     pmid: true,
     title: true,
@@ -1008,7 +1017,7 @@ export async function getTopicPublications(
     prisma.publicationTopic.findMany({
       where: baseWhere,
       skip,
-      take: TOPIC_PUBLICATIONS_PAGE_SIZE,
+      take: pageSize,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       orderBy: orderBy as any,
       distinct: ["pmid"],
@@ -1086,7 +1095,7 @@ export async function getTopicPublications(
       also: parentTierAlsoCount,
     },
     page,
-    pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
+    pageSize,
   };
 }
 
@@ -1165,6 +1174,7 @@ function mapToTopicPublicationHit(
     authors: wcmAuthors ?? [],
     hasAbstract,
     topTopic,
+    primarySubtopicId: typeof r.primarySubtopicId === "string" ? r.primarySubtopicId : null,
   };
 }
 
