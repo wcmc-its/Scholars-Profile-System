@@ -18,6 +18,7 @@ import { FamilyPublicationFeed } from "@/components/method/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
 import {
   SCHOLAR_FILTER_PARAM,
+  ScholarFilterAnnouncer,
   ScholarFilterChip,
   useScholarFilter,
 } from "@/components/taxonomy/scholar-filter";
@@ -231,6 +232,7 @@ function FamilyScholarFilterPanel({
           onRosterLoaded: filter.onRosterLoaded,
         }}
       />
+      <ScholarFilterAnnouncer message={filter.announcement} />
       {filter.active && <ScholarFilterChip scholar={filter.active} onClear={filter.clear} />}
       <FamilyPublicationFeed
         supercategorySlug={supercategorySlug}

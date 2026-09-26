@@ -45,7 +45,10 @@ describe("ScholarCardGrid", () => {
   it("has a narrow-viewport plain link and an md+ link per card", () => {
     render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(2)]} />);
     const [narrow, wide] = cardLinks();
-    expect(narrow.className).toContain("md:hidden");
+    // The narrow copy must be `flex` (not the default inline <a>) or the
+    // avatar + text stack vertically and min-h-11 / w-full do nothing.
+    expect(narrow.className.split(/\s+/)).toEqual(expect.arrayContaining(["flex", "md:hidden"]));
+    expect(narrow.className.split(/\s+/)).not.toContain("hidden");
     expect(wide.className).toContain("hidden md:flex");
   });
 

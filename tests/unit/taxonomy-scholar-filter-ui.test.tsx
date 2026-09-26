@@ -116,6 +116,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The chip must not be its own status region (it holds a button + link and
+ *  is inserted already filled); announcements go to the persistent region. */
+function chip_hasNoStatusRole(): boolean {
+  return screen.getByTestId("scholar-filter-chip").getAttribute("role") === null;
+}
+
 describe("topic: pick-to-filter subarea scholars", () => {
   it("toggle: aria-pressed, dims the others, filters the feed, chip + profile link, URL", async () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
@@ -123,7 +129,7 @@ describe("topic: pick-to-filter subarea scholars", () => {
     const alpha = await screen.findByRole("button", { name: /Test Alpha/ });
     expect(alpha.getAttribute("aria-pressed")).toBe("false");
     // The profile link is separate from the toggle.
-    const profile = screen.getByRole("link", { name: "View Test Alpha's profile" });
+    const profile = screen.getByRole("link", { name: "View profile of Test Alpha" });
     expect(profile.getAttribute("href")).toBe("/test-alpha");
     expect(alpha.contains(profile)).toBe(false);
 
@@ -133,7 +139,13 @@ describe("topic: pick-to-filter subarea scholars", () => {
     const cards = screen.getAllByTestId("scholar-pick-card");
     expect(cards[0].getAttribute("data-dimmed")).toBeNull();
     expect(cards[1].getAttribute("data-dimmed")).toBe("true");
-    expect(cards[1].className).toContain("opacity-60");
+    // Dimming is avatar-only; the card itself keeps full-contrast text.
+    expect(cards[1].className).not.toContain("opacity");
+    expect(cards[1].querySelector("[class*='opacity-40']")).not.toBeNull();
+    expect(screen.getByTestId("scholar-filter-status").textContent).toBe(
+      "Showing publications by Test Alpha",
+    );
+    expect(chip_hasNoStatusRole()).toBe(true);
     const chip = screen.getByTestId("scholar-filter-chip");
     expect(within(chip).getByText("Showing publications by")).toBeTruthy();
     expect(
@@ -156,6 +168,12 @@ describe("topic: pick-to-filter subarea scholars", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear scholar filter" }));
     expect(feed()).toBe("s1|none");
     expect(window.location.search).toBe("");
+    // Focus returns to the card that set the filter, not <body>, and the
+    // always-mounted live region announces the change.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Test Beta/ }));
+    expect(screen.getByTestId("scholar-filter-status").textContent).toBe(
+      "Showing all publications",
+    );
     expect(screen.getAllByRole("button", { pressed: false })).toBeTruthy();
   });
 

@@ -76,7 +76,7 @@ export function ScholarCardGrid({
         {viewAll && viewAll.count > 0 && (
           <a
             href={viewAll.href}
-            className="ml-auto text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            className="text-apollo-slate ml-auto inline-flex min-h-11 items-center text-sm underline-offset-4 hover:underline sm:min-h-0"
           >
             View all {viewAll.count.toLocaleString()} {viewAll.count === 1 ? "scholar" : "scholars"}{" "}
             →
@@ -86,7 +86,7 @@ export function ScholarCardGrid({
       <ul className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3.5 lg:grid-cols-3">
         {shown.map((s) => (
           <li key={s.cwid} className="min-w-0">
-            <ScholarCardLink scholar={s} className="md:hidden" />
+            <ScholarCardLink scholar={s} className="flex md:hidden" />
             <WithPopover scholar={s} popover={popover}>
               <ScholarCardLink scholar={s} className="hidden md:flex" />
             </WithPopover>
@@ -164,7 +164,7 @@ function ScholarCardLink({ scholar, className }: { scholar: ScholarCardData; cla
               {areas.map((a) => (
                 <span
                   key={a}
-                  className="bg-muted text-foreground max-w-full truncate rounded-full px-2 py-0.5 text-[11.5px] leading-snug"
+                  className="bg-apollo-surface-2 text-foreground max-w-full truncate rounded-full px-2 py-0.5 text-[11.5px] leading-snug"
                 >
                   {a}
                 </span>

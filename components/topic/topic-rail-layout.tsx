@@ -11,6 +11,7 @@ import { PublicationFeed } from "@/components/topic/publication-feed";
 import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
 import {
   SCHOLAR_FILTER_PARAM,
+  ScholarFilterAnnouncer,
   ScholarFilterChip,
   useScholarFilter,
 } from "@/components/taxonomy/scholar-filter";
@@ -148,6 +149,7 @@ function TopicScholarFilterPanel({
           }}
         />
       )}
+      <ScholarFilterAnnouncer message={filter.announcement} />
       {filter.active && <ScholarFilterChip scholar={filter.active} onClear={filter.clear} />}
       <PublicationFeed
         topicSlug={topicSlug}
