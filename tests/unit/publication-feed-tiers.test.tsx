@@ -1,6 +1,6 @@
 /**
  * Component tests for the two-tier display and inline best-fit label on
- * `components/topic/publication-feed.tsx` for #326 + #327, refined to use
+ * the topic feed (`TopicPublicationFeed`, components/taxonomy/publication-feed.tsx) for #326 + #327, refined to use
  * a top-of-list scope select (replaces the prior bottom disclosure button)
  * and the "Best fit:" copy on its own row.
  *
@@ -30,7 +30,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { PublicationFeed } from "@/components/topic/publication-feed";
+import { TopicPublicationFeed as PublicationFeed } from "@/components/taxonomy/publication-feed";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
 
 // next/link works in jsdom but its prefetch path is noisy; stub to a plain

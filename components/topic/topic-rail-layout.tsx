@@ -7,7 +7,7 @@
  */
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
-import { PublicationFeed } from "@/components/topic/publication-feed";
+import { TopicPublicationFeed } from "@/components/taxonomy/publication-feed";
 import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
 
 export type SubtopicRailItem = {
@@ -87,7 +87,7 @@ export function TopicRailLayout({
                 variant={scholarNames ? "names" : "inline"}
               />
             )}
-            <PublicationFeed
+            <TopicPublicationFeed
               topicSlug={topicSlug}
               activeSubtopic={activeSubtopic}
             />

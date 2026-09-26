@@ -17,14 +17,12 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
   usePathname: () => "/",
 }));
-vi.mock("@/components/topic/publication-feed", () => ({
-  PublicationFeed: (props: Record<string, unknown>) => (
+vi.mock("@/components/taxonomy/publication-feed", () => ({
+  TopicPublicationFeed: (props: Record<string, unknown>) => (
     <div data-testid="feed" data-props={Object.keys(props).sort().join(",")}>
       {(props.activeSubtopic as string | null) ?? "all"}
     </div>
   ),
-}));
-vi.mock("@/components/method/publication-feed", () => ({
   FamilyPublicationFeed: (props: Record<string, unknown>) => (
     <div data-testid="feed" data-props={Object.keys(props).sort().join(",")}>
       {props.familyLabel as string}

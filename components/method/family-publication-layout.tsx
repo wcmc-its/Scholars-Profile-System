@@ -7,7 +7,7 @@
  * family rail + panel lives in `supercategory-rail-layout.tsx`.
  */
 import { Suspense } from "react";
-import { FamilyPublicationFeed } from "@/components/method/publication-feed";
+import { FamilyPublicationFeed } from "@/components/taxonomy/publication-feed";
 
 export function FamilyPublicationLayout({
   supercategorySlug,

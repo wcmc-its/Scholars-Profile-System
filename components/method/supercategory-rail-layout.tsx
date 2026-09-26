@@ -14,7 +14,7 @@
  */
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
-import { FamilyPublicationFeed } from "@/components/method/publication-feed";
+import { FamilyPublicationFeed } from "@/components/taxonomy/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { familySegmentFor, resolveFamilyParam } from "@/lib/method-url";

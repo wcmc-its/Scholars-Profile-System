@@ -11,7 +11,7 @@ const mockGet = vi.fn();
 vi.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: mockGet }),
 }));
-vi.mock("@/components/method/publication-feed", () => ({
+vi.mock("@/components/taxonomy/publication-feed", () => ({
   FamilyPublicationFeed: () => <div data-testid="feed" />,
 }));
 

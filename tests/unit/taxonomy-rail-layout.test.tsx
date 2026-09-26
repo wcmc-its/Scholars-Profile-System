@@ -12,8 +12,8 @@ const mockGet = vi.fn();
 vi.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: mockGet }),
 }));
-vi.mock("@/components/topic/publication-feed", () => ({
-  PublicationFeed: ({ activeSubtopic }: { activeSubtopic: string | null }) => (
+vi.mock("@/components/taxonomy/publication-feed", () => ({
+  TopicPublicationFeed: ({ activeSubtopic }: { activeSubtopic: string | null }) => (
     <div data-testid="feed">{activeSubtopic ?? "all"}</div>
   ),
 }));
