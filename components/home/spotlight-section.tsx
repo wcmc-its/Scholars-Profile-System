@@ -121,7 +121,7 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
   // Default <a> cursor handles the pointer state.
   // Land the user on the publication feed for the requested subtopic — not at
   // the top of the topic page. The topic page exposes a stable
-  // id="publications" anchor on the SubtopicPublicationLayout root (#3).
+  // id="publications" anchor on the section wrapping TopicRailLayout (#3).
   const subtopicBase = `/topics/${card.parentTopicSlug}?subtopic=${card.subtopicId}`;
   const parentHref = `/topics/${card.parentTopicSlug}`;
   // #2218 — null counts mean the (parent, subtopic) pair has no aggregate row:

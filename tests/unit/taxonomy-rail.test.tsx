@@ -142,6 +142,38 @@ describe("TaxonomyRail (subarea configuration)", () => {
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
+  it("showFilter={false} renders no filter input and lists every item", () => {
+    render(
+      <TaxonomyRail
+        items={subtopics.map((s) => ({ id: s.id, label: s.displayName, count: s.pubCount }))}
+        selectedId={null}
+        onSelect={vi.fn()}
+        railLabel="Related families"
+        headerText="RELATED FAMILIES"
+        filterPlaceholder="Filter families…"
+        showFilter={false}
+        filter="zzz"
+        noMatchNoun="families"
+      />,
+    );
+    expect(screen.queryByRole("textbox")).toBeNull();
+    for (const s of subtopics) expect(screen.getByText(s.displayName)).toBeTruthy();
+  });
+
+  it("formats plain counts with thousands separators (matches the mobile trigger)", () => {
+    render(
+      <SubtopicRail
+        subtopics={subtopics}
+        activeSubtopic={null}
+        onSelect={vi.fn()}
+        allRow={{ label: "All subareas", count: 12345 }}
+      />,
+    );
+    expect(screen.getByText("All subareas").closest("button")!.textContent).toContain(
+      (12345).toLocaleString(),
+    );
+  });
+
   it("hides the 'All' row while the filter has text", () => {
     render(
       <SubtopicRail

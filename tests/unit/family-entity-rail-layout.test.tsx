@@ -71,4 +71,12 @@ describe("FamilyEntityRailLayout", () => {
     expect(row().getAttribute("aria-current")).toBeNull();
     expect(screen.getByTestId("taxonomy-rail-trigger").textContent).toContain("All cell lines");
   });
+
+  it("mobile eyebrow is the singular kind noun, like Subarea / Family", () => {
+    mockGet.mockReturnValue(null);
+    renderIt();
+    const trigger = screen.getByTestId("taxonomy-rail-trigger");
+    expect(trigger.textContent).toMatch(/^Cell line/);
+    expect(trigger.textContent).not.toMatch(/^Cell lines/);
+  });
 });

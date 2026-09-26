@@ -16,7 +16,7 @@
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
-import { entityKindNoun } from "@/lib/methods/entity-kind-noun";
+import { entityKindNoun, entityKindNounForCount } from "@/lib/methods/entity-kind-noun";
 import type { CellLineEntity } from "@/lib/api/methods";
 
 /** CellLineEntity → rail row: lineage/organism descriptor beneath the label,
@@ -68,7 +68,12 @@ export function FamilyEntityRailLayout({
         noMatchNoun: nounLower,
         variant: "captioned",
       }}
-      mobile={{ eyebrow: noun, allLabel: `All ${nounLower}` }}
+      // Singular eyebrow, matching "Subarea" / "Family" ("Cell line").
+      mobile={{
+        eyebrow: entityKindNounForCount(entities[0]?.dominantKind, 1),
+        allLabel: `All ${nounLower}`,
+        countNoun: "papers",
+      }}
     >
       {() => (
         <FamilyPublicationLayout

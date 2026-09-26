@@ -60,6 +60,7 @@ export type RailLayoutProps = {
     railLabel: string;
     headerText: string;
     filterPlaceholder: string;
+    showFilter?: boolean;
     noMatchNoun: string;
     allRow?: TaxonomyRailAllRow;
     lessCommonThreshold?: number;
@@ -73,6 +74,8 @@ export type RailLayoutProps = {
     allLabel: string;
     /** Count shown when nothing is selected (omit when no honest total). */
     allCount?: number | null;
+    /** Screen-reader unit read after the trigger's count. Default "publications". */
+    countNoun?: string;
   };
   /** Prefix for the results region id (`${idPrefix}-results`). */
   idPrefix: string;
@@ -119,7 +122,21 @@ function RailLayoutInner({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const resultsRef = useRef<HTMLDivElement>(null);
+  const sheetBodyRef = useRef<HTMLDivElement>(null);
   const focusResultsOnCloseRef = useRef(false);
+
+  // The sheet exists only below lg. If the viewport grows past lg while it is
+  // open (an iPad rotating to landscape), `lg:hidden` hides the content but the
+  // overlay, scroll lock and focus trap would stay, so close it instead.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => {
+      if (mq.matches) setSheetOpen(false);
+    };
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
 
   // Scroll the section into view when a deep-link resolves, once per distinct
   // requested value. The URL fragment alone is unreliable: links that set the
@@ -157,7 +174,15 @@ function RailLayoutInner({
     [paramKey, serializeParam, clearParamsOnChange, urlHash],
   );
 
-  const selectedItem = selectedId ? items.find((it) => it.id === selectedId) ?? null : null;
+  // Clear × unmounts itself (the subhead goes away), so move focus to the
+  // results region rather than letting it drop to <body>, and announce it.
+  const clear = useCallback(() => {
+    select(null);
+    setAnnouncement(`Showing ${mobile.allLabel.toLowerCase()}`);
+    resultsRef.current?.focus({ preventScroll: true });
+  }, [select, mobile.allLabel]);
+
+  const selectedItem = selectedId ? (items.find((it) => it.id === selectedId) ?? null) : null;
 
   const selectFromSheet = useCallback(
     (id: string | null) => {
@@ -187,10 +212,10 @@ function RailLayoutInner({
 
   return (
     <div className="mt-16">
-      <hr className="mb-10 border-border" />
+      <hr className="border-border mb-10" />
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
         {hasItems && (
-          <div className="hidden lg:block lg:w-[280px] lg:shrink-0 lg:self-start lg:sticky lg:top-[84px]">
+          <div className="hidden lg:sticky lg:top-[84px] lg:block lg:w-[280px] lg:shrink-0 lg:self-start">
             <ScrollFade viewportClassName="lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
               <TaxonomyRail {...railProps} onSelect={select} />
             </ScrollFade>
@@ -201,20 +226,21 @@ function RailLayoutInner({
             <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
               <SheetTrigger
                 data-testid="taxonomy-rail-trigger"
-                className="flex min-h-14 w-full items-center justify-between gap-3 rounded-md border border-border border-l-[3px] border-l-[var(--color-primary-cornell-red)] bg-background px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="border-border bg-background focus-visible:ring-ring flex min-h-14 w-full items-center justify-between gap-3 rounded-md border border-l-[3px] border-l-[var(--color-primary-cornell-red)] px-3 py-2 text-left focus-visible:ring-2 focus-visible:outline-none"
               >
                 <span className="flex min-w-0 flex-col gap-0.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <span className="text-muted-foreground text-[10px] font-semibold tracking-wide uppercase">
                     {mobile.eyebrow}
                   </span>
-                  <span className="text-[15px] font-semibold leading-snug [overflow-wrap:anywhere]">
+                  <span className="text-[15px] leading-snug font-semibold [overflow-wrap:anywhere]">
                     {triggerLabel}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
                   {typeof triggerCount === "number" && (
-                    <span className="text-xs tabular-nums text-muted-foreground">
+                    <span className="text-muted-foreground text-xs tabular-nums">
                       {triggerCount.toLocaleString()}
+                      <span className="sr-only"> {mobile.countNoun ?? "publications"}</span>
                     </span>
                   )}
                   <span className="text-xs font-semibold text-[var(--color-primary-cornell-red)]">
@@ -229,7 +255,17 @@ function RailLayoutInner({
               <SheetContent
                 side="left"
                 aria-describedby={undefined}
-                className="gap-0 p-0 lg:hidden [&_[data-slot=sheet-close-icon]]:top-1.5 [&_[data-slot=sheet-close-icon]]:right-1.5 [&_[data-slot=sheet-close-icon]]:flex [&_[data-slot=sheet-close-icon]]:size-11 [&_[data-slot=sheet-close-icon]]:items-center [&_[data-slot=sheet-close-icon]]:justify-center [&_[data-slot=sheet-close-icon]_svg]:size-5"
+                className="gap-0 p-0 motion-reduce:animate-none! motion-reduce:transition-none! lg:hidden [&_[data-slot=sheet-close-icon]]:top-1.5 [&_[data-slot=sheet-close-icon]]:right-1.5 [&_[data-slot=sheet-close-icon]]:flex [&_[data-slot=sheet-close-icon]]:size-11 [&_[data-slot=sheet-close-icon]]:items-center [&_[data-slot=sheet-close-icon]]:justify-center [&_[data-slot=sheet-close-icon]_svg]:size-5"
+                onOpenAutoFocus={(e) => {
+                  // Land on the current row, not the filter input: focusing the
+                  // input pops the soft keyboard over the list on every open.
+                  const target = sheetBodyRef.current?.querySelector<HTMLElement>(
+                    'button[aria-current="true"]',
+                  );
+                  if (!target) return;
+                  e.preventDefault();
+                  target.focus();
+                }}
                 onCloseAutoFocus={(e) => {
                   if (!focusResultsOnCloseRef.current) return;
                   focusResultsOnCloseRef.current = false;
@@ -244,7 +280,7 @@ function RailLayoutInner({
                 <SheetHeader className="min-h-14 justify-center pr-14">
                   <SheetTitle>{rail.railLabel}</SheetTitle>
                 </SheetHeader>
-                <div className="overflow-y-auto p-4">
+                <div ref={sheetBodyRef} className="overflow-y-auto p-4">
                   <TaxonomyRail
                     {...railProps}
                     onSelect={selectFromSheet}
@@ -263,6 +299,8 @@ function RailLayoutInner({
           id={resultsId}
           ref={resultsRef}
           tabIndex={-1}
+          role="region"
+          aria-label={`Results: ${subhead?.title ?? triggerLabel}`}
           className={`min-w-0 flex-1 scroll-mt-20 outline-none ${
             hasItems ? "lg:border-l-[3px] lg:border-[var(--color-primary-cornell-red)] lg:pl-6" : ""
           }`}
@@ -270,14 +308,14 @@ function RailLayoutInner({
           {subhead && (
             <header className="mb-4">
               <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                <h2 className="min-w-0 text-xl font-semibold leading-tight [overflow-wrap:anywhere]">
+                <h2 className="min-w-0 text-xl leading-tight font-semibold [overflow-wrap:anywhere]">
                   {subhead.title}
                 </h2>
                 <button
                   type="button"
-                  onClick={() => select(null)}
+                  onClick={clear}
                   aria-label={`Clear ${subhead.title}, show ${mobile.allLabel.toLowerCase()}`}
-                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background px-2.5 text-[13px] text-muted-foreground hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] max-lg:h-11 max-lg:px-3.5"
+                  className="border-border bg-background text-muted-foreground inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[13px] hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] max-lg:h-11 max-lg:px-3.5"
                 >
                   Clear
                   <X className="size-3.5" aria-hidden />

@@ -77,6 +77,9 @@ export type TaxonomyRailProps = {
   headerText: string;
   /** Filter input placeholder. */
   filterPlaceholder: string;
+  /** Render the filter input (default true). Off for short, non-filterable
+   *  rails; `filter` is then ignored and every item shows. */
+  showFilter?: boolean;
   /** Noun for the empty-filter message (e.g. "subareas", "cell lines"). */
   noMatchNoun: string;
   /** Optional "All …" row above the items. */
@@ -100,6 +103,7 @@ export function TaxonomyRail({
   railLabel,
   headerText,
   filterPlaceholder,
+  showFilter = true,
   noMatchNoun,
   allRow,
   lessCommonThreshold,
@@ -110,7 +114,7 @@ export function TaxonomyRail({
   idSuffix = "",
 }: TaxonomyRailProps) {
   const [ownFilter, setOwnFilter] = useState("");
-  const filter = controlledFilter ?? ownFilter;
+  const filter = showFilter ? (controlledFilter ?? ownFilter) : "";
   const setFilter = onFilterChange ?? setOwnFilter;
   const filterLower = filter.trim().toLowerCase();
   const touch = size === "touch";
@@ -162,8 +166,8 @@ export function TaxonomyRail({
         }`}
         aria-label={ariaLabel ?? `${count.toLocaleString()} ${countLabel ?? "pubs"}`}
       >
-        <span className="block text-sm font-medium leading-none">{count.toLocaleString()}</span>
-        <span className="mt-0.5 block text-[10px] uppercase tracking-wide text-muted-foreground/80">
+        <span className="block text-sm leading-none font-medium">{count.toLocaleString()}</span>
+        <span className="text-muted-foreground/80 mt-0.5 block text-[10px] tracking-wide uppercase">
           {countLabel ?? "pubs"}
         </span>
       </span>
@@ -174,7 +178,7 @@ export function TaxonomyRail({
         }`}
         aria-label={ariaLabel}
       >
-        {count}
+        {count.toLocaleString()}
       </span>
     );
 
@@ -186,7 +190,7 @@ export function TaxonomyRail({
             {it.label}
           </div>
         ) : (
-          <div className="text-base break-words leading-snug [overflow-wrap:anywhere]">
+          <div className="text-base leading-snug [overflow-wrap:anywhere] break-words">
             {it.label}
           </div>
         )}
@@ -196,7 +200,7 @@ export function TaxonomyRail({
           // ScrollArea (a shrink-to-fit `display:table` viewport), a nowrap
           // line expands the row to the full un-truncated width and pushes the
           // count off the right edge (the original "count clipped" bug).
-          <div className="mt-0.5 line-clamp-1 text-xs font-normal text-muted-foreground">
+          <div className="text-muted-foreground mt-0.5 line-clamp-1 text-xs font-normal">
             {it.descriptor}
           </div>
         )}
@@ -209,38 +213,40 @@ export function TaxonomyRail({
 
   return (
     <aside className="w-full" aria-label={railLabel}>
-      <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="text-muted-foreground mb-3 text-xs font-semibold tracking-wider uppercase">
         {headerText}
       </div>
-      <div className="relative mb-3">
-        <Input
-          id={filterId}
-          type="text"
-          aria-label={filterPlaceholder.replace(/…$/, "")}
-          placeholder={filterPlaceholder}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className={touch ? "pr-11" : "pr-8"}
-        />
-        {filter.length > 0 && (
-          <button
-            type="button"
-            aria-label="Clear filter"
-            aria-controls={filterId}
-            onClick={() => setFilter("")}
-            className={
-              touch
-                ? "absolute right-0 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center text-muted-foreground"
-                : "absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-            }
-          >
-            <X className="size-3.5" />
-          </button>
-        )}
-      </div>
+      {showFilter && (
+        <div className="relative mb-3">
+          <Input
+            id={filterId}
+            type="text"
+            aria-label={filterPlaceholder.replace(/…$/, "")}
+            placeholder={filterPlaceholder}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className={touch ? "pr-11" : "pr-8"}
+          />
+          {filter.length > 0 && (
+            <button
+              type="button"
+              aria-label="Clear filter"
+              aria-controls={filterId}
+              onClick={() => setFilter("")}
+              className={
+                touch
+                  ? "text-muted-foreground absolute top-1/2 right-0 flex size-11 -translate-y-1/2 items-center justify-center"
+                  : "text-muted-foreground absolute top-1/2 right-2 -translate-y-1/2"
+              }
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {visible.length === 0 ? (
-        <div className="py-4 text-center text-sm italic text-muted-foreground">
+        <div className="text-muted-foreground py-4 text-center text-sm italic">
           No {noMatchNoun} match &ldquo;{filter}&rdquo;
         </div>
       ) : (
@@ -256,7 +262,7 @@ export function TaxonomyRail({
                   aria-current={selectedId === null ? "true" : undefined}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="text-base break-words leading-snug">{allRow.label}</div>
+                    <div className="text-base leading-snug break-words">{allRow.label}</div>
                   </div>
                   {typeof allRow.count === "number" &&
                     renderCount(allRow.count, selectedId === null, allRow.countLabel, undefined)}
@@ -277,7 +283,7 @@ export function TaxonomyRail({
                   {showDivider && (
                     <div className="relative my-2 flex items-center">
                       <Separator className="flex-1" />
-                      <span className="absolute left-1/2 -translate-x-1/2 bg-background px-2 text-sm italic text-muted-foreground">
+                      <span className="bg-background text-muted-foreground absolute left-1/2 -translate-x-1/2 px-2 text-sm italic">
                         Less common
                       </span>
                     </div>

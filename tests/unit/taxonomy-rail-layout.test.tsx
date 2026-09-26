@@ -6,7 +6,7 @@
  * closes it and moves focus to the results region.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 const mockGet = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -98,6 +98,59 @@ describe("RailLayout (topic)", () => {
     expect(screen.getByTestId("feed").textContent).toBe("all");
     expect(screen.queryByRole("heading", { level: 2, name: "Cardiac Surgery" })).toBeNull();
     expect(replaceSpy).toHaveBeenLastCalledWith(null, "", "/topics/cardio");
+  });
+
+  it("Clear × moves focus to the named results region and announces, not to <body>", () => {
+    mockGet.mockReturnValue("s1");
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    const clear = screen.getByRole("button", { name: /^Clear Cardiac Surgery/ });
+    clear.focus();
+    fireEvent.click(clear);
+    const results = screen.getByRole("region", { name: "Results: All subareas" });
+    expect(results.id).toBe("publications-results");
+    expect(document.activeElement).toBe(results);
+    expect(screen.getByRole("status").textContent).toBe("Showing all subareas");
+  });
+
+  it("mobile: opening the sheet focuses the current row, not the filter input", async () => {
+    mockGet.mockReturnValue("s2");
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    fireEvent.click(screen.getByTestId("taxonomy-rail-trigger"));
+    const dialog = screen.getByRole("dialog");
+    const current = within(dialog).getByText("Oncology").closest("button")!;
+    await waitFor(() => expect(document.activeElement).toBe(current));
+  });
+
+  it("mobile: the sheet closes when the viewport grows past lg", async () => {
+    mockGet.mockReturnValue(null);
+    let listener: (() => void) | null = null;
+    const mq = {
+      matches: false,
+      addEventListener: (_: string, cb: () => void) => {
+        listener = cb;
+      },
+      removeEventListener: () => {
+        listener = null;
+      },
+    };
+    const orig = window.matchMedia;
+    window.matchMedia = vi.fn(() => mq) as unknown as typeof window.matchMedia;
+    try {
+      render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+      fireEvent.click(screen.getByTestId("taxonomy-rail-trigger"));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      mq.matches = true;
+      act(() => listener?.());
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    } finally {
+      window.matchMedia = orig;
+    }
+  });
+
+  it("mobile: the trigger count carries a screen-reader unit", () => {
+    mockGet.mockReturnValue(null);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    expect(screen.getByTestId("taxonomy-rail-trigger").textContent).toContain("284 publications");
   });
 
   it("does not scroll when the selection comes from a rail click", async () => {
