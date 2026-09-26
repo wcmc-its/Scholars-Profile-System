@@ -737,8 +737,11 @@ export class EdgeStack extends Stack {
       // filter needs no cache-key change.
       ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
-      // `page` (#824), `entity` (#1166) and `cwid` (TAXONOMY_SCHOLAR_CARDS). Same
-      // shape as `/api/topics/*/publications`.
+      // `page` (#824), `entity` (#1166), `cwid` (TAXONOMY_SCHOLAR_CARDS) and
+      // `limit` (TAXONOMY_FEED_LOAD_MORE). Same shape as
+      // `/api/topics/*/publications`. The glob also covers the category-wide
+      // feed `/api/methods/<sc>/all/publications` (TAXONOMY_FEED_LOAD_MORE),
+      // which sits at this depth on purpose so it needs no behavior of its own.
       ["/api/methods/*/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Org-unit (dept/division) method-facet roster -- `force-dynamic`,
       // `no-store`, reads repeatable `?method=` (+ `?page=`) for the #974 Phase 2
