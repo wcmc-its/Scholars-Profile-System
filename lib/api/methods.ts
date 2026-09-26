@@ -697,7 +697,7 @@ export async function getFamiliesForSupercategory(
   // inactive scholars. Measured on prod 2026-08-10: 131 of 786 families
   // over-counted, 176 phantom rows, worst family off by 5 (PET/CT announced 23
   // where 19 were live). That number is read aloud in the family rail's
-  // aria-label (`components/method/family-rail.tsx` — the visible figure is
+  // aria-label (`components/method/supercategory-rail-layout.tsx` — the visible figure is
   // `pubCount`), so a screen reader was told a false count. It is ALSO the hub's
   // sort key, which is why this moves 253 of 736 cards: ordering by a population
   // that includes dead scholars was itself wrong, so the reorder IS the fix. No

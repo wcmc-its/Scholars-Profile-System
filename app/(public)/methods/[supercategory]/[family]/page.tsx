@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { buildDefinedTermJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
@@ -15,8 +14,7 @@ import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
-import { CellLineRail } from "@/components/method/cell-line-rail";
-import { ScrollFade } from "@/components/ui/scroll-fade";
+import { FamilyEntityRailLayout } from "@/components/method/family-entity-rail-layout";
 import type { SpotlightData } from "@/lib/api/spotlight";
 import {
   Breadcrumb,
@@ -236,30 +234,16 @@ export default async function FamilyPage({
 
       <section id="publications" className="scroll-mt-20">
         {hasCellLines ? (
-          // #1166 Surface B — master-detail: the cell-line rail (left) drives the
-          // shared `?entity=` filter the feed (right) reads. Mirrors the
-          // supercategory layout's sticky-rail + cornell-red divider for parity.
-          <div className="mt-16">
-            <hr className="mb-10 border-border" />
-            <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
-              <div className="lg:w-[280px] lg:shrink-0 lg:self-start lg:sticky lg:top-[84px]">
-                <Suspense fallback={null}>
-                  <ScrollFade viewportClassName="lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
-                    <CellLineRail entities={cellLineEntities} />
-                  </ScrollFade>
-                </Suspense>
-              </div>
-              <div className="min-w-0 flex-1 lg:border-l-[3px] lg:border-[var(--color-primary-cornell-red)] lg:pl-6">
-                <FamilyPublicationLayout
-                  supercategorySlug={resolved.supercategorySlug}
-                  familySegment={resolved.familySlug}
-                  familyLabel={resolved.familyLabel}
-                  cellLineLabels={cellLineLabels}
-                  embedded
-                />
-              </div>
-            </div>
-          </div>
+          // #1166 Surface B: master-detail on the shared RailLayout. The entity
+          // rail (left, a sheet below lg) drives the `?entity=` filter the feed
+          // (right) reads.
+          <FamilyEntityRailLayout
+            entities={cellLineEntities}
+            supercategorySlug={resolved.supercategorySlug}
+            familySegment={resolved.familySlug}
+            familyLabel={resolved.familyLabel}
+            cellLineLabels={cellLineLabels}
+          />
         ) : (
           <FamilyPublicationLayout
             supercategorySlug={resolved.supercategorySlug}

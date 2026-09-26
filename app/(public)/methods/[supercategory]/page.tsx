@@ -12,8 +12,10 @@ import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
 import { isSupercategoryExportInRange } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
-import { SupercategoryFamilyLayout } from "@/components/method/family-publication-layout";
-import type { FamilyRailItem } from "@/components/method/family-rail";
+import {
+  SupercategoryRailLayout,
+  type FamilyRailItem,
+} from "@/components/method/supercategory-rail-layout";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -176,7 +178,7 @@ export default async function SupercategoryPage({
 
       {/* Two-level body: family rail + ?family= right panel. */}
       <section id="families" className="scroll-mt-20">
-        <SupercategoryFamilyLayout
+        <SupercategoryRailLayout
           supercategorySlug={sc.slug}
           supercategoryLabel={sc.label}
           families={railItems}
