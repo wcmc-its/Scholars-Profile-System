@@ -307,7 +307,8 @@ function RailLayoutInner({
           {subhead && (
             <header className="mb-7 flex flex-col gap-1.5" data-testid="rail-subhead">
               {/* Mockup subHeadStyle="Eyebrow": the item kind in WCM red. */}
-              <span className="text-xs font-semibold tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase">
+              {/* font-[600], not font-semibold: the token remap makes semibold 500. */}
+              <span className="text-xs font-[600] tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase">
                 {mobile.eyebrow}
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

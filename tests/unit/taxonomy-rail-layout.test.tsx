@@ -67,6 +67,9 @@ describe("RailLayout (topic)", () => {
     expect(eyebrow.className).toContain("uppercase");
     expect(eyebrow.className).toContain("text-[var(--color-primary-cornell-red)]");
     expect(eyebrow.className).toContain("tracking-[0.1em]");
+    // Mockup weight 600; `font-semibold` is remapped to 500 in globals.css.
+    expect(eyebrow.className).toContain("font-[600]");
+    expect(eyebrow.className).not.toContain("font-semibold");
     const h2 = within(row).getByRole("heading", { level: 2, name: "Cardiac Surgery" });
     expect(h2.className).toContain("font-serif");
     expect(h2.className).toContain("text-[28px]");
