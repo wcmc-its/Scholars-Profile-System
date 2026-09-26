@@ -129,6 +129,10 @@ describe("AdministratorsRoster — directory enrichment", () => {
     );
     // No email link when none resolved.
     expect(screen.queryByTestId("administrators-email-staff1")).toBeNull();
+    // The CWID shows once, not as both the name and the muted CWID line.
+    expect(
+      screen.getByTestId("administrators-person-staff1").textContent!.match(/staff1/g),
+    ).toHaveLength(1);
   });
 
   it("clears the note after enrichment when everyone resolves via the directory", async () => {

@@ -765,7 +765,8 @@ export function AdministratorsRoster({
             <span className="text-muted-foreground truncate text-[13px]">{person.title}</span>
           )}
           <span className="text-muted-foreground flex min-w-0 flex-wrap gap-x-2 text-xs">
-            <span className="font-mono">{entry.cwid}</span>
+            {/* A bare-CWID person already shows the CWID as the name. */}
+            {!person.isBareCwid && <span className="font-mono">{entry.cwid}</span>}
             {person.email && (
               <a
                 href={`mailto:${person.email}`}

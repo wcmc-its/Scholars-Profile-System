@@ -444,4 +444,29 @@ describe("Functional roles parity line", () => {
       ),
     );
   });
+  it("shows the CWID once for an unnamed holder, and Name + CWID for a named one", () => {
+    stubFetch(() => ({ ok: true }));
+    const named: GateHolder = { ...HOLDERS[1]!, cwid: "fake021", name: "Nia Named" };
+    renderRoster([], { gateHolders: [HOLDERS[1]!, named] });
+    openRolesTab();
+    const bare = screen.getByTestId("functional-roles-parity-gap-fake020");
+    expect(bare.textContent!.match(/fake020/g)).toHaveLength(1);
+    expect(bare.textContent).toMatch(/^fake020 · External Affairs/);
+    const withName = screen.getByTestId("functional-roles-parity-gap-fake021");
+    expect(withName.textContent).toMatch(/^Nia Named fake021 · External Affairs/);
+  });
+});
+
+describe("Functional roles registry row names", () => {
+  it("a row whose name is its CWID shows the CWID once; a named row shows Name + CWID", () => {
+    stubFetch(() => ({ ok: true }));
+    const bare = row({ cwid: "fake030", name: "fake030", title: null, granteeName: null });
+    renderRoster([MANUAL, bare]);
+    openRolesTab();
+    const bareRow = screen.getByTestId("functional-role-reporting:fake030:manual");
+    expect(bareRow.textContent!.match(/fake030/g)).toHaveLength(1);
+    const namedRow = screen.getByTestId("functional-role-reporting:fake001:manual");
+    expect(within(namedRow).getByText("Pat Example")).toBeTruthy();
+    expect(within(namedRow).getByText("fake001")).toBeTruthy();
+  });
 });
