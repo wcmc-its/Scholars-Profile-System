@@ -131,7 +131,7 @@ export function SupercategoryRailLayout({
               {/* #879: generated capability gloss, mirroring the standalone
                   family page. Em-dashes render verbatim (house style). */}
               {meta.definition && (
-                <div className="mt-2 max-w-prose">
+                <div className="max-w-[62ch]">
                   <p className="text-sm leading-relaxed text-muted-foreground">
                     {meta.definition}
                   </p>

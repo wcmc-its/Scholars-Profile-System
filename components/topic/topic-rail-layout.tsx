@@ -76,7 +76,9 @@ export function TopicRailLayout({
         const desc = byId(id)?.shortDescription ?? null;
         return {
           title: label,
-          body: desc ? <p className="mt-1 text-sm text-muted-foreground">{desc}</p> : null,
+          body: desc ? (
+            <p className="text-muted-foreground max-w-[62ch] text-[14.5px] text-pretty">{desc}</p>
+          ) : null,
         };
       }}
     >
