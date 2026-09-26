@@ -76,6 +76,8 @@ type Server = {
   parentAlso?: number;
   subtopicOf?: (i: number) => string | null;
   familyOf?: (i: number) => string;
+  /** Row indexes the server drops from a page (dark pubs filtered after paging). */
+  dropped?: Set<number>;
 };
 
 /** A fake feed route: pages `page`/`limit` over a synthetic ordered id list. */
@@ -93,8 +95,9 @@ function stubServer(s: Server) {
     const page = Number(q.get("page"));
     const start = (page - 1) * limit;
     const n = Math.max(0, Math.min(limit, total - start));
-    const hits = Array.from({ length: n }, (_, k) => {
-      const i = start + k;
+    const hits = Array.from({ length: n }, (_, k) => start + k)
+      .filter((i) => !s.dropped?.has(i))
+      .map((i) => {
       return {
         pmid: `${sortTag}-${tier ?? "any"}-${i}`,
         title: `Row ${i}`,
@@ -111,7 +114,7 @@ function stubServer(s: Server) {
         primarySubtopicId: s.subtopicOf ? s.subtopicOf(i) : null,
         familyLabel: s.familyOf ? s.familyOf(i) : undefined,
       };
-    });
+      });
     const body = {
       hits,
       total,
@@ -222,6 +225,25 @@ describe("topic feed, Load more", () => {
     await waitFor(() => expect(rows()).toHaveLength(45));
     expect(button()).toBeNull();
     expect(shownParam()).toBe("60");
+  });
+
+  it("a page short of rows (dark pubs dropped server-side) still advances by whole chunks", async () => {
+    const calls = stubServer({ strongly: 50, also: 0, dropped: new Set([3]) });
+    render(<TopicPublicationFeed topicSlug="cardio" activeSubtopic={null} loadMore />);
+    await waitFor(() => expect(rows()).toHaveLength(19));
+    expect(button()!.textContent).toBe("Show 20 more · 19 of 50");
+    fireEvent.click(button()!);
+    await waitFor(() => expect(rows()).toHaveLength(39));
+    expect(calls[1].searchParams.get("page")).toBe("2");
+    expect(shownParam()).toBe("40");
+  });
+
+  it("Show = Strongly: the denominator is the strongly count, the heading every tier", async () => {
+    stubServer({ strongly: 30, also: 20 });
+    render(<TopicPublicationFeed topicSlug="cardio" activeSubtopic={null} loadMore />);
+    await waitFor(() => expect(rows()).toHaveLength(20));
+    expect(screen.getByTestId("publications-count").textContent).toBe("50");
+    expect(button()!.textContent).toBe("Show 10 more · 20 of 30");
   });
 
   it("the button is full width and 44px tall below sm", async () => {
