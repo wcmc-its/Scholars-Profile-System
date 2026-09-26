@@ -552,23 +552,45 @@ export type SubtopicWithCount = {
   pubCount: number;
 };
 
+export type SubtopicRail = {
+  subtopics: SubtopicWithCount[];
+  /**
+   * DISTINCT pmids in the whole topic under the feed's default scope (research
+   * articles only, every relevance tier), INCLUDING pmids with no primary
+   * subtopic. This is the "All subareas" row, the topic page's
+   * Spotlight "View all N" and — by construction — the unfiltered feed's
+   * "Publications N" heading. Not a sum of the rows (open question 10).
+   */
+  totalPubCount: number;
+};
+
 /**
- * Returns all subtopics for a topic with pubCount per subtopic for rail ordering.
+ * The topic page's subarea rail: every subtopic with its pubCount, plus the
+ * topic-wide distinct total.
  *
- * Implements D-07: count by primarySubtopicId only (not the union with subtopicIds
- * JSON array) for query performance. Subtopics with pubCount 0 are excluded — the
- * Hierarchy ETL's subtopic catalog can carry entries no WCM paper actually lands
- * in (e.g. a niche conceptual slot ReciterAI discovered elsewhere in the corpus),
- * and listing those at "0" in the rail read as a data gap rather than the
- * legitimate empty long-tail entry it is.
+ * Count definition (Topic & Method refactor phase 4 — ONE definition shared by
+ * the rail row, the feed's "Publications N" heading and the Load more
+ * denominator): DISTINCT pmids, all relevance tiers, research articles only
+ * (the feed's default type filter, `FEED_EXCLUDED_TYPES`). Before this the rail
+ * counted every publication type while the feed defaulted to research articles,
+ * so the two numbers disagreed on every topic with letters/editorials.
  *
- * Design note: counting via primarySubtopicId only was chosen over the union of
- * primarySubtopicId + subtopicIds JSON array. The JSON array union approach was
- * considered and rejected — it requires application-side JSON parsing on every row
- * in the pool (O(n) per row), cannot be indexed, and the additional coverage
- * (secondary subtopics) is editorial value that doesn't justify the cost.
+ * Implements D-07: per-subtopic counts use primarySubtopicId only (not the
+ * union with the subtopicIds JSON array) for query performance. Subtopics with
+ * pubCount 0 are excluded — the Hierarchy ETL's subtopic catalog can carry
+ * entries no WCM paper actually lands in, and listing those at "0" read as a
+ * data gap rather than the legitimate empty long-tail entry it is.
+ *
+ * Cost (ISR path, #1514): still ONE groupBy. The research-type predicate is a
+ * to-one relation filter, i.e. a semi-join from each of the topic's
+ * publication_topic rows to `publication` by its primary key (eq_ref) — bounded
+ * by the same row set the groupBy already scans via the parent_topic_id
+ * indexes, never a fan-out join. It is the same predicate the feed route runs
+ * (`researchCond`) on every request. Dropping the `primarySubtopicId IS NOT
+ * NULL` filter adds the topic's no-subtopic rows to the result so the distinct
+ * total can be computed in the same pass instead of a second COUNT(DISTINCT).
  */
-export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicWithCount[] | null> {
+export async function getSubtopicRail(topicSlug: string): Promise<SubtopicRail | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
 
@@ -585,17 +607,21 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
 
   // #651 — group by (subtopic, pmid) and tally distinct pmids per subtopic.
   // `_count: { pmid: true }` counts publication_topic ROWS, which the
-  // (pmid, cwid, parent_topic_id) key inflates once per WCM co-author — so the
-  // rail count over-reported vs. the deduped feed (which uses distinct:
-  // ["pmid"]). No pmid maps to >1 primary_subtopic within a topic, so the
-  // per-subtopic tally is exact and the topic-header sum (page.tsx) stays free
-  // of double counting.
+  // (pmid, cwid, parent_topic_id) key inflates once per WCM co-author. No pmid
+  // maps to >1 primary_subtopic within a topic, so the per-subtopic tally is
+  // exact; the topic total is the distinct pmid set across every group
+  // (including the null-subtopic group).
   const countRows = await prisma.publicationTopic.groupBy({
     by: ["primarySubtopicId", "pmid"],
-    where: { parentTopicId: topicSlug, primarySubtopicId: { not: null } },
+    where: {
+      parentTopicId: topicSlug,
+      publication: { publicationType: { notIn: HARD_EXCLUDE_TYPES } },
+    },
   });
   const countMap = new Map<string, number>();
+  const allPmids = new Set<string>();
   for (const r of countRows) {
+    allPmids.add(r.pmid);
     if (r.primarySubtopicId) {
       countMap.set(r.primarySubtopicId, (countMap.get(r.primarySubtopicId) ?? 0) + 1);
     }
@@ -606,7 +632,7 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
   // (see assertSubtopicDisplayInvariants in etl/hierarchy). Runtime case-folding
   // can't recover semantic intent ("CAR T cell" vs. "Cat cell"), so we trust
   // the source rather than guess.
-  return catalog
+  const subtopics = catalog
     .map((s) => {
       const displayName = s.displayName?.trim() || s.label?.trim() || s.id;
       return {
@@ -623,6 +649,13 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
     })
     .filter((s) => s.pubCount > 0)
     .sort((a, b) => b.pubCount - a.pubCount);
+  return { subtopics, totalPubCount: allPmids.size };
+}
+
+/** The rail rows only (see `getSubtopicRail` for the count definition). */
+export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicWithCount[] | null> {
+  const rail = await getSubtopicRail(topicSlug);
+  return rail ? rail.subtopics : null;
 }
 
 export type TopicPublicationSort = "newest" | "most_cited" | "by_impact";
@@ -712,6 +745,10 @@ export type TopicPublicationHit = {
    * null automatically (Prisma `SetNull` onDelete + relation include).
    */
   topTopic: { id: string; label: string } | null;
+  /** The row's primary subtopic within this topic (the rail's grain), for the
+   *  feed's per-row "· {subarea}" label (TAXONOMY_FEED_LOAD_MORE). Null when
+   *  the pub has none. */
+  primarySubtopicId: string | null;
 };
 
 export type TopicPublicationsResult = {
@@ -811,6 +848,10 @@ export async function getTopicPublications(
      * same empty result (no existence leak). The route validates the shape.
      */
     cwid?: string;
+    /** TAXONOMY_FEED_LOAD_MORE — rows per page (the route validates a whole
+     *  number of 20-row chunks, at most 200). `page` stays 0-indexed in units
+     *  of this size. Default 20. */
+    pageSize?: number;
   },
   now: Date = new Date(),
 ): Promise<TopicPublicationsResult | null> {
@@ -832,6 +873,7 @@ export async function getTopicPublications(
   const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
 
   const page = Math.max(0, opts.page ?? 0);
+  const pageSize = opts.pageSize ?? TOPIC_PUBLICATIONS_PAGE_SIZE;
   const filter = opts.filter ?? "research_articles_only";
   const subtopicFilter = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
   // Issue #326 — `displayThreshold` is nullable in the catalog (NULL =
@@ -932,7 +974,7 @@ export async function getTopicPublications(
             { publication: { impactScore: "desc" as const } },
             { year: "desc" as const },
           ];
-  const skip = page * TOPIC_PUBLICATIONS_PAGE_SIZE;
+  const skip = page * pageSize;
   const pubSelectFields = {
     pmid: true,
     title: true,
@@ -975,7 +1017,7 @@ export async function getTopicPublications(
     prisma.publicationTopic.findMany({
       where: baseWhere,
       skip,
-      take: TOPIC_PUBLICATIONS_PAGE_SIZE,
+      take: pageSize,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       orderBy: orderBy as any,
       distinct: ["pmid"],
@@ -1053,7 +1095,7 @@ export async function getTopicPublications(
       also: parentTierAlsoCount,
     },
     page,
-    pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
+    pageSize,
   };
 }
 
@@ -1132,6 +1174,7 @@ function mapToTopicPublicationHit(
     authors: wcmAuthors ?? [],
     hasAbstract,
     topTopic,
+    primarySubtopicId: typeof r.primarySubtopicId === "string" ? r.primarySubtopicId : null,
   };
 }
 

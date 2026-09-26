@@ -1,6 +1,6 @@
 /**
  * Component tests for the two-tier display and inline best-fit label on
- * `components/topic/publication-feed.tsx` for #326 + #327, refined to use
+ * the topic feed (`TopicPublicationFeed`, components/taxonomy/publication-feed.tsx) for #326 + #327, refined to use
  * a top-of-list scope select (replaces the prior bottom disclosure button)
  * and the "Best fit:" copy on its own row.
  *
@@ -30,7 +30,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { PublicationFeed } from "@/components/topic/publication-feed";
+import { TopicPublicationFeed as PublicationFeed } from "@/components/taxonomy/publication-feed";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
 
 // next/link works in jsdom but its prefetch path is noisy; stub to a plain
@@ -492,12 +492,15 @@ describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
         hits: [makeHit({ pmid: "111" })],
         total: 28,
         tierTotals: { strongly: 28, also: 4 },
+        totalResearchOnly: 32,
       }),
     });
     renderFeed({ activeSubtopic: "s1" });
     const row = await screen.findByTestId("publications-heading-row");
     expect(within(row).getByRole("heading", { level: 3, name: "Publications" })).toBeTruthy();
-    await waitFor(() => expect(within(row).getByTestId("publications-count").textContent).toBe("28"));
+    // Phase 4 count definition: every relevance tier, distinct (32), not the
+    // strongly-only page total — the same number the rail row shows.
+    await waitFor(() => expect(within(row).getByTestId("publications-count").textContent).toBe("32"));
     expect(within(row).getByTestId("publications-count").className).toContain(
       "text-muted-foreground",
     );
@@ -511,25 +514,48 @@ describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
   });
 
-  it("the count follows the scope: 'All relevant' shows the combined tier total", async () => {
+  it("the count is the all-tier total under either Show option (rail == heading)", async () => {
     mockFetchByTier({
       strongly: makeTierResponse({
         hits: [makeHit({ pmid: "111" })],
         total: 3,
         tierTotals: { strongly: 3, also: 2 },
+        totalResearchOnly: 5,
       }),
       also: makeTierResponse({
         hits: [makeHit({ pmid: "222" })],
         total: 2,
         tierTotals: { strongly: 3, also: 2 },
+        totalResearchOnly: 5,
       }),
     });
     renderFeed();
-    await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("3"));
-    fireEvent.change(getShowSelect()!, { target: { value: "all" } });
     await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("5"));
+    // The Show options keep their per-tier counts.
+    expect(getShowSelect()!.textContent).toContain("Strongly relevant (3)");
+    expect(getShowSelect()!.textContent).toContain("All relevant (5)");
+    fireEvent.change(getShowSelect()!, { target: { value: "all" } });
+    await screen.findByRole("heading", { level: 4, name: "Also relevant" });
+    expect(screen.getByTestId("publications-count").textContent).toBe("5");
     // "Also relevant" sits one level under "Publications".
     expect(screen.getByRole("heading", { level: 4, name: "Also relevant" })).toBeTruthy();
+  });
+
+  it("a paper in both tiers (co-author scores straddle the threshold) is counted once", async () => {
+    // strongly 3 + also 2, but one pmid is in both tier counts: distinct is 4.
+    const resp = {
+      hits: [makeHit({ pmid: "111" })],
+      total: 3,
+      tierTotals: { strongly: 3, also: 2 },
+      totalResearchOnly: 4,
+      totalAllTypes: 6,
+    };
+    mockFetchByTier({ strongly: makeTierResponse(resp), also: makeTierResponse({ ...resp, total: 2 }) });
+    renderFeed();
+    await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("4"));
+    // Under "all publication types" the heading is that filter's distinct count.
+    fireEvent.click(await screen.findByText(/Show all publication types/));
+    await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("6"));
   });
 
   it("unselected topic: same 'Publications' heading (no 'Research articles in this area')", async () => {

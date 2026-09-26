@@ -67,7 +67,7 @@ const top = (n: number) =>
 vi.mock("@/lib/api/topics", () => ({
   getTopic: async () => ({ id: "cardio", label: "Cardio", description: null }),
   getTopScholarsForTopic: async () => top(7),
-  getSubtopicsForTopic: async () => [],
+  getSubtopicRail: async () => ({ subtopics: [], totalPubCount: 0 }),
   getDistinctScholarCountForTopic: async () => 42,
   fetchTopSubtopicsForScholars: h.fetchTopSubtopicsForScholars,
 }));

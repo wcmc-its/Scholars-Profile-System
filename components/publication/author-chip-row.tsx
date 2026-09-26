@@ -12,7 +12,7 @@
  * shown as a "+N more →" pill (no link target — non-blocking visual cue).
  *
  * Used by:
- *   - components/topic/publication-feed.tsx (topic page paginated feed)
+ *   - components/taxonomy/publication-feed.tsx (topic + method paginated feeds)
  *   - app/(public)/search/page.tsx (publication search results)
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";

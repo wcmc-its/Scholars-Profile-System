@@ -160,11 +160,17 @@ function findServerMutatingRoutes(dir: string): string[] {
   return [...new Set(out)];
 }
 
-/** A CloudFront PathPattern (exact, or trailing-`*` prefix glob) covers a route. */
+/** A CloudFront PathPattern covers a route. CloudFront's `*` matches any run
+ *  of characters (slashes included) anywhere in the pattern, so the family
+ *  feed's mid-pattern glob (`/api/methods/<*>/<*>/publications`) also covers a
+ *  static segment in that position (`/api/methods/<*>/all/publications`). A
+ *  route's own `*` (a dynamic segment) is tested as one opaque sample value,
+ *  which a pattern can only match through a `*` of its own, never a literal. */
 function behaviorCovers(pattern: string, route: string): boolean {
-  return pattern.endsWith("*")
-    ? route.startsWith(pattern.slice(0, -1))
-    : route === pattern;
+  const re = new RegExp(
+    "^" + pattern.split("*").map((lit) => lit.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$",
+  );
+  return re.test(route.replace(/\*/g, "\u0000dynamic\u0000"));
 }
 
 describe("EdgeStack", () => {

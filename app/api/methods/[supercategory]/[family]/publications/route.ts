@@ -13,7 +13,7 @@
  *   T-03-05-01 sort injection      → SORT_ALLOWLIST
  *   T-03-05-03 filter bypass       → FILTER_ALLOWLIST
  *   T-03-05-04 path traversal      → SUPERCATEGORY_SLUG_RE / FAMILY_SEGMENT_RE
- *   T-03-05-05 DoS via page        → MAX_PAGE clamp
+ *   T-03-05-05 DoS via page        → clampFeedPage (offset cap)
  *   T-03-05-06 input echo          → static error strings only
  *   T-03-05-07 tier bypass (#326)  → TIER_ALLOWLIST (no family tier today; a tier
  *                                    param, if present, is allow-list-validated
@@ -22,6 +22,8 @@
  *   scholar filter (TAXONOMY_SCHOLAR_CARDS) → CWID_PATTERN; the loader refuses
  *                                    unknown / inactive / #536-hidden cwids with
  *                                    the same empty feed. Flag off ⇒ ignored.
+ *   rows per page (TAXONOMY_FEED_LOAD_MORE) → `parseFeedLimit` (whole 20-row
+ *                                    chunks, at most 200). Flag off ⇒ ignored.
  *
  * The overlay gate (#800 suppression / #801 sensitivity) + master lens gate live
  * in the loader (`getFamilyPublications`), which returns null for a gated/unknown
@@ -39,7 +41,8 @@ import {
   type MethodPublicationFilter,
 } from "@/lib/api/methods";
 import { CWID_PATTERN } from "@/lib/cwid";
-import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { FEED_CHUNK, clampFeedPage, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +64,6 @@ const TIER_ALLOWLIST: ReadonlySet<string> = new Set(["strongly", "also"]);
 // underscore (the family-id suffix carries an underscore).
 const SUPERCATEGORY_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const FAMILY_SEGMENT_RE = /^[a-z0-9][a-z0-9_-]*$/;
-const MAX_PAGE = 500;
 // #1166 — a cell-line entity id is an opaque registry id: a canonical tool id
 // (`tool_000718`) or a minted parent id (`ent_<hex>`). Allow-list the shape so a
 // crafted value can never reach the query as anything but a bounded token.
@@ -100,13 +102,23 @@ export async function GET(
     return apiError("invalid tier", 400);
   }
 
+  let pageSize = FEED_CHUNK;
+  if (isTaxonomyFeedLoadMoreOn()) {
+    const limit = parseFeedLimit(sp.get("limit"));
+    if (limit === "invalid") {
+      return apiError("invalid limit", 400);
+    }
+    pageSize = limit;
+  }
+
   const pageStr = sp.get("page") ?? "1";
   const pageNum = parseInt(pageStr, 10);
   if (!Number.isFinite(pageNum) || pageNum < 1) {
     return apiError("invalid page", 400);
   }
-  // URL is 1-indexed; service is 0-indexed; clamp to MAX_PAGE.
-  const page = Math.min(pageNum, MAX_PAGE) - 1;
+  // URL is 1-indexed; service is 0-indexed; the depth cap bounds the OFFSET
+  // (page 500 at 20 rows), whatever the page size.
+  const page = clampFeedPage(pageNum, pageSize);
 
   // #1166 Surface B — optional cell-line filter. Validated against the opaque-id
   // shape; the loader additionally gates it on METHODS_LENS_CELL_LINE_ENTITIES and
@@ -140,7 +152,14 @@ export async function GET(
   const result = await getFamilyPublications(
     resolved.supercategory,
     resolved.familyLabel,
-    { sort, page, filter, entityId, ...(cwid ? { cwid } : {}) },
+    {
+      sort,
+      page,
+      filter,
+      entityId,
+      ...(cwid ? { cwid } : {}),
+      ...(pageSize !== FEED_CHUNK ? { pageSize } : {}),
+    },
   );
   if (result === null) {
     return apiError("family not found", 404);

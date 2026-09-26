@@ -17,14 +17,12 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
   usePathname: () => "/",
 }));
-vi.mock("@/components/topic/publication-feed", () => ({
-  PublicationFeed: (props: Record<string, unknown>) => (
+vi.mock("@/components/taxonomy/publication-feed", () => ({
+  TopicPublicationFeed: (props: Record<string, unknown>) => (
     <div data-testid="feed" data-props={Object.keys(props).sort().join(",")}>
       {(props.activeSubtopic as string | null) ?? "all"}
     </div>
   ),
-}));
-vi.mock("@/components/method/publication-feed", () => ({
   FamilyPublicationFeed: (props: Record<string, unknown>) => (
     <div data-testid="feed" data-props={Object.keys(props).sort().join(",")}>
       {props.familyLabel as string}
@@ -113,7 +111,7 @@ function expectNoPickUi() {
 describe("topic: subarea scholars as names", () => {
   it("'Scholars' h3 + count, then plain slate profile links (no avatars, no cards)", async () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} scholarNames />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={1} scholarNames />);
     const list = await screen.findByTestId("scholar-name-list");
     const h3 = within(list).getByRole("heading", { level: 3, name: "Scholars" });
     expect(h3.className).toContain("text-xl");
@@ -130,7 +128,7 @@ describe("topic: subarea scholars as names", () => {
   it("clicking a name is a profile link, never a filter (feed + URL unchanged)", async () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
     window.history.replaceState(null, "", "/topics/cardio?subtopic=s1");
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} scholarNames />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={1} scholarNames />);
     const alpha = await screen.findByRole("link", { name: "Test Alpha" });
     // jsdom cannot navigate; the default action is the profile href (asserted above).
     alpha.addEventListener("click", (e) => e.preventDefault());
@@ -145,7 +143,7 @@ describe("topic: subarea scholars as names", () => {
       k === "subtopic" ? "s1" : k === "scholar" ? "bbb2222" : null,
     );
     window.history.replaceState(null, "", "/topics/cardio?subtopic=s1&scholar=bbb2222");
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} scholarNames />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={1} scholarNames />);
     await screen.findByTestId("scholar-name-list");
     expect(mockGet.mock.calls.map((c) => c[0])).not.toContain("scholar");
     expect(feed()).toBe("s1");
@@ -157,7 +155,7 @@ describe("topic: subarea scholars as names", () => {
 
   it("flag off: today's middot name list, no names block", async () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
-    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} />);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={1} />);
     await screen.findAllByRole("link", { name: "Test Alpha" });
     expect(screen.queryByTestId("scholar-name-list")).toBeNull();
     expect(screen.getByText(/Researchers in Arrhythmia · 2/)).toBeTruthy();

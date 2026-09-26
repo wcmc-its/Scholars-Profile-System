@@ -9,14 +9,9 @@
  * sortable/paginated feed.
  *
  * Server Component-friendly: the publication hits arrive as a prop (no client
- * fetch). Each row reuses the same title→modal + author-chip + meta affordances
- * the family feed uses, so the two views read consistently.
+ * fetch). Each row is the shared feed `PubRow`, so the two views read the same.
  */
-import { AuthorChipRow } from "@/components/publication/author-chip-row";
-import { pubTitleProps } from "@/components/publication/pub-html";
-import { PublicationMeta } from "@/components/publication/publication-meta";
-import { usePublicationModal } from "@/components/publication/publication-modal";
-import { sanitizePubTitle } from "@/lib/utils";
+import { PubRow } from "@/components/taxonomy/publication-feed";
 import type { MethodPublicationHit } from "@/lib/api/methods";
 
 export function SupercategoryAllWorkFeed({
@@ -47,48 +42,9 @@ export function SupercategoryAllWorkFeed({
       </header>
       <ul className="divide-y divide-border">
         {pubs.map((h) => (
-          <AllWorkRow key={h.pmid} hit={h} />
+          <PubRow key={h.pmid} hit={h} />
         ))}
       </ul>
     </section>
-  );
-}
-
-function AllWorkRow({ hit }: { hit: MethodPublicationHit }) {
-  const { open: openModal } = usePublicationModal();
-  const titleHtml = sanitizePubTitle(hit.title);
-  return (
-    <li className="py-4">
-      <div className="line-clamp-2 font-semibold leading-snug">
-        <button
-          type="button"
-          onClick={() => openModal(hit.pmid)}
-          aria-haspopup="dialog"
-          {...pubTitleProps(titleHtml, "text-left hover:underline")}
-        />
-      </div>
-      {(hit.journal || hit.year) && (
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-          {hit.journal && (
-            <span
-              className="italic"
-              dangerouslySetInnerHTML={{ __html: sanitizePubTitle(hit.journal) }}
-            />
-          )}
-          {hit.journal && hit.year ? <span aria-hidden="true">·</span> : null}
-          {hit.year ? <span>{hit.year}</span> : null}
-        </div>
-      )}
-      <AuthorChipRow authors={hit.authors} pmid={hit.pmid} />
-      <PublicationMeta
-        citationCount={hit.citationCount}
-        impactScore={hit.impactScore}
-        impactJustification={null}
-        pmid={hit.pmid}
-        pmcid={hit.pmcid}
-        doi={hit.doi}
-        lazyAbstract={hit.hasAbstract}
-      />
-    </li>
   );
 }

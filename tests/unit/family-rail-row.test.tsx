@@ -16,7 +16,7 @@ import {
 import { entityRailRow } from "@/components/method/family-entity-rail-layout";
 import type { CellLineEntity } from "@/lib/api/methods";
 
-vi.mock("@/components/method/publication-feed", () => ({ FamilyPublicationFeed: () => null }));
+vi.mock("@/components/taxonomy/publication-feed", () => ({ FamilyPublicationFeed: () => null }));
 vi.mock("@/components/method/family-scholars-row", () => ({ FamilyScholarsRow: () => null }));
 vi.mock("@/components/method/supercategory-all-work-feed", () => ({
   SupercategoryAllWorkFeed: () => null,

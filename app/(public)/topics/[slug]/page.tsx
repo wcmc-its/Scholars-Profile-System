@@ -5,7 +5,7 @@ import { buildDefinedTermJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   getTopic,
   getTopScholarsForTopic,
-  getSubtopicsForTopic,
+  getSubtopicRail,
   getDistinctScholarCountForTopic,
   fetchTopSubtopicsForScholars,
 } from "@/lib/api/topics";
@@ -16,7 +16,7 @@ import {
   SCHOLAR_CARD_LIMIT,
   type ScholarCardData,
 } from "@/components/taxonomy/scholar-card-grid";
-import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { TopicRailLayout } from "@/components/topic/topic-rail-layout";
 import {
@@ -72,11 +72,11 @@ export default async function TopicPage({
   const topic = await loadTopic(slug);
   if (!topic) notFound();
 
-  const [topScholars, spotlightCards, subtopics, scholarCount] = await Promise.all([
+  const [topScholars, spotlightCards, subtopicRail, scholarCount] = await Promise.all([
     getTopScholarsForTopic(slug).catch(() => null),
     // Up to 9 cards, paged 3 at a time; ≤3 renders exactly as before.
     getSpotlightCardsForTopic(slug, { limit: TOPIC_SPOTLIGHT_POOL_MAX }).catch(() => null),
-    getSubtopicsForTopic(slug).catch(() => null),
+    getSubtopicRail(slug).catch(() => null),
     loadScholarCount(slug).catch(() => 0),
   ]);
 
@@ -100,8 +100,11 @@ export default async function TopicPage({
     }));
   }
 
-  const subtopicList = subtopics ?? [];
-  const totalPubsForStats = subtopicList.reduce((sum, s) => sum + s.pubCount, 0);
+  const subtopicList = subtopicRail?.subtopics ?? [];
+  // One count definition (phase 4): distinct research articles, every
+  // relevance tier — the "All subareas" row, the Spotlight "View all N" and
+  // the unfiltered feed's "Publications N" all read it.
+  const totalPubsForStats = subtopicRail?.totalPubCount ?? 0;
   const spotlightData = spotlightCards
     ? {
         cards: spotlightCards,
@@ -192,7 +195,9 @@ export default async function TopicPage({
         <TopicRailLayout
           topicSlug={slug}
           subtopics={subtopicList}
+          totalPubCount={totalPubsForStats}
           scholarNames={scholarCards}
+          loadMore={isTaxonomyFeedLoadMoreOn()}
         />
       </section>
     </main>
