@@ -15,6 +15,13 @@
  * pinned to the card bottom, and the 28px spotlight author chips. Topic and
  * methods pages pass no variant and keep the original rendering.
  *
+ * `paged` (topic page only): the pool may hold up to 9 cards, shown 3 at a
+ * time with an "n of m" position and round ‹ › buttons (wrap-around) in the
+ * header. With 3 or fewer cards the controls do not render and the surface is
+ * identical to the unpaged one. Paging swaps content with no animation, so
+ * reduced-motion needs nothing extra; the position text is a polite live
+ * region so a page change is announced.
+ *
  * Visual contract: `.planning/source-docs/spotlight-departments-and-friends.html`.
  * Data contract: `SpotlightData` from `lib/api/spotlight.ts`.
  *
@@ -22,7 +29,9 @@
  * division. The home-page Spotlight (eight-subtopic carousel) is a
  * different surface and is not affected.
  */
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { pubTitleProps } from "@/components/publication/pub-html";
 import { htmlToPlainText, sanitizePubTitle } from "@/lib/utils";
@@ -38,16 +47,42 @@ function stripTrailingPeriod(html: string): string {
 
 export type SpotlightVariant = "default" | "unit";
 
+/** Cards per page when `paged`. */
+export const SPOTLIGHT_PAGE_SIZE = 3;
+
 export function Spotlight({
   data,
   variant = "default",
+  paged = false,
 }: {
   data: SpotlightData | null;
   variant?: SpotlightVariant;
+  /** Page the pool 3 at a time with prev/next controls (default variant only). */
+  paged?: boolean;
 }) {
   if (!data || data.cards.length === 0) return null;
-  const { cards, totalCount, viewAllHref } = data;
+  return <SpotlightInner data={data} variant={variant} paged={paged && variant !== "unit"} />;
+}
+
+function SpotlightInner({
+  data,
+  variant,
+  paged,
+}: {
+  data: SpotlightData;
+  variant: SpotlightVariant;
+  paged: boolean;
+}) {
+  const [pageIdx, setPageIdx] = useState(0);
+  const { totalCount, viewAllHref } = data;
   const unit = variant === "unit";
+  const pageCount = paged ? Math.ceil(data.cards.length / SPOTLIGHT_PAGE_SIZE) : 1;
+  const cycling = pageCount > 1;
+  // Wrap-around; also clamps if a smaller pool arrives on re-render.
+  const current = ((pageIdx % pageCount) + pageCount) % pageCount;
+  const cards = cycling
+    ? data.cards.slice(current * SPOTLIGHT_PAGE_SIZE, (current + 1) * SPOTLIGHT_PAGE_SIZE)
+    : data.cards;
 
   const gridClass =
     cards.length === 3
@@ -80,7 +115,7 @@ export function Spotlight({
           : "my-8 rounded-[14px] bg-[#f5f3ee] px-[26px] pb-6 pt-[22px]"
       }
     >
-      <header className={unit ? "mb-5" : "mb-[22px]"}>
+      <header className={unit ? "mb-5" : "mb-[22px] flex flex-wrap items-center gap-x-2 gap-y-2"}>
         <h2
           className={
             unit
@@ -95,6 +130,29 @@ export function Spotlight({
             Refreshes weekly.
           </SectionInfoButton>
         </h2>
+        {cycling && (
+          <div className="ml-auto flex items-center gap-2.5" data-testid="spotlight-pager">
+            <span
+              className="text-muted-foreground text-[13px] tabular-nums"
+              aria-live="polite"
+              aria-atomic="true"
+              data-testid="spotlight-position"
+            >
+              <span className="sr-only">Spotlight page </span>
+              {current + 1} of {pageCount}
+            </span>
+            <SpotlightPagerButton
+              label="Previous"
+              onClick={() => setPageIdx(current - 1)}
+              icon={<ChevronLeft className="size-3.5" strokeWidth={2.2} aria-hidden />}
+            />
+            <SpotlightPagerButton
+              label="Next"
+              onClick={() => setPageIdx(current + 1)}
+              icon={<ChevronRight className="size-3.5" strokeWidth={2.2} aria-hidden />}
+            />
+          </div>
+        )}
       </header>
 
       <div
@@ -115,6 +173,28 @@ export function Spotlight({
 
       {unit ? viewAll : <div className="mt-[22px]">{viewAll}</div>}
     </section>
+  );
+}
+
+function SpotlightPagerButton({
+  label,
+  onClick,
+  icon,
+}: {
+  label: string;
+  onClick: () => void;
+  icon: ReactNode;
+}) {
+  // 34px visual per the mockup; a coarse pointer gets the 44px target.
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="border-apollo-border-strong bg-background text-foreground inline-flex size-[34px] items-center justify-center rounded-full border transition-colors hover:border-[var(--color-accent-slate)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)] pointer-coarse:size-11"
+    >
+      {icon}
+    </button>
   );
 }
 

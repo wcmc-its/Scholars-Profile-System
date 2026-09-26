@@ -45,7 +45,10 @@ vi.mock("@/components/scholar-export/scholar-list-export-button", () => ({
 }));
 vi.mock("@/lib/export/scholar-export-flags", () => ({ isScholarListExportEnabled: () => false }));
 vi.mock("@/lib/api/export-scholars", () => ({ isSupercategoryExportInRange: async () => false }));
-vi.mock("@/lib/api/spotlight", () => ({ getSpotlightCardsForTopic: async () => null }));
+vi.mock("@/lib/api/spotlight", () => ({
+  getSpotlightCardsForTopic: async () => null,
+  TOPIC_SPOTLIGHT_POOL_MAX: 9,
+}));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodPagesEnabled: () => true,
   isMethodsFamilyDefinitionsOn: () => false,
