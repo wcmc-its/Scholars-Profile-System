@@ -11,7 +11,7 @@ import {
 import { getSpotlightCardsForTopic } from "@/lib/api/spotlight";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { Spotlight } from "@/components/shared/spotlight";
-import { SubtopicPublicationLayout } from "@/components/topic/subtopic-publication-layout";
+import { TopicRailLayout } from "@/components/topic/topic-rail-layout";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -157,11 +157,11 @@ export default async function TopicPage({
       {/* Spotlight (§16) — replaces the prior Recent Highlights surface. */}
       <Spotlight data={spotlightData} />
 
-      {/* Layout B: sticky subtopic rail + CSR publication feed.
+      {/* Layout B: subtopic rail (sheet below lg) + CSR publication feed.
           id="publications" anchors deep-links from the home page spotlight
           section. */}
       <section id="publications" className="scroll-mt-20">
-        <SubtopicPublicationLayout topicSlug={slug} subtopics={subtopicList} />
+        <TopicRailLayout topicSlug={slug} subtopics={subtopicList} />
       </section>
     </main>
   );

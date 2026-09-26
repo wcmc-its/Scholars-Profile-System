@@ -111,10 +111,14 @@ vi.mock("@/components/scholar-export/scholar-list-export-button", () => ({
 vi.mock("@/components/topic/top-scholars-chip-row", () => ({ TopScholarsChipRow: mockChipRow }));
 vi.mock("@/components/shared/spotlight", () => ({ Spotlight: mockSpotlight }));
 vi.mock("@/components/method/family-publication-layout", () => ({
-  SupercategoryFamilyLayout: () => null,
   FamilyPublicationLayout: () => null,
 }));
-vi.mock("@/components/method/cell-line-rail", () => ({ CellLineRail: () => null }));
+vi.mock("@/components/method/supercategory-rail-layout", () => ({
+  SupercategoryRailLayout: () => null,
+}));
+vi.mock("@/components/method/family-entity-rail-layout", () => ({
+  FamilyEntityRailLayout: () => null,
+}));
 vi.mock("@/components/ui/breadcrumb", () => ({
   Breadcrumb: () => null,
   BreadcrumbItem: () => null,

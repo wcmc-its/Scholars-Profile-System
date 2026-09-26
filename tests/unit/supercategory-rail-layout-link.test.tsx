@@ -10,7 +10,7 @@
  * lock that link in (and the absence of it when no family is selected).
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 // `?family=` is read via useSearchParams; only `.get` is used. A controllable
 // stub lets each test drive the selected family (or none).
@@ -20,8 +20,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 // Isolate the header link from the data-fetching children (which fetch in
-// useEffect and are out of scope for this test).
-vi.mock("@/components/method/family-rail", () => ({ FamilyRail: () => null }));
+// useEffect and are out of scope for this test). The rail itself renders.
 vi.mock("@/components/method/family-scholars-row", () => ({
   FamilyScholarsRow: () => null,
 }));
@@ -32,7 +31,7 @@ vi.mock("@/components/method/supercategory-all-work-feed", () => ({
   SupercategoryAllWorkFeed: () => <div data-testid="all-work" />,
 }));
 
-import { SupercategoryFamilyLayout } from "@/components/method/family-publication-layout";
+import { SupercategoryRailLayout } from "@/components/method/supercategory-rail-layout";
 
 const families = [
   {
@@ -61,7 +60,7 @@ const baseMeta: Record<string, PanelMeta> = {
 
 function renderLayout(familyMeta: Record<string, PanelMeta> = baseMeta) {
   return render(
-    <SupercategoryFamilyLayout
+    <SupercategoryRailLayout
       supercategorySlug="animal-cell-models"
       supercategoryLabel="Animal & cell models"
       families={families}
@@ -71,7 +70,7 @@ function renderLayout(familyMeta: Record<string, PanelMeta> = baseMeta) {
   );
 }
 
-describe("SupercategoryFamilyLayout — canonical family-page signpost", () => {
+describe("SupercategoryRailLayout — canonical family-page signpost", () => {
   beforeEach(() => {
     mockGet.mockReset();
   });
@@ -124,7 +123,7 @@ describe("SupercategoryFamilyLayout — canonical family-page signpost", () => {
   // badges when the selected family has a specific-entity layer.
   function renderWithEntities(entity: { entityCount?: number; entityKind?: string | null }) {
     return render(
-      <SupercategoryFamilyLayout
+      <SupercategoryRailLayout
         supercategorySlug="animal-cell-models"
         supercategoryLabel="Animal & cell models"
         families={[{ ...families[0], ...entity }]}
@@ -160,5 +159,30 @@ describe("SupercategoryFamilyLayout — canonical family-page signpost", () => {
     const link = screen.getByText(/View full Cancer cell lines method page/).closest("a");
     expect(link?.textContent).not.toContain("specific");
     expect(link?.textContent).not.toContain("per-paper usage");
+  });
+
+  it("writes the full family slug to ?family= on select and drops it via All families", () => {
+    mockGet.mockReturnValue(null);
+    window.history.replaceState(null, "", "/methods/animal-cell-models");
+    const spy = vi.spyOn(window.history, "replaceState");
+    renderLayout();
+    const rail = screen.getAllByRole("complementary", { name: "Method families" })[0];
+    fireEvent.click(within(rail).getByText("Cancer cell lines"));
+    expect(spy).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "/methods/animal-cell-models?family=cancer-cell-lines-fam_0007",
+    );
+    expect(screen.getByText(/View full Cancer cell lines method page/)).toBeTruthy();
+    fireEvent.click(within(rail).getByText("All families"));
+    expect(spy).toHaveBeenLastCalledWith(null, "", "/methods/animal-cell-models");
+    expect(screen.getByTestId("all-work")).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it("resolves a stale-id label-slug ?family= deep link (hub links) to the current family", () => {
+    mockGet.mockReturnValue("cancer-cell-lines-fam_0001");
+    renderLayout();
+    expect(screen.getByText(/View full Cancer cell lines method page/)).toBeTruthy();
   });
 });

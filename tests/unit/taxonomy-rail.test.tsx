@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { SubtopicRail } from "@/components/topic/subtopic-rail";
+import { TaxonomyRail, type TaxonomyRailProps } from "@/components/taxonomy/taxonomy-rail";
 
 const subtopics = [
   { id: "s1", label: "Cardiac Surgery", displayName: "Cardiac Surgery", description: null, shortDescription: "Procedures on the heart and great vessels", pubCount: 234 },
@@ -9,7 +9,37 @@ const subtopics = [
   { id: "s4", label: "Case Reports", displayName: "Case Reports", description: null, shortDescription: null, pubCount: 3 },
 ];
 
-describe("SubtopicRail", () => {
+type Sub = (typeof subtopics)[number];
+
+/** The topic page's rail configuration (mirrors TopicRailLayout). */
+function SubtopicRail({
+  subtopics: subs,
+  activeSubtopic,
+  onSelect,
+  allRow,
+}: {
+  subtopics: Sub[];
+  activeSubtopic: string | null;
+  onSelect: (id: string | null) => void;
+  allRow?: TaxonomyRailProps["allRow"];
+}) {
+  return (
+    <TaxonomyRail
+      items={subs.map((s) => ({ id: s.id, label: s.displayName, count: s.pubCount }))}
+      selectedId={activeSubtopic}
+      onSelect={onSelect}
+      railLabel="Subareas"
+      headerText={`SUBAREAS (${subs.length})`}
+      filterPlaceholder="Filter subareas…"
+      noMatchNoun="subareas"
+      lessCommonThreshold={10}
+      variant="plain"
+      allRow={allRow}
+    />
+  );
+}
+
+describe("TaxonomyRail (subarea configuration)", () => {
   it("renders all subtopic display names on the top line", () => {
     render(<SubtopicRail subtopics={subtopics} activeSubtopic={null} onSelect={() => {}} />);
     expect(screen.getByText("Cardiac Surgery")).toBeTruthy();
@@ -73,8 +103,65 @@ describe("SubtopicRail", () => {
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
-  it("component exports (RED: implementation pending Plan 07)", () => {
-    expect(typeof SubtopicRail).toBe("function");
+  it("marks the active row with aria-current and the red spine class", () => {
+    render(<SubtopicRail subtopics={subtopics} activeSubtopic="s2" onSelect={() => {}} />);
+    const btn = screen.getByText("Oncology").closest("button")!;
+    expect(btn.getAttribute("aria-current")).toBe("true");
+    expect(btn.className).toContain("border-l-[var(--color-primary-cornell-red)]");
+    // An active less-common row is never faded.
+    const inactive = screen.getByText("Cardiac Surgery").closest("button")!;
+    expect(inactive.getAttribute("aria-current")).toBeNull();
+    expect(inactive.className).toContain("border-l-transparent");
+  });
+
+  it("'All' row shows the total, is current when nothing is selected, and selecting it clears", () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(
+      <SubtopicRail
+        subtopics={subtopics}
+        activeSubtopic={null}
+        onSelect={onSelect}
+        allRow={{ label: "All subareas", count: 297 }}
+      />,
+    );
+    const all = screen.getByText("All subareas").closest("button")!;
+    expect(all.getAttribute("aria-current")).toBe("true");
+    expect(all.textContent).toContain("297");
+
+    rerender(
+      <SubtopicRail
+        subtopics={subtopics}
+        activeSubtopic="s1"
+        onSelect={onSelect}
+        allRow={{ label: "All subareas", count: 297 }}
+      />,
+    );
+    const allAgain = screen.getByText("All subareas").closest("button")!;
+    expect(allAgain.getAttribute("aria-current")).toBeNull();
+    fireEvent.click(allAgain);
+    expect(onSelect).toHaveBeenCalledWith(null);
+  });
+
+  it("hides the 'All' row while the filter has text", () => {
+    render(
+      <SubtopicRail
+        subtopics={subtopics}
+        activeSubtopic={null}
+        onSelect={() => {}}
+        allRow={{ label: "All subareas", count: 297 }}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText("Filter subareas…"), {
+      target: { value: "onc" },
+    });
+    expect(screen.queryByText("All subareas")).toBeNull();
+  });
+
+  it("clicking an inactive row selects it", () => {
+    const onSelect = vi.fn();
+    render(<SubtopicRail subtopics={subtopics} activeSubtopic={null} onSelect={onSelect} />);
+    fireEvent.click(screen.getByText("Oncology"));
+    expect(onSelect).toHaveBeenCalledWith("s2");
   });
 
   it("does NOT render short_description in the rail (moved to publication-feed h2 subtitle)", () => {
