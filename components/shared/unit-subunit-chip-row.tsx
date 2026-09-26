@@ -22,6 +22,7 @@
  */
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { matchesMedia, scrollIntoViewAndFocus } from "@/lib/scroll-focus";
 import {
   SUBUNIT_SELECTION_EVENT,
   requestSubunitSelect,
@@ -38,14 +39,6 @@ export type SubunitChipView = {
   filter?: { param: SubunitParam; value: string };
 };
 
-function prefersReducedMotion(): boolean {
-  try {
-    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  } catch {
-    return false;
-  }
-}
-
 /** Tailwind `md` — below it the rosters stack the facet aside above the list. */
 const NARROW_QUERY = "(max-width: 767px)";
 
@@ -60,17 +53,8 @@ const NARROW_QUERY = "(max-width: 767px)";
 function scrollAndFocusRoster(): void {
   const people = document.getElementById("people");
   const results = document.getElementById("people-results");
-  let narrow = false;
-  try {
-    narrow = window.matchMedia?.(NARROW_QUERY).matches ?? false;
-  } catch {
-    narrow = false;
-  }
-  (narrow && results ? results : people)?.scrollIntoView({
-    behavior: prefersReducedMotion() ? "auto" : "smooth",
-    block: "start",
-  });
-  results?.focus({ preventScroll: true });
+  const narrow = matchesMedia(NARROW_QUERY);
+  scrollIntoViewAndFocus(narrow && results ? results : people, results);
 }
 
 export function UnitSubunitChipRow({ chips }: { chips: SubunitChipView[] }) {
