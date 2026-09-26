@@ -62,13 +62,13 @@ export default async function SupercategoryPage({
   if (!sc) notFound();
 
   const [rollup, topScholars, entitySummaries] = await Promise.all([
-    getSupercategoryRollup(sc.id).catch(() => ({ families: [], allWorkPubs: [] })),
+    getSupercategoryRollup(sc.id).catch(() => ({ families: [], allWorkPubs: [], allPubCount: 0 })),
     getTopScholarsForSupercategory(sc.id).catch(() => null),
     getSupercategoryFamilyEntitySummaries(sc.id).catch(
       () => ({}) as Awaited<ReturnType<typeof getSupercategoryFamilyEntitySummaries>>,
     ),
   ]);
-  const { families, allWorkPubs } = rollup;
+  const { families, allWorkPubs, allPubCount } = rollup;
 
   // getSupercategory already rejects an all-suppressed/sensitive supercategory
   // (empty post-gate roster), so `families` is non-empty here in practice; guard
@@ -200,6 +200,7 @@ export default async function SupercategoryPage({
           families={railItems}
           familyMeta={familyMeta}
           allWorkPubs={allWorkPubs}
+          allPubCount={allPubCount}
           scholarNames={scholarCards}
         />
       </section>

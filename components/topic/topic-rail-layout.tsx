@@ -25,10 +25,14 @@ const LESS_COMMON_THRESHOLD = 10;
 export function TopicRailLayout({
   topicSlug,
   subtopics,
+  totalPubCount,
   scholarNames = false,
 }: {
   topicSlug: string;
   subtopics: SubtopicRailItem[];
+  /** Distinct research-article pmids in the whole topic (`getSubtopicRail`):
+   *  the "All subareas" count. Not the row sum. */
+  totalPubCount: number;
   /** TAXONOMY_SCHOLAR_CARDS — the selected subarea's scholars render as a
    *  "Scholars N" heading over plain name links. */
   scholarNames?: boolean;
@@ -38,8 +42,9 @@ export function TopicRailLayout({
     label: s.displayName,
     count: s.pubCount,
   }));
-  // Same total the page's stats line and Spotlight "View all" use.
-  const total = subtopics.reduce((sum, s) => sum + s.pubCount, 0);
+  // Same total the page's stats line, Spotlight "View all" and the
+  // unfiltered feed heading use.
+  const total = totalPubCount;
   const byId = (id: string | null) => (id ? subtopics.find((s) => s.id === id) ?? null : null);
   // D-09: displayName for headings, falling back to label.
   const labelFor = (id: string | null) => {

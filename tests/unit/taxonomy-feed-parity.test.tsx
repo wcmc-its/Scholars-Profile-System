@@ -5,9 +5,12 @@
  * three copies of one row + toolbar. They now render through ONE shared
  * `PublicationFeed` / `PubRow` (`components/taxonomy/publication-feed.tsx`).
  * With TAXONOMY_FEED_LOAD_MORE off the merge is a pure refactor, so these
- * snapshots were recorded against the PRE-merge components and must match the
+ * snapshots were recorded against the PRE-merge components and matched the
  * merged ones byte for byte (ids normalized): same rows, same controls, same
- * props into the row's children, same modal arguments.
+ * props into the row's children, same modal arguments. The one deliberate
+ * change since is the count unification (unflagged): the topic heading shows
+ * the all-tier total ("45" = 30 strongly + 15 also) instead of the strongly
+ * page total ("30").
  *
  * Child components are replaced by prop-echo stubs so the snapshot also pins
  * WHAT each row passes to the author chips and the meta band.

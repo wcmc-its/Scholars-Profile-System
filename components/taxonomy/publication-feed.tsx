@@ -202,14 +202,11 @@ export function PublicationFeed({
   if (data) {
     if (formatCount) {
       countLabel = formatCount(data, filter);
-    } else if (relevanceTiers) {
-      // Reflect what is on screen: the combined total in "All relevant".
-      const n = alsoInline
-        ? (also.data?.total ?? null)
-        : showTier === "all" && tierTotals
-          ? tierTotals.strongly + tierTotals.also
-          : data.total;
-      countLabel = n !== null ? n.toLocaleString() : null;
+    } else if (relevanceTiers && tierTotals) {
+      // One count definition (phase 4): every relevance tier under the active
+      // type filter, whatever Show says — the same number as the rail row
+      // (`getSubtopicRail`). The Show options keep their per-tier counts.
+      countLabel = (tierTotals.strongly + tierTotals.also).toLocaleString();
     } else {
       countLabel = data.total.toLocaleString();
     }

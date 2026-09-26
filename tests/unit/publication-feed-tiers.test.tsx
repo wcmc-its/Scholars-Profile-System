@@ -497,7 +497,9 @@ describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
     renderFeed({ activeSubtopic: "s1" });
     const row = await screen.findByTestId("publications-heading-row");
     expect(within(row).getByRole("heading", { level: 3, name: "Publications" })).toBeTruthy();
-    await waitFor(() => expect(within(row).getByTestId("publications-count").textContent).toBe("28"));
+    // Phase 4 count definition: every relevance tier (28 + 4), not the
+    // strongly-only page total — the same number the rail row shows.
+    await waitFor(() => expect(within(row).getByTestId("publications-count").textContent).toBe("32"));
     expect(within(row).getByTestId("publications-count").className).toContain(
       "text-muted-foreground",
     );
@@ -511,7 +513,7 @@ describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
   });
 
-  it("the count follows the scope: 'All relevant' shows the combined tier total", async () => {
+  it("the count is the all-tier total under either Show option (rail == heading)", async () => {
     mockFetchByTier({
       strongly: makeTierResponse({
         hits: [makeHit({ pmid: "111" })],
@@ -525,9 +527,13 @@ describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
       }),
     });
     renderFeed();
-    await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("3"));
-    fireEvent.change(getShowSelect()!, { target: { value: "all" } });
     await waitFor(() => expect(screen.getByTestId("publications-count").textContent).toBe("5"));
+    // The Show options keep their per-tier counts.
+    expect(getShowSelect()!.textContent).toContain("Strongly relevant (3)");
+    expect(getShowSelect()!.textContent).toContain("All relevant (5)");
+    fireEvent.change(getShowSelect()!, { target: { value: "all" } });
+    await screen.findByRole("heading", { level: 4, name: "Also relevant" });
+    expect(screen.getByTestId("publications-count").textContent).toBe("5");
     // "Also relevant" sits one level under "Publications".
     expect(screen.getByRole("heading", { level: 4, name: "Also relevant" })).toBeTruthy();
   });

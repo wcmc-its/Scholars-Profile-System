@@ -97,17 +97,55 @@ const member = (
 
 /** Dispatch the three distinct scholarFamily.findMany call-sites by their `select`. */
 function wireScholarFamilyFindMany(opts: {
-  pmidRows: Array<{ familyLabel: string; pmids: string[] }>;
+  pmidRows: Array<{ familyLabel: string; pmids: string[]; roleCategory?: string | null }>;
   exemplarRows: Array<{ familyLabel: string; exemplarTools: string[] }>;
   memberRows?: MemberRow[];
 }) {
   mockScholarFamilyFindMany.mockImplementation((args: { select?: Record<string, unknown> }) => {
-    if (args.select?.pmids) return Promise.resolve(opts.pmidRows);
+    // The per-family collectors and the phase-4 category-wide collector (which
+    // also selects the scholar's role for the #536 carve) share this fixture.
+    if (args.select?.pmids) {
+      return Promise.resolve(
+        opts.pmidRows.map((r) => ({ ...r, scholar: { roleCategory: r.roleCategory ?? null } })),
+      );
+    }
     if (args.select?.exemplarTools) return Promise.resolve(opts.exemplarRows);
     // #2292 — the member fetch that replaced the uncarved groupBy.
     if (args.select?.cwid) return Promise.resolve(opts.memberRows ?? []);
     return Promise.resolve([]);
   });
+}
+
+/**
+ * `prisma.publication.findMany` over every call site the rollup makes, keyed by
+ * shape: the research-type probe (pmid-only select + a `publicationType`
+ * filter), the category-wide collector (sort fields + type), the abstract
+ * probe and the representative list (both answer empty here). Every pmid asked
+ * about exists; `types` overrides a pmid's type (default "Journal Article").
+ */
+function publicationsByType(types: Record<string, string>) {
+  return (args: { select?: Record<string, unknown>; where?: Record<string, unknown> }) => {
+    const pmids = ((args.where?.pmid as { in?: string[] })?.in ?? []) as string[];
+    const typeOf = (p: string) => types[p] ?? "Journal Article";
+    const keys = Object.keys(args.select ?? {}).sort().join();
+    if (keys === "pmid" && args.where?.publicationType) {
+      const excluded = (args.where.publicationType as { notIn: string[] }).notIn;
+      return Promise.resolve(pmids.filter((p) => !excluded.includes(typeOf(p))).map((pmid) => ({ pmid })));
+    }
+    if (args.select?.publicationType && !args.select?.title) {
+      return Promise.resolve(
+        pmids.map((pmid) => ({
+          pmid,
+          year: 2020,
+          dateAddedToEntrez: null,
+          citationCount: null,
+          impactScore: null,
+          publicationType: typeOf(pmid),
+        })),
+      );
+    }
+    return Promise.resolve([]);
+  };
 }
 
 beforeEach(() => {
@@ -149,13 +187,15 @@ describe("getSupercategoryRollup", () => {
     });
   });
 
-  it("computes DISTINCT (deduped, dark-filtered) paper counts and the union exemplar set (cap 3)", async () => {
+  it("computes DISTINCT (deduped, dark-filtered, research-only) paper counts and the union exemplar set (cap 3)", async () => {
     // pmid "4" is dark — drops from Deep learning's distinct {1,2,3,4} → 3.
     mockResolveDarkPmids.mockResolvedValue(new Set(["4"]));
     mockSuppressionOverlayFindMany.mockResolvedValue([{ supercategory: SC, familyLabel: "Secret" }]);
-    mockPublicationFindMany.mockResolvedValue([]);
+    // Phase 4 — "7" is a Letter: the family rows count research articles only
+    // (the feed's default), so MRI's distinct {5,6,7} reads 2.
+    mockPublicationFindMany.mockImplementation(publicationsByType({ "7": "Letter" }));
 
-    const { families } = await getSupercategoryRollup(SC);
+    const { families, allPubCount } = await getSupercategoryRollup(SC);
 
     // Secret excluded; sorted by scholarCount desc.
     expect(families.map((f) => f.familyLabel)).toEqual(["Deep learning", "MRI"]);
@@ -165,8 +205,32 @@ describe("getSupercategoryRollup", () => {
     expect(dl.exemplarTools).toEqual(["CNN", "U-Net", "ResNet"]); // deduped, capped at 3
 
     const mri = families.find((f) => f.familyLabel === "MRI")!;
-    expect(mri.pubCount).toBe(3); // {5,6,7}
+    expect(mri.pubCount).toBe(2); // {5,6}; "7" is a Letter
     expect(mri.exemplarTools).toEqual(["T1", "T2"]);
+    // "All families" = the DISTINCT research union {1,2,3,5,6} — not the row
+    // sum (3 + 2 = 5 here only because the families don't overlap after the
+    // dark/letter drops; see the overlap case below).
+    expect(allPubCount).toBe(5);
+  });
+
+  it("the All families count is distinct: a pub in two families counts once", async () => {
+    wireScholarFamilyFindMany({
+      memberRows: [
+        member("Deep learning", "fam_0001", "aaa1001", 2, "full_time_faculty"),
+        member("MRI", "fam_0002", "bbb2001", 2, "full_time_faculty"),
+      ],
+      pmidRows: [
+        { familyLabel: "Deep learning", pmids: ["1", "2"] },
+        { familyLabel: "MRI", pmids: ["2", "3"] },
+      ],
+      exemplarRows: [],
+    });
+    mockSuppressionOverlayFindMany.mockResolvedValue([]);
+    mockPublicationFindMany.mockImplementation(publicationsByType({}));
+    const { families, allPubCount } = await getSupercategoryRollup(SC);
+    const sum = families.reduce((n, f) => n + (f.pubCount ?? 0), 0);
+    expect(sum).toBe(4);
+    expect(allPubCount).toBe(3);
   });
 
   it("excludes a suppressed family's pmids from the All-work union AND drops dark pmids", async () => {
@@ -197,7 +261,7 @@ describe("getSupercategoryRollup", () => {
   it("returns empty when the master lens is off (no DB reads)", async () => {
     mockLensEnabled.mockReturnValue(false);
     const out = await getSupercategoryRollup(SC);
-    expect(out).toEqual({ families: [], allWorkPubs: [] });
+    expect(out).toEqual({ families: [], allWorkPubs: [], allPubCount: 0 });
     expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
   });
 });

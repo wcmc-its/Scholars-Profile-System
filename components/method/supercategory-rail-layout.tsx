@@ -69,6 +69,7 @@ export function SupercategoryRailLayout({
   families,
   familyMeta,
   allWorkPubs,
+  allPubCount,
   scholarNames = false,
 }: {
   supercategorySlug: string;
@@ -78,6 +79,9 @@ export function SupercategoryRailLayout({
   /** Representative recent publications across all families, the default
    *  "all work" panel shown until a family is selected (§A2). */
   allWorkPubs: MethodPublicationHit[];
+  /** Distinct research-article pmids across the category (the "All families"
+   *  count). Omitted ⇒ no count on the row (no honest total). */
+  allPubCount?: number;
   /** TAXONOMY_SCHOLAR_CARDS — the selected family's scholars render as a
    *  "Scholars N" heading over plain name links. */
   scholarNames?: boolean;
@@ -104,12 +108,12 @@ export function SupercategoryRailLayout({
         headerText: `FAMILIES (${families.length})`,
         filterPlaceholder: "Filter families…",
         noMatchNoun: "families",
-        // No count: summing the rail counts double-counts pubs in several
-        // families, and no distinct category total is loaded (PLAN open Q10).
-        allRow: { label: "All families" },
+        // The DISTINCT category count, never the row sum: a pub in several
+        // families would be counted once per family (PLAN open Q10).
+        allRow: { label: "All families", count: allPubCount, countLabel: "pubs" },
         variant: "captioned",
       }}
-      mobile={{ eyebrow: "Family", allLabel: "All families" }}
+      mobile={{ eyebrow: "Family", allLabel: "All families", allCount: allPubCount }}
       renderSubhead={(familyId) => {
         const meta = familyMeta[familyId];
         if (!meta?.familyLabel) return null;
