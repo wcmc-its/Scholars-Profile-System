@@ -75,6 +75,7 @@ import {
 } from "@/lib/method-url";
 import { deriveSlug } from "@/lib/slug";
 import { cachedRead } from "@/lib/api/swr-cache";
+import { isPublicScholarCwid, loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
 
 // Re-export the chip/row data shapes so Method page components import them from
 // here (one module surface) rather than reaching into `topics.ts`.
@@ -1128,9 +1129,15 @@ export async function getFamilyScholars(
  * sensitive families never contribute), within the FT-faculty PI carve, then rank
  * desc. Active-only. Sparse-state hide (`null`) below the floor. Lens-off ⇒ null.
  */
+export type SupercategoryTopScholar = TopScholarChipData & {
+  /** The scholar's publicly-visible families in this supercategory, ranked by
+   *  their per-family `pmidCount` desc, capped at 3 (the card-grid chips). */
+  families: string[];
+};
+
 export async function getTopScholarsForSupercategory(
   supercategory: string,
-): Promise<TopScholarChipData[] | null> {
+): Promise<SupercategoryTopScholar[] | null> {
   if (!isMethodsLensEnabled()) return null;
 
   const gate = await loadFamilyOverlayGate();
@@ -1156,14 +1163,17 @@ export async function getTopScholarsForSupercategory(
   type Agg = {
     scholar: { cwid: string; slug: string; preferredName: string; primaryTitle: string | null };
     total: number;
+    families: Array<{ label: string; pmidCount: number }>;
   };
   const byCwid = new Map<string, Agg>();
   for (const r of rows) {
     if (!r.scholar) continue;
     // Drop contributions from suppressed/sensitive families BEFORE aggregating.
+    // The same gate keeps a gated family out of the card chips.
     if (!isFamilyPubliclyVisible(supercategory, r.familyLabel, gate)) continue;
-    const entry = byCwid.get(r.scholar.cwid) ?? { scholar: r.scholar, total: 0 };
+    const entry = byCwid.get(r.scholar.cwid) ?? { scholar: r.scholar, total: 0, families: [] };
     entry.total += r.pmidCount;
+    entry.families.push({ label: r.familyLabel, pmidCount: r.pmidCount });
     byCwid.set(r.scholar.cwid, entry);
   }
 
@@ -1177,6 +1187,10 @@ export async function getTopScholarsForSupercategory(
     primaryTitle: e.scholar.primaryTitle,
     identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
     rank: i + 1,
+    families: [...e.families]
+      .sort((a, b) => b.pmidCount - a.pmidCount || a.label.localeCompare(b.label))
+      .slice(0, 3)
+      .map((f) => f.label),
   }));
 }
 
@@ -1438,6 +1452,35 @@ async function collectFamilyPmids(
 }
 
 /**
+ * One scholar's member pmids for a family (their own `ScholarFamily.pmids` row),
+ * minus the papers they per-author-hid (ADR-005). The caller intersects this with
+ * the family's gated union, so the overlay gate + #356-dark filtering still apply.
+ */
+async function loadScholarFamilyPmids(
+  cwid: string,
+  supercategory: string,
+  familyLabel: string,
+): Promise<Set<string>> {
+  const [rows, hidden] = await Promise.all([
+    prisma.scholarFamily.findMany({
+      where: { cwid, supercategory, familyLabel },
+      select: { pmids: true },
+    }),
+    loadHiddenAuthorshipPmids(cwid),
+  ]);
+  const hiddenSet = new Set(hidden);
+  const out = new Set<string>();
+  for (const r of rows) {
+    if (!Array.isArray(r.pmids)) continue;
+    for (const p of r.pmids as unknown[]) {
+      const pmid = String(p);
+      if (!hiddenSet.has(pmid)) out.add(pmid);
+    }
+  }
+  return out;
+}
+
+/**
  * Representative publications for a family — the union of `ScholarFamily.pmids`
  * across the gated, active scholars, resolved to `Publication`, suppression/dark
  * filtered, with confirmed WCM author chips. Ordered newest-first. `limit` caps
@@ -1499,6 +1542,13 @@ export async function getFamilyPublications(
      *  / `totalResearchOnly` counts stay over the WHOLE family (the "N of 33"
      *  denominator); `total` becomes the filtered count. */
     entityId?: string;
+    /** TAXONOMY_SCHOLAR_CARDS — restrict the feed to this scholar's papers in the
+     *  family: the family's gated pmid union intersected with the scholar's own
+     *  `ScholarFamily.pmids` for the family, minus their per-author hides. Like
+     *  `entityId`, the family-level denominators stay over the whole family;
+     *  `total` becomes the filtered count. An unknown, inactive or #536-hidden
+     *  cwid yields an empty feed (the same answer as an unknown one). */
+    cwid?: string;
   },
 ): Promise<MethodPublicationsResult | null> {
   if (!isMethodsLensEnabled()) return null;
@@ -1509,6 +1559,15 @@ export async function getFamilyPublications(
   const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
   const page = Math.max(0, opts.page ?? 0);
   const filter = opts.filter ?? "research_articles_only";
+
+  // Resolved BEFORE the empty-family early return so a refused cwid always
+  // answers with the same empty shape, whatever the family holds.
+  let scholarPmids: Set<string> | null = null;
+  if (opts.cwid) {
+    scholarPmids = (await isPublicScholarCwid(opts.cwid))
+      ? await loadScholarFamilyPmids(opts.cwid, supercategory, familyLabel)
+      : new Set();
+  }
 
   if (allPmids.length === 0) {
     return {
@@ -1542,6 +1601,10 @@ export async function getFamilyPublications(
       else factsByPmid.set(f.pmid, [f]);
     }
     feedPmids = [...factsByPmid.keys()];
+  }
+  if (scholarPmids) {
+    const mine = scholarPmids;
+    feedPmids = feedPmids.filter((p) => mine.has(p));
   }
 
   const typeWhere =

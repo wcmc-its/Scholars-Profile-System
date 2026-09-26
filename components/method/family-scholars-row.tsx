@@ -15,7 +15,8 @@
  * scholars →" link to the family page's scholar browse is shown when the cap is
  * reached.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ScholarPickList, type PickScholar } from "@/components/taxonomy/scholar-filter";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import { profilePath } from "@/lib/profile-url";
@@ -27,18 +28,31 @@ import type { SubtopicScholarRowData } from "@/lib/api/methods";
 // fetched roster hits the cap there are likely more behind the family page.
 const ROSTER_CAP = 10;
 
+/** TAXONOMY_SCHOLAR_CARDS — when passed, the roster renders as pick-to-filter
+ *  toggle cards (each with its own profile link) instead of popover chips. */
+export type FamilyScholarsPick = {
+  selectedCwid: string | null;
+  onToggle: (s: PickScholar) => void;
+  onRosterLoaded: (roster: PickScholar[]) => void;
+};
+
 export function FamilyScholarsRow({
   supercategorySlug,
   familyId,
   familyLabel,
+  pick,
 }: {
   supercategorySlug: string;
   familyId: string;
   familyLabel: string | null;
+  pick?: FamilyScholarsPick;
 }) {
   const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
   const [includesNonFaculty, setIncludesNonFaculty] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Read through a ref so a new callback identity never re-triggers the fetch.
+  const onRosterLoadedRef = useRef(pick?.onRosterLoaded);
+  onRosterLoadedRef.current = pick?.onRosterLoaded;
 
   useEffect(() => {
     let cancelled = false;
@@ -55,12 +69,14 @@ export function FamilyScholarsRow({
           setScholars(data.scholars ?? []);
           setIncludesNonFaculty(Boolean(data.includesNonFaculty));
           setLoading(false);
+          onRosterLoadedRef.current?.(data.scholars ?? []);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setScholars([]);
           setLoading(false);
+          onRosterLoadedRef.current?.([]);
         }
       });
     return () => {
@@ -77,29 +93,52 @@ export function FamilyScholarsRow({
       )}/scholars`
     : null;
 
+  const heading = (
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      {familyLabel ? `Scholars in ${familyLabel}` : "Scholars in this method"}
+      <SectionInfoButton label="Scholars in this method" anchor="topScholars">
+        {includesNonFaculty ? (
+          <>
+            Researchers identified by ReCiterAI from their first- or senior-author
+            publications using this method, with full-time faculty listed first.
+            Curators do not handpick this list; it updates weekly as new work
+            appears.
+          </>
+        ) : (
+          <>
+            Full-time faculty identified by ReCiterAI from their first- or
+            senior-author publications using this method. Curators do not handpick
+            this list; it updates weekly as new work appears.
+          </>
+        )}
+      </SectionInfoButton>
+    </span>
+  );
+
+  if (pick) {
+    return (
+      <ScholarPickList
+        heading={heading}
+        scholars={scholars}
+        selectedCwid={pick.selectedCwid}
+        onToggle={pick.onToggle}
+        footer={
+          scholars.length >= ROSTER_CAP && seeAllHref ? (
+            <a
+              href={seeAllHref}
+              className="mt-2 inline-flex min-h-11 items-center text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            >
+              View all scholars →
+            </a>
+          ) : null
+        }
+      />
+    );
+  }
+
   return (
     <div className="mb-8">
-      <div className="mb-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {familyLabel ? `Scholars in ${familyLabel}` : "Scholars in this method"}
-          <SectionInfoButton label="Scholars in this method" anchor="topScholars">
-            {includesNonFaculty ? (
-              <>
-                Researchers identified by ReCiterAI from their first- or senior-author
-                publications using this method, with full-time faculty listed first.
-                Curators do not handpick this list; it updates weekly as new work
-                appears.
-              </>
-            ) : (
-              <>
-                Full-time faculty identified by ReCiterAI from their first- or
-                senior-author publications using this method. Curators do not handpick
-                this list; it updates weekly as new work appears.
-              </>
-            )}
-          </SectionInfoButton>
-        </span>
-      </div>
+      <div className="mb-2">{heading}</div>
       <div className="flex flex-wrap gap-2 py-1">
         {scholars.map((s) => (
           <FamilyScholarChip key={s.cwid} scholar={s} />
