@@ -344,6 +344,8 @@ describe("#1881 — method feeds carry hasAbstract for the lazy Abstract link", 
     expect(probe, "the abstract probe must run").toBeDefined();
     expect(probe![0].select).toEqual({ pmid: true });
     expect(new Set(probe![0].where.pmid.in)).toEqual(new Set(["5", "6"]));
+    // Both null and "" count as no abstract, or an empty one shows a dead link.
+    expect(probe![0].where.NOT).toEqual([{ abstract: null }, { abstract: "" }]);
     // No query selects the @db.Text column.
     for (const [args] of mockPublicationFindMany.mock.calls) {
       expect(args.select?.abstract).toBeUndefined();
