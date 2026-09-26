@@ -1,33 +1,33 @@
 /**
- * GET /api/edit/reports/display-titles — report 10 (Display titles) as an
- * `.xlsx` of the FILTERED rows (Titles, Criteria). Same query string as the
- * page (`parseTitleDashboardParams`, then `filterTitleDashboard`), same gate
- * (a `report_access` row on `DISPLAY_TITLES_REPORT`; superuser /
- * comms_steward always).
+ * GET /edit/titles-queue/export — the Titles queue as an `.xlsx` of the
+ * FILTERED rows (Titles, Criteria). Same query string as the page
+ * (`parseTitleDashboardParams`, then `filterTitleDashboard`), same gate as the
+ * page (`canReviewTitles`: superuser / comms_steward): no session → 401,
+ * anyone else → 404, like `/edit/honors-queue/export`. An unset `tab` exports
+ * every tab, so a bare link exports the whole list.
  *
  * Exempt from SCHOLAR_EXPORT_CAP per Paul, 2026-09-25, scoped to this export
- * only (name, CWID, titles; no emails).
+ * only (name, CWID, titles; no emails). It was report 10's export
+ * (`/api/edit/reports/display-titles`) until the report moved under Queues.
  */
 import { NextResponse } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { DISPLAY_TITLES_REPORT, getReportScopes } from "@/lib/edit/report-access";
 import {
   filterTitleDashboard,
   loadTitleDashboard,
   parseTitleDashboardParams,
 } from "@/lib/edit/title-dashboard";
 import { buildTitleDashboardWorkbook } from "@/lib/edit/title-dashboard-xlsx";
+import { canReviewTitles } from "@/lib/edit/titles-queue";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const session = await getEffectiveEditSession();
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
-  if ((await getReportScopes(session, DISPLAY_TITLES_REPORT)).size === 0) {
-    return new NextResponse("Forbidden", { status: 403 });
-  }
+  if (!canReviewTitles(session)) return new NextResponse("Not found", { status: 404 });
 
   const params = parseTitleDashboardParams(new URL(request.url).searchParams);
   const generatedAt = new Date();

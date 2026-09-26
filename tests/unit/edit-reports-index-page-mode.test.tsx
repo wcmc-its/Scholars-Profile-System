@@ -71,7 +71,6 @@ vi.mock("@/lib/edit/report-access", () => ({
   MENTORED_PUBS_SCOPE_OPTIONS: [["*", "All programs"]],
   ARTICLE_COUNT_REPORT: "article-count",
   HIGH_IMPACT_PUBS_REPORT: "high-impact-publications",
-  DISPLAY_TITLES_REPORT: "display-titles",
   ARTICLE_COUNT_ACCESS_NOTE: "",
 }));
 vi.mock("@/lib/edit/article-count-report", () => ({

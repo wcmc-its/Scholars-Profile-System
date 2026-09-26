@@ -52,7 +52,7 @@ export type ReportsIndexUnitKind =
   | "core"
   | "program"
   | "institution";
-export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 const isPseudo = (k: ReportsIndexUnitKind) => k === "program" || k === "institution";
 

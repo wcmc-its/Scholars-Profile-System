@@ -73,7 +73,9 @@ vi.mock("@/lib/edit/manageable-units", () => ({ unitEditHref: () => "/edit/cente
 vi.mock("@/lib/edit/report-access", () => {
   const whole = [["*", "Whole report"]];
   return {
-    // Reports 9 and 10 ride their own mocks so the report 7 cases stay pinned.
+    // Report 9 rides its own mock so the report 7 cases stay pinned. The
+    // "display-titles" branch stands for a LEFTOVER grant on retired report
+    // 10: the index must never ask for it, let alone list it.
     getReportScopes: (s: unknown, key: string) =>
       key === "high-impact-publications"
         ? mockGetHighImpactScopes(s, key)
@@ -86,7 +88,6 @@ vi.mock("@/lib/edit/report-access", () => {
     MENTORED_PUBS_REPORT: "mentored-publications",
     ARTICLE_COUNT_REPORT: "article-count",
     HIGH_IMPACT_PUBS_REPORT: "high-impact-publications",
-    DISPLAY_TITLES_REPORT: "display-titles",
     ARTICLE_COUNT_ACCESS_NOTE: "admins note",
     WHOLE_REPORT_SCOPE_OPTIONS: whole,
     REPORT_ACCESS_SCOPE_OPTIONS: {
@@ -96,7 +97,6 @@ vi.mock("@/lib/edit/report-access", () => {
       ],
       "article-count": whole,
       "high-impact-publications": whole,
-      "display-titles": whole,
     },
   };
 });
@@ -184,7 +184,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(units[0].reports[0].accessText).toBe("Superusers and comms stewards");
   });
 
-  it("a report 10 grant beside report 9 → the institution row lists 9 then 10", async () => {
+  it("report 10 (Display titles) is gone: a leftover grant beside report 9 → the institution row lists 9 alone", async () => {
     mockGetEditSession.mockResolvedValue(CURATOR);
     mockGetHighImpactScopes.mockResolvedValue(new Set(["*"]));
     mockGetDisplayTitlesScopes.mockResolvedValue(new Set(["*"]));
@@ -194,10 +194,23 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
       reports: Array<{ n: number; slug: string }>;
     }>;
     expect(units.map((u) => u.kind)).toEqual(["institution"]);
-    expect(units[0].reports.map((r) => [r.n, r.slug])).toEqual([
-      [9, "high-impact-publications"],
-      [10, "display-titles"],
-    ]);
+    expect(units[0].reports.map((r) => [r.n, r.slug])).toEqual([[9, "high-impact-publications"]]);
+    expect(mockGetDisplayTitlesScopes).not.toHaveBeenCalled();
+  });
+
+  it("a superuser's institution row is 8 and 9 — never report 10", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockCanViewArticleCount.mockResolvedValue(true);
+    mockGetHighImpactScopes.mockResolvedValue(new Set(["*"]));
+    mockGetDisplayTitlesScopes.mockResolvedValue(new Set(["*"]));
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    const units = findByType(result, mockReportsIndex)!.props.units as Array<{
+      kind: string;
+      reports: Array<{ n: number }>;
+    }>;
+    const institution = units.find((u) => u.kind === "institution");
+    expect(institution?.reports.map((r) => r.n)).toEqual([8, 9]);
+    expect(units.flatMap((u) => u.reports.map((r) => r.n))).not.toContain(10);
   });
 
   it("scoped Owner/Curator with zero grants → still 404s", async () => {

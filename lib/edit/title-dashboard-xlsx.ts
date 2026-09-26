@@ -1,5 +1,5 @@
 /**
- * The display-titles report (report 10) as an `.xlsx`: one Titles sheet of
+ * The Titles queue (`/edit/titles-queue`, formerly report 10) as an `.xlsx`: one Titles sheet of
  * the FILTERED rows, then the Criteria sheet stating every filter. Built on
  * the shared workbook pieces (`report-xlsx.ts`). No email column: this export
  * carries names, CWIDs and titles only (see the route's cap note).

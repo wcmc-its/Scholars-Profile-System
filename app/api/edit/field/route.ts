@@ -77,6 +77,7 @@ import {
   TITLE_OVERRIDE_FIELD,
   TITLE_REQUEST_FIELD,
 } from "@/lib/edit/title-picker";
+import { invalidateTitlesPendingCount } from "@/lib/edit/titles-queue";
 import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/field";
@@ -785,6 +786,8 @@ async function handleTitleFieldEdit(params: {
 
   // Only an operator's pick changes anything public; a request does not.
   if (isOverride) {
+    // A pin can move a scholar in or out of the Titles queue's "Needs review".
+    invalidateTitlesPendingCount();
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
     if (profile) await reflectOverviewEdit(profile.slug);
   }

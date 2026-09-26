@@ -48,6 +48,7 @@ import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { countPendingHonors } from "@/lib/edit/honor-queue";
+import { countTitlesNeedingReview } from "@/lib/edit/titles-queue";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -374,6 +375,9 @@ export default async function EditSelfPage({
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
   const pendingHonors = tabs.honors ? await countPendingHonors(db.read) : null;
+  // The Titles queue pill, the same memoized fail-soft count `ConsoleShell`
+  // reads (null = no pill; the tab itself rides `tabs.titles`).
+  const pendingTitles = tabs.titles ? await countTitlesNeedingReview(db.read) : null;
 
   return (
     <EditPage
@@ -392,6 +396,8 @@ export default async function EditSelfPage({
             unitsTab={tabs.units || hasUnitGrants}
             pendingSlugRequests={pendingSlugRequests}
             pendingHonors={pendingHonors}
+            titlesTab={tabs.titles}
+            pendingTitles={pendingTitles}
             administratorsTab={tabs.administrators ? 0 : null}
             methodsTab={tabs.methods ? 0 : null}
             roleVocabularyTab={tabs.roleVocabulary ? 0 : null}

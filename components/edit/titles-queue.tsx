@@ -1,6 +1,6 @@
 /**
- * Report 10 — "Display titles" body. Top to bottom (design canvas "Display
- * Titles", 2026-09-25):
+ * The Titles queue body (`/edit/titles-queue`, formerly report 10 "Display
+ * titles"). Top to bottom (design canvas "Display Titles", 2026-09-25):
  *
  *   - "How titles are chosen": a one-line summary with a Show ladder toggle
  *     (`RubricDisclosure`, `#rubric`, which the `/edit` title picker
@@ -15,15 +15,16 @@
  *     listed (the tab included).
  *   - One row per scholar: name, displayed title with its rank and winning
  *     rule, runner-up with its rank and source, why listed (reason pills +
- *     notes), and — superuser / comms steward only — Change, which opens the
- *     pin panel under the row (`TitleRowDisclosure`).
+ *     notes), and Change, which opens the pin panel under the row
+ *     (`TitleRowDisclosure`).
  *
  * Who is listed, and why, is `lib/edit/title-dashboard.ts`; the download route
- * (`/api/edit/reports/display-titles`) takes the same query string through the
- * same `parseTitleDashboardParams`. The pin panel posts the same
- * `/api/edit/field` write as `TitleField` — this report adds no write path.
- * Only superuser / comms_steward get it: the person gate also admits
- * grantees, who may look but not set.
+ * (`/edit/titles-queue/export`) takes the same query string through the same
+ * `parseTitleDashboardParams`. The pin panel posts the same `/api/edit/field`
+ * write as `TitleField` — this page adds no write path. The page's gate
+ * (`canReviewTitles`) is the pin gate, so every viewer gets the pin control;
+ * `canSet` is still derived from the session so the control can never show
+ * to someone the write would refuse.
  */
 import Link from "next/link";
 import { Download } from "lucide-react";
@@ -32,11 +33,11 @@ import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import {
   RubricDisclosure,
   TitleRowDisclosure,
-} from "@/components/edit/reports/display-titles-client";
+} from "@/components/edit/titles-queue-client";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Button } from "@/components/ui/button";
+import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
-import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
 import {
   filterTitleDashboard,
   formatTitleRank,
@@ -61,6 +62,7 @@ import {
   type TitleReason,
   type TitleTab,
 } from "@/lib/edit/title-dashboard";
+import { canReviewTitles } from "@/lib/edit/titles-queue";
 import { TITLE_RANK, TITLE_RANK_LABEL } from "@/lib/scholar-title";
 import { cn } from "@/lib/utils";
 
@@ -103,7 +105,10 @@ const CONTROL =
   "border-apollo-border-strong bg-apollo-surface h-9 min-w-0 rounded-lg border px-2.5 text-[13.5px]";
 const RANK_TAG = "border-apollo-border rounded-[5px] border px-1.5 font-mono tabular-nums";
 
-function toSearchParams(sp: PersonReportProps["searchParams"]): URLSearchParams {
+/** The page's `searchParams`, awaited — Next's shape (a repeated key is an array). */
+export type TitlesQueueSearchParams = Record<string, string | string[] | undefined>;
+
+function toSearchParams(sp: TitlesQueueSearchParams): URLSearchParams {
   const out = new URLSearchParams();
   for (const [k, v] of Object.entries(sp)) {
     for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) out.append(k, x);
@@ -153,7 +158,7 @@ function Rubric() {
   );
 }
 
-/** A report URL for `p` (the tab links, reason chips). The review tab is the
+/** A queue URL for `p` (the tab links, reason chips). The review tab is the
  *  page's default, so it stays off the URL. */
 function hrefFor(basePath: string, p: TitleDashboardParams): string {
   const q = titleDashboardQueryString({ ...p, tab: p.tab === "review" ? null : p.tab });
@@ -428,87 +433,99 @@ function TitleRowCells({ r }: { r: TitleDashboardRow }) {
   );
 }
 
-export async function renderDisplayTitlesReport({
-  session,
-  searchParams,
-  basePath,
-}: PersonReportProps): Promise<ReportRender> {
-  const parsed = parseTitleDashboardParams(toSearchParams(searchParams));
-  // The page opens on "Needs review"; the route keeps unset = every tab.
-  const params: TitleDashboardParams = { ...parsed, tab: parsed.tab ?? "review" };
+/** The queue's loaded state: every listed row plus the per-tab counts. The
+ *  page loads it once, reads `counts.review` for the nav pill and hands it to
+ *  {@link TitlesQueue}. */
+export type TitlesQueueData = {
+  all: TitleDashboardRow[];
+  counts: Record<TitleTab, number>;
+};
+
+export async function loadTitlesQueue(): Promise<TitlesQueueData> {
   const all = await loadTitleDashboard(db.read);
   const counts: Record<TitleTab, number> = { review: 0, pinned: 0, fyi: 0, all: all.length };
   for (const r of all) counts[titleTabOf(r)] += 1;
+  return { all, counts };
+}
+
+export function TitlesQueue({
+  data,
+  session,
+  searchParams,
+  basePath,
+}: {
+  data: TitlesQueueData;
+  session: Pick<EditSession, "isSuperuser" | "isCommsSteward">;
+  searchParams: TitlesQueueSearchParams;
+  /** `/edit/titles-queue` — for the page's own links (tabs, chips, the form). */
+  basePath: string;
+}) {
+  const { all, counts } = data;
+  const parsed = parseTitleDashboardParams(toSearchParams(searchParams));
+  // The page opens on "Needs review"; the export keeps unset = every tab.
+  const params: TitleDashboardParams = { ...parsed, tab: parsed.tab ?? "review" };
   const inTab = params.tab === "all" ? all.length : counts[params.tab!];
   const base = filterTitleDashboard(all, { ...params, reason: null });
   const rows = params.reason ? base.filter((r) => r.reasons.includes(params.reason!)) : base;
-  const canSet = session.isSuperuser || session.isCommsSteward;
+  const canSet = canReviewTitles(session);
   const grid = canSet ? GRID_SET : GRID_VIEW;
-  const downloadHref = `/api/edit/reports/display-titles?${titleDashboardQueryString(params)}`;
+  const downloadHref = `${basePath}/export?${titleDashboardQueryString(params)}`;
 
-  return {
-    subtitle: (
-      <p className="text-muted-foreground text-sm">
-        Scholars whose displayed title is worth a look: leadership titles and roles, pins, close
-        contests, leadership titles that lost, and roles the title text disagrees with.
-      </p>
-    ),
-    main: (
-      <div className="mt-7 flex flex-col gap-5">
-        <Rubric />
-        <div className="flex flex-col gap-2.5">
-          <Tabs basePath={basePath} params={params} counts={counts} />
-          <p className="text-muted-foreground text-[13.5px]" data-testid="display-titles-tab-note">
-            {TITLE_TAB_NOTE[params.tab!]}
-          </p>
-        </div>
-        <Toolbar
-          basePath={basePath}
-          params={params}
-          base={base}
-          shown={rows.length}
-          inTab={inTab}
-          downloadHref={downloadHref}
-        />
-        <div
-          className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[var(--apollo-radius-card)] border"
-          data-testid="display-titles-table"
-        >
-          <div
-            className={cn(
-              "bg-apollo-page border-apollo-border-strong text-muted-foreground hidden gap-x-8 border-b px-[18px] py-2.5 text-xs tracking-[0.05em] uppercase md:grid",
-              grid,
-            )}
-            aria-hidden
-          >
-            <span>Scholar</span>
-            <span>Displayed title</span>
-            <span>Runner-up</span>
-            <span>Why listed</span>
-            {canSet && <span />}
-          </div>
-          {rows.length === 0 ? (
-            <p className="text-muted-foreground p-10 text-center text-sm">
-              No scholars match these filters.
-            </p>
-          ) : (
-            rows.map((r) => (
-              <TitleRowDisclosure
-                key={r.cwid}
-                cwid={r.cwid}
-                name={r.name}
-                options={r.options}
-                displayed={r.displayed}
-                pinned={r.pin !== null}
-                canSet={canSet}
-                gridClass={grid}
-              >
-                <TitleRowCells r={r} />
-              </TitleRowDisclosure>
-            ))
-          )}
-        </div>
+  return (
+    <div className="flex flex-col gap-5">
+      <Rubric />
+      <div className="flex flex-col gap-2.5">
+        <Tabs basePath={basePath} params={params} counts={counts} />
+        <p className="text-muted-foreground text-[13.5px]" data-testid="display-titles-tab-note">
+          {TITLE_TAB_NOTE[params.tab!]}
+        </p>
       </div>
-    ),
-  };
+      <Toolbar
+        basePath={basePath}
+        params={params}
+        base={base}
+        shown={rows.length}
+        inTab={inTab}
+        downloadHref={downloadHref}
+      />
+      <div
+        className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[var(--apollo-radius-card)] border"
+        data-testid="display-titles-table"
+      >
+        <div
+          className={cn(
+            "bg-apollo-page border-apollo-border-strong text-muted-foreground hidden gap-x-8 border-b px-[18px] py-2.5 text-xs tracking-[0.05em] uppercase md:grid",
+            grid,
+          )}
+          aria-hidden
+        >
+          <span>Scholar</span>
+          <span>Displayed title</span>
+          <span>Runner-up</span>
+          <span>Why listed</span>
+          {canSet && <span />}
+        </div>
+        {rows.length === 0 ? (
+          <p className="text-muted-foreground p-10 text-center text-sm">
+            No scholars match these filters.
+          </p>
+        ) : (
+          rows.map((r) => (
+            <TitleRowDisclosure
+              key={r.cwid}
+              cwid={r.cwid}
+              name={r.name}
+              options={r.options}
+              displayed={r.displayed}
+              pinned={r.pin !== null}
+              canSet={canSet}
+              gridClass={grid}
+            >
+              <TitleRowCells r={r} />
+            </TitleRowDisclosure>
+          ))
+        )}
+      </div>
+    </div>
+  );
 }

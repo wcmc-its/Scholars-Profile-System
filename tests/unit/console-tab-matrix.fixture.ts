@@ -52,6 +52,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "matcha",
   "grantMatcha",
   "roleVocabulary",
+  "titles",
 ];
 
 // --- the matrix --------------------------------------------------------
@@ -96,11 +97,13 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "dataSharing",
       "cores",
       "roleVocabulary",
+      "titles",
     ],
     pins:
       "Gap 2 — news via isNewsQueueTabVisible, never via a profilesTab piggyback; " +
       "cores per the 2026-08-26 policy widening (decision #6, full curator-parity on cores); " +
-      "roleVocabulary per isOrgUnitRoleConsoleTabVisible (#2542) — superuser-or-steward gate",
+      "roleVocabulary per isOrgUnitRoleConsoleTabVisible (#2542) — superuser-or-steward gate; " +
+      "titles per canReviewTitles — the display-title pin gate (superuser or steward)",
   },
   {
     name: "pure honors_curator",
@@ -174,6 +177,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "orcidCoverage",
       "cores",
       "roleVocabulary",
+      "titles",
     ],
     pins: "Gap 4b — a comms_steward loses Units on /edit/administrators (unitsTab={session.isSuperuser})",
   },

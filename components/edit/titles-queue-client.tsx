@@ -1,5 +1,5 @@
 /**
- * Report 10 (Display titles) — the two interactive pieces of the body, kept
+ * The Titles queue (`/edit/titles-queue`) — the two interactive pieces of the body, kept
  * out of the server body so it can stay a server component:
  *
  *   RubricDisclosure    "How titles are chosen": one line and a toggle,
@@ -13,7 +13,7 @@
  *                       Unpin when a pin is set.
  *
  * The pin panel posts `/api/edit/field` with `primaryTitle` — the SAME write
- * (and audit row) as `TitleField` on `/edit`; this report adds no write path.
+ * (and audit row) as `TitleField` on `/edit`; this page adds no write path.
  * The route accepts only a title on record (never free text) and `""` to
  * un-pin. After a save the page refreshes so the row, its reasons and the tab
  * counts come back from the server.
@@ -94,7 +94,7 @@ export type TitleRowDisclosureProps = {
   displayed: string | null;
   /** True when a pin is set. */
   pinned: boolean;
-  /** Superuser / comms steward: the Change control. Grantees only look. */
+  /** Superuser / comms steward (the pin gate): the Change control. */
   canSet: boolean;
   /** The md+ grid template, shared with the header row. */
   gridClass: string;

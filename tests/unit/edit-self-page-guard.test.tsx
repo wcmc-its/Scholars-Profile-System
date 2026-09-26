@@ -129,6 +129,11 @@ vi.mock("@/lib/edit/manageable-units", () => ({
   loadAllUnitsDirectory: async () => [],
 }));
 vi.mock("@/lib/auth/honors-curator", () => ({ isHonorsCurator: mockIsHonorsCurator }));
+// The Titles queue pill reads the whole title dashboard; the gate stays real.
+vi.mock("@/lib/edit/titles-queue", async (orig) => ({
+  ...(await orig<typeof import("@/lib/edit/titles-queue")>()),
+  countTitlesNeedingReview: async () => 0,
+}));
 vi.mock("@/lib/auth/development", () => ({ isDeveloper: mockIsDeveloper }));
 vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,

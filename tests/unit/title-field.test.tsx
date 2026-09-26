@@ -121,16 +121,16 @@ describe("TitleField — radio list", () => {
   });
 
   it("links to the title ladder when rubricHref is passed (picker posture)", () => {
-    renderField({ rubricHref: "/edit/reports/display-titles#rubric" });
+    renderField({ rubricHref: "/edit/titles-queue#rubric" });
     const link = screen.getByTestId("title-rubric-link");
     expect(link.textContent).toBe("How titles are chosen");
-    expect(link.getAttribute("href")).toBe("/edit/reports/display-titles#rubric");
+    expect(link.getAttribute("href")).toBe("/edit/titles-queue#rubric");
   });
 
   it("links to the title ladder in the read-only posture too", () => {
-    renderField({ canSet: false, rubricHref: "/edit/reports/display-titles#rubric" });
+    renderField({ canSet: false, rubricHref: "/edit/titles-queue#rubric" });
     expect(screen.getByTestId("title-rubric-link").getAttribute("href")).toBe(
-      "/edit/reports/display-titles#rubric",
+      "/edit/titles-queue#rubric",
     );
   });
 

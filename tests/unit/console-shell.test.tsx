@@ -19,7 +19,10 @@ import { render, screen } from "@testing-library/react";
 import type { EditSession } from "@/lib/auth/superuser";
 import type { ConsoleTabState } from "@/lib/edit/console-tabs.server";
 
-const { mockLoadConsoleTabs } = vi.hoisted(() => ({ mockLoadConsoleTabs: vi.fn() }));
+const { mockLoadConsoleTabs, mockCountTitles } = vi.hoisted(() => ({
+  mockLoadConsoleTabs: vi.fn(),
+  mockCountTitles: vi.fn(),
+}));
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
@@ -40,6 +43,7 @@ vi.mock("@/components/site/account-menu", () => ({
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("@/lib/edit/console-tabs.server", () => ({ loadConsoleTabs: mockLoadConsoleTabs }));
+vi.mock("@/lib/edit/titles-queue", () => ({ countTitlesNeedingReview: mockCountTitles }));
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 
@@ -67,6 +71,7 @@ const NO_TABS: ConsoleTabState = {
   matcha: false,
   grantMatcha: false,
   roleVocabulary: false,
+  titles: false,
 };
 
 function tabs(overrides: Partial<ConsoleTabState>): ConsoleTabState {
@@ -230,5 +235,75 @@ describe("ConsoleShell", () => {
       }),
     );
     expect(screen.getByTestId("admin-tab-units")).toBeTruthy();
+  });
+
+  describe("the Titles queue tab and its pill", () => {
+    it("reads the Needs review count itself for a viewer who has the tab — every console page, no per-page wiring", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(7);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ methods: true, titles: true }));
+      render(
+        await ConsoleShell({
+          active: "methods",
+          session: session({ isCommsSteward: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Method families</h1>,
+        }),
+      );
+      const tab = screen.getByTestId("admin-tab-titles-queue");
+      expect(tab.getAttribute("href")).toBe("/edit/titles-queue");
+      expect(tab.textContent).toBe("Titles7");
+      expect(mockCountTitles).toHaveBeenCalledTimes(1);
+    });
+
+    it("a failed count (null) shows the tab with no pill", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(null);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ titles: true }));
+      render(
+        await ConsoleShell({
+          active: "activity",
+          session: session({ isSuperuser: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Edit activity</h1>,
+        }),
+      );
+      expect(screen.getByTestId("admin-tab-titles-queue").textContent).toBe("Titles");
+    });
+
+    it("uses the page's own count when it passes one (the queue page) and reads nothing", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(99);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ titles: true }));
+      render(
+        await ConsoleShell({
+          active: "titles-queue",
+          session: session({ isSuperuser: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          pendingTitles: 3,
+          children: <h1>Titles</h1>,
+        }),
+      );
+      const tab = screen.getByTestId("admin-tab-titles-queue");
+      expect(tab.textContent).toBe("Titles3");
+      expect(tab.getAttribute("aria-current")).toBe("page");
+      expect(mockCountTitles).not.toHaveBeenCalled();
+    });
+
+    it("hides the tab, and never counts, for a viewer without it", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(7);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ profiles: true, units: true }));
+      render(
+        await ConsoleShell({
+          active: "profiles",
+          session: session({}),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Profiles</h1>,
+        }),
+      );
+      expect(screen.queryByTestId("admin-tab-titles-queue")).toBeNull();
+      expect(mockCountTitles).not.toHaveBeenCalled();
+    });
   });
 });
