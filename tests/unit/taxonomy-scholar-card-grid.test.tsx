@@ -105,6 +105,10 @@ describe("ScholarCardGrid", () => {
     expect(card.className).toContain("min-h-11");
     const name = within(card).getByText("Test Person 1");
     expect(name.className).toContain("truncate");
+    // Mockup Portrait card: sans 14px / 650 (not the serif name of the spine card).
+    expect(name.className).toContain("text-[14px]");
+    expect(name.className).toContain("font-[650]");
+    expect(name.className).not.toContain("font-serif");
     const title = within(card).getByText(LONG_TITLE);
     expect(title.className).toContain("truncate");
     expect(title.parentElement!.className).toContain("min-w-0");

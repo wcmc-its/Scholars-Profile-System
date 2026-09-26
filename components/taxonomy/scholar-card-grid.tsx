@@ -145,7 +145,7 @@ function ScholarCardLink({ scholar, className }: { scholar: ScholarCardData; cla
         className="mt-0.5 shrink-0"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-px">
-        <span className="truncate text-sm font-semibold">{scholar.preferredName}</span>
+        <span className="truncate text-[14px] font-[650]">{scholar.preferredName}</span>
         {scholar.primaryTitle ? (
           <span className="text-muted-foreground truncate text-[13px] leading-[1.35]">
             {scholar.primaryTitle}
