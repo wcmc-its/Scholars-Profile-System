@@ -1818,14 +1818,12 @@ describe("EtlStack", () => {
       // rule; all enabled in staging.
       // The #1218 opportunity-projection rule was RETIRED in staging on
       // 2026-07-20 (the nightly now covers the work); the honors-list scraper's
-      // weekly rule brings it to 10. That one rule ships DISABLED on purpose
-      // (first run is supervised; see the honors describe block below), so it
-      // is the single exception here.
+      // weekly rule brings it to 10 (enabled after staging's clean supervised
+      // first run on 2026-09-25).
       expect(Object.keys(rules)).toHaveLength(10);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
-        const expected = rule.Properties?.Name === "sps-honors-staging" ? "DISABLED" : "ENABLED";
-        expect({ id, state }).toEqual({ id, state: expected });
+        expect({ id, state }).toEqual({ id, state: "ENABLED" });
       }
     });
 
@@ -2308,15 +2306,15 @@ describe("EtlStack honors-list scraper (scholars-honors-<env>)", () => {
       });
     });
 
-    it(`${env}: a weekly rule, DISABLED on first deploy, sending every list`, () => {
+    it(`${env}: a weekly rule (enabled in staging, DISABLED in prod until its supervised first run), sending every list`, () => {
       const rule = Object.values(template.findResources("AWS::Events::Rule")).find(
         (r) => r.Properties?.Name === `sps-honors-${env}`,
       );
       expect(rule?.Properties?.ScheduleExpression).toBe("cron(0 10 ? * MON *)");
-      // Disabled in BOTH envs until a supervised first run has been checked for
-      // candidates that duplicate the seed import; the machine still deploys
-      // and is startable by hand.
-      expect(rule?.Properties?.State).toBe("DISABLED");
+      // Each env stays disabled until its supervised first run has been checked
+      // for candidates that duplicate the seed import; the machine still
+      // deploys and is startable by hand. Staging's was clean on 2026-09-25.
+      expect(rule?.Properties?.State).toBe(env === "staging" ? "ENABLED" : "DISABLED");
       expect(rule?.Properties?.Targets).toHaveLength(1);
       expect(JSON.parse(rule?.Properties?.Targets[0].Input)).toEqual({
         lists: "all",

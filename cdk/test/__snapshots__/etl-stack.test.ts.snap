@@ -17475,7 +17475,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "Description": "SPS honors-list scrape -- weekly Mon 10:00 UTC (staging).",
         "Name": "sps-honors-staging",
         "ScheduleExpression": "cron(0 10 ? * MON *)",
-        "State": "DISABLED",
+        "State": "ENABLED",
         "Targets": [
           {
             "Arn": {

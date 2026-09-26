@@ -3063,7 +3063,9 @@ export class EtlStack extends Stack {
     // differs from the seed's would re-propose already-decided honors). Once
     // staging's first run is clean, flip staging's branch to `true`, then
     // prod's, each with a snapshot update and a `cdk deploy Sps-Etl-<env>`.
-    const honorsScheduleEnabled = envConfig.envName === "staging" ? false : false;
+    // Staging: first run 2026-09-25 was clean (8 matches, all already
+    // published from the seed under the same strings; 0 duplicates) -> on.
+    const honorsScheduleEnabled = envConfig.envName === "staging" ? true : false;
     const honorsRule = new events.Rule(this, "HonorsScheduleRule", {
       ruleName: `sps-honors-${env}`,
       description: `SPS honors-list scrape -- weekly Mon 10:00 UTC (${env}).`,
