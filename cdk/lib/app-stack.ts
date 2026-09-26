@@ -3003,13 +3003,13 @@ export class AppStack extends Stack {
         // or allowlist-only holders) keep their existing access either way.
         FUNCTIONAL_ROLES_AUTHZ: env === "staging" ? "on" : "on",
         // Topic / method page phase 3 (lib/taxonomy-flags.ts). When "on": the
-        // portrait scholar card grid (top 6 with area chips) replaces the top
+        // portrait scholar card grid (top 6 with area bullets) replaces the top
         // scholars chip row on topic, method family and method category pages,
-        // the selected rail item's scholars become pick-to-filter cards
-        // (`?scholar=`), and both publication routes honor a validated `?cwid=`
-        // (hidden identities refused). Off = the pre-flag pages and routes.
-        // STAGING ON for the eyeball; prod stays off until it is signed off.
-        TAXONOMY_SCHOLAR_CARDS: env === "staging" ? "on" : "off",
+        // the selected rail item's scholars show as plain name links, and both
+        // publication routes honor a validated `?cwid=` (hidden identities
+        // refused). Off = the pre-flag pages and routes.
+        // ON in both envs (2026-09-26), signed off on staging.
+        TAXONOMY_SCHOLAR_CARDS: env === "staging" ? "on" : "on",
         // Topic / method page phase 4 (lib/taxonomy-flags.ts). When "on": the
         // topic, method family and method category publication feeds page with
         // "Show 20 more · 40 of 279" (Load more) instead of numbered pages, keep
@@ -3019,8 +3019,8 @@ export class AppStack extends Stack {
         // rail item is selected, and the category page's "All families" panel
         // becomes the paged feed at /api/methods/[sc]/all/publications (404
         // while off). Off = the pre-flag feeds.
-        // STAGING ON for the eyeball; prod stays off until it is signed off.
-        TAXONOMY_FEED_LOAD_MORE: env === "staging" ? "on" : "off",
+        // ON in both envs (2026-09-26), signed off on staging.
+        TAXONOMY_FEED_LOAD_MORE: env === "staging" ? "on" : "on",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the

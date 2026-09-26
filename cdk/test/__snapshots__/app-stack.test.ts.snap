@@ -1028,11 +1028,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "TAXONOMY_SCHOLAR_CARDS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "TAXONOMY_FEED_LOAD_MORE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
