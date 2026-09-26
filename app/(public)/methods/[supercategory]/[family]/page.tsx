@@ -13,7 +13,7 @@ import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { ScholarCardGrid } from "@/components/taxonomy/scholar-card-grid";
-import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
 import { FamilyEntityRailLayout } from "@/components/method/family-entity-rail-layout";
@@ -101,6 +101,7 @@ export default async function FamilyPage({
   const scLabel = supercategoryLabel(resolved.supercategory);
   // TAXONOMY_SCHOLAR_CARDS — portrait cards (no area chips on a family page).
   const scholarCards = isTaxonomyScholarCardsOn();
+  const feedLoadMore = isTaxonomyFeedLoadMoreOn();
   const familyScholarsHref = `/methods/${resolved.supercategorySlug}/${resolved.familySlug}/scholars`;
 
   // Spotlight (§5.A, optional) — map the representative pubs onto SpotlightCard.
@@ -260,6 +261,7 @@ export default async function FamilyPage({
             familySegment={resolved.familySlug}
             familyLabel={resolved.familyLabel}
             cellLineLabels={cellLineLabels}
+            loadMore={feedLoadMore}
           />
         ) : (
           <FamilyPublicationLayout
@@ -267,6 +269,7 @@ export default async function FamilyPage({
             familySegment={resolved.familySlug}
             familyLabel={resolved.familyLabel}
             cellLineLabels={cellLineLabels}
+            loadMore={feedLoadMore}
           />
         )}
       </section>

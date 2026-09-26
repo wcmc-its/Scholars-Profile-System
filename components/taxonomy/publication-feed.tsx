@@ -17,9 +17,24 @@
  *     fall-back to the also tier when the strongly tier is empty;
  *   - entity usage snippets (family pages, via the `?entity=` filter);
  *   - the non-research publication-type toggle (every feed).
+ *
+ * Two presentations of the same rows:
+ *   - `loadMore` off (TAXONOMY_FEED_LOAD_MORE off, the default): today's
+ *     numbered pagination, and on topics the stacked "Also relevant" section.
+ *   - `loadMore` on: a "Show 20 more · 40 of 279" button, `?shown=N` kept in the
+ *     URL so Back restores the loaded rows, and on topics ONE "All relevant" list.
  */
 import Link from "next/link";
-import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Compass } from "lucide-react";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
@@ -29,6 +44,7 @@ import { pubTitleProps } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -47,6 +63,13 @@ import {
 } from "@/components/ui/pagination";
 import { CuratedTag } from "@/components/topic/curated-tag";
 import { PublicationsHeadingRow } from "@/components/taxonomy/publications-heading-row";
+import {
+  FEED_CHUNK,
+  loadMoreLabel,
+  nextChunkSize,
+  readShownParam,
+  writeShownParam,
+} from "@/lib/taxonomy/feed-load-more";
 import { sanitizePubTitle } from "@/lib/utils";
 
 type Sort = "newest" | "most_cited" | "by_impact";
@@ -80,6 +103,10 @@ export type FeedHit = {
     matchedSpan: { start: number; end: number } | null;
     usage: "used" | "appears";
   }>;
+  /** Topic hits: the pub's primary subtopic (per-row area label). */
+  primarySubtopicId?: string | null;
+  /** Category-wide hits: the pub's family label (per-row area label). */
+  familyLabel?: string | null;
 };
 
 type FeedResponse = {
@@ -114,6 +141,10 @@ export type PublicationFeedProps = {
   headerSlot?: ReactNode;
   /** Empty-state body copy. */
   emptyBody: string;
+  /** TAXONOMY_FEED_LOAD_MORE — Load more + `?shown=` + one merged tier list. */
+  loadMore?: boolean;
+  /** TAXONOMY_FEED_LOAD_MORE — the per-row area label ("· {subarea}"). */
+  areaLabelFor?: (hit: FeedHit) => string | null;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -122,6 +153,7 @@ function feedUrl(
   o: {
     sort: Sort;
     page: number;
+    limit?: number;
     filter: Filter;
     tier?: "strongly" | "also";
     scopeParams: Array<[string, string | null]>;
@@ -130,6 +162,9 @@ function feedUrl(
   const url = new URL(endpoint, window.location.origin);
   url.searchParams.set("sort", o.sort);
   url.searchParams.set("page", String(o.page));
+  if (o.limit !== undefined && o.limit !== FEED_CHUNK) {
+    url.searchParams.set("limit", String(o.limit));
+  }
   url.searchParams.set("filter", o.filter);
   if (o.tier) url.searchParams.set("tier", o.tier);
   for (const [k, v] of o.scopeParams) if (v) url.searchParams.set(k, v);
@@ -151,6 +186,8 @@ export function PublicationFeed({
   formatCount,
   headerSlot,
   emptyBody,
+  loadMore = false,
+  areaLabelFor,
 }: PublicationFeedProps) {
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
@@ -159,6 +196,7 @@ export function PublicationFeed({
   const scopeKey = JSON.stringify(scopeParams);
   const isCuratedSort = sort === "by_impact";
 
+  // ---- numbered pages (flag off) -------------------------------------------
   const [stronglyPage, setStronglyPage] = useState(1);
   const [alsoPage, setAlsoPage] = useState(1);
   useEffect(() => {
@@ -170,27 +208,66 @@ export function PublicationFeed({
     if (showTier === "all") setAlsoPage(1);
   }, [showTier]);
 
-  const primaryUrl = feedUrl(endpoint, {
+  const primaryUrl = loadMore
+    ? null
+    : feedUrl(endpoint, {
         sort,
         page: stronglyPage,
         filter,
-    tier: relevanceTiers ? "strongly" : undefined,
-    scopeParams,
-  });
+        tier: relevanceTiers ? "strongly" : undefined,
+        scopeParams,
+      });
   const primary = usePagedFetch(primaryUrl);
   const stronglyEmpty =
     primary.data !== null && (primary.data.tierTotals?.strongly ?? 0) === 0;
   const alsoAvailable = primary.data !== null && (primary.data.tierTotals?.also ?? 0) > 0;
-  const alsoInline = relevanceTiers && stronglyEmpty && alsoAvailable;
+  const pagedAlsoInline = relevanceTiers && stronglyEmpty && alsoAvailable;
   const alsoUrl =
-    relevanceTiers && (showTier === "all" || alsoInline)
+    !loadMore && relevanceTiers && (showTier === "all" || pagedAlsoInline)
       ? feedUrl(endpoint, { sort, page: alsoPage, filter, tier: "also", scopeParams })
       : null;
   const also = usePagedFetch(alsoUrl);
 
-  const data = primary.data;
+  // ---- Load more (flag on) -------------------------------------------------
+  const listKey = `${endpoint}|${sort}|${filter}|${relevanceTiers ? showTier : "-"}|${scopeKey}`;
+  // Whether the current list's first chunk took the #326 also-fallback, so its
+  // later chunks keep asking for every tier.
+  const prevMerged = useRef(false);
+  const fetchChunk = useCallback(
+    async (page: number, limit: number, prev: FeedResponse | null) => {
+      const base = { sort, page, limit, filter, scopeParams };
+      if (!relevanceTiers || showTier === "all") {
+        return { data: await fetchFeed(feedUrl(endpoint, base)), merged: false };
+      }
+      // Strongly only. #326: when the strongly tier is empty but the also tier
+      // is not, show the also rows (= every row) instead of a blank feed.
+      if (prev) {
+        const merged = prevMerged.current;
+        return {
+          data: await fetchFeed(
+            feedUrl(endpoint, merged ? base : { ...base, tier: "strongly" }),
+          ),
+          merged,
+        };
+      }
+      const strongly = await fetchFeed(feedUrl(endpoint, { ...base, tier: "strongly" }));
+      const t = strongly.tierTotals;
+      if (t && t.strongly === 0 && t.also > 0) {
+        return { data: await fetchFeed(feedUrl(endpoint, base)), merged: true };
+      }
+      return { data: strongly, merged: false };
+    },
+    // scopeParams is captured through scopeKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [endpoint, sort, filter, relevanceTiers, showTier, scopeKey],
+  );
+  const list = useLoadMoreList({ enabled: loadMore, key: listKey, fetchChunk, prevMerged });
+
+  // ---- derived view --------------------------------------------------------
+  const data = loadMore ? list.data : primary.data;
   const tierTotals = data?.tierTotals ?? null;
   const parentTierTotals = data?.parentTierTotals ?? null;
+  const alsoInline = loadMore ? list.merged : pagedAlsoInline;
   const showTierSelect =
     relevanceTiers &&
     parentTierTotals !== null &&
@@ -205,14 +282,15 @@ export function PublicationFeed({
     } else if (relevanceTiers && tierTotals) {
       // One count definition (phase 4): every relevance tier under the active
       // type filter, whatever Show says — the same number as the rail row
-      // (`getSubtopicRail`). The Show options keep their per-tier counts.
+      // (`getSubtopicRail`). The Show options keep their per-tier counts; the
+      // Load more denominator is the current Show option's count (`total`).
       countLabel = (tierTotals.strongly + tierTotals.also).toLocaleString();
     } else {
       countLabel = data.total.toLocaleString();
     }
   }
 
-  const rowProps = { modalTopicSlug, entityTerm };
+  const rowProps = { modalTopicSlug, entityTerm, areaLabelFor };
 
   return (
     <section className="flex flex-col gap-4">
@@ -257,32 +335,38 @@ export function PublicationFeed({
 
       <FilterToggleRow data={data} filter={filter} setFilter={setFilter} />
 
-      {!alsoInline && (
-        <PagedSection
-          loading={primary.loading}
-          error={primary.error}
-          data={primary.data}
-          page={stronglyPage}
-          onPageChange={setStronglyPage}
-          emptyBody={emptyBody}
-          emptyState
-          rowProps={rowProps}
-        />
-      )}
-      {relevanceTiers && (showTier === "all" || alsoInline) && (
-        <div className={alsoInline ? "" : "mt-2 border-t border-border pt-4"}>
-          {!alsoInline && <h4 className="mb-3 text-base font-semibold">Also relevant</h4>}
-          <PagedSection
-            loading={also.loading}
-            error={also.error}
-            data={also.data}
-            page={alsoPage}
-            onPageChange={setAlsoPage}
-            emptyBody={emptyBody}
-            emptyState={alsoInline}
-            rowProps={rowProps}
-          />
-        </div>
+      {loadMore ? (
+        <LoadMoreSection list={list} emptyBody={emptyBody} rowProps={rowProps} />
+      ) : (
+        <>
+          {!pagedAlsoInline && (
+            <PagedSection
+              loading={primary.loading}
+              error={primary.error}
+              data={primary.data}
+              page={stronglyPage}
+              onPageChange={setStronglyPage}
+              emptyBody={emptyBody}
+              emptyState
+              rowProps={rowProps}
+            />
+          )}
+          {relevanceTiers && (showTier === "all" || alsoInline) && (
+            <div className={alsoInline ? "" : "mt-2 border-t border-border pt-4"}>
+              {!alsoInline && <h4 className="mb-3 text-base font-semibold">Also relevant</h4>}
+              <PagedSection
+                loading={also.loading}
+                error={also.error}
+                data={also.data}
+                page={alsoPage}
+                onPageChange={setAlsoPage}
+                emptyBody={emptyBody}
+                emptyState={alsoInline}
+                rowProps={rowProps}
+              />
+            </div>
+          )}
+        </>
       )}
     </section>
   );
@@ -329,6 +413,131 @@ function usePagedFetch(url: string | null): {
   return { data, loading, error };
 }
 
+type LoadMoreList = {
+  rows: FeedHit[];
+  data: FeedResponse | null;
+  /** Rows requested so far (a multiple of the chunk): the next offset. */
+  loaded: number;
+  /** The first chunk came from the #326 also-fallback (one merged list). */
+  merged: boolean;
+  loading: boolean;
+  error: string | null;
+  /** pmid of the first row of the last appended chunk (focus target). */
+  focusPmid: string | null;
+  announcement: string;
+  loadMore: () => void;
+};
+
+type ChunkFetcher = (
+  page: number,
+  limit: number,
+  prev: FeedResponse | null,
+) => Promise<{ data: FeedResponse; merged: boolean }>;
+
+/**
+ * Load-more list state. The first load of the FIRST key honors `?shown=N`
+ * (one request with `limit=N`); every later key change (rail item, Show, Sort,
+ * type toggle) starts again at one chunk and drops `?shown=` from the URL.
+ */
+function useLoadMoreList({
+  enabled,
+  key,
+  fetchChunk,
+  prevMerged,
+}: {
+  enabled: boolean;
+  key: string;
+  fetchChunk: ChunkFetcher;
+  prevMerged: { current: boolean };
+}): LoadMoreList {
+  const [state, setState] = useState<Omit<LoadMoreList, "loadMore">>({
+    rows: [],
+    data: null,
+    loaded: 0,
+    merged: false,
+    loading: enabled,
+    error: null,
+    focusPmid: null,
+    announcement: "",
+  });
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const fetchRef = useRef(fetchChunk);
+  fetchRef.current = fetchChunk;
+  // The mount key restores `?shown=`; once the key has changed, never again.
+  // (Keyed on the value, not on "first effect run", so a StrictMode re-run of
+  // the mount effect still restores.)
+  const initialKeyRef = useRef<string | null>(null);
+  const keyChangedRef = useRef(false);
+  const reqRef = useRef(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (initialKeyRef.current === null) initialKeyRef.current = key;
+    if (key !== initialKeyRef.current) keyChangedRef.current = true;
+    const initial = !keyChangedRef.current;
+    const restore = initial ? readShownParam(window.location.search) : null;
+    if (!initial) writeShownParam(null);
+    const limit = restore ?? FEED_CHUNK;
+    const id = ++reqRef.current;
+    setState((s) => ({ ...s, loading: true, error: null, focusPmid: null }));
+    fetchRef
+      .current(1, limit, null)
+      .then(({ data, merged }) => {
+        if (id !== reqRef.current) return;
+        prevMerged.current = merged;
+        setState({
+          rows: data.hits,
+          data,
+          loaded: limit,
+          merged,
+          loading: false,
+          error: null,
+          focusPmid: null,
+          announcement: "",
+        });
+      })
+      .catch((err: unknown) => {
+        if (id !== reqRef.current) return;
+        setState((s) => ({ ...s, loading: false, error: String(err) }));
+      });
+  }, [enabled, key, prevMerged]);
+
+  const loadMore = useCallback(() => {
+    const s = stateRef.current;
+    if (s.loading || !s.data) return;
+    const page = s.loaded / FEED_CHUNK + 1;
+    const id = ++reqRef.current;
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+    fetchRef
+      .current(page, FEED_CHUNK, s.data)
+      .then(({ data }) => {
+        if (id !== reqRef.current) return;
+        const seen = new Set(s.rows.map((r) => r.pmid));
+        const added = data.hits.filter((h) => !seen.has(h.pmid));
+        const rows = [...s.rows, ...added];
+        const loaded = s.loaded + FEED_CHUNK;
+        writeShownParam(loaded);
+        setState({
+          rows,
+          data,
+          loaded,
+          merged: s.merged,
+          loading: false,
+          error: null,
+          focusPmid: added[0]?.pmid ?? null,
+          announcement: `Showing ${rows.length.toLocaleString()} of ${data.total.toLocaleString()} publications`,
+        });
+      })
+      .catch((err: unknown) => {
+        if (id !== reqRef.current) return;
+        setState((prev) => ({ ...prev, loading: false, error: String(err) }));
+      });
+  }, []);
+
+  return { ...state, loadMore };
+}
+
 // ---------------------------------------------------------------------------
 // Sections
 // ---------------------------------------------------------------------------
@@ -336,6 +545,7 @@ function usePagedFetch(url: string | null): {
 type RowProps = {
   modalTopicSlug?: string;
   entityTerm: string | null;
+  areaLabelFor?: (hit: FeedHit) => string | null;
 };
 
 function FeedSkeleton() {
@@ -408,6 +618,72 @@ function PagedSection({
   );
 }
 
+function LoadMoreSection({
+  list,
+  emptyBody,
+  rowProps,
+}: {
+  list: LoadMoreList;
+  emptyBody: string;
+  rowProps: RowProps;
+}) {
+  const listRef = useRef<HTMLUListElement>(null);
+  // Keyboard users continue in place: focus the first newly loaded row.
+  useLayoutEffect(() => {
+    if (!list.focusPmid) return;
+    const items = listRef.current?.querySelectorAll<HTMLElement>("li[data-pmid]") ?? [];
+    for (const el of items) {
+      if (el.dataset.pmid === list.focusPmid) {
+        el.focus();
+        break;
+      }
+    }
+  }, [list.focusPmid]);
+
+  const { data, rows } = list;
+  let body: ReactNode;
+  if (list.loading && data === null) body = <FeedSkeleton />;
+  else if (list.error && data === null) body = <FeedError />;
+  else if (!data || (data.total === 0 && rows.length === 0)) body = <FeedEmpty body={emptyBody} />;
+  else {
+    const total = data.total;
+    const next = nextChunkSize(list.loaded, total);
+    body = (
+      <>
+        <ul ref={listRef} className="divide-y divide-border">
+          {rows.map((h) => (
+            <PubRow key={h.pmid} hit={h} focusable {...rowProps} />
+          ))}
+        </ul>
+        {list.error && <FeedError />}
+        {next > 0 && (
+          <div className="flex justify-center pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={list.loadMore}
+              disabled={list.loading}
+              aria-busy={list.loading || undefined}
+              className="max-sm:min-h-11 max-sm:w-full"
+              data-testid="feed-load-more"
+            >
+              {list.loading ? "Loading…" : loadMoreLabel(list.loaded, rows.length, total)}
+            </Button>
+          </div>
+        )}
+      </>
+    );
+  }
+  return (
+    <>
+      {body}
+      <div aria-live="polite" role="status" className="sr-only" data-testid="feed-announcement">
+        {list.announcement}
+      </div>
+    </>
+  );
+}
+
 /**
  * The "Show all publication types / Hide non-research" toggle (#30). The count
  * lives in the "Publications N" row; this row only holds the toggle.
@@ -456,10 +732,15 @@ export function PubRow({
   hit,
   modalTopicSlug,
   entityTerm = null,
+  areaLabelFor,
+  focusable = false,
 }: {
   hit: FeedHit;
   modalTopicSlug?: string;
   entityTerm?: string | null;
+  areaLabelFor?: (hit: FeedHit) => string | null;
+  /** Load more: rows take programmatic focus (tabIndex -1). */
+  focusable?: boolean;
 }) {
   const { open: openModal } = usePublicationModal();
   const titleHtml = sanitizePubTitle(hit.title);
@@ -467,8 +748,12 @@ export function PubRow({
   const usages = hit.entityUsages ?? [];
   const shownUsages = usagesExpanded ? usages : usages.slice(0, 1);
   const moreCount = usages.length - 1;
+  const areaLabel = areaLabelFor ? areaLabelFor(hit) : null;
   return (
-    <li className="py-4">
+    <li
+      className={focusable ? "py-4 outline-none focus-visible:ring-2 focus-visible:ring-ring" : "py-4"}
+      {...(focusable ? { tabIndex: -1, "data-pmid": hit.pmid } : {})}
+    >
       <div className="line-clamp-2 font-semibold leading-snug">
         <button
           type="button"
@@ -481,7 +766,9 @@ export function PubRow({
           {...pubTitleProps(titleHtml, "text-left hover:underline")}
         />
       </div>
-      {(hit.journal || hit.year) && (
+      {/* Kept as `journal || year` (not a boolean) for parity: a row with no
+          journal and year 0 has always rendered a stray "0" here. */}
+      {(areaLabel ? true : hit.journal || hit.year) && (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           {hit.journal && (
             <span
@@ -491,6 +778,12 @@ export function PubRow({
           )}
           {hit.journal && hit.year ? <span aria-hidden="true">·</span> : null}
           {hit.year ? <span>{hit.year}</span> : null}
+          {areaLabel ? (
+            <>
+              {hit.journal || hit.year ? <span aria-hidden="true">·</span> : null}
+              <span data-testid="pub-area-label">{areaLabel}</span>
+            </>
+          ) : null}
         </div>
       )}
       {/* #327 — the paper's argmax topic when it is ANOTHER topic (the server
@@ -625,11 +918,23 @@ function PaginationRow({
 export function TopicPublicationFeed({
   topicSlug,
   activeSubtopic,
+  loadMore = false,
+  subtopicLabels,
 }: {
   topicSlug: string;
   /** The subtopic title/description live in the rail layout's subhead. */
   activeSubtopic: string | null;
+  /** TAXONOMY_FEED_LOAD_MORE. */
+  loadMore?: boolean;
+  /** TAXONOMY_FEED_LOAD_MORE — subtopic id → display name for the per-row
+   *  area label, shown only when no subarea is selected. */
+  subtopicLabels?: Record<string, string>;
 }) {
+  const areaLabelFor = useMemo(() => {
+    if (!loadMore || activeSubtopic || !subtopicLabels) return undefined;
+    return (hit: FeedHit) =>
+      hit.primarySubtopicId ? (subtopicLabels[hit.primarySubtopicId] ?? null) : null;
+  }, [loadMore, activeSubtopic, subtopicLabels]);
   return (
     <PublicationFeed
       endpoint={`/api/topics/${encodeURIComponent(topicSlug)}/publications`}
@@ -637,6 +942,8 @@ export function TopicPublicationFeed({
       relevanceTiers
       modalTopicSlug={topicSlug}
       emptyBody="Publications in this area will appear as they are indexed."
+      loadMore={loadMore}
+      areaLabelFor={areaLabelFor}
     />
   );
 }
@@ -652,6 +959,7 @@ export function FamilyPublicationFeed({
   familySegment,
   familyLabel,
   cellLineLabels,
+  loadMore = false,
 }: {
   /** The supercategory URL slug segment (path part 1). */
   supercategorySlug: string;
@@ -661,6 +969,8 @@ export function FamilyPublicationFeed({
   familyLabel: string;
   /** #1166 — entity id → display label; unknown id ⇒ no cell-line filter UI. */
   cellLineLabels?: Record<string, string>;
+  /** TAXONOMY_FEED_LOAD_MORE. */
+  loadMore?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -674,6 +984,7 @@ export function FamilyPublicationFeed({
     const params = new URLSearchParams(searchParams.toString());
     params.delete("entity");
     params.delete("page");
+    params.delete("shown");
     router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname, {
       scroll: false,
     });
@@ -694,6 +1005,7 @@ export function FamilyPublicationFeed({
         return `${data.total.toLocaleString()} of ${denom.toLocaleString()} articles`;
       }}
       emptyBody={`Publications using ${familyLabel} will appear as they are indexed.`}
+      loadMore={loadMore}
       headerSlot={
         cellLine && cellLineLabel ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -721,4 +1033,24 @@ export function FamilyPublicationFeed({
       }
     />
   );
+}
+
+/**
+ * TAXONOMY_FEED_LOAD_MORE — the method category page's "All families" feed:
+ * every family's gated pmids as one sortable, load-more list, each row labeled
+ * with its family (`familyLabel`, chosen server-side).
+ */
+export function CategoryPublicationFeed({ supercategorySlug }: { supercategorySlug: string }) {
+  return (
+    <PublicationFeed
+      endpoint={`/api/methods/${encodeURIComponent(supercategorySlug)}/all/publications`}
+      emptyBody="Publications in this category will appear as they are indexed."
+      loadMore
+      areaLabelFor={categoryAreaLabel}
+    />
+  );
+}
+
+function categoryAreaLabel(hit: FeedHit): string | null {
+  return hit.familyLabel ?? null;
 }

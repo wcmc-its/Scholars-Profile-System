@@ -13,7 +13,7 @@ import { isSupercategoryExportInRange } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { ScholarCardGrid } from "@/components/taxonomy/scholar-card-grid";
-import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import {
   SupercategoryRailLayout,
   type FamilyRailItem,
@@ -202,6 +202,7 @@ export default async function SupercategoryPage({
           allWorkPubs={allWorkPubs}
           allPubCount={allPubCount}
           scholarNames={scholarCards}
+          loadMore={isTaxonomyFeedLoadMoreOn()}
         />
       </section>
     </main>

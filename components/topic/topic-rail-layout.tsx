@@ -5,6 +5,7 @@
  * `RailLayout`. Selection lives in `?subtopic=` (read on load, written on
  * change); `?subtopic=…#publications` deep links keep working.
  */
+import { useMemo } from "react";
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
 import { TopicPublicationFeed } from "@/components/taxonomy/publication-feed";
@@ -27,6 +28,7 @@ export function TopicRailLayout({
   subtopics,
   totalPubCount,
   scholarNames = false,
+  loadMore = false,
 }: {
   topicSlug: string;
   subtopics: SubtopicRailItem[];
@@ -36,6 +38,9 @@ export function TopicRailLayout({
   /** TAXONOMY_SCHOLAR_CARDS — the selected subarea's scholars render as a
    *  "Scholars N" heading over plain name links. */
   scholarNames?: boolean;
+  /** TAXONOMY_FEED_LOAD_MORE — Load more, one "All relevant" list and the
+   *  per-row subarea label. */
+  loadMore?: boolean;
 }) {
   const items: TaxonomyRailItem[] = subtopics.map((s) => ({
     id: s.id,
@@ -45,6 +50,10 @@ export function TopicRailLayout({
   // Same total the page's stats line, Spotlight "View all" and the
   // unfiltered feed heading use.
   const total = totalPubCount;
+  const subtopicLabels = useMemo(
+    () => Object.fromEntries(subtopics.map((s) => [s.id, s.displayName])),
+    [subtopics],
+  );
   const byId = (id: string | null) => (id ? subtopics.find((s) => s.id === id) ?? null : null);
   // D-09: displayName for headings, falling back to label.
   const labelFor = (id: string | null) => {
@@ -95,6 +104,8 @@ export function TopicRailLayout({
             <TopicPublicationFeed
               topicSlug={topicSlug}
               activeSubtopic={activeSubtopic}
+              loadMore={loadMore}
+              subtopicLabels={subtopicLabels}
             />
           </>
         );

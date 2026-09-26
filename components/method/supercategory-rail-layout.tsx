@@ -14,7 +14,10 @@
  */
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
-import { FamilyPublicationFeed } from "@/components/taxonomy/publication-feed";
+import {
+  CategoryPublicationFeed,
+  FamilyPublicationFeed,
+} from "@/components/taxonomy/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { familySegmentFor, resolveFamilyParam } from "@/lib/method-url";
@@ -71,6 +74,7 @@ export function SupercategoryRailLayout({
   allWorkPubs,
   allPubCount,
   scholarNames = false,
+  loadMore = false,
 }: {
   supercategorySlug: string;
   supercategoryLabel: string;
@@ -85,6 +89,9 @@ export function SupercategoryRailLayout({
   /** TAXONOMY_SCHOLAR_CARDS — the selected family's scholars render as a
    *  "Scholars N" heading over plain name links. */
   scholarNames?: boolean;
+  /** TAXONOMY_FEED_LOAD_MORE — the paged "All families" feed replaces the
+   *  12-newest list, and the family feed pages with Load more. */
+  loadMore?: boolean;
 }) {
   const items = families.map(familyRailRow);
 
@@ -162,7 +169,11 @@ export function SupercategoryRailLayout({
       {(activeFamilyId) => {
         const label = activeFamilyId ? familyMeta[activeFamilyId]?.familyLabel ?? null : null;
         if (!activeFamilyId || !label) {
-          return <SupercategoryAllWorkFeed pubs={allWorkPubs} supercategoryLabel={supercategoryLabel} />;
+          return loadMore ? (
+            <CategoryPublicationFeed supercategorySlug={supercategorySlug} />
+          ) : (
+            <SupercategoryAllWorkFeed pubs={allWorkPubs} supercategoryLabel={supercategoryLabel} />
+          );
         }
         return (
           <>
@@ -176,6 +187,7 @@ export function SupercategoryRailLayout({
               supercategorySlug={supercategorySlug}
               familySegment={segmentFor(activeFamilyId)}
               familyLabel={label}
+              loadMore={loadMore}
             />
           </>
         );

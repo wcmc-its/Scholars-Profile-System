@@ -15,6 +15,7 @@ export function FamilyPublicationLayout({
   familyLabel,
   cellLineLabels,
   embedded = false,
+  loadMore = false,
 }: {
   supercategorySlug: string;
   familySegment: string;
@@ -25,6 +26,8 @@ export function FamilyPublicationLayout({
    *  the page supplies its own spacing wrapper, so suppress this one's `mt-16`
    *  inside the grid. No rule below Spotlight on either path (mockup). */
   embedded?: boolean;
+  /** TAXONOMY_FEED_LOAD_MORE. */
+  loadMore?: boolean;
 }) {
   const feed = (
     // The feed reads `?entity=` via useSearchParams (#1166) — Suspense lets the
@@ -35,6 +38,7 @@ export function FamilyPublicationLayout({
         familySegment={familySegment}
         familyLabel={familyLabel}
         cellLineLabels={cellLineLabels}
+        loadMore={loadMore}
       />
     </Suspense>
   );
