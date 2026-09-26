@@ -279,6 +279,31 @@ describe("methods: family rail row == family feed heading == distinct count; All
     const allWork = await getSupercategoryAllWork(SC);
     expect(allWork.researchCount).toBe(allPubCount);
   });
+
+  it("a hidden-role member counts nowhere, so All families is never below a family", async () => {
+    db.sf.push(
+      { supercategory: SC, familyLabel: "Antibodies", familyId: "fam_0002", cwid: "ddd1004", pmids: ["m6", "m7"], roleCategory: "doctoral_student" },
+      { supercategory: SC, familyLabel: "Antibodies", familyId: "fam_0002", cwid: "eee1005", pmids: ["m7"], roleCategory: "affiliate_alumni" },
+    );
+    db.pubTypes = { ...db.pubTypes, m6: JA, m7: JA };
+    const { families, allPubCount } = await getSupercategoryRollup(SC);
+    const byLabel = Object.fromEntries(families.map((f) => [f.familyLabel, f.pubCount]));
+    expect(byLabel).toEqual({ CRISPR: 3, Antibodies: 1 });
+    const feed = (await getFamilyPublications(SC, "Antibodies", { sort: "newest" }))!;
+    expect(feed.total).toBe(1);
+    expect(feed.hits.map((h) => h.pmid)).toEqual(["m3"]);
+    expect(await getDistinctPmidCountForFamily(SC, "Antibodies")).toBe(1);
+    const allWork = await getSupercategoryAllWork(SC);
+    expect(allWork.researchCount).toBe(allPubCount);
+    for (const f of families) expect(allPubCount).toBeGreaterThanOrEqual(f.pubCount ?? 0);
+    // The category feed's rows are exactly the union of the family feeds' rows.
+    const unionRows = new Set<string>();
+    for (const f of families) {
+      const ff = (await getFamilyPublications(SC, f.familyLabel, { sort: "newest" }))!;
+      for (const h of ff.hits) unionRows.add(h.pmid);
+    }
+    expect(new Set(allWork.entries.filter((e) => e.research).map((e) => e.pmid))).toEqual(unionRows);
+  });
 });
 
 describe("pickFamilyLabel (per-row family on the category-wide feed)", () => {

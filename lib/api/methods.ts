@@ -810,14 +810,20 @@ async function collectSupercategoryFamilyPmids(
   supercategory: string,
   gate: FamilyOverlayGate,
 ): Promise<{ pmidsByFamilyLabel: Map<string, string[]>; unionPmids: string[] }> {
+  // #536 carve, both halves (same as `loadSupercategoryAllWork`, the family
+  // roster's scholarCount / pmidCountSum and `collectFamilyPmids`): a hidden
+  // identity's family membership contributes no pub to ANY family count or
+  // feed, so the "All families" set is the union of the family sets and can
+  // never count fewer pubs than one family.
   const rows = await prisma.scholarFamily.findMany({
-    where: { supercategory, scholar: { deletedAt: null, status: "active" } },
-    select: { familyLabel: true, pmids: true },
+    where: { supercategory, scholar: { deletedAt: null, status: "active", ...publicRoleWhere() } },
+    select: { familyLabel: true, pmids: true, scholar: { select: { roleCategory: true } } },
   });
 
   const rawByLabel = new Map<string, Set<string>>();
   const unionSet = new Set<string>();
   for (const r of rows) {
+    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
     if (!isFamilyPubliclyVisible(supercategory, r.familyLabel, gate)) continue;
     if (!Array.isArray(r.pmids)) continue;
     let set = rawByLabel.get(r.familyLabel);
@@ -984,7 +990,6 @@ async function loadSupercategoryRollup(
   // pmids — the value its feed shows by default (`totalResearchOnly`,
   // `getDistinctPmidCountForFamily`). It used to count every type.
   const researchPmids = await loadResearchPmids(unionPmids);
-  const allWork = await getSupercategoryAllWork(supercategory);
   const exemplarsByLabel = await loadUnionExemplars(
     supercategory,
     base.map((f) => f.familyLabel),
@@ -1020,7 +1025,12 @@ async function loadSupercategoryRollup(
     );
   }
 
-  return { families, allWorkPubs, allPubCount: allWork.researchCount };
+  // "All families" = DISTINCT research pmids of the union (never the row sum,
+  // PLAN open Q10). The union is carved exactly as `loadSupercategoryAllWork`
+  // carves the category feed, so this equals its `researchCount` without a
+  // second scholar_family scan on the page's cold path.
+  const allPubCount = unionPmids.filter((p) => researchPmids.has(p)).length;
+  return { families, allWorkPubs, allPubCount };
 }
 
 /** The subset of `pmids` that are research articles (the feeds' default type
@@ -1598,17 +1608,22 @@ async function collectFamilyPmids(
 ): Promise<string[]> {
   if (!isFamilyPubliclyVisible(supercategory, familyLabel, gate)) return [];
 
+  // #536 carve, both halves (the where-clause denylist cannot express the
+  // `doctoral_student*` prefix; the fail-closed check on the raw column can),
+  // matching `collectSupercategoryFamilyPmids` and `loadSupercategoryAllWork`
+  // so the family feed, its rail row and "All families" count one population.
   const rows = await prisma.scholarFamily.findMany({
     where: {
       supercategory,
       familyLabel,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: { deletedAt: null, status: "active", ...publicRoleWhere() },
     },
-    select: { pmids: true },
+    select: { pmids: true, scholar: { select: { roleCategory: true } } },
   });
 
   const set = new Set<string>();
   for (const r of rows) {
+    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
     if (Array.isArray(r.pmids)) {
       for (const p of r.pmids as unknown[]) set.add(String(p));
     }
