@@ -146,6 +146,7 @@ export function PublicationFeed({
   subtopicLabel,
   subtopicShortDescription,
   suppressSubtopicHeader = false,
+  scholarCwid = null,
 }: {
   topicSlug: string;
   activeSubtopic: string | null;
@@ -158,6 +159,8 @@ export function PublicationFeed({
    * block is hidden.
    */
   suppressSubtopicHeader?: boolean;
+  /** TAXONOMY_SCHOLAR_CARDS — restrict the feed to this scholar (`?cwid=`). */
+  scholarCwid?: string | null;
 }) {
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
@@ -179,7 +182,7 @@ export function PublicationFeed({
   useEffect(() => {
     setStronglyPage(1);
     setAlsoPage(1);
-  }, [sort, activeSubtopic, filter]);
+  }, [sort, activeSubtopic, filter, scholarCwid]);
 
   // Reset the Also-tier page each time the user switches into the stacked
   // "All relevant" scope — restart pagination at page 1.
@@ -195,6 +198,7 @@ export function PublicationFeed({
     tier: "strongly",
     page: stronglyPage,
     enabled: true,
+    scholarCwid,
   });
 
   // The Also-tier fetch fires under either:
@@ -214,6 +218,7 @@ export function PublicationFeed({
     tier: "also",
     page: alsoPage,
     enabled: showTier === "all" || renderAlsoInline,
+    scholarCwid,
   });
 
   const tierTotals = strongly.data?.tierTotals ?? null;
@@ -539,6 +544,7 @@ function useTierFetch({
   tier,
   page,
   enabled,
+  scholarCwid,
 }: {
   topicSlug: string;
   activeSubtopic: string | null;
@@ -547,6 +553,7 @@ function useTierFetch({
   tier: Tier;
   page: number;
   enabled: boolean;
+  scholarCwid: string | null;
 }): { data: FeedResponse | null; loading: boolean; error: string | null } {
   const [data, setData] = useState<FeedResponse | null>(null);
   const [loading, setLoading] = useState(enabled);
@@ -572,6 +579,7 @@ function useTierFetch({
     url.searchParams.set("filter", filter);
     url.searchParams.set("tier", tier);
     if (activeSubtopic) url.searchParams.set("subtopic", activeSubtopic);
+    if (scholarCwid) url.searchParams.set("cwid", scholarCwid);
 
     fetch(url.toString())
       .then((r) => {
@@ -591,7 +599,7 @@ function useTierFetch({
     return () => {
       cancelled = true;
     };
-  }, [topicSlug, activeSubtopic, sort, filter, tier, page, enabled]);
+  }, [topicSlug, activeSubtopic, sort, filter, tier, page, enabled, scholarCwid]);
 
   return { data, loading, error };
 }

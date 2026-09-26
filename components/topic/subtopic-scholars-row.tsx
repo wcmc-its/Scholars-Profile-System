@@ -20,25 +20,39 @@
  * has scrolled away anyway).
  */
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { ScholarPickList, type PickScholar } from "@/components/taxonomy/scholar-filter";
 import { profilePath } from "@/lib/profile-url";
 import type { SubtopicScholarRowData } from "@/lib/api/topics";
 
 const INLINE_CAP = 10;
 
+/** TAXONOMY_SCHOLAR_CARDS — when passed, the roster renders as pick-to-filter
+ *  toggle cards (each with its own profile link) instead of name links. */
+export type SubtopicScholarsPick = {
+  selectedCwid: string | null;
+  onToggle: (s: PickScholar) => void;
+  onRosterLoaded: (roster: PickScholar[]) => void;
+};
+
 export function SubtopicScholarsRow({
   topicSlug,
   subtopicId,
   subtopicLabel,
+  pick,
 }: {
   topicSlug: string;
   subtopicId: string;
   subtopicLabel: string | null;
+  pick?: SubtopicScholarsPick;
 }) {
   const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  // Read through a ref so a new callback identity never re-triggers the fetch.
+  const onRosterLoadedRef = useRef(pick?.onRosterLoaded);
+  onRosterLoadedRef.current = pick?.onRosterLoaded;
 
   useEffect(() => {
     let cancelled = false;
@@ -53,12 +67,14 @@ export function SubtopicScholarsRow({
         if (!cancelled) {
           setScholars(data.scholars ?? []);
           setLoading(false);
+          onRosterLoadedRef.current?.(data.scholars ?? []);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setScholars([]);
           setLoading(false);
+          onRosterLoadedRef.current?.([]);
         }
       });
     return () => {
@@ -70,6 +86,39 @@ export function SubtopicScholarsRow({
 
   const visible = expanded ? scholars : scholars.slice(0, INLINE_CAP);
   const overflow = scholars.length - visible.length;
+
+  if (pick) {
+    // Keep a picked scholar visible even when they sit past the inline cap.
+    const pickedHidden =
+      pick.selectedCwid !== null &&
+      !visible.some((s) => s.cwid === pick.selectedCwid) &&
+      scholars.some((s) => s.cwid === pick.selectedCwid);
+    const cards = pickedHidden ? scholars : visible;
+    const more = scholars.length - cards.length;
+    return (
+      <ScholarPickList
+        heading={
+          subtopicLabel
+            ? `Researchers in ${subtopicLabel} · ${scholars.length}`
+            : `Researchers in this subarea · ${scholars.length}`
+        }
+        scholars={cards}
+        selectedCwid={pick.selectedCwid}
+        onToggle={pick.onToggle}
+        footer={
+          more > 0 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="mt-2 inline-flex min-h-11 items-center text-[13.5px] text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            >
+              + {more} more →
+            </button>
+          ) : null
+        }
+      />
+    );
+  }
 
   return (
     <div className="mb-6">

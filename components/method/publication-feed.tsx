@@ -92,6 +92,7 @@ export function FamilyPublicationFeed({
   familySegment,
   familyLabel,
   cellLineLabels,
+  scholarCwid = null,
 }: {
   /** The supercategory URL slug segment (path part 1). */
   supercategorySlug: string;
@@ -102,6 +103,8 @@ export function FamilyPublicationFeed({
   /** #1166 — entity id → display label, so the `?entity=` context-bar chip can
    *  name the active cell line. Absent (or unknown id) ⇒ no cell-line filter UI. */
   cellLineLabels?: Record<string, string>;
+  /** TAXONOMY_SCHOLAR_CARDS — restrict the feed to this scholar (`?cwid=`). */
+  scholarCwid?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -125,7 +128,7 @@ export function FamilyPublicationFeed({
   // Reset pagination on sort / filter / cell-line change.
   useEffect(() => {
     setPage(1);
-  }, [sort, filter, cellLine]);
+  }, [sort, filter, cellLine, scholarCwid]);
 
   const { data, loading, error } = useFeedFetch({
     supercategorySlug,
@@ -134,6 +137,7 @@ export function FamilyPublicationFeed({
     filter,
     page,
     cellLine,
+    scholarCwid,
   });
 
   // Filtered count is `total`; the family denominator is `totalResearchOnly`
@@ -408,6 +412,7 @@ function useFeedFetch({
   filter,
   page,
   cellLine,
+  scholarCwid,
 }: {
   supercategorySlug: string;
   familySegment: string;
@@ -415,6 +420,7 @@ function useFeedFetch({
   filter: Filter;
   page: number;
   cellLine: string | null;
+  scholarCwid: string | null;
 }): { data: FeedResponse | null; loading: boolean; error: string | null } {
   const [data, setData] = useState<FeedResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -435,6 +441,7 @@ function useFeedFetch({
     url.searchParams.set("page", String(page));
     url.searchParams.set("filter", filter);
     if (cellLine) url.searchParams.set("entity", cellLine);
+    if (scholarCwid) url.searchParams.set("cwid", scholarCwid);
 
     fetch(url.toString())
       .then((r) => {
@@ -454,7 +461,7 @@ function useFeedFetch({
     return () => {
       cancelled = true;
     };
-  }, [supercategorySlug, familySegment, sort, filter, page, cellLine]);
+  }, [supercategorySlug, familySegment, sort, filter, page, cellLine, scholarCwid]);
 
   return { data, loading, error };
 }

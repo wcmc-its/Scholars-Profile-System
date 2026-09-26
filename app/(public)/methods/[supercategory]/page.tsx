@@ -12,6 +12,8 @@ import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
 import { isSupercategoryExportInRange } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
+import { ScholarCardGrid } from "@/components/taxonomy/scholar-card-grid";
+import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import {
   SupercategoryRailLayout,
   type FamilyRailItem,
@@ -111,6 +113,9 @@ export default async function SupercategoryPage({
   // SPEC §B.3 HARD cap: offer the export ONLY when the distinct displayable
   // cohort is <= 50. Only run the (extra) count query when export is enabled, so
   // the flag-dark path stays cheap. The route refuses > 50 regardless.
+  // TAXONOMY_SCHOLAR_CARDS — portrait cards (chips = the scholar's families).
+  const scholarCards = isTaxonomyScholarCardsOn();
+
   const exportEligible =
     isScholarListExportEnabled() && (await isSupercategoryExportInRange(sc.id));
 
@@ -150,16 +155,27 @@ export default async function SupercategoryPage({
         {/* Rolled-up top scholars across the supercategory's gated families.
             No supercategory-level "/scholars" page exists (scholar browse is
             per-family), so no scholarCount / "+ N more" affordance is passed. */}
-        {topScholars && (
+        {topScholars && scholarCards ? (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow
-              scholars={topScholars}
-              topicLabel={sc.label}
-              enablePopover
-              contextMethods
+            {/* No category-level scholars page exists, so no "View all" link. */}
+            <ScholarCardGrid
               heading="Scholars using this"
+              scholars={topScholars.map((s) => ({ ...s, areas: s.families }))}
+              popover={{ contextMethods: true }}
             />
           </div>
+        ) : (
+          topScholars && (
+            <div id="top-scholars" className="scroll-mt-20">
+              <TopScholarsChipRow
+                scholars={topScholars}
+                topicLabel={sc.label}
+                enablePopover
+                contextMethods
+                heading="Scholars using this"
+              />
+            </div>
+          )
         )}
 
         {/* Stats — family count (additive/accurate). The distinct cross-family
@@ -184,6 +200,7 @@ export default async function SupercategoryPage({
           families={railItems}
           familyMeta={familyMeta}
           allWorkPubs={allWorkPubs}
+          scholarFilter={scholarCards}
         />
       </section>
     </main>

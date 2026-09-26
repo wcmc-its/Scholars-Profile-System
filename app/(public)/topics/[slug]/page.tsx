@@ -7,9 +7,16 @@ import {
   getTopScholarsForTopic,
   getSubtopicsForTopic,
   getDistinctScholarCountForTopic,
+  fetchTopSubtopicsForScholars,
 } from "@/lib/api/topics";
 import { getSpotlightCardsForTopic } from "@/lib/api/spotlight";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
+import {
+  ScholarCardGrid,
+  SCHOLAR_CARD_LIMIT,
+  type ScholarCardData,
+} from "@/components/taxonomy/scholar-card-grid";
+import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { TopicRailLayout } from "@/components/topic/topic-rail-layout";
 import {
@@ -72,6 +79,26 @@ export default async function TopicPage({
     loadScholarCount(slug).catch(() => 0),
   ]);
 
+  // TAXONOMY_SCHOLAR_CARDS — portrait cards with each scholar's top subareas
+  // (primary-subtopic counts, the rail's rule) in place of the chip row.
+  const scholarCards = isTaxonomyScholarCardsOn();
+  let cardScholars: ScholarCardData[] | null = null;
+  if (scholarCards && topScholars) {
+    const top = topScholars.slice(0, SCHOLAR_CARD_LIMIT);
+    const areasByCwid = await fetchTopSubtopicsForScholars(
+      slug,
+      top.map((s) => s.cwid),
+    ).catch(() => new Map<string, { id: string; displayName: string }[]>());
+    cardScholars = top.map((s) => ({
+      cwid: s.cwid,
+      slug: s.slug,
+      preferredName: s.preferredName,
+      primaryTitle: s.primaryTitle,
+      identityImageEndpoint: s.identityImageEndpoint,
+      areas: (areasByCwid.get(s.cwid) ?? []).map((a) => a.displayName),
+    }));
+  }
+
   const subtopicList = subtopics ?? [];
   const subtopicCount = subtopicList.length;
   const totalPubsForStats = subtopicList.reduce((sum, s) => sum + s.pubCount, 0);
@@ -128,15 +155,29 @@ export default async function TopicPage({
 
         {/* Top scholars chip row — inside hero, D-10. id="top-scholars"
             anchors deep-links from the home page spotlight section. */}
-        {topScholars && (
+        {cardScholars ? (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow
-              scholars={topScholars}
-              scholarCount={scholarCount}
-              topicSlug={slug}
-              topicLabel={topic.label}
+            <ScholarCardGrid
+              heading="Scholars in this area"
+              scholars={cardScholars}
+              viewAll={{
+                href: `/topics/${encodeURIComponent(slug)}/scholars`,
+                count: scholarCount,
+              }}
+              popover={{ topicSlug: slug, topicLabel: topic.label }}
             />
           </div>
+        ) : (
+          topScholars && (
+            <div id="top-scholars" className="scroll-mt-20">
+              <TopScholarsChipRow
+                scholars={topScholars}
+                scholarCount={scholarCount}
+                topicSlug={slug}
+                topicLabel={topic.label}
+              />
+            </div>
+          )
         )}
 
         {/* Stats — dashed border under scholars row */}
@@ -161,7 +202,11 @@ export default async function TopicPage({
           id="publications" anchors deep-links from the home page spotlight
           section. */}
       <section id="publications" className="scroll-mt-20">
-        <TopicRailLayout topicSlug={slug} subtopics={subtopicList} />
+        <TopicRailLayout
+          topicSlug={slug}
+          subtopics={subtopicList}
+          scholarFilter={scholarCards}
+        />
       </section>
     </main>
   );

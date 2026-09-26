@@ -12,6 +12,8 @@ import {
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
+import { ScholarCardGrid } from "@/components/taxonomy/scholar-card-grid";
+import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
 import { FamilyEntityRailLayout } from "@/components/method/family-entity-rail-layout";
@@ -97,6 +99,9 @@ export default async function FamilyPage({
   const cellLineLabels = Object.fromEntries(cellLineEntities.map((e) => [e.entityId, e.label]));
 
   const scLabel = supercategoryLabel(resolved.supercategory);
+  // TAXONOMY_SCHOLAR_CARDS — portrait cards (no area chips on a family page).
+  const scholarCards = isTaxonomyScholarCardsOn();
+  const familyScholarsHref = `/methods/${resolved.supercategorySlug}/${resolved.familySlug}/scholars`;
 
   // Spotlight (§5.A, optional) — map the representative pubs onto SpotlightCard.
   // Omitted entirely when the family has no representative publications (e.g.
@@ -196,16 +201,27 @@ export default async function FamilyPage({
             lives at `/methods/[sc]/[fam]/scholars`, so we render the chips
             WITHOUT the topic link (omit topicSlug) and provide a separate
             method-scoped "+ N more scholars →" affordance below. */}
-        {topScholars && (
+        {topScholars && scholarCards ? (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow
-              scholars={topScholars}
-              topicLabel={resolved.familyLabel}
-              enablePopover
-              contextMethods
+            <ScholarCardGrid
               heading="Scholars using this"
+              scholars={topScholars.map((s) => ({ ...s, areas: [] }))}
+              viewAll={{ href: familyScholarsHref, count: scholarCount }}
+              popover={{ contextMethods: true }}
             />
           </div>
+        ) : (
+          topScholars && (
+            <div id="top-scholars" className="scroll-mt-20">
+              <TopScholarsChipRow
+                scholars={topScholars}
+                topicLabel={resolved.familyLabel}
+                enablePopover
+                contextMethods
+                heading="Scholars using this"
+              />
+            </div>
+          )
         )}
 
         {scholarCount > 0 && (
@@ -213,9 +229,10 @@ export default async function FamilyPage({
             <span>
               {scholarCount.toLocaleString()} {scholarCount === 1 ? "scholar" : "scholars"}
             </span>
-            {topScholars && scholarCount > topScholars.length && (
+            {/* Flag on, the card grid's "View all N scholars →" replaces this. */}
+            {!scholarCards && topScholars && scholarCount > topScholars.length && (
               <a
-                href={`/methods/${resolved.supercategorySlug}/${resolved.familySlug}/scholars`}
+                href={familyScholarsHref}
                 className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
               >
                 + {(scholarCount - topScholars.length).toLocaleString()} more scholars →
