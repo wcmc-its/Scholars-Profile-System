@@ -41,6 +41,7 @@ const {
   mockGetRepresentativePubsForFamily,
   mockGetDistinctPmidCountForFamily,
   mockSpotlight,
+  mockChipRow,
   mockIsScholarListExportEnabled,
   mockSupercategoryLabel,
   mockNotFound,
@@ -55,6 +56,7 @@ const {
   mockGetRepresentativePubsForFamily: vi.fn(),
   mockGetDistinctPmidCountForFamily: vi.fn(),
   mockSpotlight: vi.fn(() => null),
+  mockChipRow: vi.fn(() => null),
   mockIsScholarListExportEnabled: vi.fn(),
   mockSupercategoryLabel: vi.fn(),
   mockNotFound: vi.fn(() => {
@@ -106,7 +108,7 @@ vi.mock("@/lib/seo/jsonld", () => ({
 vi.mock("@/components/scholar-export/scholar-list-export-button", () => ({
   ScholarListExportButton: () => null,
 }));
-vi.mock("@/components/topic/top-scholars-chip-row", () => ({ TopScholarsChipRow: () => null }));
+vi.mock("@/components/topic/top-scholars-chip-row", () => ({ TopScholarsChipRow: mockChipRow }));
 vi.mock("@/components/shared/spotlight", () => ({ Spotlight: mockSpotlight }));
 vi.mock("@/components/method/family-publication-layout", () => ({
   SupercategoryFamilyLayout: () => null,
@@ -366,5 +368,77 @@ describe("generateMetadata — no SEO/title leak when gated (§9 E1)", () => {
     expect(meta.alternates?.canonical).toBe(
       "/methods/genomics-sequencing/crispr-gene-editing-fam_1",
     );
+  });
+});
+
+describe("Topic & Method refactor phase 1 — method-page copy + Spotlight total", () => {
+  type El = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
+  const collect = (node: unknown, pred: (el: El) => boolean, out: El[] = []): El[] => {
+    if (!node || typeof node !== "object") return out;
+    if (Array.isArray(node)) {
+      for (const child of node) collect(child, pred, out);
+      return out;
+    }
+    const el = node as El;
+    if (pred(el)) out.push(el);
+    if (el.props?.children) collect(el.props.children, pred, out);
+    return out;
+  };
+  const byType = (tree: unknown, type: unknown) => collect(tree, (el) => el.type === type);
+  const textOf = (tree: unknown, text: string) =>
+    collect(tree, (el) => el.props?.children === text);
+
+  const pub = (i: number) => ({
+    pmid: `pmid_${i}`,
+    title: `Representative paper ${i}`,
+    journal: "J. Test",
+    year: 2024,
+    pubmedUrl: null,
+    doi: null,
+    authors: [],
+  });
+  const chip = (cwid: string) => ({
+    cwid,
+    slug: cwid,
+    preferredName: cwid,
+    primaryTitle: null,
+    identityImageEndpoint: "",
+    rank: 1,
+  });
+  const famPage = () =>
+    FamilyPage({ params: famParams("genomics-sequencing", "crispr-gene-editing-fam_1") });
+
+  it("(a) family Spotlight 'View all N' uses the family's distinct research-article total, not the 3 cards", async () => {
+    mockGetRepresentativePubsForFamily.mockResolvedValue([pub(1), pub(2), pub(3)]);
+    mockGetDistinctPmidCountForFamily.mockResolvedValue(137);
+    const tree = await famPage();
+    const [spot] = byType(tree, mockSpotlight);
+    expect(spot, "Spotlight must render for this fixture").toBeDefined();
+    const data = spot.props!.data as { totalCount: number; cards: unknown[]; viewAllHref: string };
+    expect(data.cards).toHaveLength(3);
+    expect(data.totalCount).toBe(137);
+    expect(data.viewAllHref).toBe("#publications");
+  });
+
+  it("(b) family page chip row says 'Scholars using this'", async () => {
+    mockGetFamilyScholars.mockResolvedValue([chip("a"), chip("b"), chip("c")]);
+    const [row] = byType(await famPage(), mockChipRow);
+    expect(row.props!.heading).toBe("Scholars using this");
+  });
+
+  it("(b) supercategory page chip row says 'Scholars using this'", async () => {
+    mockGetTopScholarsForSupercategory.mockResolvedValue([chip("a"), chip("b"), chip("c")]);
+    const [row] = byType(
+      await SupercategoryPage({ params: scParams("genomics-sequencing") }),
+      mockChipRow,
+    );
+    expect(row.props!.heading).toBe("Scholars using this");
+  });
+
+  it("(d) eyebrows: 'Method' on the family page, 'Method category' on the supercategory page", async () => {
+    expect(textOf(await famPage(), "Method")).toHaveLength(1);
+    const sc = await SupercategoryPage({ params: scParams("genomics-sequencing") });
+    expect(textOf(sc, "Method category")).toHaveLength(1);
+    expect(textOf(sc, "RESEARCH METHODS")).toHaveLength(0);
   });
 });

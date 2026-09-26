@@ -57,6 +57,8 @@ type Hit = {
   pmcid: string | null;
   impactScore: number | null;
   abstract: string | null;
+  /** #1881 — drives the lazy Abstract link (#1537); the text is never shipped. */
+  hasAbstract?: boolean;
   authors: Array<{
     name: string;
     cwid: string;
@@ -361,7 +363,7 @@ function PubRow({ hit, entityTerm }: { hit: Hit; entityTerm: string | null }) {
         pmid={hit.pmid}
         pmcid={hit.pmcid}
         doi={hit.doi}
-        abstract={hit.abstract}
+        lazyAbstract={hit.hasAbstract === true}
       />
       {/* #1166/#1166-B — the per-(pub × entity) relevance sentences, shown only on an
           entity-filtered feed; the entity term is <mark>-highlighted via the shared

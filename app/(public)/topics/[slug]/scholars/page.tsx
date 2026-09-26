@@ -111,7 +111,7 @@ export default async function TopicScholarsPage({
 
       <header className="mb-2">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          RESEARCH AREA
+          Research area
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           Scholars in {topic.label}

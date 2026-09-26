@@ -87,7 +87,7 @@ function AllWorkRow({ hit }: { hit: MethodPublicationHit }) {
         pmid={hit.pmid}
         pmcid={hit.pmcid}
         doi={hit.doi}
-        abstract={hit.abstract}
+        lazyAbstract={hit.hasAbstract}
       />
     </li>
   );

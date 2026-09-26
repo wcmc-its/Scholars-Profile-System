@@ -1000,8 +1000,13 @@ async function loadSupercategoryRollup(
       orderBy: [{ year: "desc" }, { dateAddedToEntrez: "desc" }],
       take: allWorkLimit,
     });
-    const authorsByPmid = await fetchWcmAuthorsForPmids(pubs.map((p) => p.pmid));
-    allWorkPubs = pubs.map((p) => mapPublicationHit(p, authorsByPmid.get(p.pmid)));
+    const [authorsByPmid, withAbstract] = await Promise.all([
+      fetchWcmAuthorsForPmids(pubs.map((p) => p.pmid)),
+      loadPmidsWithAbstract(pubs.map((p) => p.pmid)),
+    ]);
+    allWorkPubs = pubs.map((p) =>
+      mapPublicationHit(p, authorsByPmid.get(p.pmid), undefined, withAbstract.has(p.pmid)),
+    );
   }
 
   return { families, allWorkPubs };
@@ -1353,6 +1358,11 @@ export type MethodPublicationHit = {
   pmcid: string | null;
   impactScore: number | null;
   abstract: string | null;
+  /** #1881 — whether the publication has a non-empty abstract. The feed renders
+   *  the Abstract link via `PublicationMeta`'s `lazyAbstract` (#1537), fetching the
+   *  text from `/api/publications/[pmid]` on first open, so the row never ships
+   *  the text. `false` on surfaces that do not compute it (the Spotlight cards). */
+  hasAbstract: boolean;
   /** Confirmed WCM author chips (headshot + first/last flags), citation order.
    *  Same shape the topic feed renders (`fetchWcmAuthorsForPmids`). `[]` when the
    *  publication has no confirmed WCM authors — the feed UI suppresses the row. */
@@ -1384,8 +1394,8 @@ const PUB_SELECT = {
   pmcid: true,
   impactScore: true,
   // #1881 — abstract is NOT selected: the method-feed mapper ships `abstract: null`
-  // (the feed never renders abstracts), so fetching the @db.Text column was pure
-  // over-fetch.
+  // and the feeds lazy-load the text on open (`hasAbstract` comes from
+  // `loadPmidsWithAbstract`), so fetching the @db.Text column was pure over-fetch.
   dateAddedToEntrez: true,
 } as const;
 
@@ -1565,11 +1575,19 @@ export async function getFamilyPublications(
     }),
   ]);
 
-  const authorsByPmid = await fetchWcmAuthorsForPmids(rows.map((r) => r.pmid));
+  const [authorsByPmid, withAbstract] = await Promise.all([
+    fetchWcmAuthorsForPmids(rows.map((r) => r.pmid)),
+    loadPmidsWithAbstract(rows.map((r) => r.pmid)),
+  ]);
   void includeImpact;
   return {
     hits: rows.map((r) => {
-      const hit = mapPublicationHit(r, authorsByPmid.get(r.pmid), includeImpact);
+      const hit = mapPublicationHit(
+        r,
+        authorsByPmid.get(r.pmid),
+        includeImpact,
+        withAbstract.has(r.pmid),
+      );
       const usageFacts = factsByPmid?.get(r.pmid);
       return usageFacts?.length
         ? {
@@ -1607,6 +1625,7 @@ function mapPublicationHit(
   },
   authors: MethodPublicationHit["authors"] | undefined,
   includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on",
+  hasAbstract = false,
 ): MethodPublicationHit {
   let impactScore: number | null = null;
   if (includeImpact && p.impactScore !== null && p.impactScore !== undefined) {
@@ -1625,8 +1644,24 @@ function mapPublicationHit(
     pmcid: p.pmcid ?? null,
     impactScore,
     abstract: null,
+    hasAbstract,
     authors: authors ?? ([] as MethodPublicationHit["authors"]),
   };
+}
+
+/**
+ * #1881 — the subset of `pmids` whose publication has a non-empty abstract, for
+ * the feeds' lazy Abstract link. Same shape as the topic feed's #2118c query:
+ * `abstract` is only a WHERE predicate (evaluated server-side) and `pmid` is the
+ * only column selected, so no abstract text is transferred.
+ */
+async function loadPmidsWithAbstract(pmids: string[]): Promise<Set<string>> {
+  if (pmids.length === 0) return new Set();
+  const rows = await prisma.publication.findMany({
+    where: { pmid: { in: pmids }, NOT: [{ abstract: null }, { abstract: "" }] },
+    select: { pmid: true },
+  });
+  return new Set(rows.map((r) => r.pmid));
 }
 
 // ---------------------------------------------------------------------------
