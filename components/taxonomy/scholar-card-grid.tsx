@@ -143,6 +143,7 @@ function ScholarCardLink({ scholar, className }: { scholar: ScholarCardData; cla
         preferredName={scholar.preferredName}
         identityImageEndpoint={scholar.identityImageEndpoint}
         className="mt-0.5 shrink-0"
+        fallbackTone="rail"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-px">
         <span className="truncate text-[14px] font-[650]">{scholar.preferredName}</span>

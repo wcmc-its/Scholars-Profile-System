@@ -46,6 +46,7 @@ export function HeadshotAvatar({
   identityImageEndpoint,
   size,
   className,
+  fallbackTone = "gradient",
 }: {
   cwid: string;
   preferredName: string;
@@ -55,6 +56,10 @@ export function HeadshotAvatar({
   identityImageEndpoint?: string;
   size: "sm" | "md" | "lg" | "roster";
   className?: string;
+  /** No-photo fallback. "gradient" (default): the name-seeded colour circle.
+   *  "rail": the taxonomy scholar-card mockup's beige `--apollo-rail` circle
+   *  with serif initials in `--apollo-bar`. */
+  fallbackTone?: "gradient" | "rail";
 }) {
   const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">(
     "loading"
@@ -100,8 +105,17 @@ export function HeadshotAvatar({
         />
       )}
       <AvatarFallback
-        className={FALLBACK_TEXT_CLASS[size]}
-        style={{ background: nameGradient(preferredName), color: "rgba(255,255,255,0.92)" }}
+        className={
+          fallbackTone === "rail"
+            ? "bg-apollo-rail text-apollo-bar font-serif text-[17px]"
+            : FALLBACK_TEXT_CLASS[size]
+        }
+        style={
+          fallbackTone === "rail"
+            ? undefined
+            : { background: nameGradient(preferredName), color: "rgba(255,255,255,0.92)" }
+        }
+        data-fallback-tone={fallbackTone}
       >
         {initials(preferredName)}
       </AvatarFallback>

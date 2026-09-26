@@ -66,6 +66,17 @@ describe("ScholarCardGrid", () => {
     expect(within(chipRows[0]).queryByText("Delta")).toBeNull();
   });
 
+  it("no-photo avatar: beige rail circle with serif initials (mockup), not the gradient", () => {
+    render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(2)]} />);
+    const fallback = cardLinks()[0].querySelector("[data-fallback-tone]") as HTMLElement;
+    expect(fallback.getAttribute("data-fallback-tone")).toBe("rail");
+    expect(fallback.textContent).toBe("TP");
+    expect(fallback.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["bg-apollo-rail", "text-apollo-bar", "font-serif", "text-[17px]"]),
+    );
+    expect(fallback.getAttribute("style") ?? "").not.toContain("gradient");
+  });
+
   it("shows 'View all N scholars →' only when a scholars page exists", () => {
     const { rerender } = render(
       <ScholarCardGrid
