@@ -207,6 +207,13 @@ describe("GET /api/methods/[sc]/all/publications", () => {
       expect(h.getSupercategoryPublications.mock.calls[0][1].page).toBe(499);
     });
 
+    it("bounds the offset, not just the page, for a 200-row limit", async () => {
+      await categoryReq("page=999999&limit=200");
+      const call = h.getSupercategoryPublications.mock.calls[0][1];
+      expect(call.pageSize).toBe(200);
+      expect(call.page).toBe(49);
+    });
+
     it("an unknown or all-suppressed category is a 404", async () => {
       h.getSupercategory.mockResolvedValue(null);
       const res = await categoryReq("sort=newest");

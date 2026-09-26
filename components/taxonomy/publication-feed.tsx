@@ -477,7 +477,10 @@ function useLoadMoreList({
     if (key !== initialKeyRef.current) keyChangedRef.current = true;
     const initial = !keyChangedRef.current;
     const restore = initial ? readShownParam(window.location.search) : null;
-    if (!initial) writeShownParam(null);
+    // Initial load: normalise the URL to what is actually restored (a crafted
+    // ?shown=999 / 35 / abc reads back as 200 / 40 / nothing). Later keys:
+    // a filter change starts over at one chunk.
+    writeShownParam(initial ? restore : null);
     const limit = restore ?? FEED_CHUNK;
     const id = ++reqRef.current;
     setState((s) => ({ ...s, loading: true, error: null, focusPmid: null }));

@@ -109,6 +109,9 @@ export function SupercategoryRailLayout({
       resolveParam={(raw) => resolveFamilyParam(raw, families)}
       serializeParam={segmentFor}
       deepLinkScrollTargetId="families"
+      // Switching All families ↔ a family swaps Category/FamilyPublicationFeed,
+      // and a freshly mounted feed reads a leftover ?shown as a Back-restore.
+      clearParamsOnChange={["shown"]}
       idPrefix="families"
       rail={{
         railLabel: "Method families",

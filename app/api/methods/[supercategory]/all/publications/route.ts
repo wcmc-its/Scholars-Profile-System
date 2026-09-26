@@ -21,7 +21,7 @@
  *
  * Security: every input is validated before the service layer (the family
  * route's threat model): SORT_ALLOWLIST, FILTER_ALLOWLIST, SUPERCATEGORY_SLUG_RE,
- * page integer ≥ 1 clamped to MAX_PAGE, `limit` via `parseFeedLimit` (whole
+ * page integer ≥ 1 clamped by clampFeedPage (offset cap), `limit` via `parseFeedLimit` (whole
  * 20-row chunks, at most 200). Static error strings only; no param echo, no
  * logging of the URL.
  */
@@ -34,7 +34,7 @@ import {
   type MethodPublicationSort,
 } from "@/lib/api/methods";
 import { isTaxonomyFeedLoadMoreOn } from "@/lib/taxonomy-flags";
-import { parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
+import { clampFeedPage, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +48,6 @@ const FILTER_ALLOWLIST: ReadonlySet<MethodPublicationFilter> = new Set([
   "all",
 ]);
 const SUPERCATEGORY_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
-const MAX_PAGE = 500;
 
 export async function GET(
   request: NextRequest,
@@ -85,8 +84,9 @@ export async function GET(
   if (!/^\d{1,6}$/.test(pageStr) || Number(pageStr) < 1) {
     return apiError("invalid page", 400);
   }
-  // URL is 1-indexed; service is 0-indexed; clamp to MAX_PAGE.
-  const page = Math.min(Number(pageStr), MAX_PAGE) - 1;
+  // URL is 1-indexed; service is 0-indexed; the depth cap bounds the OFFSET
+  // (page 500 at 20 rows), whatever the page size.
+  const page = clampFeedPage(Number(pageStr), limit);
 
   const sc = await getSupercategory(supercategory);
   if (!sc) {

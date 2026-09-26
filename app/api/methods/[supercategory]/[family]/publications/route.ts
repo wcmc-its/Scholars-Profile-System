@@ -13,7 +13,7 @@
  *   T-03-05-01 sort injection      → SORT_ALLOWLIST
  *   T-03-05-03 filter bypass       → FILTER_ALLOWLIST
  *   T-03-05-04 path traversal      → SUPERCATEGORY_SLUG_RE / FAMILY_SEGMENT_RE
- *   T-03-05-05 DoS via page        → MAX_PAGE clamp
+ *   T-03-05-05 DoS via page        → clampFeedPage (offset cap)
  *   T-03-05-06 input echo          → static error strings only
  *   T-03-05-07 tier bypass (#326)  → TIER_ALLOWLIST (no family tier today; a tier
  *                                    param, if present, is allow-list-validated
@@ -42,7 +42,7 @@ import {
 } from "@/lib/api/methods";
 import { CWID_PATTERN } from "@/lib/cwid";
 import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
-import { FEED_CHUNK, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
+import { FEED_CHUNK, clampFeedPage, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +64,6 @@ const TIER_ALLOWLIST: ReadonlySet<string> = new Set(["strongly", "also"]);
 // underscore (the family-id suffix carries an underscore).
 const SUPERCATEGORY_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const FAMILY_SEGMENT_RE = /^[a-z0-9][a-z0-9_-]*$/;
-const MAX_PAGE = 500;
 // #1166 — a cell-line entity id is an opaque registry id: a canonical tool id
 // (`tool_000718`) or a minted parent id (`ent_<hex>`). Allow-list the shape so a
 // crafted value can never reach the query as anything but a bounded token.
@@ -117,8 +116,9 @@ export async function GET(
   if (!Number.isFinite(pageNum) || pageNum < 1) {
     return apiError("invalid page", 400);
   }
-  // URL is 1-indexed; service is 0-indexed; clamp to MAX_PAGE.
-  const page = Math.min(pageNum, MAX_PAGE) - 1;
+  // URL is 1-indexed; service is 0-indexed; the depth cap bounds the OFFSET
+  // (page 500 at 20 rows), whatever the page size.
+  const page = clampFeedPage(pageNum, pageSize);
 
   // #1166 Surface B — optional cell-line filter. Validated against the opaque-id
   // shape; the loader additionally gates it on METHODS_LENS_CELL_LINE_ENTITIES and

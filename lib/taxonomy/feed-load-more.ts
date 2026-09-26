@@ -40,11 +40,18 @@ export function readShownParam(search: string): number | null {
 export function writeShownParam(n: number | null): void {
   try {
     const url = new URL(window.location.href);
-    if (n === null || n <= FEED_CHUNK) {
+    // Written values obey the same rule `readShownParam` restores by (whole
+    // chunks, at most FEED_SHOWN_MAX), so the URL never shows e.g. ?shown=280.
+    const clamped =
+      n === null || !Number.isFinite(n) || n <= FEED_CHUNK
+        ? null
+        : Math.min(FEED_SHOWN_MAX, Math.ceil(n / FEED_CHUNK) * FEED_CHUNK);
+    if (clamped === null) {
       if (!url.searchParams.has("shown")) return;
       url.searchParams.delete("shown");
     } else {
-      url.searchParams.set("shown", String(n));
+      if (url.searchParams.get("shown") === String(clamped)) return;
+      url.searchParams.set("shown", String(clamped));
     }
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   } catch {
@@ -73,4 +80,21 @@ export function parseFeedLimit(raw: string | null): number | "invalid" {
   const n = Number(raw);
   if (n < FEED_CHUNK || n > FEED_SHOWN_MAX || n % FEED_CHUNK !== 0) return "invalid";
   return n;
+}
+
+/**
+ * The publication routes' historical depth cap: page 500 at 20 rows, i.e. at
+ * most 9,980 rows skipped. `clampFeedPage` keeps that OFFSET bound for every
+ * `limit`, so a 200-row page cannot reach 10x deeper than a 20-row one.
+ */
+export const FEED_MAX_PAGE = 500;
+const FEED_MAX_OFFSET = (FEED_MAX_PAGE - 1) * FEED_CHUNK;
+
+/**
+ * 1-indexed URL page → the 0-indexed service page, clamped so that
+ * page × pageSize never exceeds FEED_MAX_OFFSET. At the default 20-row size
+ * this is exactly the old `min(page, 500) - 1`.
+ */
+export function clampFeedPage(pageNum: number, pageSize: number): number {
+  return Math.min(pageNum - 1, Math.floor(FEED_MAX_OFFSET / pageSize));
 }

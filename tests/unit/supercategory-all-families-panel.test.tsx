@@ -8,7 +8,7 @@
  *     given (never a sum of the family rows).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 const mockGet = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -80,5 +80,29 @@ describe("All families panel", () => {
     const all = within(rail).getByText("All families").closest("button")!;
     expect(all.textContent).toContain("42");
     expect(all.textContent).not.toContain("50");
+  });
+});
+
+describe("?shown does not survive a rail switch (All families ↔ family)", () => {
+  it("selecting a family drops ?shown so the new feed starts at one chunk", () => {
+    mockGet.mockReturnValue(null);
+    window.history.replaceState(null, "", "/methods/reagents?shown=60");
+    renderLayout(true);
+    const rail = screen.getAllByRole("complementary")[0];
+    fireEvent.click(within(rail).getByText("CRISPR").closest("button")!);
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get("family")).toBe("crispr-fam_0001");
+    expect(params.has("shown")).toBe(false);
+  });
+
+  it("returning to All families drops ?shown too", () => {
+    mockGet.mockReturnValue("fam_0001");
+    window.history.replaceState(null, "", "/methods/reagents?family=crispr-fam_0001&shown=40");
+    renderLayout(true);
+    const rail = screen.getAllByRole("complementary")[0];
+    fireEvent.click(within(rail).getByText("All families").closest("button")!);
+    const params = new URLSearchParams(window.location.search);
+    expect(params.has("family")).toBe(false);
+    expect(params.has("shown")).toBe(false);
   });
 });

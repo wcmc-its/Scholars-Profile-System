@@ -65,6 +65,7 @@ import {
   parseFeedLimit,
   readShownParam,
   writeShownParam,
+  clampFeedPage,
 } from "@/lib/taxonomy/feed-load-more";
 
 type Server = {
@@ -197,6 +198,25 @@ describe("feed-load-more helpers", () => {
     writeShownParam(null);
     expect(window.location.search).toBe("?subtopic=s1");
   });
+  it("writeShownParam writes only whole chunks, capped at 200", () => {
+    window.history.replaceState(null, "", "/topics/cardio");
+    writeShownParam(280);
+    expect(window.location.search).toBe("?shown=200");
+    writeShownParam(35);
+    expect(window.location.search).toBe("?shown=40");
+    writeShownParam(279);
+    expect(window.location.search).toBe("?shown=200");
+    writeShownParam(Number.NaN);
+    expect(window.location.search).toBe("");
+  });
+  it("clampFeedPage keeps the old 20-row cap and bounds the offset for bigger pages", () => {
+    expect(clampFeedPage(1, 20)).toBe(0);
+    expect(clampFeedPage(500, 20)).toBe(499);
+    expect(clampFeedPage(999999, 20)).toBe(499);
+    expect(clampFeedPage(999999, 200)).toBe(49);
+    expect(clampFeedPage(999999, 200) * 200).toBeLessThanOrEqual(499 * 20);
+    expect(clampFeedPage(3, 200)).toBe(2);
+  });
 });
 
 describe("topic feed, Load more", () => {
@@ -278,6 +298,17 @@ describe("topic feed, Load more", () => {
     render(<TopicPublicationFeed topicSlug="cardio" activeSubtopic={null} loadMore />);
     await waitFor(() => expect(rows()).toHaveLength(20));
     expect(calls[0].searchParams.has("limit")).toBe(false);
+    // The unusable value is dropped from the URL, not left behind.
+    expect(shownParam()).toBeNull();
+  });
+
+  it("rewrites an out-of-range ?shown to the value actually restored", async () => {
+    window.history.replaceState(null, "", "/topics/cardio?shown=999");
+    const calls = stubServer({ strongly: 300, also: 0 });
+    render(<TopicPublicationFeed topicSlug="cardio" activeSubtopic={null} loadMore />);
+    await waitFor(() => expect(rows()).toHaveLength(200));
+    expect(calls[0].searchParams.get("limit")).toBe("200");
+    expect(shownParam()).toBe("200");
   });
 
   it("Sort, the type toggle, Show and the rail item each reset to one chunk and drop ?shown", async () => {
