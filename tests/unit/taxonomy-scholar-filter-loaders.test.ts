@@ -188,10 +188,7 @@ describe("getFamilyPublications({ cwid })", () => {
         return Promise.resolve(opts.scholarRow ? [{ pmids: opts.scholarRow }] : []);
       }
       // The family's gated union across every active scholar.
-      return Promise.resolve([
-        { pmids: ["1", "2", "3"], scholar: { roleCategory: "full_time_faculty" } },
-        { pmids: ["3", "4"], scholar: { roleCategory: "full_time_faculty" } },
-      ]);
+      return Promise.resolve([{ pmids: ["1", "2", "3"] }, { pmids: ["3", "4"] }]);
     });
     mockTransaction.mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
     mockPublicationCount.mockResolvedValue(0);

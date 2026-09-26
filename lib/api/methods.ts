@@ -810,20 +810,17 @@ async function collectSupercategoryFamilyPmids(
   supercategory: string,
   gate: FamilyOverlayGate,
 ): Promise<{ pmidsByFamilyLabel: Map<string, string[]>; unionPmids: string[] }> {
-  // #536 carve, both halves (same as `loadSupercategoryAllWork`, the family
-  // roster's scholarCount / pmidCountSum and `collectFamilyPmids`): a hidden
-  // identity's family membership contributes no pub to ANY family count or
-  // feed, so the "All families" set is the union of the family sets and can
-  // never count fewer pubs than one family.
+  // No role filter: a pub is never hidden because of its author's role. A
+  // paper that reaches a family only through a hidden-role scholar still
+  // counts; only the PERSON is hidden (roster scholarCount, scholar lists).
   const rows = await prisma.scholarFamily.findMany({
-    where: { supercategory, scholar: { deletedAt: null, status: "active", ...publicRoleWhere() } },
-    select: { familyLabel: true, pmids: true, scholar: { select: { roleCategory: true } } },
+    where: { supercategory, scholar: { deletedAt: null, status: "active" } },
+    select: { familyLabel: true, pmids: true },
   });
 
   const rawByLabel = new Map<string, Set<string>>();
   const unionSet = new Set<string>();
   for (const r of rows) {
-    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
     if (!isFamilyPubliclyVisible(supercategory, r.familyLabel, gate)) continue;
     if (!Array.isArray(r.pmids)) continue;
     let set = rawByLabel.get(r.familyLabel);
@@ -1026,8 +1023,8 @@ async function loadSupercategoryRollup(
   }
 
   // "All families" = DISTINCT research pmids of the union (never the row sum,
-  // PLAN open Q10). The union is carved exactly as `loadSupercategoryAllWork`
-  // carves the category feed, so this equals its `researchCount` without a
+  // PLAN open Q10). The union is gated exactly as `loadSupercategoryAllWork`
+  // gates the category feed, so this equals its `researchCount` without a
   // second scholar_family scan on the page's cold path.
   const allPubCount = unionPmids.filter((p) => researchPmids.has(p)).length;
   return { families, allWorkPubs, allPubCount };
@@ -1101,10 +1098,10 @@ export function pickFamilyLabel(
  * "All families" feed and its count. Applies, in order:
  *   1. the master lens gate;
  *   2. the #800 suppression / #801 sensitivity overlay gate per family;
- *   3. active scholars only AND the #536 public-role filter (both halves: the
- *      `publicRoleWhere` denylist and the fail-closed `isPubliclyDisplayed`
- *      check on the raw column), so a hidden identity's family membership never
- *      contributes a pub;
+ *   3. active scholars only. NO role filter: a pub is never hidden because of
+ *      its author's role (a paper reached only through a hidden-role scholar
+ *      stays), exactly as the family feeds, so this set is the union of the
+ *      family sets and All families is never below one family;
  *   4. #356 whole-pub takedowns / derived-dark pubs removed.
  * Served through the swr-cache (`methods:` prefix): the gate edits that bust
  * the rollup (family tier route, suppress/revoke) bust this too, and the
@@ -1122,16 +1119,12 @@ export async function getSupercategoryAllWork(
 async function loadSupercategoryAllWork(supercategory: string): Promise<SupercategoryAllWork> {
   const gate = await loadFamilyOverlayGate();
   const rows = await prisma.scholarFamily.findMany({
-    where: {
-      supercategory,
-      scholar: { deletedAt: null, status: "active", ...publicRoleWhere() },
-    },
-    select: { familyLabel: true, pmids: true, scholar: { select: { roleCategory: true } } },
+    where: { supercategory, scholar: { deletedAt: null, status: "active" } },
+    select: { familyLabel: true, pmids: true },
   });
 
   const familiesByPmid = new Map<string, Set<string>>();
   for (const r of rows) {
-    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
     if (!isFamilyPubliclyVisible(supercategory, r.familyLabel, gate)) continue;
     if (!Array.isArray(r.pmids)) continue;
     for (const p of r.pmids as unknown[]) {
@@ -1608,22 +1601,19 @@ async function collectFamilyPmids(
 ): Promise<string[]> {
   if (!isFamilyPubliclyVisible(supercategory, familyLabel, gate)) return [];
 
-  // #536 carve, both halves (the where-clause denylist cannot express the
-  // `doctoral_student*` prefix; the fail-closed check on the raw column can),
-  // matching `collectSupercategoryFamilyPmids` and `loadSupercategoryAllWork`
-  // so the family feed, its rail row and "All families" count one population.
+  // No role filter (same as `collectSupercategoryFamilyPmids` and
+  // `loadSupercategoryAllWork`): pubs are never hidden by author role.
   const rows = await prisma.scholarFamily.findMany({
     where: {
       supercategory,
       familyLabel,
-      scholar: { deletedAt: null, status: "active", ...publicRoleWhere() },
+      scholar: { deletedAt: null, status: "active" },
     },
-    select: { pmids: true, scholar: { select: { roleCategory: true } } },
+    select: { pmids: true },
   });
 
   const set = new Set<string>();
   for (const r of rows) {
-    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
     if (Array.isArray(r.pmids)) {
       for (const p of r.pmids as unknown[]) set.add(String(p));
     }

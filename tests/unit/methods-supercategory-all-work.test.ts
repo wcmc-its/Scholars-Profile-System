@@ -4,9 +4,8 @@
  *
  * Gating the route inherits from the loader:
  *   - #800 suppressed family ⇒ none of its pmids;
- *   - #536 hidden roles ⇒ excluded by the query denylist AND by the fail-closed
- *     check on the raw column (an out-of-band `doctoral_student_*` suffix the
- *     denylist cannot name);
+ *   - NO author-role filter: a pub reached only through a hidden-role scholar
+ *     (e.g. a doctoral student) stays in the set, as it does in a family feed;
  *   - inactive / deleted scholars ⇒ excluded in the query;
  *   - #356 dark pubs ⇒ removed;
  *   - master lens off ⇒ nothing, no DB read.
@@ -112,35 +111,32 @@ const pub = (pmid: string, over: Partial<Pub> = {}): Pub => ({
 });
 
 describe("getSupercategoryAllWork gating", () => {
-  it("queries active, public-role scholars only", async () => {
+  it("queries active scholars with no role filter", async () => {
     h.sfFindMany.mockResolvedValue([]);
     await getSupercategoryAllWork(SC);
     const where = h.sfFindMany.mock.calls[0][0].where;
     expect(where.supercategory).toBe(SC);
-    expect(where.scholar).toMatchObject({ deletedAt: null, status: "active" });
-    expect(where.scholar.OR).toEqual(
-      expect.arrayContaining([expect.objectContaining({ roleCategory: null })]),
-    );
-    expect(h.sfFindMany.mock.calls[0][0].select.scholar).toEqual({ select: { roleCategory: true } });
+    expect(where.scholar).toEqual({ deletedAt: null, status: "active" });
   });
 
-  it("drops suppressed families, hidden roles (fail-closed on a suffix), and dark pubs", async () => {
+  it("drops suppressed families and dark pubs but keeps a hidden-role-only pub", async () => {
     h.suppressionOverlay.mockResolvedValue([{ supercategory: SC, familyLabel: "Secret" }]);
     h.sfFindMany.mockResolvedValue([
       row("CRISPR", ["1", "2"]),
       row("Secret", ["3"]),
-      // Admitted by the denylist (an unlisted suffix), rejected by isPubliclyDisplayed.
+      // Reaches the category only through hidden-role scholars: still shown.
       row("CRISPR", ["4"], "doctoral_student_dvm"),
+      row("Antibodies", ["4"], "doctoral_student"),
       row("Antibodies", ["2", "5"], null),
     ]);
     h.dark = new Set(["5"]);
     pubs = ["1", "2", "3", "4", "5"].map((p) => pub(p));
     const out = await getSupercategoryAllWork(SC);
-    expect(out.entries.map((e) => e.pmid).sort()).toEqual(["1", "2"]);
-    expect(out.researchCount).toBe(2);
+    expect(out.entries.map((e) => e.pmid).sort()).toEqual(["1", "2", "4"]);
+    expect(out.researchCount).toBe(3);
     // Only the surviving pmids ever reach the publication query.
     const asked = h.pubFindMany.mock.calls[0][0].where.pmid.in as string[];
-    expect(asked.sort()).toEqual(["1", "2"]);
+    expect(asked.sort()).toEqual(["1", "2", "4"]);
   });
 
   it("counts research articles and every type separately (a NULL type is not research)", async () => {

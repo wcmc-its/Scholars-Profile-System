@@ -56,6 +56,15 @@ function pubsWhere(where: Record<string, unknown>): string[] {
   );
 }
 
+/** Evaluate `scholar: { OR: [{ roleCategory: null }, { roleCategory: { notIn } }] }`. */
+function roleAdmitted(scholarWhere: unknown, role: string | null): boolean {
+  const or = (scholarWhere as { OR?: Array<{ roleCategory: null | { notIn: string[] } }> } | undefined)?.OR;
+  if (!or) return true;
+  return or.some((c) =>
+    c.roleCategory === null ? role === null : role !== null && !c.roleCategory.notIn.includes(role),
+  );
+}
+
 /** Interpret the feed's COUNT(DISTINCT pt.pmid) SQL against the fixture. */
 function countDistinct(sql: Prisma.Sql): number {
   let topic: string | null = null;
@@ -126,7 +135,10 @@ vi.mock("@/lib/db", () => ({
               (where.familyLabel === undefined ||
                 (typeof where.familyLabel === "string"
                   ? r.familyLabel === where.familyLabel
-                  : (where.familyLabel as { in: string[] }).in.includes(r.familyLabel))),
+                  : (where.familyLabel as { in: string[] }).in.includes(r.familyLabel))) &&
+              // Honor a `publicRoleWhere` denylist when a query carries one, so a
+              // role filter on any pub-set query shows up in the counts here.
+              roleAdmitted(where.scholar, r.roleCategory),
           )
           .map((r) => ({
             ...r,
@@ -295,7 +307,7 @@ describe("methods: family rail row == family feed heading == distinct count; All
     expect(allWork.researchCount).toBe(allPubCount);
   });
 
-  it("a hidden-role member counts nowhere, so All families is never below a family", async () => {
+  it("a hidden-role-only pub stays in the family feed, family count and All families; only the person is hidden", async () => {
     db.sf.push(
       { supercategory: SC, familyLabel: "Antibodies", familyId: "fam_0002", cwid: "ddd1004", pmids: ["m6", "m7"], roleCategory: "doctoral_student" },
       { supercategory: SC, familyLabel: "Antibodies", familyId: "fam_0002", cwid: "eee1005", pmids: ["m7"], roleCategory: "affiliate_alumni" },
@@ -303,11 +315,17 @@ describe("methods: family rail row == family feed heading == distinct count; All
     db.pubTypes = { ...db.pubTypes, m6: JA, m7: JA };
     const { families, allPubCount } = await getSupercategoryRollup(SC);
     const byLabel = Object.fromEntries(families.map((f) => [f.familyLabel, f.pubCount]));
-    expect(byLabel).toEqual({ CRISPR: 3, Antibodies: 1 });
+    // m6 and m7 reach Antibodies ONLY through hidden-role scholars: still counted.
+    expect(byLabel).toEqual({ CRISPR: 3, Antibodies: 3 });
     const feed = (await getFamilyPublications(SC, "Antibodies", { sort: "newest" }))!;
-    expect(feed.total).toBe(1);
-    expect(feed.hits.map((h) => h.pmid)).toEqual(["m3"]);
-    expect(await getDistinctPmidCountForFamily(SC, "Antibodies")).toBe(1);
+    expect(feed.total).toBe(3);
+    expect(feed.hits.map((h) => h.pmid).sort()).toEqual(["m3", "m6", "m7"]);
+    expect(await getDistinctPmidCountForFamily(SC, "Antibodies")).toBe(3);
+    // The PERSON stays hidden: the hidden-role members are not in the scholar count.
+    const antibodies = families.find((f) => f.familyLabel === "Antibodies")!;
+    expect(antibodies.scholarCount).toBe(1);
+    // All families: m1, m2, m3 (in both), m6, m7.
+    expect(allPubCount).toBe(5);
     const allWork = await getSupercategoryAllWork(SC);
     expect(allWork.researchCount).toBe(allPubCount);
     for (const f of families) expect(allPubCount).toBeGreaterThanOrEqual(f.pubCount ?? 0);

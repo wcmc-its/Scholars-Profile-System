@@ -14,9 +14,9 @@
  * family segment, never a bare "all".
  *
  * Gating (all in the loader, `getSupercategoryAllWork`): master lens, the
- * #800 suppression / #801 sensitivity overlay per family, active + #536
- * public-role scholars only (denylist + fail-closed check), #356 dark pubs
- * removed. An all-suppressed or unknown supercategory is a 404
+ * #800 suppression / #801 sensitivity overlay per family, active scholars
+ * (no author-role filter: pubs are never hidden by role, as in the family
+ * feeds), #356 dark pubs removed. An all-suppressed or unknown supercategory is a 404
  * (`getSupercategory`).
  *
  * Security: every input is validated before the service layer (the family
