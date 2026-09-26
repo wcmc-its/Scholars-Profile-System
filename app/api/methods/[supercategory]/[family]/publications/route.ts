@@ -19,6 +19,9 @@
  *                                    param, if present, is allow-list-validated
  *                                    and then dropped — never forwarded, since
  *                                    the family feed is a single untiered list)
+ *   scholar filter (TAXONOMY_SCHOLAR_CARDS) → CWID_PATTERN; the loader refuses
+ *                                    unknown / inactive / #536-hidden cwids with
+ *                                    the same empty feed. Flag off ⇒ ignored.
  *
  * The overlay gate (#800 suppression / #801 sensitivity) + master lens gate live
  * in the loader (`getFamilyPublications`), which returns null for a gated/unknown
@@ -35,6 +38,8 @@ import {
   type MethodPublicationSort,
   type MethodPublicationFilter,
 } from "@/lib/api/methods";
+import { CWID_PATTERN } from "@/lib/cwid";
+import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +117,19 @@ export async function GET(
   }
   const entityId = entityIdRaw ?? undefined;
 
+  // TAXONOMY_SCHOLAR_CARDS — optional scholar filter, validated only while the
+  // flag is on (off ⇒ ignored, the pre-flag behavior).
+  let cwid: string | undefined;
+  if (isTaxonomyScholarCardsOn()) {
+    const cwidRaw = sp.get("cwid");
+    if (cwidRaw !== null) {
+      if (!CWID_PATTERN.test(cwidRaw)) {
+        return apiError("invalid cwid", 400);
+      }
+      cwid = cwidRaw;
+    }
+  }
+
   // Resolve the family to its stable (supercategory, familyLabel) identity —
   // re-derives slugs over the live set, applies the overlay gate, null on miss.
   const resolved = await getFamily(supercategory, family);
@@ -122,7 +140,7 @@ export async function GET(
   const result = await getFamilyPublications(
     resolved.supercategory,
     resolved.familyLabel,
-    { sort, page, filter, entityId },
+    { sort, page, filter, entityId, ...(cwid ? { cwid } : {}) },
   );
   if (result === null) {
     return apiError("family not found", 404);

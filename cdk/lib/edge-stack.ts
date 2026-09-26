@@ -732,10 +732,13 @@ export class EdgeStack extends Stack {
       // the param is stripped before the origin and the row never shows. AllViewer
       // forwards it. GET-only (a read).
       ["/api/scholar/*/grants", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
-      // Topic publication feed -- reads `sort`/`filter`/`subtopic`/`tier`/`page`.
+      // Topic publication feed -- reads `sort`/`filter`/`subtopic`/`tier`/`page`
+      // and (TAXONOMY_SCHOLAR_CARDS) `cwid`. Never cached, so the per-scholar
+      // filter needs no cache-key change.
       ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
-      // `page` (#824). Same shape as `/api/topics/*/publications`.
+      // `page` (#824), `entity` (#1166) and `cwid` (TAXONOMY_SCHOLAR_CARDS). Same
+      // shape as `/api/topics/*/publications`.
       ["/api/methods/*/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Org-unit (dept/division) method-facet roster -- `force-dynamic`,
       // `no-store`, reads repeatable `?method=` (+ `?page=`) for the #974 Phase 2

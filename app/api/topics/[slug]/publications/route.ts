@@ -13,6 +13,9 @@
  *   T-03-05-05 DoS via page → MAX_PAGE clamp
  *   T-03-05-06 input echo → static error strings only
  *   T-03-05-07 tier bypass (issue #326) → TIER_ALLOWLIST
+ *   scholar filter (TAXONOMY_SCHOLAR_CARDS) → CWID_PATTERN; the loader refuses
+ *     unknown / inactive / #536-hidden cwids with the same empty feed. Flag off
+ *     ⇒ the param is ignored entirely (pre-flag behavior).
  *
  * Does NOT add CORS headers (same-origin only, matching all other /api/* routes).
  * Does NOT log request URL or param values (silent rejection per T-03-05-06).
@@ -25,6 +28,8 @@ import {
   type TopicPublicationFilter,
   type TopicPublicationTier,
 } from "@/lib/api/topics";
+import { CWID_PATTERN } from "@/lib/cwid";
+import { isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +93,19 @@ export async function GET(
     tier = tierRaw as TopicPublicationTier;
   }
 
+  // TAXONOMY_SCHOLAR_CARDS — optional scholar filter. Validated only while the
+  // flag is on; off, the param is ignored exactly as before the flag existed.
+  let cwid: string | undefined;
+  if (isTaxonomyScholarCardsOn()) {
+    const cwidRaw = sp.get("cwid");
+    if (cwidRaw !== null) {
+      if (!CWID_PATTERN.test(cwidRaw)) {
+        return apiError("invalid cwid", 400);
+      }
+      cwid = cwidRaw;
+    }
+  }
+
   const pageStr = sp.get("page") ?? "1";
   const pageNum = parseInt(pageStr, 10);
   if (!Number.isFinite(pageNum) || pageNum < 1) {
@@ -96,7 +114,14 @@ export async function GET(
   // URL is 1-indexed; service is 0-indexed; clamp to MAX_PAGE.
   const page = Math.min(pageNum, MAX_PAGE) - 1;
 
-  const result = await getTopicPublications(slug, { sort, subtopic, page, filter, tier });
+  const result = await getTopicPublications(slug, {
+    sort,
+    subtopic,
+    page,
+    filter,
+    tier,
+    ...(cwid ? { cwid } : {}),
+  });
   if (result === null) {
     return apiError("topic not found", 404);
   }

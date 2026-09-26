@@ -3002,6 +3002,14 @@ export class AppStack extends Stack {
         // ON in both envs (2026-09-25): additive, so the parity gaps (imported
         // or allowlist-only holders) keep their existing access either way.
         FUNCTIONAL_ROLES_AUTHZ: env === "staging" ? "on" : "on",
+        // Topic / method page phase 3 (lib/taxonomy-flags.ts). When "on": the
+        // portrait scholar card grid (top 6 with area chips) replaces the top
+        // scholars chip row on topic, method family and method category pages,
+        // the selected rail item's scholars become pick-to-filter cards
+        // (`?scholar=`), and both publication routes honor a validated `?cwid=`
+        // (hidden identities refused). Off = the pre-flag pages and routes.
+        // STAGING ON for the eyeball; prod stays off until it is signed off.
+        TAXONOMY_SCHOLAR_CARDS: env === "staging" ? "on" : "off",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the

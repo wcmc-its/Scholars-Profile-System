@@ -52,6 +52,7 @@ import {
 } from "@/lib/api/manual-layer";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import { cachedRead } from "@/lib/api/swr-cache";
+import { isPublicScholarCwid, loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -748,6 +749,20 @@ export type TopicPublicationsResult = {
 };
 
 const TOPIC_PUBLICATIONS_PAGE_SIZE = 20;
+
+/** The result for a refused scholar filter: same shape, nothing in it. */
+function emptyTopicPublications(page: number): TopicPublicationsResult {
+  return {
+    hits: [],
+    total: 0,
+    totalAllTypes: 0,
+    totalResearchOnly: 0,
+    tierTotals: { strongly: 0, also: 0 },
+    parentTierTotals: { strongly: 0, also: 0 },
+    page,
+    pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
+  };
+}
 // Same exclusion list used by every feed (issue #63). Spread once into a
 // plain array so Prisma's `notIn` accepts it without the readonly tuple.
 const HARD_EXCLUDE_TYPES = [...FEED_EXCLUDED_TYPES];
@@ -789,11 +804,27 @@ export async function getTopicPublications(
      * any caller that wants the full union).
      */
     tier?: TopicPublicationTier;
+    /**
+     * TAXONOMY_SCHOLAR_CARDS — restrict every row AND every count to the papers
+     * this scholar is attributed on (`publication_topic.cwid`), minus the papers
+     * they per-author-hid. An unknown, inactive or #536-hidden cwid yields the
+     * same empty result (no existence leak). The route validates the shape.
+     */
+    cwid?: string;
   },
   now: Date = new Date(),
 ): Promise<TopicPublicationsResult | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
+
+  const scholarCwid = opts.cwid && opts.cwid.length > 0 ? opts.cwid : undefined;
+  let hiddenForScholar: string[] = [];
+  if (scholarCwid) {
+    if (!(await isPublicScholarCwid(scholarCwid))) {
+      return emptyTopicPublications(Math.max(0, opts.page ?? 0));
+    }
+    hiddenForScholar = await loadHiddenAuthorshipPmids(scholarCwid);
+  }
 
   // #305 — flag-gate the `impactScore` field surfacing to the public hit
   // shape so flipping `SEARCH_PUB_TAB_IMPACT=off` hides the new number on
@@ -812,6 +843,10 @@ export async function getTopicPublications(
 
   const baseWhere: Record<string, unknown> = { parentTopicId: topicSlug };
   if (subtopicFilter) baseWhere.primarySubtopicId = subtopicFilter;
+  if (scholarCwid) {
+    baseWhere.cwid = scholarCwid;
+    if (hiddenForScholar.length > 0) baseWhere.pmid = { notIn: hiddenForScholar };
+  }
   if (filter === "research_articles_only") {
     baseWhere.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
   }
@@ -838,7 +873,14 @@ export async function getTopicPublications(
   //   - every count is DISTINCT pmid because publication_topic is keyed
   //     (pmid, cwid, parent_topic_id) — a plain COUNT over-reports co-authored
   //     papers (the #651 contract).
-  const parentCond = Prisma.sql`pt.parent_topic_id = ${topicSlug}`;
+  // The scholar filter is part of the SCOPE (like the topic itself), so it is
+  // folded into `parentCond` and reaches every count, parent-tier ones included.
+  const topicCond = Prisma.sql`pt.parent_topic_id = ${topicSlug}`;
+  const parentCond = scholarCwid
+    ? hiddenForScholar.length > 0
+      ? Prisma.sql`${topicCond} AND pt.cwid = ${scholarCwid} AND pt.pmid NOT IN (${Prisma.join(hiddenForScholar)})`
+      : Prisma.sql`${topicCond} AND pt.cwid = ${scholarCwid}`
+    : topicCond;
   const subCond = subtopicFilter
     ? Prisma.sql`pt.primary_subtopic_id = ${subtopicFilter}`
     : null;
@@ -1510,7 +1552,7 @@ export function topicScholarLastNameInitial(preferredName: string): string {
  * in getSubtopicsForTopic). Subtopic display names follow the same fallback
  * + parent-prefix-strip + acronym normalization rules as the rail.
  */
-async function fetchTopSubtopicsForScholars(
+export async function fetchTopSubtopicsForScholars(
   topicSlug: string,
   cwids: string[],
 ): Promise<Map<string, { id: string; displayName: string }[]>> {
