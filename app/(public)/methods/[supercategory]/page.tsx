@@ -178,18 +178,12 @@ export default async function SupercategoryPage({
           )
         )}
 
-        {/* Stats — family count (additive/accurate). The distinct cross-family
-            scholar count is non-additive across co-membership, so it is not
-            shown as a raw sum here (§3.2 / OQ-3). */}
-        <div className="mt-4 flex items-baseline justify-between gap-4 border-t border-dashed border-border pt-4">
-          <div className="text-sm text-muted-foreground">
-            {families.length.toLocaleString()} method{" "}
-            {families.length === 1 ? "family" : "families"}
-          </div>
-          {exportEligible ? (
+        {/* Export stays; the mockup shows no stats line, so no family count here. */}
+        {exportEligible ? (
+          <div className="mt-4 flex justify-end">
             <ScholarListExportButton scope="supercategory" params={{ supercategory: sc.slug }} />
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </section>
 
       {/* Two-level body: family rail + ?family= right panel. */}

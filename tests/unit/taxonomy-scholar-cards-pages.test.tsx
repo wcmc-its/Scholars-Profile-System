@@ -211,3 +211,19 @@ describe("flag on", () => {
     expect(p.viewAll).toEqual({ href: "/methods/imaging-x/mri-fam_0001/scholars", count: 12 });
   });
 });
+
+describe("no stats line (mockup shows none)", () => {
+  it.each([
+    ["topic", renderTopic],
+    ["category", renderCategory],
+    ["family", renderFamily],
+  ])("%s page has no dashed stats row, flag off or on", async (_k, run) => {
+    for (const flag of ["off", "on"]) {
+      vi.stubEnv("TAXONOMY_SCHOLAR_CARDS", flag);
+      document.body.innerHTML = "";
+      await run();
+      expect(document.querySelector(".border-dashed")).toBeNull();
+      expect(document.body.textContent).not.toMatch(/\d+ (subareas|method families|scholars\b)/);
+    }
+  });
+});

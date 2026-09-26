@@ -557,7 +557,7 @@ export type SubtopicRail = {
   /**
    * DISTINCT pmids in the whole topic under the feed's default scope (research
    * articles only, every relevance tier), INCLUDING pmids with no primary
-   * subtopic. This is the "All subareas" row, the topic stats line, the
+   * subtopic. This is the "All subareas" row, the topic page's
    * Spotlight "View all N" and — by construction — the unfiltered feed's
    * "Publications N" heading. Not a sum of the rows (open question 10).
    */

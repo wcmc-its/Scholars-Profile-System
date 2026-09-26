@@ -47,8 +47,8 @@ export function TopicRailLayout({
     label: s.displayName,
     count: s.pubCount,
   }));
-  // Same total the page's stats line, Spotlight "View all" and the
-  // unfiltered feed heading use.
+  // Same total the page's Spotlight "View all" and the unfiltered feed
+  // heading use.
   const total = totalPubCount;
   const subtopicLabels = useMemo(
     () => Object.fromEntries(subtopics.map((s) => [s.id, s.displayName])),

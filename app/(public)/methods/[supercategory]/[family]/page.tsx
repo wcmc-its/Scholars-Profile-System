@@ -225,20 +225,15 @@ export default async function FamilyPage({
           )
         )}
 
-        {scholarCount > 0 && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
-            <span>
-              {scholarCount.toLocaleString()} {scholarCount === 1 ? "scholar" : "scholars"}
-            </span>
-            {/* Flag on, the card grid's "View all N scholars →" replaces this. */}
-            {!scholarCards && topScholars && scholarCount > topScholars.length && (
-              <a
-                href={familyScholarsHref}
-                className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-              >
-                + {(scholarCount - topScholars.length).toLocaleString()} more scholars →
-              </a>
-            )}
+        {/* No stats line (mockup). Flag off, the chip row has no "View all", so keep the link. */}
+        {!scholarCards && topScholars && scholarCount > topScholars.length && (
+          <div className="mt-4 text-sm">
+            <a
+              href={familyScholarsHref}
+              className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            >
+              + {(scholarCount - topScholars.length).toLocaleString()} more scholars →
+            </a>
           </div>
         )}
       </section>
