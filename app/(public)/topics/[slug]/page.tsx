@@ -101,7 +101,6 @@ export default async function TopicPage({
   }
 
   const subtopicList = subtopics ?? [];
-  const subtopicCount = subtopicList.length;
   const totalPubsForStats = subtopicList.reduce((sum, s) => sum + s.pubCount, 0);
   const spotlightData = spotlightCards
     ? {
@@ -181,19 +180,6 @@ export default async function TopicPage({
           )
         )}
 
-        {/* Stats — dashed border under scholars row */}
-        {(totalPubsForStats > 0 || subtopicCount > 0) && (
-          <div className="mt-4 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
-            {[
-              totalPubsForStats > 0
-                ? `${totalPubsForStats.toLocaleString()} publications`
-                : null,
-              subtopicCount > 0 ? `${subtopicCount.toLocaleString()} subareas` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-        )}
       </section>
 
       {/* Spotlight (§16) — replaces the prior Recent Highlights surface. */}
