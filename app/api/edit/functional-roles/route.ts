@@ -46,6 +46,7 @@ import {
   revokeFunctionalRole,
   setFunctionalRoleScopes,
   validScopes,
+  withDirectoryNames,
 } from "@/lib/edit/functional-roles.server";
 
 const PATH = "/api/edit/functional-roles";
@@ -148,5 +149,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(500, "write_failed");
   }
 
+  // Names from ED for staff with no Scholar row, after the write committed
+  // (fail-soft: the CWID shows on any directory error).
+  ({ rows } = await withDirectoryNames(rows));
   return editOk({ op, changed, rows });
 }

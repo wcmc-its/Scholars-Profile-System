@@ -32,6 +32,7 @@
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { logEditDenial } from "@/lib/edit/authz";
+import { fillDirectoryNames } from "@/lib/edit/directory-names";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   canManageReportAccess,
@@ -102,9 +103,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(500, "write_failed");
   }
 
+  // ED names for grantees with no Scholar row and no stored name, after the
+  // write committed (fail-soft: the CWID shows on any directory error).
+  const rows = await fillDirectoryNames(
+    result.rows,
+    (r) => r.name,
+    (r, name) => ({ ...r, name }),
+  );
   return editOk({
     op,
     changed: result.changed,
-    rows: result.rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
+    rows: rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
   });
 }

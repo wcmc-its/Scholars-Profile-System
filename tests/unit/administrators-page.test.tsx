@@ -58,6 +58,11 @@ vi.mock("@/lib/edit/functional-roles.server", () => ({
   listFunctionalRoles: mockListFunctionalRoles,
   listGateHolders: mockListGateHolders,
   functionalRoleScopeOptions: () => ({ external_affairs: [], reporting: [] }),
+  // ED name fill is its own unit (functional-roles.test.ts); pass-through here.
+  withDirectoryNames: async (rows: unknown[], holders?: unknown[]) => ({
+    rows: [...rows],
+    holders: holders && [...holders],
+  }),
 }));
 vi.mock("@/lib/db", () => ({
   db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },

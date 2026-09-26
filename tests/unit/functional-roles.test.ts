@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   appendAuditRow: vi.fn(),
   listCommsStewardCwids: vi.fn(),
   listDevelopmentAllowlistCwids: vi.fn(),
+  fetchDirectory: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -43,6 +44,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: h.appendAuditRow }));
+vi.mock("@/lib/sources/ldap", () => ({ fetchDirectoryPeopleByCwid: h.fetchDirectory }));
 vi.mock("@/lib/auth/comms-steward", () => ({ listCommsStewardCwids: h.listCommsStewardCwids }));
 vi.mock("@/lib/auth/development", () => ({
   listDevelopmentAllowlistCwids: h.listDevelopmentAllowlistCwids,
@@ -75,7 +77,10 @@ import {
   revokeFunctionalRole,
   setFunctionalRoleScopes,
   validScopes,
+  withDirectoryGranteeNames,
+  withDirectoryNames,
 } from "@/lib/edit/functional-roles.server";
+import { resetDirectoryNameCache } from "@/lib/edit/directory-names";
 
 const T0 = new Date("2026-01-10T12:00:00Z");
 const T1 = new Date("2026-03-02T12:00:00Z");
@@ -98,8 +103,24 @@ function stored(over: Record<string, unknown> = {}) {
 const TX_LIST = [stored({ cwid: "txrow01" })];
 const WRITER_LIST = [stored({ cwid: "wrrow01" })];
 
+/** A directory person as `fetchDirectoryPeopleByCwid` projects one. */
+function edPerson(cwid: string, firstName: string, lastName: string) {
+  return {
+    cwid,
+    name: `${lastName}, ${firstName}`,
+    title: null,
+    dept: null,
+    firstName,
+    lastName,
+    email: null,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  resetDirectoryNameCache();
+  // ED knows nobody unless a test says otherwise.
+  h.fetchDirectory.mockResolvedValue([]);
   h.readFindMany.mockResolvedValue([]);
   h.readScholarFindMany.mockResolvedValue([]);
   h.writeFindUnique.mockResolvedValue(null);
@@ -849,5 +870,148 @@ describe("listGateHolders", () => {
         via: "development_allowlist",
       },
     ]);
+  });
+});
+
+describe("withDirectoryNames (ED fill for staff with no Scholar row)", () => {
+  function row(over: Record<string, unknown>) {
+    return {
+      role: "reporting" as const,
+      cwid: "fake001",
+      source: "report_access",
+      scopes: ["*"],
+      name: "fake001",
+      title: null,
+      granteeName: null,
+      grantedBy: "adm0001",
+      grantedByName: "Admin Person",
+      grantedAt: T0.toISOString(),
+      ...over,
+    };
+  }
+
+  it("fills bare-CWID rows, unnamed granters and unnamed parity holders in ONE lookup, and re-sorts", async () => {
+    h.fetchDirectory.mockResolvedValue([
+      edPerson("fake001", "Zed", "Staffer"),
+      edPerson("fake002", "Ann", "Aide"),
+      edPerson("adm0009", "Gia", "Granter"),
+      edPerson("fake003", "Should", "NotApply"),
+    ]);
+    const { rows, holders } = await withDirectoryNames(
+      [
+        row({ cwid: "fake001", name: "fake001" }),
+        row({ cwid: "fake002", name: "fake002", grantedBy: "adm0009", grantedByName: null }),
+        row({ cwid: "fake003", name: "Named Person" }),
+      ],
+      [
+        {
+          role: "reporting",
+          cwid: "fake002",
+          name: null,
+          reportKey: "article-count",
+          scope: "*",
+          via: "report_access",
+        },
+        {
+          role: "external_affairs",
+          cwid: "fake003",
+          name: "Stored Name",
+          scope: "development",
+          via: "development_allowlist",
+        },
+      ],
+    );
+    expect(h.fetchDirectory).toHaveBeenCalledTimes(1);
+    expect([...h.fetchDirectory.mock.calls[0]![0]].sort()).toEqual([
+      "adm0009",
+      "fake001",
+      "fake002",
+    ]);
+    expect(rows.map((r) => [r.cwid, r.name, r.grantedByName])).toEqual([
+      ["fake002", "Ann Aide", "Gia Granter"],
+      ["fake003", "Named Person", "Admin Person"],
+      ["fake001", "Zed Staffer", "Admin Person"],
+    ]);
+    expect(holders!.map((x) => [x.cwid, x.name])).toEqual([
+      ["fake002", "Ann Aide"],
+      ["fake003", "Stored Name"],
+    ]);
+  });
+
+  it("never looks up the allowlist granter sentinel", async () => {
+    await withDirectoryNames([row({ name: "Named", grantedBy: "ALLOWLIST", grantedByName: null })]);
+    expect(h.fetchDirectory).not.toHaveBeenCalled();
+  });
+
+  it("fails soft: an ED error leaves every name as it was", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.fetchDirectory.mockRejectedValue(new Error("ldap down"));
+    const input = [row({ cwid: "fake001", name: "fake001" })];
+    const { rows, holders } = await withDirectoryNames(input);
+    expect(rows.map((r) => r.name)).toEqual(["fake001"]);
+    expect(holders).toBeUndefined();
+  });
+});
+
+describe("import stores the ED name as granteeName", () => {
+  it("withDirectoryGranteeNames fills only rows with no source name", async () => {
+    h.fetchDirectory.mockResolvedValue([
+      edPerson("fake004", "Dee", "Directory"),
+      edPerson("fake001", "Other", "Name"),
+    ]);
+    const out = await withDirectoryGranteeNames([
+      {
+        role: "reporting",
+        cwid: "fake001",
+        source: "report_access",
+        scopes: ["*"],
+        granteeName: "Pat Example",
+        grantedBy: "adm0002",
+        grantedAt: T0,
+      },
+      {
+        role: "external_affairs",
+        cwid: "fake004",
+        source: "allowlist",
+        scopes: ["development"],
+        granteeName: null,
+        grantedBy: "ALLOWLIST",
+        grantedAt: null,
+      },
+    ]);
+    expect(h.fetchDirectory).toHaveBeenCalledWith(["fake004"]);
+    expect(out.map((r) => [r.cwid, r.granteeName])).toEqual([
+      ["fake001", "Pat Example"],
+      ["fake004", "Dee Directory"],
+    ]);
+  });
+
+  it("importFunctionalRoles writes the ED name onto a new imported row", async () => {
+    h.listDevelopmentAllowlistCwids.mockReturnValue(["fake005"]);
+    h.fetchDirectory.mockResolvedValue([edPerson("fake005", "Eve", "Example")]);
+    h.writeFindMany.mockResolvedValue([]);
+    h.txFindMany.mockResolvedValue([]);
+    h.txCreateMany.mockResolvedValue({ count: 1 });
+    await importFunctionalRoles(ACTOR);
+    expect(h.txCreateMany).toHaveBeenCalledTimes(1);
+    expect(h.txCreateMany.mock.calls[0]![0].data[0]).toMatchObject({
+      cwid: "fake005",
+      granteeName: "Eve Example",
+    });
+  });
+
+  it("an ED failure imports the row with a null granteeName, not an error", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.listDevelopmentAllowlistCwids.mockReturnValue(["fake005"]);
+    h.fetchDirectory.mockRejectedValue(new Error("ldap down"));
+    h.writeFindMany.mockResolvedValue([]);
+    h.txFindMany.mockResolvedValue([]);
+    h.txCreateMany.mockResolvedValue({ count: 1 });
+    const result = await importFunctionalRoles(ACTOR);
+    expect(result.added).toBe(1);
+    expect(h.txCreateMany.mock.calls[0]![0].data[0]).toMatchObject({
+      cwid: "fake005",
+      granteeName: null,
+    });
   });
 });

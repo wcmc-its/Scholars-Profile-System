@@ -5,6 +5,7 @@
  */
 import type { ReportAccessPopoverPersonProps } from "@/components/edit/report-access-popover";
 import type { EditSession } from "@/lib/auth/superuser";
+import { fillDirectoryNames } from "@/lib/edit/directory-names";
 import {
   canManageReportAccess,
   listReportAccess,
@@ -21,7 +22,13 @@ export async function loadReportAccessPopoverProps(
   session: Pick<EditSession, "isSuperuser" | "isCommsSteward">,
   note?: string,
 ): Promise<ReportAccessPopoverPersonProps> {
-  const rows = await listReportAccess(reportKey);
+  // A grantee with no Scholar row and no stored name gets an ED name
+  // (one fail-soft lookup; the CWID shows on any directory error).
+  const rows = await fillDirectoryNames(
+    await listReportAccess(reportKey),
+    (r) => r.name,
+    (r, name) => ({ ...r, name }),
+  );
   return {
     mode: "person",
     reportKey,

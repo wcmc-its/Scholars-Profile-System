@@ -99,6 +99,14 @@ function initials(name: string): string {
   return (first + last).toUpperCase();
 }
 
+/** The display name when there is a real one: null when it is missing or is
+ *  just the CWID again (no Scholar row, no stored or directory name), so the
+ *  CWID renders once instead of twice. */
+export function realName(name: string | null | undefined, cwid: string): string | null {
+  if (!name) return null;
+  return name.trim().toLowerCase() === cwid.trim().toLowerCase() ? null : name;
+}
+
 /** A row's stable key (the table's primary key). */
 export function functionalRowKey(r: Pick<FunctionalRoleRow, "role" | "cwid" | "source">): string {
   return `${r.role}:${r.cwid}:${r.source}`;
@@ -694,8 +702,15 @@ export function FunctionalRolesPanel({
                       key={`${h.role}:${h.cwid}:${h.via}:${gateHolderNeed(h)}`}
                       data-testid={`functional-roles-parity-gap-${h.cwid}`}
                     >
-                      <span className="text-foreground">{h.name ?? h.cwid}</span>{" "}
-                      <span className="font-mono text-xs">{h.cwid}</span> ·{" "}
+                      {realName(h.name, h.cwid) ? (
+                        <>
+                          <span className="text-foreground">{h.name}</span>{" "}
+                          <span className="font-mono text-xs">{h.cwid}</span>
+                        </>
+                      ) : (
+                        <span className="text-foreground font-mono text-xs">{h.cwid}</span>
+                      )}{" "}
+                      ·{" "}
                       {FUNCTIONAL_ROLE_LABEL[h.role]} · {gateHolderNeed(h)} · via{" "}
                       {GATE_VIA_LABEL[h.via]}
                     </li>
@@ -752,13 +767,21 @@ export function FunctionalRolesPanel({
                         {initials(r.name)}
                       </div>
                       <div className="flex min-w-0 flex-col gap-px">
-                        <span className="truncate text-[14.5px] font-[550]">{r.name}</span>
+                        {realName(r.name, r.cwid) ? (
+                          <span className="truncate text-[14.5px] font-[550]">{r.name}</span>
+                        ) : (
+                          <span className="truncate font-mono text-[14.5px] font-[550]">
+                            {r.cwid}
+                          </span>
+                        )}
                         {r.title && (
                           <span className="text-muted-foreground truncate text-[13px]">
                             {r.title}
                           </span>
                         )}
-                        <span className="text-muted-foreground font-mono text-xs">{r.cwid}</span>
+                        {realName(r.name, r.cwid) && (
+                          <span className="text-muted-foreground font-mono text-xs">{r.cwid}</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex min-w-0 flex-col gap-0.5 pl-12 md:pl-0">

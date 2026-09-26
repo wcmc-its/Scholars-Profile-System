@@ -38,6 +38,12 @@
  * (inside its transaction), and hands back the list it re-read; only the
  * page's server render uses the reader (`report-access.ts`'s rule, PR #2620).
  *
+ * Names: the loaders resolve from `Scholar`, then the stored `granteeName`,
+ * then the CWID. Holders with no Scholar row and no stored name are filled
+ * from the Enterprise Directory by `withDirectoryNames` (one batched, cached,
+ * fail-soft lookup), OUTSIDE any transaction; the import stores the ED name
+ * as `granteeName` so the row carries it from then on.
+ *
  * Server-only (reads `@/lib/db`).
  */
 import { db } from "@/lib/db";
@@ -46,6 +52,11 @@ import type { EditSession } from "@/lib/auth/superuser";
 import { listCommsStewardCwids } from "@/lib/auth/comms-steward";
 import { listDevelopmentAllowlistCwids } from "@/lib/auth/development";
 import { appendAuditRow } from "@/lib/edit/audit";
+import {
+  isBareName,
+  resolveDirectoryNames,
+  type DirectoryNameDeps,
+} from "@/lib/edit/directory-names";
 import {
   ALL_SCOPE,
   ALLOWLIST_GRANTER,
@@ -153,14 +164,57 @@ export async function listFunctionalRoles(
       grantedAt: r.grantedAt.toISOString(),
     });
   }
-  out.sort(
+  return sortRows(out);
+}
+
+function sortRows(rows: FunctionalRoleRow[]): FunctionalRoleRow[] {
+  return rows.sort(
     (a, b) =>
       a.name.localeCompare(b.name) ||
       a.cwid.localeCompare(b.cwid) ||
       FUNCTIONAL_ROLES.indexOf(a.role) - FUNCTIONAL_ROLES.indexOf(b.role) ||
       a.source.localeCompare(b.source),
   );
-  return out;
+}
+
+/**
+ * Fill names the tables could not supply from the Enterprise Directory: a
+ * row whose name is its CWID, a granter with no resolved name, and a parity
+ * holder with no name. ONE batched lookup for all of them; on any ED failure
+ * everything comes back as it was (the CWID shows). Never call it inside a
+ * transaction: it waits on LDAP.
+ */
+export async function withDirectoryNames(
+  rows: ReadonlyArray<FunctionalRoleRow>,
+  holders?: ReadonlyArray<GateHolder>,
+  deps?: DirectoryNameDeps,
+): Promise<{ rows: FunctionalRoleRow[]; holders: GateHolder[] | undefined }> {
+  const need = new Set<string>();
+  for (const r of rows) {
+    if (isBareName(r.name, r.cwid)) need.add(r.cwid.toLowerCase());
+    if (!r.grantedByName && r.grantedBy !== ALLOWLIST_GRANTER) {
+      need.add(r.grantedBy.toLowerCase());
+    }
+  }
+  for (const h of holders ?? []) {
+    if (isBareName(h.name, h.cwid)) need.add(h.cwid.toLowerCase());
+  }
+  const names =
+    need.size > 0 ? await resolveDirectoryNames(need, deps) : new Map<string, string>();
+  if (names.size === 0) return { rows: [...rows], holders: holders && [...holders] };
+  const nameOf = (cwid: string) => names.get(cwid.toLowerCase());
+  const filledRows = rows.map((r) => {
+    const name = isBareName(r.name, r.cwid) ? nameOf(r.cwid) : undefined;
+    const grantedByName =
+      !r.grantedByName && r.grantedBy !== ALLOWLIST_GRANTER ? nameOf(r.grantedBy) : undefined;
+    if (!name && !grantedByName) return r;
+    return { ...r, ...(name ? { name } : {}), ...(grantedByName ? { grantedByName } : {}) };
+  });
+  const filledHolders = holders?.map((h) => {
+    const name = isBareName(h.name, h.cwid) ? nameOf(h.cwid) : undefined;
+    return name ? { ...h, name } : h;
+  });
+  return { rows: sortRows(filledRows), holders: filledHolders };
 }
 
 /**
@@ -497,6 +551,28 @@ export function desiredImportedRows(inputs: ImportInputs): ImportedRow[] {
   return out;
 }
 
+/**
+ * Give each desired row with no source name its Enterprise Directory name,
+ * so the stored `granteeName` carries it (an allowlist has no names at all,
+ * and older `report_access` rows predate `grantee_name`). Done BEFORE the
+ * import's transactions. A miss or an ED failure leaves `granteeName` null,
+ * which the diff never treats as a change (a stored name is never cleared).
+ */
+export async function withDirectoryGranteeNames(
+  rows: ImportedRow[],
+  deps?: DirectoryNameDeps,
+): Promise<ImportedRow[]> {
+  const need = rows.filter((r) => !r.granteeName).map((r) => r.cwid);
+  if (need.length === 0) return rows;
+  const names = await resolveDirectoryNames(need, deps);
+  if (names.size === 0) return rows;
+  return rows.map((r) => {
+    if (r.granteeName) return r;
+    const name = names.get(r.cwid.toLowerCase());
+    return name ? { ...r, granteeName: name } : r;
+  });
+}
+
 export type ImportResult = {
   added: number;
   updated: number;
@@ -550,11 +626,14 @@ function pickFields(row: StoredRow, fields: ReadonlyArray<string>): Record<strin
  * chunks committed, each consistent with its audit rows; re-running
  * converges. Idempotent: a second run with unchanged sources changes nothing.
  */
-export async function importFunctionalRoles(args: {
-  actorCwid: string;
-  impersonatedCwid?: string | null;
-  requestId?: string | null;
-}): Promise<ImportResult> {
+export async function importFunctionalRoles(
+  args: {
+    actorCwid: string;
+    impersonatedCwid?: string | null;
+    requestId?: string | null;
+  },
+  directoryDeps?: DirectoryNameDeps,
+): Promise<ImportResult> {
   const reportAccess = await db.write.reportAccess.findMany({
     select: {
       reportKey: true,
@@ -565,11 +644,14 @@ export async function importFunctionalRoles(args: {
       granteeName: true,
     },
   });
-  const desired = desiredImportedRows({
-    reportAccess,
-    commsStewardCwids: listCommsStewardCwids(),
-    developmentCwids: listDevelopmentAllowlistCwids(),
-  });
+  const desired = await withDirectoryGranteeNames(
+    desiredImportedRows({
+      reportAccess,
+      commsStewardCwids: listCommsStewardCwids(),
+      developmentCwids: listDevelopmentAllowlistCwids(),
+    }),
+    directoryDeps,
+  );
   // Allowlists carry no grant time: a new row takes the run's time (set here,
   // not left to the DB default, so the audit snapshot matches the row).
   const now = new Date();
@@ -704,5 +786,10 @@ export async function importFunctionalRoles(args: {
     updated += counts.updated;
     removed += counts.removed;
   }
-  return { added, updated, removed, rows: await listFunctionalRoles(db.write) };
+  const { rows } = await withDirectoryNames(
+    await listFunctionalRoles(db.write),
+    undefined,
+    directoryDeps,
+  );
+  return { added, updated, removed, rows };
 }

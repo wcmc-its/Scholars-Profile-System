@@ -38,6 +38,7 @@ import {
   functionalRoleScopeOptions,
   listFunctionalRoles,
   listGateHolders,
+  withDirectoryNames,
 } from "@/lib/edit/functional-roles.server";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -65,7 +66,7 @@ async function loadFunctionalRolesTab(): Promise<
   | undefined
 > {
   try {
-    const [rows, gateHolders] = await Promise.all([
+    const [tableRows, tableHolders] = await Promise.all([
       listFunctionalRoles(db.read),
       // The parity line is advisory: a failed holder read drops the line,
       // not the tab.
@@ -79,6 +80,9 @@ async function loadFunctionalRolesTab(): Promise<
         return undefined;
       }),
     ]);
+    // Staff with no Scholar row and no stored name: one fail-soft ED lookup
+    // (never throws; on any directory error the CWID shows).
+    const { rows, holders: gateHolders } = await withDirectoryNames(tableRows, tableHolders);
     return {
       rows,
       scopeOptions: functionalRoleScopeOptions(),

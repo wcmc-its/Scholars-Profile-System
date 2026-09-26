@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   mockGrant: vi.fn(),
   mockRevoke: vi.fn(),
   mockList: vi.fn(),
+  mockFetchDirectory: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/effective-identity", () => ({
@@ -43,8 +44,10 @@ vi.mock("@/lib/edit/report-access", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+vi.mock("@/lib/sources/ldap", () => ({ fetchDirectoryPeopleByCwid: h.mockFetchDirectory }));
 
 import { POST } from "@/app/api/edit/report-access/route";
+import { resetDirectoryNameCache } from "@/lib/edit/directory-names";
 
 const ADMIN = "adm0001";
 const PLAIN = "usr0001";
@@ -88,6 +91,8 @@ const READER_ROWS = [{ ...WRITTEN_ROWS[0], cwid: "rdr0001", scopeKey: "ecr" }];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetDirectoryNameCache();
+  h.mockFetchDirectory.mockResolvedValue([]);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   asGenuine(ADMIN, { isSuperuser: true });
@@ -236,5 +241,40 @@ describe("POST /api/edit/report-access — writes", () => {
     const res = await POST(post(VALID));
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "write_failed" });
+  });
+});
+
+describe("POST /api/edit/report-access — ED names", () => {
+  const BARE = { ...WRITTEN_ROWS[0], cwid: "fake777", granteeName: null, name: "fake777" };
+
+  it("fills a grantee with no Scholar row and no stored name from ED", async () => {
+    h.mockGrant.mockResolvedValue({ changed: true, rows: [WRITTEN_ROWS[0], BARE] });
+    h.mockFetchDirectory.mockResolvedValue([
+      {
+        cwid: "fake777",
+        name: "Doe, Dana",
+        title: null,
+        dept: null,
+        firstName: "Dana",
+        lastName: "Doe",
+        email: null,
+      },
+    ]);
+    const res = await POST(post(VALID));
+    const body = (await res.json()) as { rows: Array<{ cwid: string; name: string }> };
+    expect(h.mockFetchDirectory).toHaveBeenCalledWith(["fake777"]);
+    expect(body.rows.map((r) => [r.cwid, r.name])).toEqual([
+      ["abc1234", "Staff Person"],
+      ["fake777", "Dana Doe"],
+    ]);
+  });
+
+  it("an ED failure still answers 200 with the CWID", async () => {
+    h.mockGrant.mockResolvedValue({ changed: true, rows: [BARE] });
+    h.mockFetchDirectory.mockRejectedValue(new Error("ldap down"));
+    const res = await POST(post(VALID));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: Array<{ name: string }> };
+    expect(body.rows[0]!.name).toBe("fake777");
   });
 });

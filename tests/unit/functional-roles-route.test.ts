@@ -40,6 +40,10 @@ vi.mock("@/lib/edit/functional-roles.server", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+// ED is unreachable in tests; the name fill fails soft (functional-roles.test.ts covers it).
+vi.mock("@/lib/sources/ldap", () => ({
+  fetchDirectoryPeopleByCwid: vi.fn().mockResolvedValue([]),
+}));
 
 import { POST } from "@/app/api/edit/functional-roles/route";
 
