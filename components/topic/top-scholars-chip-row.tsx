@@ -13,10 +13,6 @@ import { SectionInfoButton } from "@/components/shared/section-info-button";
 import type { TopScholarChipData } from "@/lib/api/topics";
 
 const DEFAULT_HEADING = "Scholars in this area";
-const DEFAULT_INFO =
-  "Full-time faculty identified by ReCiterAI from their first- or senior-author " +
-  "publications in this research area. Curators do not handpick this list; it " +
-  "updates weekly as new work appears.";
 
 export function TopScholarsChipRow({
   scholars,
@@ -26,7 +22,6 @@ export function TopScholarsChipRow({
   enablePopover,
   contextMethods,
   heading = DEFAULT_HEADING,
-  info = DEFAULT_INFO,
 }: {
   scholars: TopScholarChipData[];
   scholarCount?: number;
@@ -42,8 +37,6 @@ export function TopScholarsChipRow({
   /** Eyebrow heading (also the info button's label). Defaults to the topic copy
    *  "Scholars in this area"; method pages pass "Scholars using this". */
   heading?: string;
-  /** Body copy of the heading's info popover. Defaults to the topic copy. */
-  info?: string;
 }) {
   const moreCount = scholarCount !== undefined ? scholarCount - scholars.length : 0;
 
@@ -53,7 +46,9 @@ export function TopScholarsChipRow({
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {heading}
           <SectionInfoButton label={heading} anchor="topScholars">
-            {info}
+            Full-time faculty identified by ReCiterAI from their first- or
+            senior-author publications in this research area. Curators do not
+            handpick this list; it updates weekly as new work appears.
           </SectionInfoButton>
         </span>
       </div>

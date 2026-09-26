@@ -53,12 +53,11 @@ describe("(b) TopScholarsChipRow heading", () => {
     expect(screen.getByRole("button", { name: "About Scholars in this area" })).toBeTruthy();
   });
 
-  it("renders a caller-supplied heading and info label", () => {
+  it("renders a caller-supplied heading", () => {
     render(
       <TopScholarsChipRow
         scholars={scholars}
         heading="Scholars using this"
-        info="Method copy."
         enablePopover
       />,
     );

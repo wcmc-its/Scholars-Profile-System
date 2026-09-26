@@ -156,7 +156,6 @@ export default async function SupercategoryPage({
               enablePopover
               contextMethods
               heading="Scholars using this"
-              info="Full-time faculty whose publications ReCiterAI associates with the methods in this category, ranked by how many of those publications they have. Curators do not handpick this list."
             />
           </div>
         )}
