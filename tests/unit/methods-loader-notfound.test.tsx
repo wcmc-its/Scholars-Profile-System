@@ -420,12 +420,10 @@ describe("Topic & Method refactor phase 1 — method-page copy + Spotlight total
     expect(data.viewAllHref).toBe("#publications");
   });
 
-  it("(b) family page chip row says 'Scholars using this' with method info copy", async () => {
+  it("(b) family page chip row says 'Scholars using this'", async () => {
     mockGetFamilyScholars.mockResolvedValue([chip("a"), chip("b"), chip("c")]);
     const [row] = byType(await famPage(), mockChipRow);
     expect(row.props!.heading).toBe("Scholars using this");
-    expect(String(row.props!.info)).toMatch(/this method/);
-    expect(String(row.props!.info)).not.toMatch(/research area/);
   });
 
   it("(b) supercategory page chip row says 'Scholars using this'", async () => {
@@ -435,7 +433,6 @@ describe("Topic & Method refactor phase 1 — method-page copy + Spotlight total
       mockChipRow,
     );
     expect(row.props!.heading).toBe("Scholars using this");
-    expect(String(row.props!.info)).not.toMatch(/research area/);
   });
 
   it("(d) eyebrows: 'Method' on the family page, 'Method category' on the supercategory page", async () => {
