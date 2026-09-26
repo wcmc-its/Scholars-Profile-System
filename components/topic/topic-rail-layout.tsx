@@ -77,8 +77,6 @@ export function TopicRailLayout({
     >
       {(activeSubtopic) => {
         const subtopicLabel = labelFor(activeSubtopic);
-        const showSubtopicHeader =
-          activeSubtopic !== null && subtopicLabel !== null && subtopicLabel.length > 0;
         return (
           <>
             {activeSubtopic && (
@@ -92,10 +90,6 @@ export function TopicRailLayout({
             <PublicationFeed
               topicSlug={topicSlug}
               activeSubtopic={activeSubtopic}
-              subtopicLabel={subtopicLabel}
-              subtopicShortDescription={byId(activeSubtopic)?.shortDescription ?? null}
-              // The layout's subhead already shows the heading + description.
-              suppressSubtopicHeader={showSubtopicHeader}
             />
           </>
         );

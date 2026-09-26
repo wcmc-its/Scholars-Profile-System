@@ -146,15 +146,9 @@ export function PublicationFeed({
   activeSubtopic,
 }: {
   topicSlug: string;
+  /** The subtopic title/description live in the rail layout's subhead; the
+   *  feed's toolbar is always the "Publications N" row. */
   activeSubtopic: string | null;
-  subtopicLabel: string | null;
-  subtopicShortDescription: string | null;
-  /**
-   * Retained for callers; the feed no longer renders a subtopic title or
-   * description of its own (the rail layout's subhead does). The toolbar is
-   * always the "Publications N" row.
-   */
-  suppressSubtopicHeader?: boolean;
 }) {
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");

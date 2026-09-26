@@ -194,9 +194,6 @@ function renderFeed(props?: Partial<React.ComponentProps<typeof PublicationFeed>
       <PublicationFeed
         topicSlug={props?.topicSlug ?? "cancer_genomics"}
         activeSubtopic={props?.activeSubtopic ?? null}
-        subtopicLabel={props?.subtopicLabel ?? null}
-        subtopicShortDescription={props?.subtopicShortDescription ?? null}
-        suppressSubtopicHeader={props?.suppressSubtopicHeader ?? false}
       />
     </PublicationModalProvider>,
   );
@@ -497,7 +494,7 @@ describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
         tierTotals: { strongly: 28, also: 4 },
       }),
     });
-    renderFeed({ activeSubtopic: "s1", subtopicLabel: "Sub", suppressSubtopicHeader: true });
+    renderFeed({ activeSubtopic: "s1" });
     const row = await screen.findByTestId("publications-heading-row");
     expect(within(row).getByRole("heading", { level: 3, name: "Publications" })).toBeTruthy();
     await waitFor(() => expect(within(row).getByTestId("publications-count").textContent).toBe("28"));
