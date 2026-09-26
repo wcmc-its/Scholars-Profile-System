@@ -125,7 +125,7 @@ export function SupercategoryRailLayout({
                   family page. Em-dashes render verbatim (house style). */}
               {meta.definition && (
                 <div className="max-w-[62ch]">
-                  <p className="text-sm leading-relaxed text-muted-foreground">
+                  <p className="text-muted-foreground text-[14.5px] leading-relaxed text-pretty">
                     {meta.definition}
                   </p>
                   {meta.definitionSource === "generated" && (
