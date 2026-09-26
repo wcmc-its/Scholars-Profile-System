@@ -200,7 +200,7 @@ export default async function SupercategoryPage({
           families={railItems}
           familyMeta={familyMeta}
           allWorkPubs={allWorkPubs}
-          scholarFilter={scholarCards}
+          scholarNames={scholarCards}
         />
       </section>
     </main>

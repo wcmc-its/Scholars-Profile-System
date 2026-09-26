@@ -205,7 +205,7 @@ export default async function TopicPage({
         <TopicRailLayout
           topicSlug={slug}
           subtopics={subtopicList}
-          scholarFilter={scholarCards}
+          scholarNames={scholarCards}
         />
       </section>
     </main>
