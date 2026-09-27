@@ -480,7 +480,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         description: "Books, chapters, preprints, and journals PubMed doesn't index.",
         action: explain({
           detail:
-            "A paper PubMed doesn't index can still appear on your profile: the library curation team adds it in ReCiter from Scopus, OpenAlex, or Web of Science. Ask them to add it. If it's added to PubMed later, ReCiter picks it up automatically.",
+            "A paper PubMed doesn't index can still appear on your profile: the library curation team adds it in ReCiter from Scopus or OpenAlex. Ask them to add it. If it's added to PubMed later, ReCiter picks it up automatically.",
         }),
       },
       {

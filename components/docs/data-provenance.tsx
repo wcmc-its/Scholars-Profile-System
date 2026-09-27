@@ -57,7 +57,6 @@ const EXT: Source[] = [
   { name: "ORCID", data: "Suggested ORCID iDs, from public ORCID records that name WCM", cad: "weekly" },
   { name: "Scopus", data: "Citation counts, papers not in PubMed", cad: "nightly" },
   { name: "OpenAlex", data: "Papers not in PubMed", cad: "nightly" },
-  { name: "Web of Science", data: "Papers not in PubMed", cad: "nightly" },
   { name: "NIH iCite", data: "Citing papers", cad: "occasional" },
   { name: "NIH RePORTER", data: "Earlier NIH grants, abstracts, grant-linked papers", cad: "weekly" },
   { name: "NSF Awards", data: "NSF grant abstracts", cad: "weekly" },
@@ -186,7 +185,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
           </>
         ),
       },
-      { field: "Papers not in PubMed", detail: "From Scopus, OpenAlex or Web of Science", source: "ReCiter, added by library curators", cadence: "Nightly", tag: "At the source", how: "Ask the library curation team to add or remove one." },
+      { field: "Papers not in PubMed", detail: "From Scopus or OpenAlex", source: "ReCiter, added by library curators", cadence: "Nightly", tag: "At the source", how: "Ask the library curation team to add or remove one." },
       { field: "Publication details", detail: "Title, authors, journal, DOI", source: "PubMed", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support. The fix is made at PubMed." },
       { field: "MeSH topics", detail: "The Topics list on your profile", source: "PubMed indexing, via ReCiter", cadence: "Nightly", tag: "At the source", how: "Set by NLM indexers. Hide a paper to drop its tags." },
       { field: "Citation count", source: "Scopus", cadence: "Nightly", tag: "At the source", how: "Follows Scopus." },

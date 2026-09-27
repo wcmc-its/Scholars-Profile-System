@@ -136,7 +136,7 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from.</em> 26 authoritative sources, among them
+              <em>Where your data comes from.</em> 25 authoritative sources, among them
               the Enterprise Directory, the WCM Web Directory, ASMS, InfoEd, Jenzabar, OnCore, the
               External Relationships / COI system, PubMed, Scopus, NIH RePORTER, the WCM Newsroom,
               and Muck Rack (the full list is in{" "}
@@ -481,7 +481,7 @@ export default function DocsPage() {
           <li>
             Most publications reach your profile because ReCiter matched them to you from PubMed. A
             paper that is not in PubMed can still appear, but only if a library curator adds it in
-            ReCiter from an outside source such as Scopus, OpenAlex, or Web of Science. Those papers
+            ReCiter from an outside source such as Scopus or OpenAlex. Those papers
             are labeled with their source (for example <em>Source: Scopus</em>) and carry a DOI
             rather than a PMID. They are added deliberately, not matched automatically, so
             ReCiter&apos;s attribution scoring never sees them.
