@@ -100,6 +100,7 @@ import {
   resolvePeopleConceptPrecount,
   resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
+  resolveSearchPeopleTrialEvidence,
   resolvePeopleMethodFamilyTier,
   resolvePeopleMethodContextBoost,
   resolvePubFacetSplit,
@@ -2287,9 +2288,23 @@ export async function searchPeople(opts: {
   // empty ⇒ the clinical clause stays byte-identical to today's literal-name path.
   const clinicalMeshOn = clinicalReasonOn && resolveSearchPeopleClinicalMeshAnchor();
   const clinicalMeshClosure = clinicalMeshOn ? (opts.clinicalMeshTreeClosure ?? []) : [];
+  // Clinical trials as evidence (SEARCH_PEOPLE_TRIAL_EVIDENCE): trial text joins
+  // the topic ladder at a low boost; `conceptUiClause` lets a trial-tagged scholar
+  // satisfy the concept attribution boost and the concept-scope gate.
+  const trialEvidenceOn = resolveSearchPeopleTrialEvidence();
+  const conceptUiClause = (uis: string[]): Record<string, unknown> =>
+    trialEvidenceOn
+      ? {
+          bool: {
+            should: [{ terms: { publicationMeshUi: uis } }, { terms: { trialMeshUi: uis } }],
+            minimum_should_match: 1,
+          },
+        }
+      : { terms: { publicationMeshUi: uis } };
   const peopleTopicFields = (): string[] => [
     ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
     ...(methodBoostOn ? ["methodFamily^4"] : []),
+    ...(trialEvidenceOn ? ["trialText^1"] : []),
   ];
   const peopleDefaultFields = (): string[] => [
     ...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
@@ -2640,13 +2655,13 @@ export async function searchPeople(opts: {
         ? {
             bool: {
               should: [
-                { terms: { publicationMeshUi: meshDescendantUis } },
+                conceptUiClause(meshDescendantUis),
                 { terms: { cwid: grantMatchedCwids } },
               ],
               minimum_should_match: 1,
             },
           }
-        : { terms: { publicationMeshUi: meshDescendantUis } },
+        : conceptUiClause(meshDescendantUis),
     );
   }
 
@@ -3150,7 +3165,7 @@ export async function searchPeople(opts: {
   if (applyTopicTemplate) {
     if (meshDescendantUis.length > 0) {
       scoreFunctions.push({
-        filter: { terms: { publicationMeshUi: meshDescendantUis } },
+        filter: conceptUiClause(meshDescendantUis),
         // Issue #726 — graduate the former flat ×1.5 by match-type trust
         // (exact 1.5 / anchored-entry 1.3 / entry 1.15). Always-on when a
         // descriptor resolved, independent of the escalation gate above.

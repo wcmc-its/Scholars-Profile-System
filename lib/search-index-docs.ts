@@ -43,6 +43,7 @@ import { deriveGrantSignals } from "@/lib/api/match-researchers";
 // `lib/api/data-quality.ts`, which re-exports the same PI_ROLES but constructs Prisma.
 import { isPiRole } from "@/lib/funding-roles";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
+import type { TrialEvidence } from "@/lib/search-trial-evidence";
 import { buildClinicalAnchors, loadSpecialtyAnchorMap } from "@/lib/clinical-mesh-anchors";
 import {
   buildMeshAncestorIndex,
@@ -968,6 +969,9 @@ export async function buildPeopleDoc(
   // single-doc fast-path, until it's wired) — the field is never emitted,
   // so the produced doc is byte-identical to today.
   esiEligibleByCwid?: Map<string, boolean>,
+  // OPTIONAL per-cwid clinical-trial evidence (`loadTrialEvidenceByCwid`).
+  // When OMITTED the trial fields are never emitted (byte-identical doc).
+  trialEvidenceByCwid?: Map<string, TrialEvidence>,
 ): Promise<Record<string, unknown> | null> {
   // #2113 — effective overview, read-merged against the override map (see
   // the parameter doc above). Drives both `overview` / `overviewLength`
@@ -1264,6 +1268,7 @@ export async function buildPeopleDoc(
   // (count DESC, then label ASC). OMIT-on-empty: scholars with no MeSH on any
   // visible pub write nothing for this field (mirrors `publicationMeshUi`).
   const topMeshTerms = topMeshTermsFromCounts(topMeshAgg);
+  const trial = trialEvidenceByCwid?.get(s.cwid);
 
   // D-exact — materialize the per-concept distinct-pub map for the People reason
   // line. `meshSubtreeCounts[conceptUi]` = the scholar's distinct visible pubs
@@ -1649,6 +1654,8 @@ export async function buildPeopleDoc(
     // with no surviving descriptor write nothing, so `_source` consumers and the
     // `terms` filter distinguish "no signal" from "[]".
     ...(publicationMeshUi.length > 0 ? { publicationMeshUi } : {}),
+    ...(trial?.meshUi.length ? { trialMeshUi: trial.meshUi } : {}),
+    ...(trial?.text ? { trialText: trial.text } : {}),
     // #1959 — source-only companion to the field above: the gate-dropped
     // ancestors of kept descriptors, so `alsoParent` can distinguish "the parent
     // tag is absent" from "the parent tag is below the min-evidence gate".

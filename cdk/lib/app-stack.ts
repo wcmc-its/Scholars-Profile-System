@@ -2226,6 +2226,11 @@ export class AppStack extends Stack {
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
         SEARCH_PEOPLE_AREA_BOOST: "on", // Prod flipped 2026-07-07 (reorder-only, no reindex).
+        // Clinical trials as People-search evidence: trialText in the topic ladder,
+        // trialMeshUi in the concept boost + concept-scope gate. Needs the nightly
+        // reindex that writes the fields; before it, the clauses match nothing.
+        // resolveSearchPeopleTrialEvidence reads === "on". Staging-first.
+        SEARCH_PEOPLE_TRIAL_EVIDENCE: env === "staging" ? "on" : "off",
         // #2018 -- concept-arm precedence for the concentration boost above. That boost has
         //   two arms: a CURATED one keyed on taxonomyMatch.areas[0] (area membership) and a
         //   CONCEPT one keyed on the resolved MeSH descendantUis (the query). On master the

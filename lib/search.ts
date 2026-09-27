@@ -372,6 +372,12 @@ export const peopleIndexMapping = {
       // cardiology-anchored `C14`). OMIT-on-empty; gated query-side by
       // SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR. Populated by etl/pops → buildPeopleDoc.
       clinicalSpecialtyMeshTree: { type: "keyword" },
+      // Clinical trials the scholar is PI on (`lib/search-trial-evidence.ts`).
+      // `trialMeshUi` = CT.gov MeSH resolved to descriptor UIs (concept match,
+      // like `publicationMeshUi`); `trialText` = titles + conditions + MeSH
+      // labels. Queried only under SEARCH_PEOPLE_TRIAL_EVIDENCE. OMIT-on-empty.
+      trialMeshUi: { type: "keyword" },
+      trialText: { type: "text", analyzer: "scholar_text" },
       // #1836 — `clinicalAnchors`: per-specialty {specialty, boardCertified, tree}
       // rows, `_source`-read ONLY (never queried) to label the clinical evidence
       // row for a disease-subtree match. `enabled: false` so it is stored but not
