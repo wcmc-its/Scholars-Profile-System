@@ -1540,3 +1540,14 @@ export function resolveDescendantTermsClauseCap(dflt: number): number {
   );
   return Number.isInteger(n) && n > 0 && n <= 10000 ? n : dflt;
 }
+
+/**
+ * Clinical trials as People-search evidence. When on, the topic query matches the
+ * people doc's `trialText` (PI trials' titles / conditions / MeSH labels) and the
+ * concept attribution boost + concept-scope gate also accept `trialMeshUi`
+ * (`lib/search-trial-evidence.ts`). Reindex-then-flip: the fields come from the
+ * search-index ETL. Default OFF; `=== "on"` opt-in.
+ */
+export function resolveSearchPeopleTrialEvidence(): boolean {
+  return process.env.SEARCH_PEOPLE_TRIAL_EVIDENCE === "on";
+}

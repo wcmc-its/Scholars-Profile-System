@@ -64,6 +64,7 @@ import {
 } from "@/lib/api/methods-overlay";
 import { coreProjectNum } from "@/lib/award-number";
 import { db } from "@/lib/db";
+import { loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
 import {
   GRANT_INDEX_SELECT,
   GRANT_INDEX_WHERE,
@@ -472,6 +473,8 @@ async function buildScholarOps(
   // re-index of a cleared bio consistent with the nightly index instead of
   // staying stale until the next full rebuild.
   const overviewOverrides = await loadOverviewOverrides(db.read, cwid);
+  // Keep the trial fields on a fast-path reindex (one cwid-scoped read).
+  const trialEvidence = await loadTrialEvidenceByCwid(db.read, cwid);
   const doc = await buildPeopleDoc(
     scholar,
     db.read,
@@ -479,6 +482,8 @@ async function buildScholarOps(
     overlayGate,
     ancestors,
     overviewOverrides,
+    undefined,
+    trialEvidence,
   );
   if (doc === null) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];

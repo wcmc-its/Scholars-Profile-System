@@ -686,3 +686,39 @@ describe("gloss re-ranker rescore — MATCHA_GLOSS_RERANK", () => {
     expect(mainBody().rescore).toBeUndefined();
   });
 });
+
+describe("SEARCH_PEOPLE_TRIAL_EVIDENCE — clinical trials as People evidence", () => {
+  const trialClause = {
+    bool: {
+      should: [
+        { terms: { publicationMeshUi: DESCENDANTS } },
+        { terms: { trialMeshUi: DESCENDANTS } },
+      ],
+      minimum_should_match: 1,
+    },
+  };
+
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+    vi.stubEnv("SEARCH_PEOPLE_TRIAL_EVIDENCE", "on");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("adds trialText to the topic ladder and trialMeshUi to the attribution boost", async () => {
+    await searchPeople({ q: "acute myeloid leukemia", relevanceMode: "v3", shape: "topic", meshDescendantUis: DESCENDANTS });
+    const mm = (topicBranch(capturedBodies[0]).bool as { must: Record<string, unknown>[] })
+      .must[0] as { multi_match: { fields: string[] } };
+    expect(mm.multi_match.fields).toContain("trialText^1");
+    expect(functionScore(capturedBodies[0]).functions).toContainEqual({ filter: trialClause, weight: 1.5 });
+  });
+
+  it("concept scope admits trial-tagged scholars", async () => {
+    await searchPeople({ q: "acute myeloid leukemia", relevanceMode: "v3", shape: "topic", meshDescendantUis: DESCENDANTS, scope: "concept" });
+    expect(functionScore(capturedBodies[0]).query.bool.filter).toContainEqual(trialClause);
+  });
+});

@@ -71,6 +71,8 @@ vi.mock("@/lib/db", () => ({
       // default empty result keeps `buildPeopleDoc` on its raw-ETL-column
       // fallback (unchanged behavior for these tests).
       fieldOverride: { findMany: hoisted.mockFieldOverrideFindMany },
+      // Trial-evidence sidecar (one cwid); no trials in this suite.
+      personClinicalTrial: { findMany: async () => [] },
     },
     // #393 — the reconciler sentinel stamp on a successful reflect.
     write: { suppression: { update: hoisted.mockSuppressionUpdate } },

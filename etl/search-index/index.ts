@@ -69,6 +69,7 @@ import {
   loadOverviewOverrides,
 } from "@/lib/search-index-docs";
 import { isRetryableBulkStatus, resolveBulkConfig } from "@/lib/search-index-bulk";
+import { loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
 import { rebuildAliasedIndex } from "./alias-swap";
 
 // #1413 — people-doc builds per batch. Each buildPeopleDoc issues ~6 serial
@@ -221,6 +222,7 @@ async function indexPeople(concreteIndex: string) {
   // eligibility needs the scholar's FULL unfiltered grant history (see
   // `loadEsiEligibilityByCwid`'s doc comment in `lib/search-index-docs.ts`).
   const esiEligibleByCwid = await loadEsiEligibilityByCwid(prisma);
+  const trialEvidenceByCwid = await loadTrialEvidenceByCwid(prisma);
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -260,6 +262,7 @@ async function indexPeople(concreteIndex: string) {
           meshAncestors,
           overviewOverrides,
           esiEligibleByCwid,
+          trialEvidenceByCwid,
         ),
       ),
     );
