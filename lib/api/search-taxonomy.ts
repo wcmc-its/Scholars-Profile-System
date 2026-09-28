@@ -2216,6 +2216,29 @@ export async function descriptorLabelsForUis(
   return out;
 }
 
+/**
+ * A resolved concept's `descendantUis`, rebuilt from its root UI. Same map, same
+ * `getOrComputeDescendants` call as `buildMeshResolution` (invariant: element 0 is the
+ * root), so the list is identical to the one the page resolved. Lets the search card
+ * send ONE UI instead of up to DESCENDANT_HARD_CAP of them: 200 UIs is a ~2.1 KB query
+ * string, which the edge WAF's `SizeRestrictions_QUERYSTRING` (2048 B) answers with a
+ * 403. Fails closed (`[]`) on a map-load error or a malformed UI.
+ */
+export async function conceptSubtreeUis(ui: string): Promise<string[]> {
+  if (!/^D\d{6,9}$/.test(ui)) return [];
+  try {
+    return getOrComputeDescendants(await getMeshMap(), ui);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "mesh_map_load_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return [];
+  }
+}
+
 /** @internal — test-only hook. Resets the module-level MeSH cache. */
 export function _resetMeshMapForTests(): void {
   meshMapCache = null;

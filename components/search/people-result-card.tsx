@@ -35,9 +35,15 @@ import { visibleInstitutionName } from "@/lib/institutions";
  */
 export type KeyPaperConfig = {
   descriptorUis: string[];
+  /** Root UI of `descriptorUis` when that list is exactly one resolved concept's subtree.
+   *  Sent INSTEAD of the list (the route rebuilds the identical subtree) — a 200-UI list
+   *  in the URL exceeds the edge WAF's 2 KB query-string limit and is 403'd. */
+  conceptUi?: string;
   /** Two-concept pair — the secondary concept's subtree; papers tagged under both lead
    *  the key-paper list. Absent when the query resolved a single concept. */
   secondaryDescriptorUis?: string[];
+  /** Root UI of `secondaryDescriptorUis`; same role as `conceptUi`. */
+  secondaryConceptUi?: string;
   contentQuery: string;
   /** #1351 — resolved concept name, so a tagged key paper's title highlights the
    *  concept term (not just the literal query). Empty for a free-text-only query. */
@@ -206,6 +212,7 @@ export function PeopleResultCard({
   // text-only. The server flag (SEARCH_FUNDING_CONCEPT_GRANTS) decides whether to act
   // on these, so passing them when off is harmless.
   const grantDescriptorUis = keyPaperConfig?.descriptorUis.join(",") ?? "";
+  const grantConceptUi = keyPaperConfig?.conceptUi ?? "";
   const grantConceptLabel = keyPaperConfig?.conceptLabel ?? "";
 
   // #1412 — cards are keyed by cwid and persist across query navigations, so drop a
@@ -356,7 +363,8 @@ export function PeopleResultCard({
     let alive = true;
     const params = new URLSearchParams({ q: qParam });
     if (grantDescriptorUis) {
-      params.set("descriptorUis", grantDescriptorUis);
+      if (grantConceptUi) params.set("conceptUi", grantConceptUi);
+      else params.set("descriptorUis", grantDescriptorUis);
       params.set("label", grantConceptLabel);
     }
     fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/grants?${params.toString()}`)
@@ -370,7 +378,7 @@ export function PeopleResultCard({
     return () => {
       alive = false;
     };
-  }, [fundingRecordsOpen, qParam, hit.cwid, grantDescriptorUis, grantConceptLabel]);
+  }, [fundingRecordsOpen, qParam, hit.cwid, grantDescriptorUis, grantConceptUi, grantConceptLabel]);
 
   const fundingNode =
     hasFunding ? (

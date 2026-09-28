@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { fetchKeyPaper } from "@/lib/api/search";
 import { resolvePeopleReasonFromDoc } from "@/lib/api/search-flags";
-import { DESCENDANT_HARD_CAP } from "@/lib/api/search-taxonomy";
+import { conceptSubtreeUis, DESCENDANT_HARD_CAP } from "@/lib/api/search-taxonomy";
 
 export const dynamic = "force-dynamic";
 
@@ -40,11 +40,19 @@ export async function GET(request: NextRequest) {
   // already bounds at DESCENDANT_HARD_CAP (200). A tighter cap here silently
   // truncates broad subtrees — Vaccines has 95 descendants and COVID-19 Vaccines
   // sits at index 65, so a 50-cap returned [] for every COVID-vaccine scholar.
-  const descriptorUis = (params.get("descriptorUis") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, DESCENDANT_HARD_CAP);
+  //
+  // The search card now sends only the root (`conceptUi`) and the subtree is rebuilt
+  // here — a 200-UI list in the URL tripped the edge WAF's 2 KB query-string limit (403).
+  // `descriptorUis` stays for callers that pass a list that is not one concept's subtree
+  // (the Matcha panel's multi-term union) and for cards rendered before this deploy.
+  const conceptUi = params.get("conceptUi") ?? "";
+  const descriptorUis = conceptUi
+    ? await conceptSubtreeUis(conceptUi)
+    : (params.get("descriptorUis") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, DESCENDANT_HARD_CAP);
   // #1351 — the resolved concept display name, so the title highlight can mark the
   // concept term (not just the literal query) on a descriptor-tagged key paper.
   const conceptLabel = (params.get("label") ?? "").slice(0, 300);
@@ -61,11 +69,14 @@ export async function GET(request: NextRequest) {
     .filter(Boolean)
     .slice(0, 50);
   // Two-concept pair — the secondary concept's subtree, same bound as the primary's.
-  const secondaryDescriptorUis = (params.get("secondaryUis") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, DESCENDANT_HARD_CAP);
+  const secondaryConceptUi = params.get("secondaryConceptUi") ?? "";
+  const secondaryDescriptorUis = secondaryConceptUi
+    ? await conceptSubtreeUis(secondaryConceptUi)
+    : (params.get("secondaryUis") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, DESCENDANT_HARD_CAP);
 
   const pubs = await fetchKeyPaper({
     cwid,

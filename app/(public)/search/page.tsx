@@ -624,7 +624,15 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           // Two-concept pair — so the key papers under the primary lead with the ones
           // ALSO tagged under the secondary (the row says "ranked by work also under X").
           ...(!meshOff && taxonomyMatch.meshResolution?.secondaryConcept
-            ? { secondaryDescriptorUis: taxonomyMatch.meshResolution.secondaryConcept.descendantUis }
+            ? {
+                secondaryDescriptorUis: taxonomyMatch.meshResolution.secondaryConcept.descendantUis,
+                secondaryConceptUi: taxonomyMatch.meshResolution.secondaryConcept.descriptorUi,
+              }
+            : {}),
+          // The root the card sends in place of the subtree list (the route rebuilds it;
+          // a 200-UI query string is 403'd by the edge WAF).
+          ...(!meshOff && taxonomyMatch.meshResolution
+            ? { conceptUi: taxonomyMatch.meshResolution.descriptorUi }
             : {}),
           contentQuery,
           // #1351 — resolved concept name, so the key-paper title highlight can mark

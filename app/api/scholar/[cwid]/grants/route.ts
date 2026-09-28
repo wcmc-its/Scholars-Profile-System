@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { resolveFundingConceptGrants, resolveSearchEvidenceRows } from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
-import type { MeshResolution } from "@/lib/api/search-taxonomy";
+import { conceptSubtreeUis, type MeshResolution } from "@/lib/api/search-taxonomy";
 import type { EvidenceGrant } from "@/lib/api/result-evidence";
 
 /**
@@ -98,10 +98,16 @@ export async function GET(
   // text-only. `searchFunding` reads only `.descendantUis` (admission) and `.name`
   // (the phrase boost / concept label), so a minimal resolution is sufficient.
   const sp = request.nextUrl.searchParams;
-  const descriptorUis = (sp.get("descriptorUis") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // `conceptUi` (root only; subtree rebuilt server-side) keeps the URL under the edge
+  // WAF's 2 KB query-string limit — see the key-paper route. `descriptorUis` is the
+  // legacy/explicit-list form.
+  const conceptUi = sp.get("conceptUi") ?? "";
+  const descriptorUis = conceptUi
+    ? await conceptSubtreeUis(conceptUi)
+    : (sp.get("descriptorUis") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
   const label = sp.get("label")?.trim() ?? "";
   const meshResolution: MeshResolution | null =
     resolveFundingConceptGrants() && descriptorUis.length > 0
