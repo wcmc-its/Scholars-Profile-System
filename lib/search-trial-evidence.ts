@@ -32,6 +32,22 @@ export type TrialDoc = {
   pis: Array<{ cwid: string; name: string; slug: string }>;
   status: string | null;
   statusBucket: "active" | "completed";
+  /** Fine-grained status (Status facet + pill): CT.gov's overallStatus, else OnCore's mapped. */
+  statusKey: TrialStatusKey;
+  /** Recruiting first sort: 0 recruiting, 1 active not recruiting, 2 the rest. */
+  statusRank: number;
+  /** "YYYY-MM" (CT.gov start, else OnCore's first open-to-accrual date); null = unknown. */
+  startDate: string | null;
+  startYear: number | null;
+  startEstimated: boolean;
+  /** "YYYY-MM" primary completion; null = unknown. */
+  endDate: string | null;
+  endEstimated: boolean;
+  /** '; '-joined "Type: Name". */
+  interventions: string | null;
+  /** Raw CT.gov enums (DRUG, BIOLOGICAL, …), the Intervention type facet. */
+  interventionTypes: string[];
+  hasResults: boolean;
   phase: string;
   studyType: string | null;
   /** Study type facet keys: normalized CT.gov study type, plus `not_ctgov` for OnCore-only protocols. */
@@ -43,6 +59,32 @@ export type TrialDoc = {
   sponsorClass: string;
   principalSponsor: string | null;
 };
+
+export type TrialStatusKey =
+  | "recruiting"
+  | "not_yet_recruiting"
+  | "enrolling_by_invitation"
+  | "active_not_recruiting"
+  | "completed"
+  | "terminated";
+const CTGOV_STATUS = new Set<string>([
+  "recruiting", "not_yet_recruiting", "enrolling_by_invitation", "active_not_recruiting", "completed", "terminated",
+]);
+
+/** CT.gov's overallStatus when it's one we show; else OnCore's institutional
+ *  status (open to accrual → recruiting, closed to accrual → active not
+ *  recruiting, anything else → completed). Withdrawn / suspended never get
+ *  here: they are hidden upstream by the OnCore status, like the profile (D2). */
+export function trialStatusKey(ctgovStatus: string | null, oncoreStatus: string | null): TrialStatusKey {
+  const c = (ctgovStatus ?? "").toLowerCase();
+  if (CTGOV_STATUS.has(c)) return c as TrialStatusKey;
+  const o = (oncoreStatus ?? "").toLowerCase();
+  if (o.includes("open to accrual")) return "recruiting";
+  if (o.includes("closed to accrual")) return "active_not_recruiting";
+  return isActiveTrialStatus(oncoreStatus) ? "recruiting" : "completed";
+}
+
+const month = (d: string | null) => (d && /^\d{4}-\d{2}/.test(d) ? d.slice(0, 7) : null);
 
 type Resolver = (label: string) => Promise<MeshResolution | null>;
 
@@ -117,6 +159,33 @@ export async function loadTrialEvidenceByCwid(
   return out;
 }
 
+function trialStatusFields(statusKey: TrialStatusKey) {
+  const active = ["recruiting", "not_yet_recruiting", "enrolling_by_invitation", "active_not_recruiting"];
+  return {
+    statusKey,
+    statusBucket: (active.includes(statusKey) ? "active" : "completed") as TrialDoc["statusBucket"],
+    statusRank: statusKey === "recruiting" || statusKey === "enrolling_by_invitation" ? 0 : statusKey === "active_not_recruiting" ? 1 : 2,
+  };
+}
+
+/** CT.gov dates; a trial without them (no NCT) starts at OnCore's first open-to-accrual date. */
+function trialDates(t: {
+  startDate: string | null;
+  startDateType: string | null;
+  primaryCompletionDate: string | null;
+  primaryCompletionDateType: string | null;
+  firstOtaDate: Date | null;
+}) {
+  const startDate = month(t.startDate) ?? (t.firstOtaDate ? t.firstOtaDate.toISOString().slice(0, 7) : null);
+  return {
+    startDate,
+    startYear: startDate ? Number(startDate.slice(0, 4)) : null,
+    startEstimated: month(t.startDate) !== null && t.startDateType === "ESTIMATED",
+    endDate: month(t.primaryCompletionDate),
+    endEstimated: t.primaryCompletionDateType === "ESTIMATED",
+  };
+}
+
 /**
  * Docs for the `scholars-trials` index: public trials with at least one PI who
  * has a public profile, one doc per NCT number (else per protocol number), PIs
@@ -140,6 +209,15 @@ export async function loadTrialDocs(
       conditions: true,
       meshTerms: true,
       briefSummary: true,
+      ctgovStatus: true,
+      startDate: true,
+      startDateType: true,
+      primaryCompletionDate: true,
+      primaryCompletionDateType: true,
+      hasResults: true,
+      interventions: true,
+      interventionTypes: true,
+      firstOtaDate: true,
       investigators: {
         where: { scholar: PEOPLE_INDEX_WHERE },
         select: { cwid: true, scholar: { select: { preferredName: true, slug: true, primaryDepartment: true } } },
@@ -173,7 +251,11 @@ export async function loadTrialDocs(
         piCwids: [],
         pis: [],
         status: t.status,
-        statusBucket: isActiveTrialStatus(t.status) ? "active" : "completed",
+        ...trialStatusFields(trialStatusKey(t.ctgovStatus, t.status)),
+        ...trialDates(t),
+        interventions: t.interventions,
+        interventionTypes: splitTrialList(t.interventionTypes),
+        hasResults: t.hasResults === true,
         phase: phaseKey(t.phase),
         studyType: t.studyType,
         studyTypeKeys: [

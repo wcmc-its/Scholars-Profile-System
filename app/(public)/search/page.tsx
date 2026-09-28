@@ -85,7 +85,7 @@ import {
 } from "@/lib/api/search-funding";
 import { FUNDING_ROLE_BUCKET_LABEL } from "@/lib/funding-roles";
 import { FundingResultsList } from "@/components/search/funding-results-list";
-import { TrialResultRow, studyTypeLabel } from "@/components/search/trial-result-row";
+import { TRIAL_STATUS_LABEL, TrialResultRow, studyTypeLabel } from "@/components/search/trial-result-row";
 import { ScrollActiveTab } from "@/components/search/scroll-active-tab";
 import {
   resolveTrialsTab,
@@ -410,9 +410,17 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     const arr = (Array.isArray(v) ? v : v ? [v] : []).filter(Boolean);
     return arr.length > 0 ? arr : undefined;
   };
-  const trialFilters: TrialFilters = Object.fromEntries(
-    TRIAL_AXIS_PARAMS.map(({ axis, param }) => [axis, listParam(param)]),
-  );
+  const trialYear = (k: string) => {
+    const n = parseOptionalInt(sp[k]);
+    return n !== undefined && n >= 1900 && n <= 2100 ? n : undefined;
+  };
+  const trialFilters: TrialFilters = {
+    ...Object.fromEntries(TRIAL_AXIS_PARAMS.map(({ axis, param }) => [axis, listParam(param)])),
+    startFrom: trialYear("startFrom"),
+    startTo: trialYear("startTo"),
+    hasResults: sp.results === "1" || undefined,
+  };
+  const trialSort: TrialSort = sort === "recent" || sort === "recruiting" ? sort : "relevance";
 
   // Pub filters.
   const yearMin = parseOptionalInt(sp.yearMin);
@@ -695,7 +703,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       ? searchTrials({
           q,
           page,
-          sort: sort === "active" ? "active" : "relevance",
+          sort: trialSort,
           filters: trialFilters,
           meshResolution: effectiveMeshResolution,
           scope,
@@ -964,7 +972,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             ) : type === "trials" ? (
               <TrialsResults
                 q={q}
-                sort={sort === "active" ? "active" : "relevance"}
+                sort={trialSort}
                 filters={trialFilters}
                 scope={scope}
                 concept={concept}
@@ -2409,8 +2417,9 @@ async function FundingResults({
 /* ============================================================
  * Clinical trials tab content (SEARCH_TRIALS_TAB)
  * ============================================================ */
-const TRIAL_STATUS_LABEL: Record<string, string> = { active: "Active", completed: "Completed" };
 const trialStudyTypeName = (v: string) => (v === "not_ctgov" ? "Not on ClinicalTrials.gov" : studyTypeLabel(v));
+const TRIAL_STATUS_ORDER = Object.keys(TRIAL_STATUS_LABEL);
+const statusOrder = (v: string) => (TRIAL_STATUS_ORDER.indexOf(v) + 99) % 99;
 /** Facet order per the mockup (D4). Own param names so another tab's filters never leak in. */
 const TRIAL_AXIS_PARAMS: ReadonlyArray<{
   axis: TrialAxis;
@@ -2425,6 +2434,7 @@ const TRIAL_AXIS_PARAMS: ReadonlyArray<{
   { axis: "investigator", param: "investigator", label: "Investigator", name: (v) => v, collapseAfter: 5 },
   { axis: "department", param: "trialDept", label: "Department", name: (v) => v, collapseAfter: 5 },
   { axis: "condition", param: "condition", label: "Condition", name: (v) => v, collapseAfter: 5 },
+  { axis: "interventionType", param: "intervention", label: "Intervention type", name: studyTypeLabel },
   { axis: "sponsorClass", param: "sponsor", label: "Sponsor type", name: (v) => sponsorTypeLabel(v as SponsorTypeKey) },
 ];
 
@@ -2452,6 +2462,9 @@ async function TrialsResults({
     for (const { axis, param } of TRIAL_AXIS_PARAMS) for (const v of filters[axis] ?? []) sp.append(param, v);
     if (scope !== "expanded") sp.set("match", scope);
     if (sort !== "relevance") sp.set("sort", sort);
+    if (filters.startFrom !== undefined) sp.set("startFrom", String(filters.startFrom));
+    if (filters.startTo !== undefined) sp.set("startTo", String(filters.startTo));
+    if (filters.hasResults) sp.set("results", "1");
     mut(sp);
     return `/search?${sp.toString()}`;
   };
@@ -2462,16 +2475,35 @@ async function TrialsResults({
       const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
       for (const v of next) sp.append(param, v);
     });
-  const clearAllHref = buildUrl((sp) => TRIAL_AXIS_PARAMS.forEach(({ param }) => sp.delete(param)));
+  const clearAllHref = buildUrl((sp) =>
+    [...TRIAL_AXIS_PARAMS.map(({ param }) => param), "startFrom", "startTo", "results"].forEach((p) => sp.delete(p)),
+  );
   // Investigator keys are cwids; the facet buckets carry the names.
   const bucketLabel = (axis: TrialAxis, v: string, name: (v: string) => string) =>
     result.facets[axis].find((b) => b.value === v)?.label ?? name(v);
   const chips = TRIAL_AXIS_PARAMS.flatMap(({ axis, param, name }) =>
     (filters[axis] ?? []).map((v) => ({ label: bucketLabel(axis, v, name), removeHref: toggleHref(param, v) })),
   );
+  const { startFrom, startTo } = filters;
+  if (startFrom !== undefined || startTo !== undefined) {
+    chips.push({
+      label: `Started ${startFrom ?? "…"}–${startTo ?? "…"}`,
+      removeHref: buildUrl((sp) => {
+        sp.delete("startFrom");
+        sp.delete("startTo");
+      }),
+    });
+  }
+  const resultsHref = buildUrl((sp) => (filters.hasResults ? sp.delete("results") : sp.set("results", "1")));
+  if (filters.hasResults) chips.push({ label: "Has results posted", removeHref: resultsHref });
+  // Start date form: resubmits every other param as hidden inputs (plain GET, no client JS).
+  const keep = [...new URLSearchParams(buildUrl((sp) => ["startFrom", "startTo", "page"].forEach((p) => sp.delete(p))).split("?")[1])];
+  const thisYear = new Date().getFullYear();
+  const years = Array.from({ length: thisYear + 3 - 1990 }, (_, i) => thisYear + 2 - i);
   const sortOptions = [
     { value: "relevance", label: "Relevance" },
-    { value: "active", label: "Active first" },
+    { value: "recent", label: "Most recent" },
+    { value: "recruiting", label: "Recruiting first" },
   ].map((o) => ({
     ...o,
     href: buildUrl((sp) => (o.value === "relevance" ? sp.delete("sort") : sp.set("sort", o.value))),
@@ -2494,8 +2526,10 @@ async function TrialsResults({
           result.facets[axis].length > 0 ? (
             <FacetGroup key={axis} label={label} collapseAfter={collapseAfter}>
               {sortActiveFirst(
-                // "Not on ClinicalTrials.gov" trails the real study types.
-                [...result.facets[axis]].sort((a, b) => Number(a.value === "not_ctgov") - Number(b.value === "not_ctgov")),
+                // Status in lifecycle order; "Not on ClinicalTrials.gov" trails the real study types.
+                axis === "status"
+                  ? [...result.facets.status].sort((a, b) => statusOrder(a.value) - statusOrder(b.value))
+                  : [...result.facets[axis]].sort((a, b) => Number(a.value === "not_ctgov") - Number(b.value === "not_ctgov")),
                 (b) => (filters[axis] ?? []).includes(b.value),
               ).map((b) => (
                 <FacetCheckbox
@@ -2510,6 +2544,47 @@ async function TrialsResults({
             </FacetGroup>
           ) : null,
         )}
+        <FacetGroup label="Start date">
+          <form action="/search" method="get" className="flex flex-wrap items-center gap-2">
+            {keep.map(([k, v], n) => (
+              <input key={`${k}-${n}`} type="hidden" name={k} value={v} />
+            ))}
+            {(["startFrom", "startTo"] as const).map((name, n) => (
+              <React.Fragment key={name}>
+                {n === 1 ? <span className="text-muted-foreground">to</span> : null}
+                <select
+                  name={name}
+                  aria-label={n === 0 ? "Started from year" : "Started through year"}
+                  defaultValue={filters[name] ?? ""}
+                  className="min-w-0 flex-1 rounded-[5px] border border-[#dbd3cd] bg-white px-1.5 py-1 text-[13px]"
+                >
+                  <option value="">Any</option>
+                  {years.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </React.Fragment>
+            ))}
+            <button
+              type="submit"
+              className="rounded-[5px] border border-[#dbd3cd] px-2.5 py-1 text-[12.5px] font-medium text-[#2c4f6e] hover:bg-[#f4f1ed]"
+            >
+              Apply
+            </button>
+          </form>
+        </FacetGroup>
+        {result.hasResultsCount > 0 || filters.hasResults ? (
+          <ul className="m-0 list-none p-0">
+            <FacetCheckbox
+              label="Has results posted"
+              count={result.hasResultsCount}
+              isActive={!!filters.hasResults}
+              href={resultsHref}
+            />
+          </ul>
+        ) : null}
       </aside>
       <section className="min-w-0">
         {concept ? (

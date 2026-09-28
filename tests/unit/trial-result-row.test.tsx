@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { TrialResultRow, trialMatchLine } from "@/components/search/trial-result-row";
+import { TrialResultRow, trialDatesLabel, trialMatchLine, trialProgress } from "@/components/search/trial-result-row";
 import type { TrialHit } from "@/lib/api/search-trials";
 
 const hit = (over: Partial<TrialHit> = {}): TrialHit => ({
@@ -15,6 +15,13 @@ const hit = (over: Partial<TrialHit> = {}): TrialHit => ({
   principalSponsor: "Kura Oncology",
   pis: [1, 2, 3, 4].map((i) => ({ cwid: `c${i}`, name: `PI ${i}`, slug: `pi-${i}` })),
   conditions: "Acute Myeloid Leukemia; Myelodysplastic Syndrome; CMML; Anemia",
+  statusKey: "recruiting",
+  startDate: "2016-09",
+  startEstimated: false,
+  endDate: "2020-06",
+  endEstimated: false,
+  interventions: "Drug: Gilteritinib; Drug: Midostaurin",
+  hasResults: true,
   matchedConcept: true,
   matchedFields: ["title", "conditions"],
   ...over,
@@ -37,7 +44,11 @@ describe("trialMatchLine", () => {
 describe("TrialResultRow", () => {
   it("renders the status pill, type · phase, NCT link, PI pills with +N more, sponsor and capped conditions", () => {
     const { container } = render(<TrialResultRow hit={hit()} q="leukemia" conceptLabel="Leukemia" />);
-    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("Recruiting")).toBeTruthy();
+    expect(screen.getByText("Drug: Gilteritinib · Drug: Midostaurin")).toBeTruthy();
+    expect(screen.getByText("Sep 2016 – Jun 2020", { exact: false })).toBeTruthy();
+    expect(screen.getByText("· Results posted")).toBeTruthy();
+    expect(screen.getByRole("img").getAttribute("aria-label")).toBe("100% of the planned study period elapsed");
     expect(screen.getByText("Interventional · Phase 2")).toBeTruthy();
     expect(screen.getByText("NCT02807272 ↗").getAttribute("href")).toBe("https://clinicaltrials.gov/study/NCT02807272");
     expect(container.querySelectorAll("a[href^='/scholars/'], a[href*='pi-']")).toHaveLength(4);
@@ -49,8 +60,32 @@ describe("TrialResultRow", () => {
     expect(screen.getByText("Leukemia in conditions and title", { exact: false })).toBeTruthy();
   });
   it("labels a protocol without an NCT as a WCM protocol", () => {
-    render(<TrialResultRow hit={hit({ nctNumber: null, trialId: "19-06020313", statusBucket: "completed" })} q="" conceptLabel={null} />);
+    render(
+      <TrialResultRow
+        hit={hit({ nctNumber: null, trialId: "19-06020313", statusKey: "terminated", interventions: null, hasResults: false })}
+        q=""
+        conceptLabel={null}
+      />,
+    );
     expect(screen.getByText("WCM protocol 19-06020313")).toBeTruthy();
-    expect(screen.getByText("Completed")).toBeTruthy();
+    expect(screen.getByText("Terminated")).toBeTruthy();
+    expect(screen.queryByText("Intervention")).toBeNull();
+    expect(screen.queryByText("· Results posted")).toBeNull();
+  });
+});
+
+describe("trial dates", () => {
+  it("labels the span, marks estimates, and handles a missing end", () => {
+    const d = { startDate: "2025-11", startEstimated: false, endDate: "2029-03", endEstimated: true };
+    expect(trialDatesLabel(d)).toBe("Nov 2025 – Mar 2029 (est.)");
+    expect(trialDatesLabel({ ...d, endDate: null })).toBe("Started Nov 2025");
+    expect(trialDatesLabel({ ...d, startDate: null })).toBeNull();
+  });
+  it("progress is the elapsed share, clamped to 4–100", () => {
+    const now = new Date(2026, 8, 1); // Sep 2026
+    expect(trialProgress({ startDate: "2024-09", endDate: "2028-09" }, now)).toBe(50);
+    expect(trialProgress({ startDate: "2027-01", endDate: "2029-01" }, now)).toBe(4);
+    expect(trialProgress({ startDate: "2016-09", endDate: "2020-06" }, now)).toBe(100);
+    expect(trialProgress({ startDate: "2016-09", endDate: null }, now)).toBeNull();
   });
 });
