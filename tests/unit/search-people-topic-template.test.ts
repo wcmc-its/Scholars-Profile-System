@@ -84,6 +84,7 @@ vi.mock("@/lib/search", () => ({
                   publicationCount: 40,
                   grantCount: 2,
                   hasActiveGrants: true,
+                  trialMesh: [{ ui: ["D012345"] }, { ui: ["D999999"] }, { ui: ["D067890", "D012345"] }],
                 },
                 highlight: undefined,
               },
@@ -715,6 +716,11 @@ describe("SEARCH_PEOPLE_TRIAL_EVIDENCE — clinical trials as People evidence", 
       .must[0] as { multi_match: { fields: string[] } };
     expect(mm.multi_match.fields).toContain("trialText^1");
     expect(functionScore(capturedBodies[0]).functions).toContainEqual({ filter: trialClause, weight: 1.5 });
+  });
+
+  it("counts the scholar's trials tagged within the concept for the card", async () => {
+    const r = await searchPeople({ q: "acute myeloid leukemia", relevanceMode: "v3", shape: "topic", meshDescendantUis: DESCENDANTS });
+    expect(r.hits[0].trialMatchCount).toBe(2);
   });
 
   it("concept scope admits trial-tagged scholars", async () => {

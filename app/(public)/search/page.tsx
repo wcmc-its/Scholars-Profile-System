@@ -1120,7 +1120,7 @@ function ModeTabs({
       {trialsCount !== null ? (
         <ModeTab
           href={tabHref("trials")}
-          label="Clinical trials"
+          label="Clinical research"
           count={trialsCount}
           active={activeType === "trials"}
         />

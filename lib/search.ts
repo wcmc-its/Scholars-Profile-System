@@ -379,6 +379,9 @@ export const peopleIndexMapping = {
       // labels. Queried only under SEARCH_PEOPLE_TRIAL_EVIDENCE. OMIT-on-empty.
       trialMeshUi: { type: "keyword" },
       trialText: { type: "text", analyzer: "scholar_text" },
+      // Per-trial descriptor UIs, `_source`-read only, for the card's
+      // "Clinical research · N trials" count (trials tagged under the query concept).
+      trialMesh: { type: "object", enabled: false },
       // #1836 — `clinicalAnchors`: per-specialty {specialty, boardCertified, tree}
       // rows, `_source`-read ONLY (never queried) to label the clinical evidence
       // row for a disease-subtree match. `enabled: false` so it is stored but not

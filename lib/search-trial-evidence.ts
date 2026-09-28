@@ -14,7 +14,9 @@ import { isActiveTrialStatus, isHiddenTrialStatus } from "@/lib/api/profile";
 import { phaseKey, sponsorTypeKey } from "@/lib/edit/clinical-trials-report";
 import { PEOPLE_INDEX_WHERE } from "@/lib/search-index-docs";
 
-export type TrialEvidence = { meshUi: string[]; text: string };
+/** `trials` = one entry per MeSH-tagged trial: its descriptor UIs, for the per-concept
+ *  "Clinical research · N trials" count on the People card. */
+export type TrialEvidence = { meshUi: string[]; text: string; trials: string[][] };
 
 /** A `scholars-trials` document (`trialsIndexMapping`). */
 export type TrialDoc = {
@@ -81,23 +83,26 @@ export async function loadTrialEvidenceByCwid(
   });
 
   const mesh = memoResolver(resolve);
-  const acc = new Map<string, { ui: Set<string>; text: string[] }>();
+  const acc = new Map<string, { ui: Set<string>; text: string[]; trials: string[][] }>();
   for (const r of rows) {
     if (isHiddenTrialStatus(r.trial.status)) continue;
     let e = acc.get(r.cwid);
-    if (!e) acc.set(r.cwid, (e = { ui: new Set(), text: [] }));
+    if (!e) acc.set(r.cwid, (e = { ui: new Set(), text: [], trials: [] }));
     const labels = splitTrialList(r.trial.meshTerms);
     e.text.push(r.trial.title, ...splitTrialList(r.trial.conditions), ...labels);
+    const trialUis = new Set<string>();
     for (const label of labels) {
       const ui = await mesh.ui(label);
-      if (ui) e.ui.add(ui);
+      if (ui) trialUis.add(ui);
     }
+    for (const ui of trialUis) e.ui.add(ui);
+    if (trialUis.size > 0) e.trials.push([...trialUis]);
   }
 
   assertSomeResolved("trial evidence", mesh.uiByLabel);
 
   const out = new Map<string, TrialEvidence>();
-  for (const [k, e] of acc) out.set(k, { meshUi: [...e.ui], text: e.text.join(" ") });
+  for (const [k, e] of acc) out.set(k, { meshUi: [...e.ui], text: e.text.join(" "), trials: e.trials });
   return out;
 }
 

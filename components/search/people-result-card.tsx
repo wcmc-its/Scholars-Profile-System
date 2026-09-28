@@ -88,6 +88,7 @@ const SECONDARY_LABEL: Record<string, string> = {
   concept: "Concept",
   keyword: "Keyword",
   funding: "Funding",
+  trials: "Clinical research",
 };
 
 /** Uniform fold rule — a folded secondary is now a LABEL plus a subordinate detail
@@ -264,7 +265,11 @@ export function PeopleResultCard({
   // (exactly one) still collapses under "Also matched" (#1381 follow-up), but the
   // umbrella toggle then expands straight to that secondary's records — one click.
   const lesserLines = lines ? lines.slice(1) : [];
-  const secondaryCount = lesserLines.length + (hasFunding ? 1 : 0);
+  // Clinical research — PI trials tagged within the query concept. Always a secondary
+  // (never the lead), and only on the stacked surface.
+  const trialCount = stacked ? (hit.trialMatchCount ?? 0) : 0;
+  const hasTrials = trialCount > 0;
+  const secondaryCount = lesserLines.length + (hasFunding ? 1 : 0) + (hasTrials ? 1 : 0);
   const singleSecondary = secondaryCount === 1;
 
   // When a topic-matching grant IS the query match, drop the generic NO-MATCH
@@ -504,6 +509,12 @@ export function PeopleResultCard({
   // the cap of 4 encoded for bare labels; more collapse to "+N". Realistic secondary
   // counts are 2–3 (`selectEvidenceLines` emits at most one line per kind, plus funding),
   // so this rarely bites. Bump it if cards routinely carry more.
+  if (hasTrials) {
+    secondaryChips.push({
+      label: SECONDARY_LABEL.trials,
+      detail: `${trialCount} trial${trialCount === 1 ? "" : "s"}`,
+    });
+  }
   const shownChips = secondaryChips.slice(0, 3);
   const chipOverflow = secondaryChips.length - shownChips.length;
 
@@ -536,6 +547,19 @@ export function PeopleResultCard({
         />
       ))}
       {hasFunding ? fundingNode : null}
+      {hasTrials ? (
+        <LesserReason label={SECONDARY_LABEL.trials}>
+          {trialCount} trial{trialCount === 1 ? "" : "s"}
+          {grantConceptLabel ? (
+            <>
+              {" "}tagged{" "}
+              <span className="font-[450] text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
+                {grantConceptLabel}
+              </span>
+            </>
+          ) : null}
+        </LesserReason>
+      ) : null}
     </>
   );
 

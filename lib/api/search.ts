@@ -349,6 +349,9 @@ export type PeopleHit = {
    *  never fall back to `pubCount`: an under-counted denominator inflates the percentage,
    *  and that is a worse claim than no percentage. */
   methodPubCount?: number;
+  /** Clinical research — how many of the scholar's PI trials are tagged within the
+   *  resolved MeSH concept (SEARCH_PEOPLE_TRIAL_EVIDENCE). Absent when none. */
+  trialMatchCount?: number;
   /** D1 (sponsor recency) — the scholar's most-recent publication YEAR, from the precomputed
    *  `mostRecentPubDate`. Present only under `includeMostRecentPub` (the sponsor recency path);
    *  absent for every other caller, so the hit shape is unchanged. Feeds `recencyWeight` and D8's
@@ -3503,6 +3506,8 @@ export async function searchPeople(opts: {
       // either the exact-match or the mesh-match clinical path can use them) so
       // the off path keeps today's `_source` shape. DISPLAY-ONLY.
       ...(clinicalReasonOn ? ["clinicalOnTopicCounts", "meshTaggedPubCount"] : []),
+      // Per-trial MeSH sets for the card's "Clinical research · N trials" chip.
+      ...(trialEvidenceOn ? ["trialMesh"] : []),
       // D1 (sponsor recency) — the scholar's most-recent pub date, requested ONLY when the
       // sponsor recency path asks for it, so every other caller keeps today's `_source` shape.
       // Already stored + used for the recentPub sort/filter; this only projects it back.
@@ -3694,6 +3699,7 @@ export async function searchPeople(opts: {
       // sibling this used to sit beside (`areaCounts`) is gone from this type —
       // #2071 (E1b) replaced it with the query-time `areaCountsByCwid`.
       methodFamilyCounts?: Record<string, number>;
+      trialMesh?: Array<{ ui: string[] }>;
       // POPS clinical specialty set + board-cert-only subset (omit-on-empty in
       // the ETL). Present only when SEARCH_PEOPLE_CLINICAL_FN is on (added to
       // `_source` above); feed `clinicalExactMatch` for the `clinical:exact`
@@ -4573,6 +4579,14 @@ export async function searchPeople(opts: {
         ...(() => {
           const n = methodPubCountByCwid.get(h._source.cwid);
           return n != null ? { methodPubCount: n } : {};
+        })(),
+        // Clinical research — the scholar's PI trials tagged within the resolved concept
+        // (SEARCH_PEOPLE_TRIAL_EVIDENCE). Omitted when zero or no concept resolved.
+        ...(() => {
+          if (!trialEvidenceOn || meshDescendantUis.length === 0) return {};
+          const want = new Set(meshDescendantUis);
+          const n = (h._source.trialMesh ?? []).filter((t) => t.ui.some((u) => want.has(u))).length;
+          return n > 0 ? { trialMatchCount: n } : {};
         })(),
         grantCount: h._source.grantCount,
         hasActiveGrants: h._source.hasActiveGrants,

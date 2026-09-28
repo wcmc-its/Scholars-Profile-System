@@ -1656,6 +1656,7 @@ export async function buildPeopleDoc(
     ...(publicationMeshUi.length > 0 ? { publicationMeshUi } : {}),
     ...(trial?.meshUi.length ? { trialMeshUi: trial.meshUi } : {}),
     ...(trial?.text ? { trialText: trial.text } : {}),
+    ...(trial?.trials.length ? { trialMesh: trial.trials.map((ui) => ({ ui })) } : {}),
     // #1959 — source-only companion to the field above: the gate-dropped
     // ancestors of kept descriptors, so `alsoParent` can distinguish "the parent
     // tag is absent" from "the parent tag is below the min-evidence gate".

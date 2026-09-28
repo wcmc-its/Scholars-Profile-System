@@ -35,6 +35,8 @@ describe("loadTrialEvidenceByCwid", () => {
       resolver({ "Leukemia, Myeloid, Acute": "D015470", Leukemia: "D007938" }),
     );
     expect(out.get("a")?.meshUi).toEqual(["D015470", "D007938"]);
+    // One UI set per MeSH-tagged trial, for the card's per-concept trial count.
+    expect(out.get("a")?.trials).toEqual([["D015470", "D007938"], ["D007938"]]);
     expect(out.get("a")?.text).toBe("AML study AML Leukemia, Myeloid, Acute Leukemia Second Leukemia Unknown Label");
   });
 
@@ -50,7 +52,7 @@ describe("loadTrialEvidenceByCwid", () => {
 
   it("keeps title-only (non-NCT) trials as text evidence", async () => {
     const out = await loadTrialEvidenceByCwid(client([{ cwid: "a", trial: t({ title: "Local protocol" }) }]), undefined, resolver({}));
-    expect(out.get("a")).toEqual({ meshUi: [], text: "Local protocol" });
+    expect(out.get("a")).toEqual({ meshUi: [], text: "Local protocol", trials: [] });
   });
 
   it("throws when labels exist but none resolve (MeSH map unavailable)", async () => {
