@@ -51,9 +51,6 @@ import {
   pct,
 } from "@/lib/edit/orcid-coverage";
 import { unitLabels } from "@/lib/edit/person-filter";
-// `ORCID_MANAGE_URL` is per-person (`{cwid}`); this page is aggregate-only, so
-// it links the ReCiter front door and names the Manage profile page in prose.
-import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { cn } from "@/lib/utils";
@@ -143,9 +140,9 @@ function Definitions() {
   return (
     <div className={cn(cardClass, "grid gap-x-8 gap-y-4 px-[22px] py-[18px] md:grid-cols-2")}>
       <Definition term="Asserted" swatch="bg-apollo-slate">
-        On file in WCM Identity, entered by a Publication Manager administrator, or confirmed by the
-        person (or someone editing for them) in this console. An iD the person removed counts
-        nowhere.
+        Confirmed by the person (or someone editing for them) in this console, on file in WCM
+        Identity, or entered by a Publication Manager administrator before that path was retired in
+        April 2026. An iD the person removed counts nowhere.
       </Definition>
       <Definition term="Confirmed">
         The subset of asserted iDs confirmed by the person in this console.
@@ -172,17 +169,8 @@ function Definitions() {
         see. &ldquo;NIH PI, no eRA&rdquo; is a miss in our resolver, not in their account.
       </Definition>
       <Definition term="NIH-funded">
-        Any NIH award on file for the person, whatever its dates. Scholars add their iD under Manage
-        profile in{" "}
-        <a
-          href={PUBLICATION_MANAGER_URL}
-          className="text-apollo-slate underline"
-          target="_blank"
-          rel="noreferrer"
-        >
-          ReCiter
-        </a>
-        .
+        Any NIH award on file for the person, whatever its dates. People add or confirm their iD
+        in Scholars, under Identifiers &amp; profiles.
       </Definition>
     </div>
   );

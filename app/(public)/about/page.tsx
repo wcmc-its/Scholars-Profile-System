@@ -481,7 +481,7 @@ export default function DocsPage() {
           <li>
             Most publications reach your profile because ReCiter matched them to you from PubMed. A
             paper that is not in PubMed can still appear, but only if a library curator adds it in
-            ReCiter from an outside source such as Scopus, OpenAlex, or Web of Science. Those papers
+            ReCiter from an outside source such as Scopus or OpenAlex. Those papers
             are labeled with their source (for example <em>Source: Scopus</em>) and carry a DOI
             rather than a PMID. They are added deliberately, not matched automatically, so
             ReCiter&apos;s attribution scoring never sees them.
