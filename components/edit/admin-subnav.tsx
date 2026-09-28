@@ -153,6 +153,8 @@ export function AdminSubnav({
   orcidCoverageTab = false,
   reportsTab = false,
   newsTab = false,
+  pendingNews = null,
+  pendingClips = null,
   coresTab = false,
   viewerIsDeveloper = false,
 }: {
@@ -234,6 +236,11 @@ export function AdminSubnav({
    *  (`/edit/profiles`'s `unitScope !== null` override), showing a News link
    *  that 404s on `isNewsQueueTabVisible`'s actual gate. Default `false`. */
   newsTab?: boolean;
+  /** The News and Media highlights tabs' pills: each queue's Pending count
+   *  (`countPendingNews`). `null` shows the tab with no pill, like
+   *  `pendingTitles`; the tabs themselves ride `newsTab`. */
+  pendingNews?: number | null;
+  pendingClips?: number | null;
   /** Show the "Cores" tab (`/edit/core`) to a non-superuser comms_steward.
    *  Superusers already get it via `superuserSurfaces`; this is the escape
    *  hatch, mirroring `newsTab`/`reportsTab` — 2026-08-26 policy widening
@@ -270,8 +277,15 @@ export function AdminSubnav({
       // `superuserSurfaces` is false, so ANDing it would hide the tab from the very
       // people the role exists to serve (#1767: "an honors surface nobody could
       // find"). The caller already resolved the gate into a count-vs-null.
-      // #1762 round 4: no count badge — the curator asked for it to be dropped.
-      { show: pendingHonors !== null, id: "honors-queue", href: "/edit/honors-queue", label: "Honors" },
+      // #1762 round 4 dropped the count badge; restored 2026-09-28 so every
+      // review queue (Honors, News, Media highlights, Titles) shows its pill.
+      {
+        show: pendingHonors !== null,
+        id: "honors-queue",
+        href: "/edit/honors-queue",
+        label: "Honors",
+        count: pendingHonors ?? undefined,
+      },
       {
         // Gap 2 fix — was `superuserSurfaces || profilesTab`, piggybacking on a
         // prop a unit Owner/Curator can also earn; `newsTab` is the dedicated
@@ -281,6 +295,7 @@ export function AdminSubnav({
         id: "news-queue",
         href: "/edit/news-queue",
         label: "News",
+        count: pendingNews ?? undefined,
       },
       // Press clips (etl/news/clips.ts) — same reviewers as News, own queue.
       {
@@ -288,6 +303,7 @@ export function AdminSubnav({
         id: "media-highlights-queue",
         href: "/edit/media-highlights-queue",
         label: "Media highlights",
+        count: pendingClips ?? undefined,
       },
       // Display titles needing review (formerly report 10 under Reports). The
       // tab rides the role (`titlesTab`), the pill rides the count, so a

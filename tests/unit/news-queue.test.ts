@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import { scoreProminence } from "@/lib/api/prominence";
 import {
+  countPendingNews,
   NEWS_HISTORY_LIMIT,
   loadNewsQueue,
   snippetMatchRanges,
@@ -656,5 +657,30 @@ describe("loadNewsQueue — enrolled-student postnominal (#2599)", () => {
     const groups = await loadNewsQueue(c, "pending");
 
     expect(groups[0].rows[0].scholarName).toBe("Elena Whitcombe, PhD");
+  });
+});
+
+describe("countPendingNews (the console menu pill)", () => {
+  const client = (rows: { id: string; duplicateOf: string | null }[] | Error) =>
+    ({
+      newsMention: {
+        findMany: async () => {
+          if (rows instanceof Error) throw rows;
+          return rows;
+        },
+      },
+    }) as unknown as Parameters<typeof countPendingNews>[0];
+
+  it("matches the Pending tab: a copy riding a pending lead is not counted twice", async () => {
+    const rows = [
+      { id: "lead", duplicateOf: null },
+      { id: "copy", duplicateOf: "lead" },
+      { id: "orphan", duplicateOf: "approved-elsewhere" },
+    ];
+    expect(await countPendingNews(client(rows), "clips")).toBe(2);
+  });
+
+  it("returns null instead of throwing when the read fails", async () => {
+    expect(await countPendingNews(client(new Error("down")))).toBeNull();
   });
 });

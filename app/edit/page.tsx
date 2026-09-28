@@ -48,6 +48,11 @@ import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { countPendingHonors } from "@/lib/edit/honor-queue";
+import {
+  countPendingNews,
+  isMediaHighlightsQueueEnabled,
+  isNewsQueueEnabled,
+} from "@/lib/edit/news-queue";
 import { countTitlesNeedingReview } from "@/lib/edit/titles-queue";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
@@ -378,6 +383,11 @@ export default async function EditSelfPage({
   // The Titles queue pill, the same memoized fail-soft count `ConsoleShell`
   // reads (null = no pill; the tab itself rides `tabs.titles`).
   const pendingTitles = tabs.titles ? await countTitlesNeedingReview(db.read) : null;
+  // News / Media highlights pills, as `ConsoleShell` reads them.
+  const [pendingNews, pendingClips] = await Promise.all([
+    tabs.news && isNewsQueueEnabled() ? countPendingNews(db.read, "newsroom") : null,
+    tabs.news && isMediaHighlightsQueueEnabled() ? countPendingNews(db.read, "clips") : null,
+  ]);
 
   return (
     <EditPage
@@ -404,6 +414,8 @@ export default async function EditSelfPage({
             dataSharingTab={tabs.dataSharing ? 0 : null}
             reportsTab={tabs.reports}
             newsTab={tabs.news}
+            pendingNews={pendingNews}
+            pendingClips={pendingClips}
             usageTab={tabs.usage}
             coresTab={tabs.cores}
             viewerIsDeveloper={developer}

@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  attachedEmails,
   readEmail,
   clipMentionRows,
   clipToArticle,
@@ -172,4 +173,43 @@ describe("clipMentionRows", () => {
 
 it("htmlToLines keeps a single-quoted href", () => {
   expect(htmlToLines("<a href='https://example.org/x'>Story</a>")).toBe("Story<https://example.org/x>");
+});
+
+describe("attachedEmails", () => {
+  // Outlook's forward-as-attachment: each digest is a base64 octet-stream `.eml`.
+  function forward(inner: string[], disposition = true): string {
+    const b = "OUTER_b2";
+    const att = inner.map(
+      (m, i) =>
+        `--${b}\r\nContent-Type: application/octet-stream;\r\n\tname="digest-${i}.eml"\r\n` +
+        (disposition ? `Content-Disposition: attachment;\r\n\tfilename="digest-${i}.eml"; size=1\r\n` : "") +
+        `Content-Transfer-Encoding: base64\r\n\r\n${Buffer.from(m, "latin1").toString("base64")}\r\n`,
+    );
+    return (
+      `From: A Forwarder <fwd@med.cornell.edu>\r\nSubject: FW: CLIPS\r\nMIME-Version: 1.0\r\n` +
+      `Content-Type: multipart/mixed; boundary="${b}"\r\n\r\n` +
+      `--${b}\r\nContent-Type: text/plain\r\n\r\n-a forwarder\r\n${att.join("")}--${b}--\r\n`
+    );
+  }
+
+  it("returns each attached .eml intact, so it parses like a delivered digest", () => {
+    const digest = eml([{ type: "text/plain", body: PLAIN }]);
+    const found = attachedEmails(forward([digest, digest]));
+    expect(found).toHaveLength(2);
+    expect(readEmail(found[0]).subject).toBe("[CLIPS] WCM in the News - September 22, 2026");
+    expect(parseClipsEmail(found[1])).toEqual(EXPECTED);
+  });
+
+  it("finds a .eml by its Content-Type name alone, and message/rfc822 parts", () => {
+    const digest = eml([{ type: "text/plain", body: PLAIN }]);
+    expect(attachedEmails(forward([digest], false))).toHaveLength(1);
+    const rfc822 =
+      `Subject: FW\r\nContent-Type: multipart/mixed; boundary="z"\r\n\r\n` +
+      `--z\r\nContent-Type: message/rfc822\r\n\r\n${digest}\r\n--z--\r\n`;
+    expect(parseClipsEmail(attachedEmails(rfc822)[0])).toEqual(EXPECTED);
+  });
+
+  it("finds nothing in a plain digest", () => {
+    expect(attachedEmails(eml([{ type: "text/plain", body: PLAIN }]))).toEqual([]);
+  });
 });

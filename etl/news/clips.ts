@@ -77,18 +77,22 @@ function param(value: string | undefined, name: string): string | undefined {
   return m ? (m[1] ?? m[2]) : undefined;
 }
 
-function decodeBody(p: Part): string {
+function decodeBytes(p: Part): Buffer {
   const cte = (p.headers.get("content-transfer-encoding") ?? "").toLowerCase();
-  let bytes: Buffer;
-  if (cte === "base64") bytes = Buffer.from(p.body.replace(/\s+/g, ""), "base64");
-  else if (cte === "quoted-printable") {
-    bytes = Buffer.from(
+  if (cte === "base64") return Buffer.from(p.body.replace(/\s+/g, ""), "base64");
+  if (cte === "quoted-printable") {
+    return Buffer.from(
       p.body
         .replace(/=\r?\n/g, "")
         .replace(/=([0-9A-Fa-f]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16))),
       "latin1",
     );
-  } else bytes = Buffer.from(p.body, "latin1");
+  }
+  return Buffer.from(p.body, "latin1");
+}
+
+function decodeBody(p: Part): string {
+  const bytes = decodeBytes(p);
   const charset = param(p.headers.get("content-type"), "charset") ?? "utf-8";
   try {
     return new TextDecoder(charset).decode(bytes);
@@ -111,6 +115,38 @@ export function sesAuthVerdict(header: string | undefined): string {
     .join(" ");
 }
 
+/** The non-multipart parts of a MIME tree, in order. */
+function leafParts(p: Part): Part[] {
+  const ct = (p.headers.get("content-type") ?? "").toLowerCase();
+  if (!ct.startsWith("multipart/")) return [p];
+  const boundary = param(p.headers.get("content-type"), "boundary");
+  if (!boundary) return [];
+  const out: Part[] = [];
+  for (const c of p.body.split(`--${boundary}`).slice(1)) {
+    if (c.startsWith("--")) break; // closing delimiter
+    out.push(...leafParts(splitPart(c.replace(/^\r?\n/, ""))));
+  }
+  return out;
+}
+
+/**
+ * Emails attached to this one, raw (latin1, like the outer message). A batch
+ * of old digests arrives as ONE forward with each digest attached: Outlook
+ * sends each as a base64 `application/octet-stream` named `*.eml`, not as
+ * `message/rfc822`, so both are accepted. One level deep.
+ * Sender and verdict checks stay on the OUTER message: the forwarder is who
+ * delivered it, and an attached message's headers are just file contents.
+ */
+export function attachedEmails(raw: string): string[] {
+  return leafParts(splitPart(raw))
+    .filter((p) => {
+      const ct = p.headers.get("content-type") ?? "";
+      const name = param(p.headers.get("content-disposition"), "filename") ?? param(ct, "name") ?? "";
+      return /^message\/rfc822/i.test(ct) || /\.eml$/i.test(name);
+    })
+    .map((p) => decodeBytes(p).toString("latin1"));
+}
+
 /** Walk the MIME tree; return the first text/plain and text/html bodies. */
 export function readEmail(raw: string): {
   from: string;
@@ -129,23 +165,12 @@ export function readEmail(raw: string): {
   const top = splitPart(raw);
   let plain: string | null = null;
   let html: string | null = null;
-  const walk = (p: Part) => {
+  for (const p of leafParts(top)) {
     const ct = (p.headers.get("content-type") ?? "text/plain").toLowerCase();
-    if (ct.startsWith("multipart/")) {
-      const boundary = param(p.headers.get("content-type"), "boundary");
-      if (!boundary) return;
-      const chunks = p.body.split(`--${boundary}`).slice(1);
-      for (const c of chunks) {
-        if (c.startsWith("--")) break; // closing delimiter
-        walk(splitPart(c.replace(/^\r?\n/, "")));
-      }
-      return;
-    }
-    if (/attachment/i.test(p.headers.get("content-disposition") ?? "")) return;
+    if (/attachment/i.test(p.headers.get("content-disposition") ?? "")) continue;
     if (ct.startsWith("text/plain") && plain === null) plain = decodeBody(p);
     else if (ct.startsWith("text/html") && html === null) html = decodeBody(p);
-  };
-  walk(top);
+  }
   return {
     from: top.headers.get("from") ?? "",
     subject: top.headers.get("subject") ?? "",
@@ -459,27 +484,31 @@ async function main(): Promise<number> {
   const unparsed: string[] = [];
   let skipped = 0;
   const auth: Record<string, number> = {};
-  for (const { raw, receivedAt } of raws) {
-    const e = readEmail(raw);
-    // Bucket mail is from anyone who knows the address, and the From header is
-    // forgeable, so this is a noise filter, not the trust boundary: every row
-    // is pending until comms approves it. A hand-given file is an operator's
-    // forward, so only the subject is checked.
-    const trusted =
-      SUBJECT_RE.test(e.subject) &&
-      (!fromBucket ||
-        (!REPLY_RE.test(e.subject) &&
-          WCM_FROM_RE.test(e.from) &&
-          e.virusVerdict !== "FAIL" &&
-          e.spamVerdict !== "FAIL"));
-    if (!trusted) {
-      skipped++;
-      continue;
+  for (const { raw: delivered, receivedAt } of raws) {
+    const outer = readEmail(delivered);
+    // The delivered email, then any digests attached to it (attachedEmails).
+    for (const raw of [delivered, ...attachedEmails(delivered)]) {
+      const e = raw === delivered ? outer : readEmail(raw);
+      // Bucket mail is from anyone who knows the address, and the From header is
+      // forgeable, so this is a noise filter, not the trust boundary: every row
+      // is pending until comms approves it. A hand-given file is an operator's
+      // forward, so only the subject is checked.
+      const trusted =
+        SUBJECT_RE.test(e.subject) &&
+        (!fromBucket ||
+          (!REPLY_RE.test(e.subject) &&
+            WCM_FROM_RE.test(outer.from) &&
+            outer.virusVerdict !== "FAIL" &&
+            outer.spamVerdict !== "FAIL"));
+      if (!trusted) {
+        skipped++;
+        continue;
+      }
+      auth[outer.authVerdict] = (auth[outer.authVerdict] ?? 0) + 1;
+      const clips = parseClipsEmail(raw);
+      if (clips.length === 0 && Date.now() - receivedAt <= UNPARSED_FAIL_MS) unparsed.push(e.subject);
+      articles.push(...clips.map(clipToArticle));
     }
-    auth[e.authVerdict] = (auth[e.authVerdict] ?? 0) + 1;
-    const clips = parseClipsEmail(raw);
-    if (clips.length === 0 && Date.now() - receivedAt <= UNPARSED_FAIL_MS) unparsed.push(e.subject);
-    articles.push(...clips.map(clipToArticle));
   }
 
   const scholars = await db.write.scholar.findMany({
