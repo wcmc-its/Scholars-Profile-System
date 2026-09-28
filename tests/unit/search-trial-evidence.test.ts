@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadTrialDocs, loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
+import { loadTrialDocs, loadTrialEvidenceByCwid, trialStatusKey } from "@/lib/search-trial-evidence";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 type Trial = { title: string; status: string | null; conditions: string | null; meshTerms: string | null };
@@ -75,6 +75,15 @@ describe("loadTrialDocs", () => {
     conditions: null,
     meshTerms: null,
     briefSummary: null,
+    ctgovStatus: null as string | null,
+    startDate: null as string | null,
+    startDateType: null as string | null,
+    primaryCompletionDate: null as string | null,
+    primaryCompletionDateType: null as string | null,
+    hasResults: null as boolean | null,
+    interventions: null as string | null,
+    interventionTypes: null as string | null,
+    firstOtaDate: null as Date | null,
     investigators: [] as Array<{
       cwid: string;
       scholar: { preferredName: string; slug: string; primaryDepartment: string | null };
@@ -117,8 +126,61 @@ describe("loadTrialDocs", () => {
     });
   });
 
+  it("carries CT.gov status, dates, interventions and results; OnCore dates for a protocol without an NCT", async () => {
+    const docs = await loadTrialDocs(
+      clientOf([
+        trial({
+          protocolNumber: "P1",
+          nctNumber: "NCT1",
+          ctgovStatus: "TERMINATED",
+          startDate: "2019-03-14",
+          startDateType: "ACTUAL",
+          primaryCompletionDate: "2027-06",
+          primaryCompletionDateType: "ESTIMATED",
+          hasResults: true,
+          interventions: "Drug: A; Procedure: B",
+          interventionTypes: "DRUG; PROCEDURE",
+          investigators: [pi("a")],
+        }),
+        trial({ protocolNumber: "P2", firstOtaDate: new Date("2021-05-02T00:00:00Z"), investigators: [pi("b")] }),
+      ]),
+      resolver({}),
+    );
+    expect(docs[0]).toMatchObject({
+      statusKey: "terminated",
+      statusBucket: "completed",
+      statusRank: 2,
+      startDate: "2019-03",
+      startYear: 2019,
+      startEstimated: false,
+      endDate: "2027-06",
+      endEstimated: true,
+      interventionTypes: ["DRUG", "PROCEDURE"],
+      hasResults: true,
+    });
+    expect(docs[1]).toMatchObject({
+      statusKey: "recruiting",
+      statusRank: 0,
+      startDate: "2021-05",
+      startYear: 2021,
+      endDate: null,
+      interventionTypes: [],
+      hasResults: false,
+    });
+  });
+
   it("drops trials the profile hides", async () => {
     const docs = await loadTrialDocs(clientOf([trial({ status: "SUSPENDED", investigators: [pi("a")] })]), resolver({}));
     expect(docs).toEqual([]);
+  });
+});
+
+describe("trialStatusKey", () => {
+  it("prefers CT.gov's status when it's one we show, else maps OnCore's", () => {
+    expect(trialStatusKey("NOT_YET_RECRUITING", "OPEN TO ACCRUAL")).toBe("not_yet_recruiting");
+    expect(trialStatusKey("UNKNOWN", "CLOSED TO ACCRUAL")).toBe("active_not_recruiting");
+    expect(trialStatusKey(null, "OPEN TO ACCRUAL")).toBe("recruiting");
+    expect(trialStatusKey(null, "IRB STUDY CLOSURE")).toBe("completed");
+    expect(trialStatusKey("WITHDRAWN", "IRB STUDY CLOSURE")).toBe("completed");
   });
 });

@@ -3,6 +3,21 @@ import { profilePath } from "@/lib/profile-url";
 import { phaseLabel, sponsorTypeLabel, type SponsorTypeKey } from "@/lib/edit/clinical-trials-report";
 import type { TrialHit, TrialMatchField } from "@/lib/api/search-trials";
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const TRIAL_STATUS_LABEL: Record<string, string> = {
+  recruiting: "Recruiting",
+  not_yet_recruiting: "Not yet recruiting",
+  enrolling_by_invitation: "Enrolling by invitation",
+  active_not_recruiting: "Active, not recruiting",
+  completed: "Completed",
+  terminated: "Terminated",
+};
+const STATUS_TONE: Record<string, string> = {
+  recruiting: "bg-[#eaf0f5] text-[var(--color-accent-slate)]",
+  enrolling_by_invitation: "bg-[#eaf0f5] text-[var(--color-accent-slate)]",
+  not_yet_recruiting: "bg-amber-50 text-amber-800",
+  active_not_recruiting: "bg-[#f4f1ed] text-[#1a1a1a]",
+};
 const PI_LIMIT = 3;
 const CONDITION_LIMIT = 3;
 const FIELD_NOUN: Record<TrialMatchField, string> = {
@@ -17,6 +32,33 @@ const FIELD_NOUN: Record<TrialMatchField, string> = {
 export function studyTypeLabel(raw: string): string {
   const s = raw.trim().replace(/_/g, " ").toLowerCase();
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "2016-09" → "Sep 2016". */
+function monthLabel(ym: string): string {
+  return `${MONTHS[Number(ym.slice(5, 7)) - 1] ?? ""} ${ym.slice(0, 4)}`.trim();
+}
+
+/** "Sep 2016 – Jun 2020 (est.)", or "Started Sep 2016" with no end date. */
+export function trialDatesLabel(
+  hit: Pick<TrialHit, "startDate" | "startEstimated" | "endDate" | "endEstimated">,
+): string | null {
+  if (!hit.startDate) return null;
+  const est = hit.startEstimated || (hit.endDate !== null && hit.endEstimated) ? " (est.)" : "";
+  return hit.endDate
+    ? `${monthLabel(hit.startDate)} – ${monthLabel(hit.endDate)}${est}`
+    : `Started ${monthLabel(hit.startDate)}${est}`;
+}
+
+/** Elapsed share of start → primary completion, 4–100%; null without both dates. */
+export function trialProgress(hit: Pick<TrialHit, "startDate" | "endDate">, now = new Date()): number | null {
+  if (!hit.startDate || !hit.endDate) return null;
+  const t = (ym: string) => Number(ym.slice(0, 4)) + (Number(ym.slice(5, 7)) - 1) / 12;
+  const a = t(hit.startDate);
+  const b = t(hit.endDate);
+  if (b <= a) return 100;
+  const n = now.getFullYear() + now.getMonth() / 12;
+  return Math.round(Math.max(4, Math.min(100, ((n - a) / (b - a)) * 100)));
 }
 
 function joinAnd(xs: string[]): string {
@@ -57,7 +99,11 @@ export function TrialResultRow({
   q: string;
   conceptLabel: string | null;
 }) {
-  const active = hit.statusBucket === "active";
+  const statusLabel = TRIAL_STATUS_LABEL[hit.statusKey] ?? hit.statusKey;
+  const tone = STATUS_TONE[hit.statusKey] ?? "bg-[#f4f1ed] text-muted-foreground";
+  const dates = trialDatesLabel(hit);
+  const progress = trialProgress(hit);
+  const interventions = (hit.interventions ?? "").split(";").map((x) => x.trim()).filter(Boolean);
   const typeLine = [
     hit.studyType ? studyTypeLabel(hit.studyType) : null,
     hit.phase === "nr" ? null : phaseLabel(hit.phase),
@@ -85,13 +131,9 @@ export function TrialResultRow({
   return (
     <article className="flex flex-col gap-2 border-t border-[#e3e2dd] py-5">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px]">
-        <span
-          className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-medium whitespace-nowrap ${
-            active ? "bg-[#eaf0f5] text-[var(--color-accent-slate)]" : "bg-[#f4f1ed] text-muted-foreground"
-          }`}
-        >
+        <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-medium whitespace-nowrap ${tone}`}>
           <span aria-hidden="true" className="size-[7px] rounded-full bg-current" />
-          {active ? "Active" : "Completed"}
+          {statusLabel}
         </span>
         {typeLine ? <span className="whitespace-nowrap text-muted-foreground">{typeLine}</span> : null}
         <span className="ml-auto">
@@ -130,11 +172,40 @@ export function TrialResultRow({
           </details>
         ) : null}
       </div>
-      {sponsor ? (
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 text-[13px] leading-snug">
-          <span className="text-muted-foreground">Sponsor</span>
-          <span className="text-[#1a1a1a]">{sponsor}</span>
-        </div>
+      {interventions.length > 0 || dates || hit.hasResults || sponsor ? (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-1 text-[13px] leading-snug">
+          {interventions.length > 0 ? (
+            <>
+              <dt className="text-muted-foreground">Intervention</dt>
+              <dd className="text-[#1a1a1a]">{interventions.join(" · ")}</dd>
+            </>
+          ) : null}
+          {dates || hit.hasResults ? (
+            <>
+              <dt className="text-muted-foreground">Dates</dt>
+              <dd className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[#1a1a1a]">
+                {dates ?? "Not reported"}
+                {progress !== null ? (
+                  <span
+                    role="img"
+                    aria-label={`${progress}% of the planned study period elapsed`}
+                    // Track in the pill's tint, fill in its text color.
+                    className={`inline-block h-1 w-[120px] overflow-hidden rounded-sm ${tone}`}
+                  >
+                    <span className="block h-full bg-current" style={{ width: `${progress}%` }} />
+                  </span>
+                ) : null}
+                {hit.hasResults ? <span className="text-[12.5px] text-muted-foreground">· Results posted</span> : null}
+              </dd>
+            </>
+          ) : null}
+          {sponsor ? (
+            <>
+              <dt className="text-muted-foreground">Sponsor</dt>
+              <dd className="text-[#1a1a1a]">{sponsor}</dd>
+            </>
+          ) : null}
+        </dl>
       ) : null}
       {conditions.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
