@@ -356,4 +356,125 @@ describe("fetchCtgovStudies", () => {
     expect(fields).toContain("LeadSponsorClass");
     expect(fields).toContain("LeadSponsorName");
   });
+
+  it("requests the enrichment fields in fields=", async () => {
+    const urls: string[] = [];
+    const fake = (async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ studies: [] }));
+    }) as unknown as typeof fetch;
+    await fetchCtgovStudies(["NCT00000001"], fake);
+    const fields = new URL(urls[0]).searchParams.get("fields")?.split(",");
+    for (const f of [
+      "OverallStatus", "StartDate", "StartDateType", "PrimaryCompletionDate",
+      "PrimaryCompletionDateType", "HasResults", "InterventionType", "InterventionName",
+    ]) {
+      expect(fields).toContain(f);
+    }
+  });
+
+  // Shapes copied from a live v2 response (2026-09-28): hasResults is top-level
+  // and explicitly false for a study without results; interventions repeat per arm.
+  const enrichmentBody = {
+    studies: [
+      {
+        protocolSection: {
+          identificationModule: { nctId: "NCT04102020" },
+          statusModule: {
+            overallStatus: "COMPLETED",
+            startDateStruct: { date: "2020-03-26", type: "ACTUAL" },
+            primaryCompletionDateStruct: { date: "2022-09-29", type: "ACTUAL" },
+          },
+          armsInterventionsModule: {
+            interventions: [
+              { type: "DRUG", name: "Venetoclax" },
+              { type: "DRUG", name: "Azacitidine" },
+              { type: "DRUG", name: "Azacitidine" },
+              { type: "DIETARY_SUPPLEMENT", name: "Vitamin D" },
+            ],
+          },
+        },
+        hasResults: true,
+      },
+      {
+        protocolSection: {
+          identificationModule: { nctId: "NCT07605416" },
+          statusModule: {
+            overallStatus: "NOT_YET_RECRUITING",
+            startDateStruct: { date: "2027-04", type: "ESTIMATED" },
+            primaryCompletionDateStruct: { date: "2030-01", type: "ESTIMATED" },
+          },
+        },
+        hasResults: false,
+      },
+      {
+        // hasResults absent, junk date → both null, never a guessed value.
+        protocolSection: {
+          identificationModule: { nctId: "NCT00000003" },
+          statusModule: { startDateStruct: { date: "March 2020" } },
+        },
+      },
+    ],
+  };
+  const scholars = new Map([["abc1234", { cwid: "abc1234", name: "Jane Smith" }]]);
+  const now = new Date("2026-09-28T00:00:00Z");
+  const instRow = (protocol: string, nct: string): InstitutionalRow => ({
+    cwid: "abc1234", nctNumber: nct, protocolNumber: protocol, piName: null, title: null,
+    protocolType: null, firstOTADate: null, firstCTADate: null, statusDate: null,
+    principalSponsor: null, overallCurrentStatus: "Open to Accrual",
+  });
+
+  it("round-trips status, dates, hasResults and interventions into the stored row", async () => {
+    const fake = (async () => new Response(JSON.stringify(enrichmentBody))) as typeof fetch;
+    const ctgov = await fetchCtgovStudies(["NCT04102020", "NCT07605416", "NCT00000003"], fake);
+    const { trials } = buildTrialsAndLinks(
+      [instRow("P-1", "NCT04102020"), instRow("P-2", "NCT07605416"), instRow("P-3", "NCT00000003")],
+      [],
+      scholars,
+      now,
+      ctgov,
+    );
+    const byP = new Map(trials.map((t) => [t.protocolNumber, t]));
+    expect(byP.get("P-1")).toMatchObject({
+      ctgovStatus: "COMPLETED",
+      startDate: "2020-03-26",
+      startDateType: "ACTUAL",
+      primaryCompletionDate: "2022-09-29",
+      primaryCompletionDateType: "ACTUAL",
+      hasResults: true,
+      interventionTypes: "DRUG; DIETARY_SUPPLEMENT",
+      interventions: "Drug: Venetoclax; Drug: Azacitidine; Dietary supplement: Vitamin D",
+    });
+    expect(byP.get("P-2")).toMatchObject({
+      ctgovStatus: "NOT_YET_RECRUITING",
+      startDate: "2027-04",
+      startDateType: "ESTIMATED",
+      primaryCompletionDate: "2030-01",
+      primaryCompletionDateType: "ESTIMATED",
+      hasResults: false,
+      interventionTypes: null,
+      interventions: null,
+    });
+    const p3 = byP.get("P-3")!;
+    expect(p3.hasResults).toBeNull();
+    expect(p3.startDate).toBeNull();
+    expect(p3.startDateType).toBeNull();
+    expect(p3.ctgovStatus).toBeNull();
+  });
+
+  it("leaves the CT.gov-only fields null on the reciterdb enriched fallback", () => {
+    const enriched: EnrichedRow[] = [{
+      nctNumber: "NCT04102020", officialTitle: "Fallback", briefTitle: null, briefSummary: null,
+      studyType: "INTERVENTIONAL", phases: null, conditions: null, meshTerms: null, enrollment: null,
+    }];
+    const t = buildTrialsAndLinks([instRow("P-1", "NCT04102020")], enriched, scholars, now, {
+      studies: new Map(),
+      complete: false,
+    }).trials[0];
+    expect(t.title).toBe("Fallback");
+    expect(t).toMatchObject({
+      ctgovStatus: null, startDate: null, startDateType: null, primaryCompletionDate: null,
+      primaryCompletionDateType: null, hasResults: null, interventionTypes: null, interventions: null,
+    });
+  });
 });
