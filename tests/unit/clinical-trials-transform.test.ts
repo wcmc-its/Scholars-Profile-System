@@ -477,4 +477,17 @@ describe("fetchCtgovStudies", () => {
       primaryCompletionDateType: null, hasResults: null, interventionTypes: null, interventions: null,
     });
   });
+
+  it("keeps the stored CT.gov-only fields when the fetch failed or never ran, not when it completed", () => {
+    const stored = {
+      ctgovStatus: "RECRUITING", startDate: "2020-03", startDateType: "ACTUAL", primaryCompletionDate: "2027-01",
+      primaryCompletionDateType: "ESTIMATED", hasResults: false, interventionTypes: "DRUG", interventions: "Drug: X",
+    };
+    const priorCtgov = new Map([["P-1", stored]]);
+    const build = (ctgov?: { studies: Map<string, CtgovStudy>; complete: boolean }) =>
+      buildTrialsAndLinks([instRow("P-1", "NCT04102020")], [], scholars, now, ctgov, new Map(), priorCtgov).trials[0];
+    expect(build({ studies: new Map(), complete: false })).toMatchObject(stored);
+    expect(build(undefined)).toMatchObject(stored); // the bridge import
+    expect(build({ studies: new Map(), complete: true })).toMatchObject({ ctgovStatus: null, hasResults: null });
+  });
 });

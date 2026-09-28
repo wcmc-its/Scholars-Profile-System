@@ -387,6 +387,28 @@ export async function loadPriorSponsorClasses(): Promise<Map<string, string | nu
   return new Map(rows.map((t) => [t.protocolNumber, t.sponsorClass]));
 }
 
+const CTGOV_ONLY_KEYS = [
+  "ctgovStatus", "startDate", "startDateType", "primaryCompletionDate",
+  "primaryCompletionDateType", "hasResults", "interventionTypes", "interventions",
+] as const;
+export type CtgovOnlyFields = Pick<TrialBuild, (typeof CTGOV_ONLY_KEYS)[number]>;
+const NO_CTGOV: CtgovOnlyFields = Object.fromEntries(CTGOV_ONLY_KEYS.map((k) => [k, null])) as CtgovOnlyFields;
+
+/** protocolNumber → the CT.gov-only fields stored now. Like the sponsor class, a
+ *  registered trial keeps them when CT.gov could not be read this run (a failed
+ *  batch, or the bridge import), since the table is replaced wholesale. */
+export async function loadPriorCtgovFields(): Promise<Map<string, CtgovOnlyFields>> {
+  const rows = await db.write.clinicalTrial.findMany({
+    select: { protocolNumber: true, ...Object.fromEntries(CTGOV_ONLY_KEYS.map((k) => [k, true])) },
+  });
+  return new Map(
+    rows.map((t) => [
+      t.protocolNumber,
+      Object.fromEntries(CTGOV_ONLY_KEYS.map((k) => [k, (t as Record<string, unknown>)[k] ?? null])) as CtgovOnlyFields,
+    ]),
+  );
+}
+
 /** Join institutional + enriched, dedup to one trial per protocol, build the
  *  per-(cwid, protocol) link. The feed lists the active PI only, so every link is
  *  "Principal Investigator". A live ClinicalTrials.gov study (`ctgov`) wins over
@@ -399,6 +421,7 @@ export function buildTrialsAndLinks(
   now: Date,
   ctgov: { studies: Map<string, CtgovStudy>; complete: boolean } = { studies: new Map(), complete: false },
   priorSponsorClass: ReadonlyMap<string, string | null> = new Map(),
+  priorCtgov: ReadonlyMap<string, CtgovOnlyFields> = new Map(),
 ): { trials: TrialBuild[]; links: LinkBuild[]; stats: BuildStats } {
   const enrichedByNct = new Map<string, EnrichedRow>();
   for (const e of enriched) {
@@ -460,16 +483,20 @@ export function buildTrialsAndLinks(
         meshTerms: nonEmpty(enrichedRow?.meshTerms),
         briefSummary: nonEmpty(enrichedRow?.briefSummary),
         enrollment: cleanInt(enrichedRow?.enrollment ?? null),
-        // CT.gov-only fields: null when the live study is absent (the reciterdb
-        // enriched fallback and the bridge import carry none of them).
-        ctgovStatus: study?.overallStatus ?? null,
-        startDate: study?.startDate ?? null,
-        startDateType: study?.startDateType ?? null,
-        primaryCompletionDate: study?.primaryCompletionDate ?? null,
-        primaryCompletionDateType: study?.primaryCompletionDateType ?? null,
-        hasResults: study?.hasResults ?? null,
-        interventionTypes: study?.interventionTypes ?? null,
-        interventions: study?.interventions ?? null,
+        // CT.gov-only fields. Without a live study they are kept from the stored
+        // row when the fetch was incomplete or never ran, else null.
+        ...(study
+          ? {
+              ctgovStatus: study.overallStatus ?? null,
+              startDate: study.startDate ?? null,
+              startDateType: study.startDateType ?? null,
+              primaryCompletionDate: study.primaryCompletionDate ?? null,
+              primaryCompletionDateType: study.primaryCompletionDateType ?? null,
+              hasResults: study.hasResults ?? null,
+              interventionTypes: study.interventionTypes ?? null,
+              interventions: study.interventions ?? null,
+            }
+          : (nct && !ctgov.complete && priorCtgov.get(protocol)) || NO_CTGOV),
         firstOtaDate: parseLooseDate(r.firstOTADate),
         firstCtaDate: ctaDate(r, nct, study, ctgov.complete),
         enrichmentSource: enrichedRow ? "ClinicalTrials.gov" : null,
