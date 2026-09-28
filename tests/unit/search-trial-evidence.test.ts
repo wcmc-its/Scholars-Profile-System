@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
+import { loadTrialDocs, loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 type Trial = { title: string; status: string | null; conditions: string | null; meshTerms: string | null };
@@ -57,5 +57,51 @@ describe("loadTrialEvidenceByCwid", () => {
     await expect(
       loadTrialEvidenceByCwid(client([{ cwid: "a", trial: t({ meshTerms: "Leukemia" }) }]), undefined, resolver({})),
     ).rejects.toThrow(/none of 1 MeSH labels resolved/);
+  });
+});
+
+describe("loadTrialDocs", () => {
+  const trial = (over: Record<string, unknown>) => ({
+    protocolNumber: "P1",
+    nctNumber: null,
+    title: "A trial",
+    status: "OPEN TO ACCRUAL",
+    phase: "PHASE2",
+    studyType: "INTERVENTIONAL",
+    sponsorClass: "industry",
+    principalSponsor: "Acme",
+    conditions: null,
+    meshTerms: null,
+    briefSummary: null,
+    investigators: [] as Array<{ cwid: string; scholar: { preferredName: string; slug: string } }>,
+    ...over,
+  });
+  const pi = (cwid: string) => ({ cwid, scholar: { preferredName: `Dr ${cwid}`, slug: cwid } });
+  const clientOf = (rows: unknown[]) => ({ clinicalTrial: { findMany: async () => rows } }) as never;
+
+  it("dedupes protocols sharing an NCT, merges PIs, maps phase/sponsor/status", async () => {
+    const docs = await loadTrialDocs(
+      clientOf([
+        trial({ protocolNumber: "P1", nctNumber: "NCT1", meshTerms: "Leukemia", investigators: [pi("a")] }),
+        trial({ protocolNumber: "P2", nctNumber: "NCT1", investigators: [pi("a"), pi("b")] }),
+        trial({ protocolNumber: "P3", status: "IRB STUDY CLOSURE", phase: null, sponsorClass: null, investigators: [pi("c")] }),
+      ]),
+      resolver({ Leukemia: "D007938" }),
+    );
+    expect(docs.map((d) => d.trialId)).toEqual(["NCT1", "P3"]);
+    expect(docs[0]).toMatchObject({
+      piCwids: ["a", "b"],
+      piNames: "Dr a; Dr b",
+      meshDescriptorUi: ["D007938"],
+      statusBucket: "active",
+      phase: "2",
+      sponsorClass: "industry",
+    });
+    expect(docs[1]).toMatchObject({ statusBucket: "completed", phase: "nr", sponsorClass: "unknown" });
+  });
+
+  it("drops trials the profile hides", async () => {
+    const docs = await loadTrialDocs(clientOf([trial({ status: "SUSPENDED", investigators: [pi("a")] })]), resolver({}));
+    expect(docs).toEqual([]);
   });
 });
