@@ -34,6 +34,7 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { db } from "../../lib/db";
 import {
   buildTrialsAndLinks,
+  loadPriorCtgovFields,
   loadPriorSponsorClasses,
   loadScholars,
   replaceAll,
@@ -142,6 +143,7 @@ async function main() {
     now,
     undefined,
     prior,
+    await loadPriorCtgovFields(),
   );
   console.log(
     `Built ${stats.trials} trials (${stats.enrichedHits} had NCT enrichment) and ${stats.links} ` +

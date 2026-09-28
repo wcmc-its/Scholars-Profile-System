@@ -111,6 +111,14 @@ export type TrialBuild = {
   meshTerms: string | null;
   briefSummary: string | null;
   enrollment: number | null;
+  ctgovStatus: string | null;
+  startDate: string | null;
+  startDateType: string | null;
+  primaryCompletionDate: string | null;
+  primaryCompletionDateType: string | null;
+  hasResults: boolean | null;
+  interventionTypes: string | null;
+  interventions: string | null;
   firstOtaDate: Date | null;
   firstCtaDate: Date | null;
   enrichmentSource: string | null;
@@ -167,11 +175,23 @@ export const INACTIVE_STATUSES = new Set(["IRB STUDY CLOSURE", "CLOSED TO ACCRUA
 /** A ClinicalTrials.gov study in the `clinical_trials_enriched` shape, plus the
  *  ACTUAL primary completion date (null when absent or only ANTICIPATED) and
  *  the raw lead-sponsor class (INDUSTRY, NIH, FED, OTHER, ...) and name (to
- *  tell WCM's own trials apart within OTHER). */
+ *  tell WCM's own trials apart within OTHER). The optional fields below are
+ *  CT.gov-only (the reciterdb enriched fallback has none of them): raw
+ *  overallStatus enum, start / primary completion dates as CT.gov gives them
+ *  ("YYYY-MM" or "YYYY-MM-DD") with their ACTUAL/ESTIMATED type, the top-level
+ *  hasResults flag, and the interventions (see `formatInterventions`). */
 export type CtgovStudy = EnrichedRow & {
   primaryCompletionActual: string | null;
   leadSponsorClass: string | null;
   leadSponsorName?: string | null;
+  overallStatus?: string | null;
+  startDate?: string | null;
+  startDateType?: string | null;
+  primaryCompletionDate?: string | null;
+  primaryCompletionDateType?: string | null;
+  hasResults?: boolean | null;
+  interventionTypes?: string | null;
+  interventions?: string | null;
 };
 
 const CTGOV_URL = "https://clinicaltrials.gov/api/v2/studies";
@@ -179,22 +199,73 @@ const CTGOV_FIELDS = [
   "NCTId", "BriefTitle", "OfficialTitle", "BriefSummary", "StudyType", "Phase",
   "Condition", "ConditionMeshTerm", "EnrollmentCount",
   "PrimaryCompletionDate", "PrimaryCompletionDateType", "LeadSponsorClass",
-  "LeadSponsorName",
+  "LeadSponsorName", "OverallStatus", "StartDate", "StartDateType", "HasResults",
+  "InterventionType", "InterventionName",
 ].join(",");
 /** The subset of a v2 study we read (`fields=` limits the response to it). */
 type CtgovApiStudy = {
   protocolSection?: {
     identificationModule?: { nctId?: string; officialTitle?: string; briefTitle?: string };
-    statusModule?: { primaryCompletionDateStruct?: { date?: string; type?: string } };
+    statusModule?: {
+      overallStatus?: string;
+      startDateStruct?: { date?: string; type?: string };
+      primaryCompletionDateStruct?: { date?: string; type?: string };
+    };
     descriptionModule?: { briefSummary?: string };
     conditionsModule?: { conditions?: string[] };
     designModule?: { studyType?: string; phases?: string[]; enrollmentInfo?: { count?: number } };
     sponsorCollaboratorsModule?: { leadSponsor?: { class?: string; name?: string } };
+    armsInterventionsModule?: { interventions?: Array<{ type?: string; name?: string }> };
   };
   derivedSection?: { conditionBrowseModule?: { meshes?: Array<{ term?: string }> } };
+  /** Top-level (not under protocolSection). */
+  hasResults?: boolean;
 };
 const joinList = (xs: unknown): string | null =>
   Array.isArray(xs) && xs.length > 0 ? xs.join("; ") : null;
+
+/** A CT.gov partial date ("YYYY-MM" or "YYYY-MM-DD"), or null — anything else
+ *  would overflow the VARCHAR(10) column and fail the whole createMany. */
+function ctgovDate(raw: string | undefined): string | null {
+  const t = nonEmpty(raw);
+  return t && /^\d{4}-\d{2}(-\d{2})?$/.test(t) ? t : null;
+}
+
+/** A CT.gov enum value (status, date type), or null when blank or wider than
+ *  its column. */
+function ctgovEnum(raw: string | undefined, max: number): string | null {
+  const t = nonEmpty(raw);
+  return t && t.length <= max ? t : null;
+}
+
+/** "DIETARY_SUPPLEMENT" → "Dietary supplement". */
+export function titleCaseEnum(raw: string): string {
+  const s = raw.trim().toLowerCase().replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** CT.gov interventions → `interventionTypes` ('; '-joined distinct raw type
+ *  enums, first-seen order, e.g. "DRUG; PROCEDURE") and `interventions`
+ *  ('; '-joined distinct "Type: Name" with the type title-cased, e.g.
+ *  "Drug: Venetoclax; Drug: Azacitidine"). CT.gov repeats an intervention once
+ *  per arm, so both lists are deduped. An intervention with no type is stored
+ *  as its bare name. */
+export function formatInterventions(
+  xs: Array<{ type?: string; name?: string }> | undefined,
+): { interventionTypes: string | null; interventions: string | null } {
+  const types = new Set<string>();
+  const items = new Set<string>();
+  for (const x of xs ?? []) {
+    const type = nonEmpty(x.type);
+    const name = nonEmpty(x.name);
+    if (type) types.add(type);
+    if (name) items.add(type ? `${titleCaseEnum(type)}: ${name}` : name);
+  }
+  return {
+    interventionTypes: types.size > 0 ? [...types].join("; ") : null,
+    interventions: items.size > 0 ? [...items].join("; ") : null,
+  };
+}
 
 /** Fetch studies straight from the ClinicalTrials.gov v2 API, 100 ids per call,
  *  so every NCT in the feed is enriched each run (reciterdb's
@@ -223,6 +294,7 @@ export async function fetchCtgovStudies(
         const nct = cleanNct(ps.identificationModule?.nctId ?? null);
         if (!nct) continue;
         const pc = ps.statusModule?.primaryCompletionDateStruct;
+        const sd = ps.statusModule?.startDateStruct;
         studies.set(nct, {
           nctNumber: nct,
           officialTitle: ps.identificationModule?.officialTitle ?? null,
@@ -238,6 +310,13 @@ export async function fetchCtgovStudies(
           primaryCompletionActual: pc?.type === "ACTUAL" ? (pc.date ?? null) : null,
           leadSponsorClass: ps.sponsorCollaboratorsModule?.leadSponsor?.class ?? null,
           leadSponsorName: ps.sponsorCollaboratorsModule?.leadSponsor?.name ?? null,
+          overallStatus: ctgovEnum(ps.statusModule?.overallStatus, 32),
+          startDate: ctgovDate(sd?.date),
+          startDateType: ctgovEnum(sd?.type, 16),
+          primaryCompletionDate: ctgovDate(pc?.date),
+          primaryCompletionDateType: ctgovEnum(pc?.type, 16),
+          hasResults: typeof st.hasResults === "boolean" ? st.hasResults : null,
+          ...formatInterventions(ps.armsInterventionsModule?.interventions),
         });
       }
     } catch (e) {
@@ -308,6 +387,28 @@ export async function loadPriorSponsorClasses(): Promise<Map<string, string | nu
   return new Map(rows.map((t) => [t.protocolNumber, t.sponsorClass]));
 }
 
+const CTGOV_ONLY_KEYS = [
+  "ctgovStatus", "startDate", "startDateType", "primaryCompletionDate",
+  "primaryCompletionDateType", "hasResults", "interventionTypes", "interventions",
+] as const;
+export type CtgovOnlyFields = Pick<TrialBuild, (typeof CTGOV_ONLY_KEYS)[number]>;
+const NO_CTGOV: CtgovOnlyFields = Object.fromEntries(CTGOV_ONLY_KEYS.map((k) => [k, null])) as CtgovOnlyFields;
+
+/** protocolNumber → the CT.gov-only fields stored now. Like the sponsor class, a
+ *  registered trial keeps them when CT.gov could not be read this run (a failed
+ *  batch, or the bridge import), since the table is replaced wholesale. */
+export async function loadPriorCtgovFields(): Promise<Map<string, CtgovOnlyFields>> {
+  const rows = await db.write.clinicalTrial.findMany({
+    select: { protocolNumber: true, ...Object.fromEntries(CTGOV_ONLY_KEYS.map((k) => [k, true])) },
+  });
+  return new Map(
+    rows.map((t) => [
+      t.protocolNumber,
+      Object.fromEntries(CTGOV_ONLY_KEYS.map((k) => [k, (t as Record<string, unknown>)[k] ?? null])) as CtgovOnlyFields,
+    ]),
+  );
+}
+
 /** Join institutional + enriched, dedup to one trial per protocol, build the
  *  per-(cwid, protocol) link. The feed lists the active PI only, so every link is
  *  "Principal Investigator". A live ClinicalTrials.gov study (`ctgov`) wins over
@@ -320,6 +421,7 @@ export function buildTrialsAndLinks(
   now: Date,
   ctgov: { studies: Map<string, CtgovStudy>; complete: boolean } = { studies: new Map(), complete: false },
   priorSponsorClass: ReadonlyMap<string, string | null> = new Map(),
+  priorCtgov: ReadonlyMap<string, CtgovOnlyFields> = new Map(),
 ): { trials: TrialBuild[]; links: LinkBuild[]; stats: BuildStats } {
   const enrichedByNct = new Map<string, EnrichedRow>();
   for (const e of enriched) {
@@ -381,6 +483,20 @@ export function buildTrialsAndLinks(
         meshTerms: nonEmpty(enrichedRow?.meshTerms),
         briefSummary: nonEmpty(enrichedRow?.briefSummary),
         enrollment: cleanInt(enrichedRow?.enrollment ?? null),
+        // CT.gov-only fields. Without a live study they are kept from the stored
+        // row when the fetch was incomplete or never ran, else null.
+        ...(study
+          ? {
+              ctgovStatus: study.overallStatus ?? null,
+              startDate: study.startDate ?? null,
+              startDateType: study.startDateType ?? null,
+              primaryCompletionDate: study.primaryCompletionDate ?? null,
+              primaryCompletionDateType: study.primaryCompletionDateType ?? null,
+              hasResults: study.hasResults ?? null,
+              interventionTypes: study.interventionTypes ?? null,
+              interventions: study.interventions ?? null,
+            }
+          : (nct && !ctgov.complete && priorCtgov.get(protocol)) || NO_CTGOV),
         firstOtaDate: parseLooseDate(r.firstOTADate),
         firstCtaDate: ctaDate(r, nct, study, ctgov.complete),
         enrichmentSource: enrichedRow ? "ClinicalTrials.gov" : null,
