@@ -153,6 +153,8 @@ export function AdminSubnav({
   orcidCoverageTab = false,
   reportsTab = false,
   newsTab = false,
+  pendingNews = null,
+  pendingClips = null,
   coresTab = false,
   viewerIsDeveloper = false,
 }: {
@@ -234,6 +236,11 @@ export function AdminSubnav({
    *  (`/edit/profiles`'s `unitScope !== null` override), showing a News link
    *  that 404s on `isNewsQueueTabVisible`'s actual gate. Default `false`. */
   newsTab?: boolean;
+  /** The News and Media highlights tabs' pills: each queue's Pending count
+   *  (`countPendingNews`). `null` shows the tab with no pill, like
+   *  `pendingTitles`; the tabs themselves ride `newsTab`. */
+  pendingNews?: number | null;
+  pendingClips?: number | null;
   /** Show the "Cores" tab (`/edit/core`) to a non-superuser comms_steward.
    *  Superusers already get it via `superuserSurfaces`; this is the escape
    *  hatch, mirroring `newsTab`/`reportsTab` — 2026-08-26 policy widening
@@ -281,6 +288,7 @@ export function AdminSubnav({
         id: "news-queue",
         href: "/edit/news-queue",
         label: "News",
+        count: pendingNews ?? undefined,
       },
       // Press clips (etl/news/clips.ts) — same reviewers as News, own queue.
       {
@@ -288,6 +296,7 @@ export function AdminSubnav({
         id: "media-highlights-queue",
         href: "/edit/media-highlights-queue",
         label: "Media highlights",
+        count: pendingClips ?? undefined,
       },
       // Display titles needing review (formerly report 10 under Reports). The
       // tab rides the role (`titlesTab`), the pill rides the count, so a

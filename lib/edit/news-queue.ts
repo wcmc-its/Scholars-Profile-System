@@ -603,7 +603,31 @@ export function sortNewsQueueGroups(
   return [...groups].sort(cmp);
 }
 
-/** Count pending mentions — the admin sub-nav's pending-count pill. */
-export function countPendingNews(client: Pick<PrismaClient, "newsMention">): Promise<number> {
-  return client.newsMention.count({ where: { status: "pending" } });
+/**
+ * The console menu's pill for the News / Media highlights queue: the same number
+ * as that queue's Pending tab, i.e. pending rows minus copies that ride on a
+ * pending lead's card (`loadNewsQueue`'s story grouping). Null when the read
+ * fails (logged); never throws, so a failure costs the pill and nothing else.
+ */
+export async function countPendingNews(
+  client: Pick<PrismaClient, "newsMention">,
+  kind: NewsQueueKind = "newsroom",
+): Promise<number | null> {
+  try {
+    const rows = await client.newsMention.findMany({
+      where: { status: "pending", ...kindWhere(kind) },
+      select: { id: true, duplicateOf: true },
+    });
+    const listed = new Set(rows.map((r) => r.id));
+    return rows.filter((r) => !(r.duplicateOf && listed.has(r.duplicateOf))).length;
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "news_pending_count_failed",
+        kind,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return null;
+  }
 }

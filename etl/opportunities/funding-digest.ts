@@ -34,6 +34,7 @@ import {
   type OpportunitySubmission,
 } from "@/lib/edit/opportunity-submission";
 import {
+  attachedEmails,
   htmlToLines,
   readBucketEmails,
   readEmail,
@@ -222,37 +223,41 @@ async function main(): Promise<number> {
   const unparsed: string[] = [];
   const oversized: string[] = [];
   let skipped = 0;
-  for (const { raw, receivedAt } of raws) {
-    const e = readEmail(raw);
-    // Noise filter, not a trust boundary: the drain's judge decides what
-    // becomes an opportunity, and a steward can suppress any submission.
-    const trusted =
-      SUBJECT_RE.test(e.subject) &&
-      (!fromBucket ||
-        (!REPLY_RE.test(e.subject) &&
-          WCM_FROM_RE.test(e.from) &&
-          /\b(spf|dkim)=PASS\b/.test(e.authVerdict) &&
-          e.virusVerdict !== "FAIL" &&
-          e.spamVerdict !== "FAIL"));
-    if (!trusted) {
-      // Unlike clips, submissions go to ReciterAI's fetcher with no human in
-      // between, so bucket mail must also pass SPF or DKIM (the From header is
-      // forgeable). Logged, so a real digest the list server fails auth on is
-      // visible rather than silently lost.
-      if (fromBucket && SUBJECT_RE.test(e.subject)) {
-        console.warn(`[FundingDigest] skipped "${e.subject}" from ${e.from} (${e.authVerdict})`);
+  for (const { raw: delivered, receivedAt } of raws) {
+    const outer = readEmail(delivered);
+    // The delivered email, then any digests attached to it (attachedEmails).
+    for (const raw of [delivered, ...attachedEmails(delivered)]) {
+      const e = raw === delivered ? outer : readEmail(raw);
+      // Noise filter, not a trust boundary: the drain's judge decides what
+      // becomes an opportunity, and a steward can suppress any submission.
+      const trusted =
+        SUBJECT_RE.test(e.subject) &&
+        (!fromBucket ||
+          (!REPLY_RE.test(e.subject) &&
+            WCM_FROM_RE.test(outer.from) &&
+            /\b(spf|dkim)=PASS\b/.test(outer.authVerdict) &&
+            outer.virusVerdict !== "FAIL" &&
+            outer.spamVerdict !== "FAIL"));
+      if (!trusted) {
+        // Unlike clips, submissions go to ReciterAI's fetcher with no human in
+        // between, so bucket mail must also pass SPF or DKIM (the From header is
+        // forgeable). Logged, so a real digest the list server fails auth on is
+        // visible rather than silently lost.
+        if (fromBucket && SUBJECT_RE.test(e.subject)) {
+          console.warn(`[FundingDigest] skipped "${e.subject}" from ${outer.from} (${outer.authVerdict})`);
+        }
+        skipped++;
+        continue;
       }
-      skipped++;
-      continue;
+      const items = parseFundingDigest(raw);
+      if (items.length > MAX_ITEMS_PER_EMAIL) {
+        oversized.push(`${e.subject} (${items.length} items)`);
+        continue;
+      }
+      if (items.length === 0 && Date.now() - receivedAt <= UNPARSED_FAIL_MS) unparsed.push(e.subject);
+      const date = isoDate(e.date, receivedAt);
+      for (const item of items) found.push({ item, date });
     }
-    const items = parseFundingDigest(raw);
-    if (items.length > MAX_ITEMS_PER_EMAIL) {
-      oversized.push(`${e.subject} (${items.length} items)`);
-      continue;
-    }
-    if (items.length === 0 && Date.now() - receivedAt <= UNPARSED_FAIL_MS) unparsed.push(e.subject);
-    const date = isoDate(e.date, receivedAt);
-    for (const item of items) found.push({ item, date });
   }
 
   const corpus = await db.write.opportunity.findMany({ select: { sourceUrl: true } });

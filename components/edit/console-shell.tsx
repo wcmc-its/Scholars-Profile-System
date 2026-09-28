@@ -2,6 +2,11 @@ import { AdminSubnav, type AdminSubnavActive } from "@/components/edit/admin-sub
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { db } from "@/lib/db";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import {
+  countPendingNews,
+  isMediaHighlightsQueueEnabled,
+  isNewsQueueEnabled,
+} from "@/lib/edit/news-queue";
 import { countTitlesNeedingReview } from "@/lib/edit/titles-queue";
 import type { EditSession } from "@/lib/auth/superuser";
 
@@ -75,6 +80,10 @@ export async function ConsoleShell({
     : pendingTitles !== undefined
       ? pendingTitles
       : await countTitlesNeedingReview(db.read);
+  const [newsPill, clipsPill] = await Promise.all([
+    tabs.news && isNewsQueueEnabled() ? countPendingNews(db.read, "newsroom") : null,
+    tabs.news && isMediaHighlightsQueueEnabled() ? countPendingNews(db.read, "clips") : null,
+  ]);
   return (
     <div className="bg-apollo-page min-h-screen">
       {/* Skip link — first focusable element, jumps past the bar's tabs to the page. */}
@@ -100,6 +109,8 @@ export async function ConsoleShell({
           dataSharingTab={tabs.dataSharing ? 0 : null}
           reportsTab={tabs.reports || reportsTab}
           newsTab={tabs.news}
+          pendingNews={newsPill}
+          pendingClips={clipsPill}
           coresTab={tabs.cores}
           usageTab={tabs.usage}
           orcidCoverageTab={tabs.orcidCoverage}

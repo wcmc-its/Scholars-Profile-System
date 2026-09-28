@@ -599,6 +599,25 @@ describe("AdminSubnav — the Titles queue tab (formerly report 10)", () => {
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
+  it("News and Media highlights carry their Pending counts as pills", () => {
+    vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+    vi.stubEnv("MEDIA_HIGHLIGHTS_SECTION", "on");
+    render(
+      <AdminSubnav
+        active="profiles"
+        superuserSurfaces={false}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        newsTab
+        pendingNews={4}
+        pendingClips={null}
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-news-queue").textContent).toBe("News4");
+    // A failed count keeps the tab and drops only the pill.
+    expect(screen.getByTestId("admin-tab-media-highlights-queue").textContent).toBe("Media highlights");
+  });
+
   it("is marked current on its own page", () => {
     render(
       <AdminSubnav active="titles-queue" pendingSlugRequests={null} pendingHonors={null} titlesTab pendingTitles={3} />,
