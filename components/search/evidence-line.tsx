@@ -483,12 +483,15 @@ export function EvidenceLine({
     if (!wantsLazyKeyPaper || keyPaperFetched.current) return;
     keyPaperFetched.current = true;
     setKeyPaperStatus("loading");
-    const params = new URLSearchParams({
-      cwid,
-      q: keyPaperConfig!.contentQuery,
-      descriptorUis: keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","),
-      label: keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""),
-    });
+    const params = new URLSearchParams({ cwid, q: keyPaperConfig!.contentQuery });
+    // The root UI, not the (up to 200-UI) subtree: the list form exceeds the edge WAF's 2 KB
+    // query-string limit and is 403'd. The route rebuilds the identical subtree.
+    if (!keyPaperMentionOnly && keyPaperConfig!.conceptUi) {
+      params.set("conceptUi", keyPaperConfig!.conceptUi);
+    } else {
+      params.set("descriptorUis", keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","));
+    }
+    params.set("label", keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""));
     // MATCHA_GLOSS_INWORDS — suppressed on the mention-only path, which is the ONE path where the
     // redesign's invariant does not hold: `descriptorUis` is blanked just above, so admission falls
     // back to a free-text `multi_match` over title+abstract that an ABSTRACT alone can satisfy — and
@@ -500,7 +503,9 @@ export function EvidenceLine({
     if (!keyPaperMentionOnly && keyPaperConfig!.glossTerms) {
       params.set("glossTerms", keyPaperConfig!.glossTerms);
     }
-    if (!keyPaperMentionOnly && keyPaperConfig!.secondaryDescriptorUis?.length) {
+    if (!keyPaperMentionOnly && keyPaperConfig!.secondaryConceptUi) {
+      params.set("secondaryConceptUi", keyPaperConfig!.secondaryConceptUi);
+    } else if (!keyPaperMentionOnly && keyPaperConfig!.secondaryDescriptorUis?.length) {
       params.set("secondaryUis", keyPaperConfig!.secondaryDescriptorUis.join(","));
     }
     const ex = Array.from(claimedPmids).join(",");
@@ -524,11 +529,10 @@ export function EvidenceLine({
   const ensureGrants = useCallback(() => {
     if (!artifactLead || !keyPaperConfig || grantsFetched.current) return;
     grantsFetched.current = true;
-    const params = new URLSearchParams({
-      q: keyPaperConfig.contentQuery,
-      descriptorUis: keyPaperConfig.descriptorUis.join(","),
-      label: keyPaperConfig.conceptLabel ?? "",
-    });
+    const params = new URLSearchParams({ q: keyPaperConfig.contentQuery });
+    if (keyPaperConfig.conceptUi) params.set("conceptUi", keyPaperConfig.conceptUi);
+    else params.set("descriptorUis", keyPaperConfig.descriptorUis.join(","));
+    params.set("label", keyPaperConfig.conceptLabel ?? "");
     fetch(`/api/scholar/${encodeURIComponent(cwid)}/grants?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { grants: [] }))
       .then((d: { grants?: EvidenceGrant[] }) =>

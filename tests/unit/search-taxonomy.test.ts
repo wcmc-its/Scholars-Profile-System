@@ -43,6 +43,7 @@ vi.mock("@/lib/db", () => ({
 import {
   _clearDescendantsForTests,
   _resetMeshMapForTests,
+  conceptSubtreeUis,
   matchQueryToTaxonomy,
   normalizeForMatch,
   resolveMeshDescriptor,
@@ -2294,5 +2295,42 @@ describe("resolveQueryTaxonomy (#1982) — a curated match no longer blocks the 
     // `Coronary Vessels` shares no token with the dropped `disease`/`patients` — rejected,
     // exactly as it is with no curated match at all.
     expect(taxonomyMatch.meshResolution).toBeNull();
+  });
+});
+
+describe("conceptSubtreeUis — the key-paper/grants routes rebuild the page's subtree", () => {
+  // A broad concept past DESCENDANT_HARD_CAP: the list the card used to put in the URL
+  // (~2.1 KB at 200 UIs) was 403'd by the edge WAF. The card now sends only the root;
+  // the route must rebuild EXACTLY the list the page resolved, or it picks other papers.
+  const root = {
+    descriptorUi: "D002318",
+    name: "Cardiovascular Diseases",
+    entryTerms: ["Cardiovascular Disease"],
+    scopeNote: null,
+    dateRevised: new Date("2024-01-01"),
+    localPubCoverage: null,
+    treeNumbers: ["C14"],
+  };
+  const kids = Array.from({ length: 250 }, (_, i) => ({
+    descriptorUi: `D${String(900000 + i)}`,
+    name: `Kid ${i}`,
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: new Date("2024-01-01"),
+    localPubCoverage: null,
+    treeNumbers: [`C14.${String(100 + i)}`],
+  }));
+
+  it("equals the resolved concept's descendantUis, truncation and order included", async () => {
+    mockMeshFindMany.mockResolvedValue([root, ...kids]);
+    const r = await resolveMeshDescriptor("cardiovascular disease");
+    expect(r?.descendantUis).toHaveLength(200);
+    expect(await conceptSubtreeUis("D002318")).toEqual(r!.descendantUis);
+  });
+
+  it("returns [] for a malformed UI (unauthenticated param)", async () => {
+    mockMeshFindMany.mockResolvedValue([root]);
+    expect(await conceptSubtreeUis("D002318,D1")).toEqual([]);
+    expect(await conceptSubtreeUis("")).toEqual([]);
   });
 });
