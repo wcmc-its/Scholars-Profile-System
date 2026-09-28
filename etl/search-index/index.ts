@@ -47,12 +47,14 @@ import {
   OPPORTUNITY_INDEX_WHERE,
   PEOPLE_INDEX,
   PUBLICATIONS_INDEX,
+  TRIALS_INDEX,
   buildOpportunityDoc,
   fundingIndexMapping,
   opportunitiesIndexMapping,
   peopleIndexMapping,
   publicationsIndexMapping,
   searchClient,
+  trialsIndexMapping,
   type OpportunityIndexRow,
 } from "@/lib/search";
 import {
@@ -69,8 +71,8 @@ import {
   loadOverviewOverrides,
 } from "@/lib/search-index-docs";
 import { isRetryableBulkStatus, resolveBulkConfig } from "@/lib/search-index-bulk";
-import { loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
 import { rebuildAliasedIndex } from "./alias-swap";
+import { loadTrialDocs, loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
 
 // #1413 — people-doc builds per batch. Each buildPeopleDoc issues ~6 serial
 // sidecar queries on the shared Prisma client, so 8 concurrent builds keeps
@@ -400,22 +402,52 @@ async function indexFunding(concreteIndex: string) {
   return docs.length;
 }
 
-type SourceType = "people" | "publications" | "funding" | "opportunities";
+async function indexTrials(concreteIndex: string) {
+  const client = searchClient();
+  const docs = await loadTrialDocs(prisma);
+  if (docs.length === 0) return 0;
+  await bulkIndexDocs(
+    client,
+    concreteIndex,
+    docs.map((doc) => ({ id: doc.trialId, doc: doc as unknown as Record<string, unknown> })),
+    "Trials",
+  );
+  console.log(`  ...indexed ${docs.length} clinical trials`);
+  await client.indices.refresh({ index: concreteIndex });
+  return docs.length;
+}
+
+/** Trials index smoke: non-empty, and MeSH resolution survived (see loadTrialDocs). */
+async function assertTrialsIndexHealth(
+  client: ReturnType<typeof searchClient>,
+  index: string,
+): Promise<void> {
+  const total = await client.count({ index });
+  if (total.body.count === 0) throw new Error("[smoke] scholars-trials index is empty after indexTrials()");
+  const withMesh = await client.count({ index, body: { query: { exists: { field: "meshDescriptorUi" } } } });
+  if (withMesh.body.count === 0) {
+    throw new Error(`[smoke] scholars-trials: 0/${total.body.count} docs carry meshDescriptorUi`);
+  }
+  console.log(`[smoke] scholars-trials: ${withMesh.body.count}/${total.body.count} docs carry meshDescriptorUi`);
+}
+
+type SourceType = "people" | "publications" | "funding" | "opportunities" | "trials";
 
 function parseSelected(argv: string[]): Set<SourceType> {
-  const all: SourceType[] = ["people", "publications", "funding", "opportunities"];
+  const all: SourceType[] = ["people", "publications", "funding", "opportunities", "trials"];
   const flagMap: Record<string, SourceType> = {
     "--people-only": "people",
     "--publications-only": "publications",
     "--funding-only": "funding",
     "--opportunities-only": "opportunities",
+    "--trials-only": "trials",
   };
   const selected = new Set<SourceType>();
   for (const arg of argv) {
     if (arg in flagMap) selected.add(flagMap[arg]);
     else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: tsx etl/search-index/index.ts [--people-only] [--publications-only] [--funding-only] [--opportunities-only]\n" +
+        "Usage: tsx etl/search-index/index.ts [--people-only] [--publications-only] [--funding-only] [--opportunities-only] [--trials-only]\n" +
           "  Flags are additive; pass none to (re)index all three sources.\n" +
           "  Each selected source has its index dropped and recreated; unselected indices are left alone.",
       );
@@ -843,6 +875,34 @@ async function main() {
     );
   }
 
+  // The trials tab is new and flag-gated (SEARCH_TRIALS_TAB), and this step is
+  // tier "abort" in the nightly: a trials failure must not halt the whole run.
+  // A failed rebuild never moves the alias, so the previous index keeps serving.
+  if (selected.has("trials")) {
+    console.log(`Rebuilding ${TRIALS_INDEX} via alias swap...`);
+    try {
+      const { docsIndexed, newIndex, deleted } = await rebuildAliasedIndex({
+        client,
+        alias: TRIALS_INDEX,
+        mapping: trialsIndexMapping,
+        fillFn: indexTrials,
+        preSwapCheck: preSwapGate(client, TRIALS_INDEX, assertTrialsIndexHealth),
+      });
+      counts.trials = docsIndexed;
+      console.log(
+        `  ...swapped ${TRIALS_INDEX} -> ${newIndex}` +
+          (deleted.length > 0 ? ` (pruned ${deleted.join(", ")})` : ""),
+      );
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: "search_index_trials_failed",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+
   // Smoke checks now run inside each preSwapGate against the NEW concrete
   // index before its alias moves — a failing rebuild leaves the previous
   // version serving instead of publishing an empty/broken index.
@@ -852,6 +912,7 @@ async function main() {
   if (counts.publications !== undefined) parts.push(`${counts.publications} publications`);
   if (counts.funding !== undefined) parts.push(`${counts.funding} funding projects`);
   if (counts.opportunities !== undefined) parts.push(`${counts.opportunities} opportunities`);
+  if (counts.trials !== undefined) parts.push(`${counts.trials} clinical trials`);
   console.log(`Indexed ${parts.join(", ")}.`);
 }
 

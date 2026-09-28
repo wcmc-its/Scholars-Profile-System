@@ -2231,6 +2231,10 @@ export class AppStack extends Stack {
         // reindex that writes the fields; before it, the clauses match nothing.
         // resolveSearchPeopleTrialEvidence reads === "on". Staging-first.
         SEARCH_PEOPLE_TRIAL_EVIDENCE: env === "staging" ? "on" : "off",
+        // Clinical trials search tab over the scholars-trials index (built nightly by
+        // search:index). resolveTrialsTab reads === "on". Staging-first; a missing
+        // index hides the tab rather than erroring the page.
+        SEARCH_TRIALS_TAB: env === "staging" ? "on" : "off",
         // #2018 -- concept-arm precedence for the concentration boost above. That boost has
         //   two arms: a CURATED one keyed on taxonomyMatch.areas[0] (area membership) and a
         //   CONCEPT one keyed on the resolved MeSH descendantUis (the query). On master the

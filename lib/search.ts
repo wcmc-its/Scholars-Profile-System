@@ -100,6 +100,7 @@ export const FUNDING_INDEX = "scholars-funding";
 // GrantRecs Phase 2 — funding OPPORTUNITIES (not awarded grants), projected
 // from the `opportunity` MySQL table (itself fed by ReciterAI `GRANT#`).
 export const OPPORTUNITIES_INDEX = "scholars-opportunities";
+export const TRIALS_INDEX = "scholars-trials";
 
 /**
  * Mapping for the people index. Note that authorship-weighted contributions
@@ -1563,3 +1564,33 @@ export function buildOpportunityDoc(
   };
   return { id: row.opportunityId, doc };
 }
+
+/**
+ * Clinical trials tab (SEARCH_TRIALS_TAB). One doc per trial, deduped by NCT
+ * number (the institutional export registers some studies under several
+ * protocol numbers). Built by `loadTrialDocs` (`lib/search-trial-evidence.ts`);
+ * reuses the funding analyzer. `meshDescriptorUi` = CT.gov MeSH resolved to UIs.
+ */
+export const trialsIndexMapping = {
+  settings: fundingIndexMapping.settings,
+  mappings: {
+    properties: {
+      trialId: { type: "keyword" },
+      nctNumber: { type: "keyword" },
+      title: { type: "text", analyzer: "funding_text" },
+      briefSummary: { type: "text", analyzer: "funding_text" },
+      conditions: { type: "text", analyzer: "funding_text" },
+      meshTerms: { type: "text", analyzer: "funding_text" },
+      meshDescriptorUi: { type: "keyword" },
+      piNames: { type: "text", analyzer: "funding_text" },
+      piCwids: { type: "keyword" },
+      pis: { type: "object", enabled: false },
+      status: { type: "keyword" },
+      statusBucket: { type: "keyword" },
+      phase: { type: "keyword" },
+      studyType: { type: "keyword" },
+      sponsorClass: { type: "keyword" },
+      principalSponsor: { type: "keyword" },
+    },
+  },
+};

@@ -85,6 +85,13 @@ import {
 } from "@/lib/api/search-funding";
 import { FUNDING_ROLE_BUCKET_LABEL } from "@/lib/funding-roles";
 import { FundingResultsList } from "@/components/search/funding-results-list";
+import { TrialResultRow } from "@/components/search/trial-result-row";
+import { resolveTrialsTab, searchTrials, type TrialFilters } from "@/lib/api/search-trials";
+import {
+  phaseLabel,
+  sponsorTypeLabel,
+  type SponsorTypeKey,
+} from "@/lib/edit/clinical-trials-report";
 import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
 import {
@@ -184,7 +191,10 @@ function SearchShellSkeleton() {
 async function SearchBody({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
-  const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
+  const rawType = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
+  // Clinical trials tab (SEARCH_TRIALS_TAB). Off ⇒ `?type=trials` falls back to people.
+  const trialsOn = resolveTrialsTab();
+  const type = rawType === "trials" && !trialsOn ? "people" : rawType;
   // Issue #1513 — the A–Z directory overflow link ("View all N scholars with
   // last name starting with X") passes a single last-name initial. Validated to
   // one A–Z letter; anything else is ignored (falls back to normal browse).
@@ -387,6 +397,17 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   if (fundingFilters.status && fundingFilters.status.length === 0)
     fundingFilters.status = undefined;
   if (fundingFilters.role && fundingFilters.role.length === 0) fundingFilters.role = undefined;
+  // Trials tab filters — own param names so a Funding `status` never leaks in.
+  const listParam = (k: string) => {
+    const v = sp[k];
+    const arr = (Array.isArray(v) ? v : v ? [v] : []).filter(Boolean);
+    return arr.length > 0 ? arr : undefined;
+  };
+  const trialFilters: TrialFilters = {
+    status: listParam("trialStatus"),
+    phase: listParam("phase"),
+    sponsorClass: listParam("sponsor"),
+  };
 
   // Pub filters.
   const yearMin = parseOptionalInt(sp.yearMin);
@@ -656,6 +677,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   activePeoplePromise?.catch(() => {});
   activePubsPromise?.catch(() => {});
   activeFundingPromise?.catch(() => {});
+  const activeTrialsPromise =
+    type === "trials"
+      ? searchTrials({ q, page, filters: trialFilters, meshResolution: effectiveMeshResolution, scope })
+      : null;
+  activeTrialsPromise?.catch(() => {});
 
   // Tab badge counts for all three corpora, count-only (size:0, no aggs, no
   // hydration). The active tab's hits + facets come from the hoisted full search
@@ -664,7 +690,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // computed from the same query predicate, so these badge counts equal a full
   // search.
   const searchesStart = performance.now();
-  const [peopleResult, pubsResult, fundingResult] = await Promise.all([
+  const [peopleResult, pubsResult, fundingResult, trialsResult] = await Promise.all([
     cachedReasonAgg(badgeCountKey("people", q, scope), () =>
       searchPeople({
       q,
@@ -772,6 +798,16 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       countOnly: true,
       }),
     ),
+    // Trials badge — uncached: a count on a few-thousand-doc index. Fails soft
+    // (no tab) so a missing `scholars-trials` index can't take down the page.
+    trialsOn
+      ? searchTrials({ q, filters: trialFilters, meshResolution: effectiveMeshResolution, scope, countOnly: true }).catch(
+          (err) => {
+            console.error(JSON.stringify({ event: "search_trials_badge_failed", error: String(err) }));
+            return null;
+          },
+        )
+      : Promise.resolve(null),
   ]).catch((err) => {
     // #668 §3 — an OpenSearch outage on the shell's badge-count fetch is logged
     // as a structured, server-side `search_degraded` event before it bubbles to
@@ -845,6 +881,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           peopleCount={peopleResult.total}
           pubCount={pubsResult.total}
           fundingCount={fundingResult.total}
+          trialsCount={trialsResult?.total ?? null}
           scope={scope}
         />
         {showAZ && azBuckets ? (
@@ -873,7 +910,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 type={
                   type === "publications"
                     ? "publications"
-                    : type === "funding"
+                    : type === "funding" || type === "trials"
                       ? "funding"
                       : "people"
                 }
@@ -903,6 +940,15 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
+              />
+            ) : type === "trials" ? (
+              <TrialsResults
+                q={q}
+                filters={trialFilters}
+                scope={scope}
+                concept={concept}
+                scopeHrefs={scopeHrefs}
+                resultPromise={activeTrialsPromise!}
               />
             ) : type === "funding" ? (
               <FundingResults
@@ -1022,6 +1068,7 @@ function ModeTabs({
   peopleCount,
   pubCount,
   fundingCount,
+  trialsCount,
   scope,
 }: {
   q: string;
@@ -1029,6 +1076,8 @@ function ModeTabs({
   peopleCount: number;
   pubCount: number;
   fundingCount: number;
+  /** Null ⇒ SEARCH_TRIALS_TAB off, no tab. */
+  trialsCount: number | null;
   scope: Scope;
 }) {
   // Carry the active match-scope across tab switches (default `expanded` omitted).
@@ -1041,7 +1090,7 @@ function ModeTabs({
   const pubHref = tabHref("publications");
   const fundingHref = tabHref("funding");
   return (
-    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 overflow-x-auto border-b border-[#e3e2dd] px-6">
       <ModeTab
         href={peopleHref}
         label="Scholars"
@@ -1060,6 +1109,14 @@ function ModeTabs({
         count={fundingCount}
         active={activeType === "funding"}
       />
+      {trialsCount !== null ? (
+        <ModeTab
+          href={tabHref("trials")}
+          label="Clinical trials"
+          count={trialsCount}
+          active={activeType === "trials"}
+        />
+      ) : null}
     </nav>
   );
 }
@@ -1082,7 +1139,7 @@ function ModeTab({
       href={href}
       scroll={false}
       title={title}
-      className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
+      className={`-mb-px inline-flex h-[42px] shrink-0 items-center gap-2 border-b-2 px-4 text-[13px] whitespace-nowrap transition-colors ${
         active
           ? "border-[#2c4f6e] font-semibold text-[#2c4f6e]"
           : "border-transparent font-medium text-[#4a4a4a] hover:text-[#1a1a1a]"
@@ -2319,6 +2376,124 @@ async function FundingResults({
               },
               { resetPage: false },
             )
+          }
+        />
+      </section>
+    </>
+  );
+}
+
+/* ============================================================
+ * Clinical trials tab content (SEARCH_TRIALS_TAB)
+ * ============================================================ */
+const TRIAL_STATUS_LABEL: Record<string, string> = { active: "Active", completed: "Completed" };
+const TRIAL_AXES = [
+  { axis: "status", param: "trialStatus", label: "Status", name: (v: string) => TRIAL_STATUS_LABEL[v] ?? v },
+  { axis: "phase", param: "phase", label: "Phase", name: (v: string) => phaseLabel(v) },
+  { axis: "sponsorClass", param: "sponsor", label: "Sponsor type", name: (v: string) => sponsorTypeLabel(v as SponsorTypeKey) },
+] as const;
+
+async function TrialsResults({
+  q,
+  filters,
+  scope,
+  concept,
+  scopeHrefs,
+  resultPromise,
+}: {
+  q: string;
+  filters: TrialFilters;
+  scope: Scope;
+  concept: ConceptInfo | null;
+  scopeHrefs: Record<Scope, string>;
+  resultPromise: ReturnType<typeof searchTrials>;
+}) {
+  const result = await resultPromise;
+  // Page is dropped on every filter change; Pagination sets it explicitly.
+  const buildUrl = (mut: (sp: URLSearchParams) => void) => {
+    const sp = new URLSearchParams({ q, type: "trials" });
+    for (const { axis, param } of TRIAL_AXES) for (const v of filters[axis] ?? []) sp.append(param, v);
+    if (scope !== "expanded") sp.set("match", scope);
+    mut(sp);
+    return `/search?${sp.toString()}`;
+  };
+  const toggleHref = (param: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(param);
+      sp.delete(param);
+      const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+      for (const v of next) sp.append(param, v);
+    });
+  const clearAllHref = buildUrl((sp) => TRIAL_AXES.forEach(({ param }) => sp.delete(param)));
+  const chips = TRIAL_AXES.flatMap(({ axis, param, name }) =>
+    (filters[axis] ?? []).map((v) => ({ label: name(v), removeHref: toggleHref(param, v) })),
+  );
+
+  return (
+    <>
+      <aside className="text-[13px]">
+        <div className="mb-4 flex items-baseline justify-between">
+          <span className="text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Filters
+          </span>
+          {chips.length > 0 ? (
+            <Link href={clearAllHref} scroll={false} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+              Clear all
+            </Link>
+          ) : null}
+        </div>
+        {TRIAL_AXES.map(({ axis, param, label, name }) =>
+          result.facets[axis].length > 0 ? (
+            <FacetGroup key={axis} label={label}>
+              {sortActiveFirst(result.facets[axis], (b) => (filters[axis] ?? []).includes(b.value)).map((b) => (
+                <FacetCheckbox
+                  key={b.value}
+                  label={name(b.value)}
+                  count={b.count}
+                  isActive={(filters[axis] ?? []).includes(b.value)}
+                  href={toggleHref(param, b.value)}
+                />
+              ))}
+            </FacetGroup>
+          ) : null,
+        )}
+      </aside>
+      <section className="min-w-0">
+        {concept ? (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <ScopeNote scope={scope} query={q} concept={concept} />
+            <ScopeControl active={scope} hrefs={scopeHrefs} />
+          </div>
+        ) : null}
+        {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
+        <div className="mb-2 text-[13px] text-muted-foreground">
+          {result.total === 0
+            ? "No results"
+            : `Showing ${result.page * result.pageSize + 1}–${Math.min(
+                (result.page + 1) * result.pageSize,
+                result.total,
+              )} of ${result.total.toLocaleString()}`}
+        </div>
+        {result.hits.length === 0 ? (
+          <EmptyState query={q} tip="Try broadening the query or removing filters." />
+        ) : (
+          <ul>
+            {result.hits.map((hit) => (
+              <li key={hit.trialId}>
+                <TrialResultRow hit={hit} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <Pagination
+          page={result.page}
+          total={result.total}
+          pageSize={result.pageSize}
+          buildHref={(p) =>
+            buildUrl((sp) => {
+              if (p > 0) sp.set("page", String(p));
+              else sp.delete("page");
+            })
           }
         />
       </section>
