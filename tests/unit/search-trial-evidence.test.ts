@@ -75,17 +75,23 @@ describe("loadTrialDocs", () => {
     conditions: null,
     meshTerms: null,
     briefSummary: null,
-    investigators: [] as Array<{ cwid: string; scholar: { preferredName: string; slug: string } }>,
+    investigators: [] as Array<{
+      cwid: string;
+      scholar: { preferredName: string; slug: string; primaryDepartment: string | null };
+    }>,
     ...over,
   });
-  const pi = (cwid: string) => ({ cwid, scholar: { preferredName: `Dr ${cwid}`, slug: cwid } });
+  const pi = (cwid: string, dept: string | null = "Medicine") => ({
+    cwid,
+    scholar: { preferredName: `Dr ${cwid}`, slug: cwid, primaryDepartment: dept },
+  });
   const clientOf = (rows: unknown[]) => ({ clinicalTrial: { findMany: async () => rows } }) as never;
 
   it("dedupes protocols sharing an NCT, merges PIs, maps phase/sponsor/status", async () => {
     const docs = await loadTrialDocs(
       clientOf([
         trial({ protocolNumber: "P1", nctNumber: "NCT1", meshTerms: "Leukemia", investigators: [pi("a")] }),
-        trial({ protocolNumber: "P2", nctNumber: "NCT1", investigators: [pi("a"), pi("b")] }),
+        trial({ protocolNumber: "P2", nctNumber: "NCT1", investigators: [pi("a"), pi("b", "Pediatrics")] }),
         trial({ protocolNumber: "P3", status: "IRB STUDY CLOSURE", phase: null, sponsorClass: null, investigators: [pi("c")] }),
       ]),
       resolver({ Leukemia: "D007938" }),
@@ -98,8 +104,17 @@ describe("loadTrialDocs", () => {
       statusBucket: "active",
       phase: "2",
       sponsorClass: "industry",
+      studyTypeKeys: ["interventional"],
+      departments: ["Medicine", "Pediatrics"],
+      meshLabels: ["Leukemia"],
     });
-    expect(docs[1]).toMatchObject({ statusBucket: "completed", phase: "nr", sponsorClass: "unknown" });
+    // No NCT ⇒ the "Not on ClinicalTrials.gov" study-type option.
+    expect(docs[1]).toMatchObject({
+      statusBucket: "completed",
+      phase: "nr",
+      sponsorClass: "unknown",
+      studyTypeKeys: ["interventional", "not_ctgov"],
+    });
   });
 
   it("drops trials the profile hides", async () => {

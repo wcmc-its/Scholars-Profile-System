@@ -1,5 +1,5 @@
 /**
- * Clinical trials search tab (SEARCH_TRIALS_TAB) over `scholars-trials`.
+ * Clinical research search tab (SEARCH_TRIALS_TAB) over `scholars-trials`.
  *
  * Text match on title / conditions / MeSH labels / summary / PI names, plus the
  * resolved MeSH concept on `meshDescriptorUi` (CT.gov MeSH, NLM-assigned). Scope
@@ -15,23 +15,50 @@ import type { TrialDoc } from "@/lib/search-trial-evidence";
 const PAGE_SIZE = 20;
 
 export type TrialStatusBucket = "active" | "completed";
-export type TrialFilters = { status?: string[]; phase?: string[]; sponsorClass?: string[] };
+export type TrialSort = "relevance" | "active";
+export const TRIAL_AXES = ["status", "studyType", "phase", "investigator", "department", "condition", "sponsorClass"] as const;
+export type TrialAxis = (typeof TRIAL_AXES)[number];
+export type TrialFilters = Partial<Record<TrialAxis, string[]>>;
+/** Text fields a hit can match on (highlight keys), for the row's match line. */
+export type TrialMatchField = "title" | "conditions" | "meshTerms" | "piNames" | "briefSummary";
 export type TrialHit = Pick<
   TrialDoc,
-  "trialId" | "nctNumber" | "title" | "status" | "statusBucket" | "phase" | "sponsorClass" | "principalSponsor" | "pis" | "conditions"
->;
-type Bucket = { value: string; count: number };
+  | "trialId"
+  | "nctNumber"
+  | "title"
+  | "status"
+  | "statusBucket"
+  | "phase"
+  | "studyType"
+  | "sponsorClass"
+  | "principalSponsor"
+  | "pis"
+  | "conditions"
+> & { matchedConcept: boolean; matchedFields: TrialMatchField[] };
+/** `label` is set where the key isn't display text (investigator = cwid). */
+export type TrialBucket = { value: string; count: number; label?: string };
 export type TrialSearchResult = {
   hits: TrialHit[];
   total: number;
   page: number;
   pageSize: number;
-  facets: { status: Bucket[]; phase: Bucket[]; sponsorClass: Bucket[] };
+  facets: Record<TrialAxis, TrialBucket[]>;
 };
 
-const AXES = ["status", "phase", "sponsorClass"] as const;
-type Axis = (typeof AXES)[number];
-const FIELD: Record<Axis, string> = { status: "statusBucket", phase: "phase", sponsorClass: "sponsorClass" };
+const FIELD: Record<TrialAxis, string> = {
+  status: "statusBucket",
+  studyType: "studyTypeKeys",
+  phase: "phase",
+  investigator: "piCwids",
+  department: "departments",
+  condition: "meshLabels",
+  sponsorClass: "sponsorClass",
+};
+const SOURCE = [
+  "trialId", "nctNumber", "title", "status", "statusBucket", "phase", "studyType",
+  "sponsorClass", "principalSponsor", "pis", "conditions",
+];
+const MATCH_FIELDS: TrialMatchField[] = ["title", "conditions", "meshTerms", "piNames", "briefSummary"];
 
 export function resolveTrialsTab(): boolean {
   return process.env.SEARCH_TRIALS_TAB === "on";
@@ -46,18 +73,23 @@ export function buildTrialsQuery(q: string, meshResolution: MeshResolution | nul
       fields: ["title^4", "conditions^3", "meshTerms^2", "piNames^2", "briefSummary^1"],
       type: "best_fields" as const,
       operator: "and" as const,
+      _name: "text",
     },
   };
   const uis = meshResolution?.descendantUis ?? [];
   if (uis.length === 0 || scope === "exact") return text;
-  const concept = { terms: { meshDescriptorUi: uis, boost: 4 } };
+  const concept = { terms: { meshDescriptorUi: uis, boost: 4, _name: "concept" } };
   if (scope === "concept") return concept;
   return { bool: { should: [text, concept], minimum_should_match: 1 } };
 }
 
+const emptyFacets = () =>
+  Object.fromEntries(TRIAL_AXES.map((a) => [a, []])) as unknown as Record<TrialAxis, TrialBucket[]>;
+
 export async function searchTrials(opts: {
   q: string;
   page?: number;
+  sort?: TrialSort;
   filters?: TrialFilters;
   meshResolution?: MeshResolution | null;
   scope?: Scope;
@@ -67,10 +99,10 @@ export async function searchTrials(opts: {
   const filters = opts.filters ?? {};
   const query = buildTrialsQuery(opts.q, opts.meshResolution, opts.scope ?? "expanded");
   const clauses = Object.fromEntries(
-    AXES.filter((a) => filters[a]?.length).map((a) => [a, { terms: { [FIELD[a]]: filters[a] } }]),
-  ) as Partial<Record<Axis, Record<string, unknown>>>;
-  const except = (axis?: Axis) =>
-    AXES.filter((a) => a !== axis && clauses[a]).map((a) => clauses[a]!);
+    TRIAL_AXES.filter((a) => filters[a]?.length).map((a) => [a, { terms: { [FIELD[a]]: filters[a] } }]),
+  ) as Partial<Record<TrialAxis, Record<string, unknown>>>;
+  const except = (axis?: TrialAxis) =>
+    TRIAL_AXES.filter((a) => a !== axis && clauses[a]).map((a) => clauses[a]!);
 
   const client = searchClient();
   if (opts.countOnly) {
@@ -78,9 +110,13 @@ export async function searchTrials(opts: {
       index: TRIALS_INDEX,
       body: { query: { bool: { must: [query], filter: except() } } },
     });
-    return { hits: [], total: r.body.count, page, pageSize: PAGE_SIZE, facets: { status: [], phase: [], sponsorClass: [] } };
+    return { hits: [], total: r.body.count, page, pageSize: PAGE_SIZE, facets: emptyFacets() };
   }
 
+  // Relevance breaks ties active-first; "Active first" leads with it ("active" < "completed").
+  const active = { statusBucket: "asc" as const };
+  const tie = { trialId: "asc" as const };
+  const sort = opts.sort === "active" ? [active, "_score", tie] : ["_score", active, tie];
   const r = await client.search({
     index: TRIALS_INDEX,
     body: {
@@ -89,28 +125,60 @@ export async function searchTrials(opts: {
       track_total_hits: true,
       query,
       post_filter: { bool: { filter: except() } },
-      // Relevance, then active before completed ("active" < "completed").
-      sort: ["_score", { statusBucket: "asc" }, { trialId: "asc" }],
-      _source: ["trialId", "nctNumber", "title", "status", "statusBucket", "phase", "sponsorClass", "principalSponsor", "pis", "conditions"],
+      sort,
+      _source: SOURCE,
+      // Only which fields matched is read (the row's match line), not fragments.
+      highlight: {
+        fields: Object.fromEntries(MATCH_FIELDS.map((f) => [f, { number_of_fragments: 1, fragment_size: 1 }])),
+      },
       aggs: Object.fromEntries(
-        AXES.map((a) => [
+        TRIAL_AXES.map((a) => [
           a,
-          { filter: { bool: { filter: except(a) } }, aggs: { keys: { terms: { field: FIELD[a], size: 20 } } } },
+          {
+            filter: { bool: { filter: except(a) } },
+            aggs: {
+              keys: {
+                terms: { field: FIELD[a], size: a === "investigator" || a === "condition" || a === "department" ? 50 : 20 },
+                // PI names aren't indexed as keywords; one doc's `pis` carries the label.
+                ...(a === "investigator" ? { aggs: { doc: { top_hits: { size: 1, _source: ["pis"] } } } } : {}),
+              },
+            },
+          },
         ]),
       ),
     },
   });
-  const body = r.body as unknown as {
-    hits: { total: { value: number }; hits: Array<{ _source: TrialHit }> };
-    aggregations: Record<Axis, { keys: { buckets: Array<{ key: string; doc_count: number }> } }>;
+  type RawBucket = {
+    key: string;
+    doc_count: number;
+    doc?: { hits: { hits: Array<{ _source: Pick<TrialDoc, "pis"> }> } };
   };
-  const buckets = (a: Axis): Bucket[] =>
-    body.aggregations[a].keys.buckets.map((b) => ({ value: b.key, count: b.doc_count }));
+  const body = r.body as unknown as {
+    hits: {
+      total: { value: number };
+      hits: Array<{ _source: TrialHit; matched_queries?: string[]; highlight?: Record<string, string[]> }>;
+    };
+    aggregations: Record<TrialAxis, { keys: { buckets: RawBucket[] } }>;
+  };
+  const facets = emptyFacets();
+  for (const a of TRIAL_AXES) {
+    facets[a] = body.aggregations[a].keys.buckets.map((b) => ({
+      value: b.key,
+      count: b.doc_count,
+      ...(a === "investigator"
+        ? { label: b.doc?.hits.hits[0]?._source.pis.find((p) => p.cwid === b.key)?.name ?? b.key }
+        : {}),
+    }));
+  }
   return {
-    hits: body.hits.hits.map((h) => h._source),
+    hits: body.hits.hits.map((h) => ({
+      ...h._source,
+      matchedConcept: (h.matched_queries ?? []).includes("concept"),
+      matchedFields: MATCH_FIELDS.filter((f) => h.highlight?.[f]),
+    })),
     total: body.hits.total.value,
     page,
     pageSize: PAGE_SIZE,
-    facets: { status: buckets("status"), phase: buckets("phase"), sponsorClass: buckets("sponsorClass") },
+    facets,
   };
 }

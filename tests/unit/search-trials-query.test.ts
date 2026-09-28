@@ -3,7 +3,7 @@ import { buildTrialsQuery } from "@/lib/api/search-trials";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 const mesh = { descendantUis: ["D1", "D2"] } as MeshResolution;
-const concept = { terms: { meshDescriptorUi: ["D1", "D2"], boost: 4 } };
+const concept = { terms: { meshDescriptorUi: ["D1", "D2"], boost: 4, _name: "concept" } };
 
 describe("buildTrialsQuery", () => {
   it("empty query browses everything", () => {

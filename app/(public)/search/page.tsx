@@ -85,8 +85,15 @@ import {
 } from "@/lib/api/search-funding";
 import { FUNDING_ROLE_BUCKET_LABEL } from "@/lib/funding-roles";
 import { FundingResultsList } from "@/components/search/funding-results-list";
-import { TrialResultRow } from "@/components/search/trial-result-row";
-import { resolveTrialsTab, searchTrials, type TrialFilters } from "@/lib/api/search-trials";
+import { TrialResultRow, studyTypeLabel } from "@/components/search/trial-result-row";
+import { ScrollActiveTab } from "@/components/search/scroll-active-tab";
+import {
+  resolveTrialsTab,
+  searchTrials,
+  type TrialAxis,
+  type TrialFilters,
+  type TrialSort,
+} from "@/lib/api/search-trials";
 import {
   phaseLabel,
   sponsorTypeLabel,
@@ -403,11 +410,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     const arr = (Array.isArray(v) ? v : v ? [v] : []).filter(Boolean);
     return arr.length > 0 ? arr : undefined;
   };
-  const trialFilters: TrialFilters = {
-    status: listParam("trialStatus"),
-    phase: listParam("phase"),
-    sponsorClass: listParam("sponsor"),
-  };
+  const trialFilters: TrialFilters = Object.fromEntries(
+    TRIAL_AXIS_PARAMS.map(({ axis, param }) => [axis, listParam(param)]),
+  );
 
   // Pub filters.
   const yearMin = parseOptionalInt(sp.yearMin);
@@ -687,7 +692,14 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   activeFundingPromise?.catch(() => {});
   const activeTrialsPromise =
     type === "trials"
-      ? searchTrials({ q, page, filters: trialFilters, meshResolution: effectiveMeshResolution, scope })
+      ? searchTrials({
+          q,
+          page,
+          sort: sort === "active" ? "active" : "relevance",
+          filters: trialFilters,
+          meshResolution: effectiveMeshResolution,
+          scope,
+        })
       : null;
   activeTrialsPromise?.catch(() => {});
 
@@ -952,6 +964,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             ) : type === "trials" ? (
               <TrialsResults
                 q={q}
+                sort={sort === "active" ? "active" : "relevance"}
                 filters={trialFilters}
                 scope={scope}
                 concept={concept}
@@ -1125,6 +1138,7 @@ function ModeTabs({
           active={activeType === "trials"}
         />
       ) : null}
+      <ScrollActiveTab activeKey={activeType} />
     </nav>
   );
 }
@@ -1147,6 +1161,7 @@ function ModeTab({
       href={href}
       scroll={false}
       title={title}
+      aria-current={active ? "page" : undefined}
       className={`-mb-px inline-flex h-[42px] shrink-0 items-center gap-2 border-b-2 px-4 text-[13px] whitespace-nowrap transition-colors ${
         active
           ? "border-[#2c4f6e] font-semibold text-[#2c4f6e]"
@@ -2395,14 +2410,27 @@ async function FundingResults({
  * Clinical trials tab content (SEARCH_TRIALS_TAB)
  * ============================================================ */
 const TRIAL_STATUS_LABEL: Record<string, string> = { active: "Active", completed: "Completed" };
-const TRIAL_AXES = [
-  { axis: "status", param: "trialStatus", label: "Status", name: (v: string) => TRIAL_STATUS_LABEL[v] ?? v },
-  { axis: "phase", param: "phase", label: "Phase", name: (v: string) => phaseLabel(v) },
-  { axis: "sponsorClass", param: "sponsor", label: "Sponsor type", name: (v: string) => sponsorTypeLabel(v as SponsorTypeKey) },
-] as const;
+const trialStudyTypeName = (v: string) => (v === "not_ctgov" ? "Not on ClinicalTrials.gov" : studyTypeLabel(v));
+/** Facet order per the mockup (D4). Own param names so another tab's filters never leak in. */
+const TRIAL_AXIS_PARAMS: ReadonlyArray<{
+  axis: TrialAxis;
+  param: string;
+  label: string;
+  name: (v: string) => string;
+  collapseAfter?: number;
+}> = [
+  { axis: "status", param: "trialStatus", label: "Status", name: (v) => TRIAL_STATUS_LABEL[v] ?? v },
+  { axis: "studyType", param: "studyType", label: "Study type", name: trialStudyTypeName },
+  { axis: "phase", param: "phase", label: "Phase", name: (v) => phaseLabel(v) },
+  { axis: "investigator", param: "investigator", label: "Investigator", name: (v) => v, collapseAfter: 5 },
+  { axis: "department", param: "trialDept", label: "Department", name: (v) => v, collapseAfter: 5 },
+  { axis: "condition", param: "condition", label: "Condition", name: (v) => v, collapseAfter: 5 },
+  { axis: "sponsorClass", param: "sponsor", label: "Sponsor type", name: (v) => sponsorTypeLabel(v as SponsorTypeKey) },
+];
 
 async function TrialsResults({
   q,
+  sort,
   filters,
   scope,
   concept,
@@ -2410,6 +2438,7 @@ async function TrialsResults({
   resultPromise,
 }: {
   q: string;
+  sort: TrialSort;
   filters: TrialFilters;
   scope: Scope;
   concept: ConceptInfo | null;
@@ -2420,8 +2449,9 @@ async function TrialsResults({
   // Page is dropped on every filter change; Pagination sets it explicitly.
   const buildUrl = (mut: (sp: URLSearchParams) => void) => {
     const sp = new URLSearchParams({ q, type: "trials" });
-    for (const { axis, param } of TRIAL_AXES) for (const v of filters[axis] ?? []) sp.append(param, v);
+    for (const { axis, param } of TRIAL_AXIS_PARAMS) for (const v of filters[axis] ?? []) sp.append(param, v);
     if (scope !== "expanded") sp.set("match", scope);
+    if (sort !== "relevance") sp.set("sort", sort);
     mut(sp);
     return `/search?${sp.toString()}`;
   };
@@ -2432,10 +2462,20 @@ async function TrialsResults({
       const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
       for (const v of next) sp.append(param, v);
     });
-  const clearAllHref = buildUrl((sp) => TRIAL_AXES.forEach(({ param }) => sp.delete(param)));
-  const chips = TRIAL_AXES.flatMap(({ axis, param, name }) =>
-    (filters[axis] ?? []).map((v) => ({ label: name(v), removeHref: toggleHref(param, v) })),
+  const clearAllHref = buildUrl((sp) => TRIAL_AXIS_PARAMS.forEach(({ param }) => sp.delete(param)));
+  // Investigator keys are cwids; the facet buckets carry the names.
+  const bucketLabel = (axis: TrialAxis, v: string, name: (v: string) => string) =>
+    result.facets[axis].find((b) => b.value === v)?.label ?? name(v);
+  const chips = TRIAL_AXIS_PARAMS.flatMap(({ axis, param, name }) =>
+    (filters[axis] ?? []).map((v) => ({ label: bucketLabel(axis, v, name), removeHref: toggleHref(param, v) })),
   );
+  const sortOptions = [
+    { value: "relevance", label: "Relevance" },
+    { value: "active", label: "Active first" },
+  ].map((o) => ({
+    ...o,
+    href: buildUrl((sp) => (o.value === "relevance" ? sp.delete("sort") : sp.set("sort", o.value))),
+  }));
 
   return (
     <>
@@ -2450,13 +2490,18 @@ async function TrialsResults({
             </Link>
           ) : null}
         </div>
-        {TRIAL_AXES.map(({ axis, param, label, name }) =>
+        {TRIAL_AXIS_PARAMS.map(({ axis, param, label, name, collapseAfter }) =>
           result.facets[axis].length > 0 ? (
-            <FacetGroup key={axis} label={label}>
-              {sortActiveFirst(result.facets[axis], (b) => (filters[axis] ?? []).includes(b.value)).map((b) => (
+            <FacetGroup key={axis} label={label} collapseAfter={collapseAfter}>
+              {sortActiveFirst(
+                // "Not on ClinicalTrials.gov" trails the real study types.
+                [...result.facets[axis]].sort((a, b) => Number(a.value === "not_ctgov") - Number(b.value === "not_ctgov")),
+                (b) => (filters[axis] ?? []).includes(b.value),
+              ).map((b) => (
                 <FacetCheckbox
                   key={b.value}
-                  label={name(b.value)}
+                  label={b.label ?? name(b.value)}
+                  wrap
                   count={b.count}
                   isActive={(filters[axis] ?? []).includes(b.value)}
                   href={toggleHref(param, b.value)}
@@ -2474,13 +2519,21 @@ async function TrialsResults({
           </div>
         ) : null}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
-        <div className="mb-2 text-[13px] text-muted-foreground">
-          {result.total === 0
-            ? "No results"
-            : `Showing ${result.page * result.pageSize + 1}–${Math.min(
-                (result.page + 1) * result.pageSize,
-                result.total,
-              )} of ${result.total.toLocaleString()}`}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted-foreground">
+          <span>
+            {result.total === 0
+              ? "No results"
+              : `Showing ${result.page * result.pageSize + 1}–${Math.min(
+                  (result.page + 1) * result.pageSize,
+                  result.total,
+                )} of ${result.total.toLocaleString()} ${result.total === 1 ? "study" : "studies"}`}
+          </span>
+          {result.total > 0 ? (
+            <span className="inline-flex items-center gap-2 text-[#4a4a4a]">
+              Sort:
+              <SortLinks current={sort} options={sortOptions} />
+            </span>
+          ) : null}
         </div>
         {result.hits.length === 0 ? (
           <EmptyState query={q} tip="Try broadening the query or removing filters." />
@@ -2488,7 +2541,7 @@ async function TrialsResults({
           <ul>
             {result.hits.map((hit) => (
               <li key={hit.trialId}>
-                <TrialResultRow hit={hit} />
+                <TrialResultRow hit={hit} q={q} conceptLabel={concept?.label ?? null} />
               </li>
             ))}
           </ul>

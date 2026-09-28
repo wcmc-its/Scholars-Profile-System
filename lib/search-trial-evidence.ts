@@ -34,6 +34,12 @@ export type TrialDoc = {
   statusBucket: "active" | "completed";
   phase: string;
   studyType: string | null;
+  /** Study type facet keys: normalized CT.gov study type, plus `not_ctgov` for OnCore-only protocols. */
+  studyTypeKeys: string[];
+  /** Distinct primary departments of the listed PIs. */
+  departments: string[];
+  /** MeSH condition labels as keywords (the Condition facet). */
+  meshLabels: string[];
   sponsorClass: string;
   principalSponsor: string | null;
 };
@@ -58,6 +64,11 @@ function assertSomeResolved(what: string, uiByLabel: Map<string, string | null>)
   if (uiByLabel.size > 0 && ![...uiByLabel.values()].some(Boolean)) {
     throw new Error(`${what}: none of ${uiByLabel.size} MeSH labels resolved — MeSH map unavailable?`);
   }
+}
+
+/** "INTERVENTIONAL" / "Interventional" / "Expanded Access" → "interventional" / "expanded_access". */
+export function studyTypeKey(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
 }
 
 export function splitTrialList(raw: string | null): string[] {
@@ -131,7 +142,7 @@ export async function loadTrialDocs(
       briefSummary: true,
       investigators: {
         where: { scholar: PEOPLE_INDEX_WHERE },
-        select: { cwid: true, scholar: { select: { preferredName: true, slug: true } } },
+        select: { cwid: true, scholar: { select: { preferredName: true, slug: true, primaryDepartment: true } } },
       },
     },
     orderBy: { protocolNumber: "asc" },
@@ -165,6 +176,12 @@ export async function loadTrialDocs(
         statusBucket: isActiveTrialStatus(t.status) ? "active" : "completed",
         phase: phaseKey(t.phase),
         studyType: t.studyType,
+        studyTypeKeys: [
+          ...(t.studyType ? [studyTypeKey(t.studyType)] : []),
+          ...(t.nctNumber ? [] : ["not_ctgov"]),
+        ],
+        departments: [],
+        meshLabels: labels,
         sponsorClass: sponsorTypeKey(t.sponsorClass),
         principalSponsor: t.principalSponsor,
       };
@@ -174,6 +191,8 @@ export async function loadTrialDocs(
       if (doc.piCwids.includes(inv.cwid)) continue;
       doc.piCwids.push(inv.cwid);
       doc.pis.push({ cwid: inv.cwid, name: inv.scholar.preferredName, slug: inv.scholar.slug });
+      const dept = inv.scholar.primaryDepartment;
+      if (dept && !doc.departments.includes(dept)) doc.departments.push(dept);
     }
   }
   assertSomeResolved("trial docs", mesh.uiByLabel);
