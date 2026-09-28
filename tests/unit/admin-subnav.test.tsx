@@ -501,16 +501,13 @@ describe("AdminSubnav — the Grant Matcha tab", () => {
 });
 
 describe("AdminSubnav — the Honors tab (#1762)", () => {
-  it("shows the tab without a pending-count badge (round 4)", () => {
-    // #1762 round 4: the curator asked to drop the pending count from the tab.
-    // The tab still renders (and `pendingHonors` still gates its visibility), but
-    // no count pill — so a non-null count no longer paints a number.
+  it("shows the tab with its pending count as a pill", () => {
+    // Round 4 dropped the pill; restored 2026-09-28 alongside News and Media highlights.
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={7} />);
     const tab = screen.getByTestId("admin-tab-honors-queue");
-    expect(tab).toBeTruthy();
     expect(tab.getAttribute("href")).toBe("/edit/honors-queue");
-    expect(tab.textContent).not.toContain("7");
-    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+    expect(tab.textContent).toBe("Honors7");
+    expect(tab.querySelector('[data-testid="admin-subnav-pending-count"]')?.textContent).toBe("7");
   });
 
   it("hides the tab when the count is null", () => {

@@ -277,8 +277,15 @@ export function AdminSubnav({
       // `superuserSurfaces` is false, so ANDing it would hide the tab from the very
       // people the role exists to serve (#1767: "an honors surface nobody could
       // find"). The caller already resolved the gate into a count-vs-null.
-      // #1762 round 4: no count badge — the curator asked for it to be dropped.
-      { show: pendingHonors !== null, id: "honors-queue", href: "/edit/honors-queue", label: "Honors" },
+      // #1762 round 4 dropped the count badge; restored 2026-09-28 so every
+      // review queue (Honors, News, Media highlights, Titles) shows its pill.
+      {
+        show: pendingHonors !== null,
+        id: "honors-queue",
+        href: "/edit/honors-queue",
+        label: "Honors",
+        count: pendingHonors ?? undefined,
+      },
       {
         // Gap 2 fix — was `superuserSurfaces || profilesTab`, piggybacking on a
         // prop a unit Owner/Curator can also earn; `newsTab` is the dedicated
