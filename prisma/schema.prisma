@@ -982,6 +982,28 @@ model ClinicalTrial {
   meshTerms        String?   @map("mesh_terms") @db.Text
   briefSummary     String?   @map("brief_summary") @db.Text
   enrollment       Int?
+  /// Raw ClinicalTrials.gov `overallStatus` enum (RECRUITING, NOT_YET_RECRUITING,
+  /// ACTIVE_NOT_RECRUITING, COMPLETED, TERMINATED, WITHDRAWN, ...). Distinct
+  /// from the institutional `status`. Null when CT.gov was not read this run.
+  ctgovStatus      String?   @map("ctgov_status") @db.VarChar(32)
+  /// CT.gov start date as given: "YYYY-MM" or "YYYY-MM-DD" (month precision is
+  /// common, so a string, not DateTime).
+  startDate        String?   @map("start_date") @db.VarChar(10)
+  /// CT.gov start date type: ACTUAL | ESTIMATED.
+  startDateType    String?   @map("start_date_type") @db.VarChar(16)
+  /// CT.gov primary completion date as given ("YYYY-MM" or "YYYY-MM-DD"),
+  /// whatever its type (firstCtaDate only ever uses the ACTUAL one).
+  primaryCompletionDate     String? @map("primary_completion_date") @db.VarChar(10)
+  /// CT.gov primary completion date type: ACTUAL | ESTIMATED.
+  primaryCompletionDateType String? @map("primary_completion_date_type") @db.VarChar(16)
+  /// CT.gov top-level `hasResults`. Null = unknown (CT.gov not read this run).
+  hasResults       Boolean?  @map("has_results")
+  /// Distinct CT.gov intervention type enums, '; '-joined in first-seen order
+  /// (e.g. "DRUG; PROCEDURE").
+  interventionTypes String?  @map("intervention_types") @db.Text
+  /// Distinct CT.gov interventions as "Type: Name" with the type title-cased,
+  /// '; '-joined (e.g. "Drug: Tipifarnib; Dietary supplement: Vitamin D").
+  interventions    String?   @db.Text
   firstOtaDate     DateTime? @map("first_ota_date") @db.Date
   firstCtaDate     DateTime? @map("first_cta_date") @db.Date
   /// Where the enriched fields came from ("ClinicalTrials.gov" today; a vendor
