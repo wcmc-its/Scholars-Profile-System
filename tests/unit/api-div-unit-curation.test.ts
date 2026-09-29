@@ -182,6 +182,19 @@ describe("getDivision — unit-curation read-merge (#540)", () => {
     );
   });
 
+  it("drops the chief card for a hidden identity class (#2260)", async () => {
+    defaultBaselineMocks();
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "etl0002",
+      preferredName: "ETL Chief",
+      slug: "etl-chief",
+      primaryTitle: "Chief of Cardiology",
+      roleCategory: "affiliate_alumni",
+    });
+    const result = await getDivision("medicine", "cardiology");
+    expect(result?.chief).toBeNull();
+  });
+
   it("leaderCwid override of \"\" is explicit vacancy; no chief, no auto-detect fallback (edge 6)", async () => {
     defaultBaselineMocks();
     mockFieldOverrideFindMany.mockResolvedValue([

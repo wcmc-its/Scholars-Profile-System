@@ -66,6 +66,13 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+const { mockFetchDirectoryPeopleByCwid } = vi.hoisted(() => ({
+  mockFetchDirectoryPeopleByCwid: vi.fn(),
+}));
+vi.mock("@/lib/sources/ldap", () => ({
+  fetchDirectoryPeopleByCwid: mockFetchDirectoryPeopleByCwid,
+}));
+
 vi.mock("@/lib/external-leaders", () => ({
   EXTERNAL_LEADERS: {
     // keyed <centerCode>:<programCode> for the program-page fallback
@@ -74,6 +81,7 @@ vi.mock("@/lib/external-leaders", () => ({
 }));
 
 import {
+  getCenter,
   getCenterProgram,
   getCenterPrograms,
   isProgramPageEligible,
@@ -304,6 +312,57 @@ describe("getCenterProgram (#1105)", () => {
     );
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
     expect(detail!.leaders).toEqual([]);
+  });
+});
+
+describe("unit leader carve (#2260)", () => {
+  /** Resolve every requested cwid, stamping a hidden role on the named ones. */
+  function withRoles(roles: Record<string, string>) {
+    mockScholarFindMany.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
+      routeScholarFindMany(args).then((rows) =>
+        rows.map((r) => (roles[r.cwid] ? { ...r, roleCategory: roles[r.cwid] } : r)),
+      ),
+    );
+  }
+
+  it("drops a hidden-class program leader and never routes it to the external fallback", async () => {
+    mockCenterProgramFindUnique.mockResolvedValueOnce({
+      code: "CPC",
+      label: "Cancer Prevention & Control",
+      description: null,
+    });
+    // ext1234 IS the EXTERNAL_LEADERS entry for MEYER:CPC — a hidden scholar
+    // with that cwid must not resurface through it.
+    programAssignments = [
+      assignmentRow("lead001", "leader"),
+      assignmentRow("stu0001", "leader"),
+      assignmentRow("ext1234", "leader"),
+    ];
+    withRoles({ stu0001: "doctoral_student_xyz", ext1234: "affiliate_alumni" });
+    const detail = await getCenterProgram("meyer-cancer-center", "CPC");
+    expect(detail!.leaders.map((l) => l.cwid)).toEqual(["lead001"]);
+  });
+
+  it("drops a hidden-class center leader and keeps it out of the ED fallback", async () => {
+    mockAssignmentFindMany.mockImplementation((args?: { where?: { entityType?: string } }) =>
+      Promise.resolve(
+        args?.where?.entityType === "center"
+          ? [
+              { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+              { cwid: "stu0002", roleKey: "co_director", interim: false, role: { label: "Co-Director" } },
+            ]
+          : [],
+      ),
+    );
+    withRoles({ stu0002: "doctoral_student" });
+    mockFetchDirectoryPeopleByCwid.mockResolvedValue([
+      { cwid: "stu0002", name: "Hidden Student", title: "Student" },
+    ]);
+    const detail = await getCenter("meyer-cancer-center");
+    expect(detail!.leadership.map((l) => l.cwid)).toEqual(["dir0001"]);
+    for (const call of mockFetchDirectoryPeopleByCwid.mock.calls) {
+      expect(call[0]).not.toContain("stu0002");
+    }
   });
 });
 
