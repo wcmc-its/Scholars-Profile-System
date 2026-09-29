@@ -579,6 +579,27 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.queryAllByText(/3 trials/).length).toBeGreaterThan(before);
   });
 
+  it("Clinical research stays visible when it is the FOURTH secondary (Research area + Clinical + Funding)", () => {
+    mockFetch(oneGrant);
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={stackedHit({
+          trialMatchCount: 4,
+          evidenceLines: [
+            { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
+            { kind: "topic", label: "Stem Cell & Regenerative Medicine", id: "stem", count: 2 },
+            { kind: "clinical", specialty: "Cardiology", boardCertified: true },
+          ] as PeopleHit["evidenceLines"],
+        })}
+      />,
+    );
+    const summary = screen.getByRole("button", { name: /also matched/i }).textContent ?? "";
+    expect(summary).toMatch(/Clinical research · 4 trials/);
+    expect(summary).not.toMatch(/\+1/);
+  });
+
   it("a COLLAPSED count is never smaller than what opening it reveals (the union, not the lead)", () => {
     // The chip used the row's LEAD clause, which per #1732 is one half of a partition: 8
     // tagged, while the panel behind the fold lists all 15 matched grants (8 tagged + 7
