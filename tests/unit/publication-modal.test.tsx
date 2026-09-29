@@ -56,6 +56,18 @@ function makePayload(
       ],
       synopsis: "Widgets are explained simply.",
     },
+    wcmAuthors: [
+      {
+        name: "Bob Jones",
+        cwid: "bjo9001",
+        slug: "bob-jones",
+        identityImageEndpoint: "",
+        isFirst: false,
+        isLast: false,
+        position: 2,
+        roleCategory: null,
+      },
+    ],
     topics: [
       {
         topicId: "widget_science",
@@ -187,6 +199,39 @@ describe("PublicationModal — trigger + close", { retry: 2 }, () => {
   });
 });
 
+describe("PublicationModal — author byline", { retry: 2 }, () => {
+  async function open(payload: PublicationDetailPayload) {
+    mockFetch(payload);
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    return within(screen.getByRole("dialog"));
+  }
+
+  it("replaces the WCM author's PubMed name with a profile pill in byline order", async () => {
+    const dialog = await open(makePayload());
+    const pill = dialog.getByRole("link", { name: /Bob Jones/ });
+    expect(pill.getAttribute("href")).toBe("/bob-jones");
+    expect(dialog.queryByText(/Jones B/)).toBeNull();
+    const line = pill.parentElement!.textContent!;
+    expect(line.indexOf("Smith A")).toBeLessThan(line.indexOf("Bob Jones"));
+    expect(line.indexOf("Bob Jones")).toBeLessThan(line.indexOf("Wong C"));
+  });
+
+  it("appends an unplaceable (position 0) author and leaves hidden identities unlinked", async () => {
+    const base = makePayload();
+    const dialog = await open({
+      ...base,
+      wcmAuthors: [
+        { ...base.wcmAuthors[0], position: 0, roleCategory: "doctoral_student" },
+      ],
+    });
+    expect(dialog.getByText("Jones B,")).toBeDefined();
+    expect(dialog.getByText("Bob Jones")).toBeDefined();
+    expect(dialog.queryByRole("link", { name: /Bob Jones/ })).toBeNull();
+  });
+});
+
 describe("PublicationModal — content sections", { retry: 2 }, () => {
   it("renders journal/year/volume in the citation context line", async () => {
     mockFetch(makePayload());
@@ -198,7 +243,7 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     // paragraph's combined textContent rather than a single text node.
     const journalEl = screen.getByText("Journal of Widgets");
     expect(journalEl.parentElement?.textContent).toBe(
-      "Journal of Widgets · 2024 · 10(2) · 100-110",
+      "Journal of Widgets · 2024 · 10(2):100-110",
     );
   });
 
@@ -224,7 +269,7 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     expect(abstractPara.className).toContain("line-clamp-4");
   });
 
-  it("shows the Show more toggle only when the abstract overflows the clamp", async () => {
+  it("shows the Show full abstract toggle only when the abstract overflows the clamp", async () => {
     // jsdom can't measure scrollHeight, so the overflow detector defaults to
     // false — Show more should NOT be present for short abstracts. We assert
     // the abstract paragraph renders without the toggle, then assert the
@@ -235,7 +280,7 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show full abstract" })).toBeNull();
   });
 
   it("renders topics sorted by score desc", async () => {
@@ -251,16 +296,19 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
   });
 
   it("renders subtopics inline without per-subtopic confidence numbers", async () => {
-    // Calmer presentation: comma-separated subtopic links, primary in
-    // slightly heavier weight, no confidence floats per subtopic.
+    // Calmer presentation: every subtopic is a plain foreground link at normal
+    // weight (per the mockup), no confidence floats per subtopic.
     mockFetch(makePayload());
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const primary = screen.getByRole("link", { name: "Widget Design" });
     const other = screen.getByRole("link", { name: "Widget Manufacturing" });
-    expect(primary.className).toContain("font-medium");
-    expect(other.className).not.toContain("font-medium");
+    for (const link of [primary, other]) {
+      expect(link.className).toContain("text-foreground");
+      expect(link.className).not.toContain("font-medium");
+      expect(link.className).not.toContain("text-foreground/80");
+    }
     // No 0.9 / 0.6 confidence labels anywhere — only the parent topic score
     // 0.92 renders.
     const dialog = screen.getByRole("dialog");
@@ -358,11 +406,12 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
   });
 
   it("renders authors inline in the header without a section heading", async () => {
-    mockFetch(makePayload());
+    mockFetch(makePayload({ wcmAuthors: [] }));
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.getByText("Smith A, Jones B, Wong C")).toBeDefined();
+    const smith = screen.getByText("Smith A,");
+    expect(smith.parentElement?.textContent).toBe("Smith A,Jones B,Wong C");
     // No "Authors" section heading anymore — flow as part of the citation block.
     expect(screen.queryByRole("heading", { name: "Authors" })).toBeNull();
   });
@@ -720,7 +769,7 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.getByText("197 · Scopus")).toBeDefined();
+    expect(screen.getByTestId("cited-by-count").textContent).toBe("197 · Scopus");
     expect(
       screen.getByText("19 most recent citing publications in Scholars"),
     ).toBeDefined();
@@ -743,7 +792,7 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
       screen.getByText("None of the citing publications are in Scholars yet."),
     ).toBeDefined();
     // Chip still shows the Scopus count, labeled as Scopus.
-    expect(screen.getByText("5 · Scopus")).toBeDefined();
+    expect(screen.getByTestId("cited-by-count").textContent).toBe("5 · Scopus");
   });
 
   // #2201 — the state 41.6% of sampled prod publications are actually in, and
@@ -768,7 +817,7 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
       screen.getByText("None of the citing publications are in Scholars yet."),
     ).toBeDefined();
     // The Scopus chip is unaffected and labeled as Scopus.
-    expect(screen.getByText("105 · Scopus")).toBeDefined();
+    expect(screen.getByTestId("cited-by-count").textContent).toBe("105 · Scopus");
   });
 
   it("still offers the CSV download when the list has rows", async () => {
@@ -819,11 +868,11 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     // The unfiltered iCite total is not a number the list can support.
     expect(screen.getByRole("dialog").textContent).not.toMatch(/1,234/);
     // Chip reflects the Scopus total, labeled as Scopus.
-    expect(screen.getByText("1,500 · Scopus")).toBeDefined();
+    expect(screen.getByTestId("cited-by-count").textContent).toBe("1,500 · Scopus");
   });
 
-  it("paginates the citing list to 50 by default with a Show all toggle", async () => {
-    // > 50 rows → first 50 render, "Show all 75" button reveals the rest.
+  it("paginates the citing list to 5 by default with a Show all toggle", async () => {
+    // > 5 rows → first 5 render (mockup), "Show all 75" button reveals the rest.
     const rows = Array.from({ length: 75 }, (_, i) => ({
       pmid: String(i + 1),
       title: `Citation ${i + 1}`,
@@ -845,7 +894,7 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
       Array.from(dialog.querySelectorAll("ul a"))
         .map((a) => a.textContent)
         .filter((t) => t && t.startsWith("Citation "));
-    expect(visible().length).toBe(50);
+    expect(visible().length).toBe(5);
     const toggle = screen.getByRole("button", { name: "Show all 75" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(toggle);
@@ -853,11 +902,11 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(toggle.textContent).toBe("Show fewer");
     fireEvent.click(toggle);
-    expect(visible().length).toBe(50);
+    expect(visible().length).toBe(5);
   });
 
   it("renders no pagination toggle when the list fits in the initial window", async () => {
-    const rows = Array.from({ length: 10 }, (_, i) => ({
+    const rows = Array.from({ length: 5 }, (_, i) => ({
       pmid: String(i + 1),
       title: `Citation ${i + 1}`,
       journal: null,
@@ -865,9 +914,9 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     }));
     mockFetch(
       makePayload({
-        pub: { ...makePayload().pub, citationCount: 10 },
+        pub: { ...makePayload().pub, citationCount: 5 },
         citingPubs: rows,
-        citingPubsTotal: 10,
+        citingPubsTotal: 5,
       }),
     );
     renderModalHarness();
@@ -994,7 +1043,9 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const dialog = screen.getByRole("dialog");
-    const headingRow = within(dialog).getByText("Cited by").closest("div") as HTMLElement;
+    // Scope to the section: the "Cited by" section tab carries the same label.
+    const citedSection = dialog.querySelector('[data-sec="cited"]') as HTMLElement;
+    const headingRow = within(citedSection).getByText("Cited by").closest("div") as HTMLElement;
     expect(headingRow.textContent).toBe("Cited by");
   });
 
@@ -1006,6 +1057,127 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     const titles = screen.getAllByText(/Citation paper (one|two)/);
     expect(titles[0].textContent).toBe("Citation paper one");
     expect(titles[1].textContent).toBe("Citation paper two");
+  });
+});
+
+describe("PublicationModal — section tabs", { retry: 2 }, () => {
+  function tabBar() {
+    return screen.getByRole("navigation", { name: "Publication sections" });
+  }
+
+  it("renders a tab per present section with counts, Summary active first", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const labels = within(tabBar())
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+    expect(labels).toEqual([
+      "Summary",
+      "Research areas 2",
+      "Methods & MeSH",
+      "Cited by 2",
+    ]);
+    expect(
+      within(tabBar()).getByRole("button", { name: "Summary" }).getAttribute("aria-current"),
+    ).toBe("true");
+  });
+
+  it("hides tabs for absent sections", async () => {
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, meshTerms: [], citationCount: 0 },
+        topics: [],
+        methodFamilies: [],
+        cores: [],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const labels = within(tabBar())
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+    // No count on Cited by when the Scopus count is 0.
+    expect(labels).toEqual(["Summary", "Cited by"]);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector('[data-sec="areas"]')).toBeNull();
+    expect(dialog.querySelector('[data-sec="terms"]')).toBeNull();
+  });
+
+  it("clicking a tab marks it active and scrolls the body", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const body = screen.getByTestId("publication-modal-body");
+    const scrollTo = vi.fn();
+    (body as unknown as { scrollTo: typeof scrollTo }).scrollTo = scrollTo;
+    const cited = within(tabBar()).getByRole("button", { name: /Cited by/ });
+    fireEvent.click(cited);
+    expect(cited.getAttribute("aria-current")).toBe("true");
+    expect(
+      within(tabBar()).getByRole("button", { name: "Summary" }).getAttribute("aria-current"),
+    ).toBeNull();
+    expect(scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "smooth" }),
+    );
+  });
+
+  it("gives count tabs a spaced accessible name", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(
+      within(tabBar()).getByRole("button", { name: "Research areas 2" }),
+    ).toBeDefined();
+  });
+
+  it("jumps without smooth scrolling under prefers-reduced-motion", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn((q: string) => ({
+      matches: q.includes("reduce"),
+      media: q,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+    try {
+      mockFetch(makePayload());
+      renderModalHarness();
+      fireEvent.click(screen.getByTestId("harness-trigger"));
+      await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+      const body = screen.getByTestId("publication-modal-body");
+      const scrollTo = vi.fn();
+      (body as unknown as { scrollTo: typeof scrollTo }).scrollTo = scrollTo;
+      fireEvent.click(within(tabBar()).getByRole("button", { name: /Cited by/ }));
+      expect(scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({ behavior: "auto" }),
+      );
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it("shows a visible 'Copied' confirmation after copying the PMID", async () => {
+    mockFetch(makePayload());
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const btn = screen.getByRole("button", { name: "Copy PMID 12345" });
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn.textContent).toContain("Copied"));
+    expect(writeText).toHaveBeenCalledWith("12345");
   });
 });
 
