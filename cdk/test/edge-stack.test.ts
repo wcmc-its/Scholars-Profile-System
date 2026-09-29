@@ -90,7 +90,8 @@ const QUERY_KEYED_PATTERNS: ReadonlySet<string> = new Set([
 
 // The exact query-string allow-list on the custom cache policy: the union of
 // params the Group B pages read (/scholars/* -> mentees-sort; dept/center/
-// division -> page/tab/sort; topics/*/scholars -> q/role/page).
+// division -> page/tab/sort; topics/*/scholars -> q/role/sub/letter;
+// methods/*/*/scholars -> q/role/page).
 const QUERY_KEYED_ALLOWLIST = [
   "mentees-sort",
   "page",
@@ -98,6 +99,8 @@ const QUERY_KEYED_ALLOWLIST = [
   "sort",
   "q",
   "role",
+  "sub",
+  "letter",
 ] as const;
 
 /** Map an app route file to its URL path: drop the route-group `(...)` segments
@@ -771,6 +774,36 @@ describe("EdgeStack", () => {
         expect(qs.QueryStringBehavior).toBe("whitelist");
         const items = (qs.QueryStrings as string[]).slice().sort();
         expect(items).toEqual([...QUERY_KEYED_ALLOWLIST].sort());
+      });
+
+      it("every `sp.<param>` a query-keyed page reads is on the allow-list (a missing one is silently stripped)", () => {
+        // The behavior-coverage guard above only proves SOME behavior forwards
+        // the query string. A param missing from the allow-list still reaches
+        // the page as undefined: `?sub=`/`?letter=` on /topics/*/scholars shipped
+        // that way and every filter link rendered the unfiltered page.
+        // ponytail: matches the `sp.<name>` / `sp["name"]` convention these pages
+        // all use; a page that reads its params another way is not scanned.
+        const allowed = new Set<string>(QUERY_KEYED_ALLOWLIST);
+        const missing: string[] = [];
+        const walk = (d: string) => {
+          for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+            const p = path.join(d, ent.name);
+            if (ent.isDirectory()) {
+              walk(p);
+              continue;
+            }
+            if (!/^page\.(t|j)sx?$/.test(ent.name)) continue;
+            const route = routePatternFor(p);
+            if (![...QUERY_KEYED_PATTERNS].some((pat) => behaviorCovers(pat, route))) continue;
+            const src = fs.readFileSync(p, "utf8");
+            for (const m of src.matchAll(/\bsp(?:\.([A-Za-z_]\w*)|\[["']([\w-]+)["']\])/g)) {
+              const name = m[1] ?? m[2];
+              if (!allowed.has(name)) missing.push(`${route} reads ?${name}`);
+            }
+          }
+        };
+        walk(APP_DIR);
+        expect([...new Set(missing)]).toEqual([]);
       });
 
       it("does NOT key on cookies; keys on the RSC headers (soft-nav) only", () => {
