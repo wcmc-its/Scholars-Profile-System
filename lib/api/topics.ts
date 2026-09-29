@@ -1433,8 +1433,6 @@ export async function getDistinctScholarCountForTopic(topicSlug: string): Promis
 // list zero. `lib/eligibility.ts` forbids faceting them regardless.
 export type TopicAllScholarRole = "all" | "faculty" | "postdocs";
 
-export const TOPIC_ALL_SCHOLARS_PAGE_SIZE = 22;
-
 export type TopicScholarRow = {
   cwid: string;
   slug: string;
@@ -1452,8 +1450,10 @@ export type TopicScholarsResult = {
   total: number;
   roleCounts: { all: number; faculty: number; postdocs: number };
   hits: TopicScholarRow[];
-  page: number;
-  pageSize: number;
+  /** Surname initials present in the role/name/subarea-filtered set, A–Z. */
+  letters: string[];
+  /** The letter `hits` is narrowed to; null during a name search (all matches). */
+  letter: string | null;
 };
 
 const ROLE_FILTER_CATEGORIES: Record<Exclude<TopicAllScholarRole, "all">, string[]> = {
@@ -1463,12 +1463,11 @@ const ROLE_FILTER_CATEGORIES: Record<Exclude<TopicAllScholarRole, "all">, string
 
 export async function getTopicScholars(
   topicSlug: string,
-  opts: { page?: number; role?: TopicAllScholarRole; q?: string },
+  opts: { letter?: string; subtopic?: string; role?: TopicAllScholarRole; q?: string },
 ): Promise<TopicScholarsResult | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
 
-  const page = Math.max(0, opts.page ?? 0);
   const role: TopicAllScholarRole = opts.role ?? "all";
   const q = opts.q?.trim() ?? "";
 
@@ -1477,7 +1476,12 @@ export async function getTopicScholars(
   const baseScholarFilter: Record<string, unknown> = {
     deletedAt: null,
     status: "active",
-    publicationTopics: { some: { parentTopicId: topicSlug } },
+    publicationTopics: {
+      some: {
+        parentTopicId: topicSlug,
+        ...(opts.subtopic ? { primarySubtopicId: opts.subtopic } : {}),
+      },
+    },
     ...publicRoleWhere(),
   };
   if (q.length > 0) {
@@ -1545,9 +1549,15 @@ export async function getTopicScholars(
       a.cwid.localeCompare(b.cwid),
   );
 
-  const total = enriched.length;
-  const skip = page * TOPIC_ALL_SCHOLARS_PAGE_SIZE;
-  const slice = enriched.slice(skip, skip + TOPIC_ALL_SCHOLARS_PAGE_SIZE);
+  // One letter at a time (a name search shows every match). A requested letter
+  // with no scholars falls back to the first letter that has some.
+  const letters = [...new Set(enriched.map((s) => topicScholarLastNameInitial(s.preferredName)))].sort();
+  const want = opts.letter?.toUpperCase();
+  const letter = q.length > 0 ? null : letters.includes(want ?? "") ? want! : (letters[0] ?? null);
+  const slice = letter
+    ? enriched.filter((s) => topicScholarLastNameInitial(s.preferredName) === letter)
+    : enriched;
+  const total = slice.length;
 
   const subtopicsByCwid = await fetchTopSubtopicsForScholars(
     topicSlug,
@@ -1567,8 +1577,8 @@ export async function getTopicScholars(
       roleCategory: s.roleCategory,
       subtopics: subtopicsByCwid.get(s.cwid) ?? [],
     })),
-    page,
-    pageSize: TOPIC_ALL_SCHOLARS_PAGE_SIZE,
+    letters,
+    letter,
   };
 }
 
