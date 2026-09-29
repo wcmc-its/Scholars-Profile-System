@@ -258,6 +258,20 @@ export function isPublicLeader(s: {
 }
 
 /**
+ * #1827 — will this cwid's Scholar row (null = no row) render on a PUBLIC
+ * center roster? Mirrors the public gate in `lib/api/centers.ts`
+ * (`deletedAt: null, status: "active"`, `publicRoleWhere()` + the fail-closed
+ * `isPubliclyDisplayed` re-check), which is exactly {@link isPublicLeader} on a
+ * row that exists. The /edit roster uses it to flag members the public page
+ * will silently drop, so the editor and the page cannot drift.
+ */
+export function isPublicRosterMember(
+  s: Parameters<typeof isPublicLeader>[0] | null | undefined,
+): boolean {
+  return s != null && isPublicLeader(s);
+}
+
+/**
  * General eligibility carve — applies to scholar-attributed algorithmic surfaces:
  * Recent contributions (RANKING-01), Selected research carousel filtering (HOME-02),
  * Recent highlights (RANKING-02).
