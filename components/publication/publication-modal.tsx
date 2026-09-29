@@ -727,12 +727,14 @@ function SummarySection({ pub }: { pub: PublicationDetailPayload["pub"] }) {
         </div>
       ) : null}
       {impactScore !== null && impactJustification ? (
-        <p
-          className="text-muted-foreground -mt-2 text-sm leading-normal [text-wrap:pretty]"
-          dangerouslySetInnerHTML={{
-            __html: sanitizePubmedHtml(impactJustification),
-          }}
-        />
+        <p className="text-muted-foreground -mt-2 text-sm leading-normal [text-wrap:pretty]">
+          <span className="text-foreground font-medium">Why {Math.round(impactScore)}:</span>{" "}
+          <span
+            dangerouslySetInnerHTML={{
+              __html: sanitizePubmedHtml(impactJustification),
+            }}
+          />
+        </p>
       ) : null}
       <AbstractBlock abstract={abstract} />
     </section>
