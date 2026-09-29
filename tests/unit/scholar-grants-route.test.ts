@@ -280,7 +280,7 @@ describe("GET /api/scholar/[cwid]/grants", () => {
 });
 
 describe("GET /api/scholar/[cwid]/grants — Matcha trials (trials=1)", () => {
-  const trial = { trialId: "NCT1", nctNumber: "NCT1", title: "A trial", status: "Recruiting", isActive: true, startYear: 2024 };
+  const trial = { trialId: "NCT1", nctNumber: "NCT1", title: "A trial", titleHighlight: null, status: "Recruiting", isActive: true, startYear: 2024 };
   const on = () => {
     vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({ hits: [], total: 0 } as never);
@@ -290,9 +290,12 @@ describe("GET /api/scholar/[cwid]/grants — Matcha trials (trials=1)", () => {
     on();
     vi.mocked(resolveSearchPeopleTrialEvidence).mockReturnValue(true);
     vi.mocked(loadConceptTrials).mockResolvedValue({ trials: [trial], total: 1 });
-    const body = await (await call("abc1234", "myeloma", { descriptorUis: "D009101,D000001", trials: "1" })).json();
+    const body = await (
+      await call("abc1234", "myeloma", { descriptorUis: "D009101,D000001", label: "Multiple Myeloma", trials: "1" })
+    ).json();
     expect(body.trials).toEqual([trial]);
-    expect(loadConceptTrials).toHaveBeenCalledWith("abc1234", ["D009101", "D000001"]);
+    // The query + concept name drive the title highlight (never admission).
+    expect(loadConceptTrials).toHaveBeenCalledWith("abc1234", ["D009101", "D000001"], "myeloma Multiple Myeloma");
   });
 
   it("omits trials without trials=1, with the flag off, or with no concept", async () => {

@@ -1744,8 +1744,16 @@ describe("MatchaPanel", () => {
           ok: true,
           json: async () => ({
             trials: [
-              { trialId: "NCT0000001", nctNumber: "NCT0000001", title: "Orca-T after reduced intensity conditioning", status: "Recruiting", isActive: true, startYear: 2025 },
-              { trialId: "19-0000001", nctNumber: null, title: "Nutrition in acute leukemia", status: "Completed", isActive: false, startYear: 2019 },
+              {
+                trialId: "NCT0000001",
+                nctNumber: "NCT0000001",
+                title: "Orca-T after reduced intensity conditioning",
+                titleHighlight: "<mark>Orca-T</mark> after reduced intensity conditioning",
+                status: "Recruiting",
+                isActive: true,
+                startYear: 2025,
+              },
+              { trialId: "19-0000001", nctNumber: null, title: "Nutrition in acute leukemia", titleHighlight: null, status: "Completed", isActive: false, startYear: 2019 },
             ],
             grants: [],
             total: 0,
@@ -1779,8 +1787,12 @@ describe("MatchaPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    const link = await screen.findByText("Orca-T after reduced intensity conditioning");
-    expect(link.closest("a")?.getAttribute("href")).toBe("https://clinicaltrials.gov/study/NCT0000001");
+    const link = await screen.findByRole("link", { name: "Orca-T after reduced intensity conditioning" });
+    expect(link.getAttribute("href")).toBe("https://clinicaltrials.gov/study/NCT0000001");
+    // The matched term gets the same pale-red pill as a PUB title.
+    const mark = link.querySelector("mark");
+    expect(mark?.textContent).toBe("Orca-T");
+    expect(mark?.className).toContain("bg-[#b31b1b]/10");
     expect(screen.getAllByText("TRIAL")).toHaveLength(2);
     expect(screen.getByText("Recruiting")).toBeTruthy();
     // No NCT: plain title, labelled by the WCM protocol number.
