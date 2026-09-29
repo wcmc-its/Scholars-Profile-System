@@ -16,7 +16,15 @@
  * `POST /api/edit/core-claim/bulk`) — is folded into `confirmed` too, via a
  * second query joined straight to `publication` (`isManual: true` on the row).
  * A REJECTED claim with no engine row isn't surfaced — there's nothing to
- * reject, so it's not meaningful review state.
+ * reject, so it's not meaningful review state — UNLESS the pmid was sent to
+ * review by hand.
+ *
+ * "Send to review" pmids (`core_queue_add`, Queue v2 PR B) join `candidates`
+ * with `queued: true` while they have no active claim and the engine has not
+ * confirmed them, whether the engine never scored them (a row built here, like
+ * a manual add) or scored them below threshold. A claim files them like any
+ * other paper; the `core_queue_add` row is never deleted, so revoking that claim
+ * returns them to the queue.
  *
  * The DB load is a thin wrapper; `partitionCoreQueue` is pure and unit-tested.
  */
@@ -156,6 +164,15 @@ export interface CoreQueueRow {
    *  signal/likelihood field is a placeholder; the UI should show that plainly
    *  rather than a misleading 0%/no-evidence candidate card. */
   isManual: boolean;
+  /** The pmid was sent to this core's review queue by hand ("Add PMIDs → Send to
+   *  review", a `core_queue_add` row). On a CANDIDATE it means the engine did
+   *  not surface it — it is on the queue only because a reviewer put it there,
+   *  and the queue files it under the unscored "Added by you" rail group (an
+   *  open engine candidate that was also sent is left as an engine candidate).
+   *  On a confirmed/rejected row it says a revoke/restore returns it to review.
+   *  Set by `partitionCoreQueue`, written only when true (same payload rule as
+   *  `wcmAuthorsTruncated`). */
+  queued?: boolean;
   /** iCite relative citation ratio (reciterdb.analysis_nih), when computed. */
   relativeCitationRatio: number | null;
   /** NIH citation percentile (0-100), when computed. */
@@ -203,20 +220,33 @@ export interface CoreReviewQueue {
 export function partitionCoreQueue(
   rows: ReadonlyArray<CoreQueueRow>,
   claimFor: (pmid: string) => ClaimStatus | null,
+  queued: ReadonlySet<string> = new Set(),
 ): { candidates: CoreQueueRow[]; confirmed: CoreQueueRow[]; rejected: CoreQueueRow[] } {
   const candidates: CoreQueueRow[] = [];
   const confirmed: CoreQueueRow[] = [];
   const rejected: CoreQueueRow[] = [];
   for (const row of rows) {
     const claim = claimFor(row.pmid);
+    // On a DECIDED row, `queued` records that it was sent to review by hand, so
+    // the Revoke/Restore guard can say where it goes back to (the queue, not
+    // nowhere). Written only when true.
+    const sentHere = queued.has(row.pmid) ? { queued: true } : {};
     if (isOpenCandidate(row.status, claim)) candidates.push({ ...row, claimed: false });
+    // "Send to review": a reviewer queued this pmid and nobody has decided it.
+    // The engine either never scored it (`unscored`, built by the loader) or
+    // scored it below threshold, so it would otherwise be invisible. An engine
+    // `confirmed` row is already confirmed and stays so; an ACTIVE claim always
+    // wins, which is what files a queued paper under Confirmed/Rejected once it
+    // is decided — and a revoke of that claim puts it straight back here.
+    else if (claim == null && queued.has(row.pmid) && row.status !== "confirmed")
+      candidates.push({ ...row, claimed: false, queued: true });
     else if (effectiveCoreStatus(row.status, claim) === "confirmed")
-      confirmed.push({ ...row, claimed: claim === "claimed" });
+      confirmed.push({ ...row, claimed: claim === "claimed", ...sentHere });
     // Effective-rejected is ONLY ever a human `rejected` claim (the engine has no
     // rejected state), so a claim always backs it → `claimed: true` drives the
     // Rejected-tab restore (which posts the soft `revoked` undo).
     else if (effectiveCoreStatus(row.status, claim) === "rejected")
-      rejected.push({ ...row, claimed: true });
+      rejected.push({ ...row, claimed: true, ...sentHere });
     // an engine `below_threshold` row with no claim falls through (not surfaced)
   }
   return { candidates, confirmed, rejected };
@@ -224,7 +254,13 @@ export function partitionCoreQueue(
 
 type QueueReader = Pick<
   typeof db.read,
-  "core" | "publicationCore" | "coreClaim" | "scholar" | "publicationAuthor" | "publication"
+  | "core"
+  | "publicationCore"
+  | "coreClaim"
+  | "coreQueueAdd"
+  | "scholar"
+  | "publicationAuthor"
+  | "publication"
 >;
 
 /** The `publication` fields a queue card needs — shared by the engine-sourced
@@ -331,15 +367,25 @@ export async function loadCoreReviewQueue(
     },
   });
 
-  const claims = await loadActiveCoreClaimsByCore(coreId, client);
+  const [claims, queuedRows] = await Promise.all([
+    loadActiveCoreClaimsByCore(coreId, client),
+    client.coreQueueAdd.findMany({ where: { coreId }, select: { pmid: true } }),
+  ]);
+  // "Send to review" pmids (`core_queue_add`). See `partitionCoreQueue`.
+  const queued = new Set(queuedRows.map((r) => r.pmid));
 
-  // Manual PMID add: a CLAIMED core_claim with no matching publication_core row
-  // above — a human attesting usage the engine never scored. (A REJECTED claim
-  // with no engine row has nothing to reject, so it's not surfaced.)
+  // Rows with no publication_core projection that still belong on a list:
+  //   - Manual PMID add: a CLAIMED core_claim — a human attesting usage the
+  //     engine never scored (Confirmed tab).
+  //   - Send to review: a QUEUED pmid, undecided (To review, "Added by you") or
+  //     decided either way (Confirmed / Rejected). A queued paper that was
+  //     rejected must stay on the Rejected tab so it can be restored.
+  // A REJECTED claim with no engine row that was never queued has nothing to
+  // reject, so it's still not surfaced.
   const projectedPmids = new Set(rows.map((r) => r.pmid));
-  const manualPmids = [...claims.entries()]
-    .filter(([pmid, status]) => status === "claimed" && !projectedPmids.has(pmid))
-    .map(([pmid]) => pmid);
+  const manualPmids = [...new Set([...claims.keys(), ...queued])].filter(
+    (pmid) => !projectedPmids.has(pmid) && (claims.get(pmid) === "claimed" || queued.has(pmid)),
+  );
   const manualPubs =
     manualPmids.length === 0
       ? []
@@ -502,11 +548,14 @@ export async function loadCoreReviewQueue(
     fullAuthorsString: p.fullAuthorsString,
     abstract: p.abstract,
     synopsis: p.synopsis,
-    // No engine projection exists — likelihood/status/every signal is a
-    // placeholder never read functionally (core-merge resolves purely off the
-    // active claim), but isManual tells the UI to render that plainly.
+    // No engine projection exists — likelihood/every signal is a placeholder,
+    // and isManual tells the UI to render that plainly. `status` is read: a
+    // claimed pmid keeps the manual add's "confirmed" (core-merge then resolves
+    // it off the claim alone), and a merely QUEUED one is "unscored", which is
+    // not an engine status at all, so only `partitionCoreQueue`'s queued branch
+    // (or a rejected claim) can place it — never the engine-candidate test.
     likelihood: 0,
-    status: "confirmed",
+    status: claims.get(p.pmid) === "claimed" ? "confirmed" : "unscored",
     coauthors: [],
     coauthorScholars: [],
     wcmAuthors: wcmByPmid.get(p.pmid) ?? [],
@@ -535,6 +584,7 @@ export async function loadCoreReviewQueue(
   const { candidates, confirmed, rejected } = partitionCoreQueue(
     [...queueRows, ...manualRows],
     (pmid) => claims.get(pmid) ?? null,
+    queued,
   );
   return {
     // Rebuilt rather than passed straight through so both staff counts are

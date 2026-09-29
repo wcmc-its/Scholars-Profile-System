@@ -185,11 +185,13 @@ describe("loadCoreReviewQueue mapping", () => {
     authors: typeof AUTHORS = AUTHORS,
     claims: Array<{ pmid: string; status: ClaimStatus }> = [],
     publications: Array<Record<string, unknown>> = [],
+    queued: string[] = [],
   ) =>
     ({
       core: { findUnique: async () => ({ id: "2", name: "Imaging" }) },
       publicationCore: { findMany: async () => rows },
       coreClaim: { findMany: async () => claims },
+      coreQueueAdd: { findMany: async () => queued.map((pmid) => ({ pmid })) },
       scholar: { findMany: async () => scholars },
       publicationAuthor: { findMany: async () => authors },
       publication: { findMany: async () => publications },
@@ -481,6 +483,7 @@ describe("loadCoreReviewQueue mapping", () => {
         },
       },
       coreClaim: { findMany: async () => [] },
+      coreQueueAdd: { findMany: async () => [] },
       scholar: { findMany: async () => SCHOLARS },
       publicationAuthor: { findMany: async () => AUTHORS },
       publication: { findMany: async () => [] },
@@ -608,12 +611,126 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(r?.year).toBe(2021); // the card's fallback is still there
   });
 
+  // --- "Send to review" (core_queue_add, Queue v2 PR B) ---
+  const queuedPub = (pmid: string) => ({
+    pmid,
+    title: `A paper sent to review (${pmid})`,
+    journal: "Synthetic Journal of Hunches",
+    journalAbbrev: "Synth J Hunch",
+    year: 2024,
+    dateAddedToEntrez: null,
+    authorsString: "Fixture F",
+    fullAuthorsString: "Fixture F",
+    abstract: null,
+    synopsis: null,
+    citationCount: 0,
+    pubmedUrl: null,
+    doi: null,
+    relativeCitationRatio: null,
+    nihPercentile: null,
+    meshTerms: [],
+  });
+
+  it("surfaces an undecided queued pmid with no engine row as an unscored candidate", async () => {
+    const queue = await loadCoreReviewQueue(
+      "2",
+      reader([rawRow()], SCHOLARS, AUTHORS, [], [queuedPub("88888888")], ["88888888"]),
+    );
+    const added = queue?.candidates.find((r) => r.pmid === "88888888");
+    expect(added).toBeDefined();
+    expect(added?.queued).toBe(true);
+    expect(added?.isManual).toBe(true);
+    expect(added?.status).toBe("unscored");
+    expect(added?.title).toBe("A paper sent to review (88888888)");
+    // the engine candidate is untouched: not queued (key absent, not false)
+    expect("queued" in (queue?.candidates.find((r) => r.pmid === "30418319") ?? {})).toBe(false);
+  });
+
+  it("files a queued pmid by its claim once decided — Rejected stays restorable", async () => {
+    const rejected = await loadCoreReviewQueue(
+      "2",
+      reader(
+        [],
+        SCHOLARS,
+        AUTHORS,
+        [{ pmid: "88888888", status: "rejected" }],
+        [queuedPub("88888888")],
+        ["88888888"],
+      ),
+    );
+    expect(rejected?.candidates).toHaveLength(0);
+    expect(rejected?.rejected.map((r) => [r.pmid, r.queued, r.claimed])).toEqual([
+      ["88888888", true, true],
+    ]);
+
+    const confirmed = await loadCoreReviewQueue(
+      "2",
+      reader(
+        [],
+        SCHOLARS,
+        AUTHORS,
+        [{ pmid: "88888888", status: "claimed" }],
+        [queuedPub("88888888")],
+        ["88888888"],
+      ),
+    );
+    expect(confirmed?.candidates).toHaveLength(0);
+    expect(confirmed?.confirmed.map((r) => [r.pmid, r.queued, r.isManual])).toEqual([
+      ["88888888", true, true],
+    ]);
+  });
+
   it("returns null when the core does not exist", async () => {
     const emptyReader = {
       core: { findUnique: async () => null },
       publicationCore: { findMany: async () => [] },
       coreClaim: { findMany: async () => [] },
+      coreQueueAdd: { findMany: async () => [] },
     } as unknown as Parameters<typeof loadCoreReviewQueue>[1];
     expect(await loadCoreReviewQueue("nope", emptyReader)).toBeNull();
+  });
+});
+
+describe("partitionCoreQueue — Send to review (core_queue_add)", () => {
+  const queued = new Set(["7"]);
+
+  it("a queued below-threshold row with no claim is an open candidate, flagged queued", () => {
+    const { candidates } = partitionCoreQueue(
+      [row({ pmid: "7", status: "below_threshold" })],
+      () => null,
+      queued,
+    );
+    expect(candidates.map((r) => [r.pmid, r.queued])).toEqual([["7", true]]);
+  });
+
+  it("a queued row the engine CONFIRMED stays confirmed, never back in review", () => {
+    const { candidates, confirmed } = partitionCoreQueue(
+      [row({ pmid: "7", status: "confirmed" })],
+      () => null,
+      queued,
+    );
+    expect(candidates).toHaveLength(0);
+    expect(confirmed.map((r) => r.pmid)).toEqual(["7"]);
+  });
+
+  it("an open ENGINE candidate that was also queued stays an engine candidate (not 'Added by you')", () => {
+    const { candidates } = partitionCoreQueue([row({ pmid: "7" })], () => null, queued);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].queued).toBeUndefined();
+  });
+
+  it("a claim always wins over the queue row", () => {
+    const { candidates, rejected } = partitionCoreQueue(
+      [row({ pmid: "7", status: "unscored", isManual: true })],
+      claimMap([["7", "rejected"]]),
+      queued,
+    );
+    expect(candidates).toHaveLength(0);
+    expect(rejected.map((r) => r.pmid)).toEqual(["7"]);
+  });
+
+  it("without the queued set, a below-threshold row is still not surfaced", () => {
+    const out = partitionCoreQueue([row({ pmid: "7", status: "below_threshold" })], () => null);
+    expect([...out.candidates, ...out.confirmed, ...out.rejected]).toHaveLength(0);
   });
 });

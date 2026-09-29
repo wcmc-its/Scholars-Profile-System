@@ -285,7 +285,15 @@ export type AuditAction =
    *  proposes lands as `pending`, and each curator decision on it is audited as
    *  `honor_update`. Requires the `scholars_audit` ENUMs be extended — see
    *  `scripts/sql/audit-log.sql`. */
-  | "honor_list_run";
+  | "honor_list_run"
+  /** a core owner (or Superuser/comms_steward) sent a PMID to the core's review
+   *  queue by hand ("Add PMIDs → Send to review", Core Review Queue v2 PR B;
+   *  `POST /api/edit/core-queue-add`), writing a `core_queue_add` row. One row
+   *  per PMID. `targetEntityType='core'`, `targetEntityId` is the
+   *  `"{coreId}:{pmid}"` pair (the `core_claim` shape); before is null, after
+   *  carries `{ queued: true }`. Requires the `scholars_audit` action ENUM be
+   *  extended — see `scripts/sql/audit-log.sql`. */
+  | "core_queue_add";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
