@@ -934,7 +934,7 @@ export function CenterRosterCard({
                 <Button variant="outline" size="sm" className="h-[34px] gap-1.5" data-testid="roster-disease-filter-trigger">
                   <span className="text-muted-foreground">Disease</span>
                   <span className="font-semibold">
-                    {selectedDiseaseCodes.size === 0 ? "Any" : `${selectedDiseaseCodes.size} selected`}
+                    {selectedDiseaseCodes.size === 0 ? "Any" : `${selectedDiseaseCodes.size.toLocaleString("en-US")} selected`}
                   </span>
                   <ChevronDown className="size-3.5 opacity-60" aria-hidden />
                 </Button>
@@ -964,7 +964,7 @@ export function CenterRosterCard({
                           onCheckedChange={() => toggleDiseaseCode(opt.code)}
                         />
                         <span className="truncate">{diseaseLabel(opt.code)}</span>
-                        <span className="text-muted-foreground ml-auto text-xs tabular-nums">{opt.count}</span>
+                        <span className="text-muted-foreground ml-auto text-xs tabular-nums">{opt.count.toLocaleString("en-US")}</span>
                       </label>
                     ))
                   )}
@@ -1019,7 +1019,7 @@ export function CenterRosterCard({
               >
                 Has diseases to review
                 <span className="font-bold tabular-nums" data-testid="roster-needs-review-count">
-                  {needsReviewList.length}
+                  {needsReviewList.length.toLocaleString("en-US")}
                 </span>
               </button>
             </>
@@ -1029,7 +1029,7 @@ export function CenterRosterCard({
 
           {hasDiseases && needsReviewList.length > 0 && (
             <Button type="button" size="sm" onClick={startQueue} data-testid="roster-start-review-queue">
-              Start review queue ({needsReviewList.length})
+              Start review queue ({needsReviewList.length.toLocaleString("en-US")})
             </Button>
           )}
           {exportEnabled && (
@@ -1048,7 +1048,7 @@ export function CenterRosterCard({
         {filtersActive && (
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-sm">
             <span className="text-muted-foreground" data-testid="roster-filter-result-line">
-              {visible.length} of {rosterFiltered.length} members match
+              {visible.length.toLocaleString("en-US")} of {rosterFiltered.length.toLocaleString("en-US")} members match
             </span>
             <button
               type="button"

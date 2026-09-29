@@ -8,7 +8,7 @@ export async function CtscFeedIssuesPanel() {
   return (
     <CtscFeedIssuesCard
       issues={rows.map(({ syncedAt: _s, ...r }) => r)}
-      syncedAt={syncedAt ? syncedAt.toISOString().slice(0, 10) : null}
+      syncedAt={syncedAt ? syncedAt.toISOString() : null}
     />
   );
 }
