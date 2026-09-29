@@ -244,6 +244,75 @@ describe("/edit/reports — one grouped list for every viewer", () => {
     ]);
   });
 
+  describe("cores collapse into one group with a picker", () => {
+    const CORES = [
+      { code: "c-zeta", name: "Zeta Imaging Core", kind: "core" as const, centerType: null },
+      { code: "c-alpha", name: "Alpha Flow Core", kind: "core" as const, centerType: null },
+      { code: "c-mid", name: "Mid Sequencing Core", kind: "core" as const, centerType: null },
+    ];
+    type CoresProps = { coreOptions?: Array<{ code: string; name: string; editHref: string }> };
+
+    it("N cores → ONE group where the first core sat, options A–Z, on the first alphabetically", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockLoadReportableUnits.mockResolvedValue([TWO_UNITS[0], ...CORES, TWO_UNITS[1]]);
+      const props = await indexProps();
+      expect(props.units.map((u) => [u.code, u.name])).toEqual([
+        ["a", "A"],
+        ["c-alpha", "Cores"],
+        ["surg", "Surgery"],
+      ]);
+      const group = props.units[1] as (typeof props.units)[number] & CoresProps;
+      expect(group.editHref).toBe("/edit/core/c-alpha");
+      expect(group.coreOptions!.map((o) => [o.code, o.name, o.editHref])).toEqual([
+        ["c-alpha", "Alpha Flow Core", "/edit/core/c-alpha"],
+        ["c-mid", "Mid Sequencing Core", "/edit/core/c-mid"],
+        ["c-zeta", "Zeta Imaging Core", "/edit/core/c-zeta"],
+      ]);
+      expect(mockLoadReportLiveness).toHaveBeenCalledWith(
+        expect.arrayContaining(CORES.map((c) => ({ code: c.code, kind: "core" }))),
+        expect.anything(),
+      );
+      expect(props.initialScope).toBe("all");
+    });
+
+    it("?center=<coreId>&kind=core → the full list on that core, opening on Cores", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockLoadReportableUnits.mockResolvedValue([TWO_UNITS[0], ...CORES]);
+      const props = await indexProps({ center: "c-mid", kind: "core" });
+      expect(mockLoadReportsContext).not.toHaveBeenCalled();
+      expect(props.units.map((u) => [u.code, u.name])).toEqual([
+        ["a", "A"],
+        ["c-mid", "Cores"],
+      ]);
+      expect(props.units[1].editHref).toBe("/edit/core/c-mid");
+      expect(props.initialScope).toBe("core");
+      // The full index, so a global viewer's cores stay off under All.
+      expect(props.hideUnderAll).toBe(true);
+      // An explicit scope wins.
+      const explicit = await indexProps({ center: "c-mid", kind: "core", scope: "all" });
+      expect(explicit.initialScope).toBe("all");
+    });
+
+    it("?center= a core the actor can't report on → the forbidden page, no list", async () => {
+      mockGetEditSession.mockResolvedValue(OWNER);
+      mockLoadReportableUnits.mockResolvedValue([CORES[0]]);
+      const result = await EditReportsIndexPage({
+        searchParams: Promise.resolve({ center: "c-other", kind: "core" }),
+      });
+      expect(findByType(result, mockReportsIndex)).toBeNull();
+      expect(findByType(result, mockForbidden)).not.toBeNull();
+    });
+
+    it("an owner of one core: the group keeps the core's name, one option", async () => {
+      mockGetEditSession.mockResolvedValue(OWNER);
+      mockLoadReportableUnits.mockResolvedValue([CORES[0]]);
+      const props = await indexProps();
+      const group = props.units[0] as (typeof props.units)[number] & CoresProps;
+      expect([group.code, group.name]).toEqual(["c-zeta", "Zeta Imaging Core"]);
+      expect(group.coreOptions).toHaveLength(1);
+    });
+  });
+
   it("passes the URL filters through (q, scope, review=1); an unknown scope becomes All", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
     const props = await indexProps({ q: "grants", scope: "department", review: "1" });

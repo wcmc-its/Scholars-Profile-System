@@ -427,6 +427,121 @@ describe("ReportsIndex — URL params", () => {
   });
 });
 
+describe("ReportsIndex — the Cores group's Viewing picker", () => {
+  const CORE_REPORTS = [
+    report(3, "Publications", "Publications citing the core."),
+    report(11, "Core users", "Who used the core."),
+  ];
+  const coreOption = (code: string, name: string, live11: boolean) => ({
+    code,
+    name,
+    editHref: `/edit/core/${code}`,
+    perReport: [
+      { n: 3 as const, live: true, lastRefreshedAt: null },
+      { n: 11 as const, live: live11, lastRefreshedAt: null },
+    ],
+  });
+  const OPTIONS = [
+    coreOption("core-a", "Alpha Imaging Core", true),
+    coreOption("core-b", "Beta Sequencing Core", false),
+    coreOption("core-c", "Gamma Flow Core", true),
+  ];
+  // As the page builds it: the group IS the selected core, named "Cores".
+  const cores = (selected = OPTIONS[0]): ReportsIndexUnit => ({
+    ...selected,
+    kind: "core",
+    name: "Cores",
+    reports: CORE_REPORTS,
+    coreOptions: OPTIONS,
+  });
+  const select = (c: HTMLElement) =>
+    within(c).getByTestId("reports-index-core-select") as HTMLSelectElement;
+
+  it("N cores render as ONE group with a Viewing select listing every core", () => {
+    const { container } = render(<ReportsIndex units={[MEYER, cores()]} />);
+    expect(groupNames(container)).toEqual(["Meyer Cancer Center", "Cores"]);
+    expect(container.querySelectorAll("[data-testid='reports-index-group-cores']")).toHaveLength(1);
+    const group = within(
+      container.querySelector("[data-testid='reports-index-group-cores']") as HTMLElement,
+    );
+    expect(group.getByLabelText("Viewing")).toBe(select(container));
+    expect(Array.from(select(container).options).map((o) => o.textContent)).toEqual([
+      "Alpha Imaging Core",
+      "Beta Sequencing Core",
+      "Gamma Flow Core",
+    ]);
+    expect(group.getByText("2 reports")).toBeTruthy();
+    expect(within(container).getByTestId("reports-index-row-core-a-3").getAttribute("href")).toBe(
+      "/edit/reports/publications?center=core-a&kind=core",
+    );
+  });
+
+  it("picking a core rewrites the row hrefs, the Edit core profile link, liveness and the URL", () => {
+    const { container } = render(<ReportsIndex units={[cores()]} />);
+    const c = within(container);
+    fireEvent.change(select(container), { target: { value: "core-c" } });
+    expect(c.getByTestId("reports-index-row-core-c-3").getAttribute("href")).toBe(
+      "/edit/reports/publications?center=core-c&kind=core",
+    );
+    expect(c.getByTestId("reports-index-edit-core-c").getAttribute("href")).toBe(
+      "/edit/core/core-c",
+    );
+    expect(c.getByTestId("reports-index-edit-core-c").textContent).toBe("Edit core profile");
+    expect(c.getByTestId("reports-index-row-core-c-11").tagName).toBe("A");
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "?center=core-c&kind=core");
+
+    // Core B has no Core users data yet: that row goes muted.
+    fireEvent.change(select(container), { target: { value: "core-b" } });
+    expect(c.getByTestId("reports-index-row-core-b-11").tagName).toBe("DIV");
+    expect(c.queryByTestId("reports-index-row-core-c-3")).toBeNull();
+    // Back to the default core: the URL still names it, not the last pick.
+    fireEvent.change(select(container), { target: { value: "core-a" } });
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "?center=core-a&kind=core");
+  });
+
+  it("opens on the core the page preselected; the default core leaves a bare URL alone", () => {
+    const { container, unmount } = render(<ReportsIndex units={[cores(OPTIONS[1])]} />);
+    expect(select(container).value).toBe("core-b");
+    expect(within(container).getByTestId("reports-index-row-core-b-3")).toBeTruthy();
+    unmount();
+    replaceState.mockClear();
+    render(<ReportsIndex units={[cores()]} />);
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "/edit/reports");
+  });
+
+  it("the no-JS form GETs ?center=<coreId>&kind=core", () => {
+    const { container } = render(<ReportsIndex units={[cores()]} />);
+    const form = select(container).closest("form")!;
+    expect(form.getAttribute("method")).toBe("get");
+    expect(form.getAttribute("action")).toBe("/edit/reports");
+    expect(select(container).getAttribute("name")).toBe("center");
+    expect((form.querySelector("input[name='kind']") as HTMLInputElement).value).toBe("core");
+  });
+
+  it("an owner of one core sees its name and no select", () => {
+    const only: ReportsIndexUnit = {
+      ...OPTIONS[0],
+      kind: "core",
+      reports: CORE_REPORTS,
+      coreOptions: [OPTIONS[0]],
+    };
+    const { container } = render(<ReportsIndex units={[only]} />);
+    expect(groupNames(container)).toEqual(["Alpha Imaging Core"]);
+    expect(within(container).queryByTestId("reports-index-core-select")).toBeNull();
+    expect(within(container).getByTestId("reports-index-row-core-a-11").getAttribute("href")).toBe(
+      "/edit/reports/core-users?center=core-a&kind=core",
+    );
+  });
+
+  it("search reaches the picked core's name", () => {
+    const { container } = render(<ReportsIndex units={[MEYER, cores()]} />);
+    fireEvent.change(within(container).getByTestId("reports-index-search"), {
+      target: { value: "alpha imaging" },
+    });
+    expect(groupNames(container)).toEqual(["Cores"]);
+  });
+});
+
 describe("dataLabel", () => {
   it("covers every state", () => {
     expect(dataLabel(3, undefined)).toBe("No data yet");

@@ -41,6 +41,11 @@
  * unit group. The search / scope / In progress filters ride the URL (`q`,
  * `scope`, `review=1`) so a shared link reproduces the view.
  *
+ * Cores (core reports index picker, 2026-09-28): every core collapses into ONE
+ * "Cores" group with a "Viewing" picker (`buildCoresUnit`), and
+ * `?center=<coreId>&kind=core` is that full list with the core preselected,
+ * no longer a one-unit view.
+ *
  * Program reports (`/edit/reports/7`, Mentored publications) are NOT
  * unit-scoped — their gate is a `report_access` row (`getReportScopes`,
  * `lib/edit/report-access.ts`); reports 8/9 likewise. A holder gets the
@@ -70,6 +75,7 @@ import {
   type ReportsIndexUnit,
 } from "@/components/edit/reports-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import type { EditSession } from "@/lib/auth/superuser";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { db } from "@/lib/db";
 import {
@@ -214,24 +220,28 @@ export default async function EditReportsIndexPage({
 
   const params = (await searchParams) ?? {};
   const { center, kind: kindParam } = params;
+  const kind = parseKind(kindParam);
+  // `?center=<coreId>&kind=core` (the queue's Reporting link) is the full
+  // index with the Cores group on that core, not a one-unit view: every core
+  // collapses into one group with a picker (core reports index picker plan,
+  // 2026-09-28). Every other `?center=` still addresses exactly one unit.
+  const preselectedCore = center && kind === "core" ? center : null;
+  const singleUnit = Boolean(center) && !preselectedCore;
   let baseUnits: ReadonlyArray<{ code: string; kind: ReportableUnitKind; name: string }>;
-  if (center) {
+  if (center && singleUnit) {
     // An explicit `?center=` addresses exactly one unit, validated against the
-    // CenterProgram taxonomy gate for a center. A department/division/core has
-    // no taxonomy to validate against — `loadReportsContext` is the real
+    // CenterProgram taxonomy gate for a center. A department/division has no
+    // taxonomy to validate against — `loadReportsContext` is the real
     // existence/authz gate for every kind.
-    const kind = parseKind(kindParam);
     const code = kind === "center" ? await resolveReportsCenterCode(db.read, center) : center;
     const ctx = await loadReportsContext(code, session, db.read, kind);
-    if (ctx === null)
-      return (
-        <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
-          <ForbiddenEditPage variant="unit" targetEntity={code} />
-        </ConsoleShell>
-      );
+    if (ctx === null) return forbidden(session, code);
     baseUnits = [{ code, kind, name: ctx.unit.name }];
   } else {
     baseUnits = await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
+    // A core this actor can't report on is the same 403 the one-unit view gave.
+    if (preselectedCore && !baseUnits.some((u) => u.kind === "core" && u.code === preselectedCore))
+      return forbidden(session, preselectedCore);
     // Gap 5: zero reportable units is an empty roster for a superuser, a 404
     // for everyone else — unless a pseudo-unit (report 7/8/9) gives them
     // somewhere to go.
@@ -242,19 +252,25 @@ export default async function EditReportsIndexPage({
     baseUnits.map((u) => ({ code: u.code, kind: u.kind })),
     db.read,
   );
+  const toUnit = (u: (typeof baseUnits)[number]): ReportsIndexUnit => {
+    const reports = catalog.byKind[u.kind];
+    return {
+      code: u.code,
+      kind: u.kind,
+      name: u.name,
+      editHref: unitEditHref(u.kind, u.code),
+      reports,
+      perReport: serializePerReport(liveness.get(u.code), reports),
+    };
+  };
+  const cores = baseUnits.filter((u) => u.kind === "core");
+  const coresUnit = cores.length > 0 ? buildCoresUnit(cores.map(toUnit), preselectedCore) : null;
   const units: ReportsIndexUnit[] = [
     ...extraUnits,
-    ...baseUnits.map((u) => {
-      const reports = catalog.byKind[u.kind];
-      return {
-        code: u.code,
-        kind: u.kind,
-        name: u.name,
-        editHref: unitEditHref(u.kind, u.code),
-        reports,
-        perReport: serializePerReport(liveness.get(u.code), reports),
-      };
-    }),
+    // Every core is one group, where the first core sat.
+    ...baseUnits.flatMap((u) =>
+      u.kind !== "core" ? [toUnit(u)] : u === cores[0] && coresUnit ? [coresUnit] : [],
+    ),
   ];
 
   return (
@@ -267,15 +283,39 @@ export default async function EditReportsIndexPage({
       <ReportsIndex
         units={units}
         // A global viewer sees every department/division/core: off under
-        // "All" (their own segments show them). Not for an explicit
+        // "All" (their own segments show them). Not for a one-unit
         // `?center=` — that one unit is what they asked for.
-        hideUnderAll={(session.isSuperuser || session.isCommsSteward) && !center}
+        hideUnderAll={(session.isSuperuser || session.isCommsSteward) && !singleUnit}
         initialQuery={typeof params.q === "string" ? params.q : ""}
-        initialScope={parseReportsIndexScope(params.scope)}
+        // A preselected core opens on the Cores segment unless the link names one.
+        initialScope={
+          params.scope === undefined && preselectedCore ? "core" : parseReportsIndexScope(params.scope)
+        }
         initialReview={params.review === "1"}
       />
     </ConsoleShell>
   );
+}
+
+function forbidden(session: EditSession, code: string) {
+  return (
+    <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
+      <ForbiddenEditPage variant="unit" targetEntity={code} />
+    </ConsoleShell>
+  );
+}
+
+/** Every core as ONE group (core reports index picker plan, 2026-09-28). The
+ *  group IS the selected core (`?center=<coreId>&kind=core` if given, else the
+ *  first alphabetically); `coreOptions` carries every core's code, name, edit
+ *  link and liveness so `ReportsIndex`'s "Viewing" picker switches cores in
+ *  place. One core keeps its own name as the heading. */
+function buildCoresUnit(cores: ReportsIndexUnit[], preselected: string | null): ReportsIndexUnit {
+  const coreOptions = [...cores]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(({ code, name, editHref, perReport }) => ({ code, name, editHref, perReport }));
+  const selected = cores.find((c) => c.code === (preselected ?? coreOptions[0].code)) ?? cores[0];
+  return { ...selected, name: cores.length > 1 ? "Cores" : selected.name, coreOptions };
 }
 
 /** The person-granted Mentored publications report as a one-report

@@ -1429,7 +1429,7 @@ export function CoreClaimQueue({
           <a
             // This core's reports index (3, 6 and the core-only 11–13), the same
             // `center=<coreId>&kind=core` scope the index and every report use.
-            href={`/edit/reports?center=${encodeURIComponent(core.id)}&kind=core`}
+            href={`/edit/reports?center=${encodeURIComponent(core.id)}&kind=core&scope=core`}
             className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
           >
             Reporting

@@ -29,6 +29,10 @@
  * division and core; those stay off under "All" (their own segments show
  * them) unless a search is typed, which reaches every unit — or unless they
  * are ALL there is, when hiding them would open on an empty list.
+ *
+ * Every core is ONE group (`coreOptions`, core reports index picker,
+ * 2026-09-28) with a "Viewing" picker in its header; the picked core rides
+ * the URL as `?center=<coreId>&kind=core`, like the filters.
  */
 "use client";
 
@@ -85,7 +89,16 @@ export type ReportsIndexUnit = {
   editHref: string;
   reports: ReadonlyArray<ReportsIndexReport>;
   perReport: ReadonlyArray<ReportsIndexPerReport>;
+  /** The one Cores group only: every core, A–Z. The unit's own `code` /
+   *  `editHref` / `perReport` are the selected core's; the "Viewing" picker
+   *  swaps them for another option's. */
+  coreOptions?: ReadonlyArray<ReportsIndexCoreOption>;
 };
+
+export type ReportsIndexCoreOption = Pick<
+  ReportsIndexUnit,
+  "code" | "name" | "editHref" | "perReport"
+>;
 
 /** Segments that appear only when the viewer has a unit of that kind. */
 const OPTIONAL_SCOPES = new Set<string>(["department", "division", "core"]);
@@ -135,6 +148,7 @@ function buildRows(units: ReadonlyArray<ReportsIndexUnit>): Row[] {
     for (const report of [...unit.reports].sort((a, b) => a.n - b.n)) {
       const p = byN.get(report.n);
       const live = p?.live ?? false;
+      const coreName = unit.coreOptions?.find((o) => o.code === unit.code)?.name ?? "";
       rows.push({
         unit,
         report,
@@ -142,7 +156,7 @@ function buildRows(units: ReadonlyArray<ReportsIndexUnit>): Row[] {
         data: dataLabel(report.n, p),
         toReview: report.n === 2 && live ? (p?.toReview ?? 0) : 0,
         haystack:
-          `${report.name} ${report.description} ${unit.name} #${report.n} ${report.n}`.toLowerCase(),
+          `${report.name} ${report.description} ${unit.name} ${coreName} #${report.n} ${report.n}`.toLowerCase(),
       });
     }
   }
@@ -164,7 +178,20 @@ export function ReportsIndex({
   initialScope?: ReportsIndexScope;
   initialReview?: boolean;
 }) {
-  const rows = React.useMemo(() => buildRows(units), [units]);
+  // The Cores group's "Viewing" picker: the page hands the group already on
+  // its default core; picking another swaps in that core's code (row hrefs),
+  // edit link and liveness.
+  const coresUnit = units.find((u) => u.coreOptions);
+  const [core, setCore] = React.useState(coresUnit?.code ?? "");
+  const shown = React.useMemo(
+    () =>
+      units.map((u) => {
+        const o = u.coreOptions?.find((c) => c.code === core);
+        return o ? { ...u, code: o.code, editHref: o.editHref, perReport: o.perReport } : u;
+      }),
+    [units, core],
+  );
+  const rows = React.useMemo(() => buildRows(shown), [shown]);
   const kindsPresent = React.useMemo(() => new Set<string>(units.map((u) => u.kind)), [units]);
   const segments = SCOPES.filter(([k]) => !OPTIONAL_SCOPES.has(k) || kindsPresent.has(k));
   // Only a report with an NCI 2A import can have rows to review; a "No data
@@ -191,9 +218,15 @@ export function ReportsIndex({
     set("q", query.trim() || null);
     set("scope", scope === "all" ? null : scope);
     set("review", review ? "1" : null);
+    // The picked core, as the `?center=<coreId>&kind=core` the page preselects
+    // from — once the viewer picks one or the URL already named a core.
+    if (coresUnit && (core !== coresUnit.code || params.get("kind") === "core")) {
+      params.set("center", core);
+      params.set("kind", "core");
+    }
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [query, scope, review]);
+  }, [query, scope, review, core, coresUnit]);
 
   const q = query.trim().toLowerCase();
   const inScope = (r: Row, k: ReportsIndexScope) => {
@@ -299,14 +332,18 @@ export function ReportsIndex({
         <div className="mt-7 flex flex-col gap-7">
           {groups.map(({ unit, rows: unitRows }) => (
             <section
-              key={`${unit.kind}:${unit.code}`}
-              data-testid={`reports-index-group-${unit.code}`}
+              // The Cores group keeps one key across picks, so the picker keeps focus.
+              key={unit.coreOptions ? "core" : `${unit.kind}:${unit.code}`}
+              data-testid={`reports-index-group-${unit.coreOptions ? "cores" : unit.code}`}
             >
               <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-1 pb-2.5">
                 <h2 className="text-[17px] font-semibold">{unit.name}</h2>
                 <span className="text-muted-foreground text-[13px]">
                   {unitRows.length} {unitRows.length === 1 ? "report" : "reports"}
                 </span>
+                {unit.coreOptions && unit.coreOptions.length > 1 && (
+                  <CorePicker options={unit.coreOptions} value={core} onChange={setCore} />
+                )}
                 {!isPseudo(unit.kind) && (
                   <Link
                     href={unit.editHref}
@@ -327,6 +364,51 @@ export function ReportsIndex({
         </div>
       )}
     </div>
+  );
+}
+
+/** "Viewing <core>" (mockup `Core pub review/Core Reports.dc.html`). With JS
+ *  the pick swaps the group in place; without it the form GETs
+ *  `?center=<coreId>&kind=core`, which the page preselects from. Its own line
+ *  on a phone, the select shrinking to fit. */
+function CorePicker({
+  options,
+  value,
+  onChange,
+}: {
+  options: ReadonlyArray<ReportsIndexCoreOption>;
+  value: string;
+  onChange: (code: string) => void;
+}) {
+  return (
+    <form
+      method="get"
+      action="/edit/reports"
+      onSubmit={(e) => e.preventDefault()}
+      className="text-muted-foreground flex w-full min-w-0 items-center gap-2 text-[13px] sm:w-auto"
+    >
+      <label htmlFor="reports-index-core">Viewing</label>
+      <select
+        id="reports-index-core"
+        name="center"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="border-apollo-border-strong bg-apollo-surface text-foreground h-8 min-w-0 flex-1 rounded-lg border px-2.5 text-sm sm:max-w-[300px] sm:flex-none"
+        data-testid="reports-index-core-select"
+      >
+        {options.map((o) => (
+          <option key={o.code} value={o.code}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+      <input type="hidden" name="kind" value="core" />
+      <noscript>
+        <button type="submit" className="text-apollo-slate hover:underline">
+          Go
+        </button>
+      </noscript>
+    </form>
   );
 }
 
