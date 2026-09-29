@@ -5057,6 +5057,12 @@ describe("v2 pure helpers", () => {
     expect(people).toHaveLength(1);
     expect(people[0].rows.map((r) => r.pmid)).toEqual(["1"]);
     expect(people[0].open).toBe(1);
+    // a paper decided this session stays on their list (for its Undo) but is not open
+    const after = buildRailPeople([r1, r2], new Map([["1", "claimed"]]), {
+      ppp0001: { papers: 4, recent: 1, total: 10 },
+    });
+    expect(after[0].rows.map((r) => r.pmid)).toEqual(["1"]);
+    expect(after[0].open).toBe(0);
   });
 
   it("rowChips: short chips, the repeat user named only in By evidence", () => {
