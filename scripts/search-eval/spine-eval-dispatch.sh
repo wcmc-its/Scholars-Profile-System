@@ -170,8 +170,10 @@ fi
 for arm in $ARMS; do
   aws s3 cp "s3://$BUCKET/$PREFIX/$arm.json" "$OUT/$arm.raw.json" --only-show-errors
   # sponsor-eval.sh wants a bare {id: [cwid,...]}; keep the audit fields beside it.
-  jq '.ranked' "$OUT/$arm.raw.json" > "$OUT/$arm.json"
-  n="$(jq 'length' "$OUT/$arm.json")"
+  # #1985 — unmeasured ids go in as `null`, not absent: sponsor-eval.sh scores a MISSING key as
+  # a ranked-nobody 0 (deflating the mean and claiming scored=N/N), but excludes a `null`.
+  jq '.ranked + (.unmeasured | map({(.id): null}) | add // {})' "$OUT/$arm.raw.json" > "$OUT/$arm.json"
+  n="$(jq '.ranked | length' "$OUT/$arm.raw.json")"
   u="$(jq '.unmeasured | length' "$OUT/$arm.raw.json")"
   echo "  $arm: $n fixtures ranked, $u unmeasured"
   # An unmeasured fixture is a MEASUREMENT FAILURE, not a zero — say so loudly rather than
