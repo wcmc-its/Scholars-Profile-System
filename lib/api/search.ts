@@ -101,6 +101,7 @@ import {
   resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
   resolveSearchPeopleTrialEvidence,
+  resolveSearchPeopleTrialMeshWeight,
   resolvePeopleMethodFamilyTier,
   resolvePeopleMethodContextBoost,
   resolvePubFacetSplit,
@@ -3175,6 +3176,12 @@ export async function searchPeople(opts: {
         // descriptor resolved, independent of the escalation gate above.
         weight: MESH_ATTRIBUTION_WEIGHT[meshTier],
       });
+      // Clinical research: a PI trial tagged in the concept earns its own multiplier on top
+      // (SEARCH_PEOPLE_TRIAL_MESH_WEIGHT; 1 ⇒ nothing pushed, body unchanged).
+      const trialMeshWeight = trialEvidenceOn ? resolveSearchPeopleTrialMeshWeight() : 1;
+      if (trialMeshWeight > 1) {
+        scoreFunctions.push({ filter: { terms: { trialMeshUi: meshDescendantUis } }, weight: trialMeshWeight });
+      }
     }
     // #1269 — explicit method-tag tier. A scholar whose `methodFamily` rollup
     // contains the resolved family label (`match_phrase`, same `scholar_text`

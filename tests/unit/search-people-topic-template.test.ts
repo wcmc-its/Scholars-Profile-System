@@ -723,6 +723,30 @@ describe("SEARCH_PEOPLE_TRIAL_EVIDENCE — clinical trials as People evidence", 
     expect(r.hits[0].trialMatchCount).toBe(2);
   });
 
+  it("SEARCH_PEOPLE_TRIAL_MESH_WEIGHT adds a trial-only multiplier on top of the attribution boost", async () => {
+    vi.stubEnv("SEARCH_PEOPLE_TRIAL_MESH_WEIGHT", "1.2");
+    await searchPeople({ q: "acute myeloid leukemia", relevanceMode: "v3", shape: "topic", meshDescendantUis: DESCENDANTS });
+    const fns = functionScore(capturedBodies[0]).functions;
+    expect(fns).toContainEqual({ filter: trialClause, weight: 1.5 });
+    expect(fns).toContainEqual({ filter: { terms: { trialMeshUi: DESCENDANTS } }, weight: 1.2 });
+  });
+
+  it("no trial multiplier by default, when out of range, or with trial evidence off", async () => {
+    const trialOnly = (fns: Array<{ filter?: unknown }>) =>
+      fns.filter((f) => JSON.stringify(f.filter) === JSON.stringify({ terms: { trialMeshUi: DESCENDANTS } }));
+    const run = async () => {
+      capturedBodies.length = 0;
+      await searchPeople({ q: "acute myeloid leukemia", relevanceMode: "v3", shape: "topic", meshDescendantUis: DESCENDANTS });
+      return trialOnly(functionScore(capturedBodies[0]).functions);
+    };
+    expect(await run()).toHaveLength(0); // unset ⇒ 1
+    vi.stubEnv("SEARCH_PEOPLE_TRIAL_MESH_WEIGHT", "5");
+    expect(await run()).toHaveLength(0); // > 3 ⇒ ignored
+    vi.stubEnv("SEARCH_PEOPLE_TRIAL_MESH_WEIGHT", "1.2");
+    vi.stubEnv("SEARCH_PEOPLE_TRIAL_EVIDENCE", "off");
+    expect(await run()).toHaveLength(0);
+  });
+
   it("concept scope admits trial-tagged scholars", async () => {
     await searchPeople({ q: "acute myeloid leukemia", relevanceMode: "v3", shape: "topic", meshDescendantUis: DESCENDANTS, scope: "concept" });
     expect(functionScore(capturedBodies[0]).query.bool.filter).toContainEqual(trialClause);

@@ -1551,3 +1551,13 @@ export function resolveDescendantTermsClauseCap(dflt: number): number {
 export function resolveSearchPeopleTrialEvidence(): boolean {
   return process.env.SEARCH_PEOPLE_TRIAL_EVIDENCE === "on";
 }
+
+/**
+ * Extra multiplier for a scholar whose PI trials are MeSH-tagged in the resolved concept,
+ * on top of the concept attribution boost (so pubs+trials > pubs-only > neither). Only read
+ * when SEARCH_PEOPLE_TRIAL_EVIDENCE is on. Default 1 (no boost); valid range (1, 3].
+ */
+export function resolveSearchPeopleTrialMeshWeight(): number {
+  const n = Number(process.env.SEARCH_PEOPLE_TRIAL_MESH_WEIGHT);
+  return Number.isFinite(n) && n > 1 && n <= 3 ? n : 1;
+}

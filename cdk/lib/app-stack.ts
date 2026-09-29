@@ -2231,6 +2231,10 @@ export class AppStack extends Stack {
         // reindex that writes the fields; before it, the clauses match nothing.
         // resolveSearchPeopleTrialEvidence reads === "on". Staging-first.
         SEARCH_PEOPLE_TRIAL_EVIDENCE: env === "staging" ? "on" : "off",
+        // Multiplier for a PI trial MeSH-tagged in the searched concept, stacked on the
+        // concept attribution boost. resolveSearchPeopleTrialMeshWeight: 1 = off, (1, 3].
+        // Staging-first for the A/B; prod inert (trial evidence is off there).
+        SEARCH_PEOPLE_TRIAL_MESH_WEIGHT: env === "staging" ? "1.2" : "1",
         // Clinical trials search tab over the scholars-trials index (built nightly by
         // search:index). resolveTrialsTab reads === "on". Staging-first; a missing
         // index hides the tab rather than erroring the page.
