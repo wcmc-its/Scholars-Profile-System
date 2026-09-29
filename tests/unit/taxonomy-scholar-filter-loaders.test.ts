@@ -72,7 +72,7 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
 
 import { isPublicScholarCwid, loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
 import { getTopicPublications } from "@/lib/api/topics";
-import { getFamilyPublications } from "@/lib/api/methods";
+import { getFamilyPublications, getScholarMethodScopePmids } from "@/lib/api/methods";
 
 const TOPIC = { id: "cardio", label: "Cardio", displayThreshold: null };
 const count = (n: number) => [{ c: BigInt(n) }];
@@ -239,5 +239,38 @@ describe("getFamilyPublications({ cwid })", () => {
       getFamilyPublications(SC, "MRI", { sort: "newest", cwid: "aaa1111" }),
     ).resolves.toBeNull();
     expect(mockScholarFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("getScholarMethodScopePmids", () => {
+  const SC = "imaging_image_analysis";
+
+  it("one family: that family's pmids minus the scholar's hides", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([{ familyLabel: "MRI", pmids: ["1", "2", 3] }]);
+    mockSuppressionFindMany.mockImplementation((args: { where: Record<string, unknown> }) =>
+      Promise.resolve(args.where.contributorCwid ? [{ entityId: "2" }] : []),
+    );
+    const out = await getScholarMethodScopePmids("aaa1111", SC, "MRI");
+    expect(new Set(out)).toEqual(new Set(["1", "3"]));
+    expect(mockScholarFamilyFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "aaa1111",
+      supercategory: SC,
+      familyLabel: "MRI",
+    });
+  });
+
+  it("whole supercategory: union of visible families, a suppressed family's pmids excluded", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { familyLabel: "MRI", pmids: ["1", "2"] },
+      { familyLabel: "PET", pmids: ["2", "5"] },
+      { familyLabel: "Secret", pmids: ["9"] },
+    ]);
+    mockSuppressionOverlayFindMany.mockResolvedValue([{ supercategory: SC, familyLabel: "Secret" }]);
+    const out = await getScholarMethodScopePmids("aaa1111", SC);
+    expect(new Set(out)).toEqual(new Set(["1", "2", "5"]));
+    expect(mockScholarFamilyFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "aaa1111",
+      supercategory: SC,
+    });
   });
 });

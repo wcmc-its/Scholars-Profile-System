@@ -64,6 +64,11 @@ import {
 import { CuratedTag } from "@/components/topic/curated-tag";
 import { PublicationsHeadingRow } from "@/components/taxonomy/publications-heading-row";
 import {
+  ScholarFilterChip,
+  setScholarFilter,
+  useScholarFilter,
+} from "@/components/taxonomy/scholar-filter";
+import {
   FEED_CHUNK,
   loadMoreLabel,
   nextChunkSize,
@@ -145,6 +150,9 @@ export type PublicationFeedProps = {
   loadMore?: boolean;
   /** TAXONOMY_FEED_LOAD_MORE — the per-row area label ("· {subarea}"). */
   areaLabelFor?: (hit: FeedHit) => string | null;
+  /** Honor the scholar-card hover's "Filter publications" pick (`?cwid=`);
+   *  only for routes that accept it (topic, method family). */
+  scholarFilter?: boolean;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -179,7 +187,7 @@ async function fetchFeed(url: string): Promise<FeedResponse> {
 
 export function PublicationFeed({
   endpoint,
-  scopeParams = [],
+  scopeParams: baseScopeParams = [],
   relevanceTiers = false,
   modalTopicSlug,
   entityTerm = null,
@@ -188,7 +196,15 @@ export function PublicationFeed({
   emptyBody,
   loadMore = false,
   areaLabelFor,
+  scholarFilter = false,
 }: PublicationFeedProps) {
+  const pickedScholar = useScholarFilter();
+  const scholar = scholarFilter ? pickedScholar : null;
+  // The pick belongs to this page's feed; drop it when the feed goes away.
+  useEffect(() => (scholarFilter ? () => setScholarFilter(null) : undefined), [scholarFilter]);
+  const scopeParams: Array<[string, string | null]> = scholar
+    ? [...baseScopeParams, ["cwid", scholar.cwid]]
+    : baseScopeParams;
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   // #326 — defaults to "strongly" on every mount (no persistence).
@@ -336,6 +352,12 @@ export function PublicationFeed({
         </div>
       </PublicationsHeadingRow>
 
+      {scholarFilter && (
+        <p className="sr-only" role="status" aria-live="polite">
+          {scholar ? `Showing publications by ${scholar.name}` : ""}
+        </p>
+      )}
+      {scholar && <ScholarFilterChip scholar={scholar} />}
       {headerSlot}
 
       <FilterToggleRow data={data} filter={filter} setFilter={setFilter} />
@@ -943,10 +965,18 @@ export function TopicPublicationFeed({
     return (hit: FeedHit) =>
       hit.primarySubtopicId ? (subtopicLabels[hit.primarySubtopicId] ?? null) : null;
   }, [loadMore, activeSubtopic, subtopicLabels]);
+  // A subarea change drops the scholar pick (it was made against the topic).
+  const prevSubtopic = useRef(activeSubtopic);
+  useEffect(() => {
+    if (prevSubtopic.current === activeSubtopic) return;
+    prevSubtopic.current = activeSubtopic;
+    setScholarFilter(null);
+  }, [activeSubtopic]);
   return (
     <PublicationFeed
       endpoint={`/api/topics/${encodeURIComponent(topicSlug)}/publications`}
       scopeParams={[["subtopic", activeSubtopic]]}
+      scholarFilter
       relevanceTiers
       modalTopicSlug={topicSlug}
       emptyBody="Publications in this area will appear as they are indexed."
@@ -1004,6 +1034,7 @@ export function FamilyPublicationFeed({
         familySegment,
       )}/publications`}
       scopeParams={[["entity", cellLine]]}
+      scholarFilter
       entityTerm={cellLineLabel}
       // "N of M articles" while an entity filter is on; M is the family total
       // for the active type filter.

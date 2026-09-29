@@ -12,6 +12,7 @@
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { loadHiddenAuthorshipCounts } from "@/lib/api/manual-layer";
+import { loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 
 export type PopoverContextHeader = {
@@ -321,6 +322,55 @@ export async function fetchTopicRank(
 
   const recent = await fetchRecentPubsInTopic(cwid, topicId, 2);
   return { rank, topicPubCount, recent };
+}
+
+/**
+ * Taxonomy-card popover summary (topic / method pages): how many of the
+ * scholar's papers fall in the page's scope, how many of those they led
+ * (confirmed first or senior author), and their two most recent.
+ */
+export type ScopeSummary = {
+  pubCount: number;
+  leadCount: number;
+  recent: Array<RecentPub & { journal: string | null }>;
+};
+
+/** The scholar's pmids in a topic, minus their per-author hides (ADR-005) — the
+ *  same set the topic feed's `?cwid=` filter shows. */
+export async function fetchTopicScopePmids(cwid: string, topicId: string): Promise<string[]> {
+  if (!cwid || !topicId) return [];
+  const [rows, hidden] = await Promise.all([
+    prisma.publicationTopic.findMany({
+      where: { cwid, parentTopicId: topicId },
+      select: { pmid: true },
+    }),
+    loadHiddenAuthorshipPmids(cwid),
+  ]);
+  const hiddenSet = new Set(hidden);
+  return rows.map((r) => r.pmid).filter((p) => !hiddenSet.has(p));
+}
+
+export async function summarizeScope(cwid: string, pmids: string[]): Promise<ScopeSummary | null> {
+  if (!cwid || pmids.length === 0) return null;
+  const [leadRows, recent] = await Promise.all([
+    prisma.publicationAuthor.findMany({
+      where: {
+        cwid,
+        pmid: { in: pmids },
+        isConfirmed: true,
+        OR: [{ isFirst: true }, { isLast: true }],
+      },
+      select: { pmid: true },
+      distinct: ["pmid"],
+    }),
+    prisma.publication.findMany({
+      where: { pmid: { in: pmids } },
+      orderBy: [{ year: "desc" }, { pmid: "desc" }],
+      take: 2,
+      select: { pmid: true, title: true, journal: true, year: true },
+    }),
+  ]);
+  return { pubCount: pmids.length, leadCount: leadRows.length, recent };
 }
 
 /**

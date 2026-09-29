@@ -8,8 +8,10 @@ import {
   fetchRecentActiveGrants,
   fetchRecentPubs,
   fetchTopicRank,
+  fetchTopicScopePmids,
+  summarizeScope,
 } from "@/lib/api/popover-context";
-import { getScholarMethodFamilies } from "@/lib/api/methods";
+import { getScholarMethodFamilies, getScholarMethodScopePmids } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +42,11 @@ export async function GET(
   // lights up the method-families section only for /methods, never leaking into
   // topic pages.
   const contextMethods = sp.get("contextMethods") === "1";
+  // Taxonomy-card surface (topic / method page scholar cards): the page's scope
+  // is a topic (contextTopicSlug) or a method supercategory, optionally one
+  // family in it (supercategory id + family label, the family feed's own key).
+  const contextSupercategory = sp.get("contextSupercategory") || undefined;
+  const contextFamilyLabel = sp.get("contextFamilyLabel") || undefined;
 
   const header = await fetchPopoverHeader(cwid);
   if (!header) {
@@ -53,6 +60,9 @@ export async function GET(
     !!contextPubPmid && (surface === "pub-chip" || surface === "co-author");
   const wantsCoPubs = !!contextScholarCwid && surface !== "facet";
   const wantsTopicRank = !!contextTopicSlug && surface === "top-scholar";
+  const isCard = surface === "taxonomy-card";
+  const wantsScope =
+    isCard && (!!contextTopicSlug || (!!contextSupercategory && isMethodPagesEnabled()));
   const wantsRecentPubs =
     surface === "pub-chip" ||
     surface === "co-author" ||
@@ -73,6 +83,7 @@ export async function GET(
     recentGrantsR,
     topSponsorR,
     methodFamiliesR,
+    scopeR,
   ] = await Promise.allSettled([
     wantsAuthorship ? fetchAuthorshipOnPub(cwid, contextPubPmid!) : Promise.resolve(null),
     wantsCoPubs ? fetchCoPubsSummary(cwid, contextScholarCwid!) : Promise.resolve(null),
@@ -83,6 +94,12 @@ export async function GET(
       : Promise.resolve([]),
     wantsTopSponsor ? fetchInvestigatorTopSponsor(cwid) : Promise.resolve(null),
     wantsMethodFamilies ? getScholarMethodFamilies(cwid) : Promise.resolve([]),
+    wantsScope
+      ? (contextTopicSlug
+          ? fetchTopicScopePmids(cwid, contextTopicSlug)
+          : getScholarMethodScopePmids(cwid, contextSupercategory!, contextFamilyLabel)
+        ).then((pmids) => summarizeScope(cwid, pmids))
+      : Promise.resolve(null),
   ]);
   const unwrap = <T>(r: PromiseSettledResult<T>, fb: T): T =>
     r.status === "fulfilled" ? r.value : fb;
@@ -96,5 +113,6 @@ export async function GET(
     recentGrants: unwrap(recentGrantsR, []),
     topSponsor: unwrap(topSponsorR, null),
     methodFamilies: unwrap(methodFamiliesR, []),
+    scope: unwrap(scopeR, null),
   });
 }

@@ -11,6 +11,8 @@ import { ScholarCardGrid, type ScholarCardData } from "@/components/taxonomy/sch
 const LONG_TITLE =
   "Distinguished Professor of Extraordinarily Long Departmental Appointment Names and Associated Interdisciplinary Research Programs";
 
+const POPOVER = { label: "Cardiology", topicSlug: "cardio", filterable: true };
+
 function scholar(i: number, areas: string[] = []): ScholarCardData {
   return {
     cwid: `aaa${1000 + i}`,
@@ -32,7 +34,7 @@ function cardLinks() {
 describe("ScholarCardGrid", () => {
   it("renders at most 6 cards, each one link to the profile", () => {
     render(
-      <ScholarCardGrid
+      <ScholarCardGrid popover={POPOVER}
         heading="Scholars in this area"
         scholars={Array.from({ length: 7 }, (_, i) => scholar(i + 1))}
       />,
@@ -43,7 +45,7 @@ describe("ScholarCardGrid", () => {
   });
 
   it("has a narrow-viewport plain link and an md+ link per card", () => {
-    render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(2)]} />);
+    render(<ScholarCardGrid popover={POPOVER} heading="Scholars in this area" scholars={[scholar(2)]} />);
     const [narrow, wide] = cardLinks();
     // The narrow copy must be `flex` (not the default inline <a>) or the
     // avatar + text stack vertically and min-h-11 / w-full do nothing.
@@ -54,7 +56,7 @@ describe("ScholarCardGrid", () => {
 
   it("renders up to 3 area bullets, and none when the scholar has no areas", () => {
     render(
-      <ScholarCardGrid
+      <ScholarCardGrid popover={POPOVER}
         heading="Scholars in this area"
         scholars={[scholar(2, ["Alpha", "Beta", "Gamma", "Delta"]), scholar(3, [])]}
       />,
@@ -67,7 +69,7 @@ describe("ScholarCardGrid", () => {
   });
 
   it("no-photo avatar: beige rail circle with serif initials (mockup), not the gradient", () => {
-    render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(2)]} />);
+    render(<ScholarCardGrid popover={POPOVER} heading="Scholars in this area" scholars={[scholar(2)]} />);
     const fallback = cardLinks()[0].querySelector("[data-fallback-tone]") as HTMLElement;
     expect(fallback.getAttribute("data-fallback-tone")).toBe("rail");
     expect(fallback.textContent).toBe("TP");
@@ -79,7 +81,7 @@ describe("ScholarCardGrid", () => {
 
   it("shows 'View all N scholars →' only when a scholars page exists", () => {
     const { rerender } = render(
-      <ScholarCardGrid
+      <ScholarCardGrid popover={POPOVER}
         heading="Scholars in this area"
         scholars={[scholar(2)]}
         viewAll={{ href: "/topics/cardio/scholars", count: 1234 }}
@@ -88,21 +90,21 @@ describe("ScholarCardGrid", () => {
     const link = screen.getByRole("link", { name: "View all 1,234 scholars →" });
     expect(link.getAttribute("href")).toBe("/topics/cardio/scholars");
 
-    rerender(<ScholarCardGrid heading="Scholars using this" scholars={[scholar(2)]} />);
+    rerender(<ScholarCardGrid popover={POPOVER} heading="Scholars using this" scholars={[scholar(2)]} />);
     expect(screen.queryByText(/View all/)).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: /Scholars using this/ })).toBeTruthy();
   });
 
   it("keeps the ORIGINAL info copy ('…in this research area') on every heading", () => {
-    render(<ScholarCardGrid heading="Scholars using this" scholars={[scholar(2)]} />);
+    render(<ScholarCardGrid popover={POPOVER} heading="Scholars using this" scholars={[scholar(2)]} />);
     fireEvent.click(screen.getByRole("button", { name: "About Scholars using this" }));
     expect(
       screen.getByText(/senior-author publications in this research area\. Curators do not/),
     ).toBeTruthy();
   });
 
-  it("guards 390px overflow: min-w-0 containers, truncated name + title", () => {
-    render(<ScholarCardGrid heading="Scholars in this area" scholars={[scholar(1, ["A"])]} />);
+  it("guards 390px overflow: min-w-0 containers, name + title wrap in full", () => {
+    render(<ScholarCardGrid popover={POPOVER} heading="Scholars in this area" scholars={[scholar(1, ["A"])]} />);
     const grid = screen.getByTestId("scholar-card-grid");
     expect(grid.className).toContain("min-w-0");
     const list = grid.querySelector("ul")!;
@@ -115,18 +117,20 @@ describe("ScholarCardGrid", () => {
     expect(card.className).toContain("min-w-0");
     expect(card.className).toContain("min-h-11");
     const name = within(card).getByText("Test Person 1");
-    expect(name.className).toContain("truncate");
+    expect(name.className).not.toContain("truncate");
+    expect(name.className).toContain("[overflow-wrap:anywhere]");
     // Mockup Portrait card: sans 14px / 650 (not the serif name of the spine card).
     expect(name.className).toContain("text-[14px]");
     expect(name.className).toContain("font-[650]");
     expect(name.className).not.toContain("font-serif");
     const title = within(card).getByText(LONG_TITLE);
-    expect(title.className).toContain("truncate");
+    expect(title.className).not.toContain("truncate");
+    expect(title.className).toContain("[overflow-wrap:anywhere]");
     expect(title.parentElement!.className).toContain("min-w-0");
   });
 
   it("renders nothing for an empty roster", () => {
-    const { container } = render(<ScholarCardGrid heading="Scholars in this area" scholars={[]} />);
+    const { container } = render(<ScholarCardGrid popover={POPOVER} heading="Scholars in this area" scholars={[]} />);
     expect(container.innerHTML).toBe("");
   });
 });

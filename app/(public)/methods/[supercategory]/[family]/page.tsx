@@ -208,7 +208,12 @@ export default async function FamilyPage({
               heading="Scholars using this"
               scholars={topScholars.map((s) => ({ ...s, areas: [] }))}
               viewAll={{ href: familyScholarsHref, count: scholarCount }}
-              popover={{ contextMethods: true }}
+              popover={{
+                label: resolved.familyLabel,
+                supercategory: resolved.supercategory,
+                familyLabel: resolved.familyLabel,
+                filterable: true,
+              }}
             />
           </div>
         ) : (
