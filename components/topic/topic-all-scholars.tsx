@@ -1,323 +1,196 @@
 /**
- * Spec §13 "All scholars in this area · N" — comprehensive enumerative list.
+ * Spec §13 "All scholars in this area" — comprehensive enumerative list
+ * (mockup "Dedicated subarea - scholar list").
  *
- * Server Component. URL state for filter / search / page so the surface is
- * shareable and indexable. Visual contract:
- *   - Header row: section label "ALL SCHOLARS IN THIS AREA · N" left, hint copy right.
- *   - Filter bar: name search box (left, max 320px) + role filter chips (right).
- *   - Three-column compact list on desktop, single column on mobile.
- *   - Alpha-letter dividers in serif at each new starting letter.
- *   - Each row: 28×28 avatar, name (weight 500, 13px), title (11.5px tertiary),
- *     up to 3 subtopic pills.
- *   - Pagination 22/page; pagination state lives in URL query params.
+ * Server Component; every filter is URL state so the view is shareable:
+ *   - Sticky bar: name filter, Subarea picker, role chips, A–Z letter bar.
+ *   - One letter at a time; a name search shows every match grouped by letter.
+ *   - Borderless taxonomy scholar cards (hover = scope summary popover), the
+ *     selected subarea bolded in each card's area bullets.
  */
-import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
-import {
-  topicScholarLastNameInitial,
-  type TopicAllScholarRole,
-  type TopicScholarRow,
-  type TopicScholarsResult,
-} from "@/lib/api/topics";
+import { Search } from "lucide-react";
+import type { TopicAllScholarRole, TopicScholarsResult } from "@/lib/api/topics";
+import { topicScholarLastNameInitial } from "@/lib/api/topics";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
-import { profilePath } from "@/lib/profile-url";
-import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
-import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
+import { ScholarCard } from "@/components/taxonomy/scholar-card";
+import { SubareaPicker } from "@/components/topic/subarea-picker";
 
-const ROLE_CHIPS: Array<{ id: TopicAllScholarRole; label: string; countKey: keyof TopicScholarsResult["roleCounts"] }> = [
-  { id: "all", label: "All", countKey: "all" },
-  { id: "faculty", label: "Faculty", countKey: "faculty" },
-  { id: "postdocs", label: "Postdocs", countKey: "postdocs" },
+const ROLE_CHIPS: Array<{ id: TopicAllScholarRole; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "faculty", label: "Faculty" },
+  { id: "postdocs", label: "Postdocs" },
   // No "Doctoral students" chip (sibling of #2270): the loader carves the #536
   // hidden identity classes, so the facet could only ever offer an empty list.
 ];
 
-function buildHref(
-  topicSlug: string,
-  params: { role?: TopicAllScholarRole; q?: string; page?: number },
-): string {
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+type ListParams = { role: TopicAllScholarRole; q: string; sub: string | null; letter?: string | null };
+
+function buildScholarsHref(topicSlug: string, p: ListParams): string {
   const sp = new URLSearchParams();
-  if (params.role && params.role !== "all") sp.set("role", params.role);
-  if (params.q && params.q.length > 0) sp.set("q", params.q);
-  if (params.page && params.page > 0) sp.set("page", String(params.page));
+  if (p.sub) sp.set("sub", p.sub);
+  if (p.role !== "all") sp.set("role", p.role);
+  if (p.q) sp.set("q", p.q);
+  if (p.letter) sp.set("letter", p.letter);
   const qs = sp.toString();
   const base = `/topics/${encodeURIComponent(topicSlug)}/scholars`;
   return qs ? `${base}?${qs}` : base;
 }
 
-/** Discrete page numbers with ellipsis when total > 7. */
-function paginationPages(current: number, totalPages: number): Array<number | "ellipsis"> {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, i) => i);
-  }
-  const out: Array<number | "ellipsis"> = [0];
-  const start = Math.max(1, current - 1);
-  const end = Math.min(totalPages - 2, current + 1);
-  if (start > 1) out.push("ellipsis");
-  for (let i = start; i <= end; i++) out.push(i);
-  if (end < totalPages - 2) out.push("ellipsis");
-  out.push(totalPages - 1);
-  return out;
-}
-
-function ScholarRow({ scholar }: { scholar: TopicScholarRow }) {
-  const displayName = scholar.postnominal
-    ? `${scholar.preferredName}, ${scholar.postnominal}`
-    : scholar.preferredName;
-  // #536 — hidden identity class (doctoral student): keep the row + name but
-  // render it as a non-link (the profile route 404s).
-  const linkable = isPubliclyDisplayed(scholar.roleCategory);
-  const rowClass = "flex items-start gap-3 rounded-md p-1.5 -mx-1.5";
-  const inner = (
-    <>
-      <HeadshotAvatar
-        size="sm"
-        cwid={scholar.cwid}
-        preferredName={scholar.preferredName}
-        identityImageEndpoint={scholar.identityImageEndpoint}
-        className="size-7"
-      />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium leading-tight">
-          {displayName}
-        </div>
-        {scholar.primaryTitle ? (
-          <div className="truncate text-[11.5px] leading-tight text-muted-foreground">
-            {scholar.primaryTitle}
-          </div>
-        ) : null}
-        {scholar.subtopics.length > 0 ? (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {scholar.subtopics.map((s) => (
-              <span
-                key={s.id}
-                className="inline-flex items-center rounded-full bg-[var(--color-cream,#f5f0e8)] px-2 py-0.5 text-[10.5px] text-muted-foreground"
-              >
-                {s.displayName}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </>
-  );
-  return (
-    <li className="break-inside-avoid py-2">
-      {linkable ? (
-        <a href={profilePath(scholar.slug)} className={`${rowClass} hover:bg-muted/50`}>
-          {inner}
-        </a>
-      ) : (
-        <div className={rowClass}>{inner}</div>
-      )}
-    </li>
-  );
-}
-
 export function TopicAllScholars({
   topicSlug,
+  topicLabel,
   result,
+  subtopics,
   selectedRole,
+  selectedSub,
   query,
-  page,
-  exportEnabled = false,
 }: {
   topicSlug: string;
+  topicLabel: string;
   result: TopicScholarsResult;
+  subtopics: Array<{ id: string; displayName: string; pubCount: number }>;
   selectedRole: TopicAllScholarRole;
+  selectedSub: string | null;
   query: string;
-  page: number;
-  /** When true (#847 flag on), render the internal CSV download island. */
-  exportEnabled?: boolean;
 }) {
-  const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
-  const pages = paginationPages(page, totalPages);
+  const here: ListParams = { role: selectedRole, q: query, sub: selectedSub };
+  const activeArea = subtopics.find((s) => s.id === selectedSub)?.displayName;
+  const available = new Set(result.letters);
 
-  // SPEC §B.3 HARD cap: offer the export ONLY when the full displayable cohort
-  // is <= 50. The export covers the WHOLE cohort (ignores the name filter), so
-  // gate on the unfiltered all-roles total — `roleCounts.all` equals that only
-  // when no name search is active; during a search, hide the button. The server
-  // refuses > 50 regardless.
-  const exportEligible =
-    exportEnabled && query.length === 0 && result.roleCounts.all <= SCHOLAR_EXPORT_CAP;
+  const groups = new Map<string, TopicScholarsResult["hits"]>();
+  for (const h of result.hits) {
+    const ch = topicScholarLastNameInitial(h.preferredName);
+    groups.set(ch, [...(groups.get(ch) ?? []), h]);
+  }
 
-  // Three-column CSS columns layout preserves alpha-letter dividers in document
-  // order. `break-inside-avoid` keeps each row + divider intact across columns.
   return (
-    <section className="mt-12">
-      <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          All scholars in this area · {result.roleCounts.all.toLocaleString()}
-        </h2>
-        <div className="flex items-baseline gap-4">
-          <p className="hidden text-xs italic text-muted-foreground sm:block">
-            Anyone with at least one publication in this area, sorted alphabetically.
-          </p>
-          {exportEligible ? (
-            <ScholarListExportButton
-              scope="topic"
-              params={{ slug: topicSlug }}
-              count={result.roleCounts.all}
+    <section>
+      <div className="border-apollo-border z-10 md:sticky md:top-0 mt-7 flex flex-col gap-3.5 border-b bg-white pt-3.5">
+        <div className="flex flex-wrap items-center gap-3">
+          <form
+            method="get"
+            action={`/topics/${encodeURIComponent(topicSlug)}/scholars`}
+            className="border-apollo-border-strong bg-apollo-surface flex h-[38px] max-w-[360px] min-w-0 flex-[1_1_280px] items-center gap-2 rounded-lg border px-3"
+          >
+            <Search className="text-muted-foreground size-[15px] shrink-0" aria-hidden />
+            <input
+              type="search"
+              name="q"
+              defaultValue={query}
+              placeholder="Filter by name"
+              aria-label="Filter scholars by name"
+              className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-sm outline-none [&::-webkit-search-cancel-button]:hidden"
+            />
+            {selectedSub ? <input type="hidden" name="sub" value={selectedSub} /> : null}
+            {selectedRole !== "all" ? <input type="hidden" name="role" value={selectedRole} /> : null}
+            {query ? (
+              <a href={buildScholarsHref(topicSlug, { ...here, q: "" })} className="text-muted-foreground text-[13px]">
+                Clear
+              </a>
+            ) : null}
+          </form>
+
+          {subtopics.length > 0 ? (
+            <SubareaPicker
+              selected={selectedSub}
+              allHref={buildScholarsHref(topicSlug, { ...here, sub: null })}
+              options={subtopics.map((s) => ({
+                id: s.id,
+                label: s.displayName,
+                pubCount: s.pubCount,
+                href: buildScholarsHref(topicSlug, { ...here, sub: s.id }),
+              }))}
             />
           ) : null}
-        </div>
-      </div>
 
-      <form
-        method="get"
-        action={`/topics/${encodeURIComponent(topicSlug)}/scholars`}
-        className="mt-4 flex flex-wrap items-center gap-3"
-      >
-        <input
-          type="search"
-          name="q"
-          defaultValue={query}
-          placeholder="Search by name"
-          aria-label="Search scholars by name"
-          className="h-9 w-full max-w-[320px] rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-        {selectedRole !== "all" && (
-          <input type="hidden" name="role" value={selectedRole} />
-        )}
-        <button
-          type="submit"
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-muted"
-        >
-          Search
-        </button>
-        {query.length > 0 && (
-          <a
-            href={buildHref(topicSlug, { role: selectedRole, q: "", page: 0 })}
-            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-          >
-            Clear
-          </a>
-        )}
-        <div className="ml-auto flex flex-wrap gap-2">
-          {ROLE_CHIPS.map((chip) => {
-            const active = selectedRole === chip.id;
-            const count = result.roleCounts[chip.countKey];
+          <div className="ml-auto flex flex-wrap gap-1.5">
+            {ROLE_CHIPS.filter((c) => c.id === "all" || result.roleCounts[c.id] > 0).map((chip) => {
+              const active = selectedRole === chip.id;
+              return (
+                <a
+                  key={chip.id}
+                  href={buildScholarsHref(topicSlug, { ...here, role: chip.id })}
+                  aria-current={active ? "page" : undefined}
+                  className={`inline-flex h-8 items-center rounded-full border px-3.5 text-[13.5px] whitespace-nowrap tabular-nums ${
+                    active
+                      ? "border-apollo-bar bg-apollo-bar text-white"
+                      : "border-apollo-border-strong bg-white hover:border-[var(--color-accent-slate)]"
+                  }`}
+                >
+                  {chip.label} {result.roleCounts[chip.id].toLocaleString()}
+                </a>
+              );
+            })}
+          </div>
+        </div>
+
+        <nav aria-label="Jump to letter" className="-mx-1.5 flex flex-wrap">
+          {ALPHABET.map((ch) => {
+            const base = "flex h-[34px] min-w-[30px] items-center justify-center border-b-2 px-1.5 text-sm";
+            if (!available.has(ch)) {
+              return (
+                <span key={ch} aria-disabled="true" className={`${base} text-apollo-border-strong border-transparent`}>
+                  {ch}
+                </span>
+              );
+            }
+            const on = ch === result.letter;
             return (
               <a
-                key={chip.id}
-                href={buildHref(topicSlug, { role: chip.id, q: query, page: 0 })}
-                aria-current={active ? "page" : undefined}
-                className={
-                  active
-                    ? "inline-flex items-center rounded-full border border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] px-3 py-1 text-xs font-medium text-white"
-                    : "inline-flex items-center rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground hover:border-[var(--color-accent-slate)]"
-                }
+                key={ch}
+                href={buildScholarsHref(topicSlug, { ...here, q: "", letter: ch })}
+                aria-current={on ? "page" : undefined}
+                className={`${base} ${on ? "border-[var(--color-primary-cornell-red)] font-semibold" : "border-transparent hover:text-[var(--color-accent-slate)]"}`}
               >
-                {chip.label} {count.toLocaleString()}
+                {ch}
               </a>
             );
           })}
-        </div>
-      </form>
+        </nav>
+      </div>
 
       {result.hits.length === 0 ? (
-        <p className="mt-8 text-sm text-muted-foreground">
-          {query.length > 0
-            ? `No scholars in this area match "${query}".`
-            : "No scholars match this filter."}
+        <p className="text-muted-foreground py-12 text-[15px]">
+          No scholars match.{" "}
+          <a href={buildScholarsHref(topicSlug, { role: "all", q: "", sub: null })} className="text-[var(--color-accent-slate)] underline">
+            Clear filters
+          </a>
         </p>
       ) : (
-        <ScholarColumns hits={result.hits} />
-      )}
-
-      {totalPages > 1 && (
-        <Pagination className="mt-8">
-          <PaginationContent>
-            {page > 0 && (
-              <PaginationItem>
-                <PaginationPrevious
-                  href={buildHref(topicSlug, {
-                    role: selectedRole,
-                    q: query,
-                    page: page - 1,
-                  })}
-                />
-              </PaginationItem>
-            )}
-            {pages.map((p, i) =>
-              p === "ellipsis" ? (
-                <PaginationItem key={`e-${i}`}>
-                  <PaginationEllipsis />
-                </PaginationItem>
-              ) : (
-                <PaginationItem key={p}>
-                  <PaginationLink
-                    href={buildHref(topicSlug, {
-                      role: selectedRole,
-                      q: query,
-                      page: p,
-                    })}
-                    isActive={p === page}
-                  >
-                    {p + 1}
-                  </PaginationLink>
-                </PaginationItem>
-              ),
-            )}
-            {page < totalPages - 1 && (
-              <PaginationItem>
-                <PaginationNext
-                  href={buildHref(topicSlug, {
-                    role: selectedRole,
-                    q: query,
-                    page: page + 1,
-                  })}
-                />
-              </PaginationItem>
-            )}
-          </PaginationContent>
-        </Pagination>
+        [...groups].map(([ch, hits]) => (
+          <div key={ch} className="mt-7 flex flex-col gap-1.5">
+            <div className="flex items-baseline gap-2.5 pb-2">
+              <h2 className="font-serif text-[26px] leading-none">{ch}</h2>
+              <span className="text-muted-foreground text-[13px] tabular-nums">{hits.length}</span>
+            </div>
+            <ul className="-mx-3 grid grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-x-5 gap-y-1">
+              {hits
+                // #536 — the loader already carves hidden identity classes; this
+                // belt-and-braces keeps a stray row from rendering a dead link.
+                .filter((h) => isPubliclyDisplayed(h.roleCategory))
+                .map((h) => (
+                  <li key={h.cwid} className="min-w-0">
+                    <ScholarCard
+                      bare
+                      activeArea={activeArea}
+                      scholar={{
+                        cwid: h.cwid,
+                        slug: h.slug,
+                        preferredName: h.postnominal ? `${h.preferredName}, ${h.postnominal}` : h.preferredName,
+                        primaryTitle: h.primaryTitle,
+                        identityImageEndpoint: h.identityImageEndpoint,
+                        areas: h.subtopics.map((s) => s.displayName),
+                      }}
+                      popover={{ label: topicLabel, topicSlug }}
+                    />
+                  </li>
+                ))}
+            </ul>
+          </div>
+        ))
       )}
     </section>
-  );
-}
-
-/**
- * Walks the alphabetically-sorted hit list once, emitting a serif divider
- * each time the last-name initial advances. Wrapped in a CSS `columns` layout
- * so dividers and rows flow naturally into 3 columns on desktop.
- */
-function ScholarColumns({ hits }: { hits: TopicScholarRow[] }) {
-  const items: Array<
-    | { kind: "divider"; letter: string }
-    | { kind: "row"; row: TopicScholarRow }
-  > = [];
-  let last = "";
-  for (const row of hits) {
-    const initial = topicScholarLastNameInitial(row.preferredName);
-    if (initial !== last) {
-      items.push({ kind: "divider", letter: initial });
-      last = initial;
-    }
-    items.push({ kind: "row", row });
-  }
-  return (
-    <ul className="mt-6 columns-1 gap-x-8 sm:columns-2 lg:columns-3">
-      {items.map((item, i) =>
-        item.kind === "divider" ? (
-          <li
-            key={`d-${item.letter}-${i}`}
-            className="break-inside-avoid pt-3 pb-1 font-serif text-lg text-foreground first:pt-0"
-          >
-            {item.letter}
-          </li>
-        ) : (
-          <ScholarRow key={item.row.cwid} scholar={item.row} />
-        ),
-      )}
-    </ul>
   );
 }

@@ -41,13 +41,20 @@ export type ScholarCardPopover = {
 export function ScholarCard({
   scholar,
   popover,
+  bare = false,
+  activeArea,
 }: {
   scholar: ScholarCardData;
   popover: ScholarCardPopover;
+  /** Borderless row with a hover fill (the /topics/{slug}/scholars list). */
+  bare?: boolean;
+  /** Area label to bold (the list's selected subarea). */
+  activeArea?: string;
 }) {
+  const link = { scholar, bare, activeArea };
   return (
     <ScholarCardPickState cwid={scholar.cwid}>
-      <ScholarCardLink scholar={scholar} className="flex md:hidden" />
+      <ScholarCardLink {...link} className="flex md:hidden" />
       <PersonPopover
         cwid={scholar.cwid}
         surface="taxonomy-card"
@@ -57,7 +64,7 @@ export function ScholarCard({
         contextFamilyLabel={popover.familyLabel}
         filterable={popover.filterable}
       >
-        <ScholarCardLink scholar={scholar} className="hidden md:flex" />
+        <ScholarCardLink {...link} className="hidden md:flex" />
       </PersonPopover>
     </ScholarCardPickState>
   );
@@ -68,15 +75,25 @@ export function ScholarCard({
 function ScholarCardLink({
   scholar,
   className,
+  bare,
+  activeArea,
   ...rest
-}: { scholar: ScholarCardData; className: string } & ComponentProps<"a">) {
+}: {
+  scholar: ScholarCardData;
+  className: string;
+  bare: boolean;
+  activeArea?: string;
+} & ComponentProps<"a">) {
   const areas = scholar.areas.slice(0, AREA_LIMIT);
+  const skin = bare
+    ? "hover:bg-apollo-surface-2 data-[state=open]:bg-apollo-surface-2 p-3"
+    : "border-border bg-background border px-3.5 py-3 hover:border-[var(--color-accent-slate)] group-data-[pick=picked]/pick:border-apollo-slate group-data-[pick=picked]/pick:bg-apollo-slate-tint sm:h-full";
   return (
     <a
       {...rest}
       href={profilePath(scholar.slug)}
       data-testid="scholar-card"
-      className={`${className} border-border bg-background min-h-11 w-full min-w-0 items-start gap-3 rounded-[10px] border px-3.5 py-3 transition-colors hover:border-[var(--color-accent-slate)] group-data-[pick=picked]/pick:border-apollo-slate group-data-[pick=picked]/pick:bg-apollo-slate-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)] sm:h-full`}
+      className={`${className} ${skin} min-h-11 w-full min-w-0 items-start gap-3 rounded-[10px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]`}
     >
       <HeadshotAvatar
         size="md"
@@ -109,7 +126,11 @@ function ScholarCardLink({
                   aria-hidden
                   className="size-1 shrink-0 -translate-y-0.5 rounded-full bg-[var(--color-primary-cornell-red)]"
                 />
-                <span className="min-w-0 text-pretty [overflow-wrap:anywhere]">{a}</span>
+                <span
+                  className={`min-w-0 text-pretty [overflow-wrap:anywhere] ${a === activeArea ? "font-semibold" : ""}`}
+                >
+                  {a}
+                </span>
               </li>
             ))}
           </ul>
