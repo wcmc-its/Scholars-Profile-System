@@ -9,7 +9,7 @@
  *   - current-topic marker renders only when slug matches
  *   - synopsis / mesh / impact sections omitted when payload is empty
  *   - citing-pubs `null` shows fallback message
- *   - citing-pubs over cap shows "Showing N most recent of M total"
+ *   - citing-pubs subhead scopes the list to Scholars; chip labeled Scopus
  *
  * Uses a fetch stub injected per test. The provider is mounted around a
  * minimal trigger button.
@@ -720,13 +720,15 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.getByText("197")).toBeDefined();
+    expect(screen.getByText("197 · Scopus")).toBeDefined();
     expect(
-      screen.getByText("19 in PubMed · Scopus reports 197"),
+      screen.getByText("19 most recent citing publications in Scholars"),
     ).toBeDefined();
+    // #2201 — the list is not PubMed; never say so.
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/in PubMed/);
   });
 
-  it("renders 'No PubMed-indexed citations yet.' when list empty but Scopus has cites", async () => {
+  it("says none of the citers are in Scholars when list empty but Scopus has cites", async () => {
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 5 },
@@ -737,9 +739,11 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.getByText("No PubMed-indexed citations yet.")).toBeDefined();
-    // Chip still shows the Scopus count.
-    expect(screen.getByText("5")).toBeDefined();
+    expect(
+      screen.getByText("None of the citing publications are in Scholars yet."),
+    ).toBeDefined();
+    // Chip still shows the Scopus count, labeled as Scopus.
+    expect(screen.getByText("5 · Scopus")).toBeDefined();
   });
 
   // #2201 — the state 41.6% of sampled prod publications are actually in, and
@@ -759,9 +763,12 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.queryByRole("link", { name: /Download CSV/i })).toBeNull();
-    // The Scopus chip is unaffected — this fix is about the download, not the count.
-    expect(screen.getByText("105")).toBeDefined();
+    expect(screen.queryByRole("link", { name: /CSV/i })).toBeNull();
+    expect(
+      screen.getByText("None of the citing publications are in Scholars yet."),
+    ).toBeDefined();
+    // The Scopus chip is unaffected and labeled as Scopus.
+    expect(screen.getByText("105 · Scopus")).toBeDefined();
   });
 
   it("still offers the CSV download when the list has rows", async () => {
@@ -769,7 +776,9 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.getByRole("link", { name: /Download CSV/i })).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "Download these (CSV)" }),
+    ).toBeDefined();
   });
 
   it("renders 'No citing publications.' when both citationCount and list are zero", async () => {
@@ -788,7 +797,7 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     expect(screen.queryByText("0")).toBeNull();
   });
 
-  it("shows the cap-overflow subhead when the PubMed subset exceeds 500", async () => {
+  it("describes only the Scholars list, never the unfiltered total, at the 500 cap", async () => {
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 1500 },
@@ -805,12 +814,12 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(
-      screen.getByText(
-        "500 most recent in PubMed of 1,234 total · use CSV for the full list",
-      ),
+      screen.getByText("500 most recent citing publications in Scholars"),
     ).toBeDefined();
-    // Chip reflects the true Scopus total, not the PubMed indexed total.
-    expect(screen.getByText("1,500")).toBeDefined();
+    // The unfiltered iCite total is not a number the list can support.
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/1,234/);
+    // Chip reflects the Scopus total, labeled as Scopus.
+    expect(screen.getByText("1,500 · Scopus")).toBeDefined();
   });
 
   it("paginates the citing list to 50 by default with a Show all toggle", async () => {
@@ -887,14 +896,14 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    const link = screen.getByRole("link", { name: /Download CSV/ });
+    const link = screen.getByRole("link", { name: "Download these (CSV)" });
     expect(link.getAttribute("href")).toBe(
       "/api/publications/12345/citations.csv",
     );
     expect(link.hasAttribute("download")).toBe(true);
   });
 
-  it("nudges users toward CSV when the 500-row cap kicks in", async () => {
+  it("never claims the CSV is the full list (#2201)", async () => {
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 5000 },
@@ -911,10 +920,9 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(
-      screen.getByText(
-        /500 most recent in PubMed of 5,000 total · use CSV for the full list/,
-      ),
+      screen.getByText("500 most recent citing publications in Scholars"),
     ).toBeDefined();
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/full list/);
   });
 
   it("omits the CSV download link when reciterdb soft-failed (citingPubsTotal=null)", async () => {
@@ -922,7 +930,7 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.queryByRole("link", { name: /Download CSV/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /CSV/ })).toBeNull();
   });
 
   it("omits the CSV download link when the indexed total is zero", async () => {
@@ -936,11 +944,10 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.queryByRole("link", { name: /Download CSV/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /CSV/ })).toBeNull();
   });
 
-  it("shows 'Most recent first' subhead when list equals total and >1", async () => {
-    // Equal case: indexed total matches Scopus and list isn't capped.
+  it("scopes the subhead to Scholars when list equals total and >1", async () => {
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 2 },
@@ -954,11 +961,13 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.getByText("Most recent first")).toBeDefined();
+    expect(
+      screen.getByText("2 most recent citing publications in Scholars"),
+    ).toBeDefined();
     expect(screen.queryByText(/Showing/)).toBeNull();
   });
 
-  it("omits the order subhead when there is only one citing pub and counts align", async () => {
+  it("uses a singular subhead when there is only one citing pub", async () => {
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 1 },
@@ -969,8 +978,8 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.queryByText("Most recent first")).toBeNull();
-    expect(screen.queryByText(/Showing/)).toBeNull();
+    expect(screen.getByText("1 citing publication in Scholars")).toBeDefined();
+    expect(screen.queryByText(/most recent/)).toBeNull();
   });
 
   it("omits the count chip when citationCount is 0", async () => {
