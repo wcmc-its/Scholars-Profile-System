@@ -761,7 +761,51 @@ describe("POST /api/edit/matcha (route)", () => {
       // BY HASH, NOT BY ID. Revert this to `{ where: { id: "s1" } }` and the sponsor's words
       // survive their own deletion.
       expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
-        where: { descriptionHash: "h-abc" },
+        where: { descriptionHash: "h-abc", submittedBy: "dev1" },
+      });
+    });
+
+    it("DELETE is scoped like GET (#1776): out-of-scope 404s and erases nothing; own row erases", async () => {
+      // A developer is not a superuser, so GET shows them only their own rows. DELETE must apply
+      // the SAME predicate — otherwise they could erase a paste they are not allowed to read.
+      // Out of scope: the scoped lookup finds nothing (a real DB would not match another
+      // officer's row under `submittedBy: "dev1"`).
+      mockSubmissionFindUnique.mockResolvedValue(null);
+      const denied = await DELETE(postRequest(developerCtx, { submissionId: "theirs" }));
+      expect(denied.status).toBe(404);
+      expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({
+        id: "theirs",
+        submittedBy: "dev1",
+      });
+      expect(mockSubmissionDeleteMany).not.toHaveBeenCalled();
+
+      // In scope: the same developer deleting their own row succeeds, and the erase is bounded
+      // by the same scope so a colleague's run of an identical paste survives.
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-mine" });
+      mockSubmissionDeleteMany.mockResolvedValue({ count: 1 });
+      const ok = await DELETE(postRequest(developerCtx, { submissionId: "mine" }));
+      expect(ok.status).toBe(200);
+      expect(mockSubmissionFindUnique.mock.calls[1][0].where).toEqual({
+        id: "mine",
+        submittedBy: "dev1",
+      });
+      expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
+        where: { descriptionHash: "h-mine", submittedBy: "dev1" },
+      });
+    });
+
+    it("DELETE by a SUPERUSER is unscoped — erasure on behalf of any officer", async () => {
+      const superCtx = {
+        ...developerCtx,
+        session: { cwid: "su1", isSuperuser: true, isDeveloper: false },
+      };
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-any" });
+      mockSubmissionDeleteMany.mockResolvedValue({ count: 2 });
+      const resp = await DELETE(postRequest(superCtx, { submissionId: "theirs" }));
+      expect(resp.status).toBe(200);
+      expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({ id: "theirs" });
+      expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
+        where: { descriptionHash: "h-any" },
       });
     });
 
