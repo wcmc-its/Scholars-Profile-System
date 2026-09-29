@@ -107,7 +107,25 @@ export type TrackedSpec = {
   /** Envs this source is expected in. Omitted = every env. */
   readonly envs?: readonly string[];
   readonly ack?: FreshnessAck;
+  /**
+   * `etl_run.status` values that count as a live run for freshness. Omitted =
+   * `success` only. A dirty-check gate whose correct outcome is often `skipped`
+   * is alive when it skips; anchoring it on `success` alone makes every quiet
+   * month read as a dead producer.
+   */
+  readonly liveStatuses?: readonly string[];
+  /**
+   * Grade on when OUR loader last succeeded (`completedAt`) rather than the
+   * producer's `manifestGeneratedAt`. For an artifact whose age is unbounded by
+   * design, with producer liveness graded on its own row.
+   */
+  readonly anchorOnRun?: boolean;
 };
+
+/** The `etl_run.status` filter for "the newest run that proves this source is alive". */
+export function liveStatusWhere(spec: TrackedSpec): string | { in: string[] } {
+  return spec.liveStatuses ? { in: [...spec.liveStatuses] } : "success";
+}
 
 /**
  * `etl_run.source` string -> cadence. The source strings are the exact values
@@ -323,28 +341,16 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // mirrored into etl_run as `ReciterAI-spotlight-gate` (see
   // etl/dynamodb/producer-run-mapper.ts), which is the row that distinguishes
   // "the gate ran and declined" from "the gate stopped running". See SPS #1813.
-  Spotlight: {
-    cadence: "monthly",
-    // Not a widened SLA — the comment above is explicit that widening is the
-    // wrong response. This keeps the 40d SLA and the STALE computation intact,
-    // and only stops a producer outage we do not own from failing OUR
-    // heartbeat every night. Revisit at `until`: either the producer is
-    // deployed (drop this ack) or it is not (renew it deliberately, with a
-    // fresh date, as a decision rather than by default).
-    ack: {
-      until: "2026-09-30",
-      // Reader-facing copy, deliberately. #2281 started rendering this string to
-      // superusers on /edit/etl-status, where it was the most technical sentence
-      // on the page and the only card visible on an otherwise green day. The
-      // engineering record did not move: the comment above this block is the
-      // canonical technical account and is richer than this string ever was. Do
-      // not re-technicalise this to match its neighbour — edit the comment.
-      reason:
-        "This data is still published by hand because its automatic monthly " +
-        "refresh has not been switched on yet. The last hand-published update " +
-        "was 15 June 2026. Tracked as SPS #1813; there is nothing to do here.",
-    },
-  },
+  //
+  // RESOLVED 2026-09-29 — the ack that used to sit here is gone for good. With the
+  // producer deployed and gating, artifact age is unbounded BY DESIGN (the same
+  // reason producer-run-mapper excludes `spotlight_publish`), so no SLA on it can
+  // be both quiet and honest. Liveness is split across two rows instead:
+  //   - `ReciterAI-spotlight-gate` (below): did the PRODUCER's monthly gate run;
+  //     `skipped` counts, a `failed` attempt paints it red.
+  //   - `Spotlight` (here): did OUR weekly loader run — anchored on completedAt,
+  //     not manifestGeneratedAt, so an unchanged artifact is not an alarm.
+  Spotlight: { cadence: "weekly", anchorOnRun: true },
   // #2293 — durable reconcilers (ADR-005 layer 3), each its own `rate(5 min)`
   // state machine outside the nightly/weekly chains, not deployed steps within
   // them. Both got a CDK status + cadence alarm at 15 min resolution when they
@@ -385,7 +391,10 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // the moment it lands and ages to ~44h before the next mirror. See SLA_HOURS.
   "ReciterAI-enrichment": { cadence: "nightly-mirrored" },
   "ReciterAI-hot-path": { cadence: "weekly" },
-  "ReciterAI-spotlight-gate": { cadence: "monthly" },
+  // The gate is the liveness signal for Spotlight, and `skipped` is its normal
+  // outcome (nothing crossed the regenerate threshold). Artifact age is graded
+  // separately on the `Spotlight` row.
+  "ReciterAI-spotlight-gate": { cadence: "monthly", liveStatuses: ["success", "skipped"] },
   "ReciterAI-onboarding-detector": { cadence: "nightly-mirrored" },
   // The two daily drift Lambdas. They write a findings row per day rather than a
   // ledger entry, so the row's existence is the liveness signal -- see
