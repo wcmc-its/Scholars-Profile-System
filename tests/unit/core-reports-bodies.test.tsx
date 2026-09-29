@@ -83,6 +83,26 @@ describe("report 11 — CoreUsersView", () => {
     );
   });
 
+  it("below lg: stacked cards carry papers + active years; the table is desktop-only", () => {
+    const { container } = render(
+      <CoreUsersView
+        coreId={CORE}
+        basePath={BASE}
+        params={parseCoreUsersParams(new URLSearchParams())}
+        result={users(2, ["u1"])}
+        totalConfirmed={2}
+      />,
+    );
+    const view = within(container);
+    const cards = view.getByTestId("core-users-cards");
+    expect(cards.className).toContain("lg:hidden");
+    expect(view.getByTestId("core-users-table").parentElement!.className).toContain("hidden");
+    const items = within(cards).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toMatch(/\d+ papers?/);
+    expect(cards.textContent).toContain("Known client");
+  });
+
   it("over the scholar-list cap: no download link, the note says why", () => {
     const { container } = render(
       <CoreUsersView
@@ -189,6 +209,24 @@ describe("report 12 — CoreOutputView", () => {
       within(within(container).getByTestId("core-output-table")).getAllByRole("row"),
     ).toHaveLength(3);
   });
+
+  it("Publications tab below lg: stacked cards carry year + evidence", () => {
+    const { container } = render(
+      <CoreOutputView
+        coreId={CORE}
+        basePath="/edit/reports/core-output-over-time"
+        params={{ ...params, view: "publications" }}
+        result={result}
+        now={NOW}
+      />,
+    );
+    const cards = within(container).getByTestId("core-output-cards");
+    expect(cards.className).toContain("lg:hidden");
+    const items = within(cards).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    const p = result.publications[0];
+    expect(items[0].textContent).toContain(String(p.basisYear));
+  });
 });
 
 describe("report 13 — CoreGrantsView", () => {
@@ -224,5 +262,24 @@ describe("report 13 — CoreGrantsView", () => {
     expect(view.getByTestId("core-grants-view-funders").getAttribute("href")).toBe(
       "/edit/reports/core-grants?center=14&kind=core&view=funders",
     );
+  });
+
+  it("below lg: stacked cards keep period, status and papers on screen", () => {
+    const { container } = render(
+      <CoreGrantsView
+        coreId={CORE}
+        basePath="/edit/reports/core-grants"
+        params={parseCoreGrantsParams(new URLSearchParams())}
+        result={filterAwards([award], parseCoreGrantsParams(new URLSearchParams()))}
+      />,
+    );
+    const view = within(container);
+    const cards = view.getByTestId("core-grants-cards");
+    expect(cards.className).toContain("lg:hidden");
+    expect(view.getByTestId("core-grants-table").parentElement!.className).toContain("hidden");
+    const card = within(cards).getByRole("listitem");
+    expect(card.textContent).toContain("Pat PI");
+    expect(card.textContent).toContain("Active");
+    expect(card.textContent).toContain("24 papers");
   });
 });

@@ -111,45 +111,72 @@ export function CoreOutputView({
           No confirmed publications match these filters.
         </p>
       ) : params.view === "publications" ? (
-        <div className="mt-4 overflow-x-auto">
-          <table
-            className="w-full min-w-[560px] border-collapse text-sm"
-            data-testid="core-output-table"
-          >
-            <thead>
-              <tr className="border-apollo-border text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
-                <th className="py-2 pr-3">Publication</th>
-                <th className="py-2 pr-3">Evidence</th>
-                <th className="py-2 text-right">Year</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.publications.map((p) => (
-                <tr key={p.pmid} className="border-apollo-border border-b align-top">
-                  <td className="py-2 pr-3">
-                    <a
-                      href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-semibold hover:underline"
-                    >
-                      <PubTitle value={p.title} />
-                    </a>
-                    {p.journal && (
-                      <PubJournal
-                        as="span"
-                        value={p.journal}
-                        className="text-muted-foreground block text-xs"
-                      />
-                    )}
-                  </td>
-                  <td className="py-2 pr-3">{EVIDENCE_LABEL[p.evidence]}</td>
-                  <td className="py-2 text-right tabular-nums">{p.basisYear}</td>
+        <>
+          {/* Below lg the table would clip Evidence/Year off-screen, so phones
+            get the same rows stacked (the /edit/core index pattern). */}
+          <ul className="mt-4 lg:hidden" data-testid="core-output-cards">
+            {result.publications.map((p) => (
+              <li key={p.pmid} className="border-apollo-border border-b py-2.5 text-sm">
+                <a
+                  href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold hover:underline"
+                >
+                  <PubTitle value={p.title} />
+                </a>
+                <div className="text-muted-foreground text-xs">
+                  {p.journal && (
+                    <>
+                      <PubJournal as="span" value={p.journal} />
+                      {" · "}
+                    </>
+                  )}
+                  {p.basisYear} · {EVIDENCE_LABEL[p.evidence]}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 hidden overflow-x-auto lg:block">
+            <table
+              className="w-full min-w-[560px] border-collapse text-sm"
+              data-testid="core-output-table"
+            >
+              <thead>
+                <tr className="border-apollo-border text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
+                  <th className="py-2 pr-3">Publication</th>
+                  <th className="py-2 pr-3">Evidence</th>
+                  <th className="py-2 text-right">Year</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {result.publications.map((p) => (
+                  <tr key={p.pmid} className="border-apollo-border border-b align-top">
+                    <td className="py-2 pr-3">
+                      <a
+                        href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold hover:underline"
+                      >
+                        <PubTitle value={p.title} />
+                      </a>
+                      {p.journal && (
+                        <PubJournal
+                          as="span"
+                          value={p.journal}
+                          className="text-muted-foreground block text-xs"
+                        />
+                      )}
+                    </td>
+                    <td className="py-2 pr-3">{EVIDENCE_LABEL[p.evidence]}</td>
+                    <td className="py-2 text-right tabular-nums">{p.basisYear}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       ) : (
         <BarList
           head="Year"

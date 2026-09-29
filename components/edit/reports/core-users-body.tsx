@@ -54,6 +54,11 @@ import {
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
 import { formatRoleCategory } from "@/lib/role-display";
 
+function activeYears(first: number | null, last: number | null): string {
+  if (first === null) return "—";
+  return first === last ? String(first) : `${first}–${last}`;
+}
+
 function summarize(labels: string[]): string {
   if (labels.length === 0) return "Any";
   return labels.length <= 2 ? labels.join(", ") : `${labels.length} selected`;
@@ -143,51 +148,75 @@ export function CoreUsersView({
           }))}
         />
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table
-            className="w-full min-w-[640px] border-collapse text-sm"
-            data-testid="core-users-table"
-          >
-            <thead>
-              <tr className="border-apollo-border text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
-                <th className="py-2 pr-3">Person</th>
-                <th className="py-2 pr-3">Department</th>
-                <th className="py-2 pr-3">Person type</th>
-                <th className="py-2 pr-3 text-right">Papers</th>
-                <th className="py-2 text-right">Active</th>
-              </tr>
-            </thead>
-            <tbody>
-              {people.map((u) => (
-                <tr key={u.cwid} className="border-apollo-border border-b align-top">
-                  <td className="py-2 pr-3">
-                    <ScholarHoverCard cwid={u.cwid}>
-                      <span className="font-semibold hover:underline">{u.name}</span>
-                    </ScholarHoverCard>
-                    {u.knownClient && (
-                      <span
-                        className="text-muted-foreground block text-xs"
-                        data-testid="core-users-known-client"
-                      >
-                        Known client
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 pr-3">{u.department ?? "—"}</td>
-                  <td className="py-2 pr-3">{formatRoleCategory(u.roleCategory) ?? "—"}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{u.papers.toLocaleString()}</td>
-                  <td className="py-2 text-right tabular-nums">
-                    {u.firstYear === null
-                      ? "—"
-                      : u.firstYear === u.lastYear
-                        ? u.firstYear
-                        : `${u.firstYear}–${u.lastYear}`}
-                  </td>
+        <>
+          {/* Below lg the 5-column table would clip Papers/Active off-screen, so
+            phones get the same rows stacked (the /edit/core index pattern). */}
+          <ul className="mt-4 lg:hidden" data-testid="core-users-cards">
+            {people.map((u) => (
+              <li key={u.cwid} className="border-apollo-border border-b py-2.5 text-sm">
+                <ScholarHoverCard cwid={u.cwid}>
+                  <span className="font-semibold hover:underline">{u.name}</span>
+                </ScholarHoverCard>
+                {u.knownClient && (
+                  <span className="text-muted-foreground text-xs"> · Known client</span>
+                )}
+                <div className="text-muted-foreground text-xs">
+                  {[u.department, formatRoleCategory(u.roleCategory)].filter(Boolean).join(" · ") ||
+                    "—"}
+                </div>
+                <div className="mt-0.5 flex justify-between text-xs tabular-nums">
+                  <span>{activeYears(u.firstYear, u.lastYear)}</span>
+                  <span>
+                    {u.papers.toLocaleString()} {u.papers === 1 ? "paper" : "papers"}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 hidden overflow-x-auto lg:block">
+            <table
+              className="w-full min-w-[640px] border-collapse text-sm"
+              data-testid="core-users-table"
+            >
+              <thead>
+                <tr className="border-apollo-border text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
+                  <th className="py-2 pr-3">Person</th>
+                  <th className="py-2 pr-3">Department</th>
+                  <th className="py-2 pr-3">Person type</th>
+                  <th className="py-2 pr-3 text-right">Papers</th>
+                  <th className="py-2 text-right">Active</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {people.map((u) => (
+                  <tr key={u.cwid} className="border-apollo-border border-b align-top">
+                    <td className="py-2 pr-3">
+                      <ScholarHoverCard cwid={u.cwid}>
+                        <span className="font-semibold hover:underline">{u.name}</span>
+                      </ScholarHoverCard>
+                      {u.knownClient && (
+                        <span
+                          className="text-muted-foreground block text-xs"
+                          data-testid="core-users-known-client"
+                        >
+                          Known client
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3">{u.department ?? "—"}</td>
+                    <td className="py-2 pr-3">{formatRoleCategory(u.roleCategory) ?? "—"}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {u.papers.toLocaleString()}
+                    </td>
+                    <td className="py-2 text-right tabular-nums">
+                      {activeYears(u.firstYear, u.lastYear)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
       <div
         className="text-muted-foreground mt-6 flex max-w-[680px] flex-col gap-1.5 text-[13px]"
