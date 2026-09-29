@@ -52,8 +52,9 @@ export { isValidReportSlug, REPORT_SLUG_MAX } from "@/lib/edit/report-slug";
  *  `report_meta` row for it is simply never read — `loadReportMeta` iterates
  *  these keys, not the table's rows, so an orphaned row cannot resurface it
  *  or break a load (`scripts/sql/retire-report-10-display-titles.sql` is the
- *  optional cleanup). */
-export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
+ *  optional cleanup). Reports 11–13 (Core users, Output over time, Grants
+ *  citing the core) are core-only and skip it on purpose. */
+export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "11", "12", "13"] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
 /** Whether `v` is one of {@link REPORT_KEYS} — a string, never the number. */
@@ -157,6 +158,28 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Top clinical and high-impact journal publications",
     summary:
       "Articles in top-tier journals (JAMA, Lancet, NEJM, JCO, Sci Transl Med, Nature, Blood, Circulation, Science, Cell) with impact factor, WCM first/last authors, Entrez date and NIH citations. Access is granted per person.",
+    descriptionHtml: null,
+  },
+  // 11–13: core-only (`REPORT_NUMBERS_BY_KIND.core`). 10 is retired, not reused.
+  "11": {
+    slug: "core-users",
+    name: "Core users",
+    summary:
+      "The people and departments behind this core's confirmed publications, with known clients marked.",
+    descriptionHtml: null,
+  },
+  "12": {
+    slug: "core-output-over-time",
+    name: "Output over time",
+    summary:
+      "Confirmed publications per calendar year or year added to PubMed, split by the evidence that confirmed them.",
+    descriptionHtml: null,
+  },
+  "13": {
+    slug: "core-grants",
+    name: "Grants citing the core",
+    summary:
+      "NIH grants linked to this core's confirmed publications through NIH RePORTER and ReCiter, one row per award.",
     descriptionHtml: null,
   },
 };

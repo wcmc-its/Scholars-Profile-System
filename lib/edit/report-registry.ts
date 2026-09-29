@@ -82,6 +82,9 @@ import type * as React from "react";
 
 import { renderArticleCountReport } from "@/components/edit/reports/article-count-body";
 import { renderClinicalTrialsReport } from "@/components/edit/reports/clinical-trials-body";
+import { renderCoreGrantsReport } from "@/components/edit/reports/core-grants-body";
+import { renderCoreOutputReport } from "@/components/edit/reports/core-output-over-time-body";
+import { renderCoreUsersReport } from "@/components/edit/reports/core-users-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -172,7 +175,9 @@ export type ReportDef =
  *  reports 7 (Mentored publications) and 9 (Top clinical and high-impact
  *  journal publications) are person-gated on their `report_access` keys.
  *  Report 10 (Display titles) is retired: it is the Titles queue now
- *  (`/edit/titles-queue`). */
+ *  (`/edit/titles-queue`), and its number is not reused. Reports 11–13 (Core
+ *  users, Output over time, Grants citing the core) are unit-gated and serve
+ *  cores only. */
 export const REPORTS: Record<ReportKey, ReportDef> = {
   "1": { n: "1", gate: "unit", render: renderOptimizeMembershipReport },
   "2": { n: "2", gate: "unit", render: renderNciTable2aReport },
@@ -193,6 +198,10 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     accessKey: HIGH_IMPACT_PUBS_REPORT,
     render: renderHighImpactPublicationsReport,
   },
+  // Core-only (`REPORT_NUMBERS_BY_KIND.core`), the unit gate's core branch.
+  "11": { n: "11", gate: "unit", render: renderCoreUsersReport },
+  "12": { n: "12", gate: "unit", render: renderCoreOutputReport },
+  "13": { n: "13", gate: "unit", render: renderCoreGrantsReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page

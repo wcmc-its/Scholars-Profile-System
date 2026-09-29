@@ -139,8 +139,8 @@ function catalogEntry<N extends ReportsIndexReport["n"]>(
 }
 
 function buildCatalog(meta: Map<ReportKey, ReportMeta>): ReportCatalog {
-  // Reports 1–6 are unit-gated: the Owner/Curator rule.
-  const all: readonly ReportDef[] = ([1, 2, 3, 4, 5, 6] as const).map((n) =>
+  // Reports 1–6 and the core-only 11–13 are unit-gated: the Owner/Curator rule.
+  const all: readonly ReportDef[] = ([1, 2, 3, 4, 5, 6, 11, 12, 13] as const).map((n) =>
     catalogEntry(meta, n, { mode: "unit" }),
   );
   return {

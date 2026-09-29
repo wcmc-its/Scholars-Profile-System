@@ -41,7 +41,7 @@ describe("REPORTS", () => {
     }
   });
 
-  it("reports 1–6 are unit-gated; 7 and 9 person-gated on their keys; 8 is admin-gated", () => {
+  it("reports 1–6 and 11–13 are unit-gated; 7 and 9 person-gated on their keys; 8 is admin-gated", () => {
     const person = REPORT_KEYS.filter((k) => REPORTS[k].gate === "person");
     expect(person).toEqual(["7", "9"]);
     const nine = REPORTS["9"];
@@ -49,7 +49,7 @@ describe("REPORTS", () => {
     expect(REPORTS["8"].gate).toBe("admin");
     const seven = REPORTS["7"];
     expect(seven.gate === "person" && seven.accessKey).toBe(MENTORED_PUBS_REPORT);
-    for (const key of ["1", "2", "3", "4", "5", "6"] as const) {
+    for (const key of ["1", "2", "3", "4", "5", "6", "11", "12", "13"] as const) {
       expect(REPORTS[key].gate).toBe("unit");
     }
   });
@@ -84,6 +84,10 @@ describe("unitKindsFor", () => {
       "7": [],
       "8": [],
       "9": [],
+      // Core-only: Core users, Output over time, Grants citing the core.
+      "11": ["core"],
+      "12": ["core"],
+      "13": ["core"],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);

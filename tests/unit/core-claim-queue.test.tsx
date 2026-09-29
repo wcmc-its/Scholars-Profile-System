@@ -3381,7 +3381,7 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     ).toBeTruthy();
   });
 
-  it("'Reporting...' now LINKS to this core's Publications report — the route it was waiting on exists", () => {
+  it("'Reporting' LINKS to this core's reports index — the core-only reports 11–13 live there beside 3 and 6", () => {
     // It shipped inert-and-saying-so while no core reporting route existed. The
     // core-reports widening gave cores reports 3 and 6, so the placeholder is
     // now a real link — and it must carry BOTH `center=<coreId>` and
@@ -3389,10 +3389,8 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     // CENTER and 404s on the CenterProgram taxonomy gate.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     const reporting = screen.getByRole("link", { name: /Reporting/ });
-    expect(reporting.textContent).toContain("Reporting...");
-    expect(reporting.getAttribute("href")).toBe(
-      `/edit/reports/3?center=${encodeURIComponent(CORE.id)}&kind=core`,
-    );
+    expect(reporting.textContent).toBe("Reporting");
+    expect(reporting.getAttribute("href")).toBe(`/edit/reports?center=${encodeURIComponent(CORE.id)}&kind=core`);
     // No leftover "not built yet" affordances.
     expect(reporting.getAttribute("aria-disabled")).toBeNull();
     expect(document.getElementById("core-queue-reporting-why")).toBeNull();
