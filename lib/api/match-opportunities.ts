@@ -12,6 +12,7 @@
  */
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 import { db } from "@/lib/db";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { asPrestige, type Prestige } from "@/lib/funding/prestige";
 import { OPPORTUNITIES_INDEX, searchClient, type OpportunityTopicScore } from "@/lib/search";
 
@@ -308,7 +309,7 @@ export async function scholarTopicVector(
   // position needed to weight it before the per-topic sum.
   const rows = await db.read.publicationTopic.groupBy({
     by: ["parentTopicId", "year", "authorPosition"],
-    where: { cwid, year: { gte: RECITERAI_YEAR_FLOOR }, scholar: { deletedAt: null, status: "active" } },
+    where: { cwid, year: { gte: RECITERAI_YEAR_FLOOR }, scholar: { deletedAt: null, status: "active", ...publicRoleWhere() } },
     _sum: { score: true },
   });
   const nowYear = now.getFullYear();
@@ -333,7 +334,7 @@ export async function scholarTopicVector(
 export async function scholarTopicPubCounts(cwid: string): Promise<Map<string, number>> {
   const rows = await db.read.publicationTopic.groupBy({
     by: ["parentTopicId"],
-    where: { cwid, year: { gte: RECITERAI_YEAR_FLOOR }, scholar: { deletedAt: null, status: "active" } },
+    where: { cwid, year: { gte: RECITERAI_YEAR_FLOOR }, scholar: { deletedAt: null, status: "active", ...publicRoleWhere() } },
     _count: { _all: true },
   });
   return new Map(rows.map((r) => [r.parentTopicId, r._count._all]));
@@ -341,15 +342,17 @@ export async function scholarTopicPubCounts(cwid: string): Promise<Map<string, n
 
 /** roleCategory + appointment/education dates → the scholar's 5-bucket career stage. */
 export async function scholarCareerStage(cwid: string, now: Date = new Date()): Promise<CareerStage> {
-  const s = await db.read.scholar.findUnique({
-    where: { cwid },
+  // #2263 — same population gate as the topic reads; a hidden (#536) role must
+  // never be bucketed "grad" here, since the bucket is observable in the output.
+  const s = await db.read.scholar.findFirst({
+    where: { cwid, deletedAt: null, status: "active", ...publicRoleWhere() },
     select: {
       roleCategory: true,
       appointments: { select: { startDate: true } },
       educations: { select: { year: true } },
     },
   });
-  if (!s) return "mid";
+  if (!s || !isPubliclyDisplayed(s.roleCategory)) return "mid";
   return careerStageBucket(
     { roleCategory: s.roleCategory, appointments: s.appointments, educations: s.educations },
     now,
