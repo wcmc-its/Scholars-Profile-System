@@ -31,6 +31,7 @@ import {
   type TrackedSpec,
   gradeSource,
   isTrackedInEnv,
+  liveStatusWhere,
 } from "@/lib/etl/freshness-policy";
 
 /** The one Prisma model this module needs — keeps the unit-test client tiny. */
@@ -221,7 +222,7 @@ export async function loadEtlStatus(
     expected.map(async ([source, spec]) => {
       const [lastSuccess, lastAttempt] = await Promise.all([
         client.etlRun.findFirst({
-          where: { source, status: "success", completedAt: { not: null } },
+          where: { source, status: liveStatusWhere(spec), completedAt: { not: null } },
           orderBy: { completedAt: "desc" },
           select: { completedAt: true, manifestGeneratedAt: true },
         }),

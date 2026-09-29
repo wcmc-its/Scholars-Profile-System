@@ -116,12 +116,15 @@ beforeEach(() => {
   mockHonorsTabVisible.mockReturnValue(false);
   mockPendingHonors.mockResolvedValue(0);
   mockSession.mockResolvedValue({ cwid: "edt1", isSuperuser: true, isCommsSteward: false });
-  mockFindFirst.mockImplementation((args: { where: { source: string; status?: string } }) => {
+  mockFindFirst.mockImplementation((args: { where: { source: string; status?: string | { in: string[] } } }) => {
     const f = fixtures[args.where.source];
     // The loader issues exactly two shapes: the newest SUCCESS, and the newest
     // attempt of any outcome.
+    // A source with `liveStatuses` asks for its success row as `{ in: [...] }`.
     return Promise.resolve(
-      args.where.status === "success" ? (f?.success ?? null) : (f?.attempt ?? null),
+      args.where.status === "success" || typeof args.where.status === "object"
+        ? (f?.success ?? null)
+        : (f?.attempt ?? null),
     );
   });
 });
@@ -168,6 +171,18 @@ const annual: TrackedSpec = { cadence: "annual" };
 
 /** The loader needs exactly one Prisma model, so the fake is one method. */
 const fakeClient = () => ({ etlRun: { findFirst: mockFindFirst } }) as unknown as EtlStatusClient;
+
+describe("liveStatuses (spotlight gate)", () => {
+  it("counts a skipped gate run as alive, and only that source", async () => {
+    await loadEtlStatus(fakeClient(), new Date(NOW), "prod");
+    const where = (source: string) =>
+      mockFindFirst.mock.calls
+        .map((c) => c[0].where)
+        .find((w) => w.source === source && w.completedAt);
+    expect(where("ReciterAI-spotlight-gate")?.status).toEqual({ in: ["success", "skipped"] });
+    expect(where("ED")?.status).toBe("success");
+  });
+});
 
 describe("etl-status state mapping", () => {
   it("grades a recent success as up to date and an old one as late", () => {

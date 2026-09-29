@@ -49,6 +49,7 @@ import {
   ackState,
   gradeSource,
   isTrackedInEnv,
+  liveStatusWhere,
 } from "@/lib/etl/freshness-policy";
 
 async function evaluate(now: number): Promise<SourceStatus[]> {
@@ -69,7 +70,7 @@ async function evaluate(now: number): Promise<SourceStatus[]> {
     // frozen producer read as fresh (§2.1). Sources with no S3 manifest fall
     // back to completedAt via freshnessAnchor().
     const last = await db.read.etlRun.findFirst({
-      where: { source, status: "success", completedAt: { not: null } },
+      where: { source, status: liveStatusWhere(spec), completedAt: { not: null } },
       orderBy: { completedAt: "desc" },
       select: { completedAt: true, manifestGeneratedAt: true },
     });

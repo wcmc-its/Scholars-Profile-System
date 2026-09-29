@@ -107,7 +107,19 @@ export type TrackedSpec = {
   /** Envs this source is expected in. Omitted = every env. */
   readonly envs?: readonly string[];
   readonly ack?: FreshnessAck;
+  /**
+   * `etl_run.status` values that count as a live run for freshness. Omitted =
+   * `success` only. A dirty-check gate whose correct outcome is often `skipped`
+   * is alive when it skips; anchoring it on `success` alone makes every quiet
+   * month read as a dead producer.
+   */
+  readonly liveStatuses?: readonly string[];
 };
+
+/** The `etl_run.status` filter for "the newest run that proves this source is alive". */
+export function liveStatusWhere(spec: TrackedSpec): string | { in: string[] } {
+  return spec.liveStatuses ? { in: [...spec.liveStatuses] } : "success";
+}
 
 /**
  * `etl_run.source` string -> cadence. The source strings are the exact values
@@ -385,7 +397,10 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // the moment it lands and ages to ~44h before the next mirror. See SLA_HOURS.
   "ReciterAI-enrichment": { cadence: "nightly-mirrored" },
   "ReciterAI-hot-path": { cadence: "weekly" },
-  "ReciterAI-spotlight-gate": { cadence: "monthly" },
+  // The gate is the liveness signal for Spotlight, and `skipped` is its normal
+  // outcome (nothing crossed the regenerate threshold). Artifact age is graded
+  // separately on the `Spotlight` row.
+  "ReciterAI-spotlight-gate": { cadence: "monthly", liveStatuses: ["success", "skipped"] },
   "ReciterAI-onboarding-detector": { cadence: "nightly-mirrored" },
   // The two daily drift Lambdas. They write a findings row per day rather than a
   // ledger entry, so the row's existence is the liveness signal -- see
