@@ -366,6 +366,46 @@ const FACULTY_SOR_ATTRS = [
  *  scholar in one paginated search. Caller groups by CWID before write.
  *  Filter is `weillCornellEduStatus=faculty:active` so expired rows don't
  *  reach the database (no need to mirror the SOR's history table). */
+/** #2206 — faculty SOR PERSON (parent) records: one `weillCornellEduSORRecord`
+ *  per active faculty member, the parent of the Role rows the appointment
+ *  search reads. It carries `weillCornellEduDegree`, the same way the students
+ *  SOR parent does for doctoral students (the only population whose
+ *  `postnominal` was ever populated in prod). */
+export const DEFAULT_FACULTY_SOR_PERSON_FILTER =
+  "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduStatus=faculty:active))";
+
+/** Pure projection: cwid -> trimmed `weillCornellEduDegree` from SOR person
+ *  entries. Entries with no CWID or a blank degree are skipped; the first
+ *  non-blank value per CWID wins. */
+export function collectSorDegrees(
+  searchEntries: ReadonlyArray<Record<string, unknown>>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const e of searchEntries) {
+    const cwid = firstString(e.weillCornellEduCWID);
+    const degree = firstString(e.weillCornellEduDegree)?.trim();
+    if (!cwid || !degree || out.has(cwid)) continue;
+    out.set(cwid, degree);
+  }
+  return out;
+}
+
+/** #2206 — fetch the faculty SOR parent records' degree string, keyed by CWID.
+ *  Fallback source for `Scholar.postnominal` when the people-branch entry
+ *  returns no `weillCornellEduDegree` (0/7,721 faculty in prod, while the
+ *  students SOR parent populated 690/691). */
+export async function fetchFacultySorDegrees(client: Client): Promise<Map<string, string>> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_BASE ?? DEFAULT_FACULTY_SOR_BASE;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter: DEFAULT_FACULTY_SOR_PERSON_FILTER,
+    attributes: ["weillCornellEduCWID", "weillCornellEduDegree"],
+    paged: { pageSize: 500 },
+  });
+  return collectSorDegrees(searchEntries);
+}
+
 export async function fetchActiveFacultyAppointments(
   client: Client,
 ): Promise<EdFacultyAppointment[]> {
