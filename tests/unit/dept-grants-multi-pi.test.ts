@@ -402,11 +402,11 @@ describe("getDeptGrantsList — isMultiPi (#2066, #2075)", () => {
     // cannot coincidentally satisfy the end_date assertion.
     const BY_END: Row[] = [
       { ...D, cwid: "srt00001", role: "PI", externalId: "INFOED-S100-srt00001", awardNumber: "1R01CA010001-01",
-        dept: "NEURO", startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01") },
+        dept: "NEURO", startDate: new Date("2026-01-01"), endDate: new Date("2030-01-01") },
       { ...D, cwid: "srt00002", role: "PI", externalId: "INFOED-S200-srt00002", awardNumber: "1R01CA010002-01",
         dept: "NEURO", startDate: new Date("2025-01-01"), endDate: new Date("2028-01-01") },
       { ...D, cwid: "srt00003", role: "PI", externalId: "INFOED-S300-srt00003", awardNumber: "1R01CA010003-01",
-        dept: "NEURO", startDate: new Date("2024-01-01"), endDate: new Date("2030-01-01") },
+        dept: "NEURO", startDate: new Date("2024-01-01"), endDate: new Date("2027-01-01") },
     ];
     mockGrantFindMany.mockImplementation(serveGrants(BY_END));
 

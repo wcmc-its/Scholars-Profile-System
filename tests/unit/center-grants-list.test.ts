@@ -74,10 +74,11 @@ beforeEach(() => {
   ];
   grantRows = [
     // Two members on ONE award: one card, flagged multi-PI.
-    { ...D, cwid: "mem00001", role: "PI", externalId: "INFOED-A100-mem00001", awardNumber: "1R01CA111111-01", title: "Shared award", startDate: new Date("2024-06-01"), endDate: new Date("2027-01-01") },
-    { ...D, cwid: "mem00002", role: "Co-PI", externalId: "INFOED-A100-mem00002", awardNumber: "1R01CA111111-01", title: "Shared award", startDate: new Date("2024-06-01"), endDate: new Date("2027-01-01") },
-    // A solo award that ends later but started earlier.
-    { ...D, cwid: "mem00002", role: "PI", externalId: "INFOED-A200-mem00002", awardNumber: "1R01CA222222-01", title: "Solo award", startDate: new Date("2023-01-01"), endDate: new Date("2031-01-01") },
+    { ...D, cwid: "mem00001", role: "PI", externalId: "INFOED-A100-mem00001", awardNumber: "1R01CA111111-01", title: "Shared award", startDate: new Date("2024-06-01"), endDate: new Date("2031-01-01") },
+    { ...D, cwid: "mem00002", role: "Co-PI", externalId: "INFOED-A100-mem00002", awardNumber: "1R01CA111111-01", title: "Shared award", startDate: new Date("2024-06-01"), endDate: new Date("2031-01-01") },
+    // A solo award that started earlier AND ends sooner, so most_recent (start
+    // DESC) and end_date (end ASC, #2082) give different orders.
+    { ...D, cwid: "mem00002", role: "PI", externalId: "INFOED-A200-mem00002", awardNumber: "1R01CA222222-01", title: "Solo award", startDate: new Date("2023-01-01"), endDate: new Date("2027-01-01") },
   ];
   mockCenterMembershipFindMany.mockImplementation(() => Promise.resolve(memberships));
   mockSuppressionFindMany.mockImplementation(

@@ -699,11 +699,11 @@ describe("getDivisionGrantsList — project grouping + isMultiPi (#2066, #2075)"
     // accidentally satisfy the end_date assertion.
     const BY_END: CRow[] = [
       { ...D, cwid: "dsrt0001", role: "PI", externalId: "INFOED-S100-dsrt0001", awardNumber: "1R01CA010001-01",
-        inDivision: true, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01") },
+        inDivision: true, startDate: new Date("2026-01-01"), endDate: new Date("2030-01-01") },
       { ...D, cwid: "dsrt0002", role: "PI", externalId: "INFOED-S200-dsrt0002", awardNumber: "1R01CA010002-01",
         inDivision: true, startDate: new Date("2025-01-01"), endDate: new Date("2028-01-01") },
       { ...D, cwid: "dsrt0003", role: "PI", externalId: "INFOED-S300-dsrt0003", awardNumber: "1R01CA010003-01",
-        inDivision: true, startDate: new Date("2024-01-01"), endDate: new Date("2030-01-01") },
+        inDivision: true, startDate: new Date("2024-01-01"), endDate: new Date("2027-01-01") },
     ];
     mockDivisionMembershipFindMany.mockResolvedValue(
       members(BY_END).map((r) => ({ cwid: r.cwid })),

@@ -7,7 +7,8 @@
  *   - Publications: newest (dateAddedToEntrez DESC), most-cited (citationCount
  *     DESC). "By impact" deferred — needs upstream score we don't carry per
  *     publication on the dept surface.
- *   - Grants: most-recent (start_date DESC), end-date (end_date DESC).
+ *   - Grants: most-recent (start_date DESC), end-date (end_date ASC, soonest
+ *     first — matches funding search, #2082).
  *     "Largest" deferred — needs amount column.
  *
  * Pagination matches the scholars list pattern: 20 per page; page is
