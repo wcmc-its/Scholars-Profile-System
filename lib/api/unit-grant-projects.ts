@@ -45,10 +45,10 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
+  fundingProjectBaseKey,
   grantRoleRank,
   groupGrantsByProject,
   multiPiExternalIds,
-  parseExternalId,
   sortPeople,
 } from "@/lib/funding-projection";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
@@ -135,19 +135,20 @@ export type UnitGrantProject = {
  * Group a unit's active grant rows into funding projects, newest first.
  *
  * 🔴 `groupGrantsByProject` SILENTLY DROPS any row whose externalId is null or
- * does not parse as `INFOED-{account}-{cwid}` — it `continue`s when
- * `parseExternalId` returns falsy. Those rows must still get a card, so they are
- * appended here as singleton groups under a `__solo__` key (the same key the
- * per-surface code used before this module existed). `__solo__` cannot collide
- * with a real project key, which is either a `coreProjectNum` or an InfoEd
- * Account_Number.
+ * is neither `INFOED-{account}-{cwid}` nor `reporter:{cwid}:{core}` — it
+ * `continue`s when `fundingProjectBaseKey` returns falsy. Those rows must still
+ * get a card, so they are appended here as singleton groups under a `__solo__`
+ * key (the same key the per-surface code used before this module existed).
+ * `__solo__` cannot collide with a real project key, which is either a
+ * `coreProjectNum` or an InfoEd Account_Number.
  *
- * In practice the residual set is empty on these surfaces: `Grant.externalId` is
- * `String @unique` (NOT NULL) in the schema, and the only non-`INFOED-` id the
- * ETL writes is `reporter:{cwid}:{core}` (etl/reporter-grants/transform.ts),
- * which every caller here already excludes via `source: { not: "RePORTER" }`.
- * The fallback is kept anyway: it costs one loop and its absence is a silently
- * vanishing card.
+ * In practice the residual set is empty: `Grant.externalId` is `String @unique`
+ * (NOT NULL) in the schema, and the ETL writes only the two forms above. (Every
+ * caller here also excludes RePORTER rows via `source: { not: "RePORTER" }` — a
+ * unit-surface scope choice, not a parse limitation; since #2285 the shared
+ * grouping, and so the funding index, keys RePORTER rows by core project
+ * number.) The fallback is kept anyway: it costs one loop and its absence is a
+ * silently vanishing card.
  */
 export function groupUnitGrantsByProject(
   rows: readonly UnitGrantRow[],
@@ -160,7 +161,7 @@ export function groupUnitGrantsByProject(
     // Same suppression gate `groupGrantsByProject` applies, so a suppressed row
     // is not resurrected as a singleton.
     if (r.externalId !== null && suppressedExternalIds.has(r.externalId)) continue;
-    if (parseExternalId(r.externalId) !== null) continue;
+    if (fundingProjectBaseKey(r.externalId) !== null) continue;
     // Key on the externalId when there IS one: two unparsable ids for the same
     // cwid that happen to share a startDate (`LEGACY-77-abc` / `LEGACY-88-abc`)
     // are two grants, and a cwid+date key collapses them into one card — the

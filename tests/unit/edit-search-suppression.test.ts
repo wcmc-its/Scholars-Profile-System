@@ -549,7 +549,8 @@ describe("reflectGrantSuppressions — ETL batch (#2284)", () => {
     const results = await reflectGrantSuppressions([
       { suppressionId: "sup-b1", entityId: "INFOED-ACCT1-ann" },
       { suppressionId: "sup-b2", entityId: "INFOED-ACCT2-bob" },
-      // The reporter-grants half: unparseable, no index op, still stamped.
+      // The reporter-grants half (#2285): a RePORTER row IS indexed, keyed on
+      // its core project number, and shares the batch's one scan.
       { suppressionId: "sup-b3", entityId: "reporter:ann:R01CA000001" },
     ]);
 
@@ -560,20 +561,22 @@ describe("reflectGrantSuppressions — ETL batch (#2284)", () => {
     ]);
     expect(hoisted.mockSuppressionFindMany).toHaveBeenCalledTimes(1);
     expect(hoisted.mockGrantFindMany).toHaveBeenCalledTimes(1);
-    expect(hoisted.mockBulk).toHaveBeenCalledTimes(2);
+    expect(hoisted.mockBulk).toHaveBeenCalledTimes(3);
     expect(hoisted.mockBulk.mock.calls.map((c) => c[0].body)).toEqual([
       [{ delete: { _index: "scholars-funding", _id: "ACCT1" } }],
       [{ delete: { _index: "scholars-funding", _id: "ACCT2" } }],
+      [{ delete: { _index: "scholars-funding", _id: "R01CA000001" } }],
     ]);
     // Every row stamps, including the one with nothing to project (#2204).
     expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(3);
   });
 
   it("skips the scan entirely when no id in the batch parses", async () => {
-    // The reporter-grants ETL's whole batch. A corpus scan here is pure waste.
+    // Ids that are neither InfoEd nor RePORTER were never indexed, so a corpus
+    // scan here is pure waste. (RePORTER ids DO scan since #2285.)
     const results = await reflectGrantSuppressions([
-      { suppressionId: "sup-r1", entityId: "reporter:ann:R01CA000001" },
-      { suppressionId: "sup-r2", entityId: "reporter:bob:R01CA000002" },
+      { suppressionId: "sup-r1", entityId: "LEGACY-77-ann" },
+      { suppressionId: "sup-r2", entityId: "not-an-infoed-id" },
     ]);
 
     expect(results).toEqual([
