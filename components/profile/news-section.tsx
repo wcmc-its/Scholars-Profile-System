@@ -54,7 +54,7 @@ function NewsRow({ item }: { item: NewsMention }) {
             {item.alsoIn.more > 0 ? ` and ${item.alsoIn.more} more` : ""}
           </div>
         ) : null}
-        {item.excerpt ? <p className="text-muted-foreground mt-1 text-sm">{item.excerpt}</p> : null}
+        {item.excerpt && /[\p{L}\p{N}]/u.test(item.excerpt) ? <p className="text-muted-foreground mt-1 text-sm">{item.excerpt}</p> : null}
       </div>
     </li>
   );

@@ -57,7 +57,7 @@ export function NotFoundContent({ isVivo = false }: { isVivo?: boolean }) {
           Search scholars
         </Link>
         <Link href="/browse" className="underline">
-          Browse A–Z
+          Departments &amp; centers
         </Link>
         <Link href="/about" className="underline">
           About
