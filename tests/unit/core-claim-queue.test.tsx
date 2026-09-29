@@ -34,6 +34,19 @@ import {
   searchBlob,
   CSV_HEADERS,
   csvRow,
+  buildEvidenceGroups,
+  buildRailPeople,
+  evidenceGroupName,
+  facetValues,
+  groupBandText,
+  matchesFacets,
+  matchesSearch,
+  parsePmidQuery,
+  pmidMatchNote,
+  REJECT_REASONS,
+  rowChips,
+  chunkPmids,
+  pasteAsOneLine,
 } from "@/components/edit/core-claim-queue";
 import type { FilterKey } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
@@ -90,14 +103,44 @@ const CORE = {
   staffTrackedCount: null as number | null,
 };
 
-/** Expand the only open card's evidence strip — signal rows start collapsed. */
-function showEvidence() {
-  fireEvent.click(screen.getByRole("button", { name: /Show evidence/ }));
+/** The focused-paper pane (v2's right-hand pane). The evidence rows are shown
+ *  there from the start — there is no "Show evidence" disclosure any more. */
+function pane(): HTMLElement {
+  const el = document.querySelector('[data-slot="core-queue-focus"]');
+  if (!el) throw new Error("no focused paper pane");
+  return el as HTMLElement;
 }
 
-/** The expanded per-signal list of the only open card. */
+/** The per-signal list in the focused paper. */
 function evidence() {
-  return screen.getByLabelText("evidence");
+  return within(pane()).getByLabelText("evidence");
+}
+
+/** The middle pane's list of candidate rows. */
+function list(): HTMLElement {
+  return screen.getByRole("list", { name: "Candidate papers" });
+}
+
+/** One list row, by PMID. */
+function listRow(pmid: string): HTMLElement {
+  return document.querySelector(`[data-slot="core-queue-row"][data-pmid="${pmid}"]`) as HTMLElement;
+}
+
+/** Row titles in list order. */
+function listTitles(): string[] {
+  return [...document.querySelectorAll('[data-slot="core-queue-row"]')].map(
+    (li) => li.querySelector("button span span")?.textContent ?? "",
+  );
+}
+
+/** Open the Filters panel (the facets live there in v2). */
+function openFilters() {
+  fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
+}
+
+/** Press a key the way a reviewer does: on the page, not inside a control. */
+function press(key: string, init: Partial<KeyboardEventInit> = {}) {
+  fireEvent.keyDown(document.body, { key, ...init });
 }
 
 /**
@@ -118,12 +161,14 @@ afterEach(() => {
 describe("CoreClaimQueue", () => {
   it("reads the score as a band word plus a percent, with no 'likelihood' caption", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    expect(screen.getByText("Advanced MRI of the brain")).toBeTruthy();
-    // the whole score vocabulary is the band word + the percent
-    expect(screen.getByText("Moderate 82%")).toBeTruthy();
+    expect(within(pane()).getByText("Advanced MRI of the brain")).toBeTruthy();
+    // the whole score vocabulary is the band word + the percent — in the pane
+    // and on the list row alike
+    expect(within(pane()).getByText("Moderate 82%")).toBeTruthy();
+    expect(within(list()).getByText("Moderate 82%")).toBeTruthy();
     expect(screen.queryByText("Combined likelihood")).toBeNull();
     expect(screen.queryByText(/Evidence score/)).toBeNull();
-    expect(screen.getByText(/4 of 4 signals/)).toBeTruthy();
+    expect(within(pane()).getByText(/4 of 4 signals/)).toBeTruthy();
   });
 
   it("names each band at its exact threshold, and just below it", () => {
@@ -149,23 +194,24 @@ describe("CoreClaimQueue", () => {
     expect(at(0)).toBe("Weak 0%");
   });
 
-  it("summarises the evidence as label/value tokens before anything is expanded", () => {
+  it("summarises the evidence as short chips on the list row, and shows the rows in the pane", () => {
+    // v2 (mockup): the collapsed token strip is gone. The list row carries short
+    // signal chips; the pane shows the full evidence rows from the start.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const strip = screen.getByRole("button", { name: /Show evidence/ });
-    expect(strip.textContent).toContain("Acknowledged as");
-    expect(strip.textContent).toContain("“CBIC”");
-    expect(strip.textContent).toContain("Alex Testerson");
-    // No paperCounts passed, so nobody is nameable and the strip falls back to
-    // the engine's own unnamed rate rather than inventing a person.
-    expect(strip.textContent).toContain("42% of an author's own work");
-    expect(strip.textContent).toContain("possibly core work"); // llmScore 7
-    // the signal rows themselves stay closed until asked for
-    expect(screen.queryByLabelText("evidence")).toBeNull();
+    const chips = listRow("30418319").textContent ?? "";
+    expect(chips).toContain("Acknowledged");
+    expect(chips).toContain("Staff co-author");
+    expect(chips).toContain("LLM 7/10");
+    // No paperCounts passed, so nobody is nameable: the chip names nobody rather
+    // than inventing a person.
+    expect(chips).toContain("Repeat user");
+    expect(chips).not.toContain("Repeat user ·");
+    expect(screen.queryByRole("button", { name: /Show evidence/ })).toBeNull();
+    expect(within(evidence()).getByText("Named in the acknowledgments")).toBeTruthy();
   });
 
   it("renders the per-signal rows, their strength words and their raw readouts once expanded", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    showEvidence();
     const list = within(evidence());
     expect(list.getByText("Named in the acknowledgments")).toBeTruthy();
     expect(list.getByText("Direct")).toBeTruthy(); // ack tier
@@ -196,7 +242,6 @@ describe("CoreClaimQueue", () => {
         paperCounts={{ ccc1003: { papers: 18, recent: 11, total: 29 } }}
       />,
     );
-    showEvidence();
     const list = within(evidence());
     expect(list.getByText("18 confirmed papers")).toBeTruthy();
     expect(
@@ -218,7 +263,6 @@ describe("CoreClaimQueue", () => {
         paperCounts={{ ccc1003: { papers: 1, recent: 0, total: 1 } }}
       />,
     );
-    showEvidence();
     const list = within(evidence());
     expect(list.getByText("1 confirmed paper")).toBeTruthy();
     expect(
@@ -232,13 +276,11 @@ describe("CoreClaimQueue", () => {
     const { container } = render(
       <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
     );
-    showEvidence();
     expect(container.querySelector("mark")?.textContent).toBe("CBIC");
   });
 
   it("shows the PMID verbatim (linked to PubMed) and the rationale", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    showEvidence();
     expect(screen.getByText("Acknowledges the imaging core for confocal microscopy.")).toBeTruthy();
     // the PMID is shown verbatim and is the PubMed link
     const pubmed = screen.getByRole("link", { name: /PMID 30418319/ });
@@ -326,7 +368,6 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    showEvidence();
     expect(within(evidence()).getByText("Acknowledged in text")).toBeTruthy();
   });
 
@@ -338,15 +379,14 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    showEvidence();
     const list = within(evidence());
     expect(list.queryByText("Repeat user")).toBeNull();
     expect(list.queryByText("Staff co-author")).toBeNull();
     expect(list.queryByText(/Named in the acknowledgments|Acknowledged in text/)).toBeNull();
   });
 
-  it("chips the method families at the card top and quotes the extractor, UNCOUNTED", () => {
-    const { container } = render(
+  it("chips the method families in 'Methods used' and quotes the extractor, UNCOUNTED", () => {
+    render(
       <CoreClaimQueue
         core={CORE}
         candidates={[
@@ -363,14 +403,15 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const card = container.querySelector("[data-card]") as HTMLElement;
+    // v2 (mockup) moved the chips from the card top into the "Methods used ·
+    // context only" row of the paper pane.
+    const card = pane();
     expect(within(card).getAllByText("Flow cytometry")).toHaveLength(1);
     expect(within(card).getByText("Mass spectrometry")).toBeTruthy();
     // The tier always rides along, and the caveat is on screen, not in a title.
     expect(card.textContent).toContain(
       "weak method match — what the paper did, not whether this core did it",
     );
-    showEvidence();
     expect(within(card).getByText("Methods used")).toBeTruthy();
     expect(card.textContent).toContain("“Cells were sorted on a.”");
     // Weighted 0.00 in the engine, and the lift inverts on weak rows — so it is
@@ -384,7 +425,6 @@ describe("CoreClaimQueue", () => {
     // comes out of the denominator and off the signal list — but stays on screen,
     // because a reviewer who can see the score has to be able to see what moved it.
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.6 })]} confirmed={[]} />);
-    showEvidence();
     expect(within(evidence()).queryByText(/prior/i)).toBeNull();
     expect(
       screen.getByText(
@@ -392,7 +432,7 @@ describe("CoreClaimQueue", () => {
       ),
     ).toBeTruthy();
     // and the prior no longer inflates the count: four signals, four fired
-    expect(screen.getByText("4 of 4 signals")).toBeTruthy();
+    expect(screen.getByText(/4 of 4 signals/)).toBeTruthy();
   });
 
   it("does not claim a MeSH descriptor on an author-only prefilter prior", () => {
@@ -403,33 +443,29 @@ describe("CoreClaimQueue", () => {
     // row of the queue that actually gets reviewed. Demoting the row to a footnote
     // does not retire the trap: the footnote asserts a MeSH branch too.
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.6 })]} confirmed={[]} />);
-    showEvidence();
     expect(screen.queryByText(/is a MeSH-branch match/)).toBeNull();
     expect(screen.getByText(/has no mapped MeSH branch for this core/)).toBeTruthy();
   });
 
   it("does not say 'no mapped MeSH branch' on the rows where MeSH DID fire", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.4 })]} confirmed={[]} />);
-    showEvidence();
     expect(screen.queryByText(/no mapped MeSH branch/)).toBeNull();
     expect(screen.getByText(/is a MeSH-branch match on the paper's own descriptors/)).toBeTruthy();
   });
 
   it("names both halves when the prior is the noisy-OR of the two", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row({ topicalPrior: 0.76 })]} confirmed={[]} />);
-    showEvidence();
     expect(screen.getByText(/blends a MeSH-branch match with the repeat-user number/)).toBeTruthy();
   });
 
   it("counts all four signals, so the numerator can reach its own denominator", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    expect(screen.getByText("4 of 4 signals")).toBeTruthy();
+    expect(screen.getByText(/4 of 4 signals/)).toBeTruthy();
   });
 
   it("renders the synopsis and links resolved core-staff co-authors to their profile", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(screen.getByText("A faster MRI sequence.")).toBeTruthy();
-    showEvidence();
     const staff = within(evidence()).getByRole("link", { name: "Alex Testerson" });
     expect(staff.getAttribute("href")).toBe("/alex-testerson");
     // "1 person" over "Alex Testerson, Radiology" — the mockup's two-line form.
@@ -450,7 +486,6 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    showEvidence();
     expect(screen.getByText(/zzz9999/)).toBeTruthy();
   });
 
@@ -467,7 +502,6 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    showEvidence();
     expect(screen.getAllByText("Robin Placeholder").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Robin Placeholder" })).toBeNull();
     expect(screen.queryByText(/bbb9001/)).toBeNull();
@@ -497,7 +531,6 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    showEvidence();
     const link = within(evidence()).getByRole("link", { name: "Alessandro Fichera" });
     expect(link.getAttribute("href")).toBe("/alessandro-fichera");
     expect(evidence().textContent).not.toContain("Fichera - Surgery");
@@ -522,7 +555,6 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    showEvidence();
     expect(within(evidence()).getByText("Robin Placeholder")).toBeTruthy();
     expect(evidence().textContent).not.toContain("Placeholder (CBIC)");
   });
@@ -558,7 +590,7 @@ describe("CoreClaimQueue", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /^confirm$/i })).toBeNull());
   });
 
-  it("tints the decided strip green on confirm and red on reject (mockup parity)", async () => {
+  it("tints the decided meter green on confirm and red on reject, and marks the list row", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     render(
@@ -568,16 +600,21 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const confirmCard = screen.getByRole("group", { name: /^Candidate: Confirm me/ });
-    fireEvent.click(within(confirmCard).getByRole("button", { name: /^confirm$/i }));
-    const rejectCard = screen.getByRole("group", { name: /^Candidate: Reject me/ });
-    fireEvent.click(within(rejectCard).getByRole("button", { name: /^reject$/i }));
+    const meter = () => pane().querySelector('[data-slot="core-queue-meter"]') as HTMLElement;
+    expect(screen.getByLabelText("Candidate: Confirm me")).toBe(pane());
+    fireEvent.click(within(pane()).getByRole("button", { name: /^confirm$/i }));
+    // a decision moves the pane on to the next undecided paper (mockup)
+    await screen.findByLabelText("Candidate: Reject me");
+    fireEvent.click(within(pane()).getByRole("button", { name: /^reject$/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
-    const confirmedStrip = await screen.findByRole("group", { name: /^Confirmed: Confirm me/ });
-    expect(confirmedStrip.className).toContain("bg-emerald-50");
-    const rejectedStrip = screen.getByRole("group", { name: /^Rejected: Reject me/ });
-    expect(rejectedStrip.className).toContain("bg-red-50");
+    await screen.findByLabelText("Rejected: Reject me");
+    expect(meter().className).toContain("bg-red-50");
+    expect(listRow("2").textContent).toContain("Rejected");
+    expect(listRow("1").textContent).toContain("Confirmed");
+    fireEvent.click(within(listRow("1")).getByRole("button"));
+    expect(screen.getByLabelText("Confirmed: Confirm me")).toBe(pane());
+    expect(meter().className).toContain("bg-emerald-50");
   });
 
   it("explains a 0-signal candidate instead of silently omitting the evidence list", () => {
@@ -599,9 +636,8 @@ describe("CoreClaimQueue", () => {
       />,
     );
     expect(screen.getByText(/0 of 4 signals/)).toBeTruthy();
-    // the collapsed strip says so too, before anything is opened
-    expect(screen.getByText("No labelled signal.")).toBeTruthy();
-    showEvidence();
+    // the list row carries no signal chip at all — nothing to claim
+    expect(listRow("1").querySelector(".rounded-full")).toBeNull();
     expect(screen.getByText(/The score moved on engine inputs this queue doesn’t show/)).toBeTruthy();
   });
 
@@ -632,7 +668,6 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText(/0 of 4 signals/)).toBeTruthy();
     // the strip is not empty — it carries the method token — so it never said this
     expect(screen.queryByText("No labelled signal.")).toBeNull();
-    showEvidence();
     expect(screen.queryByText(/engine inputs this queue doesn’t show/)).toBeNull();
     expect(screen.getByText(/The method family on this card is all it carries/)).toBeTruthy();
     expect(screen.getByText("Methods used")).toBeTruthy();
@@ -663,11 +698,13 @@ describe("CoreClaimQueue", () => {
       />,
     );
     expect(screen.getByText(/3 of 4 signals/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Show evidence/ }).textContent).toContain(
-      "Blake Fixture has used the core on 18 previous occasions (out of 29 publications).",
-    );
-    showEvidence();
+    expect(listRow("30418319").textContent).toContain("Repeat user · Blake Fixture");
     expect(within(evidence()).getByText("Repeat user")).toBeTruthy();
+    expect(
+      within(evidence()).getByText(
+        "Blake Fixture, Genomics. 18 of their 29 publications are confirmed work with this core, 11 in the last three years.",
+      ),
+    ).toBeTruthy();
     expect(within(evidence()).getByText("18 confirmed papers")).toBeTruthy();
   });
 
@@ -700,13 +737,10 @@ describe("CoreClaimQueue", () => {
         paperCounts={{ afi1007: { papers: 18, recent: 11, total: 29 } }}
       />,
     );
-    // The collapsed token first — it names him too.
-    const strip = screen.getByRole("button", { name: /Show evidence/ }).textContent ?? "";
-    expect(strip).toContain(
-      "Alessandro Fichera has used the core on 18 previous occasions (out of 29 publications).",
-    );
-    expect(strip).not.toContain("Fichera - Surgery");
-    showEvidence();
+    // The list row's chip first — it names him too.
+    const chip = listRow("30418319").textContent ?? "";
+    expect(chip).toContain("Repeat user · Alessandro Fichera");
+    expect(chip).not.toContain("Fichera - Surgery");
     const ev = evidence();
     expect(
       within(ev).getByText(
@@ -735,7 +769,6 @@ describe("CoreClaimQueue", () => {
         paperCounts={{ aaa1001: { papers: 6, recent: 2, total: 30 } }}
       />,
     );
-    showEvidence();
     expect(within(evidence()).queryByText("Repeat user")).toBeNull();
     expect(screen.queryByText(/only restates the repeat-user number/)).toBeNull();
     expect(screen.getByText(/rests on an author's prior use of this core/)).toBeTruthy();
@@ -764,7 +797,6 @@ describe("CoreClaimQueue", () => {
       />,
     );
     expect(screen.getByText(/0 of 4 signals/)).toBeTruthy();
-    showEvidence();
     expect(screen.queryByText(/engine inputs this queue doesn’t show/)).toBeNull();
     expect(screen.getByText(/The prefilter prior on this card is all it carries/)).toBeTruthy();
     expect(screen.getByText(/the topical prior \(60%\)/)).toBeTruthy();
@@ -794,7 +826,7 @@ describe("CoreClaimQueue", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
-    const undo = await screen.findByRole("button", { name: /undo/i });
+    const undo = await screen.findByRole("button", { name: /^undo$/i });
     fireEvent.click(undo);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -807,12 +839,12 @@ describe("CoreClaimQueue", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /^confirm$/i })).toBeTruthy());
   });
 
-  it("confirms via the 'a' keyboard shortcut on the focused card", async () => {
+  it("confirms the focused paper via the 'a' keyboard shortcut", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
 
-    fireEvent.keyDown(container.querySelector("[data-card]") as HTMLElement, { key: "a" });
+    press("a");
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status).toBe(
@@ -840,15 +872,19 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.getByText("Acked paper")).toBeTruthy();
-    expect(screen.getByText("Bare paper")).toBeTruthy();
+    expect(within(list()).getByText("Acked paper")).toBeTruthy();
+    expect(within(list()).getByText("Bare paper")).toBeTruthy();
 
+    openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
-    expect(screen.getByText("Acked paper")).toBeTruthy();
-    expect(screen.queryByText("Bare paper")).toBeNull();
+    expect(within(list()).getByText("Acked paper")).toBeTruthy();
+    expect(within(list()).queryByText("Bare paper")).toBeNull();
   });
 
-  it("AND-combines two ticked facets, narrowing to the rows carrying both", () => {
+  it("ORs values inside one facet group and ANDs across groups (mockup semantics)", () => {
+    // v2 changed this on purpose: the old pill row AND-combined everything; the
+    // mockup's Filters panel is a faceted search — two values of ONE group widen,
+    // a value from ANOTHER group narrows.
     render(
       <CoreClaimQueue
         core={CORE}
@@ -860,38 +896,43 @@ describe("CoreClaimQueue", () => {
             ackAlias: "CBIC",
             coauthors: [],
             coauthorScholars: [],
+            llmScore: 7,
           }),
           row({
             pmid: "2",
             title: "Co-authored only",
             signalAck: false,
             ackAlias: null,
+            llmScore: 2,
           }),
           row({
             pmid: "3",
             title: "Both signals",
             signalAck: true,
             ackAlias: "CBIC",
+            llmScore: 2,
           }),
         ]}
         confirmed={[]}
       />,
     );
+    openFilters();
     const tick = (name: RegExp) => fireEvent.click(screen.getByRole("checkbox", { name }));
 
     tick(/^Acknowledged/);
-    expect(screen.queryByText("Co-authored only")).toBeNull();
-    expect(screen.getByText("Acked only")).toBeTruthy();
+    expect(listTitles()).toEqual(["Acked only", "Both signals"]);
 
     tick(/^Staff co-author/);
-    // intersection, not union: only the row carrying BOTH survives
-    expect(screen.queryByText("Acked only")).toBeNull();
-    expect(screen.queryByText("Co-authored only")).toBeNull();
-    expect(screen.getByText("Both signals")).toBeTruthy();
+    // same group: union
+    expect(listTitles()).toEqual(["Acked only", "Co-authored only", "Both signals"]);
 
-    // un-ticking is the same click
-    tick(/^Acknowledged/);
-    expect(screen.getByText("Co-authored only")).toBeTruthy();
+    tick(/^0–3/);
+    // another group: intersection
+    expect(listTitles()).toEqual(["Co-authored only", "Both signals"]);
+
+    // un-ticking is the same click, and the chip row offers the same undo
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter LLM score: 0–3" }));
+    expect(listTitles()).toHaveLength(3);
   });
 
   it("drops a facet whose count is 0 rather than offering a pill that empties the queue", () => {
@@ -902,17 +943,23 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
+    openFilters();
     // present, with counts
     expect(screen.getByRole("checkbox", { name: /^Acknowledged/ })).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: /^Staff co-author/ })).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: /^LLM-flagged/ })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /^LLM read/ })).toBeTruthy();
     // absent entirely (not disabled, not zero-labelled)
     expect(screen.queryByRole("checkbox", { name: /^Client co-author/ })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: /^No prior usage/ })).toBeNull();
     // and every pill in the group is a genuine checkbox — the "All" reset pill
     // is gone, so there is no button-among-checkboxes left in this row
-    expect(screen.queryByRole("button", { name: /^All\b/ })).toBeNull();
-    const facets = screen.getByRole("group", { name: "Filter candidates by evidence" });
+    expect(
+      within(document.querySelector('[data-slot="core-queue-filters"]') as HTMLElement).queryByRole(
+        "button",
+        { name: /^All\b/ },
+      ),
+    ).toBeNull();
+    const facets = screen.getByRole("group", { name: "Signals fired" });
     expect(within(facets).queryAllByRole("button")).toEqual([]);
   });
 
@@ -936,13 +983,15 @@ describe("CoreClaimQueue", () => {
         ]}
       />,
     );
+    openFilters();
     expect(screen.getByRole("checkbox", { name: "Client co-author 1" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Show evidence/ }).textContent).toContain(
+    // the pane names them in its own uncounted row
+    expect(pane().querySelector('[data-slot="core-queue-client-row"]')?.textContent).toContain(
       "Casey Sample",
     );
   });
 
-  it("has NO 'All' reset pill — 'Clear filters' is the only reset, for pills and text alike", () => {
+  it("has NO 'All' reset pill — 'Clear all' is the only reset, for pills and text alike", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -963,29 +1012,40 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
+    openFilters();
     const box = (name: RegExp) => screen.getByRole("checkbox", { name });
     // the pill is gone in every guise — as a button, and as a checkbox
-    expect(screen.queryByRole("button", { name: /^All\b/ })).toBeNull();
-    expect(screen.queryByRole("checkbox", { name: /^All\b/ })).toBeNull();
+    expect(
+      within(document.querySelector('[data-slot="core-queue-filters"]') as HTMLElement).queryByRole(
+        "button",
+        { name: /^All\b/ },
+      ),
+    ).toBeNull();
+    expect(
+      within(document.querySelector('[data-slot="core-queue-filters"]') as HTMLElement).queryByRole(
+        "checkbox",
+        { name: /^All\b/ },
+      ),
+    ).toBeNull();
 
-    // a PILL narrowing resets through "Clear filters"
+    // a PILL narrowing resets through "Clear all"
     fireEvent.click(box(/^Acknowledged/));
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("true");
-    expect(screen.queryByText("Bare paper")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(within(list()).queryByText("Bare paper")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect(box(/^Acknowledged/).getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText("Bare paper")).toBeTruthy();
+    expect(within(list()).getByText("Bare paper")).toBeTruthy();
 
     // ...and so does a TEXT-ONLY narrowing, which the retired "All" pill never
     // touched: with it gone this link is the sole reset affordance on the queue.
     fireEvent.change(screen.getByLabelText("Filter candidates"), {
       target: { value: "acked" },
     });
-    expect(screen.queryByText("Bare paper")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(within(list()).queryByText("Bare paper")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect((screen.getByLabelText("Filter candidates") as HTMLInputElement).value).toBe("");
-    expect(screen.getByText("Bare paper")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+    expect(within(list()).getByText("Bare paper")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Clear all" })).toBeNull();
   });
 
   it("labels each facet with its count over the still-undecided rows", async () => {
@@ -1010,11 +1070,12 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
+    openFilters();
     const label = (name: RegExp) => screen.getByRole("checkbox", { name }).textContent;
     expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
     expect(label(/^Acknowledged/)).toBe("Acknowledged 1");
     expect(label(/^Staff co-author/)).toBe("Staff co-author 1");
-    expect(label(/^LLM-flagged/)).toBe("LLM-flagged 1");
+    expect(label(/^LLM read/)).toBe("LLM read 1");
     // "Bare paper" has no affinity, so the no-prior facet is live at 1
     expect(label(/^No prior usage/)).toBe("No prior usage on the byline 1");
 
@@ -1030,54 +1091,30 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByRole("checkbox", { name: /^Staff co-author/ })).toBeNull();
   });
 
-  it("re-sorts by LLM score when selected", () => {
+  it("re-sorts newest first on the 'Newest' pill", () => {
     render(
       <CoreClaimQueue
         core={CORE}
         candidates={[
-          row({ pmid: "1", title: "High likelihood, low LLM", likelihood: 0.9, llmScore: 3 }),
-          row({ pmid: "2", title: "Low likelihood, high LLM", likelihood: 0.5, llmScore: 9 }),
+          row({ pmid: "1", title: "High likelihood, older", likelihood: 0.9, year: 2019 }),
+          row({ pmid: "2", title: "Low likelihood, newer", likelihood: 0.5, year: 2025 }),
         ]}
         confirmed={[]}
       />,
     );
-    const titles = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    // likelihood-desc is the default; set it explicitly so the baseline is pinned
-    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "likelihood" } });
-    expect(titles()).toEqual(["High likelihood, low LLM", "Low likelihood, high LLM"]);
-
-    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "llm" } });
-    expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
+    expect(listTitles()).toEqual(["High likelihood, older", "Low likelihood, newer"]);
+    fireEvent.click(screen.getByRole("button", { name: "Newest" }));
+    expect(listTitles()).toEqual(["Low likelihood, newer", "High likelihood, older"]);
   });
 
-  it("splits the sort control into a visible 'Sort' label and BARE option text", () => {
+  it("offers the mockup's three sort pills, exactly one of them pressed", () => {
+    // v2 replaced the six-option select with the mockup's pills. `compareBySort`
+    // keeps the other keys (pinned below); the surface offers these three.
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const select = screen.getByLabelText("Sort by") as HTMLSelectElement;
-    const options = within(select)
-      .getAllByRole("option")
-      .map((o) => o.textContent);
-    // the label now carries the word, so no option repeats it. Order is the
-    // shipped order (unchanged by this pass); membership is what's pinned.
-    expect(options).toHaveLength(6);
-    for (const label of [
-      "Most certain first",
-      "Most uncertain first",
-      "Newest in PubMed",
-      "Most cited",
-      "Strongest signal",
-      "LLM score",
-    ]) {
-      expect(options).toContain(label);
-    }
-    expect(options.some((o) => o?.startsWith("Sort"))).toBe(false);
-
-    // the visible label is a real <label for=…> tied to the select — not loose
-    // text sitting next to it...
-    const visible = screen.getByText("Sort", { selector: "label" }) as HTMLLabelElement;
-    expect(visible.htmlFor).toBe(select.id);
-    expect(select.id).not.toBe("");
-    // ...and the select keeps the fuller accessible name the sr-only span gave it
-    expect(select.getAttribute("aria-label")).toBe("Sort by");
+    const sorts = within(screen.getByRole("group", { name: "Sort" })).getAllByRole("button");
+    expect(sorts.map((b) => b.textContent)).toEqual(["Most certain", "Uncertain first", "Newest"]);
+    expect(sorts.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+    expect(screen.queryByLabelText("Sort by")).toBeNull();
   });
 
   it("defaults to likelihood-desc ordering, not uncertain-first", () => {
@@ -1091,10 +1128,13 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titles).toEqual(["Near-certain", "Borderline"]); // highest likelihood first
-    // and the select agrees, so the visible label matches the applied order
-    expect((screen.getByLabelText("Sort by") as HTMLSelectElement).value).toBe("likelihood");
+    expect(listTitles()).toEqual(["Near-certain", "Borderline"]); // highest likelihood first
+    // and the pill agrees, so the pressed label matches the applied order
+    expect(screen.getByRole("button", { name: "Most certain" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    // the pane opens on the first row
+    expect(pane().getAttribute("data-pmid")).toBe("1");
   });
 
   it("re-sorts likelihood-desc, then uncertain-first when selected", () => {
@@ -1108,11 +1148,11 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const titles = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "likelihood" } });
-    expect(titles()).toEqual(["Very confident", "Coin-flip"]);
-    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "uncertain" } });
-    expect(titles()).toEqual(["Coin-flip", "Very confident"]);
+    expect(listTitles()).toEqual(["Very confident", "Coin-flip"]);
+    fireEvent.click(screen.getByRole("button", { name: "Uncertain first" }));
+    expect(listTitles()).toEqual(["Coin-flip", "Very confident"]);
+    fireEvent.click(screen.getByRole("button", { name: "Most certain" }));
+    expect(listTitles()).toEqual(["Very confident", "Coin-flip"]);
   });
 
   it("announces the outcome politely for screen readers", async () => {
@@ -1127,41 +1167,42 @@ describe("CoreClaimQueue", () => {
     await waitFor(() => expect(live.textContent).toBe("Confirmed Advanced MRI of the brain."));
   });
 
-  it("rejects via the 'r' shortcut and undoes via 'u' on the decided card", async () => {
+  it("rejects via the 'r' shortcut and undoes the last decision via 'u'", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const card = () => container.querySelector("[data-card]") as HTMLElement;
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
 
-    fireEvent.keyDown(card(), { key: "r" });
+    press("r");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status).toBe(
       "rejected",
     );
 
-    await screen.findByRole("button", { name: /undo/i });
-    fireEvent.keyDown(card(), { key: "u" });
+    await screen.findByRole("button", { name: /^undo$/i });
+    press("u");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(JSON.parse((fetchMock.mock.calls[1] as [string, { body: string }])[1].body).status).toBe(
       "revoked",
     );
   });
 
-  it("ArrowDown moves roving focus to the next card", () => {
-    const { container } = render(
+  it("ArrowDown moves the focused paper to the next row", () => {
+    render(
       <CoreClaimQueue
         core={CORE}
         candidates={[row({ pmid: "1", title: "First" }), row({ pmid: "2", title: "Second" })]}
         confirmed={[]}
       />,
     );
-    const cards = container.querySelectorAll("[data-card]");
-    fireEvent.keyDown(cards[0] as HTMLElement, { key: "ArrowDown" });
-    expect((document.activeElement as HTMLElement)?.getAttribute("data-pmid")).toBe("2");
+    expect(pane().getAttribute("data-pmid")).toBe("1");
+    press("ArrowDown");
+    expect(pane().getAttribute("data-pmid")).toBe("2");
+    expect(listRow("2").getAttribute("aria-current")).toBe("true");
+    expect(listRow("1").getAttribute("aria-current")).toBeNull();
   });
 
-  it("moves roving focus with j (down) and k (up), the vi twins of the arrows", () => {
-    const { container } = render(
+  it("moves the focused paper with j (down) and k (up), the vi twins of the arrows", () => {
+    render(
       <CoreClaimQueue
         core={CORE}
         candidates={[
@@ -1172,108 +1213,101 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    const card = (pmid: string) =>
-      container.querySelector(`[data-card][data-pmid="${pmid}"]`) as HTMLElement;
-    const focused = () => (document.activeElement as HTMLElement)?.getAttribute("data-pmid");
-
-    fireEvent.keyDown(card("1"), { key: "j" });
+    const focused = () => pane().getAttribute("data-pmid");
+    press("j");
     expect(focused()).toBe("2");
-    fireEvent.keyDown(card("2"), { key: "j" });
+    press("j");
     expect(focused()).toBe("3");
-    fireEvent.keyDown(card("3"), { key: "k" });
+    press("j"); // clamps at the end
+    expect(focused()).toBe("3");
+    press("k");
     expect(focused()).toBe("2");
-    fireEvent.keyDown(card("2"), { key: "k" });
+    press("ArrowUp");
     expect(focused()).toBe("1");
-    // uppercase reads the same (the handler lowercases the key)
-    fireEvent.keyDown(card("1"), { key: "J" });
+    // uppercase reads the same (the handler lowercases letters)
+    press("J");
     expect(focused()).toBe("2");
   });
 
-  it("'x' ticks the focused card AND arms selection mode from the default state", () => {
-    const { container } = render(
+  it("'x' ticks and unticks the focused paper's checkbox", () => {
+    render(
       <CoreClaimQueue
         core={CORE}
         candidates={[row({ pmid: "1", title: "Picked A" }), row({ pmid: "2", title: "Picked B" })]}
         confirmed={[]}
       />,
     );
-    const card = (pmid: string) =>
-      container.querySelector(`[data-card][data-pmid="${pmid}"]`) as HTMLElement;
-    // selection mode is OFF by default — no checkboxes, no selection bar
-    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
-    expect(screen.queryByRole("checkbox", { name: "Select Picked A" })).toBeNull();
+    const box = (name: string) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
+    // v2: the checkboxes are always on screen (mockup) — there is no selection mode
+    expect(screen.queryByRole("button", { name: "Select several" })).toBeNull();
+    expect(box("Select Picked A").checked).toBe(false);
 
-    fireEvent.keyDown(card("1"), { key: "x" });
-    // it armed the mode...
-    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
-    // ...and ticked this row, and only this row
-    expect(
-      (screen.getByRole("checkbox", { name: "Select Picked A" }) as HTMLInputElement).checked,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("checkbox", { name: "Select Picked B" }) as HTMLInputElement).checked,
-    ).toBe(false);
-    expect(screen.getByText("1 paper selected")).toBeTruthy();
+    press("x");
+    expect(box("Select Picked A").checked).toBe(true);
+    expect(box("Select Picked B").checked).toBe(false);
+    expect(screen.getByText("1 of 2 selected")).toBeTruthy();
 
-    // a second 'x' TOGGLES it back off (and leaves the mode armed)
-    fireEvent.keyDown(card("1"), { key: "x" });
-    expect(
-      (screen.getByRole("checkbox", { name: "Select Picked A" }) as HTMLInputElement).checked,
-    ).toBe(false);
-    expect(screen.queryByText(/paper[s]? selected/)).toBeNull();
-    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
+    press("x");
+    expect(box("Select Picked A").checked).toBe(false);
+    expect(screen.getByText("Select all 2 shown")).toBeTruthy();
   });
 
-  it("advertises the new keys on the card shell via aria-keyshortcuts", () => {
-    const { container } = render(
-      <CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />,
-    );
-    const shell = container.querySelector("[data-card]") as HTMLElement;
-    const keys = (shell.getAttribute("aria-keyshortcuts") ?? "").split(" ");
-    for (const k of ["a", "r", "x", "j", "k", "ArrowUp", "ArrowDown"]) expect(keys).toContain(k);
+  it("lists every shortcut in the popover, and '?' toggles it", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const toggle = screen.getByRole("button", { name: /^Shortcuts/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    press("?");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const pop = document.querySelector('[data-slot="core-queue-shortcuts"]') as HTMLElement;
+    for (const label of [
+      "Next paper",
+      "Previous paper",
+      "Confirm",
+      "Reject",
+      "Select / deselect",
+      "Undo last decision",
+      "Show this list",
+    ])
+      expect(within(pop).getByText(label)).toBeTruthy();
+    for (const k of ["j", "k", "a", "r", "x", "u", "?"])
+      expect(within(pop).getAllByText(k, { selector: "kbd" }).length).toBeGreaterThan(0);
+    press("Escape");
+    expect(document.querySelector('[data-slot="core-queue-shortcuts"]')).toBeNull();
+    fireEvent.click(toggle);
+    expect(document.querySelector('[data-slot="core-queue-shortcuts"]')).toBeTruthy();
   });
 
-  it("does NOT fire a shortcut typed into a child control (the shell-only guard)", () => {
+  it("does NOT fire a shortcut typed into a control, or under a modifier", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    const { container } = render(
+    render(
       <CoreClaimQueue
         core={CORE}
         candidates={[row({ pmid: "1", title: "First" }), row({ pmid: "2", title: "Second" })]}
         confirmed={[]}
       />,
     );
-
-    // 'a' typed while the Confirm button (a child) is focused must NOT claim.
-    const confirm = screen.getAllByRole("button", { name: /^confirm$/i })[0];
-    fireEvent.keyDown(confirm, { key: "a" });
-    expect(fetchMock).not.toHaveBeenCalled();
-    // ...nor may the new keys act from a child: no roving move, no selection.
-    fireEvent.keyDown(confirm, { key: "j" });
-    expect(container.querySelector("[data-card]:focus")).toBeNull();
-    fireEvent.keyDown(confirm, { key: "x" });
-    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
-
-    // The same holds for a child INPUT: arm selection, then type into the row's
-    // own checkbox. 'x' there must toggle nothing beyond the native control.
-    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
+    // Typed into the row's own checkbox (an INPUT): nothing beyond the control.
     const box = screen.getByRole("checkbox", { name: "Select First" }) as HTMLInputElement;
-    fireEvent.keyDown(box, { key: "x" });
-    expect(box.checked).toBe(false);
-    fireEvent.keyDown(box, { key: "j" });
-    expect(container.querySelector("[data-card]:focus")).toBeNull();
-    fireEvent.keyDown(box, { key: "r" });
+    for (const key of ["a", "r", "x", "j", "u"]) fireEvent.keyDown(box, { key });
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(box.checked).toBe(false);
+    expect(pane().getAttribute("data-pmid")).toBe("1");
+    // Cmd/Ctrl/Alt chords belong to the browser.
+    press("a", { metaKey: true });
+    press("r", { ctrlKey: true });
+    press("j", { altKey: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(pane().getAttribute("data-pmid")).toBe("1");
   });
 
-  it("does NOT hijack j/k/x typed into the FILTER BOX", () => {
-    // The load-bearing case for the shell-only guard now that the shortcuts are
-    // ordinary printable characters and the filter box moved into the header:
-    // typing a word containing j, k or x must narrow the queue and nothing else
-    // — no focus jump, no selection mode, no claim.
+  it("does NOT hijack j/k/x typed into the SEARCH BOX", () => {
+    // The load-bearing case for the typing guard: the shortcuts are ordinary
+    // printable characters, so a word containing j, k or x must search and do
+    // nothing else — no focus jump, no selection, no claim.
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    const { container } = render(
+    render(
       <CoreClaimQueue
         core={CORE}
         candidates={[
@@ -1290,12 +1324,14 @@ describe("CoreClaimQueue", () => {
     for (const key of ["j", "k", "x", "a", "r", "u", "ArrowDown", "ArrowUp"]) {
       fireEvent.keyDown(input, { key });
     }
-    // focus never left the box for a card, no card was decided, no mode armed
     expect(document.activeElement).toBe(input);
-    expect(container.querySelector("[data-card]:focus")).toBeNull();
+    expect(pane().getAttribute("data-pmid")).toBe("1");
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Select several" })).toBeTruthy();
-    expect(screen.queryByRole("checkbox", { name: /^Select / })).toBeNull();
+    expect(
+      screen
+        .getAllByRole("checkbox", { name: /^Select / })
+        .some((b) => (b as HTMLInputElement).checked),
+    ).toBe(false);
 
     // and the box still filters, so the guard didn't cost the control anything
     fireEvent.change(input, { target: { value: "jacks" } });
@@ -1319,16 +1355,20 @@ describe("CoreClaimQueue", () => {
 
     const target = screen.getByLabelText("Candidate: Advanced MRI of the brain");
     fireEvent.click(within(target).getByRole("button", { name: /^confirm$/i }));
-    await screen.findByRole("button", { name: /undo/i });
+    await screen.findByRole("button", { name: "Undo last" });
 
+    openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
-    // still shown via the decided-row override, so its Undo is reachable
-    expect(screen.getByRole("button", { name: /undo/i })).toBeTruthy();
+    // still listed via the decided-row override, marked, and undoable
+    expect(listRow("1").textContent).toContain("Confirmed");
+    fireEvent.click(within(listRow("1")).getByRole("button"));
+    expect(within(pane()).getByRole("button", { name: /^undo$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo last" })).toBeTruthy();
   });
 
-  // --- evidence grouping ---
+  // --- the scope rail (v2: evidence groups and people move into it) ---
 
-  it("groups rows by evidence kind, in the group vocabulary, with a band range", () => {
+  it("lists the evidence groups in the rail, in the group vocabulary, with counts and bands", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1349,16 +1389,35 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(
-      screen.getByText("2 papers · acknowledgment + staff co-author + LLM read + repeat user"),
-    ).toBeTruthy();
-    expect(screen.getByText("1 paper · LLM read")).toBeTruthy();
+    const items = [...document.querySelectorAll('[data-slot="core-queue-rail-item"]')].map((b) =>
+      (b.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
+    expect(items).toEqual([
+      "All candidates2 evidence groups3",
+      "Acknowledgment + staff co-author + LLM read + repeat userSlight to Strong2",
+      "LLM readSlight band1",
+    ]);
     // the range speaks bands, never "likelihood 52–94%"
-    expect(screen.getByText("Slight to Strong")).toBeTruthy();
     expect(screen.queryByText(/likelihood \d/)).toBeNull();
+    // the phone's select carries the same scopes
+    const select = screen.getByLabelText("Choose a scope") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "All candidates (3)",
+      "Acknowledgment + staff co-author + LLM read + repeat user (2)",
+      "LLM read (1)",
+    ]);
+
+    // picking a group scopes the list (and the pane) to it
+    fireEvent.click(screen.getByRole("button", { name: /^LLM read/ }));
+    expect(listTitles()).toEqual(["LLM only"]);
+    expect(pane().getAttribute("data-pmid")).toBe("3");
+    expect(screen.getByText("Showing 1 of 1 candidates")).toBeTruthy();
+    // ...and so does the phone's select
+    fireEvent.change(select, { target: { value: "all" } });
+    expect(listTitles()).toHaveLength(3);
   });
 
-  it("labels a group with no COUNTED evidence kinds 'no counted signal'", () => {
+  it("labels a group with no COUNTED evidence kinds 'No counted signal'", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1377,32 +1436,96 @@ describe("CoreClaimQueue", () => {
       />,
     );
     // "counted", not "labelled": a method-family row groups here too, and its
-    // chips, strip token and quote are all labels the card draws.
-    expect(screen.getByText("1 paper · no counted signal")).toBeTruthy();
+    // chips and quote are labels the pane draws.
+    expect(screen.getByRole("button", { name: /^No counted signal/ })).toBeTruthy();
   });
 
-  it("collapses and re-expands a group", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const caret = screen.getByRole("button", { name: "Collapse or expand this group" });
-    expect(caret.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(caret);
-    expect(screen.queryByText("Advanced MRI of the brain")).toBeNull();
-    fireEvent.click(caret);
-    expect(screen.getByText("Advanced MRI of the brain")).toBeTruthy();
+  it("'By person' lists repeat users with prior-confirmed and open counts, and scopes to them", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            pmid: "1",
+            title: "Both on it",
+            wcmAuthors: [
+              { cwid: "ppp0001", name: "Pat Placeholder", slug: null, dept: "Medicine" },
+              { cwid: "qqq0002", name: "Quinn Sample", slug: null, dept: null },
+            ],
+          }),
+          row({
+            pmid: "2",
+            title: "Pat alone",
+            wcmAuthors: [
+              { cwid: "ppp0001", name: "Pat Placeholder", slug: null, dept: "Medicine" },
+            ],
+          }),
+          row({ pmid: "3", title: "Nobody counted", wcmAuthors: [] }),
+        ]}
+        confirmed={[]}
+        paperCounts={{
+          ppp0001: { papers: 12, recent: 3, total: 40 },
+          qqq0002: { papers: 2, recent: 0, total: 9 },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "By person" }));
+    const items = [...document.querySelectorAll('[data-slot="core-queue-rail-item"]')].map((b) =>
+      (b.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
+    // most open candidates first; nobody without a confirmed paper here
+    expect(items).toEqual([
+      "Pat Placeholder12 prior confirmed · Medicine2",
+      "Quinn Sample2 prior confirmed1",
+    ]);
+    // the first person is the default scope — each of their papers ONCE
+    expect(listTitles()).toEqual(["Both on it", "Pat alone"]);
+    expect(
+      screen.getByText("2 open candidates · 12 of 40 publications already confirmed"),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Quinn Sample/ }));
+    expect(listTitles()).toEqual(["Both on it"]);
+    // in By person the chip does not repeat the person on every row
+    expect(listRow("1").textContent).not.toContain("Repeat user ·");
+
+    fireEvent.click(screen.getByRole("button", { name: "By evidence" }));
+    expect(listTitles()).toHaveLength(3);
   });
 
-  it("turns grouping off and back on", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
-    const toggle = screen.getByRole("button", { name: /^Grouped by evidence$/ });
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(toggle);
-    expect(screen.getByRole("button", { name: /^Group by evidence$/ })).toBeTruthy();
-    // no group header while flat
-    expect(screen.queryByRole("button", { name: "Collapse or expand this group" })).toBeNull();
-    expect(screen.getByText("Advanced MRI of the brain")).toBeTruthy();
+  it("jumps from a repeat-user row to 'Review all N papers by X', keeping the paper in view", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Other paper", likelihood: 0.9, wcmAuthors: [] }),
+          row({
+            pmid: "2",
+            title: "Pat's paper",
+            likelihood: 0.5,
+            coauthors: [],
+            coauthorScholars: [],
+            wcmAuthors: [{ cwid: "ppp0001", name: "Pat Placeholder", slug: null, dept: null }],
+          }),
+        ]}
+        confirmed={[]}
+        paperCounts={{ ppp0001: { papers: 12, recent: 3, total: 40 } }}
+      />,
+    );
+    fireEvent.click(within(listRow("2")).getByRole("button"));
+    fireEvent.click(
+      within(evidence()).getByRole("button", { name: "Review all 1 paper by Pat Placeholder" }),
+    );
+    expect(screen.getByRole("button", { name: "By person" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(listTitles()).toEqual(["Pat's paper"]);
+    expect(pane().getAttribute("data-pmid")).toBe("2");
+    // already scoped to them, so the action is not offered again
+    expect(within(evidence()).queryByRole("button", { name: /^Review all/ })).toBeNull();
   });
 
-  // --- selection mode + the hand-picked bulk bar ---
+  // --- selection + the bulk bar (always-on checkboxes, mockup) ---
 
   it("has no likelihood-gated bulk-confirm sweep", () => {
     render(
@@ -1417,6 +1540,10 @@ describe("CoreClaimQueue", () => {
     );
     expect(screen.queryByRole("button", { name: /high-confidence/i })).toBeNull();
     expect(screen.queryByText(/Confirm 2/)).toBeNull();
+    // nothing selected, nothing to act on
+    expect(
+      (screen.getByRole("button", { name: "Confirm selected" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("confirms a hand-selected set through one bulk POST", async () => {
@@ -1433,23 +1560,27 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Picked A" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Picked B" }));
-    expect(screen.getByText("2 papers selected")).toBeTruthy();
+    expect(screen.getByText("2 of 3 selected")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm 2 selected" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
     expect(url).toBe("/api/edit/core-claim/bulk");
     expect(JSON.parse(init.body)).toEqual({ coreId: "2", pmids: ["1", "2"], status: "claimed" });
     expect(screen.getByTestId("core-claim-live").textContent).toBe("Confirmed 2 publications.");
+    // both rows marked, the selection cleared, the session line counts them
+    await waitFor(() => expect(listRow("1").textContent).toContain("Confirmed"));
+    expect(listRow("2").textContent).toContain("Confirmed");
+    expect(screen.getByText("This session: 2 confirmed · 0 rejected")).toBeTruthy();
+    expect(screen.getByText("Select all 1 shown")).toBeTruthy();
   });
 
-  it("asks before bulk-rejecting, and posts nothing when the reviewer declines", () => {
+  it("guards a selection's bulk reject inline, and posts nothing when the reviewer cancels", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
-    const confirmMock = vi.fn().mockReturnValue(false);
+    const confirmMock = vi.fn();
     vi.stubGlobal("confirm", confirmMock);
     render(
       <CoreClaimQueue
@@ -1458,19 +1589,25 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reject all" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Select all 2 shown/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject 2 selected" }));
 
-    expect(confirmMock).toHaveBeenCalledWith("Reject 2 publications for this core?");
+    // the mockup's inline guard, not a browser dialog
+    expect(confirmMock).not.toHaveBeenCalled();
+    const guard = document.querySelector('[data-slot="core-queue-reject-guard"]') as HTMLElement;
+    expect(guard.textContent).toContain(
+      "Reject 2 selected? Each gets its own audit row and can be restored.",
+    );
+    fireEvent.click(within(guard).getByRole("button", { name: "Cancel" }));
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-slot="core-queue-reject-guard"]')).toBeNull();
     // the rows stay selected, so declining costs the reviewer nothing
-    expect(screen.getByText("2 papers selected")).toBeTruthy();
+    expect(screen.getByText("2 of 2 selected")).toBeTruthy();
   });
 
-  it("bulk-rejects once the reviewer accepts the guard", async () => {
+  it("bulk-rejects the selection once the reviewer accepts the guard", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1478,8 +1615,10 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reject all" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Select all 2 shown/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject 2 selected" }));
+    const guard = document.querySelector('[data-slot="core-queue-reject-guard"]') as HTMLElement;
+    fireEvent.click(within(guard).getByRole("button", { name: "Reject 2" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
@@ -1488,19 +1627,79 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByTestId("core-claim-live").textContent).toBe("Rejected 2 publications.");
   });
 
+  it("'Reject all N…' rejects every row SHOWN, behind the inline guard", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Alpha tomography study" }),
+          row({ pmid: "2", title: "Beta tomography study" }),
+          row({ pmid: "3", title: "Gamma sequencing study" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "tomography" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reject all 2…" }));
+    const guard = document.querySelector('[data-slot="core-queue-reject-guard"]') as HTMLElement;
+    expect(guard.textContent).toContain(
+      "Reject all 2 shown? Each gets its own audit row and can be restored.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(within(guard).getByRole("button", { name: "Reject 2" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // only what the search shows — never the hidden Gamma row
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body)).toEqual({
+      coreId: "2",
+      pmids: ["1", "2"],
+      status: "rejected",
+    });
+  });
+
+  it("splits a bulk batch at the route's 500-PMID cap (pure — a 501-row render is too slow for jsdom)", () => {
+    const pmids = Array.from({ length: 1001 }, (_, i) => String(1000 + i));
+    expect(chunkPmids(pmids).map((c) => c.length)).toEqual([500, 500, 1]);
+    expect(chunkPmids(pmids).flat()).toEqual(pmids);
+    expect(chunkPmids([])).toEqual([]);
+  });
+
+  it("turns a multi-line paste into one line, so a pasted PMID column still splits", () => {
+    expect(pasteAsOneLine("11111111\n22222222\r\n33333333")).toBe("11111111 22222222 33333333");
+    expect(pasteAsOneLine("brain imaging")).toBeNull();
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "11111111", title: "Alpha" }),
+          row({ pmid: "22222222", title: "Beta" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
+    fireEvent.paste(input, { clipboardData: { getData: () => "11111111\n33333333" } });
+    expect(input.value).toBe("11111111 33333333");
+    expect(listTitles()).toEqual(["Alpha"]);
+    expect(document.querySelector('[data-slot="core-queue-pmid-note"]')?.textContent).toBe(
+      "Matched 1 of 2 PMIDs here. Elsewhere: 33333333 (not in this core's queue).",
+    );
+  });
+
   it("does not ask before bulk-confirming — only reject is guarded", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
-    const confirmMock = vi.fn().mockReturnValue(true);
-    vi.stubGlobal("confirm", confirmMock);
     render(
       <CoreClaimQueue core={CORE} candidates={[row({ pmid: "1", title: "Picked A" })]} confirmed={[]} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select 1" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Picked A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm 1 selected" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(confirmMock).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-slot="core-queue-reject-guard"]')).toBeNull();
   });
 
   it("drops a selected row from the bulk post once the filter hides it", async () => {
@@ -1519,17 +1718,16 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Alpha imaging study" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Beta sequencing study" }));
-    expect(screen.getByText("2 papers selected")).toBeTruthy();
+    expect(screen.getByText("2 of 2 selected")).toBeTruthy();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Filter candidates" }), {
       target: { value: "beta" },
     });
-    expect(screen.getByText("1 paper selected")).toBeTruthy();
+    expect(screen.getByText("1 of 1 selected")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm 1 selected" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
     expect(JSON.parse(init.body).pmids).toEqual(["2"]);
@@ -1541,19 +1739,19 @@ describe("CoreClaimQueue", () => {
     render(
       <CoreClaimQueue core={CORE} candidates={[row({ pmid: "1", title: "Picked A" })]} confirmed={[]} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select several" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Picked A" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm 1 selected" }));
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("bulk confirm failed"));
-    // the row stays reviewable
+    // the row stays reviewable, and says it was not saved
     expect(screen.getByRole("button", { name: /^confirm$/i })).toBeTruthy();
+    expect(listRow("1").textContent).toContain("Not saved");
     expect(screen.getByTestId("core-claim-live").textContent).toBe(
       "Bulk confirm could not be saved.",
     );
   });
 
-  it("'Select N' on a group arms selection mode and picks that whole pile", () => {
+  it("'Select all N shown' ticks every open row shown, and unticks them again", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -1561,9 +1759,14 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
-    expect(screen.getByText("2 papers selected")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Exit selection" })).toBeTruthy();
+    const all = screen.getByRole("checkbox", { name: /^Select all 2 shown/ });
+    fireEvent.click(all);
+    expect(screen.getByText("2 of 2 selected")).toBeTruthy();
+    expect(
+      (screen.getByRole("checkbox", { name: "Select Picked B" }) as HTMLInputElement).checked,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /^2 of 2 selected/ }));
+    expect(screen.getByText("Select all 2 shown")).toBeTruthy();
   });
 
   it("shows a 'Manually added' badge on a confirmed row with no engine signals", () => {
@@ -1978,9 +2181,10 @@ describe("CoreClaimQueue", () => {
       />,
     );
     expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
+    openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
     expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
   });
 
@@ -2001,7 +2205,7 @@ describe("CoreClaimQueue", () => {
       target: { value: "cytometry" },
     });
     expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
-    expect(screen.getByText("Flow cytometry gating strategies")).toBeTruthy();
+    expect(within(list()).getByText("Flow cytometry gating strategies")).toBeTruthy();
     expect(screen.queryByText("Advanced MRI of the brain")).toBeNull();
   });
 
@@ -2014,7 +2218,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Showing 0 of 2 candidates")).toBeTruthy();
   });
 
-  it("'Clear filters' clears the text box as well as the pills, and appears for text alone", () => {
+  it("'Clear all' clears the text box as well as the pills, and appears for text alone", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -2037,28 +2241,29 @@ describe("CoreClaimQueue", () => {
     );
     const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
     // nothing narrowed yet — no clear affordance to offer
-    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear all" })).toBeNull();
 
     // text ALONE surfaces the clear link (the text box has none of its own)
     fireEvent.change(input, { target: { value: "acked" } });
-    expect(screen.getByRole("button", { name: "Clear filters" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
     expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
 
     // pills on top of text: both narrowings AND-combine
+    openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
     expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect(input.value).toBe("");
     expect(
       screen.getByRole("checkbox", { name: /^Acknowledged/ }).getAttribute("aria-checked"),
     ).toBe("false");
     expect(screen.getByText("Showing 2 of 2 candidates")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear all" })).toBeNull();
   });
 
   it("disables both selection-bar buttons while a bulk decision is in flight", async () => {
-    // A double-click on "Confirm all" used to post the same batch twice: the bar
+    // A double-click on the bulk Confirm used to post the same batch twice: the bar
     // had no disabled state, unlike every per-row button in this component.
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -2075,15 +2280,15 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select 2" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm all" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Select all 2 shown/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm 2 selected" }));
 
     // the acting button swaps to the pending label, both are disabled
-    const confirming = screen.getByRole("button", { name: "Confirming…" }) as HTMLButtonElement;
+    const confirming = screen.getByRole("button", { name: /^Confirming…/ }) as HTMLButtonElement;
     expect(confirming.disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Reject all" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(
+      (screen.getByRole("button", { name: "Reject 2 selected" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
 
     fireEvent.click(confirming);
     expect(fetchMock).toHaveBeenCalledTimes(1); // the second click posts nothing
@@ -2953,7 +3158,7 @@ describe("CoreClaimQueue — core-staff lock chip", () => {
     }
   });
 
-  it("keeps the chip and the button group in the same toolbar row, chip first", () => {
+  it("sits in the rail's 'About these signals' note, not the header toolbar (mockup)", () => {
     render(
       <CoreClaimQueue
         core={{ ...CORE, staffCount: 4, staffTrackedCount: 1 }}
@@ -2961,15 +3166,19 @@ describe("CoreClaimQueue — core-staff lock chip", () => {
         confirmed={[]}
       />,
     );
+    const about = document.querySelector('[data-slot="core-queue-about"]');
     const toolbar = document.querySelector('[data-slot="core-queue-toolbar"]');
-    const knownClients = screen.getByRole("button", { name: /Known clients/ });
-    expect(toolbar?.contains(chip()!)).toBe(true);
-    expect(toolbar?.contains(knownClients)).toBe(true);
-    expect(
-      chip()!.compareDocumentPosition(knownClients) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    // wraps rather than overflowing on a narrow viewport
-    expect(toolbar?.className).toContain("flex-wrap");
+    expect(about?.contains(chip()!)).toBe(true);
+    expect(toolbar?.contains(chip()!)).toBe(false);
+    expect(about?.textContent).toContain("About these signals");
+    expect(about?.textContent).toContain(
+      "Method family shows what a paper did, not whether this core did it.",
+    );
+    // the MeSH line counts this queue's decoded priors rather than asserting a
+    // branch mapping the queue cannot see
+    expect(about?.textContent).toContain(
+      "No candidate here carries a topical MeSH match, so that prior never shows.",
+    );
   });
 
   it("offers NO 'Manage staff' control, in any state — there is no destination", () => {
@@ -3010,26 +3219,33 @@ describe("CoreClaimQueue — core-staff lock chip", () => {
 // label contains the words "Method family", so a body-wide match would pass
 // with the card rendering nothing at all.
 describe("CoreClaimQueue — method family, on screen", () => {
-  /** The collapsed evidence strip of the only open card, as text. */
-  const cardStrip = () =>
-    (screen.getByRole("button", { expanded: false }).textContent ?? "").replace(/\s+/g, " ");
-
-  it("paints the tier IN THE CARD, and leaves the 'N of 4 signals' line alone", () => {
+  it("paints the tier on the row and in the pane, and leaves the 'N of 4 signals' line alone", () => {
     const { unmount } = render(
-      <CoreClaimQueue core={CORE} candidates={[row({ methodTier: "strong" })]} confirmed={[]} />,
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            methodTier: "strong",
+            methodEvidence: [{ family: "Flow cytometry", tool: "FACSAria", sentence: null }],
+          }),
+        ]}
+        confirmed={[]}
+      />,
     );
-    expect(cardStrip()).toContain("Method family");
-    expect(cardStrip()).toContain("strong");
-    const withTier = screen.getByText(/of 4 signals/).textContent;
+    expect(listRow("30418319").textContent).toContain("Method strong");
+    const methods = pane().querySelector('[data-slot="core-queue-methods"]');
+    expect(methods?.textContent).toContain("strong · context only");
+    const withTier = within(pane()).getByText(/of 4 signals/).textContent;
     unmount();
 
     render(<CoreClaimQueue core={CORE} candidates={[row({ methodTier: null })]} confirmed={[]} />);
-    expect(cardStrip()).not.toContain("Method family");
+    expect(listRow("30418319").textContent).not.toContain("Method");
+    expect(pane().querySelector('[data-slot="core-queue-methods"]')).toBeNull();
     // Same row, no tier: the counted-signal line must be byte-identical.
-    expect(screen.getByText(/of 4 signals/).textContent).toBe(withTier);
+    expect(within(pane()).getByText(/of 4 signals/).textContent).toBe(withTier);
   });
 
-  it("offers the facet as a pill, and ticking it drops the weak and untiered rows", () => {
+  it("offers the tier as a 'Method match' facet, and ticking strong + moderate drops the rest", () => {
     render(
       <CoreClaimQueue
         core={CORE}
@@ -3042,10 +3258,12 @@ describe("CoreClaimQueue — method family, on screen", () => {
         confirmed={[]}
       />,
     );
-    fireEvent.click(screen.getByText(/Method family \(strong\/moderate\)/));
-    // 2 of the 4 survive — weak and null are excluded on purpose: weak families
-    // invert to below background, so a facet returning them would narrow the
-    // queue towards the rows the signal argues against.
+    openFilters();
+    const match = screen.getByRole("group", { name: "Method match" });
+    fireEvent.click(within(match).getByRole("checkbox", { name: /^Strong/ }));
+    fireEvent.click(within(match).getByRole("checkbox", { name: /^Moderate/ }));
+    // weak and untiered are excluded unless asked for: weak families invert to
+    // below background, so the reviewer has to tick them on purpose
     expect(screen.getByText(/Showing 2 of 4/)).toBeTruthy();
   });
 
@@ -3116,7 +3334,8 @@ describe("CoreClaimQueue — byline markers and the dropped-author suffix", () =
         confirmed={[]}
       />,
     );
-    const link = screen.getByRole("link", { name: /Alex Testerson/ });
+    const byline = document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement;
+    const link = within(byline).getByRole("link", { name: /Alex Testerson/ });
     expect(link.getAttribute("href")).toBe("/alex-testerson");
   });
 });
@@ -3309,7 +3528,7 @@ describe("CoreClaimQueue — Confirmed rows carry the score", () => {
         paperCounts={counts}
       />,
     );
-    expect(screen.getByRole("button", { name: /Show evidence/ }).textContent).toContain(
+    expect(pane().querySelector('[data-slot="core-queue-client-row"]')?.textContent).toContain(
       "Casey Sample, 18 papers, 11 recent",
     );
     unmount();
@@ -3501,10 +3720,10 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
   });
 });
 
-// The queue header as the mockup draws it: one bordered panel holding a TAB
-// STRIP (not pills), the free-text filter on the tabs' own line, the facet and
-// control rows, and a status band along the bottom.
-describe("CoreClaimQueue — header panel", () => {
+// The queue header as the v2 mockup draws it: a tab row (a TAB STRIP, not
+// pills) with the session line and the shortcuts on its right, then the search
+// row (search box, Filters, sort pills), then the three panes.
+describe("CoreClaimQueue — header rows", () => {
   const withHistory = (
     <CoreClaimQueue
       core={CORE}
@@ -3515,23 +3734,24 @@ describe("CoreClaimQueue — header panel", () => {
   );
   const panel = (container: HTMLElement) =>
     container.querySelector('[data-slot="core-queue-panel"]') as HTMLElement;
+  const searchRow = (container: HTMLElement) =>
+    container.querySelector('[data-slot="core-queue-search"]') as HTMLElement;
 
-  it("wraps the tabs, facets, controls and status strip in ONE bordered panel", () => {
+  it("puts the tabs and the shortcuts in the tab row, and search/Filters/sort in the row below", () => {
     const { container } = render(withHistory);
     const p = panel(container);
-    expect(p).toBeTruthy();
-    expect(p.className).toContain("rounded-lg");
-    expect(p.className).toContain("border");
-    // everything the header owns lives inside it...
+    expect(p.className).toContain("border-b");
     expect(p.contains(screen.getByRole("group", { name: "Queue view" }))).toBe(true);
-    expect(p.contains(screen.getByLabelText("Filter candidates"))).toBe(true);
-    expect(p.contains(screen.getByRole("group", { name: "Filter candidates by evidence" }))).toBe(
-      true,
-    );
-    expect(p.contains(screen.getByLabelText("Sort by"))).toBe(true);
-    expect(p.contains(screen.getByText(/^Showing /))).toBe(true);
-    // ...and the candidate cards do NOT
-    expect(p.querySelector("[data-card]")).toBeNull();
+    expect(p.contains(screen.getByRole("button", { name: /^Shortcuts/ }))).toBe(true);
+    const s = searchRow(container);
+    expect(s.contains(screen.getByLabelText("Filter candidates"))).toBe(true);
+    expect(s.contains(screen.getByRole("button", { name: /^Filters/ }))).toBe(true);
+    expect(s.contains(screen.getByRole("group", { name: "Sort" }))).toBe(true);
+    // the tab row comes first
+    expect(p.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // ...and neither holds the panes
+    const panes = container.querySelector('[data-slot="core-queue-panes"]') as HTMLElement;
+    expect(p.contains(panes) || s.contains(panes)).toBe(false);
   });
 
   it("keeps the tab semantics: a Queue view group of aria-pressed buttons", () => {
@@ -3579,28 +3799,26 @@ describe("CoreClaimQueue — header panel", () => {
     expect(countSpan(tab(/^Confirmed/)).className).toContain("text-muted-foreground");
   });
 
-  it("puts the filter on the tab-strip line, and promises 'method' knowingly", () => {
-    const { container } = render(withHistory);
+  it("uses the mockup's search placeholder, which promises several PMIDs knowingly", () => {
+    render(withHistory);
     const input = screen.getByLabelText("Filter candidates") as HTMLInputElement;
-    // the mockup's exact string. NOTE `searchBlob` does NOT search a method —
-    // CoreQueueRow carries none — so that word is aspirational by owner
-    // decision, not a bug. See the comment at the placeholder.
-    expect(input.placeholder).toBe("Filter by title, author, journal, PMID or method...");
-    // same row as the tabs: one shared parent, not stacked under them
-    const tabs = screen.getByRole("group", { name: "Queue view" });
-    expect(tabs.parentElement?.contains(input)).toBe(true);
-    // and the row is the first thing in the panel
-    expect(panel(container).firstElementChild?.contains(input)).toBe(true);
+    expect(input.placeholder).toBe("Search title, author, journal, or paste several PMIDs");
   });
 
-  it("keeps the filter OFF the Confirmed and Rejected tabs, where it is inert", () => {
+  it("keeps the search, Filters and panes OFF the Confirmed and Rejected tabs, where they are inert", () => {
     render(withHistory);
     expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Confirmed 1/ }));
     expect(screen.queryByLabelText("Filter candidates")).toBeNull();
-    expect(screen.queryByRole("group", { name: "Filter candidates by evidence" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Filters/ })).toBeNull();
     expect(screen.queryByText(/^Showing /)).toBeNull();
+    expect(document.querySelector('[data-slot="core-queue-focus"]')).toBeNull();
+    // the keys belong to the review tab: 'a' here decides nothing
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    press("a");
+    expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /Rejected 1/ }));
     expect(screen.queryByLabelText("Filter candidates")).toBeNull();
@@ -3610,31 +3828,41 @@ describe("CoreClaimQueue — header panel", () => {
     expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
   });
 
-  it("bands the status strip inside the panel: count left, key legend right", () => {
+  it("puts the 'Showing N of M' count under the list", () => {
     const { container } = render(withHistory);
     const strip = container.querySelector('[data-slot="core-queue-status"]') as HTMLElement;
-    expect(strip).toBeTruthy();
-    expect(panel(container).contains(strip)).toBe(true);
-    // a real background band, not loose text on the page
-    expect(strip.className).toContain("bg-apollo-surface-2");
-    expect(strip.className).toContain("border-t");
-    expect(within(strip).getByText("Showing 2 of 2 candidates")).toBeTruthy();
-    // the legend, verbatim
-    const legend = strip.lastElementChild as HTMLElement;
-    expect(legend.textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "Keys: j/k move · a confirm · r reject · x select · u undo",
-    );
-    // it sits after the count, pushed to the right edge
-    expect(legend.className).toContain("ml-auto");
+    expect(strip.textContent).toBe("Showing 2 of 2 candidates");
+    const section = screen.getByRole("region", { name: "Candidates" });
+    expect(section.contains(strip)).toBe(true);
+    expect(section.contains(list())).toBe(true);
   });
 
   it("still shows a plain 'To review' heading (no tab strip) when there is no history", () => {
     const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(screen.queryByRole("group", { name: "Queue view" })).toBeNull();
-    const heading = screen.getByRole("heading", { level: 2 });
+    const heading = screen.getByRole("heading", { level: 2, name: /^To review/ });
     expect(heading.textContent).toBe("To review1");
-    // and it is inside the panel, where the tab strip would be
+    // and it is inside the tab row, where the tab strip would be
     expect(panel(container).contains(heading)).toBe(true);
+  });
+
+  it("renders the page's title block beside the header buttons", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row()]}
+        confirmed={[]}
+        header={<h1>Biomedical Imaging</h1>}
+      />,
+    );
+    const toolbar = document.querySelector('[data-slot="core-queue-toolbar"]') as HTMLElement;
+    const h1 = screen.getByRole("heading", { level: 1 });
+    expect(toolbar.contains(h1)).toBe(true);
+    expect(
+      h1.compareDocumentPosition(screen.getByRole("button", { name: /Known clients/ })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(toolbar.className).toContain("flex-wrap");
   });
 });
 
@@ -3767,7 +3995,9 @@ describe("CoreClaimQueue — byline person cards", () => {
       coauthorScholars: [STAFF],
       coauthors: [STAFF.cwid],
     });
-    const name = screen.getByRole("link", { name: "Alex Testerson" });
+    const name = within(
+      document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement,
+    ).getByRole("link", { name: "Alex Testerson" });
     fireEvent.pointerEnter(name);
     // The role line is the whole point of the card — without it a reviewer sees
     // a highlighted name and has to guess which signal it belongs to.
@@ -3831,7 +4061,12 @@ describe("CoreClaimQueue — byline person cards", () => {
       },
       [clientRow("aaa1001")],
     );
-    fireEvent.pointerEnter(screen.getByRole("link", { name: "Alex Testerson" }));
+    fireEvent.pointerEnter(
+      within(document.querySelector('[data-slot="core-queue-byline"]') as HTMLElement).getByRole(
+        "link",
+        { name: "Alex Testerson" },
+      ),
+    );
     expect(await screen.findByText("Core staff")).toBeTruthy();
     expect(screen.queryByText("Known client of this core")).toBeNull();
   });
@@ -4496,5 +4731,348 @@ describe("CoreClaimQueue — stale 'Check PMIDs' response", () => {
     ).toBe(true);
     // And nothing describing the abandoned check is on screen.
     expect(document.querySelector('[data-slot="core-claim-pmid-check"]')).toBeNull();
+  });
+});
+
+// v2 (Core Review Queue v2 mockup, PR A): the pieces that did not exist before.
+describe("CoreClaimQueue — v2 reject reasons", () => {
+  it("offers the mockup's three reasons, and sends the chosen one as the claim's note", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const reasons = within(pane()).getByRole("group", { name: "Reject with a reason" });
+    expect(
+      within(reasons)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual([...REJECT_REASONS]);
+
+    fireEvent.click(within(reasons).getByRole("button", { name: "Method match only" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    // the SINGLE-claim route, which is the one that takes a note
+    expect(url).toBe("/api/edit/core-claim");
+    expect(JSON.parse(init.body)).toEqual({
+      pmid: "30418319",
+      coreId: "2",
+      status: "rejected",
+      note: "Method match only",
+    });
+    // the decision echoes its reason, and the reasons go away with the buttons
+    await screen.findByText("Rejected · Method match only");
+    expect(within(pane()).queryByRole("group", { name: "Reject with a reason" })).toBeNull();
+  });
+
+  it("sends NO note on a plain Reject — the body is exactly what it always was", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    fireEvent.click(within(pane()).getByRole("button", { name: /^reject$/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body)).toEqual({
+      pmid: "30418319",
+      coreId: "2",
+      status: "rejected",
+    });
+  });
+});
+
+describe("CoreClaimQueue — v2 several-PMID search", () => {
+  const rows = () => [
+    row({ pmid: "11111111", title: "Alpha" }),
+    row({ pmid: "22222222", title: "Beta" }),
+    row({
+      pmid: "33333333",
+      title: "Gamma, another group",
+      signalAck: false,
+      ackAlias: null,
+      coauthors: [],
+      coauthorScholars: [],
+      authorAffinity: null,
+    }),
+  ];
+
+  it("matches a pasted PMID list exactly, and says where the misses are", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={rows()}
+        confirmed={[row({ pmid: "44444444", title: "Old", claimed: true })]}
+        rejected={[row({ pmid: "55555555", title: "Nope" })]}
+      />,
+    );
+    // scope to the first evidence group, so Gamma is "elsewhere"
+    fireEvent.click(screen.getByRole("button", { name: /^Acknowledgment \+ staff co-author/ }));
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "11111111, 33333333 44444444 55555555; 66666666" },
+    });
+    expect(listTitles()).toEqual(["Alpha"]);
+    expect(document.querySelector('[data-slot="core-queue-pmid-note"]')?.textContent).toBe(
+      "Matched 1 of 5 PMIDs here. Elsewhere: 33333333 (To review · LLM read), 44444444 (Confirmed), 55555555 (Rejected), 66666666 (not in this core's queue).",
+    );
+  });
+
+  it("names a PMID the filters are hiding in THIS scope, and one decided this session", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={rows()} confirmed={[]} />);
+    fireEvent.click(within(pane()).getByRole("button", { name: /^confirm$/i })); // Alpha
+    await screen.findByText(/This session: 1 confirmed/);
+    openFilters();
+    fireEvent.click(screen.getByRole("checkbox", { name: /^No prior usage/ })); // Gamma only
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "22222222 33333333" },
+    });
+    expect(document.querySelector('[data-slot="core-queue-pmid-note"]')?.textContent).toBe(
+      "Matched 1 of 2 PMIDs here. Elsewhere: 22222222 (To review · hidden by filters).",
+    );
+    fireEvent.change(screen.getByLabelText("Filter candidates"), {
+      target: { value: "33333333 11111111" },
+    });
+    // Alpha is decided — held in the list for its Undo, so it counts as shown
+    expect(document.querySelector('[data-slot="core-queue-pmid-note"]')?.textContent).toBe(
+      "Matched 2 of 2 PMIDs here.",
+    );
+  });
+
+  it("treats ONE number as ordinary text, with no match note", () => {
+    render(<CoreClaimQueue core={CORE} candidates={rows()} confirmed={[]} />);
+    fireEvent.change(screen.getByLabelText("Filter candidates"), { target: { value: "22222222" } });
+    expect(listTitles()).toEqual(["Beta"]);
+    expect(document.querySelector('[data-slot="core-queue-pmid-note"]')).toBeNull();
+  });
+});
+
+describe("CoreClaimQueue — v2 session line and Undo last", () => {
+  it("counts this session's decisions and undoes the LAST one only", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "One" }), row({ pmid: "2", title: "Two" })]}
+        confirmed={[]}
+      />,
+    );
+    // silent until something is decided
+    expect(document.querySelector('[data-slot="core-queue-session"]')).toBeNull();
+
+    press("a"); // One -> confirmed, pane moves to Two
+    await screen.findByText("This session: 1 confirmed · 0 rejected");
+    await screen.findByLabelText("Candidate: Two");
+    press("r");
+    await screen.findByText("This session: 1 confirmed · 1 rejected");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo last" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse((fetchMock.mock.calls[2] as [string, { body: string }])[1].body)).toEqual({
+      pmid: "2",
+      coreId: "2",
+      status: "revoked",
+    });
+    await screen.findByText("This session: 1 confirmed · 0 rejected");
+    // the pane goes back to the paper that was undone
+    expect(pane().getAttribute("data-pmid")).toBe("2");
+    expect(listRow("1").textContent).toContain("Confirmed");
+  });
+
+  it("undoes a whole bulk batch, one revoke per paper on the single-claim route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "One" }), row({ pmid: "2", title: "Two" })]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Select all 2 shown/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm 2 selected" }));
+    await screen.findByText("This session: 2 confirmed · 0 rejected");
+
+    press("u");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const calls = fetchMock.mock.calls.slice(1) as Array<[string, { body: string }]>;
+    expect(calls.map(([u]) => u)).toEqual(["/api/edit/core-claim", "/api/edit/core-claim"]);
+    expect(calls.map(([, i]) => JSON.parse(i.body))).toEqual([
+      { pmid: "1", coreId: "2", status: "revoked" },
+      { pmid: "2", coreId: "2", status: "revoked" },
+    ]);
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="core-queue-session"]')).toBeNull(),
+    );
+  });
+});
+
+describe("CoreClaimQueue — v2 phone sheet", () => {
+  it("keeps the paper pane hidden below lg until a row is tapped, then opens it full-screen", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "One" }), row({ pmid: "2", title: "Two" })]}
+        confirmed={[]}
+      />,
+    );
+    const cls = () => pane().className.split(/\s+/);
+    // closed: hidden on phones, the third pane at lg
+    expect(cls()).toContain("hidden");
+    expect(cls()).not.toContain("fixed");
+    expect(cls()).toContain("lg:flex");
+    expect(cls()).toContain("lg:sticky");
+
+    fireEvent.click(within(listRow("2")).getByRole("button"));
+    expect(pane().getAttribute("data-pmid")).toBe("2");
+    expect(cls()).toContain("fixed");
+    expect(cls()).toContain("inset-0");
+    expect(cls()).not.toContain("hidden");
+    // Previous/Next work inside the sheet
+    fireEvent.click(within(pane()).getByRole("button", { name: "Previous" }));
+    expect(pane().getAttribute("data-pmid")).toBe("1");
+    expect(cls()).toContain("fixed");
+
+    fireEvent.click(within(pane()).getByRole("button", { name: "Close paper" }));
+    expect(cls()).toContain("hidden");
+    expect(cls()).not.toContain("fixed");
+    // the close control is phone-only
+    expect(within(pane()).getByRole("button", { name: "Close paper" }).className).toContain(
+      "lg:hidden",
+    );
+  });
+
+  it("closes the sheet on Escape", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    fireEvent.click(within(listRow("30418319")).getByRole("button"));
+    expect(pane().className).toContain("fixed");
+    press("Escape");
+    expect(pane().className).not.toContain("fixed");
+  });
+
+  it("collapses the rail to a select below lg, and keeps the list rail for lg", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(screen.getByLabelText("Choose a scope").className).toContain("lg:hidden");
+    const rail = screen.getByRole("list", { name: "Evidence groups" });
+    expect(rail.className).toContain("hidden");
+    expect(rail.className).toContain("lg:flex");
+    // Previous is disabled on the first paper, Next on the last
+    expect(
+      (within(pane()).getByRole("button", { name: "Previous" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (within(pane()).getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(within(pane()).getByText("1 of 1 shown")).toBeTruthy();
+  });
+});
+
+describe("v2 pure helpers", () => {
+  it("parsePmidQuery: two or more PMID tokens, all of them PMIDs, de-duplicated", () => {
+    expect(parsePmidQuery("111 222, 333;111")).toEqual(["111", "222", "333"]);
+    expect(parsePmidQuery("  111\n222  ")).toEqual(["111", "222"]);
+    expect(parsePmidQuery("111")).toBeNull(); // one number stays a text query
+    expect(parsePmidQuery("111 brain")).toBeNull();
+    expect(parsePmidQuery("0111 222")).toBeNull(); // no leading zero
+    expect(parsePmidQuery("")).toBeNull();
+  });
+
+  it("matchesSearch: a PMID list matches members only; anything else is matchesQuery", () => {
+    expect(matchesSearch(row({ pmid: "111" }), "111 222")).toBe(true);
+    expect(matchesSearch(row({ pmid: "333" }), "111 222")).toBe(false);
+    expect(matchesSearch(row({ title: "Advanced MRI" }), "mri")).toBe(true);
+  });
+
+  it("pmidMatchNote: counts matches here and names each miss", () => {
+    expect(pmidMatchNote(["1", "2"], new Set(["1", "2"]), () => "x")).toBe(
+      "Matched 2 of 2 PMIDs here.",
+    );
+    expect(pmidMatchNote(["1", "2", "3"], new Set(["2"]), (p) => `where ${p}`)).toBe(
+      "Matched 1 of 3 PMIDs here. Elsewhere: 1 (where 1), 3 (where 3).",
+    );
+  });
+
+  it("facetValues: speaks the Filters panel's words, off the card's own functions", () => {
+    const v = facetValues(
+      row({
+        llmScore: 7,
+        methodTier: "weak",
+        methodEvidence: [{ family: "Flow", tool: "t", sentence: null }],
+      }),
+      { ccc1003: { papers: 3, recent: 1, total: 9 } },
+    );
+    expect(v.signal).toEqual(["Acknowledged", "Staff co-author", "LLM read", "Repeat user"]);
+    expect(v.llm).toEqual(["7–10"]);
+    expect(v.mstr).toEqual(["Weak"]);
+    expect(v.method).toEqual(["Flow"]);
+    expect(v.person).toEqual(["Casey Sample"]);
+    expect(v.year).toEqual(["2021"]);
+    const bare = facetValues(
+      row({ llmScore: null, authorAffinity: null, methodTier: null, year: null }),
+    );
+    expect(bare.llm).toEqual(["Not read"]);
+    expect(bare.mstr).toEqual(["None"]);
+    expect(bare.method).toEqual([]);
+    expect(bare.person).toEqual(["No prior usage on the byline"]);
+    expect(bare.year).toEqual(["No year"]);
+    // a known client on the byline is a Signals value (not a counted signal)
+    expect(facetValues(row(), {}, new Set(["ccc1003"])).signal).toContain("Client co-author");
+  });
+
+  it("matchesFacets: OR within a group, AND across, empty matches everything", () => {
+    const v = facetValues(row({ llmScore: 2 }));
+    expect(matchesFacets(v, {})).toBe(true);
+    expect(matchesFacets(v, { signal: [] })).toBe(true);
+    expect(matchesFacets(v, { signal: ["Acknowledged", "Client co-author"] })).toBe(true);
+    expect(matchesFacets(v, { signal: ["Client co-author"] })).toBe(false);
+    expect(matchesFacets(v, { signal: ["Acknowledged"], llm: ["7–10"] })).toBe(false);
+    expect(matchesFacets(v, { signal: ["Acknowledged"], llm: ["0–3"] })).toBe(true);
+    // a row with NO value in a ticked group does not match it
+    expect(matchesFacets(v, { method: ["Flow"] })).toBe(false);
+  });
+
+  it("buildEvidenceGroups: first-appearance order, open counts exclude decided rows", () => {
+    const a = row({ pmid: "1" });
+    const b = row({ pmid: "2", signalAck: false, ackAlias: null });
+    const c = row({ pmid: "3" });
+    const groups = buildEvidenceGroups([a, b, c], new Map([["3", "claimed"]]));
+    expect(groups.map((g) => [g.key, g.rows.map((r) => r.pmid), g.open])).toEqual([
+      ["ack+coauthor+llm+affinity", ["1", "3"], 1],
+      ["coauthor+llm+affinity", ["2"], 1],
+    ]);
+    expect(evidenceGroupName("ack+coauthor")).toBe("Acknowledgment + staff co-author");
+    expect(evidenceGroupName("none")).toBe("No counted signal");
+    expect(groupBandText([0.9])).toBe("Strong band");
+    expect(groupBandText([0.9, 0.95])).toBe("Strong band");
+    expect(groupBandText([0.5, 0.95])).toBe("Slight to Strong");
+  });
+
+  it("buildRailPeople: one entry per person, each paper once, nobody without a confirmed paper", () => {
+    const pat = { cwid: "PPP0001", name: "Pat Placeholder", slug: null, dept: null };
+    const r1 = row({ pmid: "1", wcmAuthors: [pat, { ...pat, cwid: "ppp0001" }] }); // listed twice
+    const r2 = row({
+      pmid: "2",
+      wcmAuthors: [{ cwid: "zzz0009", name: "Zed New", slug: null, dept: null }],
+    });
+    const people = buildRailPeople([r1, r2], new Map(), {
+      ppp0001: { papers: 4, recent: 1, total: 10 },
+    });
+    expect(people).toHaveLength(1);
+    expect(people[0].rows.map((r) => r.pmid)).toEqual(["1"]);
+    expect(people[0].open).toBe(1);
+  });
+
+  it("rowChips: short chips, the repeat user named only in By evidence", () => {
+    const counts = { ccc1003: { papers: 3, recent: 1, total: 9 } };
+    expect(rowChips(row({ methodTier: "strong" }), counts, new Set(), "evidence")).toEqual([
+      "Acknowledged",
+      "Staff co-author",
+      "LLM 7/10",
+      "Repeat user · Casey Sample",
+      "Method strong",
+    ]);
+    expect(rowChips(row(), counts, new Set(["ccc1003"]), "person")).toEqual([
+      "Acknowledged",
+      "Staff co-author",
+      "LLM 7/10",
+      "Client co-author",
+    ]);
   });
 });

@@ -137,19 +137,26 @@ export default async function EditCoreReviewPage({
           <span>Review publications</span>
         </nav>
 
-        <p className="text-apollo-maroon mb-1.5 text-[11px] font-medium tracking-[0.09em] uppercase">
-          Core facility · review queue
-        </p>
-        {/* `page-title` (not `font-serif`) is the repo's page-subject hook — see
-            the typography rule in app/globals.css. */}
-        <h1 className="page-title mb-1.5 text-[29px] leading-tight font-semibold">
-          {queue.core.name}
-        </h1>
-        <p className="text-muted-foreground mb-6 max-w-[56ch] text-[13px]">
-          Confirm the publications that used this core and reject the false positives. Decisions
-          show on public profiles and prime the next inference run.
-        </p>
+        {/* The title block rides into the queue as `header`: v2 puts the
+            Known clients / Add PMIDs / Reporting buttons beside it (mockup), and
+            their dialogs are state the client component owns. */}
         <CoreClaimQueue
+          header={
+            <>
+              <p className="text-apollo-maroon mb-1.5 text-[11px] font-medium tracking-[0.09em] uppercase">
+                Core facility · review queue
+              </p>
+              {/* `page-title` (not `font-serif`) is the repo's page-subject hook —
+                  see the typography rule in app/globals.css. */}
+              <h1 className="page-title mb-1.5 text-[29px] leading-tight font-semibold">
+                {queue.core.name}
+              </h1>
+              <p className="text-muted-foreground max-w-[56ch] text-[13px]">
+                Confirm the publications that used this core and reject the false positives.
+                Decisions show on public profiles and prime the next inference run.
+              </p>
+            </>
+          }
           core={queue.core}
           candidates={queue.candidates}
           confirmed={queue.confirmed}
