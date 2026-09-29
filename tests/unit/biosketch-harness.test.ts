@@ -95,6 +95,8 @@ describe("measureRun", () => {
             { span: "2019;12", kind: "full_citation", action: "flagged" },
           ],
         },
+        tightened: [{ index: 0, before: 3600, after: 3300 }],
+        overflow: [],
       },
       REFS,
     );
@@ -108,6 +110,8 @@ describe("measureRun", () => {
     expect(run.outOfListFinal).toBe(0);
     expect(run.urlsFinal).toBe(0);
     expect(run.referencesKept).toBe(1);
+    expect(run.overCapBeforeTighten).toBe(1);
+    expect(run.overCapFinal).toBe(0);
   });
 
   it("for v7 (no validator) the raw counts are the final scan of the text", () => {
@@ -117,6 +121,8 @@ describe("measureRun", () => {
         entries: [{ title: "", body: "Claim (Jones 2020) at https://x.org/y. Fine (Smith 2019)." }],
         removed: [],
         references: null,
+        tightened: [],
+        overflow: [],
       },
       REFS,
     );
@@ -148,6 +154,8 @@ describe("percentile + summarizeVersion + compareVersions", () => {
     outOfListFinal: 0,
     urlsFinal: 0,
     referencesKept: 0,
+    overCapBeforeTighten: 0,
+    overCapFinal: 0,
     ...over,
   });
 
@@ -161,7 +169,7 @@ describe("percentile + summarizeVersion + compareVersions", () => {
   it("summarizes one version's runs only", () => {
     const runs = [
       run({ latencyMs: 1000, costUsd: 0.1, unsupportedClaimRate: 0.1, emDashes: 1 }),
-      run({ latencyMs: 3000, costUsd: 0.3, unsupportedClaimRate: 0.3, outOfListRaw: 2 }),
+      run({ latencyMs: 3000, costUsd: 0.3, unsupportedClaimRate: 0.3, outOfListRaw: 2, overCapBeforeTighten: 1 }),
       run({ version: "v8", latencyMs: 99999, costUsd: null }),
     ];
     const s = summarizeVersion("v7", runs);
@@ -175,6 +183,8 @@ describe("percentile + summarizeVersion + compareVersions", () => {
       urlsFinal: 0,
       fullCitationTells: 0,
       emDashes: 1,
+      overCapBeforeTighten: 1,
+      overCapFinal: 0,
       latencyP50: 1000,
       latencyP95: 3000,
       costP50: 0.1,

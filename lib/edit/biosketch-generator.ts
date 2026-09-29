@@ -838,7 +838,26 @@ export type BiosketchResult = {
   /** #2653 v8 — the product-reference validator's report (references rendered, spans stripped
    *  or flagged), summed across entries. `null` for a version without product references. */
   references: BiosketchReferenceReport | null;
+  /** #2665 — the entries that came back over the cap and got the one tighten pass, with their
+   *  body length before and after (index = the entry's position BEFORE the faithfulness pass). */
+  tightened: { index: number; before: number; after: number }[];
 };
+
+/** #2665 — the one follow-up turn for an entry over its cap. Aims 5% under the cap so a small
+ *  miscount by the model still lands inside it. */
+export function buildTightenPrompt(body: string, cap: number): string {
+  const target = Math.floor(cap * 0.95);
+  return [
+    `The paragraph below is ${body.length.toLocaleString("en-US")} characters; the limit is ${cap.toLocaleString("en-US")}.`,
+    `Tighten it to at most ${target.toLocaleString("en-US")} characters without adding, removing, or changing any`,
+    "claim, name, number, or reference. Keep every parenthetical reference exactly as written.",
+    "Return only the tightened paragraph: no title, no numbering, no commentary.",
+    "",
+    "<PARAGRAPH>",
+    body,
+    "</PARAGRAPH>",
+  ].join("\n");
+}
 
 /** A phase-boundary progress event (#917 follow-up A). Emitted as `generateBiosketch` advances so
  *  the route can stream a determinate progress bar. `faithfulness` carries `done/total` (one tick
@@ -941,6 +960,34 @@ export async function generateBiosketch(
       .filter((e) => e.body.length > 0);
   }
 
+  // #2665 — ONE tighten call per entry over the cap, before grounding, so the faithfulness pass
+  // checks the text the user will see. Same model and system prompt (cache point: a read at
+  // ~0.1x, the draft call just wrote it). Best-effort: a failed call, an empty reply, or one no
+  // shorter keeps the original; still over after it → flagged in `overflow` as before.
+  const cap = biosketchCharCap(mode);
+  const tightened: BiosketchResult["tightened"] = [];
+  entries = await Promise.all(
+    entries.map(async (entry, index) => {
+      if (entry.body.length <= cap) return entry;
+      let body = entry.body;
+      try {
+        const t = await generateText({
+          model: bedrockClient()(modelId),
+          system: { role: "system", content: systemPrompt, providerOptions: BEDROCK_CACHE_POINT },
+          messages: [{ role: "user", content: buildTightenPrompt(entry.body, cap) }],
+          ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
+        });
+        const text = t.text.trim();
+        if (text.length > 0 && text.length < body.length) body = text;
+      } catch {
+        // keep the original; the card flags it over cap.
+      }
+      tightened.push({ index, before: entry.body.length, after: body.length });
+      return { ...entry, body };
+    }),
+  );
+  tightened.sort((a, b) => a.index - b.index);
+
   const removed: UngroundedSpan[] = [];
   if (opts?.faithfulnessPass ?? isBiosketchFaithfulnessPassEnabled()) {
     // Per-entry verify→revise: each contribution is self-contained, so it is fact-checked
@@ -977,7 +1024,6 @@ export async function generateBiosketch(
     for (const g of grounded) removed.push(...g.removed);
   }
 
-  const cap = biosketchCharCap(mode);
   // The character ceiling measures the BODY only — the title is a short heading, not part of the
   // capped narrative.
   const overflow = entries
@@ -1047,7 +1093,7 @@ export async function generateBiosketch(
   }
 
   onProgress({ phase: "done" });
-  return { mode, entries, model: modelId, removed, overflow, products, sources, references };
+  return { mode, entries, model: modelId, removed, overflow, products, sources, references, tightened };
 }
 
 /**

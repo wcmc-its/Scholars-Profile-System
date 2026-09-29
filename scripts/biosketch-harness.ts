@@ -65,6 +65,9 @@ export type HarnessRun = {
   outOfListFinal: number;
   urlsFinal: number;
   referencesKept: number;
+  /** #2665 — entries over the cap as drafted (each got one tighten pass), and still over at the end. */
+  overCapBeforeTighten: number;
+  overCapFinal: number;
 };
 
 export function countEmDashes(text: string): number {
@@ -112,7 +115,7 @@ export function estimateRunCostUsd(
  *  on the same footing as v8's validator. */
 export function measureRun(
   base: Pick<HarnessRun, "cwid" | "version" | "mode" | "role" | "latencyMs" | "costUsd">,
-  result: Pick<BiosketchResult, "entries" | "removed" | "references">,
+  result: Pick<BiosketchResult, "entries" | "removed" | "references" | "tightened" | "overflow">,
   refs: readonly BiosketchProductRef[],
 ): HarnessRun {
   const text = resultText(result);
@@ -133,6 +136,8 @@ export function measureRun(
     outOfListFinal: finalIssues.filter((i) => i.kind === "out_of_list").length,
     urlsFinal: countUrls(text),
     referencesKept: result.references?.kept ?? 0,
+    overCapBeforeTighten: result.tightened.length,
+    overCapFinal: result.overflow.length,
   };
 }
 
@@ -154,6 +159,8 @@ export type VersionSummary = {
   urlsFinal: number;
   fullCitationTells: number;
   emDashes: number;
+  overCapBeforeTighten: number;
+  overCapFinal: number;
   latencyP50: number;
   latencyP95: number;
   costP50: number;
@@ -178,6 +185,8 @@ export function summarizeVersion(
     urlsFinal: sum((r) => r.urlsFinal),
     fullCitationTells: sum((r) => r.fullCitationTells),
     emDashes: sum((r) => r.emDashes),
+    overCapBeforeTighten: sum((r) => r.overCapBeforeTighten),
+    overCapFinal: sum((r) => r.overCapFinal),
     latencyP50: percentile(
       mine.map((r) => r.latencyMs),
       50,
@@ -463,7 +472,8 @@ const main = async () => {
     console.log(
       `${cwid} ${version} ${mode}${role ? ` ${role}` : ""}: ${latencyMs} ms, ${run.sentences} sentences, ` +
         `${run.removedSpans} removed, refs kept ${run.referencesKept}, out-of-list raw/final ` +
-        `${run.outOfListRaw}/${run.outOfListFinal}, urls ${run.urlsRaw}/${run.urlsFinal}, em-dashes ${run.emDashes}`,
+        `${run.outOfListRaw}/${run.outOfListFinal}, urls ${run.urlsRaw}/${run.urlsFinal}, em-dashes ${run.emDashes}, ` +
+        `over cap before/after tighten ${run.overCapBeforeTighten}/${run.overCapFinal}`,
     );
     return { result, refs, text };
   };

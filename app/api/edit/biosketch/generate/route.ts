@@ -196,6 +196,9 @@ export async function POST(request: NextRequest): Promise<Response> {
               // Contributions and for v5–v7), so a restore recovers the role the draft argued.
               applicationRole: effectiveParams.applicationRole,
               contributionLine: effectiveParams.contributionLine,
+              // #2665 — entries that got the over-cap tighten pass, with body length before and
+              // after, so the over-cap rate before/after tightening is countable from history.
+              tightened: result.tightened,
             },
             products: result.products ?? undefined,
             sources: result.sources ?? undefined,
