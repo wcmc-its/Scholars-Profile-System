@@ -1683,8 +1683,8 @@ export class EtlStack extends Stack {
       // Reads the directory over NAT egress with no credential (like etl:nsf), so
       // external:false; mutates SPS-DB only. Weekly cadence is plenty for a slow-
       // changing signal; incremental by default (re-probes never-checked + rows
-      // older than HEADSHOT_STALE_DAYS = 6, `lib/headshot-presence.ts`). That
-      // threshold is pinned UNDER this rule's 7-day period on purpose (#2210):
+      // older than HEADSHOT_STALE_DAYS = 13, `lib/headshot-presence.ts`). That
+      // threshold is pinned ABOVE this rule's 7-day period on purpose (#2210):
       // at the previous 30 days each row was only re-probed every 30-37 days, so
       // a scholar who gained a photo stayed listed as missing for five weeks.
       // Measured cost of a full wave in prod (2026-07-06): 9,389 probes in 3m21s.

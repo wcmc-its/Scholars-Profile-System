@@ -265,6 +265,7 @@ export function ProfilesRoster({
                           name={e.name}
                           editHref={e.editHref}
                           hasHeadshot={e.headshot === "present"}
+                          headshotCheckedAt={e.headshotCheckedAt}
                           isVisible={e.isVisible}
                           leadership={e.leadership}
                           subtitle={[e.title, e.unit].filter(Boolean).join(" · ") || null}

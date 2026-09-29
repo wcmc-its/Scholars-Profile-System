@@ -169,6 +169,9 @@ export type DataQualityEntry = {
   /** "present" | "missing" | "unknown" (not yet probed by etl:headshot).
    *  Profiles-only. */
   headshot: HeadshotState;
+  /** ISO time etl:headshot last got a definitive answer (#2264); null = never.
+   *  An indeterminate probe never stamps it, so a verdict can be old. Profiles-only. */
+  headshotCheckedAt: string | null;
   /** Profiles-only. */
   hasOverview: boolean;
   /** ISO date the overview was last edited in /edit; null when imported/never.
@@ -532,6 +535,7 @@ async function computeDataQualityEntries(
           hIndex: true,
           scoredPubCount: true,
           hasHeadshot: true,
+          headshotCheckedAt: true,
           department: { select: { name: true } },
           division: { select: { name: true } },
         },
@@ -647,6 +651,7 @@ async function computeDataQualityEntries(
       leadershipTier,
       isVisible: s.status === "active",
       headshot,
+      headshotCheckedAt: s.headshotCheckedAt?.toISOString() ?? null,
       hasOverview,
       overviewUpdatedAt,
       overviewState,
@@ -733,7 +738,13 @@ export async function loadDataQualityExport(
 
 const BASE_CSV_HEADERS = ["rank", "cwid", "name", "title", "unit", "person_type", "leadership"] as const;
 /** Profiles-only columns (Status + gaps). */
-const PROFILE_CSV_HEADERS = ["visible", "headshot", "has_overview", "overview_updated"] as const;
+const PROFILE_CSV_HEADERS = [
+  "visible",
+  "headshot",
+  "headshot_checked",
+  "has_overview",
+  "overview_updated",
+] as const;
 /** COI-page-only columns. */
 const COI_CSV_HEADERS = ["pending_coi_high", "pending_coi_medium"] as const;
 const TAIL_CSV_HEADERS = ["prominence"] as const;
@@ -772,7 +783,13 @@ export function buildDataQualityCsv(
       e.leadership ?? "",
     ];
     const profile = opts.includeProfileCols
-      ? [e.isVisible ? "yes" : "no", e.headshot, e.hasOverview ? "yes" : "no", overviewUpdatedCell(e)]
+      ? [
+          e.isVisible ? "yes" : "no",
+          e.headshot,
+          e.headshotCheckedAt?.slice(0, 10) ?? "",
+          e.hasOverview ? "yes" : "no",
+          overviewUpdatedCell(e),
+        ]
       : [];
     const coi = opts.includeCoi ? [e.pendingCoiHigh, e.pendingCoiMedium] : [];
     return [...base, ...profile, ...coi, e.prominence.toFixed(2)];

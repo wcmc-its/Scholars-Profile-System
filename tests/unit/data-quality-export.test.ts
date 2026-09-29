@@ -26,6 +26,7 @@ function entry(over: Partial<DataQualityEntry> = {}): DataQualityEntry {
     leadershipTier: 2,
     isVisible: true,
     headshot: "present",
+    headshotCheckedAt: "2026-09-20T12:00:00.000Z",
     hasOverview: true,
     overviewUpdatedAt: "2026-06-01T00:00:00.000Z",
     overviewState: "lt1yr",
@@ -64,9 +65,10 @@ describe("buildDataQualityCsv", () => {
     );
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "rank,cwid,name,title,unit,person_type,leadership,visible,headshot,has_overview,overview_updated,prominence",
+      "rank,cwid,name,title,unit,person_type,leadership,visible,headshot,headshot_checked,has_overview,overview_updated,prominence",
     );
-    expect(lines[1]).toContain(",Dean,yes,missing,no,,10.57");
+    // headshot_checked is the last definitive probe date (#2264), date-only.
+    expect(lines[1]).toContain(",Dean,yes,missing,2026-09-20,no,,10.57");
     // No COI columns anywhere in the row — not just absent from the header.
     expect(lines[0]).not.toContain("pending_coi");
     expect(lines[1]).not.toContain("pending_coi");
@@ -119,6 +121,7 @@ describe("buildDataQualityCsv", () => {
         entry({
           isVisible: false,
           headshot: "unknown",
+          headshotCheckedAt: null,
           hasOverview: true,
           overviewUpdatedAt: null,
           overviewState: "imported",
@@ -130,9 +133,10 @@ describe("buildDataQualityCsv", () => {
     );
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "rank,cwid,name,title,unit,person_type,leadership,visible,headshot,has_overview,overview_updated,pending_coi_high,pending_coi_medium,prominence",
+      "rank,cwid,name,title,unit,person_type,leadership,visible,headshot,headshot_checked,has_overview,overview_updated,pending_coi_high,pending_coi_medium,prominence",
     );
-    expect(lines[1]).toContain(",no,unknown,yes,imported,3,0,10.57");
+    // never probed → empty headshot_checked cell
+    expect(lines[1]).toContain(",no,unknown,,yes,imported,3,0,10.57");
   });
 
   it("renders a non-leader with an empty leadership cell", () => {
