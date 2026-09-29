@@ -8,29 +8,26 @@
  * Standalone console page like `/edit/usage` (org-wide, not a unit-scoped
  * `/edit/reports/N`): same audience (`canViewUsage` — superuser or any
  * `UnitAdmin` grant), auth re-checked on every GET, aggregates only, one CSV
- * of the department table. Filters ride a GET form (`AutoSubmitForm`, report
- * 7's idiom): the shared who-filter (`PersonFilterFacets` — the Profiles
- * roster's person type / department-division / centers / institution facets,
- * `type` + `unit` params, `lib/edit/person-filter.ts`) plus the NIH `<select>`.
- * Below `lg` the filter panel moves into the shared phone `FiltersSheet`
- * (Profiles' pattern). Coverage and facets load independently: no coverage →
- * the "temporarily unavailable" notice; no facets → the numbers still render
- * (the URL's filters still apply) and the panel becomes a one-line notice.
+ * of the department table. Filters are one sticky bar of dropdowns
+ * (`./filter-bar`): NIH funding plus the shared who-filter facets (person type
+ * / department-division / centers / institution, `type` + `unit` params,
+ * `lib/edit/person-filter.ts`); each change navigates and the server
+ * recomputes. The bar wraps on phones, so there is no separate sheet.
+ * Coverage and facets load independently: no coverage → the "temporarily
+ * unavailable" notice; no facets → the numbers still render (the URL's
+ * filters still apply) and the bar becomes a one-line notice.
  * No trend — there is no history table (a nightly snapshot row is the 10-line
  * ETL step if one is ever wanted). The only bars are proportions of the
  * current counts.
  *
- * Client islands, view state only: `./how-we-count` (the definitions toggle)
+ * Client islands: `./how-we-count` (the definitions toggle), `./filter-bar`,
  * and `./coverage-tables` (Summary / All columns, department filter, sort and
  * the top-15 fold). Every number is computed here on the server.
  */
 import { redirect } from "next/navigation";
 
-import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { ConsoleShell } from "@/components/edit/console-shell";
-import { FiltersSheet } from "@/components/edit/filters-sheet";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { PersonFilterFacets } from "@/components/edit/reports/article-count-facets";
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -45,7 +42,6 @@ import {
   STRONG_MIN_ACCEPTED,
   SUGGEST_MIN_ACCEPTED,
   loadOrcidCoverage,
-  orcidCoverageActiveFilters,
   orcidCoverageQuery,
   parseOrcidCoverageParams,
   pct,
@@ -56,6 +52,7 @@ import { canViewUsage } from "@/lib/edit/usage-access";
 import { cn } from "@/lib/utils";
 
 import { CoverageTables } from "./coverage-tables";
+import { CoverageFilterBar } from "./filter-bar";
 import { HowWeCount } from "./how-we-count";
 
 export const dynamic = "force-dynamic";
@@ -64,8 +61,6 @@ export const metadata = {
   title: "ORCID coverage — Scholars Console",
   robots: { index: false, follow: false },
 };
-
-const selectClass = "border-apollo-border rounded border px-2 py-1";
 
 /** The page's card surface — the same white, greige-edged panel as the mockups. */
 const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] border";
@@ -182,11 +177,14 @@ function SourceCard({
   title,
   cadence,
   description,
+  alert,
   methods,
 }: {
   title: string;
   cadence: string;
   description: string;
+  /** A dated caveat on this source's numbers, e.g. an upstream row drop. */
+  alert?: { head: string; text: string };
   methods: SourceMethod[];
 }) {
   return (
@@ -197,6 +195,15 @@ function SourceCard({
           <span className="text-muted-foreground text-[12.5px]">{cadence}</span>
         </div>
         <p className="text-muted-foreground m-0 text-[13px] leading-normal">{description}</p>
+        {alert ? (
+          <p
+            className="bg-apollo-amber-tint m-0 mt-1.5 flex items-baseline gap-2 rounded-lg border-apollo-amber-tint-border border px-2.5 py-[7px] text-[13px]"
+            data-testid="orcid-coverage-source-alert"
+          >
+            <span className="text-apollo-amber font-semibold whitespace-nowrap">{alert.head}</span>
+            <span>{alert.text}</span>
+          </p>
+        ) : null}
       </div>
       {methods.map((m) => (
         <div
@@ -246,6 +253,11 @@ function InferenceSources({ s }: { s: InferenceSourceCounts }) {
           title="Publication Manager inference"
           cadence="Nightly · copied from ReCiter Publication Manager"
           description="PubMed author records often carry the author’s ORCID. For each WCM person, Publication Manager counts how many accepted and rejected articles carry a given iD at their byline; the nightly import copies those counts."
+          // ponytail: static note on the 09-21 upstream refresh; delete once RPM's owner answers.
+          alert={{
+            head: "Sep 21",
+            text: "Rows dropped from 12,553 to 7,303. Open question for Publication Manager’s owner.",
+          }}
           methods={[
             {
               key: "rpm_inferred",
@@ -296,61 +308,6 @@ function InferenceSources({ s }: { s: InferenceSourceCounts }) {
   );
 }
 
-function Filters({
-  data,
-  facets,
-  inSheet = false,
-}: {
-  data: OrcidCoverage;
-  facets: DataQualityFacets;
-  /** The phone sheet's copy: one column, no page margin. */
-  inSheet?: boolean;
-}) {
-  const { params } = data;
-  return (
-    <AutoSubmitForm
-      action="/edit/orcid-coverage"
-      className={
-        inSheet
-          ? "group border-apollo-border bg-apollo-surface flex flex-col gap-4 rounded-md border p-3 text-xs"
-          : cn(cardClass, "group flex flex-wrap items-end gap-4 px-[18px] py-3.5 text-xs")
-      }
-      data-testid="orcid-coverage-filters"
-    >
-      <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground">NIH funding</span>
-        <select name="nih" defaultValue={params.nih} className={selectClass}>
-          {NIH_FILTERS.map((k) => (
-            <option key={k} value={k}>
-              {NIH_FILTER_LABELS[k]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="basis-full">
-        <PersonFilterFacets
-          facets={facets}
-          types={params.types}
-          units={params.units}
-          testId="orcid-coverage-person-facets"
-          className={inSheet ? undefined : "grid gap-x-6 sm:grid-cols-2 lg:grid-cols-4"}
-        />
-        <p className="text-muted-foreground mt-1">
-          Person type narrows the department table only; the units narrow both tables. None selected
-          = everyone.
-        </p>
-      </div>
-      {/* No-JS fallback; the island hides it once hydrated. */}
-      <button
-        type="submit"
-        className="border-apollo-border hover:bg-apollo-surface-2 rounded border px-3 py-1.5 group-data-[hydrated=true]:hidden"
-      >
-        Apply
-      </button>
-    </AutoSubmitForm>
-  );
-}
-
 /** "A, B or C" — selection criteria in a caption. */
 const orList = (xs: string[]) =>
   xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}`;
@@ -397,24 +354,16 @@ function Body({
           Filters are unavailable right now.
         </p>
       ) : (
-        <div>
-          <div className="hidden lg:block" data-testid="orcid-coverage-rail">
-            <Filters data={data} facets={facets} />
-          </div>
-          <div className="lg:hidden">
-            <FiltersSheet
-              activeCount={orcidCoverageActiveFilters(params)}
-              testId="orcid-coverage-filters-sheet-trigger"
-            >
-              <Filters data={data} facets={facets} inSheet />
-            </FiltersSheet>
-          </div>
-        </div>
+        <CoverageFilterBar
+          facets={facets}
+          initial={params}
+          nihOptions={NIH_FILTERS.map((value) => ({ value, label: NIH_FILTER_LABELS[value] }))}
+        />
       )}
 
       {ignoredLegacyDept && (
         <p className="text-muted-foreground m-0 text-xs" data-testid="orcid-coverage-legacy-dept">
-          A department filter from an older link was ignored — pick it under Department / division.
+          A department filter from an older link was ignored — pick it under Department.
         </p>
       )}
 
