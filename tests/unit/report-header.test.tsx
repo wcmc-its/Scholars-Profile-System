@@ -74,6 +74,23 @@ describe("ReportHeader", () => {
     expect(q.getByText("Report 3")).toBeTruthy();
   });
 
+  it("under the core header → no h1; the name is an sr-only h2, the badge and subtitle stay", async () => {
+    const q = await renderHeader({
+      n: "11",
+      session: PLAIN,
+      access: { mode: "unit" },
+      underCoreHeader: true,
+      children: <p data-testid="subtitle">Subtitle</p>,
+    });
+    expect(q.queryByRole("heading", { level: 1 })).toBeNull();
+    const h2 = q.getByRole("heading", { level: 2 });
+    expect(h2.textContent).toBe("Publications");
+    expect(h2.className).toContain("sr-only");
+    expect(q.getByText("Report 11")).toBeTruthy();
+    expect(q.getByTestId("badge")).toBeTruthy();
+    expect(q.getByTestId("subtitle")).toBeTruthy();
+  });
+
   it("access props → the badge in the heading row, before the subtitle", async () => {
     const q = await renderHeader({
       n: "3",
