@@ -140,6 +140,22 @@ describe("TopicsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
     expect(screen.getByRole("button", { name: /Topic 1\s*100/ })).toBeTruthy();
   });
 
+  // #2245 — "From 1 accepted publications" on a one-pub profile.
+  it("uses the singular for exactly one accepted publication", () => {
+    render(
+      <TopicsSection
+        keywords={makeKeywords(1)}
+        totalAcceptedPubs={1}
+        selectedUis={[]}
+        onToggle={noop}
+        onClearAll={noop}
+        facetRedesignEnabled
+        topicCounts={null}
+      />,
+    );
+    expect(screen.getByText("From 1 accepted publication · select to filter")).toBeTruthy();
+  });
+
   it("gives a selected chip the blue facet state with a leading Check and trailing X", () => {
     const keywords = makeKeywords(3);
     const selectedUi = keywords[0].descriptorUi as string;

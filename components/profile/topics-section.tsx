@@ -65,8 +65,8 @@ export function TopicsSection({
         {facetRedesignEnabled
           ? topicCounts
             ? "Counts shown within current filter"
-            : `From ${totalAcceptedPubs} accepted publications · select to filter`
-          : `From ${totalAcceptedPubs} accepted publications · click to filter publications`}
+            : `From ${totalAcceptedPubs} accepted publication${totalAcceptedPubs === 1 ? "" : "s"} · select to filter`
+          : `From ${totalAcceptedPubs} accepted publication${totalAcceptedPubs === 1 ? "" : "s"} · click to filter publications`}
       </p>
       <ul className="flex flex-wrap gap-2">
         {visible.map((k) => {

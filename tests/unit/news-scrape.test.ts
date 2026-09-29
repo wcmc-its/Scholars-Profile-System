@@ -12,6 +12,7 @@ import {
   parseDate,
   parseTags,
   scrapeNews,
+  stripTags,
 } from "@/etl/news/scrape";
 import { validateArticles } from "@/etl/news/seed";
 
@@ -46,6 +47,17 @@ const story = (opts: {
 const feed = (stories: ReturnType<typeof story>[]) => JSON.stringify({ news_stories: stories });
 
 describe("feedStories", () => {
+  // #2245 — a tag boundary before a comma left "Dr. X , assistant", and a
+  // punctuation-only teaser was stored and rendered as a bare "...".
+  it("drops the space a closing tag leaves before punctuation", () => {
+    expect(stripTags('<a href="#"><strong>Dr. X</strong></a>, assistant')).toBe("Dr. X, assistant");
+  });
+
+  it("stores no excerpt for a teaser with no letters or digits", () => {
+    const [a] = feedStories(feed([story({ slug: "dots", teaser: "<p><strong>...</strong></p>" })]));
+    expect(a.excerpt).toBeNull();
+  });
+
   it("maps a story to url, title, excerpt, same-origin thumbnail, ISO date", () => {
     const [a] = feedStories(feed([story({ slug: "a-b-c" })]));
     expect(a).toEqual({

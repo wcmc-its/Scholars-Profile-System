@@ -33,14 +33,21 @@ import {
 } from "@/lib/sitemap";
 import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 
-const { mockScholarFindMany, mockTopicFindMany, mockDeptFindMany, mockCenterFindMany } = vi.hoisted(
-  () => ({
-    mockScholarFindMany: vi.fn(),
-    mockTopicFindMany: vi.fn(),
-    mockDeptFindMany: vi.fn(),
-    mockCenterFindMany: vi.fn(),
-  }),
-);
+const {
+  mockScholarFindMany,
+  mockTopicFindMany,
+  mockDeptFindMany,
+  mockCenterFindMany,
+  mockDivisionFindMany,
+  mockSuppressionFindMany,
+} = vi.hoisted(() => ({
+  mockScholarFindMany: vi.fn(),
+  mockTopicFindMany: vi.fn(),
+  mockDeptFindMany: vi.fn(),
+  mockCenterFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -48,6 +55,8 @@ vi.mock("@/lib/db", () => ({
     topic: { findMany: mockTopicFindMany },
     department: { findMany: mockDeptFindMany },
     center: { findMany: mockCenterFindMany },
+    division: { findMany: mockDivisionFindMany },
+    suppression: { findMany: mockSuppressionFindMany },
   },
 }));
 
@@ -68,10 +77,12 @@ beforeEach(() => {
     { id: "infectious_disease", refreshedAt: new Date("2026-03-02") },
   ]);
   mockDeptFindMany.mockResolvedValue([
-    { slug: "medicine", updatedAt: new Date("2026-02-01") },
-    { slug: "pediatrics", updatedAt: new Date("2026-02-02") },
+    { code: "N1280", slug: "medicine", updatedAt: new Date("2026-02-01") },
+    { code: "N1500", slug: "pediatrics", updatedAt: new Date("2026-02-02") },
   ]);
   mockCenterFindMany.mockResolvedValue([]);
+  mockDivisionFindMany.mockResolvedValue([]);
+  mockSuppressionFindMany.mockResolvedValue([]);
 });
 
 // Routes imported after the db mock is registered.
@@ -185,6 +196,24 @@ describe("lib/sitemap — buildSitemapEntries", () => {
     );
     expect(entries).toContainEqual(
       expect.objectContaining({ url: "https://scholars.weill.cornell.edu/centers/meyer", priority: 0.6 }),
+    );
+  });
+
+  // #2245 — division pages were missing from the sitemap entirely.
+  it("emits division pages under their department slug, skipping suppressed and orphan divisions", async () => {
+    mockDivisionFindMany.mockResolvedValue([
+      { code: "D1", deptCode: "N1280", slug: "cardiology", updatedAt: new Date("2026-02-03") },
+      { code: "D2", deptCode: "N1280", slug: "retired-div", updatedAt: null },
+      { code: "D3", deptCode: "GONE", slug: "orphan", updatedAt: null },
+    ]);
+    mockSuppressionFindMany.mockResolvedValue([{ entityId: "D2" }]);
+    const entries = await buildSitemapEntries();
+    const divisionUrls = entries.map((e) => e.url).filter((u) => u.includes("/divisions/"));
+    expect(divisionUrls).toEqual([
+      "https://scholars.weill.cornell.edu/departments/medicine/divisions/cardiology",
+    ]);
+    expect(mockSuppressionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { entityType: "division", revokedAt: null } }),
     );
   });
 

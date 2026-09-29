@@ -100,6 +100,11 @@ export const defaultFetch: Fetcher = async (url) => {
   return null;
 };
 
+/** #2245 — an excerpt with no letter or digit (a bare "...") is no excerpt. */
+function hasText(s: string): string | null {
+  return /[\p{L}\p{N}]/u.test(s) ? s : null;
+}
+
 export function stripTags(s: string): string {
   return s
     .replace(/<[^>]+>/g, " ")
@@ -111,6 +116,9 @@ export function stripTags(s: string): string {
     .replace(/&gt;/g, ">")
     .replace(/ /g, " ")
     .replace(/\s+/g, " ")
+    // #2245 — a tag boundary before punctuation (`<strong>Dr. X</strong></a>,`)
+    // must not leave "Dr. X , assistant".
+    .replace(/ ([,.;:!?)])/g, "$1")
     .trim();
 }
 
@@ -285,7 +293,7 @@ export function feedStories(json: string): ScrapedArticle[] {
     out.push({
       url: path,
       title,
-      excerpt: truncate(clean(teaser), EXCERPT_MAX) || null,
+      excerpt: hasText(truncate(clean(teaser), EXCERPT_MAX)),
       thumbnailUrl: thumbnailOf(s.field_story_featured_image),
       publishedAt: parseDate(
         typeof s.field_story_post_date === "string" ? s.field_story_post_date : "",
