@@ -4,7 +4,7 @@ import * as React from "react";
 import { Dialog as SheetPrimitive } from "radix-ui";
 import { XIcon } from "lucide-react";
 
-import { useSuppressFeedbackBadgeWhileMounted } from "@/components/site/feedback-badge-context";
+import { SuppressFeedbackBadge } from "@/components/site/feedback-badge-context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,8 +48,6 @@ function SheetContent({
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "right" | "left";
 }) {
-  // Suppress the feedback badge while the sheet is open (mirrors DialogContent).
-  useSuppressFeedbackBadgeWhileMounted();
   return (
     <SheetPrimitive.Portal data-slot="sheet-portal">
       <SheetOverlay />
@@ -65,6 +63,7 @@ function SheetContent({
         )}
         {...props}
       >
+        <SuppressFeedbackBadge />
         {children}
         <SheetPrimitive.Close
           data-slot="sheet-close-icon"

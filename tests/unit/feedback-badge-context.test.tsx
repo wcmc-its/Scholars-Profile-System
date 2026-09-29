@@ -14,6 +14,8 @@ import {
   useFeedbackBadgeSuppressed,
   useSuppressFeedbackBadgeWhileMounted,
 } from "@/components/site/feedback-badge-context";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 /** Test helper: renders its suppression status into a `data-` attribute
  *  so the assertion side reads the DOM, not a hook. */
@@ -92,5 +94,34 @@ describe("hooks outside the provider", () => {
     // No throw, no infinite render, no console errors. The assertion is
     // that render() returns successfully.
     expect(() => render(<Consumer />)).not.toThrow();
+  });
+});
+
+// Regression: a CLOSED dialog/sheet (e.g. the header's MobileNav sheet, on every
+// page) must not suppress the badge. The hook used to run in the Content
+// wrapper, which renders even while closed.
+describe("Dialog / Sheet — suppress only while open", () => {
+  it("closed dialog and sheet do not suppress; open dialog does", () => {
+    function Tree({ open }: { open: boolean }) {
+      return (
+        <FeedbackBadgeProvider>
+          <StatusProbe />
+          <Sheet open={false}>
+            <SheetContent aria-describedby={undefined}>
+              <SheetTitle>Menu</SheetTitle>
+            </SheetContent>
+          </Sheet>
+          <Dialog open={open}>
+            <DialogContent aria-describedby={undefined}>
+              <DialogTitle>Hi</DialogTitle>
+            </DialogContent>
+          </Dialog>
+        </FeedbackBadgeProvider>
+      );
+    }
+    const { getByTestId, rerender } = render(<Tree open={false} />);
+    expect(getByTestId("probe").dataset.suppressed).toBe("false");
+    rerender(<Tree open={true} />);
+    expect(getByTestId("probe").dataset.suppressed).toBe("true");
   });
 });
