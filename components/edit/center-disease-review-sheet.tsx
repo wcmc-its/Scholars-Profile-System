@@ -374,7 +374,7 @@ function SheetBody({
   const high = pending.filter((d) => d.assignment?.confidence === "high");
   const nConfirmed = diseases.filter((d) => d.decision?.decision === "confirmed").length;
   const nRejected = diseases.filter((d) => d.decision?.decision === "rejected").length;
-  const summary = `${pending.length} to review · ${nConfirmed} confirmed${nRejected ? ` · ${nRejected} rejected` : ""}`;
+  const summary = `${pending.length.toLocaleString("en-US")} to review · ${nConfirmed.toLocaleString("en-US")} confirmed${nRejected ? ` · ${nRejected.toLocaleString("en-US")} rejected` : ""}`;
   const sub = [member.title, `CWID ${cwid}`, member.programLabel].filter(Boolean).join(" · ");
 
   async function act(codes: ReadonlyArray<string>, decision: DiseaseDecisionKind) {
@@ -394,7 +394,7 @@ function SheetBody({
             className="text-apollo-amber text-xs font-semibold tracking-wider uppercase tabular-nums"
             data-testid="disease-review-queue-position"
           >
-            Review queue · {queue.position} of {queue.total}
+            Review queue · {queue.position.toLocaleString("en-US")} of {queue.total.toLocaleString("en-US")}
           </p>
         )}
         <SheetTitle className="pr-6 text-lg font-semibold">{member.name}</SheetTitle>
@@ -417,7 +417,7 @@ function SheetBody({
               }
               data-testid="disease-confirm-high"
             >
-              Confirm {high.length} high-confidence
+              Confirm {high.length.toLocaleString("en-US")} high-confidence
             </Button>
           )}
         </div>

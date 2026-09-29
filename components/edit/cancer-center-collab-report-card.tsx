@@ -171,7 +171,7 @@ function CountBar({ n, of, tone }: { n: number; of: number; tone: "slate" | "mar
   return (
     <>
       <div className="flex items-baseline gap-1.5">
-        <span className={cn("font-semibold", n === 0 && "text-muted-foreground")}>{n}</span>
+        <span className={cn("font-semibold", n === 0 && "text-muted-foreground")}>{n.toLocaleString("en-US")}</span>
         <span className="text-muted-foreground text-[13px]">({p}%)</span>
       </div>
       <div
@@ -422,7 +422,7 @@ export function CancerCenterCollabReportCard({
             {tabSelected.length > 0 && (
               <div className="flex flex-wrap items-center gap-2" data-testid="om-selection">
                 <span className="text-muted-foreground text-[13px] whitespace-nowrap tabular-nums">
-                  {tabSelected.length} selected
+                  {tabSelected.length.toLocaleString("en-US")} selected
                 </span>
                 <Button
                   type="button"
@@ -561,7 +561,7 @@ export function CancerCenterCollabReportCard({
                           )}
                         </td>
                         <td className={cn(TD, "text-[13px] leading-[1.4]")}>{r.institution}</td>
-                        <td className={cn(TD, "text-right")}>{r.totalPapersPostCutoff}</td>
+                        <td className={cn(TD, "text-right")}>{r.totalPapersPostCutoff.toLocaleString("en-US")}</td>
                         <td className={TD}>
                           <CountBar
                             n={r.collaborationsWithCenter}
@@ -808,14 +808,14 @@ function MeshLogicModal() {
             {empty
               ? "The cancer taxonomy hasn't been generated in this environment yet, so no publications are classified as cancer-relevant."
               : data
-                ? `${data.totalRelevant} cancer-relevant descriptors from ${data.ruleCount} ruleset rows${
+                ? `${data.totalRelevant.toLocaleString("en-US")} cancer-relevant descriptors from ${data.ruleCount.toLocaleString("en-US")} ruleset rows${
                     data.meshRelease ? ` · Resolved against ${data.meshRelease}` : ""
                   }`
                 : " "}
           </DialogDescription>
           <div className="mt-4 flex gap-7" role="tablist" aria-label="Sections">
             {modalTab("method", "Method")}
-            {modalTab("buckets", live ? `Topic buckets (${live.topics.length})` : "Topic buckets")}
+            {modalTab("buckets", live ? `Topic buckets (${live.topics.length.toLocaleString("en-US")})` : "Topic buckets")}
           </div>
         </div>
 
@@ -995,7 +995,7 @@ function MeshLogicModal() {
                             {b.topic}
                           </div>
                           <div className="mt-1.5 text-[13px] tabular-nums">
-                            <strong className="font-semibold">{b.descriptorCount}</strong>{" "}
+                            <strong className="font-semibold">{b.descriptorCount.toLocaleString("en-US")}</strong>{" "}
                             <span className="text-muted-foreground">
                               descriptor{b.descriptorCount === 1 ? "" : "s"}
                             </span>
@@ -1060,7 +1060,7 @@ function MeshLogicModal() {
             rel="noreferrer"
             className="text-apollo-slate hover:underline"
           >
-            {data ? `The full ruleset, all ${data.ruleCount} rows ↗` : "The full ruleset ↗"}
+            {data ? `The full ruleset, all ${data.ruleCount.toLocaleString("en-US")} rows ↗` : "The full ruleset ↗"}
           </a>
         </div>
       </DialogContent>
