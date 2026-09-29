@@ -79,6 +79,7 @@ import {
   type UnitFieldOverrideName,
 } from "@/lib/api/manual-layer";
 import { parseCsv } from "@/lib/csv";
+import { isPublicRosterMember } from "@/lib/eligibility";
 import {
   canManageAccess as canManageAccessPredicate,
   getEffectiveUnitRole,
@@ -176,6 +177,10 @@ export type UnitEditContext = {
      *  `Scholar` (#2519) — `name`/`title` above come from that row, not the
      *  nameMap. */
     scholarState: RosterScholarState;
+    /** #1827 — whether the public center page renders this member
+     *  (`isPublicRosterMember`). Optional so fixtures that predate it still
+     *  type-check; absent → treated as listed. */
+    publiclyListed?: boolean;
     /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
      *  picture. `[]` outside a center (dept/division) and for a center member
      *  with no `CancerCenterDiseaseAssignment`/`CancerCenterDiseaseDecision`
@@ -297,19 +302,34 @@ export type UnitEditContextClient = Pick<
 export async function resolveScholarNames(
   cwids: ReadonlyArray<string>,
   client: UnitEditContextClient,
-): Promise<Map<string, { name: string; title: string | null; departed: boolean }>> {
-  const out = new Map<string, { name: string; title: string | null; departed: boolean }>();
+): Promise<
+  Map<string, { name: string; title: string | null; departed: boolean; publiclyListed: boolean }>
+> {
+  const out = new Map<
+    string,
+    { name: string; title: string | null; departed: boolean; publiclyListed: boolean }
+  >();
   const unique = [...new Set(cwids.filter((c) => c.length > 0))];
   if (unique.length === 0) return out;
   const rows = await client.scholar.findMany({
     where: { cwid: { in: unique } },
-    select: { cwid: true, preferredName: true, primaryTitle: true, deletedAt: true },
+    select: {
+      cwid: true,
+      preferredName: true,
+      primaryTitle: true,
+      deletedAt: true,
+      status: true,
+      roleCategory: true,
+    },
   });
   for (const row of rows) {
     out.set(row.cwid, {
       name: row.preferredName,
       title: row.primaryTitle,
       departed: row.deletedAt !== null,
+      // #1827 — the public center-roster gate, so /edit can flag members the
+      // public page silently drops (suppressed profile, hidden role class).
+      publiclyListed: isPublicRosterMember(row),
     });
   }
   return out;
@@ -979,6 +999,9 @@ export async function loadUnitEditContext(
           startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
           endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
           scholarState: scholarStateOf(resolved, external !== undefined),
+          // #1827 — false ⇒ the public center page will not render this WCM
+          // member. External rows render through their own source path.
+          publiclyListed: external !== undefined || (resolved?.publiclyListed ?? false),
           diseases: diseasesByCwid.get(r.cwid) ?? [],
         };
       })

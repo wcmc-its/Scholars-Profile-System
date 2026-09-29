@@ -57,6 +57,8 @@ type Opts = {
     preferredName: string;
     primaryTitle: string | null;
     deletedAt?: Date | null;
+    status?: string;
+    roleCategory?: string | null;
   }>;
   siblings?: Array<{ code: string; name: string; slug: string }>;
   centerMembers?: Array<{
@@ -409,6 +411,8 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
       preferredName: string;
       primaryTitle: string | null;
       deletedAt: Date | null;
+      status?: string;
+      roleCategory?: string | null;
     }>,
   ) {
     const ctx = await loadUnitEditContext(
@@ -473,6 +477,28 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
       ["here1", "active"],
       ["gone1", "departed"],
       ["ghost1", "unknown"],
+    ]);
+  });
+
+  it("#1827 — publiclyListed mirrors the public roster gate (suppressed / hidden role / no row ⇒ false)", async () => {
+    const roster = await rosterFor(
+      [
+        { cwid: "here1", source: "manual-ui" },
+        { cwid: "supp1", source: "manual-ui" },
+        { cwid: "stud1", source: "manual-ui" },
+        { cwid: "ghost1", source: "manual-ui" },
+      ],
+      [
+        { cwid: "here1", preferredName: "Here", primaryTitle: null, deletedAt: null, status: "active", roleCategory: "full_time_faculty" },
+        { cwid: "supp1", preferredName: "Supp", primaryTitle: null, deletedAt: null, status: "suppressed", roleCategory: "full_time_faculty" },
+        { cwid: "stud1", preferredName: "Stud", primaryTitle: null, deletedAt: null, status: "active", roleCategory: "doctoral_student" },
+      ],
+    );
+    expect(roster.map((r) => [r.cwid, r.scholarState, r.publiclyListed])).toEqual([
+      ["here1", "active", true],
+      ["supp1", "active", false],
+      ["stud1", "active", false],
+      ["ghost1", "unknown", false],
     ]);
   });
 
@@ -613,6 +639,7 @@ describe("loadUnitEditContext — manual division roster", () => {
         startDate: null,
         endDate: null,
         scholarState: "active",
+        publiclyListed: true,
         diseases: [],
       },
     ]);
@@ -707,6 +734,7 @@ describe("loadUnitEditContext — center", () => {
         startDate: "2024-07-01",
         endDate: null,
         scholarState: "unknown",
+        publiclyListed: false,
         diseases: [],
       },
     ]);

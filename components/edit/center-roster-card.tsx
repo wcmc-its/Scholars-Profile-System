@@ -125,6 +125,10 @@ export type RosterMember = {
    *  `"external"` (#2519) is a Cornell (Ithaca) directory member with no WCM
    *  profile at all — never "departed" or "unknown", it never had one. */
   scholarState?: "active" | "departed" | "unknown" | "external";
+  /** #1827 — false ⇒ the public center page will NOT render this member (no
+   *  active Scholar row, a suppressed profile, or a hidden role class), so the
+   *  row is inert publicly. Absent → treated as listed. */
+  publiclyListed?: boolean;
   /** Membership source (`manual-ui`, `cornell-ithaca`, `ctsc-feed`, …). Optional
    *  for fixtures that predate it; the context always sends it. */
   source?: string;
@@ -459,7 +463,10 @@ export function CenterRosterCard({
     tabRefs.current.departed?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }
 
-  async function post(body: Record<string, unknown>): Promise<boolean> {
+  /** Resolves to the success body (truthy) or `false` on failure. */
+  async function post(
+    body: Record<string, unknown>,
+  ): Promise<false | { ok: true; publiclyListed?: boolean }> {
     let res: Response;
     try {
       res = await fetch("/api/edit/roster", {
@@ -475,12 +482,14 @@ export function CenterRosterCard({
     // A failed response may carry no JSON body (e.g. a bodyless 401 from auth
     // middleware); check res.ok and parse defensively so a phantom row can't
     // linger with no error shown.
-    const data = (await res.json().catch(() => null)) as { ok: boolean; error?: string } | null;
+    const data = (await res.json().catch(() => null)) as
+      | { ok: boolean; error?: string; publiclyListed?: boolean }
+      | null;
     if (!res.ok || data?.ok !== true) {
       setError(mapErrorToMessage(data?.error ?? ""));
       return false;
     }
-    return true;
+    return { ok: true, publiclyListed: data.publiclyListed };
   }
 
   /** Per-cwid write chain so two quick edits to the SAME row don't race. The
@@ -652,6 +661,12 @@ export function CenterRosterCard({
       ? await post({ source: "cornell", netid: picked.netid, action: "add" })
       : await post({ cwid: effectiveCwid, action: "add" });
     if (!ok) setMembers((ms) => ms.filter((m) => m.cwid !== effectiveCwid));
+    // #1827 — the server says this person won't render on the public center
+    // page (no active, publicly-displayed profile): flag the new row.
+    else if (ok.publiclyListed === false)
+      setMembers((ms) =>
+        ms.map((m) => (m.cwid === effectiveCwid ? { ...m, publiclyListed: false } : m)),
+      );
     setAdding(false);
   }
 
@@ -1179,6 +1194,19 @@ export function CenterRosterCard({
                               Left WCM
                             </Badge>
                           )}
+                          {m.publiclyListed === false &&
+                            m.scholarState !== "departed" &&
+                            m.scholarState !== "unknown" &&
+                            m.scholarState !== "external" && (
+                              <Badge
+                                variant="outline"
+                                className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full"
+                                data-testid={`roster-not-public-${m.cwid}`}
+                                title="On the roster, but this person won't appear on the public center page until they have an active, public Scholars profile."
+                              >
+                                Not shown publicly
+                              </Badge>
+                            )}
                           {m.scholarState === "unknown" && (
                             <Badge
                               variant="outline"

@@ -311,6 +311,22 @@ describe("CenterRosterCard — inline edits", () => {
     expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ cwid: "new9", action: "add" });
   });
 
+  it("#1827 — flags an added member the public page won't render (publiclyListed:false)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, changed: true, publiclyListed: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<CenterRosterCard {...base} members={[member({})]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("typeahead-pick"));
+    fireEvent.click(screen.getByTestId("center-roster-add"));
+    await waitFor(() => expect(screen.getByTestId("roster-not-public-new9")).toBeTruthy());
+    // The add stuck (no rollback), and an ordinary listed member is not flagged.
+    expect(screen.getByTestId("center-roster-row-new9")).toBeTruthy();
+    expect(screen.queryByTestId("roster-not-public-m1")).toBeNull();
+  });
+
   it("rolls back the optimistic add and shows an error when the response has no JSON body (#1828)", async () => {
     // A bodyless 401 (e.g. from auth middleware): res.json() rejects. Before the
     // fix, post() threw past add()'s rollback and left a phantom row with no error.

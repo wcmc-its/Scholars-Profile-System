@@ -30,6 +30,7 @@ const {
   mockTxDivisionMembershipCreate,
   mockTxDivisionMembershipDelete,
   mockReflectUnitChange,
+  mockScholarFindUnique,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -47,6 +48,7 @@ const {
   mockTxDivisionMembershipCreate: vi.fn(),
   mockTxDivisionMembershipDelete: vi.fn(),
   mockReflectUnitChange: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
@@ -72,6 +74,7 @@ vi.mock("@/lib/db", () => ({
       centerMembership: { findUnique: mockCenterMembershipFindUnique },
       divisionMembership: { findUnique: mockDivisionMembershipFindUnique },
       centerProgram: { findMany: mockCenterProgramFindMany },
+      scholar: { findUnique: mockScholarFindUnique },
     },
     write: { $transaction: mockTransaction },
   },
@@ -148,6 +151,11 @@ beforeEach(() => {
   mockDivisionMembershipFindUnique.mockResolvedValue(null);
   mockCenterProgramFindMany.mockResolvedValue([]);
   mockTxCenterMembershipCreate.mockResolvedValue(BLANK_ROW);
+  mockScholarFindUnique.mockResolvedValue({
+    roleCategory: "full_time_faculty",
+    deletedAt: null,
+    status: "active",
+  });
   mockTxCenterMembershipUpsert.mockResolvedValue(BLANK_ROW);
   mockTxCenterMembershipDelete.mockResolvedValue(BLANK_ROW);
   mockTxOrgUnitRoleScopeFindMany.mockResolvedValue([]);
@@ -184,6 +192,28 @@ describe("/api/edit/roster — center", () => {
     expect(mockReflectUnitChange).toHaveBeenCalledWith(
       expect.objectContaining({ unitKind: "center", unitSlug: "meyer" }),
     );
+  });
+
+  it("#1827 — add reports publiclyListed per the public center-roster gate", async () => {
+    const add = async () =>
+      (await POST(
+        post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "add" }),
+      ).then((r) => r.json())) as { ok: boolean; changed: boolean; publiclyListed?: boolean };
+
+    // Active, publicly-displayed scholar → listed.
+    expect(await add()).toMatchObject({ ok: true, changed: true, publiclyListed: true });
+
+    // Each silent-drop class still ADDS (200, row written) but is flagged.
+    for (const scholar of [
+      null, // no Scholar row (staff, student, non-WCM, ED record not landed)
+      { roleCategory: "full_time_faculty", deletedAt: new Date("2026-01-01"), status: "active" },
+      { roleCategory: "full_time_faculty", deletedAt: null, status: "suppressed" },
+      { roleCategory: "doctoral_student_phd", deletedAt: null, status: "active" },
+    ]) {
+      mockScholarFindUnique.mockResolvedValueOnce(scholar);
+      expect(await add()).toMatchObject({ ok: true, changed: true, publiclyListed: false });
+    }
+    expect(mockTxCenterMembershipCreate).toHaveBeenCalledTimes(5);
   });
 
   it("Re-adding an existing member → 200 no-op (no DB write)", async () => {
