@@ -41,6 +41,10 @@ NETCFG="$(aws ecs describe-services --cluster "$CLUSTER" --services "sps-app-$EN
 SUBNETS="$(python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["subnets"]))' <<<"$NETCFG")"
 SG="$(python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["securityGroups"]))' <<<"$NETCFG")"
 [[ -n "$SUBNETS" && -n "$SG" ]] || { echo "could not read live netcfg for $ENV" >&2; exit 1; }
+# Pass the network config as explicit JSON, never the shorthand
+# `awsvpcConfiguration={subnets=[a,b],...}` string: the shorthand form mis-landed tasks in
+# subnets (and a VPC) that were never passed, which then surfaced as a DB pool timeout (#2103).
+NETWORK_JSON="$(python3 -c 'import json,sys; c=json.load(sys.stdin); print(json.dumps({"awsvpcConfiguration":{"subnets":c["subnets"],"securityGroups":c["securityGroups"],"assignPublicIp":"DISABLED"}}))' <<<"$NETCFG")"
 
 B64="$(gzip -9 -c "$PROBE" | base64 | tr -d '\n')"
 OVERRIDES="$(B64="$B64" CONTAINER="$CONTAINER" PROBE_KEEP_RW="${PROBE_KEEP_RW:-}" python3 - <<'PY'
@@ -81,10 +85,13 @@ PY
 
 echo "Launching $PROBE on $CLUSTER ($TASKDEF)…" >&2
 TID="$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASKDEF" --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+  --network-configuration "$NETWORK_JSON" \
   --overrides "$OVERRIDES" --query 'tasks[0].taskArn' --output text)"
 TID="${TID##*/}"
 echo "task: $TID — waiting…" >&2
+LANDED="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TID" \
+  --query "tasks[0].attachments[0].details[?name=='subnetId'].value | [0]" --output text || true)"
+echo "landed in subnet: ${LANDED:-unknown} (expected one of: $SUBNETS)" >&2
 aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TID"
 
 EXIT="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TID" \
