@@ -35,6 +35,8 @@ import {
 import { GrantRolePill } from "@/components/scholar/person-card-grant-role-pill";
 import { profilePath } from "@/lib/profile-url";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { usePublicationModal } from "@/components/publication/publication-modal";
+import { setScholarFilter, useScholarFilter } from "@/components/taxonomy/scholar-filter";
 
 export type PersonPopoverSurface =
   | "facet"
@@ -43,7 +45,10 @@ export type PersonPopoverSurface =
   | "mentee"
   | "top-scholar"
   | "grant-investigator"
-  | "grant-facet";
+  | "grant-facet"
+  /** Topic / method page scholar cards: scope summary + filter action, no header
+   *  (the card above already shows the person). */
+  | "taxonomy-card";
 
 type ApiResponse = {
   header: {
@@ -94,6 +99,12 @@ type ApiResponse = {
     pmidCount: number;
     href: string;
   }>;
+  /** taxonomy-card only: the scholar's papers in the page's scope. */
+  scope?: {
+    pubCount: number;
+    leadCount: number;
+    recent: Array<{ pmid: string; title: string; journal: string | null; year: number | null }>;
+  } | null;
 };
 
 export type PersonPopoverProps = {
@@ -150,6 +161,13 @@ export type PersonPopoverProps = {
     endYear: number | null;
     isMultiPi: boolean;
   };
+  /** taxonomy-card on method pages: the scope is this supercategory id, or one
+   *  family in it when `contextFamilyLabel` is set. Topic pages pass
+   *  `contextTopicSlug` instead. `contextTopicLabel` names the scope either way. */
+  contextSupercategory?: string;
+  contextFamilyLabel?: string;
+  /** taxonomy-card: offer "Filter publications →" (pages whose feed takes `?cwid=`). */
+  filterable?: boolean;
 };
 
 const ROLE_FROM_FLAGS = (
@@ -177,6 +195,9 @@ export function PersonPopover({
   primaryActionLabel,
   contextMethods,
   contextGrant,
+  contextSupercategory,
+  contextFamilyLabel,
+  filterable = false,
 }: PersonPopoverProps) {
   const [data, setData] = React.useState<ApiResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -184,7 +205,7 @@ export function PersonPopover({
   const abortRef = React.useRef<AbortController | null>(null);
   const fetchedKeyRef = React.useRef<string | null>(null);
 
-  const fetchKey = `${cwid}|${surface}|${contextScholarCwid ?? ""}|${contextPubPmid ?? ""}|${contextTopicSlug ?? ""}|${contextGrant?.projectId ?? ""}|${contextMethods ? "1" : ""}`;
+  const fetchKey = `${cwid}|${surface}|${contextScholarCwid ?? ""}|${contextPubPmid ?? ""}|${contextTopicSlug ?? ""}|${contextGrant?.projectId ?? ""}|${contextMethods ? "1" : ""}|${contextSupercategory ?? ""}|${contextFamilyLabel ?? ""}`;
 
   const handleOpenChange = React.useCallback(
     (open: boolean) => {
@@ -227,6 +248,8 @@ export function PersonPopover({
       if (contextGrant?.projectId)
         params.set("contextGrantProjectId", contextGrant.projectId);
       if (contextMethods) params.set("contextMethods", "1");
+      if (contextSupercategory) params.set("contextSupercategory", contextSupercategory);
+      if (contextFamilyLabel) params.set("contextFamilyLabel", contextFamilyLabel);
 
       fetch(`/api/scholars/${cwid}/popover-context?${params.toString()}`, {
         signal: ctl.signal,
@@ -253,6 +276,8 @@ export function PersonPopover({
       contextTopicSlug,
       contextGrant?.projectId,
       contextMethods,
+      contextSupercategory,
+      contextFamilyLabel,
       fetchKey,
       data,
     ],
@@ -267,17 +292,26 @@ export function PersonPopover({
         align="start"
         side="bottom"
         avoidCollisions
-        className="w-80 p-3.5"
+        className={surface === "taxonomy-card" ? "w-80 p-0" : "w-80 p-3.5"}
         // Keyboard: Escape on the content closes the popover and Radix returns
         // focus to the trigger automatically.
       >
         {loading && !data ? (
-          <div className="text-xs text-muted-foreground">Loading…</div>
+          <div className={`text-xs text-muted-foreground ${surface === "taxonomy-card" ? "p-4" : ""}`}>
+            Loading…
+          </div>
         ) : error && !data ? (
-          <div className="text-xs text-muted-foreground">
+          <div className={`text-xs text-muted-foreground ${surface === "taxonomy-card" ? "p-4" : ""}`}>
             Could not load preview.
           </div>
-        ) : !data ? null : (
+        ) : !data ? null : surface === "taxonomy-card" ? (
+          <TaxonomyCardBody
+            data={data}
+            scopeLabel={contextTopicLabel}
+            topicSlug={contextTopicSlug}
+            filterable={filterable}
+          />
+        ) : (
           <PersonPopoverBody
             data={data}
             surface={surface}
@@ -711,6 +745,102 @@ function SurfaceRecentList({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * taxonomy-card body (mockup "Topic and methods pages - hover"): "N publications
+ * in {scope} · M as first or senior author", the two most recent of those
+ * papers (title opens the publication modal), then "Filter publications →" /
+ * "Clear filter" and "View profile". No header: the card shows the person.
+ */
+function TaxonomyCardBody({
+  data,
+  scopeLabel,
+  topicSlug,
+  filterable,
+}: {
+  data: ApiResponse;
+  scopeLabel?: string;
+  topicSlug?: string;
+  filterable: boolean;
+}) {
+  const { header, scope } = data;
+  const { open } = usePublicationModal();
+  const picked = useScholarFilter();
+  const isPicked = picked?.cwid === header.cwid;
+  const profileHref = header.slug ? profilePath(header.slug) : null;
+
+  const pick = () => {
+    if (isPicked) {
+      setScholarFilter(null);
+      return;
+    }
+    setScholarFilter({ cwid: header.cwid, name: header.preferredName, slug: header.slug });
+    document.getElementById("publications")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  return (
+    <div className="flex flex-col">
+      {scope ? (
+        <div className="border-border text-muted-foreground border-b px-4 py-3 text-[13px] leading-[1.4] text-pretty">
+          <span className="text-foreground font-semibold">
+            {scope.pubCount.toLocaleString()} publication{scope.pubCount === 1 ? "" : "s"}
+          </span>{" "}
+          in {scopeLabel ?? "this area"}
+          {scope.leadCount > 0
+            ? ` · ${scope.leadCount.toLocaleString()} as first or senior author`
+            : ""}
+        </div>
+      ) : null}
+      {scope && scope.recent.length > 0 ? (
+        <ul className="m-0 flex list-none flex-col p-0 py-1">
+          {scope.recent.map((r) => (
+            <li key={r.pmid}>
+              <button
+                type="button"
+                onClick={() => open(r.pmid, topicSlug ? { currentTopicSlug: topicSlug } : undefined)}
+                aria-haspopup="dialog"
+                className="hover:bg-apollo-surface-2 flex w-full flex-col gap-[3px] px-4 py-[9px] text-left"
+              >
+                <span
+                  className="text-foreground text-[13.5px] leading-[1.35] font-medium text-pretty"
+                  dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(r.title) }}
+                />
+                <span className="text-muted-foreground text-[12.5px]">
+                  {r.journal ? <em>{r.journal}</em> : null}
+                  {r.journal && r.year ? " · " : null}
+                  {r.year ?? null}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(filterable || profileHref) && (
+        <div className="border-border flex items-center justify-between gap-3 border-t px-4 py-2.5 text-[13px]">
+          {filterable ? (
+            <button
+              type="button"
+              onClick={pick}
+              className="font-semibold text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            >
+              {isPicked ? "Clear filter" : "Filter publications →"}
+            </button>
+          ) : (
+            <span />
+          )}
+          {profileHref ? (
+            <a
+              href={profileHref}
+              className="text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+            >
+              View profile
+            </a>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

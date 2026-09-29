@@ -1657,6 +1657,39 @@ async function loadScholarFamilyPmids(
 }
 
 /**
+ * The scholar's pmids in a method scope for the taxonomy-card popover: one
+ * family (`familyLabel`) or, without it, every publicly visible family in the
+ * supercategory. Same gate + per-author hides as the family feed's scholar
+ * filter. Lens off ⇒ `[]`.
+ */
+export async function getScholarMethodScopePmids(
+  cwid: string,
+  supercategory: string,
+  familyLabel?: string,
+): Promise<string[]> {
+  if (!isMethodsLensEnabled() || !cwid || !supercategory) return [];
+  const gate = await loadFamilyOverlayGate();
+  const [rows, hidden] = await Promise.all([
+    prisma.scholarFamily.findMany({
+      where: { cwid, supercategory, ...(familyLabel ? { familyLabel } : {}) },
+      select: { familyLabel: true, pmids: true },
+    }),
+    loadHiddenAuthorshipPmids(cwid),
+  ]);
+  const hiddenSet = new Set(hidden);
+  const out = new Set<string>();
+  for (const r of rows) {
+    if (!isFamilyPubliclyVisible(supercategory, r.familyLabel, gate)) continue;
+    if (!Array.isArray(r.pmids)) continue;
+    for (const p of r.pmids as unknown[]) {
+      const pmid = String(p);
+      if (!hiddenSet.has(pmid)) out.add(pmid);
+    }
+  }
+  return [...out];
+}
+
+/**
  * Representative publications for a family — the union of `ScholarFamily.pmids`
  * across the gated, active scholars, resolved to `Publication`, suppression/dark
  * filtered, with confirmed WCM author chips. Ordered newest-first. `limit` caps

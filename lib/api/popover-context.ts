@@ -11,7 +11,13 @@
  */
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
-import { loadHiddenAuthorshipCounts } from "@/lib/api/manual-layer";
+import {
+  loadHiddenAuthorshipCounts,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
+import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
+import { loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 
 export type PopoverContextHeader = {
@@ -321,6 +327,70 @@ export async function fetchTopicRank(
 
   const recent = await fetchRecentPubsInTopic(cwid, topicId, 2);
   return { rank, topicPubCount, recent };
+}
+
+/**
+ * Taxonomy-card popover summary (topic / method pages): how many of the
+ * scholar's papers fall in the page's scope, how many of those they led
+ * (confirmed first or senior author), and their two most recent.
+ */
+export type ScopeSummary = {
+  pubCount: number;
+  leadCount: number;
+  recent: Array<RecentPub & { journal: string | null }>;
+};
+
+/** The scholar's pmids in a topic, minus their per-author hides (ADR-005) — the
+ *  same set the topic feed's `?cwid=` filter shows. */
+export async function fetchTopicScopePmids(cwid: string, topicId: string): Promise<string[]> {
+  if (!cwid || !topicId) return [];
+  const [rows, hidden] = await Promise.all([
+    prisma.publicationTopic.findMany({
+      where: { cwid, parentTopicId: topicId },
+      select: { pmid: true },
+    }),
+    loadHiddenAuthorshipPmids(cwid),
+  ]);
+  const hiddenSet = new Set(hidden);
+  return rows.map((r) => r.pmid).filter((p) => !hiddenSet.has(p));
+}
+
+/** Counts what the page's feed shows for this scholar by default: research
+ *  articles only (`FEED_EXCLUDED_TYPES`, the topic count spans every relevance
+ *  tier as the feed heading does), with taken-down / derived-dark papers dropped
+ *  (#356) — this endpoint is public, so a takedown must not leak a title. */
+export async function summarizeScope(cwid: string, pmids: string[]): Promise<ScopeSummary | null> {
+  if (!cwid || pmids.length === 0) return null;
+  const suppressions = await loadPublicationSuppressions(pmids, prisma);
+  const dark = await resolveDarkPmids(pmids, suppressions, prisma);
+  const research = await prisma.publication.findMany({
+    where: {
+      pmid: { in: pmids.filter((p) => !dark.has(p)) },
+      publicationType: { notIn: [...FEED_EXCLUDED_TYPES] },
+    },
+    orderBy: [{ year: "desc" }, { pmid: "desc" }],
+    select: { pmid: true },
+  });
+  if (research.length === 0) return null;
+  const researchPmids = research.map((r) => r.pmid);
+  const [leadRows, recent] = await Promise.all([
+    prisma.publicationAuthor.findMany({
+      where: {
+        cwid,
+        pmid: { in: researchPmids },
+        isConfirmed: true,
+        OR: [{ isFirst: true }, { isLast: true }],
+      },
+      select: { pmid: true },
+      distinct: ["pmid"],
+    }),
+    prisma.publication.findMany({
+      where: { pmid: { in: researchPmids.slice(0, 2) } },
+      orderBy: [{ year: "desc" }, { pmid: "desc" }],
+      select: { pmid: true, title: true, journal: true, year: true },
+    }),
+  ]);
+  return { pubCount: research.length, leadCount: leadRows.length, recent };
 }
 
 /**

@@ -161,7 +161,8 @@ export default async function SupercategoryPage({
             <ScholarCardGrid
               heading="Scholars using this"
               scholars={topScholars.map((s) => ({ ...s, areas: s.families }))}
-              popover={{ contextMethods: true }}
+              // No filter link: the category feed takes no scholar filter.
+              popover={{ label: sc.label, supercategory: sc.id }}
             />
           </div>
         ) : (

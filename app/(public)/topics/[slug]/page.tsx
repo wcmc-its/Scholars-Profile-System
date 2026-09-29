@@ -167,7 +167,7 @@ export default async function TopicPage({
                 href: `/topics/${encodeURIComponent(slug)}/scholars`,
                 count: scholarCount,
               }}
-              popover={{ topicSlug: slug, topicLabel: topic.label }}
+              popover={{ label: topic.label, topicSlug: slug, filterable: true }}
             />
           </div>
         ) : (

@@ -20,7 +20,13 @@ const {
   mockFetchPopoverHeader,
   mockGetScholarMethodFamilies,
   mockIsMethodPagesEnabled,
+  mockTopicScopePmids,
+  mockMethodScopePmids,
+  mockSummarizeScope,
 } = vi.hoisted(() => ({
+  mockTopicScopePmids: vi.fn(),
+  mockMethodScopePmids: vi.fn(),
+  mockSummarizeScope: vi.fn(),
   mockFetchPopoverHeader: vi.fn(),
   mockGetScholarMethodFamilies: vi.fn(),
   mockIsMethodPagesEnabled: vi.fn(),
@@ -34,10 +40,13 @@ vi.mock("@/lib/api/popover-context", () => ({
   fetchRecentActiveGrants: vi.fn(async () => []),
   fetchRecentPubs: vi.fn(async () => []),
   fetchTopicRank: vi.fn(async () => null),
+  fetchTopicScopePmids: (...a: unknown[]) => mockTopicScopePmids(...a),
+  summarizeScope: (...a: unknown[]) => mockSummarizeScope(...a),
 }));
 
 vi.mock("@/lib/api/methods", () => ({
   getScholarMethodFamilies: (...a: unknown[]) => mockGetScholarMethodFamilies(...a),
+  getScholarMethodScopePmids: (...a: unknown[]) => mockMethodScopePmids(...a),
 }));
 
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
@@ -82,6 +91,13 @@ beforeEach(() => {
   });
   mockGetScholarMethodFamilies.mockResolvedValue(SAMPLE_FAMILIES);
   mockIsMethodPagesEnabled.mockReturnValue(true);
+  mockTopicScopePmids.mockResolvedValue(["1", "2"]);
+  mockMethodScopePmids.mockResolvedValue(["3"]);
+  mockSummarizeScope.mockImplementation(async (_c: string, pmids: string[]) => ({
+    pubCount: pmids.length,
+    leadCount: 0,
+    recent: [],
+  }));
 });
 
 describe("popover-context route — #853 methodFamilies", () => {
@@ -118,5 +134,38 @@ describe("popover-context route — #853 methodFamilies", () => {
 
     expect(body.methodFamilies).toEqual([]);
     expect(mockGetScholarMethodFamilies).not.toHaveBeenCalled();
+  });
+});
+
+describe("popover-context route — taxonomy-card scope", () => {
+  it("topic page: summarizes the scholar's pmids in the topic", async () => {
+    const body = await (await call("?surface=taxonomy-card&contextTopicSlug=cardio")).json();
+    expect(mockTopicScopePmids).toHaveBeenCalledWith(CWID, "cardio");
+    expect(mockSummarizeScope).toHaveBeenCalledWith(CWID, ["1", "2"]);
+    expect(body.scope).toEqual({ pubCount: 2, leadCount: 0, recent: [] });
+    expect(mockMethodScopePmids).not.toHaveBeenCalled();
+  });
+
+  it("method family page: supercategory + family label reach the method loader", async () => {
+    const body = await (
+      await call("?surface=taxonomy-card&contextSupercategory=genomics&contextFamilyLabel=CRISPR")
+    ).json();
+    expect(mockMethodScopePmids).toHaveBeenCalledWith(CWID, "genomics", "CRISPR");
+    expect(body.scope.pubCount).toBe(1);
+  });
+
+  it("method scope is dark when METHODS pages are off", async () => {
+    mockIsMethodPagesEnabled.mockReturnValue(false);
+    const body = await (
+      await call("?surface=taxonomy-card&contextSupercategory=genomics")
+    ).json();
+    expect(body.scope).toBeNull();
+    expect(mockMethodScopePmids).not.toHaveBeenCalled();
+  });
+
+  it("other surfaces never compute a scope", async () => {
+    const body = await (await call("?surface=top-scholar&contextTopicSlug=cardio")).json();
+    expect(body.scope).toBeNull();
+    expect(mockTopicScopePmids).not.toHaveBeenCalled();
   });
 });
