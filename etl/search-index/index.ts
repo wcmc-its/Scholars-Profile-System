@@ -67,6 +67,7 @@ import {
   isRequireDisplayableAuthorEnabled,
   computePubCountBuckets,
   loadEsiEligibilityByCwid,
+  loadFundingVisibility,
   loadMeshAncestorContext,
   loadOverviewOverrides,
 } from "@/lib/search-index-docs";
@@ -219,8 +220,8 @@ async function indexPeople(concreteIndex: string) {
   // (mirroring the `gate` / `meshAncestors` / `overviewOverrides` loads
   // above) and pass it to every `buildPeopleDoc`. Deliberately a SEPARATE
   // query from `PEOPLE_INDEX_SELECT`'s `grants` relation below — the
-  // grantCount / hasActiveGrants / activePiGrantCount signals built from that
-  // relation are filtered to `source != 'RePORTER'`; ESI
+  // hasActiveGrants / activePiGrantCount signals built from that relation
+  // drop `source = "RePORTER"` rows in memory (#2239); ESI
   // eligibility needs the scholar's FULL unfiltered grant history (see
   // `loadEsiEligibilityByCwid`'s doc comment in `lib/search-index-docs.ts`).
   const esiEligibleByCwid = await loadEsiEligibilityByCwid(prisma);
@@ -228,6 +229,9 @@ async function indexPeople(concreteIndex: string) {
   // #2081 — the funding index's grant-suppression set, so `piRoleEver` drops
   // the same suppressed rows the Funding tab's PI chips do.
   const suppressedGrants = await loadAllGrantSuppressions(prisma);
+  // #2239 — grant suppressions + `hideFunding` overrides, once per build, so
+  // each doc's `grantCount` counts the rows the profile Funding section lists.
+  const fundingVisibility = await loadFundingVisibility(prisma);
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -269,6 +273,7 @@ async function indexPeople(concreteIndex: string) {
           esiEligibleByCwid,
           trialEvidenceByCwid,
           suppressedGrants,
+          fundingVisibility,
         ),
       ),
     );

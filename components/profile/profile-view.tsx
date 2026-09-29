@@ -22,6 +22,7 @@ import { ScrollFade } from "@/components/ui/scroll-fade";
 import { EditMyProfileButton } from "@/components/scholar/edit-my-profile-button";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
+import { countGrantProjects } from "@/lib/grants/project-count";
 import { ClinicalTrialsSection } from "@/components/profile/clinical-trials-section";
 import { DatasetsSection } from "@/components/profile/datasets-section";
 import { TechnologiesSection } from "@/components/profile/technologies-section";
@@ -148,6 +149,9 @@ export async function ProfileView({ slug }: { slug: string }) {
   // the field, matching `profileAppointments` above.
   const honors = sortHonors(profile.honors ?? []);
   const honorCount = honors.length;
+  // #2238/#2239 — Funding header = funding projects, the same shared count the
+  // people-index `grantCount` uses, so card and profile agree.
+  const fundingProjectCount = countGrantProjects(profile.grants);
 
   // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
   // for scholars with no recorded mentor relationships, in which case the
@@ -652,9 +656,12 @@ export async function ProfileView({ slug }: { slug: string }) {
               headingLg
               // "N active" left the rail and became a real filter chip inside
               // GrantsSection — a number you can act on beats one you can only read.
+              // #2238 — counts funding PROJECTS (renewal years collapsed), the
+              // unit the list below renders one row per; `grants.length` counted
+              // award records and read "9 grants" over five rows.
               count={{
-                value: profile.grants.length,
-                unit: profile.grants.length === 1 ? "grant" : "grants",
+                value: fundingProjectCount,
+                unit: fundingProjectCount === 1 ? "grant" : "grants",
               }}
               headerAction={
                 profile.nihReporterProfileId !== null ? (
