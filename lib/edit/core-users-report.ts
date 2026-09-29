@@ -161,8 +161,11 @@ const inWindow = (y: number | null, from: number | null, to: number | null) =>
 
 /**
  * One row per person. Pure. `whoMatch` = the CWIDs the who-filter keeps
- * (`null` = no who-filter set); `clientCwids` = active known clients. A person
- * counts each distinct PMID once however many authorship rows repeat it.
+ * (`null` = no who-filter set); `clientCwids` = active known clients, LOWERCASED
+ * (`loadActiveClientCwids`). The client match is case-insensitive, the same
+ * convention as `lib/api/core-clients.ts` and the review queue, because a
+ * Scholar row's `cwid` casing is not guaranteed to match `core_client.cwid`.
+ * A person counts each distinct PMID once however many authorship rows repeat it.
  */
 export function buildCoreUsers(
   authorships: readonly CoreAuthorship[],
@@ -200,7 +203,7 @@ export function buildCoreUsers(
   const all: CoreUserRow[] = [...byCwid.values()].map(({ pmids, ...rest }) => ({
     ...rest,
     papers: pmids.size,
-    knownClient: opts.clientCwids.has(rest.cwid),
+    knownClient: opts.clientCwids.has(rest.cwid.toLowerCase()),
   }));
 
   const typeCounts = new Map<string, number>();
@@ -319,12 +322,13 @@ export async function loadWhoMatch(
   return out;
 }
 
+/** The core's active known clients' CWIDs, LOWERCASED (see `buildCoreUsers`). */
 export async function loadActiveClientCwids(coreId: string): Promise<Set<string>> {
   const rows = await db.read.coreClient.findMany({
     where: { coreId, removedAt: null, cwid: { not: null } },
     select: { cwid: true },
   });
-  return new Set(rows.map((r) => r.cwid).filter((c): c is string => c !== null));
+  return new Set(rows.map((r) => r.cwid?.toLowerCase()).filter((c): c is string => !!c));
 }
 
 /** The page's and the download's ONE loader. */

@@ -9,8 +9,8 @@
  * Per award: the title and PI from the row whose role is `PI` (else the first
  * holder: earliest start, then CWID), the funder (`primeSponsor ?? funder`),
  * the mechanism, the period (min start – max end over ALL of the award's
- * `grant` rows, linked or not, found by the raw award numbers the links
- * carry), Active when the as-of date (UTC today) falls in that period, and the
+ * `grant` rows, linked or not), Active when the as-of date (UTC today) falls
+ * in that period, and the
  * distinct confirmed PMIDs linked to any of its rows.
  *
  * Only NIH grants held by WCM investigators have links (RePORTER + reciterdb
@@ -72,6 +72,8 @@ export function isCoreGrantsDefault(p: CoreGrantsParams): boolean {
   return p.status === "active" && p.funders.length === 0 && p.mechs.length === 0;
 }
 
+const AWARD_IC_SERIAL = /([A-Z]{2})\s*-?\s*0*(\d{5,6})/;
+
 /** Award number → a stable key (IC + zero-padded serial), so the per-person
  *  and per-renewal rows of one award collapse: `5R01CA123456-03`,
  *  `R01 CA123456` and `CA-123456` all → `CA123456`. Anything without that
@@ -79,8 +81,20 @@ export function isCoreGrantsDefault(p: CoreGrantsParams): boolean {
 export function awardKey(a: string | null | undefined): string | null {
   if (!a) return null;
   const u = a.toUpperCase();
-  const m = u.match(/([A-Z]{2})\s*-?\s*0*(\d{5,6})/);
+  const m = u.match(AWARD_IC_SERIAL);
   return m ? `${m[1]}${m[2].padStart(6, "0")}` : u.replace(/[^A-Z0-9]/g, "") || null;
+}
+
+/** The award's serial digits (as `awardKey` reads them, leading zeros off)
+ *  for a `LIKE '%<serial>%'` SUPERSET fetch of every spelling of the award
+ *  ("1R01CA123456-01", "5 R01 CA123456-06", "CA-123456"), the same approach as
+ *  `loadProjectSiblingRows` (lib/api/project-siblings.ts). Null when the
+ *  number has no IC + serial shape: such a key only matches its own exact
+ *  alphanumerics, so the caller fetches it by exact string. */
+export function awardSerial(a: string | null | undefined): string | null {
+  if (!a) return null;
+  const m = a.toUpperCase().match(AWARD_IC_SERIAL);
+  return m ? m[2] : null;
 }
 
 /** One `grant` row (dates `YYYY-MM-DD`). */
@@ -294,14 +308,36 @@ export async function loadCoreGrantAwards(
       rows.set(l.grant.id, toInput(l.grant));
     }
   }
-  // Every other row of the same awards (co-investigators' rows, renewals),
-  // for the PI and the period.
-  const numbers = [
-    ...new Set([...rows.values()].map((r) => r.awardNumber).filter((n): n is string => !!n)),
-  ];
-  for (const batch of chunk(numbers)) {
+  // Every other row of the same awards (co-investigators' rows, renewals and
+  // supplements), for the PI and the period. Matched by the award KEY, not the
+  // raw string: a paper linked only to a Co-I's "1R01CA123456-01" row must still
+  // pick up the PI's "5 R01 CA123456-06" renewal. The key is derived in app
+  // code, so fetch a superset by serial substring and keep only the rows whose
+  // `awardKey` is one of the linked awards'.
+  const wanted = new Set([...rows.values()].map(rowKey));
+  const serials = new Set<string>();
+  const exact = new Set<string>();
+  for (const r of rows.values()) {
+    if (!r.awardNumber) continue;
+    const serial = awardSerial(r.awardNumber);
+    if (serial) serials.add(serial);
+    else exact.add(r.awardNumber);
+  }
+  const keep = (g: Row) => {
+    if (rows.has(g.id)) return;
+    const input = toInput(g);
+    if (wanted.has(rowKey(input))) rows.set(g.id, input);
+  };
+  for (const batch of chunk([...serials], 50)) {
+    const more = await db.read.grant.findMany({
+      where: { OR: batch.map((serial) => ({ awardNumber: { contains: serial } })) },
+      select,
+    });
+    for (const g of more) keep(g);
+  }
+  for (const batch of chunk([...exact])) {
     const more = await db.read.grant.findMany({ where: { awardNumber: { in: batch } }, select });
-    for (const g of more) if (!rows.has(g.id)) rows.set(g.id, toInput(g));
+    for (const g of more) keep(g);
   }
   const all = [...rows.values()];
   const awards = collapseAwards(all, links, asOf);

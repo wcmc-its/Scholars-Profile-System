@@ -160,6 +160,23 @@ describe("buildCoreUsers", () => {
     expect(twoPlus.people.map((p) => p.cwid)).toEqual(["x1"]);
   });
 
+  it("known client matches case-insensitively (lowercased client set vs a mixed-case scholar cwid)", () => {
+    const rows = [a("ABC1001", "1", 2020), a("x1", "2", 2020)];
+    const clients = new Set(["abc1001"]);
+    const yes = buildCoreUsers(rows, {
+      whoMatch: null,
+      clientCwids: clients,
+      params: { ...ANY, client: "yes" },
+    });
+    expect(yes.people.map((p) => [p.cwid, p.knownClient])).toEqual([["ABC1001", true]]);
+    const no = buildCoreUsers(rows, {
+      whoMatch: null,
+      clientCwids: clients,
+      params: { ...ANY, client: "no" },
+    });
+    expect(no.people.map((p) => p.cwid)).toEqual(["x1"]);
+  });
+
   it("an empty who-match set matches nobody (never everyone)", () => {
     const r = buildCoreUsers([a("x1", "1", 2020)], {
       whoMatch: new Set(),

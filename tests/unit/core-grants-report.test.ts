@@ -11,10 +11,13 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
 
+import { db } from "@/lib/db";
 import {
   awardKey,
+  awardSerial,
   collapseAwards,
   filterAwards,
+  loadCoreGrantAwards,
   parseCoreGrantsParams,
   type AwardRow,
   type GrantRowInput,
@@ -207,5 +210,79 @@ describe("filterAwards", () => {
       keys,
     );
     expect(m.awards.map((a) => a.key)).toEqual(["C"]);
+  });
+});
+
+describe("loadCoreGrantAwards", () => {
+  const dbRow = (
+    id: string,
+    awardNumber: string | null,
+    over: Partial<{ cwid: string; role: string; start: string; end: string }> = {},
+  ) => ({
+    id,
+    cwid: over.cwid ?? `c${id}`,
+    title: `Title ${id}`,
+    role: over.role ?? "Co-I",
+    funder: "NIH",
+    primeSponsor: "NIH",
+    mechanism: "R01",
+    awardNumber,
+    startDate: new Date(`${over.start ?? "2015-07-01"}T00:00:00Z`),
+    endDate: new Date(`${over.end ?? "2020-06-30"}T00:00:00Z`),
+    scholar: { preferredName: `Person ${id}` },
+  });
+
+  it("finds the award's other rows by award KEY, not the raw award-number string", async () => {
+    // The core's paper is linked only to a Co-I's first-cycle row.
+    const coi = dbRow("1", "1R01CA012345-01");
+    const table = [
+      coi,
+      // The PI's renewal, spelled differently, still active.
+      dbRow("2", "5 R01 CA012345-06", {
+        cwid: "pi1",
+        role: "PI",
+        start: "2020-07-01",
+        end: "2099-06-30",
+      }),
+      // Shares the serial digits but is another award (other IC): excluded.
+      dbRow("3", "R01HL012345", { role: "PI", end: "2099-06-30" }),
+      // Non-NIH shape, linked: fetched by its exact string.
+      dbRow("4", "PCORI-INSIGHT"),
+    ];
+    const grantFind = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      const or = where.OR as { awardNumber: { contains: string } }[] | undefined;
+      if (or)
+        return table.filter((r) => or.some((a) => r.awardNumber?.includes(a.awardNumber.contains)));
+      const inList = (where.awardNumber as { in: string[] }).in;
+      return table.filter((r) => r.awardNumber !== null && inList.includes(r.awardNumber));
+    });
+    const read = db.read as unknown as Record<string, unknown>;
+    read.grantPublication = {
+      findMany: vi.fn(async () => [
+        { pmid: "100", grantId: "1", grant: coi },
+        { pmid: "101", grantId: "4", grant: table[3] },
+      ]),
+    };
+    read.grant = { findMany: grantFind };
+
+    const { awards } = await loadCoreGrantAwards(["100", "101"], "2026-09-28");
+    const ca = awards.find((a) => a.key === "CA012345")!;
+    expect(ca).toMatchObject({
+      piCwid: "pi1",
+      start: "2015-07-01",
+      end: "2099-06-30",
+      active: true,
+      papers: 1,
+    });
+    expect(awards.map((a) => a.key).sort()).toEqual(["CA012345", "PCORIINSIGHT"]);
+    expect(grantFind).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { OR: [{ awardNumber: { contains: "12345" } }] } }),
+    );
+  });
+
+  it("awardSerial: the serial digits, else null", () => {
+    expect(awardSerial("5 R01 CA012345-06")).toBe("12345");
+    expect(awardSerial("PCORI-INSIGHT")).toBeNull();
+    expect(awardSerial(null)).toBeNull();
   });
 });
