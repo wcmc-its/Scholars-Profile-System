@@ -123,56 +123,83 @@ export function CoreGrantsView({
           }))}
         />
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table
-            className="w-full min-w-[720px] border-collapse text-sm"
-            data-testid="core-grants-table"
-          >
-            <thead>
-              <tr className="border-apollo-border text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
-                <th className="py-2 pr-3">Grant</th>
-                <th className="py-2 pr-3">PI</th>
-                <th className="py-2 pr-3">Funder</th>
-                <th className="py-2 pr-3 text-right">Period</th>
-                <th className="py-2 text-right">Papers</th>
-              </tr>
-            </thead>
-            <tbody>
-              {awards.map((a) => (
-                <tr
-                  key={a.key}
-                  className="border-apollo-border border-b align-top"
-                  data-testid="core-grants-row"
-                >
-                  <td className="py-2 pr-3">
-                    <span className="font-semibold">{a.title}</span>
-                    <span className="text-muted-foreground block text-xs">
-                      {a.awardNumber ?? a.key}
-                    </span>
-                  </td>
-                  <td className="py-2 pr-3">
-                    <ScholarHoverCard cwid={a.piCwid}>
-                      <span className="hover:underline">{a.piName}</span>
-                    </ScholarHoverCard>
-                  </td>
-                  <td className="py-2 pr-3">
-                    {a.funder}
-                    {a.mechanism && (
-                      <span className="text-muted-foreground block text-xs">{a.mechanism}</span>
-                    )}
-                  </td>
-                  <td className="py-2 pr-3 text-right whitespace-nowrap">
-                    {formatPeriod(a.start, a.end)}
-                    <span className="text-muted-foreground block text-xs">
-                      {a.active ? "Active" : "Ended"}
-                    </span>
-                  </td>
-                  <td className="py-2 text-right tabular-nums">{a.papers.toLocaleString()}</td>
+        <>
+          {/* Below lg the 5-column table would clip Period/Papers off-screen, so
+            phones get the same rows stacked (the /edit/core index pattern). */}
+          <ul className="mt-4 lg:hidden" data-testid="core-grants-cards">
+            {awards.map((a) => (
+              <li key={a.key} className="border-apollo-border border-b py-2.5 text-sm">
+                <span className="font-semibold">{a.title}</span>
+                <div className="text-muted-foreground text-xs">{a.awardNumber ?? a.key}</div>
+                <div className="mt-0.5 text-xs">
+                  <ScholarHoverCard cwid={a.piCwid}>
+                    <span className="hover:underline">{a.piName}</span>
+                  </ScholarHoverCard>
+                  {" · "}
+                  {[a.funder, a.mechanism].filter(Boolean).join(" ")}
+                </div>
+                <div className="mt-0.5 flex justify-between text-xs tabular-nums">
+                  <span>
+                    {formatPeriod(a.start, a.end)} · {a.active ? "Active" : "Ended"}
+                  </span>
+                  <span>
+                    {a.papers.toLocaleString()} {a.papers === 1 ? "paper" : "papers"}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 hidden overflow-x-auto lg:block">
+            <table
+              className="w-full min-w-[720px] border-collapse text-sm"
+              data-testid="core-grants-table"
+            >
+              <thead>
+                <tr className="border-apollo-border text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
+                  <th className="py-2 pr-3">Grant</th>
+                  <th className="py-2 pr-3">PI</th>
+                  <th className="py-2 pr-3">Funder</th>
+                  <th className="py-2 pr-3 text-right">Period</th>
+                  <th className="py-2 text-right">Papers</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {awards.map((a) => (
+                  <tr
+                    key={a.key}
+                    className="border-apollo-border border-b align-top"
+                    data-testid="core-grants-row"
+                  >
+                    <td className="py-2 pr-3">
+                      <span className="font-semibold">{a.title}</span>
+                      <span className="text-muted-foreground block text-xs">
+                        {a.awardNumber ?? a.key}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <ScholarHoverCard cwid={a.piCwid}>
+                        <span className="hover:underline">{a.piName}</span>
+                      </ScholarHoverCard>
+                    </td>
+                    <td className="py-2 pr-3">
+                      {a.funder}
+                      {a.mechanism && (
+                        <span className="text-muted-foreground block text-xs">{a.mechanism}</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 text-right whitespace-nowrap">
+                      {formatPeriod(a.start, a.end)}
+                      <span className="text-muted-foreground block text-xs">
+                        {a.active ? "Active" : "Ended"}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right tabular-nums">{a.papers.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
       <div
         className="text-muted-foreground mt-6 flex max-w-[680px] flex-col gap-1.5 text-[13px]"
