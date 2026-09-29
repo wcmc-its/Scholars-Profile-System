@@ -799,6 +799,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_TRIAL_MESH_WEIGHT",
+                "Value": "1",
+              },
+              {
                 "Name": "SEARCH_TRIALS_TAB",
                 "Value": "off",
               },
@@ -5341,6 +5345,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_PEOPLE_TRIAL_EVIDENCE",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_TRIAL_MESH_WEIGHT",
+                "Value": "1.2",
               },
               {
                 "Name": "SEARCH_TRIALS_TAB",
