@@ -34,7 +34,7 @@ import { unitPublicationWhere } from "@/lib/api/unit-publication-where";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import type { LeaderRole } from "@/components/scholar/leader-card";
 import { formatRoleCategory } from "@/lib/role-display";
-import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { isPublicLeader, publicRoleWhere } from "@/lib/eligibility";
 import { DIVISION_CHIEF_ROLE_KEY } from "@/lib/org-unit-roles";
 import { resolveUnitLeader } from "@/lib/api/unit-leader";
 import {
@@ -223,10 +223,13 @@ async function getDivisionUncached(
         slug: true,
         primaryTitle: true,
         roleCategory: true,
+        deletedAt: true,
+        status: true,
       },
     });
-    // #2260 — a hidden identity class (#536) never headlines a public unit page.
-    if (chiefScholar && isPubliclyDisplayed(chiefScholar.roleCategory)) {
+    // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
+    // never headlines a public unit page.
+    if (chiefScholar && isPublicLeader(chiefScholar)) {
       const chiefAppt = await prisma.appointment.findFirst({
         where: {
           cwid: resolvedLeader.cwid,

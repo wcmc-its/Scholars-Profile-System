@@ -28,7 +28,7 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
-import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { isPublicLeader, isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
 import {
   matchesRosterQuery,
@@ -461,13 +461,16 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
         primaryTitle: true,
         slug: true,
         roleCategory: true,
+        deletedAt: true,
+        status: true,
       },
     });
-    // #2260 — a hidden identity class (#536) never gets a leader card. Keep it
+    // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
+    // never gets a leader card. Keep it
     // out of BOTH `byCwid` and the ED fallback below, or the directory lookup
     // would bring the name back unlinked.
     const hiddenCwids = new Set(
-      scholars.filter((s) => !isPubliclyDisplayed(s.roleCategory)).map((s) => s.cwid),
+      scholars.filter((s) => !isPublicLeader(s)).map((s) => s.cwid),
     );
     const byCwid = new Map(
       scholars.filter((s) => !hiddenCwids.has(s.cwid)).map((s) => [s.cwid, s]),
@@ -1370,6 +1373,8 @@ export async function getCenterProgram(
         slug: true,
         primaryTitle: true,
         roleCategory: true,
+        deletedAt: true,
+        status: true,
       },
     });
     const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
@@ -1382,8 +1387,9 @@ export async function getCenterProgram(
         ? row.role.label
         : formatLeadershipTitle(row.role.label, row.interim);
       const scholar = scholarByCwid.get(row.cwid);
-      // #2260 — a hidden identity class (#536) is dropped, never routed to `ext`.
-      if (scholar && !isPubliclyDisplayed(scholar.roleCategory)) return [];
+      // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
+      // is dropped, never routed to `ext`.
+      if (scholar && !isPublicLeader(scholar)) return [];
       if (scholar) {
         return [
           {

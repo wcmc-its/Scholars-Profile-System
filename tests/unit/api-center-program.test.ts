@@ -364,6 +364,62 @@ describe("unit leader carve (#2260)", () => {
       expect(call[0]).not.toContain("stu0002");
     }
   });
+
+  /** Resolve every requested cwid, merging extra fields onto the named ones. */
+  function withFields(fields: Record<string, Record<string, unknown>>) {
+    mockScholarFindMany.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
+      routeScholarFindMany(args).then((rows) =>
+        rows.map((r) => (fields[r.cwid] ? { ...r, ...fields[r.cwid] } : r)),
+      ),
+    );
+  }
+
+  it("drops a deleted or inactive program leader and never routes it to the external fallback", async () => {
+    mockCenterProgramFindUnique.mockResolvedValueOnce({
+      code: "CPC",
+      label: "Cancer Prevention & Control",
+      description: null,
+    });
+    programAssignments = [
+      assignmentRow("lead001", "leader"),
+      assignmentRow("del0001", "leader"),
+      assignmentRow("ext1234", "leader"),
+    ];
+    withFields({
+      del0001: { deletedAt: new Date("2026-01-01") },
+      ext1234: { status: "suppressed" },
+    });
+    const detail = await getCenterProgram("meyer-cancer-center", "CPC");
+    expect(detail!.leaders.map((l) => l.cwid)).toEqual(["lead001"]);
+  });
+
+  it("drops a deleted or inactive center leader and keeps it out of the ED fallback", async () => {
+    mockAssignmentFindMany.mockImplementation((args?: { where?: { entityType?: string } }) =>
+      Promise.resolve(
+        args?.where?.entityType === "center"
+          ? [
+              { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+              { cwid: "del0002", roleKey: "co_director", interim: false, role: { label: "Co-Director" } },
+              { cwid: "sup0002", roleKey: "co_director", interim: false, role: { label: "Co-Director" } },
+            ]
+          : [],
+      ),
+    );
+    withFields({
+      del0002: { deletedAt: new Date("2026-01-01") },
+      sup0002: { status: "suppressed" },
+    });
+    mockFetchDirectoryPeopleByCwid.mockResolvedValue([
+      { cwid: "del0002", name: "Deleted Leader", title: "Co-Director" },
+      { cwid: "sup0002", name: "Suppressed Leader", title: "Co-Director" },
+    ]);
+    const detail = await getCenter("meyer-cancer-center");
+    expect(detail!.leadership.map((l) => l.cwid)).toEqual(["dir0001"]);
+    for (const call of mockFetchDirectoryPeopleByCwid.mock.calls) {
+      expect(call[0]).not.toContain("del0002");
+      expect(call[0]).not.toContain("sup0002");
+    }
+  });
 });
 
 describe("getCenterPrograms (#1105 — center 'Programs' nav)", () => {

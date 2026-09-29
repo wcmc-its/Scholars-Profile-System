@@ -239,6 +239,25 @@ export function isPubliclyDisplayed(
 }
 
 /**
+ * #2260 — may this Scholar row headline a public unit leader card (department
+ * chair, division chief, center leadership, center program leader)? A hidden
+ * identity class, a soft-deleted row, or a non-active status all fail. Callers
+ * DROP a failing leader outright; never route it to EXTERNAL_LEADERS or the
+ * Enterprise Directory fallback, or the name resurfaces unlinked.
+ */
+export function isPublicLeader(s: {
+  roleCategory: RoleCategory | string | null | undefined;
+  deletedAt?: Date | null;
+  status?: string | null;
+}): boolean {
+  return (
+    isPubliclyDisplayed(s.roleCategory) &&
+    s.deletedAt == null &&
+    (s.status ?? "active") === "active"
+  );
+}
+
+/**
  * General eligibility carve — applies to scholar-attributed algorithmic surfaces:
  * Recent contributions (RANKING-01), Selected research carousel filtering (HOME-02),
  * Recent highlights (RANKING-02).

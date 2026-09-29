@@ -27,7 +27,7 @@ import type { RosterMeshChip } from "@/lib/roster-row-tags";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
-import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { isPublicLeader, publicRoleWhere } from "@/lib/eligibility";
 import type { LeaderRole } from "@/components/scholar/leader-card";
 import {
   departmentLeaderRoleKey,
@@ -192,10 +192,13 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
         slug: true,
         primaryTitle: true,
         roleCategory: true,
+        deletedAt: true,
+        status: true,
       },
     });
-    if (chairScholar && !isPubliclyDisplayed(chairScholar.roleCategory)) {
-      // #2260 — a hidden identity class (#536) never headlines a public unit
+    if (chairScholar && !isPublicLeader(chairScholar)) {
+      // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
+      // never headlines a public unit
       // page. Drop the card; never fall through to the external-leader branch.
       chair = null;
     } else if (chairScholar) {
