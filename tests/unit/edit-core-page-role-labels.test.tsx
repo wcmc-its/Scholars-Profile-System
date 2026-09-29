@@ -19,7 +19,10 @@
  * surface, session, and child components are mocked. Server Component
  * elements are never rendered — `EditCorePage(...)` returns a `{ type, props
  * }` tree (React.createElement records, doesn't invoke), walked with
- * `findByType`.
+ * `findByType`. Since the single-scroll redesign the page hands everything to
+ * `CoreEditSections`, which then passes `leaders` / `roleLabels` straight to
+ * `CoreLeaderCard` (`core-edit-sections.test.tsx` covers that hop), so the
+ * assertions here read the `CoreEditSections` props.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -36,7 +39,7 @@ const {
   mockLoadQueue,
   mockLoadConsoleTabs,
   mockLogAuthzDenied,
-  mockLeaderCard,
+  mockSections,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -54,7 +57,7 @@ const {
   mockLoadQueue: vi.fn(),
   mockLoadConsoleTabs: vi.fn(),
   mockLogAuthzDenied: vi.fn(),
-  mockLeaderCard: vi.fn(() => null),
+  mockSections: vi.fn(() => null),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
@@ -74,21 +77,15 @@ vi.mock("@/lib/db", () => ({
     write: {},
   },
 }));
-// Only the CLIENT COMPONENT is replaced — `resolveCoreLeaderRoleLabel` stays
-// the real export, so the assertions below run the actual resolver, not a
-// re-statement of what the component test already covers.
-vi.mock("@/components/edit/core-leader-card", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/components/edit/core-leader-card")>();
-  return { ...actual, CoreLeaderCard: mockLeaderCard };
-});
-vi.mock("@/components/edit/core-details-card", () => ({ CoreDetailsCard: vi.fn(() => null) }));
-vi.mock("@/components/edit/unit-access-card", () => ({ UnitAccessCard: vi.fn(() => null) }));
-vi.mock("@/components/edit/edit-shell", () => ({ EditShell: vi.fn(({ children }) => children) }));
+// `resolveCoreLeaderRoleLabel` stays the real export (core-leader-card is not
+// mocked), so the assertions below run the actual resolver.
+vi.mock("@/components/edit/core-edit-sections", () => ({ CoreEditSections: mockSections }));
 vi.mock("@/components/edit/console-top-bar", () => ({ ConsoleTopBar: vi.fn(() => null) }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: vi.fn(() => null) }));
 
 import { resolveCoreLeaderRoleLabel } from "@/components/edit/core-leader-card";
 import EditCorePage from "@/app/edit/core/[coreId]/page";
+import { HIGH_CONFIDENCE_LIKELIHOOD } from "@/lib/api/core-console-index";
 
 type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
@@ -135,7 +132,7 @@ beforeEach(() => {
   // the CURRENT label rather than a stale or default one.
   mockOrgUnitRoleFindMany.mockResolvedValue([{ key: "director", label: "Executive Director" }]);
   mockLoadQueue.mockResolvedValue({ candidates: [] });
-  mockLoadConsoleTabs.mockResolvedValue({ units: true });
+  mockLoadConsoleTabs.mockResolvedValue({ units: true, cores: true });
 });
 
 describe("/edit/core/[coreId] — #2559 role-label wiring", () => {
@@ -146,9 +143,9 @@ describe("/edit/core/[coreId] — #2559 role-label wiring", () => {
     );
   });
 
-  it("passes the queried labels to CoreLeaderCard, and a steward rename reaches the resolved display string (not the raw key)", async () => {
+  it("passes the queried labels on to the leader card, and a steward rename reaches the resolved display string (not the raw key)", async () => {
     const result = await EditCorePage({ params: params("2"), searchParams: searchParams("leadership") });
-    const card = findByType(result, mockLeaderCard);
+    const card = findByType(result, mockSections);
     expect(card).toBeTruthy();
 
     // Half 1: the map built from the query reached the prop verbatim.
@@ -170,9 +167,81 @@ describe("/edit/core/[coreId] — #2559 role-label wiring", () => {
     ]);
     mockScholarFindMany.mockResolvedValue([]);
     const result = await EditCorePage({ params: params("2"), searchParams: searchParams("leadership") });
-    const card = findByType(result, mockLeaderCard);
+    const card = findByType(result, mockSections);
     const leaders = card!.props.leaders as Array<{ role: string }>;
     const roleLabels = card!.props.roleLabels as Record<string, string>;
     expect(resolveCoreLeaderRoleLabel(leaders[0].role, roleLabels)).toBe("Chief");
+  });
+});
+
+describe("/edit/core/[coreId] — single-scroll page data", () => {
+  const withLikelihoods = (...ls: number[]) =>
+    mockLoadQueue.mockResolvedValue({ candidates: ls.map((likelihood) => ({ likelihood })) });
+
+  it("the banner's strong count is the /edit/core index's HIGH_CONFIDENCE_LIKELIHOOD cut", async () => {
+    // Straddle the index's constant: at-the-cut counts, just-below doesn't.
+    withLikelihoods(0.95, HIGH_CONFIDENCE_LIKELIHOOD, HIGH_CONFIDENCE_LIKELIHOOD - 0.01, 0.1);
+    const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+    expect(findByType(result, mockSections)!.props.pending).toEqual({ total: 4, strong: 2 });
+  });
+
+  it("an empty queue is 0 of 0", async () => {
+    mockLoadQueue.mockResolvedValue(null);
+    const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+    expect(findByType(result, mockSections)!.props.pending).toEqual({ total: 0, strong: 0 });
+  });
+
+  it("forwards the legacy ?attr=, the cores-tab crumb grant, and the Superuser role", async () => {
+    const result = await EditCorePage({
+      params: params("2"),
+      searchParams: searchParams("access"),
+    });
+    const props = findByType(result, mockSections)!.props;
+    expect(props.attr).toBe("access");
+    expect(props.coresNavVisible).toBe(true);
+    expect(props.actorRole).toBe("superuser");
+    // A Superuser manages access, so the Access rows are loaded (not null).
+    expect(props.access).toEqual([]);
+  });
+
+  it("a comms_steward with no grant edits at curator parity", async () => {
+    mockGetEditSession.mockResolvedValue({
+      cwid: "stw001",
+      isSuperuser: false,
+      isCommsSteward: true,
+    });
+    const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+    expect(findByType(result, mockSections)!.props.actorRole).toBe("curator");
+  });
+
+  it("no Preview link while either public core flag is off", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    vi.stubEnv("CORE_PUB_MODAL", "off");
+    try {
+      const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+      expect(findByType(result, mockSections)!.props.previewHref).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a visible core with both public flags on previews /cores/[id]; a hidden one doesn't", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    vi.stubEnv("CORE_PUB_MODAL", "on");
+    try {
+      let result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+      expect(findByType(result, mockSections)!.props.previewHref).toBe("/cores/2");
+
+      mockCoreFindUnique.mockResolvedValue({
+        name: "Biomedical Imaging",
+        description: null,
+        url: null,
+        visible: false,
+      });
+      result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+      expect(findByType(result, mockSections)!.props.previewHref).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

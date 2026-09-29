@@ -19,6 +19,9 @@
  *
  * Retired read-through (edge 11): a retired unit shows only the notice + the
  * Retire section (where a Superuser restores it).
+ *
+ * The core editor (`core-edit-sections.tsx`) reuses this shell with a "Cores"
+ * root crumb, a "Hidden" title pill, and its review banner as the `notice`.
  */
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, ChevronLeftIcon } from "lucide-react";
@@ -47,7 +50,9 @@ const ROLE_LABEL: Record<UnitActorRole, string> = {
 export function UnitEditSections({
   name,
   kindLabel,
+  titleBadge,
   crumbLabel,
+  rootCrumb = { label: "Org units", href: "/edit/units" },
   orgUnitsNavVisible,
   actorRole,
   previewHref,
@@ -59,9 +64,13 @@ export function UnitEditSections({
   name: string;
   /** The chip beside the `<h1>` ("Center"). */
   kindLabel: string;
-  /** The breadcrumb's second segment ("Centers"). */
-  crumbLabel: string;
-  /** Whether "Org units" links back to `/edit/units` (the units-tab predicate). */
+  /** An extra pill after the kind chip (a core's "Hidden from public pages"). */
+  titleBadge?: React.ReactNode;
+  /** The breadcrumb's second segment ("Centers"); omitted = the root crumb only. */
+  crumbLabel?: string;
+  /** The breadcrumb's first segment — "Org units", or a core's "Cores". */
+  rootCrumb?: { label: string; href: string };
+  /** Whether the root crumb links back to its index (the viewer's tab predicate). */
   orgUnitsNavVisible: boolean;
   actorRole: UnitActorRole;
   previewHref?: string;
@@ -86,22 +95,26 @@ export function UnitEditSections({
         <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px]">
           {orgUnitsNavVisible ? (
             <Link
-              href="/edit/units"
+              href={rootCrumb.href}
               className="text-apollo-slate inline-flex items-center gap-1 hover:underline"
               data-testid="edit-subnav-units"
             >
               <ChevronLeftIcon className="size-3.5" aria-hidden />
-              Org units
+              {rootCrumb.label}
             </Link>
           ) : (
-            <span className="text-muted-foreground">Org units</span>
+            <span className="text-muted-foreground">{rootCrumb.label}</span>
           )}
-          <span className="text-muted-foreground" aria-hidden>
-            /
-          </span>
-          <span className="text-muted-foreground" data-testid="unit-edit-crumb">
-            {crumbLabel}
-          </span>
+          {crumbLabel && (
+            <>
+              <span className="text-muted-foreground" aria-hidden>
+                /
+              </span>
+              <span className="text-muted-foreground" data-testid="unit-edit-crumb">
+                {crumbLabel}
+              </span>
+            </>
+          )}
         </nav>
 
         <header className="flex flex-wrap items-end gap-4">
@@ -119,6 +132,7 @@ export function UnitEditSections({
               >
                 {kindLabel}
               </span>
+              {titleBadge}
             </div>
             <p className="text-muted-foreground text-[13px]" data-testid="unit-edit-actor-note">
               Editing as administrator ({ROLE_LABEL[actorRole]}). Changes are logged against your
