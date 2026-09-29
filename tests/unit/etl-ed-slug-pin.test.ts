@@ -120,3 +120,29 @@ describe("maybeUpdatedSlug — pin precedence (#497 §5.2)", () => {
     });
   });
 });
+
+describe("maybeUpdatedSlug — slug_history ownership (#2606)", () => {
+  it("skips a slug_history slug owned by ANOTHER cwid (takes the numeric floor)", async () => {
+    mockScholarFindUnique.mockResolvedValue({ slug: "old-name" });
+    const existingSlugs = new Set(["old-name"]); // jane-smith is NOT live...
+    const historyOwners = new Map([["jane-smith", "other1"]]); // ...but redirects to other1
+    await maybeUpdatedSlug("old-name", "Jane Smith", "free4", existingSlugs, new Set(), historyOwners);
+    expect(mockScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "free4" },
+      data: { slug: "jane-smith-2" },
+    });
+    // the vacated slug is now history-owned by free4 for the rest of the run
+    expect(historyOwners.get("old-name")).toBe("free4");
+  });
+
+  it("lets a scholar reclaim a slug from their OWN slug_history", async () => {
+    mockScholarFindUnique.mockResolvedValue({ slug: "old-name" });
+    const existingSlugs = new Set(["old-name"]);
+    const historyOwners = new Map([["jane-smith", "free5"]]); // free5's own former slug
+    await maybeUpdatedSlug("old-name", "Jane Smith", "free5", existingSlugs, new Set(), historyOwners);
+    expect(mockScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "free5" },
+      data: { slug: "jane-smith" },
+    });
+  });
+});

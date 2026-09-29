@@ -894,6 +894,18 @@ async function main() {
       ).map((o) => o.entityId),
     );
 
+    // #2606 — slug_history old_slug -> current_cwid. A former slug still
+    // 301-redirects to its owner, so minting it for a DIFFERENT scholar would
+    // hijack that redirect; own-CWID history stays reclaimable (matches
+    // assertSlugAvailable in lib/edit/validators.ts). Loaded once per run.
+    const slugHistoryOwners = new Map(
+      (
+        await db.write.slugHistory.findMany({
+          select: { oldSlug: true, currentCwid: true },
+        })
+      ).map((h) => [h.oldSlug, h.currentCwid]),
+    );
+
     let created = 0;
     let updated = 0;
     let reactivated = 0;
@@ -1257,6 +1269,7 @@ async function main() {
           f.cwid,
           existingSlugs,
           pinnedSlugCwids,
+          slugHistoryOwners,
         );
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
         if (historicalReconcileEligible) {
@@ -1267,7 +1280,10 @@ async function main() {
       } else {
         // New scholar.
         const baseSlug = deriveSlug(f.preferredName) || f.cwid.toLowerCase();
-        const slug = nextAvailableSlug(baseSlug, existingSlugs);
+        const slug = nextAvailableSlug(
+          baseSlug,
+          slugTakenFor(f.cwid, existingSlugs, slugHistoryOwners),
+        );
         existingSlugs.add(slug);
 
         await db.write.scholar.create({
@@ -2278,6 +2294,25 @@ async function main() {
 }
 
 /**
+ * The taken-slug view for minting `cwid`'s slug (#2606): live slugs, plus any
+ * `slug_history.old_slug` owned by a DIFFERENT cwid (taking it would hijack that
+ * scholar's 301). The scholar's own history stays reclaimable.
+ */
+export function slugTakenFor(
+  cwid: string,
+  existingSlugs: ReadonlySet<string>,
+  slugHistoryOwners: ReadonlyMap<string, string>,
+): { has(slug: string): boolean } {
+  return {
+    has: (slug) => {
+      if (existingSlugs.has(slug)) return true;
+      const owner = slugHistoryOwners.get(slug);
+      return owner !== undefined && owner !== cwid;
+    },
+  };
+}
+
+/**
  * Re-mint a scholar's slug after a slug-affecting name change — unless the slug
  * is pinned by a `FieldOverride(slug)` (#497 §5.2), in which case it is left
  * untouched. When a re-mint is warranted, the old slug is written to
@@ -2296,6 +2331,7 @@ export async function maybeUpdatedSlug(
   cwid: string,
   existingSlugs: Set<string>,
   pinnedSlugCwids: ReadonlySet<string>,
+  slugHistoryOwners: Map<string, string> = new Map(),
 ): Promise<void> {
   // #497 §5.2 — a pinned slug is authoritative; never re-mint it. The override
   // is the pin; Scholar.slug and slug_history stay exactly as the last set/clear
@@ -2308,7 +2344,7 @@ export async function maybeUpdatedSlug(
   const base = currentSlug.replace(/-\d+$/, "");
   if (base === newBase) return;
 
-  const newSlug = nextAvailableSlug(newBase, existingSlugs);
+  const newSlug = nextAvailableSlug(newBase, slugTakenFor(cwid, existingSlugs, slugHistoryOwners));
   if (newSlug === currentSlug) return;
 
   // Record the old slug in history and set the new one — shared with the
@@ -2318,6 +2354,9 @@ export async function maybeUpdatedSlug(
   await reconcileScholarSlug(db.write, cwid, newSlug);
   existingSlugs.delete(currentSlug);
   existingSlugs.add(newSlug);
+  // Mirror the slug_history row reconcileScholarSlug just wrote, so a later
+  // scholar in this run can't take the slug we just vacated.
+  slugHistoryOwners.set(currentSlug, cwid);
 }
 
 // Run the ETL only when this file is executed as a script — never when it is
