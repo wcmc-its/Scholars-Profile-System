@@ -19,7 +19,11 @@
  * Exits 0 on success, 1 on failure. STDOUT carries one structured result line.
  */
 import { db } from "../../lib/db";
-import { headshotStaleBefore, probeHeadshot } from "../../lib/headshot-presence";
+import {
+  headshotIndeterminateLimit,
+  headshotStaleBefore,
+  probeHeadshot,
+} from "../../lib/headshot-presence";
 import { withEtlRun } from "@/lib/etl-run";
 
 /** Concurrent in-flight directory probes. The directory is a shared WCM service;
@@ -29,8 +33,8 @@ const CONCURRENCY = 12;
 async function main(): Promise<void> {
   const full = process.argv.includes("--full");
   // Incremental mode re-probes a scholar whose last check is older than this.
-  // The threshold is pinned to the weekly cadence in `lib/headshot-presence.ts`
-  // — see HEADSHOT_STALE_DAYS for why it must stay under 7 days (#2210).
+  // The threshold is pinned against the weekly cadence in `lib/headshot-presence.ts`
+  // — see HEADSHOT_STALE_DAYS (13, deliberately above the 7-day period, #2210).
   const staleBefore = headshotStaleBefore();
 
   const scholars = await db.write.scholar.findMany({
@@ -113,6 +117,18 @@ async function main(): Promise<void> {
       ts: new Date().toISOString(),
     }),
   );
+
+  // #2264 follow-up — thrown AFTER the definitive verdicts are written (they are
+  // correct and kept). The step's retry re-probes only the rows that were
+  // indeterminate (the rest now carry a fresh checked-at); still over the limit
+  // → the step fails and etl-failures-<env> is notified.
+  const limit = headshotIndeterminateLimit(scholars.length);
+  if (indeterminate > limit) {
+    throw new Error(
+      `[Headshot] ${indeterminate} of ${scholars.length} probes indeterminate (limit ${limit}) ` +
+        `— directory erroring; those verdicts were left unrefreshed`,
+    );
+  }
 }
 
 withEtlRun("Headshot", main)
