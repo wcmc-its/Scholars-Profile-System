@@ -16,6 +16,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { EntityBadge } from "@/components/ui/entity-badge";
 import type { EntitySuggestion } from "@/lib/api/search";
+import { searchHref } from "@/lib/search/query-url";
 
 export function MethodFinder() {
   const [value, setValue] = useState("");
@@ -68,7 +69,7 @@ export function MethodFinder() {
   }, []);
 
   const items = results ?? [];
-  const seeAllHref = `/search?q=${encodeURIComponent(q)}`;
+  const seeAllHref = searchHref(q);
   const shown = open && q.length >= 2 && results !== null;
 
   return (

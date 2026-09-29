@@ -144,6 +144,7 @@ import {
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
 // to keep both names unambiguous within this module.
 import type { PeopleQueryShape as PeopleQueryClassification } from "@/lib/api/people-query-shape";
+import { searchHref } from "@/lib/search/query-url";
 
 const PAGE_SIZE = 20;
 
@@ -6561,7 +6562,7 @@ export async function suggestEntities(
       c.confidence === "entry-term"
         ? `MeSH concept · via "${c.matchedForm}"`
         : "MeSH concept",
-    href: `/search?q=${encodeURIComponent(c.name)}`,
+    href: searchHref(c.name),
   });
 
   if (!useV2) {

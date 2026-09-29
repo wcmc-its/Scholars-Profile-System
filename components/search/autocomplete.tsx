@@ -9,6 +9,7 @@ import type { EntityKind } from "@/lib/api/search";
 import { EntityBadge } from "@/components/ui/entity-badge";
 import { reportNavWatchdog, type NavWatchdogSurface } from "@/lib/analytics/nav-watchdog";
 import { formatRoleCategory } from "@/lib/role-display";
+import { searchHref } from "@/lib/search/query-url";
 
 type Suggestion = {
   kind: EntityKind;
@@ -210,7 +211,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     abortRef.current?.abort();
     setSuggestions([]);
     setOpen(false);
-    let href = `/search?q=${encodeURIComponent(value.trim())}`;
+    let href = searchHref(value.trim());
     // Preserve the active result tab on a new search instead of bouncing to the
     // Scholars default. Read at submit time (always client) so the header avoids
     // useSearchParams; a fresh query still resets facets/sort/page.
