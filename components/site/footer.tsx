@@ -4,7 +4,7 @@ import Link from "next/link";
 export function SiteFooter() {
   return (
     <footer className="bg-apollo-bar mt-24">
-      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-6 py-8 text-sm text-[#d9d2cc] sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-6 pt-8 pb-20 text-sm sm:pb-8 text-[#d9d2cc] sm:flex-row sm:items-center sm:justify-between">
         <div className="font-serif text-base text-white">Scholars @ Weill Cornell Medicine</div>
         <div className="flex items-center gap-4">
           <Link
