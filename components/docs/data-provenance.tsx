@@ -61,7 +61,7 @@ const EXT: Source[] = [
   { name: "NIH RePORTER", data: "Earlier NIH grants, abstracts, grant-linked papers", cad: "weekly" },
   { name: "NSF Awards", data: "NSF grant abstracts", cad: "weekly" },
   { name: "Gates Foundation", data: "Gates grant summaries", cad: "weekly" },
-  { name: "ClinicalTrials.gov", data: "Trial details", cad: "weekly" },
+  { name: "ClinicalTrials.gov", data: "Trial details, status, whether results are posted; condition MeSH terms for search", cad: "weekly" },
   { name: "NLM MeSH", data: "Subject vocabulary for search", cad: "annual" },
 ];
 

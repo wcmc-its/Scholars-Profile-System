@@ -38,7 +38,7 @@ Earlier the app had two pages both calling themselves "Browse." The A–Z direct
 **Robots:** `noindex, follow` — non-canonical
 **Render:** `force-dynamic` — every request renders fresh, no ISR
 
-**Tabs:** `?type=people` (default) | `?type=publications` | `?type=funding`
+**Tabs:** `?type=people` (default) | `?type=publications` | `?type=funding` | `?type=trials` (labeled "Clinical research"; only when `SEARCH_TRIALS_TAB` is on, else `?type=trials` falls back to People)
 
 **People tab UI:**
 - When `q=""`: an A–Z directory strip renders between the tabs and the results grid, with a subordinate "Or browse departments & centers →" link beneath it. Once the user types, the strip and cross-link hide.
@@ -52,6 +52,14 @@ Earlier the app had two pages both calling themselves "Browse." The A–Z direct
 
 **Grants tab UI:**
 - Left sidebar: **Sort** (Relevance, End date, Start date, Publication count).
+
+**Clinical research tab UI** (flag `SEARCH_TRIALS_TAB`, `resolveTrialsTab` in `lib/api/search-trials.ts`; **on in staging, off in prod**, `cdk/lib/app-stack.ts:2237`):
+- One row per trial (`components/search/trial-result-row.tsx`) from the `scholars-trials` index, built by `etl/search-index/index.ts` (`loadTrialDocs`, `lib/search-trial-evidence.ts`). A trial is deduped by NCT number (else OnCore protocol number) and listed only under PIs with a public profile; withdrawn and suspended trials are left out, as on the profile. A missing index hides the tab rather than erroring the page.
+- Scope control like Funding: Exact word (text only) / Word + concepts (text or the resolved MeSH concept) / Concept only. Text matches title, conditions, MeSH labels, summary and PI names; the concept matches the trial's ClinicalTrials.gov condition MeSH.
+- Left sidebar: **Sort** (Relevance, Most recent, Recruiting first) and facets Status, Study type (incl. "Not on ClinicalTrials.gov"), Phase, Investigator, Department, Condition, Intervention type, Sponsor type, Start date, Has results posted.
+- Status, dates, interventions and the results flag come from the ClinicalTrials.gov API, fetched on the weekly clinical-trials ETL (`etl/clinical-trials/shared.ts`); a protocol with no NCT number falls back to its OnCore status and first open-to-accrual date.
+
+The People tab can also use trials as evidence (`SEARCH_PEOPLE_TRIAL_EVIDENCE`, same env state); see [`search-people-relevance.md`](./search-people-relevance.md#clinical-research-evidence).
 
 **Data:** `lib/api/search.ts` exposes `searchPeople` and `searchPublications` against OpenSearch. `getAZBuckets()` from `lib/api/browse.ts` is called only when `q="" && type="people"`. The empty-query state shows all active scholars, paginated.
 
