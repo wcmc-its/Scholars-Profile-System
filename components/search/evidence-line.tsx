@@ -121,6 +121,9 @@ function evidenceSummary(
 
 /** A PI trial tagged under the concept (Matcha). Title links to ClinicalTrials.gov when registered. */
 function TrialRow({ trial }: { trial: EvidenceTrial }) {
+  const titleHtml = trial.titleHighlight
+    ? highlightedTitleHtml(trial.titleHighlight)
+    : sanitizePubmedHtml(trial.title);
   const parts = [
     trial.nctNumber ?? `WCM protocol ${trial.trialId}`,
     "PI",
@@ -138,17 +141,17 @@ function TrialRow({ trial }: { trial: EvidenceTrial }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-foreground text-sm leading-snug">
+          {/* Same pale-red pill as the PUB row: `highlightedTitleHtml` over the index's
+              HTML-encoded <mark> fragment; the plain title is escaped by sanitizePubmedHtml. */}
           {trial.nctNumber ? (
             <a
               href={`https://clinicaltrials.gov/study/${trial.nctNumber}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:underline"
-            >
-              {trial.title /* pub-html-ok: clinical trial title, plain text from CT.gov/OnCore */}
-            </a>
+              {...pubTitleProps(titleHtml, "hover:underline")}
+            />
           ) : (
-            trial.title /* pub-html-ok: clinical trial title, plain text from CT.gov/OnCore */
+            <span {...pubTitleProps(titleHtml)} />
           )}
         </div>
         <div className="text-muted-foreground mt-0.5 text-xs">

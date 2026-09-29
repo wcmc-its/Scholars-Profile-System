@@ -83,10 +83,11 @@ async function trialsFor(
   sp: URLSearchParams,
   cwid: string,
   uis: string[],
+  highlightText: string,
 ): Promise<{ trials?: EvidenceTrial[] }> {
   if (sp.get("trials") !== "1" || !resolveSearchPeopleTrialEvidence() || uis.length === 0) return {};
   try {
-    return { trials: (await loadConceptTrials(cwid, uis)).trials };
+    return { trials: (await loadConceptTrials(cwid, uis, highlightText)).trials };
   } catch (err) {
     console.error("[grants-evidence] trial lookup failed", { cwid, err });
     return { trials: [] };
@@ -191,7 +192,10 @@ export async function GET(
     // searchFunding if the mislabel proves confusing during the soak.
     const strength: "tagged" | "mention" =
       meshResolution !== null && result.hits.some((h) => h.matchedConcept) ? "tagged" : "mention";
-    return NextResponse.json({ grants, total: result.total, strength, ...(await trialsFor(sp, cwid, descriptorUis)) }, { headers: NO_STORE });
+    return NextResponse.json(
+      { grants, total: result.total, strength, ...(await trialsFor(sp, cwid, descriptorUis, `${contentQuery} ${label}`)) },
+      { headers: NO_STORE },
+    );
   } catch (err) {
     // This used to return EMPTY, so an OpenSearch throw rendered as "this scholar has no
     // matching grants" — indistinguishable from the truth, and logged nowhere at all. Both

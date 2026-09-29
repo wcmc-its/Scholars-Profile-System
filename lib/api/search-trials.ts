@@ -278,10 +278,12 @@ export async function searchTrials(opts: {
 const EVIDENCE_TRIAL_CAP = 3;
 
 /** A scholar's PI trials whose ClinicalTrials.gov MeSH falls in the concept subtree (`uis`),
- *  recruiting first then newest, capped at 3 — Matcha's TRIAL evidence rows. Concept-only. */
+ *  recruiting first then newest, capped at 3 — Matcha's TRIAL evidence rows. Concept-only;
+ *  `highlightText` (the query + concept name) only marks the title, it never admits a trial. */
 export async function loadConceptTrials(
   cwid: string,
   uis: string[],
+  highlightText = "",
 ): Promise<{ trials: EvidenceTrial[]; total: number }> {
   if (uis.length === 0) return { trials: [], total: 0 };
   const r = await searchClient().search({
@@ -296,16 +298,30 @@ export async function loadConceptTrials(
         { trialId: "asc" },
       ],
       _source: ["trialId", "nctNumber", "title", "statusKey", "statusBucket", "startYear"],
+      ...(highlightText.trim()
+        ? {
+            highlight: {
+              pre_tags: ["<mark>"],
+              post_tags: ["</mark>"],
+              encoder: "html",
+              fields: { title: { number_of_fragments: 0 } },
+              highlight_query: { match: { title: highlightText } },
+            },
+          }
+        : {}),
     },
   });
   type Hit = Pick<TrialDoc, "trialId" | "nctNumber" | "title" | "statusKey" | "statusBucket" | "startYear">;
-  const body = r.body as unknown as { hits: { total: { value: number }; hits: Array<{ _source: Hit }> } };
+  const body = r.body as unknown as {
+    hits: { total: { value: number }; hits: Array<{ _source: Hit; highlight?: { title?: string[] } }> };
+  };
   return {
     total: body.hits.total.value,
-    trials: body.hits.hits.map(({ _source: t }) => ({
+    trials: body.hits.hits.map(({ _source: t, highlight }) => ({
       trialId: t.trialId,
       nctNumber: t.nctNumber,
       title: t.title,
+      titleHighlight: highlight?.title?.[0] ?? null,
       status: t.statusKey ? (TRIAL_STATUS_LABEL[t.statusKey] ?? null) : null,
       isActive: t.statusBucket === "active",
       startYear: t.startYear ?? null,

@@ -58,6 +58,8 @@ export type EvidenceTrial = {
   trialId: string;
   nctNumber: string | null;
   title: string;
+  /** `title` with the matched terms in `<mark>` (text HTML-escaped); null when none matched. */
+  titleHighlight: string | null;
   /** Display label ("Recruiting", "Completed", …); null when unknown. */
   status: string | null;
   isActive: boolean;
