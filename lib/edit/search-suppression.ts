@@ -86,6 +86,7 @@ import {
   buildPeopleDoc,
   buildPublicationDoc,
   isRequireDisplayableAuthorEnabled,
+  loadEsiEligibilityByCwid,
   loadMeshAncestorContext,
   loadOverviewOverrides,
   type MeshAncestorContext,
@@ -480,7 +481,9 @@ async function buildScholarOps(
     overlayGate,
     ancestors,
     overviewOverrides,
-    undefined,
+    // Keep `esiEligible` on a fast-path reindex (one cwid-scoped read); omitting
+    // it dropped the field until the next nightly rebuild.
+    await loadEsiEligibilityByCwid(db.read, cwid),
     trialEvidence,
     // #2081 — `piRoleEver` drops suppressed rows, matching the funding index.
     await loadAllGrantSuppressions(db.read),

@@ -286,9 +286,11 @@ export async function loadOverviewOverrides(
  */
 export async function loadEsiEligibilityByCwid(
   client: Pick<PrismaClient, "scholar">,
+  // Scope to one scholar for the /edit single-doc fast-path reindex.
+  cwid?: string,
 ): Promise<Map<string, boolean>> {
   const rows = await client.scholar.findMany({
-    where: PEOPLE_INDEX_WHERE,
+    where: cwid ? { ...PEOPLE_INDEX_WHERE, cwid } : PEOPLE_INDEX_WHERE,
     select: {
       cwid: true,
       grants: { select: { endDate: true, role: true, mechanism: true } },
@@ -968,8 +970,7 @@ export async function buildPeopleDoc(
   // in the map (`false` when the map has no entry for this cwid — matches
   // `deriveGrantSignals`' own conservative "unknown degree year -> not
   // eligible" posture, never a different default). When OMITTED — every
-  // existing test, and any caller that doesn't pass it (e.g. the
-  // single-doc fast-path, until it's wired) — the field is never emitted,
+  // existing test, and any caller that doesn't pass it — the field is never emitted,
   // so the produced doc is byte-identical to today.
   esiEligibleByCwid?: Map<string, boolean>,
   // OPTIONAL per-cwid clinical-trial evidence (`loadTrialEvidenceByCwid`).
