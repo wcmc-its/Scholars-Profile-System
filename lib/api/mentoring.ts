@@ -325,6 +325,10 @@ function localAuthors(fullAuthorsString: string | null): CoPublicationAuthor[] {
  * (the unlinked-alumnus case) gets zero. They get zero today too, so this is
  * strictly better than the status quo, just short of what ReciterDB would return.
  *
+ * #2047 — also the fallback for a SOURCED mentee whose pair has no row in the
+ * (manually refreshed) co-pub bridge, so a newly sourced mentee is not shown a
+ * stale zero. Read-only: nothing here writes.
+ *
  * Fail-soft to an empty map with a logged error, matching the bridge/live path's
  * historical `.catch(() => [])` — a co-pub read must not take down a profile.
  */
@@ -699,6 +703,9 @@ export async function getMenteesForMentor(
   // entirely; counts stay 0 and `copubSourceAvailable` stays false.
   const includeCopubs = options?.includeCopubs ?? true;
   let copubSourceAvailable = false;
+  // #2047 — sourced mentees the bridge has NO row for. Filled below, then
+  // computed from local Aurora alongside the manual-only mentees.
+  let bridgeGapCwids: string[] = [];
 
   // Issue #443 — two co-pub sources. LIVE: the WCM ReciterDB query (load-bearing
   // where the SPS VPC can reach ReciterDB). BRIDGE: the pre-computed
@@ -726,6 +733,17 @@ export async function getMenteesForMentor(
         copubCountByCwid.set(r.menteeCwid, r.count);
         copubPreviewByCwid.set(r.menteeCwid, (r.preview as CoPublication[]) ?? []);
       }
+      // #2047 — nothing schedules the bridge export/import, while the mentee
+      // ROSTER refreshes nightly (etl:jenzabar). So a newly sourced mentee has
+      // no bridge row, and "no row" would render as an honest-looking zero for
+      // as long as nobody re-runs the manual two-step. The export writes only
+      // count > 0 pairs, so a missing row is ambiguous (genuine zero, or pair
+      // newer than the last import); answer it from local Aurora instead of
+      // asserting zero. A genuine zero stays zero; a linked mentee's live co-pubs
+      // show up; an unlinked alumnus with no local authorship still gets zero,
+      // exactly as before. Pairs the bridge DOES cover are untouched.
+      const covered = new Set(rows.map((r) => r.menteeCwid.toLowerCase()));
+      bridgeGapCwids = sourceCwids.filter((c) => !covered.has(c.toLowerCase()));
       // Rows for this mentor ⇒ unambiguously covered. NO rows is ambiguous:
       // "bridge not yet imported" (table globally empty ⇒ degrade honestly to
       // unavailable, exactly like a live-query outage) vs "this mentor genuinely
@@ -809,8 +827,11 @@ export async function getMenteesForMentor(
   // mentees DO exist and their bridge/live read failed, the flag is reporting a
   // real outage for those chips — one flag covers the whole result, so forcing it
   // true would dress an outage up as a set of honest zeros.
-  if (includeCopubs && manualOnlyCwids.length > 0) {
-    const local = await localCoPublications(mentorCwid, manualOnlyCwids);
+  //
+  // #2047 — sourced mentees the bridge has no row for join the same local ask.
+  const localCwids = [...manualOnlyCwids, ...bridgeGapCwids];
+  if (includeCopubs && localCwids.length > 0) {
+    const local = await localCoPublications(mentorCwid, localCwids);
     for (const [cwid, pubs] of local) {
       copubCountByCwid.set(cwid, pubs.length);
       // Top 3, same order the bridge preview uses (#185). One source for both the
@@ -992,6 +1013,11 @@ async function fetchCoPublicationsRaw(
         orderBy: [{ pubYear: "desc" }, { pmid: "desc" }],
         select: { pub: true },
       });
+      // #2047 — no bridge rows for this pair: same local fallback the chip
+      // badge uses in getMenteesForMentor, so the badge and this page agree.
+      if (rows.length === 0) {
+        return (await localCoPublications(mentorCwid, [menteeCwid])).get(menteeCwid) ?? [];
+      }
       return rows.map((r) => r.pub as unknown as CoPublicationFull);
     } catch (err) {
       console.error(
