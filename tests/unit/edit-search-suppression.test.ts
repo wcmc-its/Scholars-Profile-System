@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   mockScholarFindFirst: vi.fn(),
+  mockScholarFindMany: vi.fn(),
   mockCenterMembershipFindMany: vi.fn(),
   mockDivisionMembershipFindMany: vi.fn(),
   mockPublicationFindFirst: vi.fn(),
@@ -36,7 +37,11 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
-      scholar: { findFirst: hoisted.mockScholarFindFirst },
+      // The cwid-scoped `loadEsiEligibilityByCwid` read uses `findMany`.
+      scholar: {
+        findFirst: hoisted.mockScholarFindFirst,
+        findMany: hoisted.mockScholarFindMany,
+      },
       centerMembership: { findMany: hoisted.mockCenterMembershipFindMany },
       // #540 Phase 8 — `buildPeopleDoc` issues a `divisionMembership` sidecar
       // for the manual-roster division facet keys. This suite doesn't seed
@@ -186,6 +191,7 @@ beforeEach(() => {
   hoisted.mockScholarFamilyFindMany.mockResolvedValue([]);
   hoisted.mockMeshDescriptorFindMany.mockResolvedValue([]);
   hoisted.mockFieldOverrideFindMany.mockResolvedValue([]);
+  hoisted.mockScholarFindMany.mockResolvedValue([]);
 });
 
 describe("reflectSearchSuppression — scholar suppress", () => {
@@ -252,6 +258,12 @@ describe("reflectSearchSuppression — publication per-author hide", () => {
       index: { _index: "scholars-people", _id: "ann" },
     });
     expect((body[3] as { cwid: string }).cwid).toBe("ann");
+    // The fast-path keeps `esiEligible` (one cwid-scoped read), instead of
+    // dropping the field until the next nightly rebuild.
+    expect(hoisted.mockScholarFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ cwid: "ann" }) }),
+    );
+    expect(typeof (body[3] as { esiEligible?: unknown }).esiEligible).toBe("boolean");
   });
 });
 
