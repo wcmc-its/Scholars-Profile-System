@@ -6313,7 +6313,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Description": "SPS honors-list scrape -- weekly Mon 10:00 UTC (prod).",
         "Name": "sps-honors-prod",
         "ScheduleExpression": "cron(0 10 ? * MON *)",
-        "State": "DISABLED",
+        "State": "ENABLED",
         "Targets": [
           {
             "Arn": {

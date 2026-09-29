@@ -3068,7 +3068,10 @@ export class EtlStack extends Stack {
     // prod's, each with a snapshot update and a `cdk deploy Sps-Etl-<env>`.
     // Staging: first run 2026-09-25 was clean (8 matches, all already
     // published from the seed under the same strings; 0 duplicates) -> on.
-    const honorsScheduleEnabled = envConfig.envName === "staging" ? true : false;
+    // Prod: on 2026-09-29. The prod machine did not exist yet, so the deploy
+    // that ships this creates it; the supervised manual first run follows that
+    // deploy, before the first scheduled Monday tick.
+    const honorsScheduleEnabled = true;
     const honorsRule = new events.Rule(this, "HonorsScheduleRule", {
       ruleName: `sps-honors-${env}`,
       description: `SPS honors-list scrape -- weekly Mon 10:00 UTC (${env}).`,

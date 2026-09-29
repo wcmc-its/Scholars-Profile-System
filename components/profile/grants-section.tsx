@@ -11,6 +11,7 @@ import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
 import { grantRoleShortLabel, grantRoleTitle, isPiRole } from "@/lib/funding-roles";
+import { countGrantProjects, grantProjectKey } from "@/lib/grants/project-count";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -130,10 +131,12 @@ type GrantGroup = {
 
 function groupGrants(grants: Grant[]): GrantGroup[] {
   const buckets = new Map<string, Grant[]>();
-  for (const g of grants) {
+  for (const [i, g] of grants.entries()) {
     // Singleton key for non-NIH grants (no coreProjectNum) so they don't
-    // collapse with each other or with NIH grants.
-    const key = g.coreProjectNum ?? `__singleton__${grants.indexOf(g)}`;
+    // collapse with each other or with NIH grants. #2238 — the key is the
+    // shared `grantProjectKey`, the same one the header/chip/search-card
+    // counts use, so the row count and every count above it are one number.
+    const key = grantProjectKey(g) ?? `__singleton__${i}`;
     const list = buckets.get(key);
     if (list) list.push(g);
     else buckets.set(key, [g]);
@@ -186,19 +189,21 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
   const [roleBucket, setRoleBucket] = useState<RoleBucket>("all");
   const [query, setQuery] = useState("");
 
+  // #2238 — each chip counts funding PROJECTS among its members (the shared
+  // `countGrantProjects`), i.e. exactly the rows `groupGrants` renders when that
+  // chip is selected. Counting award records read "PI 7" over three rows.
   const roleCounts = useMemo(() => {
     const c: Record<RoleBucket, number> = {
-      all: grants.length,
+      all: countGrantProjects(grants),
       PI: 0,
       "Co-PI": 0,
       "Co-I": 0,
       "PI-Subaward": 0,
       "Key Personnel": 0,
     };
-    for (const g of grants) {
-      for (const { key } of ROLE_BUCKET_ORDER) {
-        if (key !== "all" && inRoleBucket(g, key)) c[key] += 1;
-      }
+    for (const { key } of ROLE_BUCKET_ORDER) {
+      if (key === "all") continue;
+      c[key] = countGrantProjects(grants.filter((g) => inRoleBucket(g, key)));
     }
     return c;
   }, [grants]);
