@@ -3390,7 +3390,7 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     const reporting = screen.getByRole("link", { name: /Reporting/ });
     expect(reporting.textContent).toBe("Reporting");
-    expect(reporting.getAttribute("href")).toBe(`/edit/reports?center=${encodeURIComponent(CORE.id)}&kind=core`);
+    expect(reporting.getAttribute("href")).toBe(`/edit/reports?center=${encodeURIComponent(CORE.id)}&kind=core&scope=core`);
     // No leftover "not built yet" affordances.
     expect(reporting.getAttribute("aria-disabled")).toBeNull();
     expect(document.getElementById("core-queue-reporting-why")).toBeNull();
