@@ -233,6 +233,17 @@ describe("PublicationModal — author byline", { retry: 2 }, () => {
 });
 
 describe("PublicationModal — content sections", { retry: 2 }, () => {
+  it("labels the impact justification with the rounded score", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const label = screen.getByText("Why 78:");
+    expect(label.parentElement?.textContent).toBe(
+      "Why 78: Novel methodology and broad influence.",
+    );
+  });
+
   it("renders journal/year/volume in the citation context line", async () => {
     mockFetch(makePayload());
     renderModalHarness();
