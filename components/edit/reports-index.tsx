@@ -32,7 +32,9 @@
  *
  * Every core is ONE group (`coreOptions`, core reports index picker,
  * 2026-09-28) with a "Viewing" picker in its header; the picked core rides
- * the URL as `?center=<coreId>&kind=core`, like the filters.
+ * the URL as `?center=<coreId>&kind=core`, like the filters. A superuser's
+ * picker opens with "All cores (N)" (`center=all`): its option lists only the
+ * reports that roll up (`onlyReports`: 11–13) and has no profile to edit.
  */
 "use client";
 
@@ -99,7 +101,10 @@ export type ReportsIndexUnit = {
 export type ReportsIndexCoreOption = Pick<
   ReportsIndexUnit,
   "code" | "name" | "editHref" | "perReport"
->;
+> & {
+  /** The "All cores" option only: the reports it lists (the rest are hidden). */
+  onlyReports?: ReadonlyArray<ReportN>;
+};
 
 /** Segments that appear only when the viewer has a unit of that kind. */
 const OPTIONAL_SCOPES = new Set<string>(["department", "division", "core"]);
@@ -188,7 +193,15 @@ export function ReportsIndex({
     () =>
       units.map((u) => {
         const o = u.coreOptions?.find((c) => c.code === core);
-        return o ? { ...u, code: o.code, editHref: o.editHref, perReport: o.perReport } : u;
+        if (!o) return u;
+        const only = o.onlyReports;
+        return {
+          ...u,
+          code: o.code,
+          editHref: o.editHref,
+          perReport: o.perReport,
+          reports: only ? u.reports.filter((r) => only.includes(r.n)) : u.reports,
+        };
       }),
     [units, core],
   );
@@ -345,7 +358,7 @@ export function ReportsIndex({
                 {unit.coreOptions && unit.coreOptions.length > 1 && (
                   <CorePicker options={unit.coreOptions} value={core} onChange={setCore} />
                 )}
-                {!isPseudo(unit.kind) && (
+                {!isPseudo(unit.kind) && unit.editHref && (
                   <Link
                     href={unit.editHref}
                     className="text-muted-foreground hover:text-foreground ml-auto text-xs hover:underline"

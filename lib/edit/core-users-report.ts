@@ -32,7 +32,14 @@ import ExcelJS from "exceljs";
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { db } from "@/lib/db";
-import { chunk, coreCriteriaHead, parseYear } from "@/lib/edit/core-report-common";
+import {
+  chunk,
+  coreCriteriaHead,
+  isAllCores,
+  loadAllCoreIds,
+  parseYear,
+  type CriteriaCore,
+} from "@/lib/edit/core-report-common";
 import { Prisma } from "@/lib/generated/prisma/client";
 import {
   parsePersonFilter,
@@ -322,16 +329,25 @@ export async function loadWhoMatch(
   return out;
 }
 
-/** The core's active known clients' CWIDs, LOWERCASED (see `buildCoreUsers`). */
-export async function loadActiveClientCwids(coreId: string): Promise<Set<string>> {
+/** The core's active known clients' CWIDs, LOWERCASED (see `buildCoreUsers`).
+ *  Several core ids (the all-cores roll-up): a known client of ANY of them. */
+export async function loadActiveClientCwids(
+  coreIds: string | readonly string[],
+): Promise<Set<string>> {
   const rows = await db.read.coreClient.findMany({
-    where: { coreId, removedAt: null, cwid: { not: null } },
+    where: {
+      coreId: typeof coreIds === "string" ? coreIds : { in: [...coreIds] },
+      removedAt: null,
+      cwid: { not: null },
+    },
     select: { cwid: true },
   });
   return new Set(rows.map((r) => r.cwid?.toLowerCase()).filter((c): c is string => !!c));
 }
 
-/** The page's and the download's ONE loader. */
+/** The page's and the download's ONE loader. `ALL_CORES` reads the known
+ *  clients of every catalog core (`coreId IN (…)`); `pmids` is then the
+ *  deduped union (`loadCoreConfirmedPmids`). */
 export async function loadCoreUsersReport(
   coreId: string,
   pmids: readonly string[],
@@ -339,7 +355,9 @@ export async function loadCoreUsersReport(
 ) {
   const [authorships, clientCwids] = await Promise.all([
     loadCoreAuthorships(pmids),
-    loadActiveClientCwids(coreId),
+    isAllCores(coreId)
+      ? loadAllCoreIds().then(loadActiveClientCwids)
+      : loadActiveClientCwids(coreId),
   ]);
   const whoMatch = await loadWhoMatch(p, [...new Set(authorships.map((a) => a.cwid))]);
   return buildCoreUsers(authorships, { whoMatch, clientCwids, params: p });
@@ -353,7 +371,7 @@ export function yearWindowLabel(p: Pick<CoreUsersParams, "from" | "to">): string
 }
 
 export async function buildCoreUsersWorkbook(
-  coreName: string,
+  coreName: CriteriaCore,
   p: CoreUsersParams,
   r: CoreUsersResult,
   generatedAt: Date,

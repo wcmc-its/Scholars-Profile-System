@@ -29,6 +29,7 @@ import {
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import {
   coreQueryString,
+  isAllCores,
   loadCoreConfirmedPmids,
   toSearchParams,
 } from "@/lib/edit/core-report-common";
@@ -277,8 +278,9 @@ export async function renderCoreGrantsReport({
   return {
     subtitle: (
       <p className="text-muted-foreground text-sm">
-        Grants that fund at least one confirmed publication of {ctx.unit.name}. A grant is linked
-        when NIH RePORTER or ReCiter ties the paper to it.
+        Grants that fund at least one confirmed publication of{" "}
+        {isAllCores(code) ? "any core facility" : ctx.unit.name}. A grant is linked when NIH
+        RePORTER or ReCiter ties the paper to it.
       </p>
     ),
     main: (

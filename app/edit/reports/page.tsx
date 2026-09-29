@@ -44,7 +44,10 @@
  * Cores (core reports index picker, 2026-09-28): every core collapses into ONE
  * "Cores" group with a "Viewing" picker (`buildCoresUnit`), and
  * `?center=<coreId>&kind=core` is that full list with the core preselected,
- * no longer a one-unit view.
+ * no longer a one-unit view. A superuser's picker opens with "All cores (N)"
+ * (`center=all&kind=core`, picker plan PR 2): under it the group lists only
+ * reports 11–13, which roll every core up; 3 and 6 don't. Anyone else asking
+ * for `center=all` gets the same 403 as any core they can't report on.
  *
  * Program reports (`/edit/reports/7`, Mentored publications) are NOT
  * unit-scoped — their gate is a `report_access` row (`getReportScopes`,
@@ -71,6 +74,7 @@ import type {
 } from "@/components/edit/report-access-popover";
 import {
   ReportsIndex,
+  type ReportsIndexCoreOption,
   type ReportsIndexReport,
   type ReportsIndexUnit,
 } from "@/components/edit/reports-index";
@@ -88,6 +92,13 @@ import {
   type ReportNumber,
   type ReportableUnitKind,
 } from "@/lib/edit/cancer-center-reports";
+import {
+  ALL_CORES,
+  ALL_CORES_NAME,
+  ALL_CORES_REPORTS,
+  canViewAllCores,
+  isAllCores,
+} from "@/lib/edit/core-report-common";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
 import {
@@ -239,9 +250,12 @@ export default async function EditReportsIndexPage({
     baseUnits = [{ code, kind, name: ctx.unit.name }];
   } else {
     baseUnits = await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
-    // A core this actor can't report on is the same 403 the one-unit view gave.
-    if (preselectedCore && !baseUnits.some((u) => u.kind === "core" && u.code === preselectedCore))
-      return forbidden(session, preselectedCore);
+    // A core this actor can't report on is the same 403 the one-unit view gave;
+    // "all" is a superuser's alone.
+    const allowedPreselect = isAllCores(preselectedCore)
+      ? canViewAllCores(session)
+      : baseUnits.some((u) => u.kind === "core" && u.code === preselectedCore);
+    if (preselectedCore && !allowedPreselect) return forbidden(session, preselectedCore);
     // Gap 5: zero reportable units is an empty roster for a superuser, a 404
     // for everyone else — unless a pseudo-unit (report 7/8/9) gives them
     // somewhere to go.
@@ -264,7 +278,10 @@ export default async function EditReportsIndexPage({
     };
   };
   const cores = baseUnits.filter((u) => u.kind === "core");
-  const coresUnit = cores.length > 0 ? buildCoresUnit(cores.map(toUnit), preselectedCore) : null;
+  const coresUnit =
+    cores.length > 0
+      ? buildCoresUnit(cores.map(toUnit), preselectedCore, canViewAllCores(session))
+      : null;
   const units: ReportsIndexUnit[] = [
     ...extraUnits,
     // Every core is one group, where the first core sat.
@@ -309,13 +326,40 @@ function forbidden(session: EditSession, code: string) {
  *  group IS the selected core (`?center=<coreId>&kind=core` if given, else the
  *  first alphabetically); `coreOptions` carries every core's code, name, edit
  *  link and liveness so `ReportsIndex`'s "Viewing" picker switches cores in
- *  place. One core keeps its own name as the heading. */
-function buildCoresUnit(cores: ReportsIndexUnit[], preselected: string | null): ReportsIndexUnit {
-  const coreOptions = [...cores]
+ *  place. One core keeps its own name as the heading.
+ *
+ *  `withAll` (a superuser): "All cores (N)" first — reports 11–13 only, each
+ *  live when any core's is, no profile to edit. Never the default: it is
+ *  selected only when the URL names it. */
+function buildCoresUnit(
+  cores: ReportsIndexUnit[],
+  preselected: string | null,
+  withAll = false,
+): ReportsIndexUnit {
+  const coreOptions: ReportsIndexCoreOption[] = [...cores]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(({ code, name, editHref, perReport }) => ({ code, name, editHref, perReport }));
-  const selected = cores.find((c) => c.code === (preselected ?? coreOptions[0].code)) ?? cores[0];
-  return { ...selected, name: cores.length > 1 ? "Cores" : selected.name, coreOptions };
+  const name = cores.length > 1 ? "Cores" : undefined;
+  if (withAll) {
+    const onlyReports = ALL_CORES_REPORTS.map((n) => Number(n) as ReportsIndexReport["n"]);
+    const allOption: ReportsIndexCoreOption = {
+      code: ALL_CORES,
+      name: `${ALL_CORES_NAME} (${cores.length})`,
+      editHref: "",
+      perReport: onlyReports.map((n) => ({
+        n,
+        live: cores.some((c) => c.perReport.some((p) => p.n === n && p.live)),
+        lastRefreshedAt: null,
+      })),
+      onlyReports,
+    };
+    coreOptions.unshift(allOption);
+    if (isAllCores(preselected))
+      return { ...cores[0], ...allOption, name: name ?? allOption.name, coreOptions };
+  }
+  const firstCore = coreOptions.find((o) => !isAllCores(o.code)) ?? coreOptions[0];
+  const selected = cores.find((c) => c.code === (preselected ?? firstCore.code)) ?? cores[0];
+  return { ...selected, name: name ?? selected.name, coreOptions };
 }
 
 /** The person-granted Mentored publications report as a one-report

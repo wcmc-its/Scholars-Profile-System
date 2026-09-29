@@ -28,7 +28,7 @@
 import ExcelJS from "exceljs";
 
 import { db } from "@/lib/db";
-import { chunk, coreCriteriaHead } from "@/lib/edit/core-report-common";
+import { chunk, coreCriteriaHead, type CriteriaCore } from "@/lib/edit/core-report-common";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
 
 export const NON_NIH_NOTE =
@@ -364,7 +364,7 @@ export function formatPeriod(start: string, end: string): string {
 }
 
 export async function buildCoreGrantsWorkbook(
-  coreName: string,
+  coreName: CriteriaCore,
   p: CoreGrantsParams,
   r: CoreGrantsResult,
   asOf: string,

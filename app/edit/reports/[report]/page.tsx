@@ -52,6 +52,15 @@
  * "{core} reports" h1 and a tab per core report; `ReportHeader` then drops its
  * own h1 (`underCoreHeader`). Every other kind renders exactly as before.
  *
+ * All cores (`center=all&kind=core`, picker plan PR 2): a SUPERUSER opening
+ * report 11, 12 or 13 gets the roll-up over every catalog core — no
+ * single-unit resolve or `loadReportsContext`, the body handed `code: "all"`
+ * and `ALL_CORES_CONTEXT`, the badge reading "Superusers". Reports 3 and 6
+ * don't roll up: a superuser there is sent to report 11 for all cores (so a
+ * pick of "All cores" from report 3's picker lands somewhere real). Anyone
+ * else takes the ordinary path, which refuses `all` as an unknown core — the
+ * same 403 as before this existed.
+ *
  * Loading: no route `loading.tsx` (it replaced the whole page, top bar
  * included, since the shell needs the session). The body streams under
  * `Suspense` with `ReportBodySkeleton`, so only the report area shimmers.
@@ -80,6 +89,14 @@ import {
   resolveNumberedReportCenterCode,
   type ReportableUnitKind,
 } from "@/lib/edit/cancer-center-reports";
+import {
+  ALL_CORES,
+  ALL_CORES_CONTEXT,
+  ALL_CORES_NAME,
+  ALL_CORES_REPORTS,
+  canViewAllCores,
+  isAllCores,
+} from "@/lib/edit/core-report-common";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
   ARTICLE_COUNT_ACCESS_NOTE,
@@ -184,11 +201,23 @@ export default async function EditReportPage({
     // to the resolver's center default, exactly as the per-page `parseKind`
     // (reports 3/6) and the kind-blind pages (1/2/4/5) behaved.
     const requestedKind: ReportableUnitKind | undefined = allowedKinds.find((k) => k === kindParam);
-    const { code, kind } = await resolveNumberedReportCenterCode(session, db.read, center, {
-      allowedKinds,
-      requestedKind,
-    });
-    const ctx = await loadReportsContext(code, session, db.read, kind);
+    // All cores: a superuser only (anyone else falls through to the ordinary
+    // resolve, which refuses `all` as it always did).
+    const allCores = requestedKind === "core" && isAllCores(center) && canViewAllCores(session);
+    if (allCores && !(ALL_CORES_REPORTS as readonly string[]).includes(n)) {
+      const first = (await loadReportMeta()).get(ALL_CORES_REPORTS[0]);
+      if (first) redirect(`/edit/reports/${first.slug}?center=${ALL_CORES}&kind=core`);
+      notFound();
+    }
+    const { code, kind } = allCores
+      ? { code: ALL_CORES, kind: "core" as const }
+      : await resolveNumberedReportCenterCode(session, db.read, center, {
+          allowedKinds,
+          requestedKind,
+        });
+    const ctx = allCores
+      ? ALL_CORES_CONTEXT
+      : await loadReportsContext(code, session, db.read, kind);
     if (ctx === null) {
       return (
         <ConsoleShell
@@ -208,7 +237,14 @@ export default async function EditReportPage({
       kind === "center"
         ? `/edit/reports?center=${encodeURIComponent(code)}`
         : `/edit/reports?center=${encodeURIComponent(code)}&kind=${kind}`;
-    loadAccess = async () => ({ mode: "unit" });
+    loadAccess = async () =>
+      allCores
+        ? {
+            mode: "unit",
+            audience: "Superusers",
+            rule: "Only superusers can run the all-cores roll-up.",
+          }
+        : { mode: "unit" };
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
     if (kind === "core") {
       loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n);
@@ -282,7 +318,9 @@ export default async function EditReportPage({
 
 /** `CoreReportsHeader` for one core's report `n`: the viewer's cores A–Z (the
  *  one on screen kept even if the list somehow lacks it) and a tab per
- *  `REPORT_NUMBERS_BY_KIND.core` report, named from `report_meta`. */
+ *  `REPORT_NUMBERS_BY_KIND.core` report, named from `report_meta`. A
+ *  superuser's list opens with "All cores (N)"; under it (`coreId` =
+ *  `ALL_CORES`) only reports 11–13 get a tab. */
 async function coreReportsHeader(
   session: EditSession,
   coreId: string,
@@ -293,12 +331,17 @@ async function coreReportsHeader(
     loadReportableUnitsForActor(session, db.read, ["core"]),
     loadReportMeta(),
   ]);
+  const all = isAllCores(coreId);
   const options = units
     .filter((u) => u.kind === "core")
     .map((u) => ({ code: u.code, name: u.name }));
-  if (!options.some((o) => o.code === coreId)) options.push({ code: coreId, name: coreName });
+  if (!all && !options.some((o) => o.code === coreId))
+    options.push({ code: coreId, name: coreName });
   options.sort((a, b) => a.name.localeCompare(b.name));
+  if (canViewAllCores(session))
+    options.unshift({ code: ALL_CORES, name: `${ALL_CORES_NAME} (${options.length})` });
   const tabs: CoreReportTab[] = REPORT_NUMBERS_BY_KIND.core.flatMap((num) => {
+    if (all && !(ALL_CORES_REPORTS as readonly string[]).includes(String(num))) return [];
     const m = meta.get(String(num) as ReportKey);
     return m ? [{ n: m.key, name: m.name, slug: m.slug }] : [];
   });
@@ -309,6 +352,7 @@ async function coreReportsHeader(
       options={options}
       tabs={tabs}
       current={n}
+      allCount={all ? options.length - 1 : undefined}
     />
   );
 }

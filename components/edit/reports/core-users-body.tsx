@@ -32,6 +32,7 @@ import {
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import {
   coreQueryString,
+  isAllCores,
   loadCoreConfirmedPmids,
   toSearchParams,
   yearOptions,
@@ -329,8 +330,9 @@ export async function renderCoreUsersReport({
   return {
     subtitle: (
       <p className="text-muted-foreground text-sm">
-        Everyone who authored a confirmed publication with {ctx.unit.name}, with their department
-        and person type. A person counts once however many papers they have.
+        Everyone who authored a confirmed publication with{" "}
+        {isAllCores(code) ? "any core facility" : ctx.unit.name}, with their department and person
+        type. A person counts once however many papers they have.
       </p>
     ),
     main: (

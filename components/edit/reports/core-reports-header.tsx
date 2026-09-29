@@ -15,6 +15,12 @@
  * never chose. The picker is hidden when the viewer can report on one core.
  * On a phone the picker takes its own line and the tabs scroll sideways.
  *
+ * All cores (`allCount` set, `coreId` = "all"; a superuser only, the page
+ * decides): the "Core facilities · Roll-up" eyebrow, "All cores reports", a
+ * lede saying a publication used by two cores counts once, and no "← Review
+ * queue" (there is no all-cores queue). The page hands only reports 11–13 as
+ * tabs.
+ *
  * Server-safe and synchronous; the picker is the only client island.
  */
 import Link from "next/link";
@@ -31,6 +37,7 @@ export function CoreReportsHeader({
   options,
   tabs,
   current,
+  allCount,
 }: {
   coreId: string;
   coreName: string;
@@ -40,19 +47,29 @@ export function CoreReportsHeader({
   tabs: ReadonlyArray<CoreReportTab>;
   /** The report on screen (`report_meta.report_key`). */
   current: string;
+  /** Set for the all-cores roll-up: how many cores it covers. */
+  allCount?: number;
 }) {
+  const all = allCount !== undefined;
   const here = tabs.find((t) => t.n === current);
   const scope = new URLSearchParams({ center: coreId, kind: "core" }).toString();
   return (
     <div className="mb-6" data-testid="core-reports-header">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-        <Link
-          href={`/edit/core/${encodeURIComponent(coreId)}/review`}
-          className="text-apollo-slate text-sm hover:underline"
-          data-testid="core-reports-queue-link"
-        >
-          &larr; Review queue
-        </Link>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-4 gap-y-3",
+          all ? "justify-end" : "justify-between",
+        )}
+      >
+        {!all && (
+          <Link
+            href={`/edit/core/${encodeURIComponent(coreId)}/review`}
+            className="text-apollo-slate text-sm hover:underline"
+            data-testid="core-reports-queue-link"
+          >
+            &larr; Review queue
+          </Link>
+        )}
         {options.length > 1 && here && (
           <CoreReportPicker
             // Remount on a new core, so Back (a new `coreId`) resets the select.
@@ -63,12 +80,24 @@ export function CoreReportsHeader({
           />
         )}
       </div>
-      <div className="text-muted-foreground mt-4 text-xs tracking-[0.12em] uppercase">
-        Core facility
+      <div
+        className="text-muted-foreground mt-4 text-xs tracking-[0.12em] uppercase"
+        data-testid="core-reports-eyebrow"
+      >
+        {all ? "Core facilities · Roll-up" : "Core facility"}
       </div>
       <h1 className="mt-1.5 mb-0 text-[26px] font-bold tracking-[-0.01em] [overflow-wrap:anywhere]">
         {coreName} reports
       </h1>
+      {all && (
+        <p
+          className="text-muted-foreground mt-2 max-w-[720px] text-[15px] leading-normal"
+          data-testid="core-reports-lede"
+        >
+          The same reports rolled up across all {allCount} core facilities. A publication used by
+          two cores counts once in totals.
+        </p>
+      )}
       <nav
         aria-label="Core reports"
         className="mt-5 overflow-x-auto"

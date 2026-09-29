@@ -14,6 +14,14 @@
  *   4. Other signals — an engine row with neither (LLM read, repeat user,
  *      MeSH / method prior).
  *
+ * All cores (`center=all`, superuser only): a publication confirmed for SEVERAL
+ * cores still counts once, in the STRONGEST bucket any of those cores gives it
+ * (`mergeEvidence`): Acknowledgment, then Core-staff co-author, then Other
+ * signals, then Manually added — the display order. Each core's bucket is
+ * the per-core precedence above, read only from a core the paper is
+ * confirmed for; a manual add is weakest because it is the one bucket with no
+ * engine signal behind it, so any core's documentary evidence outranks it.
+ *
  * Year basis (`basis`): `cy` = `publication.year`; `added` = the year of
  * `date_added_to_entrez` (the PubMed add date). There is NO fiscal-year basis:
  * `publication` stores a year but no publication month or date, so a
@@ -30,7 +38,12 @@
 import ExcelJS from "exceljs";
 
 import { db } from "@/lib/db";
-import { chunk, coreCriteriaHead, parseYear } from "@/lib/edit/core-report-common";
+import {
+  chunk,
+  coreCriteriaHead,
+  parseYear,
+  type CriteriaCore,
+} from "@/lib/edit/core-report-common";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
 
 export const EVIDENCE_KEYS = ["manual", "ack", "coauthor", "other"] as const;
@@ -110,6 +123,12 @@ export function evidenceBucket(engine: EngineEvidence): EvidenceKey {
   if (engine.signalAck) return "ack";
   if (Array.isArray(engine.signalCoauthors) && engine.signalCoauthors.length > 0) return "coauthor";
   return "other";
+}
+
+/** The strongest of several cores' buckets for one paper (the all-cores merge
+ *  rule, see the module comment): the first in `EVIDENCE_ORDER`. Pure. */
+export function mergeEvidence(buckets: readonly EvidenceKey[]): EvidenceKey {
+  return EVIDENCE_ORDER.find((k) => buckets.includes(k)) ?? "manual";
 }
 
 export type CoreOutputPub = {
@@ -192,11 +211,36 @@ export function buildCoreOutput(
   };
 }
 
-/** The papers with their bucket — the page's and the download's ONE loader. */
+/** Each paper's bucket across the cores it is confirmed for. Pure.
+ *  `confirmedCores` = pmid → the cores whose confirmed set holds it;
+ *  `engine` = the `publication_core` rows for those cores keyed
+ *  `<coreId>|<pmid>` (any status — a promoted `below_threshold` row still
+ *  carries its signals). A core with no engine row for the paper is a manual
+ *  add there. One core reduces to the single-core `evidenceBucket`. */
+export function paperEvidence(
+  pmid: string,
+  confirmedCores: ReadonlyMap<string, ReadonlySet<string>>,
+  engine: ReadonlyMap<string, NonNullable<EngineEvidence>>,
+): EvidenceKey {
+  const cores = [...(confirmedCores.get(pmid) ?? [])];
+  if (cores.length === 0) return "manual";
+  return mergeEvidence(cores.map((c) => evidenceBucket(engine.get(`${c}|${pmid}`) ?? null)));
+}
+
+/** The papers with their bucket — the page's and the download's ONE loader.
+ *  `byCore` (the all-cores roll-up: every core's confirmed PMIDs) is how a
+ *  paper under several cores gets the merged bucket; omitted, `pmids` are
+ *  `coreId`'s own confirmed set. */
 export async function loadCoreOutputPubs(
   coreId: string,
   pmids: readonly string[],
+  byCore: ReadonlyMap<string, readonly string[]> = new Map([[coreId, pmids]]),
 ): Promise<CoreOutputPub[]> {
+  const confirmedCores = new Map<string, Set<string>>();
+  for (const [core, ps] of byCore)
+    for (const p of ps)
+      (confirmedCores.get(p) ?? confirmedCores.set(p, new Set()).get(p)!).add(core);
+  const coreIds = [...byCore.keys()];
   const out: CoreOutputPub[] = [];
   for (const batch of chunk(pmids)) {
     const [pubs, engine] = await Promise.all([
@@ -205,11 +249,14 @@ export async function loadCoreOutputPubs(
         select: { pmid: true, title: true, journal: true, year: true, dateAddedToEntrez: true },
       }),
       db.read.publicationCore.findMany({
-        where: { coreId, pmid: { in: batch } },
-        select: { pmid: true, signalAck: true, signalCoauthors: true },
+        where: {
+          coreId: coreIds.length === 1 ? coreIds[0] : { in: coreIds },
+          pmid: { in: batch },
+        },
+        select: { coreId: true, pmid: true, signalAck: true, signalCoauthors: true },
       }),
     ]);
-    const engineBy = new Map(engine.map((e) => [e.pmid, e]));
+    const engineBy = new Map(engine.map((e) => [`${e.coreId}|${e.pmid}`, e]));
     for (const p of pubs) {
       out.push({
         pmid: p.pmid,
@@ -217,7 +264,7 @@ export async function loadCoreOutputPubs(
         journal: p.journal,
         year: p.year,
         dateAdded: p.dateAddedToEntrez ? p.dateAddedToEntrez.toISOString().slice(0, 10) : null,
-        evidence: evidenceBucket(engineBy.get(p.pmid) ?? null),
+        evidence: paperEvidence(p.pmid, confirmedCores, engineBy),
       });
     }
   }
@@ -225,7 +272,7 @@ export async function loadCoreOutputPubs(
 }
 
 export async function buildCoreOutputWorkbook(
-  coreName: string,
+  coreName: CriteriaCore,
   p: CoreOutputParams,
   r: CoreOutputResult,
   generatedAt: Date,
@@ -250,6 +297,14 @@ export async function buildCoreOutputWorkbook(
       "Counting rule",
       "Each confirmed publication counts once, in one evidence group: Manually added, then Acknowledgment, then Core-staff co-author, then Other signals.",
     ],
+    ...(typeof coreName === "string"
+      ? []
+      : ([
+          [
+            "Across cores",
+            "A publication confirmed for more than one core takes the strongest evidence any of them has: Acknowledgment, then Core-staff co-author, then Other signals, then Manually added.",
+          ],
+        ] as [string, string][])),
     ...(r.undated > 0
       ? ([
           [
