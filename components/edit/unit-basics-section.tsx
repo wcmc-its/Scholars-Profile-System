@@ -519,7 +519,13 @@ export function SectionHeader({
   );
 }
 
-function FieldNote({ error, children }: { error?: string | null; children?: React.ReactNode }) {
+export function FieldNote({
+  error,
+  children,
+}: {
+  error?: string | null;
+  children?: React.ReactNode;
+}) {
   if (error) {
     return (
       <p role="alert" className="text-destructive text-[12.5px]">
@@ -531,7 +537,7 @@ function FieldNote({ error, children }: { error?: string | null; children?: Reac
 }
 
 /** LOCKED house style: neutral fill + lock icon + text, never a hue. */
-function LockedValue({
+export function LockedValue({
   id,
   mono = false,
   children,

@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCoreConsoleRows,
+  countHighConfidence,
+  HIGH_CONFIDENCE_LIKELIHOOD,
   loadCoreConsoleIndex,
   type CoreConsoleInputs,
 } from "@/lib/api/core-console-index";
@@ -134,5 +136,14 @@ describe("loadCoreConsoleIndex", () => {
     expect(row.reviewTotal).toBe(4);
     expect(row.reviewHigh).toBe(1);
     expect(row.confirmed).toBe(1);
+  });
+});
+
+describe("countHighConfidence (the core editor's banner count)", () => {
+  it("counts at-or-above the index's cut, on the same constant", () => {
+    expect(HIGH_CONFIDENCE_LIKELIHOOD).toBe(0.8);
+    const rows = [0.8, 0.7999, 0.99, 0.2].map((likelihood) => ({ likelihood }));
+    expect(countHighConfidence(rows)).toBe(2);
+    expect(countHighConfidence([])).toBe(0);
   });
 });

@@ -1,14 +1,14 @@
 # Core-facility claim queue — SPEC
 
 **Status:** Implemented (undocumented until now — reverse-derived from code)
-**Date:** 2026-08-13
+**Date:** 2026-08-13 (stale points corrected 2026-09-29: ownership grants, the `/edit/core` index, core 14, the `/review` route, known clients)
 **Builds on:** [ADR-005](./ADR-005-manual-override-layer.md) — manual-override layer (the `CoreClaim` table is a same-pattern override, keyed on `(pmid, coreId)` instead of a scholar/entity id)
 **Upstream dependency:** ReciterAI's `pipeline_cores` module (cores-inference engine, ReciterAI PR #245)
 **Shipped:** migrations `20260620120000_add_core_tables`, `20260620130000_add_core_claim`
 
 ## Purpose
 
-WCM runs 13 shared core facilities (imaging, flow cytometry, genomics, proteomics, …). A publication that used a core rarely says so in a structured field — the signal is scattered across acknowledgments text, byline co-authorship with core staff, and the paper's own content. ReciterAI's `pipeline_cores` module mines PubMed + reciterdb for these signals and projects a per-(publication, core) usage **candidate** with a combined likelihood. This SPEC covers the SPS-side consumer: the per-core owner's **claim queue** (`/edit/core/[coreId]`) where a human confirms or rejects each candidate, and the public surfaces (`/cores/[coreId]`, the publication-detail modal) that read the result.
+WCM runs a set of shared core facilities (imaging, flow cytometry, genomics, proteomics, …). A publication that used a core rarely says so in a structured field — the signal is scattered across acknowledgments text, byline co-authorship with core staff, and the paper's own content. ReciterAI's `pipeline_cores` module mines PubMed + reciterdb for these signals and projects a per-(publication, core) usage **candidate** with a combined likelihood. This SPEC covers the SPS-side consumer: the per-core owner's **claim queue** (`/edit/core/[coreId]/review`) where a human confirms or rejects each candidate, and the public surfaces (`/cores/[coreId]`, the publication-detail modal) that read the result.
 
 This is a **read-projection + human-override** design, the same shape ADR-005 uses everywhere else: the engine's output is disposable and gets fully replaced; the human decision lives in a separate, ETL-immune table and always wins at read time.
 
@@ -44,7 +44,7 @@ core_claim              HUMAN decision — ETL-immune, never touched by the nigh
 
 `core_claim` carries **no foreign key** to `publication_core`/`core`/`publication` — deliberately, the same ETL-immunity ADR-005 uses elsewhere: a claim can precede the engine's projection (or outlive a `publication_core` delete) and still be the durable record.
 
-Ownership is **not** a column on `core`. A core owner/curator is a `UnitAdmin(entityType="core", entityId=coreId, role="owner"|"curator")` row — the same RBAC machinery as department/division/center — provisioned today by direct row insert (no admin write-UI yet).
+Ownership is **not** a column on `core`. A core owner/curator is a `UnitAdmin(entityType="core", entityId=coreId, role="owner"|"curator")` row — the same RBAC machinery as department/division/center — granted in the UI like any other unit's access: the core editor's Access section and the Administrators roster, both through `POST /api/edit/grant` (#2409; comms_steward access-management parity #2522).
 
 ## The signals
 
@@ -104,6 +104,7 @@ An engine `below_threshold` row with no claim drops out of all three — invisib
 
 ```
 allow iff  session.isSuperuser
+       OR  session.isCommsSteward        (curator parity on cores, #2522)
        OR  UnitAdmin(entityType="core", entityId=coreId, cwid=session.cwid).role
              in { owner, curator }
 else 403 "not_core_owner"
@@ -111,16 +112,16 @@ else 403 "not_core_owner"
 
 Cores are **flat** — no dept→division cascade to walk, unlike unit curation. One composite-key lookup. Superuser is granted in `authorizeCoreClaim`, not baked into `getCoreOwnerRole`, so the audit log always records the role the actor actually held (a Superuser reviewing a core they don't own is logged as acting *as* Superuser, not as a phantom owner).
 
-`/edit/core/[coreId]` (the page) distinguishes 404 ("no such core") from 403 ("core exists, you can't review it") by checking core existence only on the denial path. `/edit/core` (the index) is Superuser-only for now — a non-superuser owner reaches their queue only via the direct deep link; an owner-scoped index is a known future add.
+`/edit/core/[coreId]` (the core editor) and `/edit/core/[coreId]/review` (the queue) distinguish 404 ("no such core") from 403 ("core exists, you can't review it") by checking core existence only on the denial path. `/edit/core` (the index) admits Superusers and comms_stewards (#2522; redesigned as the KPI/sortable "Core facilities" table in #2812) — an owner or curator who is neither reaches their core only via the direct deep link; an owner-scoped index is still a known future add.
 
 ### Owner vs curator are equal for claiming, unequal for granting
 
-Today `authorizeCoreClaim` treats `owner` and `curator` identically — either can confirm/reject (correct: reviewing publications is content work, the same "curator parity" `canEditUnit` already gives dept/division/center curators). What's missing is the *other* half of the Amendment 1 role model: **granting** access. For department/division/center, that split already exists and is load-bearing —
+`authorizeCoreClaim` treats `owner` and `curator` identically — either can confirm/reject (correct: reviewing publications is content work, the same "curator parity" `canEditUnit` already gives dept/division/center curators). The *other* half of the Amendment 1 role model is **granting** access. For department/division/center, that split was already load-bearing —
 
 - `canEditUnit` — Superuser OR Owner OR Curator (content parity)
 - `canManageAccess` / `canGrant` — Superuser OR Owner **only** ("Curators grant nothing" — the line that stops a Curator from self-granting Owner)
 
-Cores have no equivalent today: a `UnitAdmin(entityType="core", role="owner")` row is provisioned only by direct DB insert (see Non-goals). This SPEC proposes closing that gap by **reusing the existing machinery**, not building a parallel one — `canGrant`/`canManageAccess` already take a bare `EffectiveUnitRole` and don't care which unit kind produced it, and `getCoreOwnerRole` already produces one. Three small, additive changes:
+**Built (#2409, cores-as-org-units P2):** cores got the same split by **reusing the existing machinery**, not building a parallel one — `canGrant`/`canManageAccess` already take a bare `EffectiveUnitRole` and don't care which unit kind produced it, and `getCoreOwnerRole` already produces one. The three additive changes, as specified and shipped (#2522 later admitted comms_stewards to `canManageAccess` on every unit kind, cores included):
 
 1. **`POST /api/edit/grant`** — widen the `entityType` check to accept `"core"` alongside `department`/`division`/`center`. Branch two things by kind: the existence check (`db.read.core.findUnique` instead of `findUnit`) and the role lookup (`getCoreOwnerRole` instead of `getEffectiveUnitRole` — cores are flat, so no cascade to apply). `canGrant(session, coreRole, role)` is called exactly as today; **zero changes to the predicate itself**. The `ed_locked` branch is skipped for cores (no ED source ever writes a core grant — `source` is always app-granted). Audit needs nothing new: `target_entity_type='core'` and `action='grant_change'` are both already in the ENUM (added alongside `core_claim`, for the earlier UnitAdmin ENUM widen). Skip `reflectUnitChange` — no public page shows a core's owner/curator list, so there's nothing to revalidate.
 2. **`lib/api/administrators-roster.ts`** — widen `AdminRosterGrant.entityType` (currently `"department" | "division" | "center"`) to include `"core"`, with a core-name lookup alongside the existing dept/division/center joins. This is the existing cross-unit "who has access to what" roster (`/edit/administrators`) — it already scopes to "units you own" for a non-superuser Owner, so a core owner sees their core's grants there with no new page.
@@ -128,7 +129,7 @@ Cores have no equivalent today: a `UnitAdmin(entityType="core", role="owner")` r
 
 Net: the RBAC *predicate* layer needs nothing new (`canGrant`/`canManageAccess` are already unit-kind-agnostic); the work is entirely in widening three call sites' `entityType` unions. No schema/migration change — `unit_admin.entity_type` already includes `'core'`.
 
-A grant row for a core, as it would render on the existing Administrators roster:
+A grant row for a core, as it renders on the Administrators roster:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -170,7 +171,18 @@ An owner who knows a paper used their core — one the engine never scored, or s
 
 **UI.** An "Add PMIDs" affordance in the owner queue header, alongside "Download CSV" and "Known clients" — a textarea taking a newline/comma/space-separated block (`parsePmidBlock`, client-side parse + de-dupe), posting to the same bulk endpoint with `status: "claimed"`. The result line reports added / already-claimed / not-found-in-SPS, then `router.refresh()`s so the new row's real title/journal/etc. comes from the server (the component has no local data for a pmid it didn't already have in props). Turns out the once-open "likelihood bar" display question resolved itself for free: `partitionCoreQueue` always routes an active `claimed` claim straight to the **Confirmed** tab, which renders the compact `ConfirmedRow` (title/year/PMID/Revoke) — it never reaches the candidate-card likelihood-bar rendering at all. `ConfirmedRow` shows a small "Manually added" badge when `isManual` is set, so the row's missing evidence trail is explained rather than silently absent.
 
-## UI — `/edit/core/[coreId]` (owner review queue)
+## Known clients — `POST`/`DELETE /api/edit/core-client` (#2608; name-only #2620)
+
+The "Known clients" button in the queue header opens the core's client list: people the owner knows use the core. Rows live in `core_client` (soft-remove, ETL-immune like `core_claim`, in `CURATED_TABLES`), with `core_client_add` / `core_client_remove` audit actions. Same authz as the claim routes (`authorizeCoreClaim`).
+
+- **CWID clients** (the default POST mode) take a pasted block, re-parsed server-side by `parseCwidBlock`, with names resolved from Scholars and then the enterprise directory. The active CWID list is mirrored to the engine's DynamoDB item by `lib/cores/client-writeback.ts`, behind the same `CORE_CLAIM_WRITEBACK` flag and IAM caveat as claim writeback (see Non-goals).
+- **Name-only clients** (`mode: "name"`, `cwid` NULL) are roster-only: they can't match a byline and are never mirrored. They're deduped by a case-insensitive `displayName` check in the route, since the `(coreId, cwid)` unique index can't dedupe NULLs.
+
+The `/edit/core` index shows the split as clients with and without a CWID.
+
+## UI — `/edit/core/[coreId]/review` (owner review queue)
+
+The queue lives on its own `/review` sub-route. `/edit/core/[coreId]` itself is the core's editor (Basics, Leadership, Staff, Access on one scrolling page), which links here from a "Review pending publications" banner.
 
 ### Full queue view (default state, no history yet)
 
@@ -274,7 +286,9 @@ Revoking/restoring keeps the row visible for the session with a one-line "Revoke
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## UI — `/edit/core` (owner index, Superuser-only today)
+## UI — `/edit/core` (index, Superuser + comms_steward)
+
+The sketch below is the original list; #2812 replaced it with KPI tiles that double as filters and a sortable per-core table (review backlog split high-confidence ≥ 0.8 vs other, confirmed, clients, staff coverage, leaders, owners/curators, public state), loaded by `loadCoreConsoleIndex` (`lib/api/core-console-index.ts`).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -296,7 +310,7 @@ Revoking/restoring keeps the row visible for the session with a one-line "Revoke
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The index (`app/edit/core/page.tsx` → `getCoreList()`) only ever enumerates real catalog rows — there's no "not yet cataloged" placeholder for a facility outside the 13. Research Informatics (see "Adding a core" below) wouldn't appear here at all until it's actually added to both dictionaries; it isn't a row the real UI shows today, only a worked example of what adding one requires.
+The index (`app/edit/core/page.tsx` → `loadCoreConsoleIndex()`) only ever enumerates real catalog rows — there's no "not yet cataloged" placeholder for a facility missing from `CORE_CATALOG`.
 
 ## Public surface — `/cores/[coreId]`
 
@@ -361,7 +375,7 @@ Both **server-only, request-time** (`process.env.X === "on"`, checked at request
 | `CORE_PAGES` | Public `/cores` + `/cores/[coreId]` | Route `notFound()`s; the modal renders a core name as plain text instead of a link |
 | `CORE_CLAIM_WRITEBACK` | The DynamoDB mirror-back of a claim decision to the engine | Claim still lands correctly in MySQL; writeback step is skipped entirely (needs a not-yet-provisioned DynamoDB write IAM grant) |
 
-The owner queue itself (`/edit/core/*`) has **no flag** — it's gated by authorization only (core-owner role or Superuser), so an owner can review and claim before either public flag is on.
+The owner queue itself (`/edit/core/*`) has **no flag** — it's gated by authorization only (core owner/curator, Superuser or comms_steward), so an owner can review and claim before either public flag is on.
 
 ## ETL ingest (`etl/dynamodb/index.ts` Block 6)
 
@@ -382,21 +396,21 @@ Both sides need an entry before a core is reviewable, in this order:
 
 1. **ReciterAI:** an entry in `config/core_dictionary.yaml` — `core_id`, name, facility, aliases (signal 3), staff CWIDs (signal 2), and an LLM description (signal 4/topical routing). This is "the project's real IP" per the dictionary's own header comment; a core with no resolved staff still seeds a row and just won't fire signal 2.
 2. **SPS:** the matching entry in `CORE_CATALOG` (`etl/dynamodb/core-catalog.ts`), same `core_id`. The next ETL run upserts the `core` table row; `publication_core` rows for that core start landing once `pipeline_cores` has scored it.
-3. A `UnitAdmin(entityType="core", entityId=coreId, role="owner")` row, granting whoever will review the queue — by direct insert today (see Non-goals).
+3. A `UnitAdmin(entityType="core", entityId=coreId, role="owner")` row, granting whoever will review the queue — through the core editor's Access section or the Administrators roster.
 
-**Research Informatics is a concrete example of a facility not yet in either list.** It is not one of the 13 cores in ReciterAI's dictionary today (verified against `origin/main`, both the SPS `CORE_CATALOG` mirror and the ReciterAI `core_dictionary.yaml` source), and it's a different thing from the "Research Informatics" already elsewhere in this codebase — that name refers to an unrelated cross-account grants-data consumer (`RESEARCH_INFORMATICS_TOKEN`, #2363/#2364), not a WCM core facility. If/when WCM stands up a Research Informatics core facility that scholars should be able to claim publications against, it goes through the same two-file + `UnitAdmin` grant path as any other core — no schema change needed.
+**Research Informatics went through exactly this path: it is core 14** (`CORE_CATALOG` in `etl/dynamodb/core-catalog.ts`, with a resolved `core_dictionary.yaml` entry; owners backfilled by `scripts/backfills/2026-08-14-core-14-research-informatics-owners.ts`). It is a different thing from the "Research Informatics" cross-account grants-data consumer elsewhere in this codebase (`RESEARCH_INFORMATICS_TOKEN`, #2363/#2364). A catalog core with no dictionary entry yet (15 and 16 today, see the `core-catalog.ts` header) seeds its `core` row but gets no usage rows, because the dictionary loader raises on a core with no aliases.
 
 ## Non-goals / open gaps
 
-- **No admin write-UI for granting core ownership yet** — a `UnitAdmin(entityType="core", role=owner)` row is still provisioned today by direct DB insert. SPEC'd above ("Owner vs curator are equal for claiming, unequal for granting") as a three-call-site widen of the existing dept/division/center grant machinery; not yet built.
+- ~~No admin write-UI for granting core ownership~~ — **built** (#2409, #2522): see "Owner vs curator" above.
 - **No note-entry UI** — the single-claim API accepts an optional `note` (≤2000 chars, stored on `core_claim`), but the queue component never collects one; every UI-driven claim writes `note: null`. The field exists for the schema/API and a future direct-write use case.
-- **Owner-scoped `/edit/core` index doesn't exist yet** — `/edit/core` is Superuser-only; a non-superuser owner reaches their queue only via the deep link `/edit/core/[coreId]` (e.g. from an account-menu entry point, not yet built).
+- **Owner-scoped `/edit/core` index doesn't exist yet** — `/edit/core` admits Superusers and comms_stewards only; any other owner or curator reaches their core only via the deep link `/edit/core/[coreId]`.
 - **`/cores` index presence check is engine-status-only** (see the public-index note above) — can under-list a core whose only confirmed usage is a pure human override.
 - **`CORE_CLAIM_WRITEBACK` needs a DynamoDB write IAM grant** SPS doesn't have yet (SPS has only ever *read* the `reciterai` table before this feature) — dormant until that's provisioned, same posture `lib/reciter/client.ts` documents for its own dormant-safe writes.
 - **A `below_threshold` row can never be claimed today** — there's no UI path that lets an owner promote an engine-suppressed candidate directly (the merge logic supports it; nothing writes it).
-- ~~No way to manually claim a PMID the engine hasn't scored at all~~ — **built** ("Manual PMID add" above): an owner can paste a block of known PMIDs and claim them directly, independent of the engine queue. Built on a separate branch (`feat/core-claim-manual-pmid-add`), not yet merged as of this spec's date.
+- ~~No way to manually claim a PMID the engine hasn't scored at all~~ — **built** ("Manual PMID add" above): an owner can paste a block of known PMIDs and claim them directly, independent of the engine queue. Merged in #2393.
 - ~~The topical MeSH prior isn't a labeled signal in SPS~~ — **built** ("Topic is a candidate-generation input, and now it's shown" above): `prefilter_prior` is mapped through as `publication_core.topical_prior` and surfaced as the fifth "Topical MeSH match" signal. `screen_band`/`screen_confidence` remain unmapped, so a 0-displayed-signal candidate is still reachable.
-- **A 14th+ core needs a coordinated two-repo change** (see "Adding a core" above) — there's no SPS-side self-service path; Research Informatics (or any other facility) needs ReciterAI's dictionary updated first.
+- **Every new core needs a coordinated two-repo change** (see "Adding a core" above) — there's no SPS-side self-service path; a facility needs ReciterAI's dictionary entry before it gets usage rows.
 
 ## Interfaces and dependencies
 

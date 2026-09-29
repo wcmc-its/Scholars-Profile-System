@@ -1,13 +1,16 @@
 /**
- * `/edit/core/[coreId]` — the core's own attribute editor (cores-as-org-units
- * P3/P4 restructure): Details, Leadership, and (Owner/Superuser only) Access,
- * one panel at a time via `?attr=`. Mirrors `/edit/center/[code]`'s
- * `EditShell`/`AttributeRail` UX exactly, but built as a bespoke page — NOT
- * routed through `unit-edit-page.tsx` (`UnitEditContext`/`findUnit`/
- * `getEffectiveUnitRole` are hardcoded department|division|center throughout
- * and are production infrastructure the three already-shipped unit types
- * depend on; lower blast radius to build cores' own rail here than to widen
- * that shared plumbing, `core-as-org-unit-plan.md` P3).
+ * `/edit/core/[coreId]` — the core's own editor (cores-as-org-units P3/P4
+ * restructure; Edit Org Unit mockup, Core variant, 2026-09-28): one scrolling
+ * page of Basics, Leadership, Staff and (Owner/Superuser/comms_steward) Access
+ * under a review-queue banner, rendered by `CoreEditSections` on the same
+ * `UnitEditSections` shell the department/division/center editors use. A
+ * legacy `?attr=details|leadership|access` link scrolls to its section. Built
+ * as a bespoke page — NOT routed through `unit-edit-page.tsx`
+ * (`UnitEditContext`/`findUnit`/`getEffectiveUnitRole` are hardcoded
+ * department|division|center throughout and are production infrastructure the
+ * three already-shipped unit types depend on; lower blast radius to build
+ * cores' own page here than to widen that shared plumbing,
+ * `core-as-org-unit-plan.md` P3).
  *
  * The pub review queue (`CoreClaimQueue`) moved to its own route,
  * `/edit/core/[coreId]/review` — a sibling sub-page, not a rail attribute
@@ -26,18 +29,15 @@
  *
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
  */
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowRight } from "lucide-react";
 
-import type { RailItem } from "@/components/edit/attribute-rail";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
-import { CoreDetailsCard } from "@/components/edit/core-details-card";
-import { CoreLeaderCard, type CoreLeaderState } from "@/components/edit/core-leader-card";
-import { EditShell } from "@/components/edit/edit-shell";
+import { CoreEditSections } from "@/components/edit/core-edit-sections";
+import type { CoreLeaderState } from "@/components/edit/core-leader-card";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { UnitAccessCard } from "@/components/edit/unit-access-card";
+import { countHighConfidence } from "@/lib/api/core-console-index";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
+import { corePath } from "@/lib/core-url";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -48,6 +48,7 @@ import {
   type CoreOwnerLookup,
 } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import { isCorePagesEnabled, isCorePubModalEnabled } from "@/lib/profile/cores-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -55,9 +56,6 @@ export const metadata = {
   title: "Edit core",
   robots: { index: false, follow: false },
 };
-
-type AttrKey = "details" | "leadership" | "access";
-const DEFAULT_ATTR: AttrKey = "details";
 
 export default async function EditCorePage({
   params,
@@ -104,7 +102,14 @@ export default async function EditCorePage({
   const [core, leaderRows, coreRoleRows, accessRows, queue, consoleTabs] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
-      select: { name: true, description: true, url: true, visible: true },
+      select: {
+        name: true,
+        description: true,
+        url: true,
+        visible: true,
+        staffCount: true,
+        staffTrackedCount: true,
+      },
     }),
     db.read.coreLeader.findMany({
       where: { coreId },
@@ -129,12 +134,12 @@ export default async function EditCorePage({
     // query the review page runs, not a hand-rolled parallel count that could
     // drift from its candidate/confirmed/rejected partition logic.
     loadCoreReviewQueue(coreId, db.read),
-    // Drives `EditShell`'s "Org units" breadcrumb (dwd2001 bug #7) — the same
-    // units-tab predicate `/edit/units` itself gates on, not a bespoke check.
+    // Drives the "Cores" breadcrumb link — the same cores-tab predicate the
+    // `/edit/core` index's nav entry gates on, not a bespoke check.
     loadConsoleTabs(session, db.read),
   ]);
   if (!core) notFound();
-  const pendingCount = queue?.candidates.length ?? 0;
+  const candidates = queue?.candidates ?? [];
 
   // Batch-resolve leader + access cwids to display names (a unit admin is
   // often non-Scholar staff, so a miss is expected — UnitAccessCard
@@ -171,74 +176,27 @@ export default async function EditCorePage({
       }))
     : null;
 
-  const railItems: RailItem[] = [
-    { key: "details", label: "Details" },
-    { key: "leadership", label: "Leadership" },
-    ...(canManageAccess ? [{ key: "access", label: "Access" }] : []),
-  ];
+  // The header note's role, by `unit-edit-context.ts`'s own rule: a
+  // comms_steward with no grant of their own edits at curator parity.
+  const actorRole = session.isSuperuser ? "superuser" : coreRole === "none" ? "curator" : coreRole;
+  // The public page 404s with CORE_PAGES off, and a hidden core isn't listed —
+  // only offer a preview when it would really show (both public flags + visible).
+  const previewHref =
+    core.visible && isCorePagesEnabled() && isCorePubModalEnabled() ? corePath(coreId) : undefined;
   const { attr } = (await searchParams) ?? {};
-  const active = (railItems.some((r) => r.key === attr) ? attr : DEFAULT_ATTR) as AttrKey;
-  const basePath = `/edit/core/${coreId}`;
 
   return (
-    <EditShell
-      mode="superuser"
-      scholarName={core.name}
-      // A unit, not a scholar profile — "Profiles" never has anywhere useful
-      // to go from a unit editor. Its OWN structural crumb ("Org units") is
-      // `orgUnitsNavVisible`, gated on the viewer's units-tab predicate.
-      isProfileEntity={false}
-      orgUnitsNavVisible={consoleTabs.units}
-      railItems={railItems}
-      activeAttr={active}
-      basePath={basePath}
-    >
-      {/* The core owner's PRIMARY task — reviewing candidate publications —
-          lives on a separate route (see file header), so it needs a real
-          call-to-action here, not a small text link a scanning admin can
-          miss. The amber dot follows R13 (Apollo Surface Language): amber
-          means "awaiting human judgment," hoisted to this one indicator
-          rather than repeated per-row. */}
-      <Link
-        href={`${basePath}/review`}
-        className="border-apollo-border bg-apollo-surface hover:border-apollo-slate-tint-border mb-6 flex items-center justify-between gap-4 rounded-lg border px-5 py-4 transition-colors hover:no-underline"
-        data-testid="core-review-link"
-      >
-        <div className="flex items-center gap-3">
-          {pendingCount > 0 && (
-            <span className="bg-apollo-amber size-2.5 flex-none rounded-full" aria-hidden />
-          )}
-          <div>
-            <div className="font-medium">Review pending publications</div>
-            <div className="text-muted-foreground text-sm">
-              {pendingCount > 0
-                ? `${pendingCount} publication${pendingCount === 1 ? "" : "s"} awaiting your review`
-                : "No publications pending review"}
-            </div>
-          </div>
-        </div>
-        <ArrowRight className="text-muted-foreground size-4 flex-none" aria-hidden />
-      </Link>
-      {active === "details" && (
-        <CoreDetailsCard
-          coreId={coreId}
-          description={core.description}
-          url={core.url}
-          visible={core.visible}
-        />
-      )}
-      {active === "leadership" && (
-        <CoreLeaderCard coreId={coreId} leaders={leaders} roleLabels={roleLabels} />
-      )}
-      {active === "access" && canManageAccess && (
-        <UnitAccessCard
-          entityType="core"
-          entityId={coreId}
-          access={access}
-          actorCwid={session.cwid}
-          headingId="core-access-heading"
-        />
-      )}
-    </EditShell>
+    <CoreEditSections
+      core={{ id: coreId, ...core }}
+      leaders={leaders}
+      roleLabels={roleLabels}
+      access={access}
+      actorCwid={session.cwid}
+      actorRole={actorRole}
+      pending={{ total: candidates.length, strong: countHighConfidence(candidates) }}
+      previewHref={previewHref}
+      coresNavVisible={consoleTabs.cores}
+      attr={attr}
+    />
   );
 }

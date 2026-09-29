@@ -22,6 +22,13 @@ import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
 /** Likelihood at or above which an open candidate counts as high confidence. */
 export const HIGH_CONFIDENCE_LIKELIHOOD = 0.8;
 
+/** Of a loaded queue's open candidates, the high-confidence ones — the core
+ *  editor's "strong confidence" banner count, on the same cut as `reviewHigh`
+ *  so the editor and this index never disagree. */
+export function countHighConfidence(candidates: ReadonlyArray<{ likelihood: number }>): number {
+  return candidates.filter((c) => c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD).length;
+}
+
 export interface CoreConsoleLeader {
   name: string;
   /** Role label resolved through the `core` role vocabulary (falls back to the key). */
