@@ -504,18 +504,16 @@ export function PeopleResultCard({
       detail: unit(Math.min(grantsTotal, fundingDenominator), "grant"),
     });
   }
-  // ponytail: 3 chips fit one line at typical widths now that each carries a count
-  // ("Research area" 13 chars → "Research area · 11 pubs" 23), which is the same property
-  // the cap of 4 encoded for bare labels; more collapse to "+N". Realistic secondary
-  // counts are 2–3 (`selectEvidenceLines` emits at most one line per kind, plus funding),
-  // so this rarely bites. Bump it if cards routinely carry more.
+  // ponytail: cap of 4 chips, more collapse to "+N". Research area + Clinical + Funding +
+  // Clinical research is a common full set now that trials are evidence, and a cap of 3
+  // hid the fourth behind "+1". The line wraps (flex-wrap), so a narrow card takes two lines.
   if (hasTrials) {
     secondaryChips.push({
       label: SECONDARY_LABEL.trials,
       detail: `${trialCount} trial${trialCount === 1 ? "" : "s"}`,
     });
   }
-  const shownChips = secondaryChips.slice(0, 3);
+  const shownChips = secondaryChips.slice(0, 4);
   const chipOverflow = secondaryChips.length - shownChips.length;
 
   // The demoted "Also matched" rows — the lesser stacked lines + the (demoted) Funding
