@@ -137,6 +137,7 @@ describe("CtscFeedIssuesCard", () => {
       [{ reason: "cwid-email-conflict", feedCwid: "zzz0009" }, /Check which is right\./],
       [{ reason: "email-ambiguous" }, /Set the CWID by hand\./],
       [{ reason: "duplicate-record", feedCwid: "zzz0009" }, /Merge or remove one\./],
+      [{ reason: "wcm-email-unknown", suggestedCwid: null, suggestedName: null }, /CWID is blank\. Look the person up and set it\./],
     ];
     for (const [over, re] of cases) {
       const r = row(over);

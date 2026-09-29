@@ -197,6 +197,18 @@ export const REASONS: Record<string, Reason> = {
     },
     instruction: () => "Merge or remove one.",
   },
+  "wcm-email-unknown": {
+    label: "Blank CWID, email not in the directory",
+    facts: (r) => [
+      r.matchedEmail ? (
+        <span key="e" className="contents">
+          <Chip>{r.matchedEmail}</Chip>
+          <span className="text-muted-foreground">isn’t in the directory (an alias or an old address)</span>
+        </span>
+      ) : null,
+    ],
+    instruction: () => "The CWID is blank. Look the person up and set it.",
+  },
 };
 
 const ALL = "all";
