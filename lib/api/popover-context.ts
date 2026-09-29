@@ -11,7 +11,12 @@
  */
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
-import { loadHiddenAuthorshipCounts } from "@/lib/api/manual-layer";
+import {
+  loadHiddenAuthorshipCounts,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
+import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import { loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 
@@ -350,13 +355,29 @@ export async function fetchTopicScopePmids(cwid: string, topicId: string): Promi
   return rows.map((r) => r.pmid).filter((p) => !hiddenSet.has(p));
 }
 
+/** Counts what the page's feed shows for this scholar by default: research
+ *  articles only (`FEED_EXCLUDED_TYPES`, the topic count spans every relevance
+ *  tier as the feed heading does), with taken-down / derived-dark papers dropped
+ *  (#356) — this endpoint is public, so a takedown must not leak a title. */
 export async function summarizeScope(cwid: string, pmids: string[]): Promise<ScopeSummary | null> {
   if (!cwid || pmids.length === 0) return null;
+  const suppressions = await loadPublicationSuppressions(pmids, prisma);
+  const dark = await resolveDarkPmids(pmids, suppressions, prisma);
+  const research = await prisma.publication.findMany({
+    where: {
+      pmid: { in: pmids.filter((p) => !dark.has(p)) },
+      publicationType: { notIn: [...FEED_EXCLUDED_TYPES] },
+    },
+    orderBy: [{ year: "desc" }, { pmid: "desc" }],
+    select: { pmid: true },
+  });
+  if (research.length === 0) return null;
+  const researchPmids = research.map((r) => r.pmid);
   const [leadRows, recent] = await Promise.all([
     prisma.publicationAuthor.findMany({
       where: {
         cwid,
-        pmid: { in: pmids },
+        pmid: { in: researchPmids },
         isConfirmed: true,
         OR: [{ isFirst: true }, { isLast: true }],
       },
@@ -364,13 +385,12 @@ export async function summarizeScope(cwid: string, pmids: string[]): Promise<Sco
       distinct: ["pmid"],
     }),
     prisma.publication.findMany({
-      where: { pmid: { in: pmids } },
+      where: { pmid: { in: researchPmids.slice(0, 2) } },
       orderBy: [{ year: "desc" }, { pmid: "desc" }],
-      take: 2,
       select: { pmid: true, title: true, journal: true, year: true },
     }),
   ]);
-  return { pubCount: pmids.length, leadCount: leadRows.length, recent };
+  return { pubCount: research.length, leadCount: leadRows.length, recent };
 }
 
 /**
