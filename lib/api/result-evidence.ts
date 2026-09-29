@@ -52,6 +52,18 @@ export type EvidencePub = {
 
 /** A bounded representative grant for the "Key funding" disclosure — the funding
  *  analogue of {@link EvidencePub}. Lazily loaded by `/api/scholar/[cwid]/grants`. */
+/** A PI trial tagged under the concept, for a Matcha evidence block
+ *  (`/api/scholar/[cwid]/trials`, SEARCH_PEOPLE_TRIAL_EVIDENCE). */
+export type EvidenceTrial = {
+  trialId: string;
+  nctNumber: string | null;
+  title: string;
+  /** Display label ("Recruiting", "Completed", …); null when unknown. */
+  status: string | null;
+  isActive: boolean;
+  startYear: number | null;
+};
+
 export type EvidenceGrant = {
   /** Account_Number dedupe key from the funding index (FundingHit.projectId). */
   projectId: string;
