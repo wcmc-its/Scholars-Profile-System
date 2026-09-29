@@ -150,8 +150,12 @@ export function toReporterProject(g: GroupedProject): ReporterProject {
 }
 
 /** The Grant columns this ETL writes. `id === externalId` (the deterministic
- *  key) so the externalId-keyed suppression + funding-index machinery resolves
- *  these rows without change. */
+ *  key) so the externalId-keyed suppression machinery resolves these rows
+ *  without change. The funding index does NOT parse this form with
+ *  `parseExternalId` (InfoEd-only); it keys these rows through
+ *  `fundingProjectBaseKey` (lib/funding-projection.ts), which reads the core
+ *  project number out of the third segment — #2285. Change this format and
+ *  that parser must change with it. */
 export interface ReporterGrantRow {
   id: string;
   externalId: string;

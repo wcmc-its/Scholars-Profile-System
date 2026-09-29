@@ -1744,6 +1744,9 @@ export class EtlStack extends Stack {
       // search:index so their fresh rows are indexed. POPS reads the public
       // directory (no secret); reporter-grants + clinical-trials read ReciterDB
       // (external). Their entrypoints record etl_run via withEtlRun (freshness).
+      // (reporter-grants rows only reach the funding index since #2285; before
+      // that the funding build dropped every `reporter:` id, so this ordering
+      // bought nothing for that source.)
       { id: "PopsWeekly", npmScript: "etl:pops", external: false, tier: "continue" },
       {
         id: "ReporterGrantsWeekly",

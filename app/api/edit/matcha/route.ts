@@ -9,7 +9,8 @@
  *
  * GET — the retained searches, newest first. SCOPED: a superuser sees every officer's; everyone
  * else sees only their own (see the handler).
- * DELETE `{ submissionId }` — erase one. Any officer on this surface may erase any row.
+ * DELETE `{ submissionId }` — erase one. SCOPED IDENTICALLY to GET: a superuser may erase any
+ * row, everyone else only their own (#1776).
  *
  * THE SEARCH IS NOW RETAINED (#6d), REVERSING THIS ROUTE'S ORIGINAL POSTURE. It was built to
  * persist nothing — "the pasted text is a query, never persisted" — because sponsor
@@ -107,6 +108,7 @@ import {
 } from "@/lib/api/matcha-grants-spine";
 import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
@@ -497,6 +499,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  * row could push an older distinct paste off the end. Raise SCAN, or group in SQL, if that ever
  * bites.
  */
+/**
+ * The ONE scope predicate for retained searches, shared by GET and DELETE so the two cannot
+ * drift apart again (#1776: the read was scoped while DELETE erased any row by id).
+ * Superuser ⇒ no filter (everyone's). Anyone else — INCLUDING a developer — ⇒ their own. The
+ * TRUE leg is the privileged one so an absent flag fails closed. See GET's doc-comment.
+ */
+function submissionScope(session: Pick<EditSession, "cwid" | "isSuperuser">) {
+  return session.isSuperuser ? undefined : { submittedBy: session.cwid };
+}
+
 export async function GET(): Promise<NextResponse> {
   if (!isMatchaEnabled()) return new NextResponse(null, { status: 404 });
   const session = await getEffectiveEditSession();
@@ -505,9 +517,8 @@ export async function GET(): Promise<NextResponse> {
   }
   try {
     const rows = await db.read.sponsorMatchSubmission.findMany({
-      // Superuser ⇒ everyone's. Anyone else — INCLUDING a developer — ⇒ their own. The TRUE leg
-      // is the privileged one so an absent flag fails closed. See the doc-comment.
-      where: session.isSuperuser ? undefined : { submittedBy: session.cwid },
+      // Superuser ⇒ everyone's. Anyone else — INCLUDING a developer — ⇒ their own.
+      where: submissionScope(session),
       orderBy: { createdAt: "desc" },
       take: SUBMISSION_SCAN_MAX,
       select: {
@@ -565,11 +576,15 @@ export async function GET(): Promise<NextResponse> {
 /**
  * DELETE `{ submissionId }` — erase a retained search.
  *
- * ANY officer on this surface may delete ANY row, not merely their own. The button exists so a
- * sponsor's words can be taken back out of the system on request; scoping that to the person
- * who happened to paste them would mean a colleague's absence could block an erasure we have
- * committed to honouring. Everyone here already holds superuser or developer, and every
- * deletion is logged.
+ * SCOPED EXACTLY AS GET IS (#1776), via the same `submissionScope`: a superuser may delete any
+ * row; everyone else — including a developer — only their own. This was previously open to any
+ * officer on the surface, so a user could erase a paste they were not permitted to READ. Erasure
+ * on behalf of an absent colleague remains possible through a superuser, who sees and may erase
+ * every row. An out-of-scope id answers 404, exactly as a missing one does, so the response does
+ * not reveal whether another user's submission exists.
+ *
+ * The scope bounds BOTH the lookup and the erase: a non-superuser deleting their paste erases
+ * their own runs of it, never a colleague's rows that happen to share the same `descriptionHash`.
  *
  * ERASES EVERY RUN OF THAT PASTE, not the one row whose id was clicked — and that is a FIX, not
  * a widening of scope.
@@ -611,17 +626,19 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
 
   try {
     // The clicked row names the PASTE; every run of it is what gets erased.
+    const scope = submissionScope(session);
     const row = await db.read.sponsorMatchSubmission.findUnique({
-      where: { id: submissionId },
+      where: { id: submissionId, ...scope },
       select: { descriptionHash: true },
     });
     // Already gone is the SUCCESS case for the caller's intent but the 404 the client expects
     // (two officers clicking the same button, or a retry) — unchanged behaviour, not a 500.
+    // Out of scope is indistinguishable from gone: same 404, nothing erased.
     if (!row) return editError(404, "not_found");
 
     // deleteMany, not delete: `where` is the hash, which matches one row or many.
     const { count } = await db.write.sponsorMatchSubmission.deleteMany({
-      where: { descriptionHash: row.descriptionHash },
+      where: { descriptionHash: row.descriptionHash, ...scope },
     });
     if (count === 0) return editError(404, "not_found");
     return editOk({ deleted: submissionId, count });

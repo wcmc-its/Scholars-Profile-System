@@ -73,6 +73,7 @@ import {
 import type { EditSession } from "@/lib/auth/superuser";
 import { fetchCornellPersonByNetid } from "@/lib/sources/cornell-ldap";
 import { CTSC_FEED_SOURCES } from "@/lib/edit/external-member-sources";
+import { isPublicRosterMember } from "@/lib/eligibility";
 
 const PATH = "/api/edit/roster";
 
@@ -596,7 +597,33 @@ async function handleCenter(p: {
   }
 
   await reflectUnitChange({ unitKind: "center", unitSlug });
-  return editOk({ unitCode, cwid, action, changed: true });
+  // #1827 — the add picker reads ED, a superset of who the public center page
+  // renders. Allow the add (an ED record may not have landed yet) but tell the
+  // editor when this person won't appear publicly, instead of silently dropping.
+  const publiclyListed = willCreateMembership ? await isCwidPublicRosterMember(cwid) : undefined;
+  return editOk({
+    unitCode,
+    cwid,
+    action,
+    changed: true,
+    ...(publiclyListed === undefined ? {} : { publiclyListed }),
+  });
+}
+
+/** #1827 — the public center-roster gate for one cwid, or `undefined` when the
+ *  lookup fails (post-commit; a read hiccup must not turn a committed add into
+ *  an error). */
+async function isCwidPublicRosterMember(cwid: string): Promise<boolean | undefined> {
+  try {
+    const scholar = await db.read.scholar.findUnique({
+      where: { cwid },
+      select: { roleCategory: true, deletedAt: true, status: true },
+    });
+    return isPublicRosterMember(scholar);
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------

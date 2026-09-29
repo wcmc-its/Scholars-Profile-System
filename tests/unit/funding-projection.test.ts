@@ -574,6 +574,38 @@ describe("groupGrantsByProject", () => {
     expect(project[0].externalId).toBe("INFOED-A1-alice");
   });
 
+  it("groups and projects a RePORTER-sourced row by its core project number (#2285)", () => {
+    // `reporter:{cwid}:{core}` (etl/reporter-grants/transform.ts) used to fail
+    // the InfoEd-only parse, so every RePORTER row was silently dropped from
+    // the funding index. It must group with an InfoEd row on the same award.
+    const reporter = makeRow({
+      cwid: "alice",
+      role: "PI",
+      scholar: SCHOLAR_A,
+      externalId: "reporter:alice:R01HL123456",
+      awardNumber: "5R01HL123456-03",
+      primeSponsor: null,
+      primeSponsorRaw: null,
+    });
+    const infoed = makeRow({
+      cwid: "bob",
+      role: "Co-I",
+      scholar: SCHOLAR_B,
+      externalId: "INFOED-A9-bob",
+    });
+
+    const groups = groupGrantsByProject([reporter, infoed], new Set());
+    expect([...groups.keys()]).toEqual(["R01HL123456"]);
+    expect(groups.get("R01HL123456")).toHaveLength(2);
+
+    const solo = projectFromRows([reporter])!;
+    expect(solo).not.toBeNull();
+    expect(solo.projectId).toBe("R01HL123456");
+    expect(solo.wcmInvestigatorCwids).toEqual(["alice"]);
+    // No sponsor columns on a RePORTER row: its NIH IC stands in.
+    expect(solo.primeSponsor).toBe("NHLBI");
+  });
+
   it("skips rows whose externalId is null or unparseable", () => {
     const groups = groupGrantsByProject(
       [

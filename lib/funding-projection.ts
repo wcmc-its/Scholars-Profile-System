@@ -182,7 +182,9 @@ export type FundingDoc = {
  *  the scholar's profile. */
 export const PUB_LIST_CAP = 250;
 
-/** Parse `INFOED-{accountNumber}-{cwid}` external ID. */
+/** Parse `INFOED-{accountNumber}-{cwid}` external ID. InfoEd ONLY — the
+ *  funding-project key goes through {@link fundingProjectBaseKey}, which also
+ *  accepts RePORTER ids (#2285). */
 export function parseExternalId(
   externalId: string | null,
 ): { accountNumber: string; cwid: string } | null {
@@ -190,6 +192,34 @@ export function parseExternalId(
   const m = externalId.match(/^INFOED-(.+)-([^-]+)$/);
   if (!m) return null;
   return { accountNumber: m[1], cwid: m[2] };
+}
+
+/** `reporter:{cwid}:{coreProjectNum}` — the id `etl/reporter-grants/transform.ts`
+ *  writes for a RePORTER-sourced grant row. */
+const REPORTER_EXTERNAL_ID = /^reporter:([^:]+):(.+)$/;
+
+/** True for a RePORTER-sourced grant row's externalId. */
+export function isReporterExternalId(externalId: string | null): boolean {
+  return !!externalId && REPORTER_EXTERNAL_ID.test(externalId);
+}
+
+/**
+ * The per-row fallback half of the funding-project key: the InfoEd
+ * Account_Number for `INFOED-{account}-{cwid}`, or the core project number for
+ * `reporter:{cwid}:{core}`. Null for any other id (never indexed).
+ *
+ * #2285 — the funding index used to key on `parseExternalId` alone, which
+ * accepts only the InfoEd form, so every RePORTER row was loaded and then
+ * silently dropped. Deliberately a separate function rather than a widened
+ * `parseExternalId`: that one's other callers (`lib/api/project-siblings.ts`
+ * builds an `INFOED-{account}-` prefix from it) genuinely need an InfoEd
+ * Account_Number, which a RePORTER row does not have.
+ */
+export function fundingProjectBaseKey(externalId: string | null): string | null {
+  const infoed = parseExternalId(externalId);
+  if (infoed) return infoed.accountNumber;
+  const m = externalId?.match(REPORTER_EXTERNAL_ID);
+  return m ? m[2] : null;
 }
 
 /**
@@ -275,9 +305,9 @@ export function groupGrantsByProject<
     // #160 — drop a suppressed grant role before grouping/projection. A project
     // with no surviving rows never forms a group (-> dark, never indexed).
     if (r.externalId && suppressedExternalIds.has(r.externalId)) continue;
-    const ext = parseExternalId(r.externalId);
-    if (!ext) continue;
-    const key = coreProjectNum(r.awardNumber) ?? ext.accountNumber;
+    const base = fundingProjectBaseKey(r.externalId);
+    if (!base) continue;
+    const key = coreProjectNum(r.awardNumber) ?? base;
     const arr = byProject.get(key) ?? [];
     arr.push(r);
     byProject.set(key, arr);
@@ -434,12 +464,15 @@ export function projectFromRows(
   now: Date = new Date(),
 ): FundingDoc | null {
   if (rows.length === 0) return null;
-  const ext = parseExternalId(rows[0].externalId);
-  if (!ext) return null;
+  const baseKey = fundingProjectBaseKey(rows[0].externalId);
+  if (!baseKey) return null;
 
   // Per-project canonical fields are taken from any row — all rows for a
-  // single account number share these by construction.
-  const head = rows[0];
+  // single account number share these by construction. An InfoEd row is
+  // preferred when the project mixes sources (#2285): a RePORTER row carries no
+  // sponsor columns. For an all-InfoEd project this is `rows[0]`, as before.
+  const head = rows.find((r) => !isReporterExternalId(r.externalId)) ?? rows[0];
+  const headIsReporter = isReporterExternalId(head.externalId);
 
   // Dedupe rows by cwid before producing chips. InfoEd often emits two
   // Account_Numbers for the same scholar on one project (an Equipment
@@ -508,7 +541,12 @@ export function projectFromRows(
   const department = leadPiRow?.scholar.primaryDepartment ?? null;
   const institution = leadPiRow?.scholar.primaryOrgCode ?? null;
 
-  const primeShort = resolveCanonical(head.primeSponsor, head.primeSponsorRaw);
+  // A RePORTER row has no prime-sponsor columns; it is an NIH award by
+  // construction, so its funding IC (else NIH) stands in rather than
+  // "(unknown sponsor)".
+  const primeShort =
+    resolveCanonical(head.primeSponsor, head.primeSponsorRaw) ??
+    (headIsReporter ? (canonicalizeSponsor(head.nihIc) ?? "NIH") : null);
   const directShort = resolveCanonical(
     head.directSponsor,
     head.directSponsorRaw,
@@ -656,7 +694,7 @@ export function projectFromRows(
   }
 
   return {
-    projectId: ext.accountNumber,
+    projectId: baseKey,
     title: head.title,
     sponsorText: buildSponsorText({
       primeShort,

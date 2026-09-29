@@ -322,7 +322,7 @@ function ModalContent({
   onClose: () => void;
   titleId: string;
 }) {
-  const { pub, topics, citingPubs, citingPubsTotal } = payload;
+  const { pub, topics, citingPubs } = payload;
   const { journal: citationJournal, tail: citationTail } =
     formatCitationContext(pub);
   return (
@@ -370,7 +370,6 @@ function ModalContent({
             pmid={pub.pmid}
             citationCount={pub.citationCount}
             citingPubs={citingPubs}
-            citingPubsTotal={citingPubsTotal}
           />
         </div>
       </div>
@@ -906,19 +905,17 @@ function CitingPubsSection({
   pmid,
   citationCount,
   citingPubs,
-  citingPubsTotal,
 }: {
   pmid: string;
   citationCount: number;
   citingPubs: PublicationDetailPayload["citingPubs"];
-  citingPubsTotal: number | null;
 }) {
   // Header chip = the canonical Scopus citation count from
   // `Publication.citationCount` — the headline "this paper has been cited
   // N times" number. The listed citations come from `analysis_nih_cites`,
   // which is iCite-derived and ties to PubMed's own Cited By tab in
-  // practice — that's how users recognize the number. The subhead spells
-  // out the gap when Scopus reports more than PubMed tracks.
+  // practice, inner-joined to Scholars-indexed metadata — so the chip is
+  // labeled "Scopus" and the subhead scopes the list to Scholars (#2201).
   //
   // Pagination: the API caps at 500 rows; the UI further trims to the
   // first CITING_PUBS_INITIAL_VISIBLE on first render with a "Show all N"
@@ -949,22 +946,18 @@ function CitingPubsSection({
         ? citingPubs
         : citingPubs.slice(0, CITING_PUBS_INITIAL_VISIBLE);
 
+  // #2201 — three different populations, labeled honestly:
+  //   - the chip is the Scopus count (`Publication.citationCount`);
+  //   - `citingPubsTotal` is the unfiltered iCite edge count, which is NOT
+  //     shown, because neither the list nor the CSV can support it;
+  //   - the list (and the CSV) is only the citers indexed in Scholars.
+  // So the subhead describes the list alone, and never promises a "full list".
   let subhead: string | null = null;
-  if (hasList && citingPubsTotal !== null) {
-    if (citingPubsTotal > citingPubs.length) {
-      // 500-row API cap kicked in inside the PubMed-cited subset; CSV is
-      // the only path to the full list, so the subhead nudges users
-      // toward it.
-      subhead = `${citingPubs.length.toLocaleString()} most recent in PubMed of ${citingPubsTotal.toLocaleString()} total · use CSV for the full list`;
-    } else if (citingPubsTotal < citationCount) {
-      // Listed full PubMed subset but Scopus reports more.
-      subhead =
-        citingPubsTotal === 1
-          ? `1 in PubMed · Scopus reports ${citationCount.toLocaleString()}`
-          : `${citingPubsTotal.toLocaleString()} in PubMed · Scopus reports ${citationCount.toLocaleString()}`;
-    } else if (citingPubs.length > 1) {
-      subhead = "Most recent first";
-    }
+  if (hasList) {
+    subhead =
+      citingPubs.length === 1
+        ? "1 citing publication in Scholars"
+        : `${citingPubs.length.toLocaleString()} most recent citing publications in Scholars`;
   }
 
   return (
@@ -973,7 +966,7 @@ function CitingPubsSection({
         <SectionHeading>Cited by</SectionHeading>
         {showCountChip ? (
           <span className="text-muted-foreground text-xs tabular-nums">
-            {citationCount.toLocaleString()}
+            {citationCount.toLocaleString()} · Scopus
           </span>
         ) : null}
       </div>
@@ -1001,7 +994,7 @@ function CitingPubsSection({
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          Download CSV
+          Download these (CSV)
         </a>
       ) : null}
       {citingPubs === null ? (
@@ -1011,7 +1004,7 @@ function CitingPubsSection({
       ) : citingPubs.length === 0 ? (
         <p className="text-muted-foreground mt-2 text-sm">
           {citationCount > 0
-            ? "No PubMed-indexed citations yet."
+            ? "None of the citing publications are in Scholars yet."
             : "No citing publications."}
         </p>
       ) : (

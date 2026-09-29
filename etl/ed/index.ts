@@ -62,6 +62,7 @@ import {
   fetchHistoricalFacultyAppointments,
   fetchAllPostdocEmploymentRecords,
   fetchDoctoralStudents,
+  fetchFacultySorDegrees,
   fetchPersonNamesByCwid,
   labPiNameKey,
   personNameKey,
@@ -96,6 +97,20 @@ export function appointmentOrganization(a: {
 }): string {
   if (a.divName && PROMOTE_LEVEL2_TO_DEPT.has(a.divName)) return a.divName;
   return a.organization ?? "Weill Cornell Medicine";
+}
+
+/**
+ * #2206 — the `Scholar.postnominal` value written for one ED entry. The
+ * people-branch `weillCornellEduDegree` wins when present; otherwise fall back
+ * to the faculty SOR parent record's degree (fetchFacultySorDegrees), the same
+ * SOR-parent source doctoral students already get theirs from. Blank → null so
+ * the profile renders a bare name rather than "Name, ".
+ */
+export function resolvePostnominal(
+  entryDegree: string | null | undefined,
+  sorDegree: string | null | undefined,
+): string | null {
+  return entryDegree?.trim() || sorDegree?.trim() || null;
 }
 
 /**
@@ -756,6 +771,19 @@ async function main() {
       appointmentsByCwid.set(a.cwid, arr);
     }
 
+    // #2206 — faculty degree fallback from the faculty SOR parent records.
+    // Best-effort: a failure leaves the map empty and postnominal falls back
+    // to the people-branch value alone (the pre-#2206 behaviour).
+    let facultySorDegrees = new Map<string, string>();
+    try {
+      facultySorDegrees = await fetchFacultySorDegrees(client);
+      console.log(`ED returned ${facultySorDegrees.size} faculty SOR degree strings.`);
+    } catch (err) {
+      console.warn(
+        `Faculty SOR degree fetch skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     // Issue #1323 — historical (faculty:expired) appointments. Best-effort:
     // a fetch failure must NOT abort the ETL, and an empty result from a failed
     // fetch is NOT the same as "no historical rows exist", so we only reconcile
@@ -873,6 +901,16 @@ async function main() {
 
     // Sort by CWID for deterministic collision ordering.
     allEntries.sort((a, b) => a.cwid.localeCompare(b.cwid));
+
+    // #2206 — postnominal coverage, so the run log shows which source fed it.
+    const withEntryDegree = allEntries.filter((f) => f.degree?.trim()).length;
+    const withPostnominal = allEntries.filter((f) =>
+      resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+    ).length;
+    console.log(
+      `[ED] postnominal: ${withPostnominal}/${allEntries.length} entries ` +
+        `(${withEntryDegree} from the entry, ${withPostnominal - withEntryDegree} from faculty SOR fallback)`,
+    );
 
     // Existing scholars and slugs from the DB.
     const existing = await db.write.scholar.findMany({
@@ -1224,7 +1262,7 @@ async function main() {
           data: {
             preferredName: f.preferredName,
             fullName: f.fullName,
-            postnominal: f.degree?.trim() || null,
+            postnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
             // `primaryTitle` holds the RESOLVED display title, but the chief /
             // center-head tiers do not exist until the leader assignments are
             // written further down this run. So write the ED value here as a SEED
@@ -1289,7 +1327,7 @@ async function main() {
             cwid: f.cwid,
             preferredName: f.preferredName,
             fullName: f.fullName,
-            postnominal: f.degree?.trim() || null,
+            postnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
             // `primaryTitle` holds the RESOLVED display title, but the chief /
             // center-head tiers do not exist until the leader assignments are
             // written further down this run. So write the ED value here as a SEED
