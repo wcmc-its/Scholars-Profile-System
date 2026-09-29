@@ -514,7 +514,6 @@ export function EvidenceLine({
   // It does NOT participate in `claimedPmids`: grants have no pmid and cannot collide with papers.
   const [grants, setGrants] = useState<EvidenceGrant[]>([]);
   const [trials, setTrials] = useState<EvidenceTrial[]>([]);
-  const trialsFetched = useRef(false);
   const grantsFetched = useRef(false);
 
   // #1366 — the pmids already shown on a sibling line drive `exclude` so this
@@ -585,25 +584,15 @@ export function EvidenceLine({
     if (keyPaperConfig.conceptUi) params.set("conceptUi", keyPaperConfig.conceptUi);
     else params.set("descriptorUis", keyPaperConfig.descriptorUis.join(","));
     params.set("label", keyPaperConfig.conceptLabel ?? "");
+    // The concept's PI trials ride the same fetch (empty unless SEARCH_PEOPLE_TRIAL_EVIDENCE).
+    params.set("trials", "1");
     fetch(`/api/scholar/${encodeURIComponent(cwid)}/grants?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { grants: [] }))
-      .then((d: { grants?: EvidenceGrant[] }) =>
-        setGrants((d?.grants ?? []).filter((g) => g.matchedConcept === true)),
-      )
+      .then((d: { grants?: EvidenceGrant[]; trials?: EvidenceTrial[] }) => {
+        setGrants((d?.grants ?? []).filter((g) => g.matchedConcept === true));
+        setTrials(d?.trials ?? []);
+      })
       .catch(() => setGrants([]));
-  }, [artifactLead, keyPaperConfig, cwid]);
-
-  // Matcha only (artifactLead). Concept-only on the server; empty when the flag is off.
-  const ensureTrials = useCallback(() => {
-    if (!artifactLead || !keyPaperConfig || trialsFetched.current) return;
-    trialsFetched.current = true;
-    const params = new URLSearchParams();
-    if (keyPaperConfig.conceptUi) params.set("conceptUi", keyPaperConfig.conceptUi);
-    else params.set("descriptorUis", keyPaperConfig.descriptorUis.join(","));
-    fetch(`/api/scholar/${encodeURIComponent(cwid)}/trials?${params.toString()}`)
-      .then((r) => (r.ok ? r.json() : { trials: [] }))
-      .then((d: { trials?: EvidenceTrial[] }) => setTrials(d?.trials ?? []))
-      .catch(() => setTrials([]));
   }, [artifactLead, keyPaperConfig, cwid]);
 
   const ensureExemplar = useCallback(() => {
@@ -688,7 +677,6 @@ export function EvidenceLine({
     // Grants ride the same in-view gate but NOT the ordered chain — they claim no pmids, so nothing
     // downstream depends on them having settled.
     ensureGrants();
-    ensureTrials();
     if (isLazyExemplar) ensureExemplar();
     else if (wantsLazyKeyPaper) ensureKeyPaper();
     // Nothing to fetch — release the caller's chain immediately, or a line with no lazy loader
@@ -701,7 +689,6 @@ export function EvidenceLine({
     wantsLazyKeyPaper,
     ensureKeyPaper,
     ensureGrants,
-    ensureTrials,
   ]);
 
   const profileHref = `${profilePath(slug)}#publications`;

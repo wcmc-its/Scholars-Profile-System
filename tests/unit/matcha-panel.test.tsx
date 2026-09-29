@@ -1739,7 +1739,7 @@ describe("MatchaPanel", () => {
   it("lists the scholar's concept-tagged PI TRIALS, linked to ClinicalTrials.gov", async () => {
     const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
       const u = String(url);
-      if (u.startsWith("/api/scholar/") && u.includes("/trials")) {
+      if (u.startsWith("/api/scholar/") && u.includes("/grants")) {
         return {
           ok: true,
           json: async () => ({
@@ -1747,11 +1747,11 @@ describe("MatchaPanel", () => {
               { trialId: "NCT0000001", nctNumber: "NCT0000001", title: "Orca-T after reduced intensity conditioning", status: "Recruiting", isActive: true, startYear: 2025 },
               { trialId: "19-0000001", nctNumber: null, title: "Nutrition in acute leukemia", status: "Completed", isActive: false, startYear: 2019 },
             ],
-            total: 2,
+            grants: [],
+            total: 0,
           }),
         };
       }
-      if (u.startsWith("/api/scholar/") && u.includes("/grants")) return { ok: true, json: async () => ({ grants: [] }) };
       if (u.startsWith("/api/search/key-paper"))
         return { ok: true, json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }) };
       if ((init?.method ?? "GET") === "GET") return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
@@ -1786,9 +1786,10 @@ describe("MatchaPanel", () => {
     // No NCT: plain title, labelled by the WCM protocol number.
     expect(screen.getByText("Nutrition in acute leukemia").closest("a")).toBeNull();
     expect(screen.getByText(/WCM protocol 19-0000001/)).toBeTruthy();
-    // The block's concept travels to the route.
-    const trialsUrl = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/trials"))!;
-    expect(trialsUrl).toMatch(/conceptUi=|descriptorUis=/);
+    // Matcha asks the grants route for the concept's trials too.
+    const grantsUrl = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/grants"))!;
+    expect(grantsUrl).toMatch(/[?&]trials=1/);
+    expect(grantsUrl).toMatch(/conceptUi=|descriptorUis=/);
   });
 
   it("an expired grant reads 'expired <year>' + the scholar's role, never an active date", async () => {

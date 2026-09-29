@@ -11,6 +11,8 @@ import { searchClient, TRIALS_INDEX } from "@/lib/search";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 import type { Scope } from "@/lib/api/search-flags";
 import type { TrialDoc } from "@/lib/search-trial-evidence";
+import type { EvidenceTrial } from "@/lib/api/result-evidence";
+import { TRIAL_STATUS_LABEL } from "@/components/search/trial-result-row";
 
 const PAGE_SIZE = 20;
 
@@ -270,5 +272,43 @@ export async function searchTrials(opts: {
     pageSize: PAGE_SIZE,
     facets,
     hasResultsCount: body.aggregations.hasResults.doc_count,
+  };
+}
+
+const EVIDENCE_TRIAL_CAP = 3;
+
+/** A scholar's PI trials whose ClinicalTrials.gov MeSH falls in the concept subtree (`uis`),
+ *  recruiting first then newest, capped at 3 — Matcha's TRIAL evidence rows. Concept-only. */
+export async function loadConceptTrials(
+  cwid: string,
+  uis: string[],
+): Promise<{ trials: EvidenceTrial[]; total: number }> {
+  if (uis.length === 0) return { trials: [], total: 0 };
+  const r = await searchClient().search({
+    index: TRIALS_INDEX,
+    body: {
+      size: EVIDENCE_TRIAL_CAP,
+      track_total_hits: true,
+      query: { bool: { filter: [{ term: { piCwids: cwid } }, { terms: { meshDescriptorUi: uis } }] } },
+      sort: [
+        { statusRank: { order: "asc", unmapped_type: "integer" } },
+        { startDate: { order: "desc", missing: "_last", unmapped_type: "keyword" } },
+        { trialId: "asc" },
+      ],
+      _source: ["trialId", "nctNumber", "title", "statusKey", "statusBucket", "startYear"],
+    },
+  });
+  type Hit = Pick<TrialDoc, "trialId" | "nctNumber" | "title" | "statusKey" | "statusBucket" | "startYear">;
+  const body = r.body as unknown as { hits: { total: { value: number }; hits: Array<{ _source: Hit }> } };
+  return {
+    total: body.hits.total.value,
+    trials: body.hits.hits.map(({ _source: t }) => ({
+      trialId: t.trialId,
+      nctNumber: t.nctNumber,
+      title: t.title,
+      status: t.statusKey ? (TRIAL_STATUS_LABEL[t.statusKey] ?? null) : null,
+      isActive: t.statusBucket === "active",
+      startYear: t.startYear ?? null,
+    })),
   };
 }
