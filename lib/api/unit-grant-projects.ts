@@ -179,8 +179,14 @@ export function groupUnitGrantsByProject(
   // Deterministic: these reads are cached (lib/api/swr-cache), so a tie broken by
   // Map insertion order — itself decided by MySQL's unspecified order within one
   // `startDate` — would make the same page render two different ways.
+  //
+  // #2082: `end_date` is ASC (soonest-ending first), matching /search?type=funding
+  // "End date (soonest)" (`{ endDate: "asc" }` after its active-first tier). Every
+  // row here is already active (`endDate >= now`, non-null), so that tier is
+  // moot and plain ASC is the same order. `most_recent` stays DESC.
+  const dir = sort === "end_date" ? -1 : 1;
   projects.sort(
-    (a, b) => b.sortKey - a.sortKey || a.projectKey.localeCompare(b.projectKey),
+    (a, b) => dir * (b.sortKey - a.sortKey) || a.projectKey.localeCompare(b.projectKey),
   );
   return projects;
 }
@@ -275,7 +281,7 @@ function buildProject(
  *
  * NO `orderBy`: row order cannot reach the output. `buildProject` re-sorts each
  * group's rows into a fixed order, and `groupUnitGrantsByProject` then applies a
- * TOTAL order over groups (`sortKey` DESC, `projectKey` ASC) with no possible
+ * TOTAL order over groups (`sortKey` DESC, or ASC for `end_date`; `projectKey` ASC) with no possible
  * tie. Asking MySQL to sort as well only buys a filesort over the unit's whole
  * active-grant pool. Ordering is established in app code, on purpose — the
  * grouping key is derived (`coreProjectNum ?? accountNumber`), so it is not a

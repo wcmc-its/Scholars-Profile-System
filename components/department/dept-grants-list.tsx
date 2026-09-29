@@ -101,7 +101,7 @@ function DeptGrantsListInner({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="most_recent">Most recent</SelectItem>
-            <SelectItem value="end_date">End date</SelectItem>
+            <SelectItem value="end_date">End date (soonest)</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -366,14 +366,22 @@ describe("groupUnitGrantsByProject (#2066)", () => {
     });
   });
 
-  it("keys sortKey on endDate under the end_date sort", () => {
+  it("sorts end_date SOONEST-ending first, matching funding search (#2082)", () => {
+    // /search?type=funding "End date (soonest)" sorts `{ endDate: "asc" }`; the
+    // unit Grants tabs must not return the grant FURTHEST from expiring first.
+    // Input order is deliberately the reverse of the expected output.
     const rows = [
-      row({ cwid: "a", externalId: "INFOED-A1-a", awardNumber: "1R01CA000001-01", endDate: new Date("2026-01-01") }),
       row({ cwid: "b", externalId: "INFOED-A2-b", awardNumber: "1R01CA000002-01", endDate: new Date("2031-01-01") }),
+      row({ cwid: "c", externalId: "INFOED-A3-c", awardNumber: "1R01CA000003-01", endDate: new Date("2028-01-01") }),
+      row({ cwid: "a", externalId: "INFOED-A1-a", awardNumber: "1R01CA000001-01", endDate: new Date("2026-01-01") }),
     ];
-    expect(
-      groupUnitGrantsByProject(rows, NONE, "end_date").map((g) => g.projectKey),
-    ).toEqual(["R01CA000002", "R01CA000001"]);
+    const groups = groupUnitGrantsByProject(rows, NONE, "end_date");
+    expect(groups.map((g) => g.projectKey)).toEqual([
+      "R01CA000001",
+      "R01CA000003",
+      "R01CA000002",
+    ]);
+    expect(groups.map((g) => g.sortKey)).toEqual(groups.map((g) => g.endDate.getTime()));
   });
 
   it("sorts BOTH ways on the date the card DISPLAYS, not a second extremum", () => {
@@ -425,7 +433,9 @@ describe("groupUnitGrantsByProject (#2066)", () => {
     // group's MIN end (2027) or the representative's own end (also 2027) fails
     // here instead of coinciding with the answer.
     const byEnd = groupUnitGrantsByProject(rows, NONE, "end_date");
-    expect(byEnd.map((g) => g.projectKey)).toEqual(["R01CA333333", "R01CA999999"]);
+    // ASC (#2082): the solo's 2029 end precedes the chain's MAX end of 2030; a
+    // MIN-end (2027) key would put the chain first instead.
+    expect(byEnd.map((g) => g.projectKey)).toEqual(["R01CA999999", "R01CA333333"]);
     expect(byEnd.map((g) => g.sortKey)).toEqual(byEnd.map((g) => g.endDate.getTime()));
   });
 });
