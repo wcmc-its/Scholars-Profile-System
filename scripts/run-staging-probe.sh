@@ -41,6 +41,9 @@ NETCFG="$(aws ecs describe-services --cluster "$CLUSTER" --services "sps-app-$EN
 SUBNETS="$(python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["subnets"]))' <<<"$NETCFG")"
 SG="$(python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["securityGroups"]))' <<<"$NETCFG")"
 [[ -n "$SUBNETS" && -n "$SG" ]] || { echo "could not read live netcfg for $ENV" >&2; exit 1; }
+# #2103 — JSON, not the `awsvpcConfiguration={subnets=[...]}` shorthand, which
+# mis-landed tasks in foreign subnets/VPCs (reads as an Aurora pool timeout).
+NETJSON="$(python3 -c 'import json,sys; c=json.load(sys.stdin); print(json.dumps({"awsvpcConfiguration":{"subnets":c["subnets"],"securityGroups":c["securityGroups"],"assignPublicIp":"DISABLED"}}))' <<<"$NETCFG")"
 
 B64="$(gzip -9 -c "$PROBE" | base64 | tr -d '\n')"
 OVERRIDES="$(B64="$B64" CONTAINER="$CONTAINER" PROBE_KEEP_RW="${PROBE_KEEP_RW:-}" python3 - <<'PY'
@@ -81,7 +84,7 @@ PY
 
 echo "Launching $PROBE on $CLUSTER ($TASKDEF)…" >&2
 TID="$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASKDEF" --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+  --network-configuration "$NETJSON" \
   --overrides "$OVERRIDES" --query 'tasks[0].taskArn' --output text)"
 TID="${TID##*/}"
 echo "task: $TID — waiting…" >&2

@@ -58,6 +58,9 @@ export const ALLOWED_PATTERNS: readonly RegExp[] = [
   // family `/methods/{slug}/{slug}`. The ETL revalidates these on a tools refresh.
   new RegExp(`^/methods/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/methods/${SLUG_RE_SOURCE}/${SLUG_RE_SOURCE}$`),
+  // #2262 — child sitemap shards `/sitemap/{n}.xml`. The index at `/sitemap.xml`
+  // only lists shard links; every advertised URL lives in a shard.
+  /^\/sitemap\/\d+\.xml$/,
 ];
 
 // #671 — root people-profile form `/{slug}`, the only canonical form now.
