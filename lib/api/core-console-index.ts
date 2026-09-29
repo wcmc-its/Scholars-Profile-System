@@ -9,6 +9,8 @@
  *     `candidate` row with no active CoreClaim, the review queue's own
  *     `candidates` partition. Counted with a grouped query rather than loading
  *     every candidate row, then corrected for the (few) claimed/rejected pairs.
+ *     Only candidates at or above CANDIDATE_DISPLAY_FLOOR count — the ones the
+ *     queue shows by default (lib/cores/review-thresholds.ts).
  *   - "Confirmed" is `loadConfirmedCorePmidsByCore` (lib/api/cores.ts).
  *   - Clients are active `CoreClient` rows (`removedAt IS NULL`), split into
  *     CWID and name-only.
@@ -18,15 +20,30 @@
 import { db } from "@/lib/db";
 import { claimKey } from "@/lib/api/core-merge";
 import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
+import { CANDIDATE_DISPLAY_FLOOR, HIGH_CONFIDENCE_LIKELIHOOD } from "@/lib/cores/review-thresholds";
 
-/** Likelihood at or above which an open candidate counts as high confidence. */
-export const HIGH_CONFIDENCE_LIKELIHOOD = 0.8;
+// Both cuts live in the pure `lib/cores/review-thresholds.ts` (client components
+// read them); re-exported so existing server-side imports keep working.
+export { CANDIDATE_DISPLAY_FLOOR, HIGH_CONFIDENCE_LIKELIHOOD };
 
 /** Of a loaded queue's open candidates, the high-confidence ones — the core
  *  editor's "strong confidence" banner count, on the same cut as `reviewHigh`
  *  so the editor and this index never disagree. */
 export function countHighConfidence(candidates: ReadonlyArray<{ likelihood: number }>): number {
   return candidates.filter((c) => c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD).length;
+}
+
+/** Of a loaded queue's open candidates, the ones this index counts as "To
+ *  review" (`reviewTotal`): ENGINE candidates at or above the display floor.
+ *  The core editor's "pending in total" banner count, so the two pages agree.
+ *  A pmid sent to review by hand (not `status: "candidate"`) is on the queue
+ *  but is not an engine suggestion, so neither page counts it. */
+export function countReviewSuggestions(
+  candidates: ReadonlyArray<{ likelihood: number; status: string }>,
+): number {
+  return candidates.filter(
+    (c) => c.status === "candidate" && c.likelihood >= CANDIDATE_DISPLAY_FLOOR,
+  ).length;
 }
 
 export interface CoreConsoleLeader {
@@ -47,7 +64,7 @@ export interface CoreConsoleRow {
   leaders: CoreConsoleLeader[];
   owners: string[];
   curators: string[];
-  /** Open candidates (no active claim). */
+  /** Open candidates (no active claim) at or above CANDIDATE_DISPLAY_FLOOR. */
   reviewTotal: number;
   /** Of `reviewTotal`, those with likelihood >= HIGH_CONFIDENCE_LIKELIHOOD. */
   reviewHigh: number;
@@ -81,7 +98,8 @@ export interface CoreConsoleInputs {
     granteeName: string | null;
   }>;
   names: ReadonlyMap<string, string>;
-  /** Engine `candidate` counts per core, before claims are applied. */
+  /** Engine `candidate` counts per core at or above the display floor, before
+   *  claims are applied. */
   candidateTotals: ReadonlyMap<string, number>;
   candidateHighs: ReadonlyMap<string, number>;
   /** Engine `candidate` rows that carry an ACTIVE claim — decided, so not open. */
@@ -95,6 +113,9 @@ export function buildCoreConsoleRows(input: CoreConsoleInputs): CoreConsoleRow[]
   const claimedTotal = new Map<string, number>();
   const claimedHigh = new Map<string, number>();
   for (const c of input.claimedCandidates) {
+    // `candidateTotals` only counts rows at/above the floor, so only those are
+    // subtracted back out.
+    if (c.likelihood < CANDIDATE_DISPLAY_FLOOR) continue;
     claimedTotal.set(c.coreId, (claimedTotal.get(c.coreId) ?? 0) + 1);
     if (c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD) {
       claimedHigh.set(c.coreId, (claimedHigh.get(c.coreId) ?? 0) + 1);
@@ -189,7 +210,7 @@ export async function loadCoreConsoleIndex(
     }),
     client.publicationCore.groupBy({
       by: ["coreId"],
-      where: { status: "candidate" },
+      where: { status: "candidate", likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
       _count: { _all: true },
     }),
     client.publicationCore.groupBy({

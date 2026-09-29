@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCoreConsoleRows,
+  CANDIDATE_DISPLAY_FLOOR,
   countHighConfidence,
   HIGH_CONFIDENCE_LIKELIHOOD,
   loadCoreConsoleIndex,
@@ -85,14 +86,26 @@ describe("buildCoreConsoleRows", () => {
     expect(alpha.reviewHigh).toBe(3);
   });
 
+  it("only subtracts claimed candidates at or above the display floor (the totals exclude the rest)", () => {
+    const [alpha] = buildCoreConsoleRows(
+      inputs({
+        claimedCandidates: [
+          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR },
+          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01 },
+        ],
+      }),
+    );
+    expect(alpha.reviewTotal).toBe(9);
+  });
+
   it("never reports negative or high > total", () => {
     const [alpha] = buildCoreConsoleRows(
       inputs({
         candidateTotals: new Map([["2", 1]]),
         candidateHighs: new Map([["2", 5]]),
         claimedCandidates: [
-          { coreId: "2", likelihood: 0.1 },
-          { coreId: "2", likelihood: 0.1 },
+          { coreId: "2", likelihood: 0.5 },
+          { coreId: "2", likelihood: 0.5 },
         ],
       }),
     );
@@ -103,6 +116,7 @@ describe("buildCoreConsoleRows", () => {
 
 describe("loadCoreConsoleIndex", () => {
   it("counts only candidates whose pair carries an active claim as decided", async () => {
+    const groupByWheres: unknown[] = [];
     const reader = {
       core: { findMany: async () => [{ ...baseCore, id: "1", name: "Alpha Core" }] },
       coreLeader: { findMany: async () => [] },
@@ -117,8 +131,8 @@ describe("loadCoreConsoleIndex", () => {
             : [{ coreId: "1", pmid: "100" }],
       },
       publicationCore: {
-        groupBy: async (args: { where: { likelihood?: unknown } }) =>
-          args.where.likelihood
+        groupBy: async (args: { where: { likelihood: { gte: number } } }) =>
+          groupByWheres.push(args.where) && args.where.likelihood.gte === HIGH_CONFIDENCE_LIKELIHOOD
             ? [{ coreId: "1", _count: { _all: 2 } }]
             : [{ coreId: "1", _count: { _all: 5 } }],
         findMany: async (args: { where: { status: string } }) =>
@@ -133,6 +147,12 @@ describe("loadCoreConsoleIndex", () => {
     } as unknown as Parameters<typeof loadCoreConsoleIndex>[0];
 
     const [row] = await loadCoreConsoleIndex(reader);
+    expect(groupByWheres).toEqual(
+      expect.arrayContaining([
+        { status: "candidate", likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
+        { status: "candidate", likelihood: { gte: HIGH_CONFIDENCE_LIKELIHOOD } },
+      ]),
+    );
     expect(row.reviewTotal).toBe(4);
     expect(row.reviewHigh).toBe(1);
     expect(row.confirmed).toBe(1);

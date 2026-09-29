@@ -62,6 +62,9 @@ import { droppedAuthorCount, stripWcmMarkers } from "@/lib/author-byline";
 // imports nothing at module scope and is safe in this client bundle.
 import { extractLastNameSort, stripUnitDisambiguation } from "@/lib/name-sort";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
+// Pure and import-free, so safe in this client bundle (the loader modules that
+// also export these construct prisma at module scope).
+import { CANDIDATE_DISPLAY_FLOOR_PCT, isBelowDisplayFloor } from "@/lib/cores/review-thresholds";
 import { CoreClientsDialog } from "@/components/edit/core-clients-panel";
 import {
   AboutSignals,
@@ -908,6 +911,49 @@ export function pmidMatchNote(
   return `${head} Elsewhere: ${missing.map((p) => `${p} (${where(p)})`).join(", ")}.`;
 }
 
+/**
+ * The PMIDs a search names outright — every token PMID-shaped, ONE or more (a
+ * lone number is a text query to `matchesSearch`, but it still names a PMID).
+ * These reach below the display floor: a reviewer who types a PMID is looking
+ * for that paper, and "no match" for a paper that is on the queue would be a
+ * lie. Empty for any other query. Pure.
+ */
+export function searchedPmids(query: string): ReadonlySet<string> {
+  const tokens = query
+    .trim()
+    .split(/[\s,;]+/)
+    .filter((t) => t.length > 0);
+  return new Set(tokens.length > 0 && tokens.every((t) => /^[1-9][0-9]*$/.test(t)) ? tokens : []);
+}
+
+/**
+ * The To review candidates the queue works over, with the display floor
+ * applied (`isBelowDisplayFloor`, lib/cores/review-thresholds.ts). Below-floor
+ * open engine candidates are left out unless `showLow` is on, EXCEPT a row
+ * decided this session (held on screen for its Undo) and a row whose PMID the
+ * search names (`searchedPmids`). `hidden` is how many the floor left out;
+ * `belowFloor` how many sit below it at all (the Show/Hide line's two counts).
+ * Order is preserved. Pure.
+ */
+export function applyDisplayFloor(
+  candidates: readonly CoreQueueRow[],
+  opts: { showLow: boolean; decided: ReadonlySet<string>; searched: ReadonlySet<string> },
+): { shown: CoreQueueRow[]; hidden: number; belowFloor: number } {
+  const shown: CoreQueueRow[] = [];
+  let hidden = 0;
+  let belowFloor = 0;
+  for (const r of candidates) {
+    if (!isBelowDisplayFloor(r)) {
+      shown.push(r);
+      continue;
+    }
+    belowFloor++;
+    if (opts.showLow || opts.decided.has(r.pmid) || opts.searched.has(r.pmid)) shown.push(r);
+    else hidden++;
+  }
+  return { shown, hidden, belowFloor };
+}
+
 /** The Filters panel's groups, in the mockup's order. */
 export type FacetKey = "signal" | "llm" | "mstr" | "method" | "person" | "year";
 export const FACET_GROUPS: ReadonlyArray<{ key: FacetKey; label: string }> = [
@@ -1244,6 +1290,35 @@ export function historyGuardText(
   return `${head} ${middle} Each gets its own audit row.`;
 }
 
+/** "2,290 lower-confidence candidates hidden (likelihood below 40%) · Show" —
+ *  the display floor's one quiet line in the list header; Show/Hide toggles the
+ *  below-floor rows in and out. */
+function FloorLine({
+  count,
+  showing,
+  onToggle,
+}: {
+  count: number;
+  showing: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <p data-slot="core-queue-floor" className="text-muted-foreground mt-0.5 text-xs">
+      {`${count.toLocaleString("en-US")} lower-confidence ${count === 1 ? "candidate" : "candidates"} ${
+        showing ? "shown" : "hidden"
+      } (likelihood below ${CANDIDATE_DISPLAY_FLOOR_PCT}%) · `}
+      <button
+        type="button"
+        aria-pressed={showing}
+        onClick={onToggle}
+        className="text-apollo-slate hover:underline"
+      >
+        {showing ? "Hide" : "Show"}
+      </button>
+    </p>
+  );
+}
+
 export function CoreClaimQueue({
   core,
   candidates,
@@ -1290,6 +1365,9 @@ export function CoreClaimQueue({
   const [filtersOpen, setFiltersOpen] = useState(false);
   // Free text, or several PMIDs (see `parsePmidQuery`). AND-ed with the facets.
   const [query, setQuery] = useState("");
+  // Below-floor engine candidates (see `applyDisplayFloor`) are hidden until
+  // the reviewer asks for them. Session state only, like the facets.
+  const [showLow, setShowLow] = useState(false);
   // Engine likelihood, high→low — the loader's own order, so the list opens on
   // what the engine is surest of (owner's choice; "Uncertain first" is a pill).
   const [sort, setSort] = useState<SortKey>("likelihood");
@@ -1882,20 +1960,28 @@ export function CoreClaimQueue({
 
   // ---- derived: rail, scope, facets, the list -----------------------------
 
+  // The display floor: everything below — the rail, the list, the facet counts,
+  // "Select all", "Reject all" — works over `reviewRows`, never `candidates`.
+  const floor = applyDisplayFloor(candidates, {
+    showLow,
+    decided: new Set(decided.keys()),
+    searched: searchedPmids(query),
+  });
+  const reviewRows = floor.shown;
   // Remaining review work (decided rows stay visible for undo but don't count).
-  const remaining = candidates.filter((c) => !decided.has(c.pmid)).length;
+  const remaining = reviewRows.filter((c) => !decided.has(c.pmid)).length;
   // ponytail: every derivation below is recomputed per render, no memo. Fine at
   // the queue sizes cores carry today (low thousands); memoize on
   // [candidates, decided, paperCounts, clients] if a core ever gets much bigger.
-  const groups = buildEvidenceGroups(candidates, decided, paperCounts, clientCwids);
-  const people = buildRailPeople(candidates, decided, paperCounts);
+  const groups = buildEvidenceGroups(reviewRows, decided, paperCounts, clientCwids);
+  const people = buildRailPeople(reviewRows, decided, paperCounts);
   const activeGroup = mode === "evidence" ? (groups.find((g) => g.key === groupKey) ?? null) : null;
   const activePerson =
     mode === "person"
       ? (people.find((p) => p.scholar.cwid.toLowerCase() === personCwid) ?? people[0] ?? null)
       : null;
   const scopeRows =
-    mode === "person" ? (activePerson?.rows ?? []) : (activeGroup?.rows ?? candidates);
+    mode === "person" ? (activePerson?.rows ?? []) : (activeGroup?.rows ?? reviewRows);
   // The Confirmed/Rejected tabs share the search box and the Filters panel
   // (mockup): same facets, same words, over that tab's rows. The selection
   // there is its own (`histSelected`), and a tab switch clears both.
@@ -2037,7 +2123,7 @@ export function CoreClaimQueue({
               : groupBandText(activeGroup.rows.map((r) => r.likelihood))
           }`
         : `${plural(remaining, "open candidate")} across ${plural(groups.length, "evidence group")}`;
-  const meshCount = candidates.filter(
+  const meshCount = reviewRows.filter(
     (r) => r.topicalPrior !== null && decodeTopicalPrior(r.topicalPrior).mesh,
   ).length;
 
@@ -2584,6 +2670,16 @@ export function CoreClaimQueue({
                 {scopeSub ? (
                   <p className="text-muted-foreground mt-0.5 text-xs">{scopeSub}</p>
                 ) : null}
+                {(showLow ? floor.belowFloor : floor.hidden) > 0 ? (
+                  <FloorLine
+                    count={showLow ? floor.belowFloor : floor.hidden}
+                    showing={showLow}
+                    onToggle={() => {
+                      setShowLow((v) => !v);
+                      resetForScope();
+                    }}
+                  />
+                ) : null}
               </div>
               <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
                 <div
@@ -2694,7 +2790,9 @@ export function CoreClaimQueue({
                 <p className="text-muted-foreground border-apollo-border rounded-lg border border-dashed px-4 py-6 text-center text-sm">
                   {mode === "person" && !activePerson
                     ? "No one to review by yet."
-                    : "Nothing matches this filter."}
+                    : floor.hidden > 0 && !narrowed
+                      ? "Only lower-confidence candidates are left. Show them above."
+                      : "Nothing matches this filter."}
                 </p>
               ) : null}
               <p data-slot="core-queue-status" className="text-muted-foreground text-xs">
