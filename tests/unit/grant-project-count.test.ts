@@ -107,7 +107,7 @@ function scholarWith(grants: ReadonlyArray<Record<string, unknown>>): ScholarFor
   } as unknown as ScholarForIndex;
 }
 
-type Visibility = Parameters<typeof buildPeopleDoc>[9];
+type Visibility = Parameters<typeof buildPeopleDoc>[8];
 
 async function grantCountOf(
   grants: ReadonlyArray<Record<string, unknown>>,
