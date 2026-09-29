@@ -19,6 +19,11 @@
  * `CoreReportsHeader` (h1 "{core} reports", the "Viewing" picker over the
  * viewer's cores A–Z, one tab per core report) in place of "← All reports",
  * and a center/department report renders exactly as before.
+ *
+ * And "All cores" (`center=all&kind=core`, picker plan PR 2): a superuser gets
+ * the roll-up on 11–13 (no single-unit gate, "Superusers" badge, roll-up
+ * header, 11–13 tabs only) and is sent from 3/6 to report 11; a comms steward
+ * or multi-core owner takes the ordinary path and is refused.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
@@ -33,6 +38,8 @@ const {
   mockForbidden,
   mockPubsTable,
   mockLoadUnits,
+  mockCoreUsersPmids,
+  mockLoadCoreUsers,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -45,6 +52,8 @@ const {
   mockForbidden: vi.fn(() => null),
   mockPubsTable: vi.fn(() => null),
   mockLoadUnits: vi.fn(),
+  mockCoreUsersPmids: vi.fn(),
+  mockLoadCoreUsers: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -65,6 +74,14 @@ vi.mock("@/lib/edit/cancer-center-reports", () => ({
     division: [3, 6],
     core: [3, 6, 11, 12, 13],
   },
+}));
+vi.mock("@/lib/edit/core-report-common", async (orig) => ({
+  ...(await orig<typeof import("@/lib/edit/core-report-common")>()),
+  loadCoreConfirmedPmids: mockCoreUsersPmids,
+}));
+vi.mock("@/lib/edit/core-users-report", async (orig) => ({
+  ...(await orig<typeof import("@/lib/edit/core-users-report")>()),
+  loadCoreUsersReport: mockLoadCoreUsers,
 }));
 vi.mock("@/lib/edit/cancer-center-publications-report", () => ({
   HIGH_IMPACT_THRESHOLD: 10,
@@ -87,13 +104,19 @@ vi.mock("@/components/edit/report-header", () => ({
     n,
     children,
     underCoreHeader,
+    access,
   }: {
     n: string;
     children?: React.ReactNode;
     underCoreHeader?: boolean;
+    access?: { audience?: string };
   }) => (
     <>
-      <h2 data-testid="report-header" data-under-core={String(Boolean(underCoreHeader))}>
+      <h2
+        data-testid="report-header"
+        data-under-core={String(Boolean(underCoreHeader))}
+        data-audience={access?.audience ?? ""}
+      >
         Report {n}
       </h2>
       {children}
@@ -127,9 +150,12 @@ const pageAt =
     EditReportPage({ params: Promise.resolve({ report: slug }), searchParams }).then((t) => resolveSuspense(t));
 const EditReportsPublicationsPage = pageAt("publications");
 const EditReportsNihFundedPublicationsPage = pageAt("nih-funded-pubs");
+const EditReportsCoreUsersPage = pageAt("core-users");
 
 const OWNER = { cwid: "owner01", isSuperuser: false, isCommsSteward: false };
 const OUTSIDER = { cwid: "nobody1", isSuperuser: false, isCommsSteward: false };
+const SUPERUSER = { cwid: "adm0001", isSuperuser: true, isCommsSteward: false };
+const STEWARD = { cwid: "cs00001", isSuperuser: false, isCommsSteward: true };
 const CORE_CTX = { unit: { name: "Biomedical Imaging" } };
 
 const EMPTY_PUBS = {
@@ -155,6 +181,13 @@ beforeEach(() => {
   mockLoadReportsContext.mockResolvedValue(CORE_CTX);
   mockLoadPubsReport.mockResolvedValue(EMPTY_PUBS);
   mockLoadNihReport.mockResolvedValue({ totalPublications: 0, rows: [] });
+  mockCoreUsersPmids.mockResolvedValue([]);
+  mockLoadCoreUsers.mockResolvedValue({
+    people: [],
+    departments: [],
+    typeOptions: [],
+    deptOptions: [],
+  });
   mockLoadUnits.mockResolvedValue([
     { code: "14", kind: "core", name: "Biomedical Imaging", centerType: null },
     { code: "3", kind: "core", name: "Zeta Flow Cytometry", centerType: null },
@@ -366,4 +399,96 @@ describe("core reports page header", () => {
       expect(page.getByTestId("report-header").getAttribute("data-under-core")).toBe("false");
     },
   );
+});
+
+describe("All cores (center=all&kind=core)", () => {
+  const ALL = { center: "all", kind: "core" };
+
+  it("a superuser gets the roll-up on report 11: no single-core gate, roll-up header, 11–13 tabs, Superusers badge", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const result = await EditReportsCoreUsersPage({ searchParams: Promise.resolve(ALL) });
+    render(result as React.ReactElement);
+    const page = within(screen.getByTestId("page-under-test"));
+    // The single-unit resolve / context are bypassed for the roll-up.
+    expect(mockResolveNumbered).not.toHaveBeenCalled();
+    expect(mockLoadReportsContext).not.toHaveBeenCalled();
+    expect(mockForbidden).not.toHaveBeenCalled();
+    // The body reads every core: code "all".
+    expect(mockCoreUsersPmids).toHaveBeenCalledWith("all");
+    expect(mockLoadCoreUsers).toHaveBeenCalledWith("all", [], expect.anything());
+    const header = within(page.getByTestId("core-reports-header"));
+    expect(header.getByRole("heading", { level: 1 }).textContent).toBe("All cores reports");
+    expect(header.getByTestId("core-reports-eyebrow").textContent).toBe(
+      "Core facilities · Roll-up",
+    );
+    expect(header.queryByTestId("core-reports-queue-link")).toBeNull();
+    const select = header.getByTestId("core-reports-core-select") as HTMLSelectElement;
+    expect([...select.options].map((o) => [o.value, o.text])).toEqual([
+      ["all", "All cores (3)"],
+      ["9", "Acme Genomics"],
+      ["14", "Biomedical Imaging"],
+      ["3", "Zeta Flow Cytometry"],
+    ]);
+    expect(select.value).toBe("all");
+    const tabs = within(header.getByTestId("core-reports-tabs")).getAllByRole("link");
+    expect(tabs.map((t) => t.getAttribute("href"))).toEqual([
+      "/edit/reports/core-users?center=all&kind=core",
+      "/edit/reports/core-output-over-time?center=all&kind=core",
+      "/edit/reports/core-grants?center=all&kind=core",
+    ]);
+    expect(page.getByTestId("report-header").getAttribute("data-audience")).toBe("Superusers");
+    expect(page.getByText(/confirmed publication with any core facility/)).toBeTruthy();
+  });
+
+  it.each([
+    ["publications (3)", EditReportsPublicationsPage],
+    ["nih-funded-pubs (6)", EditReportsNihFundedPublicationsPage],
+  ])("a superuser on %s under All cores is sent to report 11 for all cores", async (_r, page) => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    await expect(page({ searchParams: Promise.resolve(ALL) })).rejects.toThrow(
+      "__REDIRECT__:/edit/reports/core-users?center=all&kind=core",
+    );
+    expect(mockLoadPubsReport).not.toHaveBeenCalled();
+    expect(mockLoadNihReport).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a comms steward", STEWARD],
+    ["an owner of several cores", OWNER],
+  ])("%s is refused center=all (the ordinary gate), and the body never runs", async (_w, who) => {
+    mockGetEditSession.mockResolvedValue(who);
+    mockResolveNumbered.mockResolvedValue({ code: "all", kind: "core" });
+    // `all` is no core: the real gate returns null.
+    mockLoadReportsContext.mockResolvedValue(null);
+    const result = await EditReportsCoreUsersPage({ searchParams: Promise.resolve(ALL) });
+    renderText(result);
+    expect(mockLoadReportsContext).toHaveBeenCalledWith("all", who, expect.anything(), "core");
+    expect(mockForbidden).toHaveBeenCalled();
+    expect(mockCoreUsersPmids).not.toHaveBeenCalled();
+    expect(mockLoadCoreUsers).not.toHaveBeenCalled();
+  });
+
+  it("the All cores option is the superuser's alone on a single core's header", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const r1 = await EditReportsPublicationsPage({
+      searchParams: Promise.resolve({ center: "14", kind: "core" }),
+    });
+    render(r1 as React.ReactElement);
+    let page = within(screen.getByTestId("page-under-test"));
+    let select = page.getByTestId("core-reports-core-select") as HTMLSelectElement;
+    expect(select.options[0].text).toBe("All cores (3)");
+    expect(select.value).toBe("14");
+    // Five tabs and the queue link for one core, as before.
+    expect(within(page.getByTestId("core-reports-tabs")).getAllByRole("link")).toHaveLength(5);
+    expect(page.getByTestId("core-reports-queue-link")).toBeTruthy();
+    cleanup();
+    mockGetEditSession.mockResolvedValue(STEWARD);
+    const r2 = await EditReportsPublicationsPage({
+      searchParams: Promise.resolve({ center: "14", kind: "core" }),
+    });
+    render(r2 as React.ReactElement);
+    page = within(screen.getByTestId("page-under-test"));
+    select = page.getByTestId("core-reports-core-select") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["9", "14", "3"]);
+  });
 });

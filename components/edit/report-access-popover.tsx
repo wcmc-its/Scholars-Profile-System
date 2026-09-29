@@ -64,8 +64,10 @@ export type ReportAccessPopoverRow = {
   grantedAt: string;
 };
 
-/** Unit-gated report: static rule + a link to the administrators page. */
-export type ReportAccessPopoverUnitProps = { mode: "unit" };
+/** Unit-gated report: static rule + a link to the administrators page.
+ *  `audience` / `rule` override the defaults for a narrower gate (the
+ *  all-cores roll-up: "Superusers"). */
+export type ReportAccessPopoverUnitProps = { mode: "unit"; audience?: string; rule?: string };
 
 /** Row-gated report: the grant list, and the manage controls when the
  *  viewer may change it. */

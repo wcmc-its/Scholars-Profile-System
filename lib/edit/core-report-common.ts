@@ -14,6 +14,14 @@
  * own gate for a core (`getCoreOwnerRole` + `authorizeCoreClaim`: superuser,
  * comms_steward, this core's Owner or Curator), which also logs a denial.
  *
+ * "All cores" (core reports index picker plan, PR 2, 2026-09-28):
+ * `center=all&kind=core` (`ALL_CORES`) addresses the roll-up of every catalog
+ * core, SUPERUSER ONLY — not comms_steward, not an owner of several cores
+ * (`canViewAllCores`). Only reports 11, 12 and 13 support it
+ * (`ALL_CORES_REPORTS`); 3 and 6 are hidden under it. Its publication set is
+ * the deduped UNION of every core's confirmed set (`loadCoreScope`), so a
+ * publication confirmed for two cores counts once.
+ *
  * Server-only (`@/lib/db`).
  */
 import { NextResponse } from "next/server";
@@ -51,8 +59,60 @@ export function coreQueryString(
   return q.toString();
 }
 
-/** This core's effective-confirmed PMIDs (see the module comment). */
+/** The `center` value that addresses every catalog core at once. */
+export const ALL_CORES = "all";
+
+/** The display name of the roll-up (the header reads "All cores reports"). */
+export const ALL_CORES_NAME = "All cores";
+
+/** The core reports that support `center=all` (11, 12, 13). 3 and 6 don't. */
+export const ALL_CORES_REPORTS = ["11", "12", "13"] as const;
+
+export function isAllCores(coreId: string | null | undefined): boolean {
+  return coreId === ALL_CORES;
+}
+
+/** Who may open the all-cores roll-up: a superuser, nobody else (decided
+ *  2026-09-28 — not comms_steward, not a multi-core owner). */
+export function canViewAllCores(session: Pick<EditSession, "isSuperuser">): boolean {
+  return session.isSuperuser === true;
+}
+
+/** The roll-up's stand-in for the single-core `ReportsContext`. */
+export const ALL_CORES_CONTEXT: ReportsContext = { unit: { name: ALL_CORES_NAME } };
+
+/** A report's core scope: the core ids it reads, the confirmed PMIDs per core,
+ *  and their deduped union (a PMID under two cores appears once). */
+export type CoreScope = {
+  coreIds: string[];
+  byCore: Map<string, string[]>;
+  pmids: string[];
+};
+
+/** Every catalog core id (the roll-up's scope). */
+export async function loadAllCoreIds(): Promise<string[]> {
+  const rows = await db.read.core.findMany({ select: { id: true } });
+  return rows.map((r) => r.id);
+}
+
+/** The deduped union of a per-core PMID map, in first-seen order. Pure. */
+export function unionPmids(byCore: ReadonlyMap<string, readonly string[]>): string[] {
+  const out = new Set<string>();
+  for (const pmids of byCore.values()) for (const p of pmids) out.add(p);
+  return [...out];
+}
+
+/** `coreId`'s scope — one core, or every catalog core for `ALL_CORES`. */
+export async function loadCoreScope(coreId: string): Promise<CoreScope> {
+  const coreIds = isAllCores(coreId) ? await loadAllCoreIds() : [coreId];
+  const byCore = await loadConfirmedCorePmidsByCore(coreIds, db.read);
+  return { coreIds, byCore, pmids: unionPmids(byCore) };
+}
+
+/** This core's effective-confirmed PMIDs (see the module comment); for
+ *  `ALL_CORES`, the deduped union over every catalog core. */
 export async function loadCoreConfirmedPmids(coreId: string): Promise<string[]> {
+  if (isAllCores(coreId)) return (await loadCoreScope(coreId)).pmids;
   return (await loadConfirmedCorePmidsByCore([coreId], db.read)).get(coreId) ?? [];
 }
 
@@ -64,7 +124,8 @@ export function chunk<T>(xs: readonly T[], size = 1000): T[][] {
 }
 
 /** The download routes' gate: a session, a `center` (the core id), and the
- *  page's own core gate. Returns the core or a ready error response. */
+ *  page's own core gate. Returns the core or a ready error response.
+ *  `center=all` is the all-cores roll-up: a superuser only, anyone else 403s. */
 export async function gateCoreReportDownload(
   sp: URLSearchParams,
 ): Promise<
@@ -75,6 +136,11 @@ export async function gateCoreReportDownload(
   if (!identity) return { ok: false, response: editError(401, "unauthenticated") };
   const coreId = sp.get("center");
   if (!coreId) return { ok: false, response: editError(400, "missing_center", "center") };
+  if (isAllCores(coreId)) {
+    if (!canViewAllCores(identity.session))
+      return { ok: false, response: editError(403, "not_core_owner") };
+    return { ok: true, coreId, ctx: ALL_CORES_CONTEXT, session: identity.session };
+  }
   const ctx = await loadReportsContext(coreId, identity.session, db.read, "core");
   if (ctx === null) return { ok: false, response: editError(403, "not_core_owner") };
   return { ok: true, coreId, ctx, session: identity.session };
@@ -98,17 +164,45 @@ export function fileSafe(name: string): string {
   return name.replace(/[^A-Za-z0-9 _-]+/g, "").trim() || "core";
 }
 
+/** A download's file name: `<core> <rest>.xlsx` for one core, and
+ *  `all-cores-<rest, hyphenated>.xlsx` for the roll-up (the mockup's name). */
+export function coreXlsxName(coreId: string, coreName: string, rest: string): string {
+  if (isAllCores(coreId)) return `all-cores-${rest.trim().replace(/\s+/g, "-")}.xlsx`;
+  return `${fileSafe(coreName)} ${rest}.xlsx`;
+}
+
+/** What a workbook's Criteria sheet says about the core. One core: its name.
+ *  The roll-up: "All N" in the Core row (the mockup's criteria) plus the
+ *  counting note, so a reader knows a shared publication is not double-counted. */
+export type CriteriaCore = string | { allCount: number };
+
+export const ALL_CORES_COUNTING_NOTE =
+  "Rolled up across every core facility. A publication confirmed for more than one core counts once.";
+
 /** The "Core" and "Generated" rows every Criteria sheet opens with. */
 export function coreCriteriaHead(
   report: string,
-  coreName: string,
+  core: CriteriaCore,
   generatedAt: Date,
 ): [string, string][] {
+  if (typeof core !== "string") {
+    return [
+      ["Report", report],
+      ["Core", `All ${core.allCount}`],
+      ["Roll-up", ALL_CORES_COUNTING_NOTE],
+      ["Generated", generatedAt.toISOString()],
+    ];
+  }
   return [
     ["Report", report],
-    ["Core", coreName],
+    ["Core", core],
     ["Generated", generatedAt.toISOString()],
   ];
+}
+
+/** The `CriteriaCore` for a gate result: the core's name, or "All N". */
+export function criteriaCore(coreId: string, coreName: string, scope: CoreScope): CriteriaCore {
+  return isAllCores(coreId) ? { allCount: scope.coreIds.length } : coreName;
 }
 
 /** The year-window select values: this year back 30. */

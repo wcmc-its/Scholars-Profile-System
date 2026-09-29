@@ -94,6 +94,39 @@ describe("CoreReportsHeader", () => {
     expect(kind.value).toBe("core");
   });
 
+  it("single-core mode keeps the Core facility eyebrow and no roll-up lede", () => {
+    const q = renderHeader();
+    expect(q.getByTestId("core-reports-eyebrow").textContent).toBe("Core facility");
+    expect(q.queryByTestId("core-reports-lede")).toBeNull();
+  });
+
+  it("All cores: roll-up eyebrow, 'All cores reports', the counts-once lede, no Review queue", () => {
+    const q = renderHeader({
+      coreId: "all",
+      coreName: "All cores",
+      options: [{ code: "all", name: "All cores (3)" }, ...OPTIONS],
+      tabs: TABS.slice(2),
+      current: "11",
+      allCount: 3,
+    });
+    expect(q.getByTestId("core-reports-eyebrow").textContent).toBe("Core facilities · Roll-up");
+    expect(q.getByRole("heading", { level: 1 }).textContent).toBe("All cores reports");
+    expect(q.getByTestId("core-reports-lede").textContent).toContain(
+      "A publication used by two cores counts once",
+    );
+    expect(q.queryByTestId("core-reports-queue-link")).toBeNull();
+    expect(q.queryByText(/Review queue/)).toBeNull();
+    const tabs = within(q.getByTestId("core-reports-tabs")).getAllByRole("link");
+    expect(tabs.map((t) => t.getAttribute("href"))).toEqual([
+      "/edit/reports/core-users?center=all&kind=core",
+      "/edit/reports/core-output-over-time?center=all&kind=core",
+      "/edit/reports/core-grants?center=all&kind=core",
+    ]);
+    const select = q.getByTestId("core-reports-core-select") as HTMLSelectElement;
+    expect(select.value).toBe("all");
+    expect(select.options[0].text).toBe("All cores (3)");
+  });
+
   it("one core → no picker", () => {
     const q = renderHeader({ options: [{ code: "14", name: "Beta Sequencing Core" }] });
     expect(q.queryByTestId("core-reports-core-select")).toBeNull();

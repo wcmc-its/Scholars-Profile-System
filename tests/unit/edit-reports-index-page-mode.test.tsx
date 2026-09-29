@@ -263,7 +263,9 @@ describe("/edit/reports — one grouped list for every viewer", () => {
       ]);
       const group = props.units[1] as (typeof props.units)[number] & CoresProps;
       expect(group.editHref).toBe("/edit/core/c-alpha");
+      // A superuser's list opens with "All cores (N)" — never the default.
       expect(group.coreOptions!.map((o) => [o.code, o.name, o.editHref])).toEqual([
+        ["all", "All cores (3)", ""],
         ["c-alpha", "Alpha Flow Core", "/edit/core/c-alpha"],
         ["c-mid", "Mid Sequencing Core", "/edit/core/c-mid"],
         ["c-zeta", "Zeta Imaging Core", "/edit/core/c-zeta"],
@@ -298,6 +300,42 @@ describe("/edit/reports — one grouped list for every viewer", () => {
       mockLoadReportableUnits.mockResolvedValue([CORES[0]]);
       const result = await EditReportsIndexPage({
         searchParams: Promise.resolve({ center: "c-other", kind: "core" }),
+      });
+      expect(findByType(result, mockReportsIndex)).toBeNull();
+      expect(findByType(result, mockForbidden)).not.toBeNull();
+    });
+
+    it("superuser, ?center=all&kind=core → the Cores group on All cores: 11–13 only, live if any core is", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockLoadReportableUnits.mockResolvedValue([TWO_UNITS[0], ...CORES]);
+      mockLoadReportLiveness.mockResolvedValue(
+        new Map([["c-mid", { perReport: [{ n: 11, live: true, lastRefreshedAt: null }] }]]),
+      );
+      const props = await indexProps({ center: "all", kind: "core" });
+      expect(mockForbidden).not.toHaveBeenCalled();
+      const group = props.units[1] as (typeof props.units)[number] &
+        CoresProps & { onlyReports?: number[] };
+      expect([group.code, group.name, group.editHref]).toEqual(["all", "Cores", ""]);
+      expect(group.onlyReports).toEqual([11, 12, 13]);
+      expect(group.perReport).toEqual([
+        { n: 11, live: true, lastRefreshedAt: null },
+        { n: 12, live: false, lastRefreshedAt: null },
+        { n: 13, live: false, lastRefreshedAt: null },
+      ]);
+      expect(props.initialScope).toBe("core");
+    });
+
+    it.each([
+      ["a comms steward", STEWARD],
+      ["an owner of several cores", OWNER],
+    ])("%s: no All cores option, and ?center=all is refused", async (_who, session) => {
+      mockGetEditSession.mockResolvedValue(session);
+      mockLoadReportableUnits.mockResolvedValue(CORES);
+      const props = await indexProps();
+      const group = props.units[0] as (typeof props.units)[number] & CoresProps;
+      expect(group.coreOptions!.map((o) => o.code)).toEqual(["c-alpha", "c-mid", "c-zeta"]);
+      const result = await EditReportsIndexPage({
+        searchParams: Promise.resolve({ center: "all", kind: "core" }),
       });
       expect(findByType(result, mockReportsIndex)).toBeNull();
       expect(findByType(result, mockForbidden)).not.toBeNull();

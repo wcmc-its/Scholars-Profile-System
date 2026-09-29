@@ -25,7 +25,7 @@ export const PERSON_RULE_SHORT = "Always have access.";
 
 /** The fields of the popover's props that the summary reads. */
 export type AccessSummaryInput<R> =
-  | { mode: "unit" }
+  | { mode: "unit"; audience?: string; rule?: string }
   | { mode: "admin" }
   | { mode: "person"; audience?: string; note?: string; initialRows: ReadonlyArray<R> };
 
@@ -45,7 +45,7 @@ export function accessSummary<R>(props: AccessSummaryInput<R>): {
       ? [props.audience ?? PERSON_AUDIENCE, props.note ?? PERSON_RULE_SHORT, props.initialRows]
       : props.mode === "admin"
         ? [ADMIN_AUDIENCE, ADMIN_RULE, []]
-        : [UNIT_AUDIENCE, UNIT_RULE, []];
+        : [props.audience ?? UNIT_AUDIENCE, props.rule ?? UNIT_RULE, []];
   const others = rows.length;
   const othersLabel = others > 0 ? `+ ${others} other${others === 1 ? "" : "s"}` : null;
   return { audience, rule, rows, others, othersLabel, text: othersLabel ? `${audience} ${othersLabel}` : audience };

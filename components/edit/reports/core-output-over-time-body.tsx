@@ -32,7 +32,9 @@ import {
 } from "@/components/edit/reports/report-ui";
 import {
   coreQueryString,
+  isAllCores,
   loadCoreConfirmedPmids,
+  loadCoreScope,
   toSearchParams,
   yearOptions,
 } from "@/lib/edit/core-report-common";
@@ -247,8 +249,10 @@ export async function renderCoreOutputReport({
 }: UnitReportProps): Promise<ReportRender> {
   const now = new Date();
   const params = parseCoreOutputParams(toSearchParams(searchParams), now);
-  const pmids = await loadCoreConfirmedPmids(code);
-  const result = buildCoreOutput(await loadCoreOutputPubs(code, pmids), params);
+  // All cores: the union, a paper under several cores in its strongest bucket.
+  const scope = isAllCores(code) ? await loadCoreScope(code) : null;
+  const pmids = scope?.pmids ?? (await loadCoreConfirmedPmids(code));
+  const result = buildCoreOutput(await loadCoreOutputPubs(code, pmids, scope?.byCore), params);
   const resetHref = isCoreOutputDefault(params, now)
     ? null
     : `${basePath}?${coreQueryString(code, coreOutputQuery({ ...parseCoreOutputParams(new URLSearchParams(), now), view: params.view }))}`;
@@ -302,8 +306,18 @@ export async function renderCoreOutputReport({
   return {
     subtitle: (
       <p className="text-muted-foreground text-sm">
-        Confirmed publications of {ctx.unit.name} per year. Each publication counts once, however
-        many core users authored it.
+        {scope ? (
+          <>
+            Confirmed publications across every core facility per year. Each publication counts
+            once, however many cores used it; one used by several cores takes the strongest evidence
+            any of them has.
+          </>
+        ) : (
+          <>
+            Confirmed publications of {ctx.unit.name} per year. Each publication counts once,
+            however many core users authored it.
+          </>
+        )}
       </p>
     ),
     main: (

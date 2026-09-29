@@ -533,6 +533,39 @@ describe("ReportsIndex — the Cores group's Viewing picker", () => {
     );
   });
 
+  it("a superuser's 'All cores (N)': 3 and 6 hidden, 11–13 linked with center=all, no profile link", () => {
+    const ALL = {
+      code: "all",
+      name: "All cores (3)",
+      editHref: "",
+      perReport: [{ n: 11 as const, live: true, lastRefreshedAt: null }],
+      onlyReports: [11, 12, 13] as const,
+    };
+    const unit: ReportsIndexUnit = { ...cores(), coreOptions: [ALL, ...OPTIONS] };
+    const { container } = render(<ReportsIndex units={[unit]} />);
+    const c = within(container);
+    expect(Array.from(select(container).options).map((o) => o.textContent)).toEqual([
+      "All cores (3)",
+      "Alpha Imaging Core",
+      "Beta Sequencing Core",
+      "Gamma Flow Core",
+    ]);
+    // The default stays the first core, not All.
+    expect(select(container).value).toBe("core-a");
+    fireEvent.change(select(container), { target: { value: "all" } });
+    expect(c.queryByTestId("reports-index-row-all-3")).toBeNull();
+    expect(c.getByTestId("reports-index-row-all-11").getAttribute("href")).toBe(
+      "/edit/reports/core-users?center=all&kind=core",
+    );
+    expect(c.getByText("1 report")).toBeTruthy();
+    expect(c.queryByText("Edit core profile")).toBeNull();
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "?center=all&kind=core");
+    // Back to one core: report 3 and the profile link return.
+    fireEvent.change(select(container), { target: { value: "core-b" } });
+    expect(c.getByTestId("reports-index-row-core-b-3")).toBeTruthy();
+    expect(c.getByTestId("reports-index-edit-core-b")).toBeTruthy();
+  });
+
   it("search reaches the picked core's name", () => {
     const { container } = render(<ReportsIndex units={[MEYER, cores()]} />);
     fireEvent.change(within(container).getByTestId("reports-index-search"), {
