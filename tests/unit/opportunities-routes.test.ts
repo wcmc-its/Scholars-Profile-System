@@ -13,6 +13,7 @@ const findUnique = vi.fn();
 const opportunityFindMany = vi.fn();
 const opportunityGroupBy = vi.fn();
 const topicFindMany = vi.fn();
+const scholarFindFirst = vi.fn();
 
 vi.mock("@/lib/api/match-opportunities", async (orig) => {
   const actual = await orig<typeof import("@/lib/api/match-opportunities")>();
@@ -30,6 +31,7 @@ vi.mock("@/lib/db", () => ({
         groupBy: (...a: unknown[]) => opportunityGroupBy(...a),
       },
       topic: { findMany: (...a: unknown[]) => topicFindMany(...a) },
+      scholar: { findFirst: (...a: unknown[]) => scholarFindFirst(...a) },
     },
   },
 }));
@@ -44,12 +46,53 @@ const p = <T,>(v: T) => Promise.resolve(v);
 beforeEach(() => {
   vi.clearAllMocks();
   topicFindMany.mockResolvedValue([]); // default: no labels unless a test sets them
+  scholarFindFirst.mockResolvedValue({ roleCategory: "full_time_faculty" }); // default: visible scholar
   opportunityFindMany.mockResolvedValue([]);
   opportunityGroupBy.mockResolvedValue([]); // per-source freshness aggregate
 });
 
 describe("GET /api/scholars/[cwid]/opportunities (forward, public)", () => {
-  it("returns results with a public cache-control header and the axes payload", async () => {
+  // #2263 — #536 carve. Prod-shaped rows: a bare `doctoral_student` with
+  // deletedAt null + status active passes the old gates. A hidden scholar must be
+  // indistinguishable from a nonexistent CWID (anti-oracle), and the matcher —
+  // which would read back topics + the "grad" stage bucket — must never run.
+  describe("hidden-role carve (#2263)", () => {
+    const call = async (cwid: string) => {
+      const resp = await forwardGET(req(`/api/scholars/${cwid}/opportunities`), { params: p({ cwid }) });
+      return { status: resp.status, headers: Object.fromEntries(resp.headers), body: await resp.json() };
+    };
+
+    it("gates the scholar lookup on deletedAt/status + the publicRoleWhere OR (with its NULL branch)", async () => {
+      matchOpportunitiesForScholar.mockResolvedValue([]);
+      await call("abc1234");
+      const where = scholarFindFirst.mock.calls[0][0].where;
+      expect(where).toMatchObject({ cwid: "abc1234", deletedAt: null, status: "active" });
+      expect(where.OR).toEqual(
+        expect.arrayContaining([
+          { roleCategory: null },
+          { roleCategory: { notIn: expect.arrayContaining(["doctoral_student"]) } },
+        ]),
+      );
+    });
+
+    it.each(["doctoral_student", "doctoral_student_xyz"])(
+      "role %s → byte-identical to a nonexistent CWID; matcher never called",
+      async (role) => {
+        scholarFindFirst.mockResolvedValueOnce(null); // nonexistent
+        const missing = await call("abc1234");
+        scholarFindFirst.mockResolvedValueOnce({ roleCategory: role }); // present, hidden
+        matchOpportunitiesForScholar.mockResolvedValue([
+          { opportunityId: "g:1", axes: { topicAffinity: 0.9, stageAppeal: 1, meshOverlap: 0, deadlineProximity: 1 }, defaultScore: 1.6 },
+        ]);
+        const hidden = await call("abc1234");
+        expect(hidden).toEqual(missing);
+        expect(hidden.body).toEqual({ cwid: "abc1234", count: 0, results: [] });
+        expect(matchOpportunitiesForScholar).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it("returns results with a private cache-control header and the axes payload", async () => {
     matchOpportunitiesForScholar.mockResolvedValue([
       { opportunityId: "g:1", axes: { topicAffinity: 0.9, stageAppeal: 0.8, meshOverlap: 0, deadlineProximity: 1 }, defaultScore: 1.6 },
     ]);
@@ -57,7 +100,8 @@ describe("GET /api/scholars/[cwid]/opportunities (forward, public)", () => {
       params: p({ cwid: "abc1234" }),
     });
     expect(resp.status).toBe(200);
-    expect(resp.headers.get("Cache-Control")).toContain("public");
+    expect(resp.headers.get("Cache-Control")).toContain("private");
+    expect(resp.headers.get("Cache-Control")).not.toContain("public");
     const body = await resp.json();
     expect(body.results[0].axes).toMatchObject({ topicAffinity: 0.9, stageAppeal: 0.8 });
     expect(matchOpportunitiesForScholar).toHaveBeenCalledWith("abc1234", expect.objectContaining({ sort: "deadline" }));
