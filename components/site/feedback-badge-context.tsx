@@ -75,3 +75,13 @@ export function useSuppressFeedbackBadgeWhileMounted(): void {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
+
+/**
+ * Render INSIDE a Radix `*.Content` (mounted only while open). Calling the
+ * hook in the Content *wrapper* instead acquires on every render of a closed
+ * dialog — the header's closed MobileNav sheet then hid the badge site-wide.
+ */
+export function SuppressFeedbackBadge(): null {
+  useSuppressFeedbackBadgeWhileMounted();
+  return null;
+}
