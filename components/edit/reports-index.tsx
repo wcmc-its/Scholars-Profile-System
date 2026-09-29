@@ -40,6 +40,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ChevronRight, Users } from "lucide-react";
 
+import { CorePicker } from "@/components/edit/reports/core-picker";
 import {
   REPORTS_INDEX_SCOPES as SCOPES,
   type ReportsIndexScope,
@@ -364,51 +365,6 @@ export function ReportsIndex({
         </div>
       )}
     </div>
-  );
-}
-
-/** "Viewing <core>" (mockup `Core pub review/Core Reports.dc.html`). With JS
- *  the pick swaps the group in place; without it the form GETs
- *  `?center=<coreId>&kind=core`, which the page preselects from. Its own line
- *  on a phone, the select shrinking to fit. */
-function CorePicker({
-  options,
-  value,
-  onChange,
-}: {
-  options: ReadonlyArray<ReportsIndexCoreOption>;
-  value: string;
-  onChange: (code: string) => void;
-}) {
-  return (
-    <form
-      method="get"
-      action="/edit/reports"
-      onSubmit={(e) => e.preventDefault()}
-      className="text-muted-foreground flex w-full min-w-0 items-center gap-2 text-[13px] sm:w-auto"
-    >
-      <label htmlFor="reports-index-core">Viewing</label>
-      <select
-        id="reports-index-core"
-        name="center"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="border-apollo-border-strong bg-apollo-surface text-foreground h-8 min-w-0 flex-1 rounded-lg border px-2.5 text-sm sm:max-w-[300px] sm:flex-none"
-        data-testid="reports-index-core-select"
-      >
-        {options.map((o) => (
-          <option key={o.code} value={o.code}>
-            {o.name}
-          </option>
-        ))}
-      </select>
-      <input type="hidden" name="kind" value="core" />
-      <noscript>
-        <button type="submit" className="text-apollo-slate hover:underline">
-          Go
-        </button>
-      </noscript>
-    </form>
   );
 }
 
