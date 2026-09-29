@@ -159,7 +159,7 @@ export function toSourceRow(
   lastAttempt: EtlAttemptRow | null,
   now: number,
 ): EtlSourceRow {
-  const graded = gradeSource(source, spec, freshnessAnchor(lastSuccess), now);
+  const graded = gradeSource(source, spec, freshnessAnchor(lastSuccess, spec.anchorOnRun), now);
   const running =
     lastAttempt?.status === "running" &&
     now - lastAttempt.startedAt.getTime() > RUNNING_TIMEOUT_HOURS * HOUR_MS;

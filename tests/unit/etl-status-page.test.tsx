@@ -490,8 +490,8 @@ describe("/edit/etl-status page", () => {
   });
 
   // Hierarchy, not Tools: Hierarchy is one of the two loaders that actually
-  // writes `manifestGeneratedAt` (the other is Spotlight, which carries an ack
-  // and so grades to "known issue" here). Tools is completedAt-anchored by
+  // writes `manifestGeneratedAt` (the other is Spotlight, which grades on its
+  // run via `anchorOnRun` and so ignores the manifest). Tools is completedAt-anchored by
   // design, so a Tools fixture would assert on a row prod cannot emit.
   it("paints a frozen artifact as late even though the import finished minutes ago", async () => {
     fixtures = {
@@ -520,8 +520,7 @@ describe("/edit/etl-status page", () => {
 
   it("renders a live acknowledgement as its own state, neither green nor red", async () => {
     const acked = Object.entries(TRACKED).find(([, s]) => s.ack !== undefined);
-    // If the last ack is ever removed, this must be a deliberate act — the same
-    // posture tests/unit/freshness-sla.test.ts already takes on Spotlight.
+    // If the last ack is ever removed, this must be a deliberate act.
     expect(acked?.[1].ack, "no source carries an ack any more").toBeDefined();
     const [source, spec] = acked!;
     const ack = spec.ack!;

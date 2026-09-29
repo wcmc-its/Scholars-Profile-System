@@ -6,14 +6,14 @@ import { describe, expect, it } from "vitest";
 import { SLA_HOURS, TRACKED, ackState, gradeSource } from "@/lib/etl/freshness-policy";
 
 describe("freshness SLAs", () => {
-  // Spotlight's producer lives in ReciterAI, not this repo, and publishes
-  // MONTHLY (reciterai-spotlight-monthly, cron(0 13 1 * ? *)). Under the 8-day
-  // weekly SLA it used to carry, the source was stale by construction and the
-  // scholars-heartbeat-<env> machine failed every day in BOTH envs. If someone
-  // tidies Spotlight back into the weekly block, that daily failure returns —
-  // so pin the cadence, not just the number.
-  it("tracks Spotlight on the monthly cadence, not weekly", () => {
-    expect(TRACKED.Spotlight?.cadence).toBe("monthly");
+  // Spotlight's artifact age is unbounded by design (ReciterAI's monthly gate
+  // only republishes when thresholds trip), so grading it on manifest age either
+  // cries wolf or needs a perpetually-renewed ack. The row grades OUR weekly
+  // loader on its run; the producer is graded on ReciterAI-spotlight-gate, where
+  // a `skipped` tick counts as alive.
+  it("grades Spotlight on our weekly loader run, and the producer on its gate", () => {
+    expect(TRACKED.Spotlight).toEqual({ cadence: "weekly", anchorOnRun: true });
+    expect(TRACKED["ReciterAI-spotlight-gate"]?.liveStatuses).toContain("skipped");
   });
 
   // 40d = 31d (longest month) + 7d (our weekly loader's worst-case pickup lag)
@@ -245,13 +245,6 @@ describe("freshness acknowledgements", () => {
         MAX_DAYS,
       );
     }
-  });
-
-  // Documents the decision, so removing the ack when the producer finally
-  // deploys is a deliberate act rather than something nobody remembers.
-  it("Spotlight is acknowledged, not silently untracked", () => {
-    expect(TRACKED.Spotlight?.ack).toBeDefined();
-    expect(TRACKED.Spotlight?.cadence).toBe("monthly");
   });
 
   // Same posture for Tools, and the second half of this assertion is the point:

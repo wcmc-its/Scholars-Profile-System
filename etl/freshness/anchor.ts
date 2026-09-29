@@ -18,8 +18,9 @@ export interface AnchorRow {
  * frozen producer read as fresh. Sources with no S3 manifest (ED, ReCiter, …)
  * leave `manifestGeneratedAt` NULL and fall back to `completedAt` (unchanged).
  */
-export function freshnessAnchor(row: AnchorRow | null): Date | null {
+export function freshnessAnchor(row: AnchorRow | null, anchorOnRun = false): Date | null {
   if (row === null) return null;
+  if (anchorOnRun) return row.completedAt;
   return row.manifestGeneratedAt ?? row.completedAt;
 }
 

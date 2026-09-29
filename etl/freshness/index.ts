@@ -80,7 +80,7 @@ async function evaluate(now: number): Promise<SourceStatus[]> {
           `date — ignoring the ack and grading this source normally.`,
       );
     }
-    out.push(gradeSource(source, spec, freshnessAnchor(last), now));
+    out.push(gradeSource(source, spec, freshnessAnchor(last, spec.anchorOnRun), now));
   }
   return out;
 }
