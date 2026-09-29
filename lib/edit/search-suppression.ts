@@ -308,10 +308,10 @@ async function buildReflectionOps(
   if (args.entityType === "grant") {
     // #481(a) — synchronous funding-search fast-path. entityId is the grant's
     // stable externalId (#352). Suppressing a grant role does NOT touch the
-    // people index: the people-doc grant facets (hasActiveGrants,
-    // activePiGrantCount) are NOT suppression-filtered in the nightly build
-    // either, so the fast-path stays consistent with a rebuild by emitting
-    // funding ops only.
+    // people index: hasActiveGrants / activePiGrantCount are NOT
+    // suppression-filtered in the nightly build. `piRoleEver` IS (#2081), so a
+    // suppression that removes a scholar's last PI chip leaves their "PI (ever)"
+    // flag stale until the next nightly rebuild.
     return buildGrantOps(args.entityId);
   }
   // Education / appointment (#160) have no search index, so a suppression
@@ -482,6 +482,8 @@ async function buildScholarOps(
     overviewOverrides,
     undefined,
     trialEvidence,
+    // #2081 — `piRoleEver` drops suppressed rows, matching the funding index.
+    await loadAllGrantSuppressions(db.read),
   );
   if (doc === null) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];

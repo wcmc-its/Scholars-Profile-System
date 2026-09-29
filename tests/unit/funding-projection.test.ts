@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   groupGrantsByProject,
+  hasFundingPiChip,
   projectFromRows,
   PUB_LIST_CAP,
   type GrantRowForIndex,
@@ -615,5 +616,40 @@ describe("groupGrantsByProject", () => {
       new Set(),
     );
     expect(groups.size).toBe(0);
+  });
+});
+
+describe("hasFundingPiChip (#2081)", () => {
+  // The People "PI (ever)" facet (`piRoleEver`) is computed with this predicate.
+  // Lock it to what the Funding tab actually renders: a scholar has a PI chip
+  // iff some indexed project doc lists them with a PI role.
+  it("agrees with the PI chips the funding projection renders", () => {
+    const rows = [
+      // RePORTER-only PI (prior-institution history) — renders a chip since #2285.
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "reporter:alice:R01HL999999",
+        awardNumber: "R01 HL999999",
+      }),
+      // Suppressed PI row — dropped from the funding index, so no chip.
+      makeRow({ cwid: "bob", role: "PI", scholar: SCHOLAR_B, externalId: "INFOED-ACC-002-bob" }),
+      // Co-I only — a chip, but not a PI chip.
+      makeRow({ cwid: "carol", role: "Co-I", scholar: SCHOLAR_C }),
+    ];
+    const suppressed = new Set(["INFOED-ACC-002-bob"]);
+
+    const chipPis = new Set<string>();
+    for (const group of groupGrantsByProject(rows, suppressed).values()) {
+      for (const p of projectFromRows(group)?.people ?? []) {
+        if (p.role === "PI" || p.role === "PI-Subaward" || p.role === "Co-PI") chipPis.add(p.cwid);
+      }
+    }
+    for (const cwid of ["alice", "bob", "carol"]) {
+      const own = rows.filter((r) => r.cwid === cwid);
+      expect(hasFundingPiChip(own, suppressed), cwid).toBe(chipPis.has(cwid));
+    }
+    expect([...chipPis]).toEqual(["alice"]);
   });
 });

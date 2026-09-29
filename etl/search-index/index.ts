@@ -218,13 +218,16 @@ async function indexPeople(concreteIndex: string) {
   // #2300 — bulk-load "Early Stage Investigator" eligibility ONCE per build
   // (mirroring the `gate` / `meshAncestors` / `overviewOverrides` loads
   // above) and pass it to every `buildPeopleDoc`. Deliberately a SEPARATE
-  // query from `PEOPLE_INDEX_SELECT`'s `grants` relation below — that
-  // relation is filtered (`source: { not: "RePORTER" }`) for the
-  // grantCount / hasActiveGrants / activePiGrantCount signals; ESI
+  // query from `PEOPLE_INDEX_SELECT`'s `grants` relation below — the
+  // grantCount / hasActiveGrants / activePiGrantCount signals built from that
+  // relation are filtered to `source != 'RePORTER'`; ESI
   // eligibility needs the scholar's FULL unfiltered grant history (see
   // `loadEsiEligibilityByCwid`'s doc comment in `lib/search-index-docs.ts`).
   const esiEligibleByCwid = await loadEsiEligibilityByCwid(prisma);
   const trialEvidenceByCwid = await loadTrialEvidenceByCwid(prisma);
+  // #2081 — the funding index's grant-suppression set, so `piRoleEver` drops
+  // the same suppressed rows the Funding tab's PI chips do.
+  const suppressedGrants = await loadAllGrantSuppressions(prisma);
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -265,6 +268,7 @@ async function indexPeople(concreteIndex: string) {
           overviewOverrides,
           esiEligibleByCwid,
           trialEvidenceByCwid,
+          suppressedGrants,
         ),
       ),
     );
