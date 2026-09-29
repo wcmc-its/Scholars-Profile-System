@@ -1894,7 +1894,7 @@ describe("CoreClaimQueue", () => {
         confirmed={[row({ pmid: "9", title: "Claimed pub", claimed: true })]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /revoke/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^revoke$/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body)).toEqual({
       pmid: "9",
@@ -1917,7 +1917,7 @@ describe("CoreClaimQueue", () => {
         confirmed={[row({ pmid: "8", title: "Engine pub", claimed: false })]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /revoke/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^revoke$/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status).toBe(
       "rejected",
@@ -1943,7 +1943,7 @@ describe("CoreClaimQueue", () => {
     // no candidates → default view is Confirmed, so the row shows without a click
     expect(screen.getByRole("group", { name: "Queue view" })).toBeTruthy();
     expect(screen.getByText("Done pub")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /revoke/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^revoke$/i })).toBeTruthy();
   });
 
   it("lands on the Rejected tab when the only history is rejected items", () => {
@@ -1957,7 +1957,7 @@ describe("CoreClaimQueue", () => {
     );
     // no candidates and no confirmed → default ladder falls through to Rejected
     expect(screen.getByText("Rejected only")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /restore/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^restore$/i })).toBeTruthy();
   });
 
   it("shows previously-rejected items on the Rejected tab and restores via 'revoked'", async () => {
@@ -1978,7 +1978,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Rejected pub")).toBeTruthy();
 
     // Restore posts the soft 'revoked' undo and shows the restored affordance
-    fireEvent.click(screen.getByRole("button", { name: /restore/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^restore$/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body)).toEqual({
       pmid: "9",
@@ -2005,10 +2005,10 @@ describe("CoreClaimQueue", () => {
         rejected={[row({ pmid: "9", title: "Rejected pub", claimed: true })]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /restore/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^restore$/i }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("not_core_owner"));
     // not restored — the Restore affordance is still present
-    expect(screen.getByRole("button", { name: /restore/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^restore$/i })).toBeTruthy();
     expect(screen.queryByText(/re-files on next load/)).toBeNull();
   });
 
@@ -3805,13 +3805,18 @@ describe("CoreClaimQueue — header rows", () => {
     expect(input.placeholder).toBe("Search title, author, journal, or paste several PMIDs");
   });
 
-  it("keeps the search, Filters and panes OFF the Confirmed and Rejected tabs, where they are inert", () => {
+  // PR A kept the search and Filters off these tabs because they were inert
+  // there. PR B wires them to the tab's own rows (mockup), so they are back —
+  // labelled for the tab — while the panes, sort pills and keys stay review-only.
+  it("gives the Confirmed and Rejected tabs their own search + Filters, but not the panes", () => {
     render(withHistory);
     expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Confirmed 1/ }));
     expect(screen.queryByLabelText("Filter candidates")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Filters/ })).toBeNull();
+    expect(screen.getByLabelText("Filter confirmed papers")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Filters/ })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Sort" })).toBeNull();
     expect(screen.queryByText(/^Showing /)).toBeNull();
     expect(document.querySelector('[data-slot="core-queue-focus"]')).toBeNull();
     // the keys belong to the review tab: 'a' here decides nothing
@@ -3822,6 +3827,7 @@ describe("CoreClaimQueue — header rows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Rejected 1/ }));
     expect(screen.queryByLabelText("Filter candidates")).toBeNull();
+    expect(screen.getByLabelText("Filter rejected papers")).toBeTruthy();
 
     // ...and comes back on the way home
     fireEvent.click(screen.getByRole("button", { name: /To review/ }));

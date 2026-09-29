@@ -39,10 +39,13 @@
  *   - PMID/CWID parsing keeps the strict parsers and their rejected-token
  *     reporting; a split-on-any-non-digit form would turn "abc123def" into 123.
  *
- * Deliberately NOT in this PR (next PR, each needs a route or schema change):
- * bulk Revoke/Restore on the Confirmed/Rejected tabs, the Add PMIDs "Send to
- * review" mode (`core_queue_add`), and the grant-signal rail groups. None of
- * them is drawn as a dead control. Also not built: the core-staff note's
+ * PR B added the pieces that needed a route or schema change: bulk Revoke /
+ * Restore on the Confirmed/Rejected tabs (selection + the inline guard, via
+ * `status: "revoked"` on the bulk route; those tabs also get the search box
+ * and Filters), and Add PMIDs' "Send to review" mode (`core_queue_add`, shown
+ * under the unscored "Added by you" rail group).
+ *
+ * Still NOT built: the grant-signal rail groups (next PR). Also not built: the core-staff note's
  * "Manage staff" link (the roster lives in ReciterAI's facility dictionary,
  * and SPS has no route that edits it).
  */
@@ -89,12 +92,31 @@ import { toCsv } from "@/lib/csv";
  *  the modal can state the limit. */
 export const MAX_CLAIM_PMIDS = 500;
 
+/** The Add PMIDs dialog's two modes (mockup): claim now, or queue for review. */
+type AddMode = "claim" | "review";
+const ADD_MODES: ReadonlyArray<{ key: AddMode; label: string; sub: string }> = [
+  {
+    key: "claim",
+    label: "Confirm now",
+    sub: "You know these used the core. Recorded as your decision, with no evidence trail.",
+  },
+  {
+    key: "review",
+    label: "Send to review",
+    sub: "Possible uses to check later. They join To review under “Added by you”.",
+  },
+];
+
 /** What the "Check PMIDs" dry run found. */
 interface PmidCheck {
-  /** PMIDs a claim would actually write. */
+  /** PMIDs the commit would actually write (a claim, or a queue row). */
   wouldWrite: number;
-  /** Already claimed for this core — writing them again is a no-op. */
+  /** Claim mode: already claimed for this core — writing them again is a no-op.
+   *  Send-to-review mode: already on this core's To review list. */
   skipped: number;
+  /** Send-to-review mode only: already decided for this core (claimed or
+   *  rejected by a person, or confirmed by the engine). */
+  decided?: number;
   /** Not ingested by SPS; a claim skips these rather than inventing a row. */
   notFound: string[];
   /** Tokens the paste-parser rejected before the request. */
@@ -642,6 +664,9 @@ export function evidenceGroupKey(
   paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
   clientCwids: ReadonlySet<string> = new Set(),
 ): string {
+  // A paper a reviewer sent here by PMID is its own pile whatever the engine
+  // made of it: the engine did not put it on the queue, a person did.
+  if (row.queued) return ADDED_GROUP;
   const kinds = buildSignals(row, paperCounts, clientCwids).map((s) => s.kind);
   return kinds.length === 0 ? "none" : kinds.join("+");
 }
@@ -656,7 +681,14 @@ const GROUP_NAMES: Record<string, string> = {
   llm: "LLM read",
   affinity: "repeat user",
   none: "no counted signal",
+  added: "added by you",
 };
+
+/** The rail group for papers sent to review by PMID ("Add PMIDs → Send to
+ *  review", a `core_queue_add` row). Unscored: no band, listed first (mockup). */
+export const ADDED_GROUP = "added";
+/** Its rail sub-line and list-row band slot (mockup: "Unscored"). */
+const ADDED_SUB = "Unscored · added by PMID";
 
 /** "3 papers · acknowledgment + staff co-author" — singular-safe. Pure. */
 export function evidenceGroupLabel(key: string, count: number): string {
@@ -932,7 +964,10 @@ export function facetValues(
     : "None";
   const method = row.methodTier ? [...new Set(row.methodEvidence.map((m) => m.family))] : [];
   let person: string[] = [];
-  if (row.authorAffinity === null) person = ["No prior usage on the byline"];
+  // A manual row's null affinity is a placeholder (the engine never scored it),
+  // not a finding that nobody on the byline used the core before.
+  if (row.isManual) person = [];
+  else if (row.authorAffinity === null) person = ["No prior usage on the byline"];
   else if (kinds.has("affinity")) {
     const who = repeatUser(row, paperCounts, clientCwids);
     person = [who ? displayName(who.scholar.name) : "Unnamed author"];
@@ -995,7 +1030,12 @@ export function buildEvidenceGroups(
     g.rows.push(r);
     if (!decided.has(r.pmid)) g.open += 1;
   }
-  return [...byKey.values()];
+  // "Added by you" leads (mockup): it is the reviewer's own pile, and its rows
+  // sit at the end of `candidates` (likelihood 0), which would bury it last.
+  const groups = [...byKey.values()];
+  const added = groups.findIndex((g) => g.key === ADDED_GROUP);
+  if (added > 0) groups.unshift(...groups.splice(added, 1));
+  return groups;
 }
 
 /** "Acknowledgment + staff co-author" — the group vocabulary as a rail label
@@ -1120,6 +1160,90 @@ export function pasteAsOneLine(text: string): string | null {
   return /[\r\n]/.test(text) ? text.replace(/\s+/g, " ").trim() : null;
 }
 
+/**
+ * What a Revoke on the Confirmed tab posts for one row. The soft `revoked` undo
+ * only helps when a human claim is what confirms the paper; it reverts the pair
+ * to its engine status. So:
+ *   - no active claim (`claimed` false) — the ENGINE confirmed it, there is no
+ *     claim to revoke, and only a `rejected` override takes it off;
+ *   - a claim on top of an engine `confirmed` row — revoking the claim would
+ *     leave the engine's own confirmation standing (the row would re-file under
+ *     Confirmed on the next load), so this too needs `rejected`;
+ *   - anything else (a claimed engine candidate, a manual add, a paper sent to
+ *     review) — the soft `revoked`, which the single Undo can reverse exactly.
+ * A manual row's `status` is the loader's "confirmed" placeholder, not an
+ * engine verdict, hence the `isManual` exclusion. Pure.
+ */
+export function revokeStatusFor(row: CoreQueueRow): "revoked" | "rejected" {
+  if (!row.claimed) return "rejected";
+  return row.status === "confirmed" && !row.isManual ? "rejected" : "revoked";
+}
+
+/** Where a Confirmed/Rejected row lands after a Revoke/Restore. */
+export type UndoDestination = "review" | "confirmed" | "rejected" | "gone";
+
+/**
+ * Where one row goes when revoked (Confirmed tab) or restored (Rejected tab),
+ * for the bulk guard's copy — "They return to review" is only true of some rows,
+ * and a guard that says so of all of them is the thing it exists to prevent:
+ *   - a Revoke that has to post `rejected` (see `revokeStatusFor`) moves the
+ *     paper to Rejected;
+ *   - otherwise the claim is soft-revoked and the pair falls back to its engine
+ *     status: an engine `confirmed` row (only reachable on Restore) goes back to
+ *     Confirmed; an engine candidate, or a pmid sent to review by hand
+ *     (`queued`), returns to review; anything else (a manual add nobody queued,
+ *     a below-threshold row) leaves the queue altogether. Pure.
+ */
+export function undoDestination(row: CoreQueueRow, tab: "confirmed" | "rejected"): UndoDestination {
+  if (tab === "confirmed" && revokeStatusFor(row) === "rejected") return "rejected";
+  if (row.status === "confirmed" && !row.isManual) return "confirmed";
+  if (row.queued || row.status === "candidate") return "review";
+  return "gone";
+}
+
+/**
+ * The inline guard's sentence in front of a bulk Revoke/Restore (grant-signal
+ * design delta B.2): "Revoke 12 confirmed papers? They return to review. Each
+ * gets its own audit row." When some rows land elsewhere (see
+ * `undoDestination`) the middle sentence names the split instead. Pure.
+ */
+export function historyGuardText(
+  tab: "confirmed" | "rejected",
+  rows: readonly CoreQueueRow[],
+): string {
+  const verb = tab === "confirmed" ? "Revoke" : "Restore";
+  const n = rows.length;
+  const head = `${verb} ${n} ${tab} ${n === 1 ? "paper" : "papers"}?`;
+  const counts = new Map<UndoDestination, number>();
+  for (const r of rows) {
+    const d = undoDestination(r, tab);
+    counts.set(d, (counts.get(d) ?? 0) + 1);
+  }
+  let middle: string;
+  if ((counts.get("review") ?? 0) === n) {
+    middle = n === 1 ? "It returns to review." : "They return to review.";
+  } else {
+    const parts: string[] = [];
+    const review = counts.get("review") ?? 0;
+    const confirmed = counts.get("confirmed") ?? 0;
+    const rejected = counts.get("rejected") ?? 0;
+    const gone = counts.get("gone") ?? 0;
+    if (review) parts.push(`${review} ${review === 1 ? "returns" : "return"} to review`);
+    if (rejected)
+      parts.push(
+        `${rejected} ${rejected === 1 ? "moves" : "move"} to Rejected (the engine confirmed ${rejected === 1 ? "it" : "them"} on its own)`,
+      );
+    if (confirmed)
+      parts.push(
+        `${confirmed} ${confirmed === 1 ? "goes" : "go"} back to Confirmed (the engine confirmed ${confirmed === 1 ? "it" : "them"} on its own)`,
+      );
+    if (gone) parts.push(`${gone} ${gone === 1 ? "leaves" : "leave"} the queue`);
+    middle = `${parts.join(", ")}.`;
+    middle = middle.charAt(0).toUpperCase() + middle.slice(1);
+  }
+  return `${head} ${middle} Each gets its own audit row.`;
+}
+
 export function CoreClaimQueue({
   core,
   candidates,
@@ -1139,6 +1263,12 @@ export function CoreClaimQueue({
   const [revokedConfirmed, setRevokedConfirmed] = useState<Set<string>>(new Set());
   // Rejected rows restored this session — kept visible with an undo (mirror of above).
   const [restoredRejected, setRestoredRejected] = useState<Set<string>>(new Set());
+  // Confirmed/Rejected tabs: the ticked rows, the inline guard in front of the
+  // bulk Revoke/Restore (decision 2 — the same guard as "Reject all N…"), and
+  // whether that bulk post is in flight.
+  const [histSelected, setHistSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [histArmed, setHistArmed] = useState(false);
+  const [histPending, setHistPending] = useState(false);
   // The active tab. Tabs only render when there's history (confirmed/rejected);
   // land on the first non-empty list so a reviewer with no open work sees content.
   const [view, setView] = useState<QueueView>(() =>
@@ -1185,8 +1315,19 @@ export function CoreClaimQueue({
   // silent (the pane swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");
   // Manual PMID add: paste a block of known PMIDs and claim them directly,
-  // independent of the engine queue (POST /api/edit/core-claim/bulk).
+  // independent of the engine queue (POST /api/edit/core-claim/bulk), or send
+  // them to review (POST /api/edit/core-queue-add).
   const [addOpen, setAddOpen] = useState(false);
+  // "Confirm now" (claim directly) or "Send to review" (queue for later, a
+  // `core_queue_add` row via POST /api/edit/core-queue-add).
+  const [addMode, setAddMode] = useState<AddMode>("claim");
+  // Mirror of `addMode` for an in-flight check, like `addTextRef` below: a check
+  // that lands after the mode changed describes the other mode's commit.
+  const addModeRef = useRef<AddMode>("claim");
+  const setAddModeTracked = (next: AddMode) => {
+    addModeRef.current = next;
+    setAddMode(next);
+  };
   const [addText, setAddText] = useState("");
   // Mirror of `addText` readable from inside an in-flight async handler, where
   // the captured state value is whatever it was when the handler started.
@@ -1425,14 +1566,25 @@ export function CoreClaimQueue({
     // late response re-armed "Claim publications" for a paste that was never
     // checked, and the claim then posted the NEW text.
     const checkedText = addText;
+    const checkedMode = addMode;
+    const stale = () => checkedText !== addTextRef.current || checkedMode !== addModeRef.current;
     setAddChecking(true);
     setAddResult(null);
-    const res = await fetch("/api/edit/core-claim/bulk", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ coreId: core.id, pmids, status: "claimed", dryRun: true }),
-    }).catch(() => null);
-    if (checkedText !== addTextRef.current) return; // stale — the paste changed
+    // Send to review is checked by its own route, on the same terms as the claim
+    // dry run (shape, cap, authorization, the `publication` existence probe).
+    const res = await fetch(
+      checkedMode === "review" ? "/api/edit/core-queue-add" : "/api/edit/core-claim/bulk",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          checkedMode === "review"
+            ? { coreId: core.id, pmids, dryRun: true }
+            : { coreId: core.id, pmids, status: "claimed", dryRun: true },
+        ),
+      },
+    ).catch(() => null);
+    if (stale()) return; // stale — the paste or the mode changed
     setAddChecking(false);
     if (!res?.ok) {
       setAddResult("Could not check these — try again.");
@@ -1440,17 +1592,73 @@ export function CoreClaimQueue({
     }
     const data = (await res.json().catch(() => ({}))) as {
       wouldWrite?: number;
+      wouldAdd?: number;
       skipped?: number;
+      inQueue?: number;
+      decided?: number;
       notFound?: string[];
     };
-    if (checkedText !== addTextRef.current) return; // stale — the paste changed
-    setAddCheck({
-      wouldWrite: data.wouldWrite ?? 0,
-      skipped: data.skipped ?? 0,
-      notFound: data.notFound ?? [],
-      invalid,
-    });
+    if (stale()) return; // stale — the paste or the mode changed
+    setAddCheck(
+      checkedMode === "review"
+        ? {
+            wouldWrite: data.wouldAdd ?? 0,
+            skipped: data.inQueue ?? 0,
+            decided: data.decided ?? 0,
+            notFound: data.notFound ?? [],
+            invalid,
+          }
+        : {
+            wouldWrite: data.wouldWrite ?? 0,
+            skipped: data.skipped ?? 0,
+            notFound: data.notFound ?? [],
+            invalid,
+          },
+    );
     setAddResult(null);
+  }
+
+  // Send a pasted block to review: one `core_queue_add` row per new PMID, so
+  // each joins To review under "Added by you" (unscored) until someone decides
+  // it. Refresh (not local state) so the page re-fetches them as real rows, and
+  // land the reviewer on that pile.
+  async function submitSendToReview() {
+    const { pmids, invalid } = parsePmidBlock(addText);
+    if (pmids.length === 0) return;
+    setAddPending(true);
+    setAddResult(null);
+    const res = await fetch("/api/edit/core-queue-add", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ coreId: core.id, pmids }),
+    }).catch(() => null);
+    setAddPending(false);
+    if (!res?.ok) {
+      setAddResult("Could not save — try again.");
+      return;
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      added?: number;
+      inQueue?: number;
+      decided?: number;
+      notFound?: string[];
+    };
+    const parts = [`Added ${data.added ?? 0} to review.`];
+    if (data.inQueue) parts.push(`Already in the queue: ${data.inQueue}.`);
+    if (data.decided) parts.push(`Already decided: ${data.decided}.`);
+    if (data.notFound?.length) parts.push(`Not found in SPS: ${data.notFound.join(", ")}.`);
+    if (invalid.length > 0) parts.push(`Ignored: ${invalid.join(", ")}.`);
+    setAddResult(parts.join(" "));
+    setAnnounce(parts.join(" "));
+    setAddTextTracked("");
+    setAddCheck(null);
+    if ((data.added ?? 0) > 0) {
+      setView("review");
+      setMode("evidence");
+      setGroupKey(ADDED_GROUP);
+      resetForScope();
+      router.refresh();
+    }
   }
 
   // Claim a pasted block of known PMIDs directly — the queue's own candidates
@@ -1497,11 +1705,12 @@ export function CoreClaimQueue({
   }
 
   // Walk back a confirmed row: a human claim soft-revokes ("revoked"); an engine
-  // confirmation has no claim, so it needs a "rejected" override instead.
-  async function revokeConfirmed(pmid: string, wasClaimed: boolean, title: string) {
+  // confirmation needs a "rejected" override instead (see `revokeStatusFor`).
+  async function revokeConfirmed(row: CoreQueueRow) {
+    const { pmid, title } = row;
     clearError(pmid);
     markPending(pmid);
-    const result = await postClaim(pmid, wasClaimed ? "revoked" : "rejected");
+    const result = await postClaim(pmid, revokeStatusFor(row));
     if (result.ok) {
       setRevokedConfirmed((s) => new Set(s).add(pmid));
       setAnnounce(`Revoked ${title}.`);
@@ -1544,6 +1753,69 @@ export function CoreClaimQueue({
       setError(pmid, result.error);
     }
     clearPending(pmid);
+  }
+
+  /**
+   * Bulk Revoke (Confirmed tab) / bulk Restore (Rejected tab), after the inline
+   * guard. Each row posts what its single Revoke/Restore would (`revokeStatusFor`
+   * on Confirmed, the soft `revoked` on Rejected), grouped by that status and
+   * chunked at the bulk route's cap; the route writes one audit row per PMID. A
+   * failed chunk marks its own rows and stops, as `bulkDecide` does. Each row
+   * that went through joins the session's revoked/restored set, so it keeps its
+   * own single-row Undo.
+   */
+  async function bulkHistory(tab: "confirmed" | "rejected", rows: CoreQueueRow[]) {
+    if (rows.length === 0 || histPending) return;
+    setHistArmed(false);
+    setHistPending(true);
+    const pmids = rows.map((r) => r.pmid);
+    setPending((s) => new Set([...s, ...pmids]));
+    for (const p of pmids) clearError(p);
+    const byStatus = new Map<"revoked" | "rejected", string[]>();
+    for (const r of rows) {
+      const status = tab === "confirmed" ? revokeStatusFor(r) : "revoked";
+      byStatus.set(status, [...(byStatus.get(status) ?? []), r.pmid]);
+    }
+    const done: string[] = [];
+    let failed = false;
+    for (const [status, group] of byStatus) {
+      for (const chunk of chunkPmids(group)) {
+        const res = await fetch("/api/edit/core-claim/bulk", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ coreId: core.id, pmids: chunk, status }),
+        }).catch(() => null);
+        if (res?.ok !== true) {
+          failed = true;
+          break;
+        }
+        done.push(...chunk);
+      }
+      if (failed) break;
+    }
+    const setTouched = tab === "confirmed" ? setRevokedConfirmed : setRestoredRejected;
+    if (done.length > 0) setTouched((s) => new Set([...s, ...done]));
+    const doneSet = new Set(done);
+    const notDone = pmids.filter((p) => !doneSet.has(p));
+    const verb = tab === "confirmed" ? "revoke" : "restore";
+    if (notDone.length === 0) setHistSelected(new Set());
+    else
+      setErrors((m) => {
+        const next = new Map(m);
+        for (const p of notDone) next.set(p, `bulk ${verb} failed`);
+        return next;
+      });
+    setPending((s) => {
+      const next = new Set(s);
+      for (const p of pmids) next.delete(p);
+      return next;
+    });
+    setHistPending(false);
+    setAnnounce(
+      notDone.length === 0
+        ? `${tab === "confirmed" ? "Revoked" : "Restored"} ${plural(pmids.length, "publication")}.`
+        : `Bulk ${verb} could not be saved.`,
+    );
   }
 
   async function undoRestoreRejected(pmid: string) {
@@ -1624,29 +1896,52 @@ export function CoreClaimQueue({
       : null;
   const scopeRows =
     mode === "person" ? (activePerson?.rows ?? []) : (activeGroup?.rows ?? candidates);
+  // The Confirmed/Rejected tabs share the search box and the Filters panel
+  // (mockup): same facets, same words, over that tab's rows. The selection
+  // there is its own (`histSelected`), and a tab switch clears both.
+  const onHistory = view !== "review";
+  const historyBase = view === "confirmed" ? confirmed : view === "rejected" ? rejected : [];
+  const historyTouched = view === "confirmed" ? revokedConfirmed : restoredRejected;
+  const filterRows = onHistory ? historyBase : scopeRows;
+  // A row walked back / decided this session is held on screen for its Undo.
+  const isHeld = (pmid: string) => (onHistory ? historyTouched.has(pmid) : decided.has(pmid));
   const values = new Map(
-    scopeRows.map((r) => [r.pmid, facetValues(r, paperCounts, clientCwids)] as const),
+    filterRows.map(
+      (r) =>
+        [
+          r.pmid,
+          // A confirmed row sits inside its own counts (see `withoutOwnPaper`).
+          facetValues(
+            r,
+            view === "confirmed" ? withoutOwnPaper(r, paperCounts) : paperCounts,
+            clientCwids,
+          ),
+        ] as const,
+    ),
   );
   // The search narrows the facet COUNTS too (mockup); the facets do not narrow
   // each other's counts, so a tick never makes its own neighbours vanish.
-  const searched = scopeRows.filter((r) => matchesSearch(r, query));
-  // Apply the facets AND the search (but always keep a just-decided row visible
-  // so its Undo stays reachable), then sort.
-  const visible = scopeRows
-    .filter(
-      (r) =>
-        decided.has(r.pmid) ||
-        (matchesSearch(r, query) && matchesFacets(values.get(r.pmid)!, facets)),
-    )
-    .slice()
-    .sort((a, b) => compareBySort(sort, a, b));
-  // Counts over the still-open rows only: a decided row is held on screen for
-  // its undo and must not inflate a facet. A value at 0 is not offered at all
-  // unless it is already ticked (then it stays, so it can be unticked).
+  const searched = filterRows.filter((r) => matchesSearch(r, query));
+  // Apply the facets AND the search (but always keep a held row visible so its
+  // Undo stays reachable).
+  const matched = filterRows.filter(
+    (r) =>
+      isHeld(r.pmid) || (matchesSearch(r, query) && matchesFacets(values.get(r.pmid)!, facets)),
+  );
+  // The To review list sorts; the history tabs keep the loader's order.
+  const visible = onHistory ? [] : matched.slice().sort((a, b) => compareBySort(sort, a, b));
+  const historyShown = onHistory ? matched : [];
+  const historyOpen = historyShown.filter((r) => !historyTouched.has(r.pmid));
+  const historySelectedRows = historyOpen.filter((r) => histSelected.has(r.pmid));
+  const historyAllChecked =
+    historyOpen.length > 0 && historySelectedRows.length === historyOpen.length;
+  // Counts over the still-open rows only: a held row is on screen for its undo
+  // and must not inflate a facet. A value at 0 is not offered at all unless it
+  // is already ticked (then it stays, so it can be unticked).
   const facetGroups: FacetGroupView[] = FACET_GROUPS.map(({ key, label }) => {
     const counts = new Map<string, number>();
     for (const r of searched) {
-      if (decided.has(r.pmid)) continue;
+      if (isHeld(r.pmid)) continue;
       for (const v of values.get(r.pmid)![key]) counts.set(v, (counts.get(v) ?? 0) + 1);
     }
     const ticked = facets[key] ?? [];
@@ -1706,7 +2001,9 @@ export function CoreClaimQueue({
           ...groups.map((g) => ({
             key: g.key,
             label: evidenceGroupName(g.key),
-            sub: groupBandText(g.rows.map((r) => r.likelihood)),
+            // "Added by you" has no band: the engine did not score these papers
+            // onto the queue, so a band word would put its verdict in its mouth.
+            sub: g.key === ADDED_GROUP ? ADDED_SUB : groupBandText(g.rows.map((r) => r.likelihood)),
             count: g.open,
           })),
         ]
@@ -1734,7 +2031,11 @@ export function CoreClaimQueue({
         ? `${plural(activePerson.open, "open candidate")} · ${activePerson.counts.papers} of ${plural(activePerson.counts.total, "publication")} already confirmed`
         : ""
       : activeGroup
-        ? `${plural(activeGroup.open, "open paper")} · ${groupBandText(activeGroup.rows.map((r) => r.likelihood))}`
+        ? `${plural(activeGroup.open, "open paper")} · ${
+            activeGroup.key === ADDED_GROUP
+              ? ADDED_SUB
+              : groupBandText(activeGroup.rows.map((r) => r.likelihood))
+          }`
         : `${plural(remaining, "open candidate")} across ${plural(groups.length, "evidence group")}`;
   const meshCount = candidates.filter(
     (r) => r.topicalPrior !== null && decodeTopicalPrior(r.topicalPrior).mesh,
@@ -1773,11 +2074,13 @@ export function CoreClaimQueue({
     });
     setFocusPmid(null);
     setArmed(null);
+    setHistArmed(false);
   };
   const clearFilters = () => {
     setFacets({});
     setQuery("");
     setArmed(null);
+    setHistArmed(false);
   };
 
   // ---- focus + keyboard ---------------------------------------------------
@@ -1797,6 +2100,14 @@ export function CoreClaimQueue({
   }
   function toggleSelected(pmid: string) {
     setSelected((s) => {
+      const next = new Set(s);
+      if (!next.delete(pmid)) next.add(pmid);
+      return next;
+    });
+  }
+  function toggleHistSelected(pmid: string) {
+    setHistArmed(false);
+    setHistSelected((s) => {
       const next = new Set(s);
       if (!next.delete(pmid)) next.add(pmid);
       return next;
@@ -1872,6 +2183,87 @@ export function CoreClaimQueue({
     };
   })();
 
+  // The search box, Filters and chips. Shared by To review and the history
+  // tabs (mockup); the sort pills and the several-PMID note are To review's.
+  const searchBar = (
+    <div data-slot="core-queue-search" className="mt-4 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setFocusPmid(null);
+            setArmed(null);
+            setHistArmed(false);
+          }}
+          onPaste={(e) => {
+            const flat = pasteAsOneLine(e.clipboardData.getData("text"));
+            if (flat === null) return;
+            e.preventDefault();
+            const el = e.currentTarget;
+            const start = el.selectionStart ?? el.value.length;
+            const end = el.selectionEnd ?? el.value.length;
+            setQuery(`${el.value.slice(0, start)}${flat}${el.value.slice(end)}`);
+            setFocusPmid(null);
+            setArmed(null);
+            setHistArmed(false);
+          }}
+          placeholder="Search title, author, journal, or paste several PMIDs"
+          aria-label={onHistory ? `Filter ${view} papers` : "Filter candidates"}
+          className="bg-apollo-surface h-9 min-w-0 flex-[1_1_260px] text-[13px]"
+        />
+        <button
+          type="button"
+          aria-expanded={filtersOpen}
+          aria-controls="core-queue-filters"
+          onClick={() => setFiltersOpen((o) => !o)}
+          className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] whitespace-nowrap ${
+            activeChips.length > 0 ? "border-apollo-slate" : "border-apollo-border-strong"
+          } ${filtersOpen ? "bg-apollo-surface-2" : "bg-apollo-surface"}`}
+        >
+          Filters
+          <span className="bg-apollo-rail rounded-full px-1.5 text-xs text-[var(--evidence-body)] tabular-nums">
+            {activeChips.length}
+          </span>
+        </button>
+        {onHistory ? null : (
+          <div role="group" aria-label="Sort" className="flex shrink-0 gap-1">
+            {SORT_PILLS.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                aria-pressed={sort === s.key}
+                onClick={() => setSort(s.key)}
+                className={`rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap ${
+                  sort === s.key
+                    ? "border-apollo-border-strong bg-apollo-surface"
+                    : "border-transparent"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {pmidNote && !onHistory ? (
+        <p
+          data-slot="core-queue-pmid-note"
+          className="border-apollo-border bg-apollo-surface-2 rounded-lg border px-2.5 py-1.5 text-xs leading-normal text-[var(--evidence-body)]"
+        >
+          {pmidNote}
+        </p>
+      ) : null}
+      {filtersOpen ? (
+        <FiltersPanel id="core-queue-filters" groups={facetGroups} onToggle={toggleFacet} />
+      ) : null}
+      {narrowed ? (
+        <ActiveFilterChips chips={activeChips} onRemove={toggleFacet} onClear={clearFilters} />
+      ) : null}
+    </div>
+  );
+
   const HEADER_BUTTON =
     "border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm";
 
@@ -1923,9 +2315,9 @@ export function CoreClaimQueue({
 
       {/* Both header panels are MODALS, not inline drawers: each is a task with
           its own commit step, and an inline panel pushed the queue down the page
-          while it was open. Add PMIDs is the existing "Confirm now" manual add;
-          the mockup's "Send to review" mode needs a table that does not exist
-          yet and is deliberately not drawn. */}
+          while it was open. Add PMIDs has the mockup's two modes: "Confirm
+          now" (the manual claim) and "Send to review" (a `core_queue_add`
+          row; the paper joins To review under "Added by you"). */}
       <Dialog
         open={addOpen}
         onOpenChange={(next) => {
@@ -1942,14 +2334,51 @@ export function CoreClaimQueue({
           className="gap-0 p-0 sm:max-w-2xl"
         >
           <DialogHeader className="border-apollo-border border-b px-6 py-5">
-            <DialogTitle>Claim publications by PMID</DialogTitle>
+            <DialogTitle>Add publications by PMID</DialogTitle>
             <DialogDescription>
-              For papers you know used this core that the engine never scored. These are recorded
-              as your decision, with no evidence trail behind them.
+              For papers the engine never put in front of you. Confirm the ones you know used this
+              core, or send the ones you want to check to review.
             </DialogDescription>
           </DialogHeader>
 
           <div className="px-6 py-5">
+            {/* The two modes (mockup). A mode change drops the check: a dry run
+                for one route says nothing about what the other would write. */}
+            <div
+              role="radiogroup"
+              aria-label="What to do with these PMIDs"
+              data-slot="core-claim-pmid-modes"
+              className="mb-4 grid gap-2 sm:grid-cols-2"
+            >
+              {ADD_MODES.map((m) => {
+                const active = addMode === m.key;
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => {
+                      if (active) return;
+                      setAddModeTracked(m.key);
+                      setAddCheck(null);
+                      setAddResult(null);
+                      setAddChecking(false);
+                    }}
+                    className={`rounded-lg border px-3 py-2.5 text-left ${
+                      active
+                        ? "border-apollo-slate bg-apollo-surface shadow-[inset_0_0_0_1px_var(--apollo-slate)]"
+                        : "border-apollo-border bg-apollo-surface-2"
+                    }`}
+                  >
+                    <span className="text-foreground block text-sm font-medium">{m.label}</span>
+                    <span className="text-muted-foreground mt-0.5 block text-xs leading-snug">
+                      {m.sub}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
             <label
               htmlFor="core-claim-add-pmids"
               className="text-foreground mb-2 block text-sm font-medium"
@@ -1989,13 +2418,21 @@ export function CoreClaimQueue({
                 data-slot="core-claim-pmid-check"
               >
                 <li className="text-foreground">
-                  <span className="tabular-nums font-medium">{addCheck.wouldWrite}</span> ready to
-                  claim.
+                  <span className="font-medium tabular-nums">{addCheck.wouldWrite}</span> ready to{" "}
+                  {addMode === "review" ? "add to review" : "claim"}.
                 </li>
                 {addCheck.skipped > 0 ? (
                   <li>
-                    <span className="tabular-nums">{addCheck.skipped}</span> already claimed for
-                    this core.
+                    <span className="tabular-nums">{addCheck.skipped}</span>{" "}
+                    {addMode === "review"
+                      ? "already in this core's To review list."
+                      : "already claimed for this core."}
+                  </li>
+                ) : null}
+                {addCheck.decided ? (
+                  <li>
+                    <span className="tabular-nums">{addCheck.decided}</span> already decided for
+                    this core (Confirmed or Rejected), not added.
                   </li>
                 ) : null}
                 {addCheck.notFound.length > 0 ? (
@@ -2029,10 +2466,18 @@ export function CoreClaimQueue({
             <button
               type="button"
               disabled={addPending || !addCheck || addCheck.wouldWrite === 0}
-              onClick={submitAddPmids}
+              onClick={addMode === "review" ? submitSendToReview : submitAddPmids}
               className="bg-apollo-maroon inline-flex h-9 items-center rounded-md px-3.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {addPending ? "Claiming…" : "Claim publications"}
+              {addMode === "review"
+                ? addPending
+                  ? "Adding…"
+                  : addCheck && addCheck.wouldWrite > 0
+                    ? `Add ${addCheck.wouldWrite} to review`
+                    : "Add to review"
+                : addPending
+                  ? "Claiming…"
+                  : "Claim publications"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -2056,8 +2501,15 @@ export function CoreClaimQueue({
           <ViewTabs
             view={view}
             onView={(v) => {
+              if (v === view) return;
               setView(v);
               setArmed(null);
+              // The search and the facets are shared across tabs; a value
+              // ticked on one tab's rows means nothing on another's.
+              setFacets({});
+              setQuery("");
+              setHistSelected(new Set());
+              setHistArmed(false);
             }}
             reviewCount={remaining}
             confirmedCount={confirmed.length}
@@ -2102,82 +2554,7 @@ export function CoreClaimQueue({
 
       {view === "review" && candidates.length > 0 ? (
         <>
-          <div data-slot="core-queue-search" className="mt-4 flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                type="search"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setFocusPmid(null);
-                  setArmed(null);
-                }}
-                onPaste={(e) => {
-                  const flat = pasteAsOneLine(e.clipboardData.getData("text"));
-                  if (flat === null) return;
-                  e.preventDefault();
-                  const el = e.currentTarget;
-                  const start = el.selectionStart ?? el.value.length;
-                  const end = el.selectionEnd ?? el.value.length;
-                  setQuery(`${el.value.slice(0, start)}${flat}${el.value.slice(end)}`);
-                  setFocusPmid(null);
-                  setArmed(null);
-                }}
-                placeholder="Search title, author, journal, or paste several PMIDs"
-                aria-label="Filter candidates"
-                className="bg-apollo-surface h-9 min-w-0 flex-[1_1_260px] text-[13px]"
-              />
-              <button
-                type="button"
-                aria-expanded={filtersOpen}
-                aria-controls="core-queue-filters"
-                onClick={() => setFiltersOpen((o) => !o)}
-                className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] whitespace-nowrap ${
-                  activeChips.length > 0 ? "border-apollo-slate" : "border-apollo-border-strong"
-                } ${filtersOpen ? "bg-apollo-surface-2" : "bg-apollo-surface"}`}
-              >
-                Filters
-                <span className="bg-apollo-rail rounded-full px-1.5 text-xs text-[var(--evidence-body)] tabular-nums">
-                  {activeChips.length}
-                </span>
-              </button>
-              <div role="group" aria-label="Sort" className="flex shrink-0 gap-1">
-                {SORT_PILLS.map((s) => (
-                  <button
-                    key={s.key}
-                    type="button"
-                    aria-pressed={sort === s.key}
-                    onClick={() => setSort(s.key)}
-                    className={`rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap ${
-                      sort === s.key
-                        ? "border-apollo-border-strong bg-apollo-surface"
-                        : "border-transparent"
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {pmidNote ? (
-              <p
-                data-slot="core-queue-pmid-note"
-                className="border-apollo-border bg-apollo-surface-2 rounded-lg border px-2.5 py-1.5 text-xs leading-normal text-[var(--evidence-body)]"
-              >
-                {pmidNote}
-              </p>
-            ) : null}
-            {filtersOpen ? (
-              <FiltersPanel id="core-queue-filters" groups={facetGroups} onToggle={toggleFacet} />
-            ) : null}
-            {narrowed ? (
-              <ActiveFilterChips
-                chips={activeChips}
-                onRemove={toggleFacet}
-                onClear={clearFilters}
-              />
-            ) : null}
-          </div>
+          {searchBar}
 
           {/* Three panes at `lg` (mockup); below it the rail is a select, the list
               runs full width, and the paper opens as a full-screen sheet. */}
@@ -2352,38 +2729,86 @@ export function CoreClaimQueue({
         </>
       ) : null}
 
-      {view === "confirmed" ? (
-        <ul className="mt-4 flex flex-col gap-1.5">
-          {confirmed.map((row) => (
-            <ConfirmedRow
-              key={row.pmid}
-              row={row}
-              revoked={revokedConfirmed.has(row.pmid)}
-              pending={pending.has(row.pmid)}
-              error={errors.get(row.pmid)}
-              clientCwids={clientCwids}
-              paperCounts={paperCounts}
-              onRevoke={() => revokeConfirmed(row.pmid, row.claimed, row.title)}
-              onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
+      {view === "confirmed" || view === "rejected" ? (
+        <>
+          {searchBar}
+          <p className="text-muted-foreground mt-3 text-xs">
+            {view === "confirmed"
+              ? "Confirmed papers appear on the public core page. Revoking takes a paper off it."
+              : "Rejected papers are hidden from public pages. Restoring re-opens a paper."}
+          </p>
+          <div className="border-apollo-border bg-apollo-surface mt-2 overflow-hidden rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
+            <HistorySelectionBar
+              tab={view}
+              openCount={historyOpen.length}
+              selectedCount={historySelectedRows.length}
+              allChecked={historyAllChecked}
+              narrowed={narrowed}
+              pending={histPending}
+              onToggleAll={() => {
+                setHistArmed(false);
+                setHistSelected((s) => {
+                  const next = new Set(s);
+                  for (const r of historyOpen) {
+                    if (historyAllChecked) next.delete(r.pmid);
+                    else next.add(r.pmid);
+                  }
+                  return next;
+                });
+              }}
+              onArm={() => setHistArmed(true)}
             />
-          ))}
-        </ul>
-      ) : null}
-
-      {view === "rejected" ? (
-        <ul className="mt-4 flex flex-col gap-1.5">
-          {rejected.map((row) => (
-            <RejectedRow
-              key={row.pmid}
-              row={row}
-              restored={restoredRejected.has(row.pmid)}
-              pending={pending.has(row.pmid)}
-              error={errors.get(row.pmid)}
-              onRestore={() => restoreRejected(row.pmid, row.title)}
-              onUndo={() => undoRestoreRejected(row.pmid)}
-            />
-          ))}
-        </ul>
+            {histArmed && historySelectedRows.length > 0 ? (
+              <HistoryGuard
+                tab={view}
+                count={historySelectedRows.length}
+                text={historyGuardText(view, historySelectedRows)}
+                disabled={histPending}
+                onConfirm={() => void bulkHistory(view, historySelectedRows)}
+                onCancel={() => setHistArmed(false)}
+              />
+            ) : null}
+            <ul
+              aria-label={view === "confirmed" ? "Confirmed papers" : "Rejected papers"}
+              className="flex flex-col"
+            >
+              {historyShown.map((row) =>
+                view === "confirmed" ? (
+                  <ConfirmedRow
+                    key={row.pmid}
+                    row={row}
+                    revoked={revokedConfirmed.has(row.pmid)}
+                    pending={pending.has(row.pmid)}
+                    error={errors.get(row.pmid)}
+                    clientCwids={clientCwids}
+                    paperCounts={paperCounts}
+                    checked={histSelected.has(row.pmid)}
+                    onCheck={() => toggleHistSelected(row.pmid)}
+                    onRevoke={() => revokeConfirmed(row)}
+                    onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
+                  />
+                ) : (
+                  <RejectedRow
+                    key={row.pmid}
+                    row={row}
+                    restored={restoredRejected.has(row.pmid)}
+                    pending={pending.has(row.pmid)}
+                    error={errors.get(row.pmid)}
+                    checked={histSelected.has(row.pmid)}
+                    onCheck={() => toggleHistSelected(row.pmid)}
+                    onRestore={() => restoreRejected(row.pmid, row.title)}
+                    onUndo={() => undoRestoreRejected(row.pmid)}
+                  />
+                ),
+              )}
+            </ul>
+          </div>
+          {historyShown.length === 0 ? (
+            <p className="text-muted-foreground border-apollo-border mt-2 rounded-lg border border-dashed px-4 py-6 text-center text-sm">
+              Nothing matches these filters.
+            </p>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -2425,6 +2850,119 @@ function RejectGuard({
           type="button"
           onClick={onCancel}
           className="inline-flex h-7 items-center rounded-md px-2.5 text-xs"
+        >
+          Cancel
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The Confirmed/Rejected tabs' selection bar (mockup): "Select all N" and ONE
+ * bulk button, "Revoke N" or "Restore N". The button only arms the inline guard
+ * (`HistoryGuard`) — nothing is posted from here. The bar wraps at phone width.
+ */
+function HistorySelectionBar({
+  tab,
+  openCount,
+  selectedCount,
+  allChecked,
+  narrowed,
+  pending,
+  onToggleAll,
+  onArm,
+}: {
+  tab: "confirmed" | "rejected";
+  openCount: number;
+  selectedCount: number;
+  allChecked: boolean;
+  narrowed: boolean;
+  pending: boolean;
+  onToggleAll: () => void;
+  onArm: () => void;
+}) {
+  const verb = tab === "confirmed" ? "Revoke" : "Restore";
+  return (
+    <div
+      data-slot="core-queue-history-bar"
+      role="group"
+      aria-label={`Selected ${tab} publications`}
+      className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 text-[13px] ${
+        selectedCount > 0 ? "bg-apollo-slate-tint" : "bg-apollo-surface-2"
+      }`}
+    >
+      <label className="flex items-center gap-2.5">
+        <input
+          type="checkbox"
+          checked={allChecked}
+          disabled={openCount === 0}
+          onChange={onToggleAll}
+          className="size-4 accent-[var(--apollo-slate)]"
+        />
+        <span>
+          {selectedCount > 0
+            ? `${selectedCount} of ${openCount} selected`
+            : `Select all ${openCount} ${narrowed ? "matching" : "shown"}`}
+        </span>
+      </label>
+      <button
+        type="button"
+        disabled={selectedCount === 0 || pending}
+        onClick={onArm}
+        className="border-border-strong bg-background inline-flex h-8 items-center rounded-md border px-3 text-xs disabled:opacity-50"
+      >
+        {pending
+          ? `${tab === "confirmed" ? "Revoking" : "Restoring"}…`
+          : selectedCount > 0
+            ? `${verb} ${selectedCount}`
+            : verb}
+        <span className="sr-only"> selected</span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The inline guard in front of a bulk Revoke/Restore — the same pattern as
+ * `RejectGuard` (grant-signal design delta B.2: "Revoke 12 confirmed papers?
+ * They return to review. Each gets its own audit row." / "Revoke 12" /
+ * "Cancel"). The sentence comes from `historyGuardText`.
+ */
+function HistoryGuard({
+  tab,
+  count,
+  text,
+  disabled,
+  onConfirm,
+  onCancel,
+}: {
+  tab: "confirmed" | "rejected";
+  count: number;
+  text: string;
+  disabled: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      data-slot="core-queue-history-guard"
+      className="border-apollo-border flex flex-wrap items-center justify-between gap-2 border-t bg-amber-50 px-3.5 py-2 text-[13px] text-amber-900"
+    >
+      <span className="min-w-0">{text}</span>
+      <span className="flex gap-1.5">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onConfirm}
+          className="inline-flex h-8 items-center rounded-md bg-amber-800 px-3 text-xs font-medium text-white disabled:opacity-50"
+        >
+          {tab === "confirmed" ? "Revoke" : "Restore"} {count}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex h-8 items-center rounded-md px-3 text-xs"
         >
           Cancel
         </button>
@@ -2537,6 +3075,10 @@ function withoutOwnPaper(
   return out;
 }
 
+/** One row on the Confirmed/Rejected tabs: a checkbox, the paper, its action. */
+const HISTORY_ROW =
+  "border-apollo-border flex gap-2.5 border-t px-3.5 py-2.5 text-sm first:border-t-0";
+
 // A confirmed publication with an inline Revoke (kept walk-back-able for the
 // session — the one thing this list needs to earn its place below the queue).
 //
@@ -2555,6 +3097,8 @@ function ConfirmedRow({
   revoked,
   pending,
   error,
+  checked = false,
+  onCheck = () => {},
   onRevoke,
   onUndo,
   clientCwids = new Set<string>(),
@@ -2564,6 +3108,9 @@ function ConfirmedRow({
   revoked: boolean;
   pending: boolean;
   error: string | undefined;
+  /** Ticked for the bulk Revoke. */
+  checked?: boolean;
+  onCheck?: () => void;
   onRevoke: () => void;
   onUndo: () => void;
   /** The core's known-client CWIDs, so the evidence line reads the same here as
@@ -2574,8 +3121,9 @@ function ConfirmedRow({
 }) {
   if (revoked) {
     return (
-      <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
-        <span className="flex min-w-0 items-baseline gap-2">
+      <li className={`${HISTORY_ROW} text-muted-foreground items-center`}>
+        <span className="size-4 shrink-0" aria-hidden />
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
           <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
           <span className="truncate">{row.title}</span>
           {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
@@ -2612,8 +3160,16 @@ function ConfirmedRow({
   // previous occasion and the count must not rise on the tab that subtracts.
   const signalCount = buildSignals(row, ownCounts, clientCwids).length;
   return (
-    <li className="text-muted-foreground flex items-start justify-between gap-2 text-sm">
-      <span className="flex min-w-0 flex-col gap-0.5">
+    <li className={`${HISTORY_ROW} text-muted-foreground items-start`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={pending}
+        onChange={onCheck}
+        aria-label={`Select ${row.title}`}
+        className="mt-0.5 size-4 shrink-0 accent-[var(--apollo-slate)]"
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-baseline gap-2">
           <Check className="size-3.5 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden />
           <span className="text-foreground truncate">{row.title}</span>
@@ -2674,6 +3230,8 @@ function RejectedRow({
   restored,
   pending,
   error,
+  checked = false,
+  onCheck = () => {},
   onRestore,
   onUndo,
 }: {
@@ -2681,13 +3239,17 @@ function RejectedRow({
   restored: boolean;
   pending: boolean;
   error: string | undefined;
+  /** Ticked for the bulk Restore. */
+  checked?: boolean;
+  onCheck?: () => void;
   onRestore: () => void;
   onUndo: () => void;
 }) {
   if (restored) {
     return (
-      <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
-        <span className="flex min-w-0 items-baseline gap-2">
+      <li className={`${HISTORY_ROW} text-muted-foreground items-center`}>
+        <span className="size-4 shrink-0" aria-hidden />
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
           <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
           <span className="truncate">{row.title}</span>
           {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
@@ -2706,8 +3268,16 @@ function RejectedRow({
     );
   }
   return (
-    <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
-      <span className="flex min-w-0 items-baseline gap-2">
+    <li className={`${HISTORY_ROW} text-muted-foreground items-center`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={pending}
+        onChange={onCheck}
+        aria-label={`Select ${row.title}`}
+        className="size-4 shrink-0 accent-[var(--apollo-slate)]"
+      />
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <X className="text-muted-foreground size-3.5 shrink-0 translate-y-0.5" aria-hidden />
         <span className="text-foreground truncate">{row.title}</span>
         {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
@@ -2848,9 +3418,17 @@ function QueueListRow({
           ) : null}
         </span>
         <span className="shrink-0 text-right text-[11px]">
-          <span className={`block font-semibold tracking-[0.06em] uppercase ${band.text}`}>
-            {band.label} {Math.round(row.likelihood * 100)}%
-          </span>
+          {row.queued ? (
+            // Sent here by PMID: the reviewer's pile, not an engine verdict
+            // (mockup "ADDED BY YOU" in slate, no band).
+            <span className="text-apollo-slate block font-semibold tracking-[0.06em] uppercase">
+              Added by you
+            </span>
+          ) : (
+            <span className={`block font-semibold tracking-[0.06em] uppercase ${band.text}`}>
+              {band.label} {Math.round(row.likelihood * 100)}%
+            </span>
+          )}
           {status ? <span className={`mt-1 block ${status.cls}`}>{status.text}</span> : null}
         </span>
       </button>
@@ -3010,7 +3588,7 @@ function FocusedPaper({
       </div>
 
       <div>
-        {row.authorAffinity === null ? (
+        {row.authorAffinity === null && !row.isManual ? (
           <p className="mb-1.5">
             <span className="border-border-strong text-muted-foreground bg-apollo-surface-2 inline-block rounded border px-2 py-0.5 text-[11px]">
               No prior core usage anywhere on this byline
@@ -3063,23 +3641,42 @@ function FocusedPaper({
               : "bg-apollo-surface-2"
         }`}
       >
-        <div className="min-w-0 flex-[1_1_140px]">
-          <div
-            className={`text-[11px] font-semibold tracking-[0.04em] uppercase ${band.text}`}
-            data-slot="core-queue-score"
-          >
-            {band.label} {likelihoodPct}%
+        {row.queued ? (
+          // Sent to review by PMID (mockup): no band and no bar. The engine
+          // either never scored it or scored it below the queue's threshold,
+          // and neither is a verdict to show a reviewer as one.
+          <div className="min-w-0 flex-[1_1_140px]">
+            <div
+              className="text-apollo-slate text-[11px] font-semibold tracking-[0.04em] uppercase"
+              data-slot="core-queue-score"
+            >
+              Added by you
+            </div>
+            <div className="text-muted-foreground mt-1 text-xs">
+              {row.isManual
+                ? "Not scored by the engine · added by PMID"
+                : `Below the engine threshold · ${signals.length} of ${SIGNAL_COUNT} signals fired`}
+            </div>
           </div>
-          <span className="bg-apollo-border-strong mt-1.5 block h-1 overflow-hidden rounded-full">
-            <span
-              className={`block h-full rounded-full ${band.fill}`}
-              style={{ width: `${likelihoodPct}%` }}
-            />
-          </span>
-          <div className="text-muted-foreground mt-1 text-xs">
-            {signals.length} of {SIGNAL_COUNT} signals fired
+        ) : (
+          <div className="min-w-0 flex-[1_1_140px]">
+            <div
+              className={`text-[11px] font-semibold tracking-[0.04em] uppercase ${band.text}`}
+              data-slot="core-queue-score"
+            >
+              {band.label} {likelihoodPct}%
+            </div>
+            <span className="bg-apollo-border-strong mt-1.5 block h-1 overflow-hidden rounded-full">
+              <span
+                className={`block h-full rounded-full ${band.fill}`}
+                style={{ width: `${likelihoodPct}%` }}
+              />
+            </span>
+            <div className="text-muted-foreground mt-1 text-xs">
+              {signals.length} of {SIGNAL_COUNT} signals fired
+            </div>
           </div>
-        </div>
+        )}
         {statusWord ? (
           <div className="flex items-center gap-2.5 text-[13px]">
             <span
@@ -3148,7 +3745,15 @@ function FocusedPaper({
         <p className="text-muted-foreground mb-1 text-[11px] tracking-[0.1em] uppercase">
           Why this surfaced
         </p>
-        {signals.length === 0 ? (
+        {row.isManual ? (
+          <p
+            data-slot="core-queue-added-note"
+            className="bg-apollo-surface-2 rounded-lg px-3 py-2.5 text-[12.5px] leading-relaxed text-[var(--evidence-body)]"
+          >
+            You added this paper by PMID. The engine never scored it for this core, so there is no
+            evidence to show; judge it on the paper.
+          </p>
+        ) : signals.length === 0 ? (
           <p className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded-lg border px-3 py-2.5 text-[12.5px] leading-relaxed">
             {/* "counted", not "labelled": the paper can carry labels this list
                 does not count — a method family is chipped and quoted on the

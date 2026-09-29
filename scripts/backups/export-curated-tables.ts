@@ -112,6 +112,10 @@ export const CURATED_TABLES: readonly string[] = [
   // attested "known client" list; ETL-immune, same posture as `core_claim`
   // (not itself curated here — see the note at its own migration for why).
   "core_client",
+  // Core Review Queue v2 PR B — PMIDs a core owner sent to their review queue
+  // by hand ("Add PMIDs → Send to review"). User-entered, ETL-immune, and
+  // nothing upstream can regenerate it, so it belongs with `core_client`.
+  "core_queue_add",
 ];
 
 interface ColumnMeta {
