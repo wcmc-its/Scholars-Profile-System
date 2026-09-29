@@ -58,6 +58,16 @@ Flag: `SEARCH_EVIDENCE_ROWS` (`resolveSearchEvidenceRows`, `lib/api/search-flags
 
 Each renders only when ≥1 item comes back (**hide-when-empty**): the card gates on `qParam` + `grantCount`/`keyPapers.length` and omits the row otherwise (`components/search/people-result-card.tsx`). A disclosure fetch must never 500 — it returns a default-safe empty instead.
 
+## Clinical research line (not a disclosure)
+
+Flag: `SEARCH_PEOPLE_TRIAL_EVIDENCE` (`resolveSearchPeopleTrialEvidence`, `lib/api/search-flags.ts`). Env state: **`"on"` in staging, `"off"` in prod** (`cdk/lib/app-stack.ts:2233`, the staging-only ternary).
+
+With a concept resolved, the card shows **Clinical research · N trials** among the Also matched secondaries (`components/search/people-result-card.tsx`, `SECONDARY_LABEL.trials`). N is `trialMatchCount` (`lib/api/search.ts`): how many of the scholar's PI trials carry a ClinicalTrials.gov condition MeSH descriptor inside the concept's descendant set. It is always a secondary, never the lead line, renders only on the stacked evidence surface, and hides when N is 0 or no concept resolved. Withdrawn and suspended trials never count; trials without an NCT number carry no MeSH, so they can help a scholar match on text but never add to N.
+
+It needs no fetch: the per-trial descriptor sets ride the people doc (`trialMesh`) and the count is computed from `_source` at hit shaping. It keys on the resolved concept, not `q`, so it sits outside the contract below the way KEY METHODS does. How trials affect ranking is in [`search-people-relevance.md`](./search-people-relevance.md#clinical-research-evidence).
+
+The trials themselves are listed on the separate **Clinical research** tab (`SEARCH_TRIALS_TAB`, same env state; `lib/api/search-trials.ts`), which has no evidence rows.
+
 ## The contract (#692 / #707 / #1339)
 
 **Every "key [thing]" disclosure must match on the generic-stripped *significant* query — the `contentQuery` from `stripDeprioritized()` (`lib/api/deprioritized-terms.ts`) — never the raw `q`.**

@@ -970,6 +970,19 @@ export default function DocsPage() {
           each result matched.
         </p>
         <p>
+          <strong>Clinical research counts too.</strong> The clinical trials a scholar leads as
+          principal investigator, from WCM&apos;s institutional trial records (OnCore), add their
+          titles and conditions to what People search reads, at a low weight. When a trial is
+          registered on ClinicalTrials.gov, the MeSH terms the NLM assigned to its conditions count
+          toward a concept match the same way a publication&apos;s MeSH terms do, and a scholar with
+          trials under the concept you searched shows <em>Clinical research · N trials</em> under
+          Also matched. Withdrawn and suspended trials are left out, as they are on the profile, and a
+          trial not registered on ClinicalTrials.gov has no MeSH terms, so it matches on its words
+          alone. The Clinical research tab lists the trials themselves, one result per study, under
+          the principal investigators who have a public profile; status, dates, interventions and
+          posted results come from ClinicalTrials.gov, refreshed weekly.
+        </p>
+        <p>
           If a publication of yours isn&apos;t turning up, the search index rebuilds nightly, so a
           paper added today usually appears the next day; searching its exact title is the quickest
           way to confirm it is indexed.
