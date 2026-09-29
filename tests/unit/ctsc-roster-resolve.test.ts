@@ -85,6 +85,21 @@ describe("resolveCtscFeed", () => {
     expect(r.externals.map((e) => e.cuid)).toEqual(["ctsc:6", "ctsc:7"]);
   });
 
+  it("flags a blank CWID whose WCM/NYP email ED doesn't know; ignores outside domains", () => {
+    const r = resolveCtscFeed(
+      [
+        rec(12, { LastName: "Gray", EMails: ["someone@gmail.com", "Gray.Alias@med.cornell.edu"] }),
+        rec(13, { LastName: "Gray", EMails: ["someone@gmail.com"] }),
+      ],
+      edByUid, edUidsByEmail, scholars,
+    );
+    expect(r.issues).toEqual([
+      expect.objectContaining({ primaryKey: 12, reason: "wcm-email-unknown", matchedEmail: "gray.alias@med.cornell.edu", suggestedCwid: null }),
+    ]);
+    // Still published as a plain name; the issue only asks CTSC to fix the CWID.
+    expect(r.externals.map((e) => e.cuid)).toEqual(["ctsc:12", "ctsc:13"]);
+  });
+
   it("never republishes a suppressed / deleted scholar as a plain name", () => {
     const r = resolveCtscFeed(
       [rec(11, { CWID: "other1003", LastName: "Brown" })],

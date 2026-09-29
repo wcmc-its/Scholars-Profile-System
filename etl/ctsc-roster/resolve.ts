@@ -36,7 +36,10 @@ export type CtscIssueReason =
   /** Emails resolve to more than one ED person. */
   | "email-ambiguous"
   /** Same person as an earlier feed record. */
-  | "duplicate-record";
+  | "duplicate-record"
+  /** Blank CWID, and a WCM/NYP email on the record is in ED for no one (an
+   *  AD-only alias or a dead address). Otherwise it would go out as a silent plain name. */
+  | "wcm-email-unknown";
 
 export type CtscIssue = {
   primaryKey: number;
@@ -107,6 +110,9 @@ export function feedDisplayName(r: CtscFeedRecord): string {
     .filter(Boolean)
     .join(" ");
 }
+
+/** Institutional domains whose addresses should resolve to a CWID. */
+const WCM_EMAIL = /@(med\.cornell\.edu|weill\.cornell\.edu|qatar-med\.cornell\.edu|nyp\.org)$/;
 
 export function feedEmails(r: CtscFeedRecord): string[] {
   return [...new Set((r.EMails ?? []).map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@")))];
@@ -180,6 +186,9 @@ export function resolveCtscFeed(
       recordIssue = issue("email-ambiguous");
     } else if (feedCwid) {
       recordIssue = issue(feedPerson ? "retired-cwid" : "not-in-ed");
+    } else {
+      const unknown = feedEmails(r).find((e) => WCM_EMAIL.test(e) && !edUidsByEmail.has(e));
+      if (unknown) recordIssue = { ...issue("wcm-email-unknown"), matchedEmail: unknown.slice(0, 255) };
     }
 
     const dup = cwid !== null && (linked.has(cwid) || externalCwids.has(cwid));
