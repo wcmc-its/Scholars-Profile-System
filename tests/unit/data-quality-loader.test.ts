@@ -271,6 +271,22 @@ describe("loadDataQualityRoster — leadership + COI + prominence", () => {
   });
 });
 
+describe("loadDataQualityRoster — headshot check age (#2264)", () => {
+  it("selects headshotCheckedAt and carries it on the entry as ISO (null when never probed)", async () => {
+    const { client, scholarFindMany } = fakeClient({
+      scholars: [
+        scholarRow({ cwid: "old", hasHeadshot: true, headshotCheckedAt: new Date("2026-01-05T00:00:00Z") }),
+        scholarRow({ cwid: "never" }),
+      ],
+    });
+    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+    const byCwid = Object.fromEntries(entries.map((e) => [e.cwid, e]));
+    expect(scholarFindMany.mock.calls[0][0].select.headshotCheckedAt).toBe(true);
+    expect(byCwid.old.headshotCheckedAt).toBe("2026-01-05T00:00:00.000Z");
+    expect(byCwid.never.headshotCheckedAt).toBeNull();
+  });
+});
+
 describe("loadDataQualityRoster — visibility", () => {
   it("computes isVisible from Scholar.status — both visible and hidden are candidates", async () => {
     const { client } = fakeClient({

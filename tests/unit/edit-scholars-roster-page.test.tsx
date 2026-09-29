@@ -111,6 +111,7 @@ const ENTRY = {
   leadershipTier: 3,
   isVisible: true,
   headshot: "unknown" as const,
+  headshotCheckedAt: null,
   hasOverview: false,
   overviewUpdatedAt: null,
   overviewState: "never" as const,
@@ -423,6 +424,7 @@ const ROW: import("@/lib/api/data-quality").DataQualityEntry = {
   leadershipTier: 3,
   isVisible: true,
   headshot: "present",
+  headshotCheckedAt: null,
   hasOverview: true,
   overviewUpdatedAt: "2026-01-01T00:00:00.000Z",
   overviewState: "lt1yr",
@@ -509,6 +511,7 @@ describe("ProfilesRoster — row name links to the editor", () => {
           leadershipTier: 3,
           isVisible: false,
           headshot: "present",
+          headshotCheckedAt: null,
           hasOverview: true,
           overviewUpdatedAt: "2026-01-01T00:00:00.000Z",
           overviewState: "lt1yr",
@@ -583,6 +586,22 @@ describe("ProfilesRoster — row name links to the editor", () => {
     const row = screen.getByTestId("roster-row-abc1001");
     expect(row.querySelector("img")).toBeNull();
     expect(screen.getByTestId("roster-avatar-missing-abc1001").textContent).toBe("AL");
+  });
+
+  it("the headshot tooltip says when the verdict was last checked (#2264)", async () => {
+    await renderRoster({
+      entries: [{ ...ROW, headshot: "missing", headshotCheckedAt: "2026-01-05T12:00:00.000Z" }],
+    });
+    expect(screen.getByTestId("roster-avatar-missing-abc1001").getAttribute("title")).toBe(
+      "No headshot · checked Jan 5, 2026",
+    );
+  });
+
+  it("a never-probed headshot says so in the tooltip", async () => {
+    await renderRoster({ entries: [{ ...ROW, headshot: "unknown", headshotCheckedAt: null }] });
+    expect(screen.getByTestId("roster-avatar-missing-abc1001").getAttribute("title")).toBe(
+      "No headshot · not checked yet",
+    );
   });
 
   it("formats counts with commas and links the gap chips to their filter", async () => {

@@ -57,13 +57,19 @@ export function Headshot({
   name,
   present,
   px,
+  checkedAt,
 }: {
   cwid: string;
   name: string;
   present: boolean;
   px: number;
+  /** #2264 — when etl:headshot last got a definitive answer. Omitted = don't say;
+   *  null = never checked. Shown in the tooltip so an old verdict reads as old. */
+  checkedAt?: string | null;
 }) {
   const style = { width: px, height: px };
+  const checked =
+    checkedAt === undefined ? "" : checkedAt ? ` · checked ${formatDate(checkedAt)}` : " · not checked yet";
   if (!present) {
     return (
       <span
@@ -73,7 +79,7 @@ export function Headshot({
           px > 40 ? "text-2xl" : "text-[11px]",
         )}
         aria-label="No headshot"
-        title="No headshot"
+        title={`No headshot${checked}`}
         data-testid={px > 40 ? undefined : `roster-avatar-missing-${cwid}`}
       >
         {initials(name)}
@@ -85,6 +91,7 @@ export function Headshot({
     <img
       src={identityImageEndpoint(cwid)}
       alt=""
+      title={checked ? `Headshot${checked}` : undefined}
       loading="lazy"
       width={px}
       height={px}
@@ -236,6 +243,8 @@ export type RosterScholarCellProps = {
   name: string;
   editHref: string;
   hasHeadshot: boolean;
+  /** #2264 — last definitive headshot probe (ISO), null = never. */
+  headshotCheckedAt?: string | null;
   isVisible: boolean;
   leadership: string | null;
   /** "Title · Unit" line under the name. */
@@ -251,7 +260,13 @@ export function RosterScholarCell(p: RosterScholarCellProps) {
   return (
     <ScholarHoverCard cwid={p.cwid} sideOffset={-40}>
       <div className="flex w-fit max-w-full items-center gap-3">
-        <Headshot cwid={p.cwid} name={p.name} present={p.hasHeadshot} px={36} />
+        <Headshot
+          cwid={p.cwid}
+          name={p.name}
+          present={p.hasHeadshot}
+          px={36}
+          checkedAt={p.headshotCheckedAt}
+        />
         <div className="min-w-0">
           <Link
             href={p.editHref}
