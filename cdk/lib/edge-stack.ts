@@ -823,7 +823,7 @@ export class EdgeStack extends Stack {
       comment: `SPS query-keyed cache (${env}) -- per-query cache key, cookies stripped (#634).`,
       // Union of params read by the Group B pages: /scholars/* (mentees-sort),
       // /departments/* + /centers/* + divisions (page/tab/sort),
-      // /topics/*/scholars (q/role/page).
+      // /topics/*/scholars (q/role/sub/letter), /methods/*/*/scholars (q/role/page).
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.allowList(
         "mentees-sort",
         "page",
@@ -831,6 +831,8 @@ export class EdgeStack extends Stack {
         "sort",
         "q",
         "role",
+        "sub",
+        "letter",
       ),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
       // Key on the RSC headers too (same rationale as `defaultRscCache`) so
