@@ -12,6 +12,7 @@ import { grantRoleShortLabel } from "@/lib/funding-roles";
 import type {
   EvidenceGrant,
   EvidencePub,
+  EvidenceTrial,
   ResultEvidence as ResultEvidenceT,
 } from "@/lib/api/result-evidence";
 import type { AuthorRole } from "@/lib/search-index-docs";
@@ -118,6 +119,50 @@ function evidenceSummary(
   }
 }
 
+/** A PI trial tagged under the concept (Matcha). Title links to ClinicalTrials.gov when registered. */
+function TrialRow({ trial }: { trial: EvidenceTrial }) {
+  const parts = [
+    trial.nctNumber ?? `WCM protocol ${trial.trialId}`,
+    "PI",
+    trial.status ? (
+      <span key="status" className={trial.isActive ? "text-[var(--apollo-green)]" : undefined}>
+        {trial.status}
+      </span>
+    ) : null,
+    trial.startYear ? `started ${trial.startYear}` : null,
+  ].filter(Boolean);
+  return (
+    <div className="mt-1.5 flex gap-2.5">
+      <span className="h-fit shrink-0 rounded bg-[var(--color-accent-slate)]/10 px-1.5 py-0.5 text-[10px] tracking-[0.04em] text-[var(--color-accent-slate)]">
+        TRIAL
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-foreground text-sm leading-snug">
+          {trial.nctNumber ? (
+            <a
+              href={`https://clinicaltrials.gov/study/${trial.nctNumber}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+            >
+              {trial.title /* pub-html-ok: clinical trial title, plain text from CT.gov/OnCore */}
+            </a>
+          ) : (
+            trial.title /* pub-html-ok: clinical trial title, plain text from CT.gov/OnCore */
+          )}
+        </div>
+        <div className="text-muted-foreground mt-0.5 text-xs">
+          {parts
+            .flatMap((part, i) => (i === 0 ? [part] : [" · ", part]))
+            .map((part, i) => (
+              <span key={i}>{part}</span>
+            ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GrantRow({ grant }: { grant: EvidenceGrant }) {
   // Absent role renders NOTHING — the scholar is on the grant but the index carries no role for
   // them; a default here would assert a rank in the award we cannot stand behind. (Same rule as
@@ -191,6 +236,7 @@ function GrantRow({ grant }: { grant: EvidenceGrant }) {
 function ArtifactLead({
   papers,
   grants,
+  trials,
   summary,
   expanded,
   onToggle,
@@ -198,6 +244,7 @@ function ArtifactLead({
 }: {
   papers: EvidencePub[];
   grants: EvidenceGrant[];
+  trials: EvidenceTrial[];
   summary: string;
   expanded: boolean;
   onToggle: () => void;
@@ -207,12 +254,15 @@ function ArtifactLead({
   // it is the one artifact that carries a FORWARD date — a paper says what someone did, an active
   // R01 says what they are doing.
   const [leadPub, ...restPubs] = papers;
-  const hasArtifact = grants.length > 0 || papers.length > 0;
+  const hasArtifact = grants.length > 0 || trials.length > 0 || papers.length > 0;
   const years = restPubs.map((p) => p.year).filter((y): y is number => y != null);
   return (
     <div className="mt-1.5" data-slot="evidence-artifact">
       {grants.map((g) => (
         <GrantRow key={g.projectId} grant={g} />
+      ))}
+      {trials.map((t) => (
+        <TrialRow key={t.trialId} trial={t} />
       ))}
       {leadPub ? <ArtifactRow pub={leadPub} /> : null}
       {expanded ? restPubs.map((p) => <ArtifactRow key={p.pmid} pub={p} />) : null}
@@ -463,6 +513,8 @@ export function EvidenceLine({
   //
   // It does NOT participate in `claimedPmids`: grants have no pmid and cannot collide with papers.
   const [grants, setGrants] = useState<EvidenceGrant[]>([]);
+  const [trials, setTrials] = useState<EvidenceTrial[]>([]);
+  const trialsFetched = useRef(false);
   const grantsFetched = useRef(false);
 
   // #1366 — the pmids already shown on a sibling line drive `exclude` so this
@@ -539,6 +591,19 @@ export function EvidenceLine({
         setGrants((d?.grants ?? []).filter((g) => g.matchedConcept === true)),
       )
       .catch(() => setGrants([]));
+  }, [artifactLead, keyPaperConfig, cwid]);
+
+  // Matcha only (artifactLead). Concept-only on the server; empty when the flag is off.
+  const ensureTrials = useCallback(() => {
+    if (!artifactLead || !keyPaperConfig || trialsFetched.current) return;
+    trialsFetched.current = true;
+    const params = new URLSearchParams();
+    if (keyPaperConfig.conceptUi) params.set("conceptUi", keyPaperConfig.conceptUi);
+    else params.set("descriptorUis", keyPaperConfig.descriptorUis.join(","));
+    fetch(`/api/scholar/${encodeURIComponent(cwid)}/trials?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : { trials: [] }))
+      .then((d: { trials?: EvidenceTrial[] }) => setTrials(d?.trials ?? []))
+      .catch(() => setTrials([]));
   }, [artifactLead, keyPaperConfig, cwid]);
 
   const ensureExemplar = useCallback(() => {
@@ -623,6 +688,7 @@ export function EvidenceLine({
     // Grants ride the same in-view gate but NOT the ordered chain — they claim no pmids, so nothing
     // downstream depends on them having settled.
     ensureGrants();
+    ensureTrials();
     if (isLazyExemplar) ensureExemplar();
     else if (wantsLazyKeyPaper) ensureKeyPaper();
     // Nothing to fetch — release the caller's chain immediately, or a line with no lazy loader
@@ -635,6 +701,7 @@ export function EvidenceLine({
     wantsLazyKeyPaper,
     ensureKeyPaper,
     ensureGrants,
+    ensureTrials,
   ]);
 
   const profileHref = `${profilePath(slug)}#publications`;
@@ -683,6 +750,7 @@ export function EvidenceLine({
       <ArtifactLead
         papers={repPapers}
         grants={grants}
+        trials={trials}
         summary={evidenceSummary(evidence, pubCount, methodPubCount)}
         expanded={expanded}
         onToggle={() => setExpanded((v) => !v)}

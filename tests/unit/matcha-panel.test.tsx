@@ -1736,6 +1736,61 @@ describe("MatchaPanel", () => {
     expect(block.indexOf("Resistance mechanisms")).toBeLessThan(block.indexOf("CAR T persistence"));
   });
 
+  it("lists the scholar's concept-tagged PI TRIALS, linked to ClinicalTrials.gov", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.startsWith("/api/scholar/") && u.includes("/trials")) {
+        return {
+          ok: true,
+          json: async () => ({
+            trials: [
+              { trialId: "NCT0000001", nctNumber: "NCT0000001", title: "Orca-T after reduced intensity conditioning", status: "Recruiting", isActive: true, startYear: 2025 },
+              { trialId: "19-0000001", nctNumber: null, title: "Nutrition in acute leukemia", status: "Completed", isActive: false, startYear: 2019 },
+            ],
+            total: 2,
+          }),
+        };
+      }
+      if (u.startsWith("/api/scholar/") && u.includes("/grants")) return { ok: true, json: async () => ({ grants: [] }) };
+      if (u.startsWith("/api/search/key-paper"))
+        return { ok: true, json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }) };
+      if ((init?.method ?? "GET") === "GET") return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const link = await screen.findByText("Orca-T after reduced intensity conditioning");
+    expect(link.closest("a")?.getAttribute("href")).toBe("https://clinicaltrials.gov/study/NCT0000001");
+    expect(screen.getAllByText("TRIAL")).toHaveLength(2);
+    expect(screen.getByText("Recruiting")).toBeTruthy();
+    // No NCT: plain title, labelled by the WCM protocol number.
+    expect(screen.getByText("Nutrition in acute leukemia").closest("a")).toBeNull();
+    expect(screen.getByText(/WCM protocol 19-0000001/)).toBeTruthy();
+    // The block's concept travels to the route.
+    const trialsUrl = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/trials"))!;
+    expect(trialsUrl).toMatch(/conceptUi=|descriptorUis=/);
+  });
+
   it("an expired grant reads 'expired <year>' + the scholar's role, never an active date", async () => {
     // The two questions a sponsor asks of a grant: is this scholar the PI, and is it still funded.
     // A dead award is a materially different pitch, so the line says so plainly instead of a bare
