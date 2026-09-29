@@ -325,6 +325,26 @@ describe("getDepartment", () => {
     expect(mockScholarFindUnique).not.toHaveBeenCalled();
   });
 
+  it("drops the chair card for a hidden identity class (#2260)", async () => {
+    mockDefaultDeptSetup();
+    mockScholarFindUnique.mockResolvedValue({
+      ...CHAIR_SCHOLAR,
+      roleCategory: "doctoral_student_phd",
+    });
+    const result = await getDepartment("medicine");
+    expect(result!.chair).toBeNull();
+  });
+
+  it.each([
+    ["soft-deleted", { deletedAt: new Date("2026-01-01") }],
+    ["non-active", { status: "suppressed" }],
+  ])("drops the chair card for a %s leader (#2260)", async (_label, extra) => {
+    mockDefaultDeptSetup();
+    mockScholarFindUnique.mockResolvedValue({ ...CHAIR_SCHOLAR, ...extra });
+    const result = await getDepartment("medicine");
+    expect(result!.chair).toBeNull();
+  });
+
   it("includes top research areas (top 8-10 parent topics by pub count)", async () => {
     mockDefaultDeptSetup();
     const result = await getDepartment("medicine");

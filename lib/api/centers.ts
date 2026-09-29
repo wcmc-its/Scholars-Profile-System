@@ -28,7 +28,7 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
-import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { isPublicLeader, isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
 import {
   matchesRosterQuery,
@@ -455,16 +455,34 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   if (sources.length > 0) {
     const scholars = await prisma.scholar.findMany({
       where: { cwid: { in: sources.map((s) => s.cwid) } },
-      select: { cwid: true, preferredName: true, primaryTitle: true, slug: true },
+      select: {
+        cwid: true,
+        preferredName: true,
+        primaryTitle: true,
+        slug: true,
+        roleCategory: true,
+        deletedAt: true,
+        status: true,
+      },
     });
-    const byCwid = new Map(scholars.map((s) => [s.cwid, s]));
+    // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
+    // never gets a leader card. Keep it
+    // out of BOTH `byCwid` and the ED fallback below, or the directory lookup
+    // would bring the name back unlinked.
+    const hiddenCwids = new Set(
+      scholars.filter((s) => !isPublicLeader(s)).map((s) => s.cwid),
+    );
+    const byCwid = new Map(
+      scholars.filter((s) => !hiddenCwids.has(s.cwid)).map((s) => [s.cwid, s]),
+    );
     // A leader a superuser assigned who has no Scholar row (staff, e.g. CTSC's
     // Executive Director) is named from ED and rendered unlinked. Fail-soft: an
     // ED miss or outage drops just that card, as before this fallback existed.
     const directory = await directoryPeopleSafe(
-      sources.map((s) => s.cwid).filter((c) => !byCwid.has(c)),
+      sources.map((s) => s.cwid).filter((c) => !byCwid.has(c) && !hiddenCwids.has(c)),
     );
     leadership = sources.flatMap((s): CenterLeader[] => {
+      if (hiddenCwids.has(s.cwid)) return [];
       const d = byCwid.get(s.cwid);
       if (d) {
         return [
@@ -1349,7 +1367,15 @@ export async function getCenterProgram(
   if (assignments.length > 0) {
     const scholars = await prisma.scholar.findMany({
       where: { cwid: { in: assignments.map((a) => a.cwid) } },
-      select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
+      select: {
+        cwid: true,
+        preferredName: true,
+        slug: true,
+        primaryTitle: true,
+        roleCategory: true,
+        deletedAt: true,
+        status: true,
+      },
     });
     const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
     const ext = EXTERNAL_LEADERS[`${center.code}:${code}`];
@@ -1361,6 +1387,9 @@ export async function getCenterProgram(
         ? row.role.label
         : formatLeadershipTitle(row.role.label, row.interim);
       const scholar = scholarByCwid.get(row.cwid);
+      // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
+      // is dropped, never routed to `ext`.
+      if (scholar && !isPublicLeader(scholar)) return [];
       if (scholar) {
         return [
           {

@@ -27,7 +27,7 @@ import type { RosterMeshChip } from "@/lib/roster-row-tags";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
-import { publicRoleWhere } from "@/lib/eligibility";
+import { isPublicLeader, publicRoleWhere } from "@/lib/eligibility";
 import type { LeaderRole } from "@/components/scholar/leader-card";
 import {
   departmentLeaderRoleKey,
@@ -186,9 +186,22 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
     const leaderRole: LeaderRole = resolvedLeader.roleLabel;
     const chairScholar = await prisma.scholar.findUnique({
       where: { cwid: resolvedLeader.cwid },
-      select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
+      select: {
+        cwid: true,
+        preferredName: true,
+        slug: true,
+        primaryTitle: true,
+        roleCategory: true,
+        deletedAt: true,
+        status: true,
+      },
     });
-    if (chairScholar) {
+    if (chairScholar && !isPublicLeader(chairScholar)) {
+      // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
+      // never headlines a public unit
+      // page. Drop the card; never fall through to the external-leader branch.
+      chair = null;
+    } else if (chairScholar) {
       // Find the leader's most-recent active appointment with a title starting
       // "Chair" / "Chairman" / "Professor and Chair", or "Director" when the
       // ROLE KEY (not the — possibly renamed — display label) is the
