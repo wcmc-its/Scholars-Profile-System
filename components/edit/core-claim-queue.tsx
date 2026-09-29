@@ -3,74 +3,52 @@
 /**
  * Per-core review queue (the owner surface at /edit/core/[coreId]/review).
  *
- * Ranked candidate rows with a band+percent score readout, a one-line evidence
- * summary that expands into the per-signal breakdown, and per-row actions that
- * POST to /api/edit/core-claim with optimistic local state. A confirm/reject
- * removes the row from the "To review" list; a confirm lifts it into the
- * "Confirmed" list.
+ * v2 layout (Core Review Queue v2 mockup, PR A — client-only). The To review
+ * tab is three panes:
+ *   - LEFT, the scope rail (`ScopeRail`): "By evidence" lists the evidence
+ *     groups `evidenceGroupKey` produces, each with its open count and band;
+ *     "By person" lists the byline authors this core already holds confirmed
+ *     work from, with their prior-confirmed and open counts. Plus a static
+ *     "About these signals" note.
+ *   - MIDDLE, a compact list: checkbox, title, meta, signal chips, band. A
+ *     selection bar confirms or rejects the ticked rows in one bulk request,
+ *     and "Reject all N…" rejects every row shown behind an inline guard.
+ *   - RIGHT, the focused paper (`FocusedPaper`): Previous/Next, synopsis, the
+ *     band meter, Confirm/Reject, reject-with-a-reason chips (sent as the
+ *     single-claim route's existing `note`), "Why this surfaced", "Methods
+ *     used · context only", and the quotes.
+ * Above them: a search box that also takes several PMIDs at once ("Matched X
+ * of Y · Elsewhere: …"), a Filters panel with active chips, sort pills, the
+ * session line ("This session: N confirmed · M rejected" + Undo last) and a
+ * keyboard-shortcuts popover (j/k/a/r/x/u/?, one window listener).
  *
- * Layout follows the core-claim-queue artboard (direction A, queue variant):
+ * Below `lg` (the console IS used on phones; the designer drew no phone
+ * layout, so this is the approved proposal): the rail becomes a select above
+ * the list, the list runs full width, and tapping a row opens the paper as a
+ * full-screen sheet with its own Close.
+ *
+ * Vocabulary rules that carried over unchanged from direction A:
  *   - the score reads as a BAND WORD + percent ("Strong 94%"), never a labelled
  *     "Combined likelihood" bar. Bands are Strong >= 0.85, Moderate >= 0.65,
  *     Slight >= 0.40, else Weak;
- *   - rows group by which KINDS of evidence fired, with a per-group band range;
- *   - facet pills carry live counts, AND-combine, and are dropped entirely at
- *     count 0 (a pill that can only ever empty the queue is not a control);
- *   - evidence collapses to a token strip and expands to the signal rows.
+ *   - the signal count says "N of 4" with all FOUR signals countable, and the
+ *     prefilter prior is a footnote, never a counted signal;
+ *   - group and rail labels name BANDS, never "likelihood 41-94%";
+ *   - a facet value whose count is 0 is not offered (a control that can only
+ *     empty the list is not a control);
+ *   - PMID/CWID parsing keeps the strict parsers and their rejected-token
+ *     reporting; a split-on-any-non-digit form would turn "abc123def" into 123.
  *
- * Deliberate departures from the artboard, and why:
- *   - NO bulk "Confirm N high-confidence" sweep, and no 90% hairline tick on the
- *     meter. The sweep was gated on a 0.9 threshold never validated against an
- *     observed confirm rate; with it gone the tick marks nothing a curator can
- *     act on, so drawing it would imply a control that no longer exists.
- *   - the signal count says "N of 4" with all FOUR signals countable (the
- *     artboard's own numerator excluded rows it drew, so it could never reach
- *     its own denominator).
- *   - the group header names BANDS, not "likelihood 41-94%" — the band
- *     vocabulary is the only score vocabulary this surface uses.
- *   - PMID/CWID parsing keeps the shipped strict parsers and their
- *     rejected-token reporting; the artboard's split-on-any-non-digit form
- *     would silently turn "abc123def" into PMID 123.
- *   - the free-text filter box sits IN the tab-strip row (the mockup's own
- *     placement, chosen by the owner), but still renders only on the To review
- *     tab: its filter narrows the review list alone, so drawing it over the
- *     Confirmed and Rejected lists would be a control that does nothing on two
- *     tabs out of three. It has no clear of its own, so "Clear filters" drops
- *     the text with the pills, and the count line and the "Nothing matches this
- *     filter." state both count the query.
- *   - there is no "All" reset pill. "Clear filters" in the status strip is the
- *     single reset affordance, and it appears for a text-only narrowing as well
- *     as a ticked facet.
- *
- *   - the mockup's "Co-author signal draws on N core staff from the facility
- *     dictionary" lock chip is now BUILT, and reads "M of N": ReciterAI
- *     publishes both the LISTED roster size and the TRACKED subset the signal
- *     can actually match (PK=CORE#{id}, SK=STAFF_DICT), and etl/dynamodb
- *     Block 6b lands them on `core.staff_count` / `core.staff_tracked_count`.
- *     The mockup's bare N is the listed count, which is wrong on 9 of the 14
- *     live cores — the very core it draws lists 4 and tracks 1 — so the chip
- *     leads with the tracked number and says outright when the signal cannot
- *     fire at all. Unpublished counts still draw nothing (see `CoreStaffChip`).
- *
- * Drawn in the mockup, NOT built here (no data behind either):
- *   - the chip's "Manage staff" link — the roster lives in ReciterAI's facility
- *     dictionary and SPS has no route that edits it (see the chip below);
- *   - the "Method family identified" facet — no method data reaches
- *     `CoreQueueRow` (see `searchBlob`).
+ * Deliberately NOT in this PR (next PR, each needs a route or schema change):
+ * bulk Revoke/Restore on the Confirmed/Rejected tabs, the Add PMIDs "Send to
+ * review" mode (`core_queue_add`), and the grant-signal rail groups. None of
+ * them is drawn as a dead control. Also not built: the core-staff note's
+ * "Manage staff" link (the roster lives in ReciterAI's facility dictionary,
+ * and SPS has no route that edits it).
  */
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  ExternalLink,
-  Lock,
-  PenLine,
-  Undo2,
-  X,
-} from "lucide-react";
+import { Check, Copy, ExternalLink, PenLine, Undo2, X } from "lucide-react";
 import type { CoreClientRow } from "@/lib/api/core-clients";
 // The PURE half of `lib/api/core-clients.ts`. `excludingOwnPaper` is a VALUE
 // import, so it must not come from the loader module — that one constructs prisma
@@ -82,6 +60,17 @@ import { droppedAuthorCount, stripWcmMarkers } from "@/lib/author-byline";
 import { extractLastNameSort, stripUnitDisambiguation } from "@/lib/name-sort";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 import { CoreClientsDialog } from "@/components/edit/core-clients-panel";
+import {
+  AboutSignals,
+  ActiveFilterChips,
+  FiltersPanel,
+  ScopeRail,
+  ShortcutsButton,
+  type ActiveChip,
+  type FacetGroupView,
+  type RailItem,
+  type RailMode,
+} from "@/components/edit/core-queue-panels";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
@@ -690,23 +679,24 @@ export function bandRange(likelihoods: readonly number[]): string {
   return low === high ? low : `${low} to ${high}`;
 }
 
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: "client", label: "Client co-author" },
-  { key: "ack", label: "Acknowledged" },
-  { key: "coauthored", label: "Staff co-author" },
-  { key: "noprior", label: "No prior usage on the byline" },
-  { key: "llm", label: "LLM-flagged" },
-  { key: "method", label: "Method family (strong/moderate)" },
+/** The sort pills the v2 list offers (mockup: Most certain · Uncertain first ·
+ *  Newest). `compareBySort` still knows the other three keys, pinned by its own
+ *  tests; since the pills replaced the six-option select, nothing on this
+ *  surface offers them. */
+const SORT_PILLS: { key: SortKey; label: string }[] = [
+  { key: "likelihood", label: "Most certain" },
+  { key: "uncertain", label: "Uncertain first" },
+  { key: "year", label: "Newest" },
 ];
 
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: "likelihood", label: "Most certain first" },
-  { key: "uncertain", label: "Most uncertain first" },
-  { key: "strongest", label: "Strongest signal" },
-  { key: "llm", label: "LLM score" },
-  { key: "year", label: "Newest in PubMed" },
-  { key: "cites", label: "Most cited" },
-];
+/** Reject-with-a-reason chips (mockup). The label IS the note: it goes to the
+ *  single-claim route's existing `note` field (<= 2,000 chars). The bulk route
+ *  takes no note, so these live on the focused paper only. */
+export const REJECT_REASONS = [
+  "External data, not this core",
+  "Method match only",
+  "Author used core elsewhere",
+] as const;
 
 /** Highest single-signal strength on a row (0 when nothing fired). Deliberately
  *  un-de-duplicated: it is a SORT key, and one that moved with the known-clients
@@ -847,6 +837,235 @@ export function matchesQuery(row: CoreQueueRow, query: string): boolean {
   return q === "" || searchBlob(row).includes(q);
 }
 
+/**
+ * Several PMIDs pasted into the search box, or null for an ordinary text query.
+ * Two or more tokens, split on whitespace/commas/semicolons, EVERY one a PMID
+ * (digits, no leading zero — the same shape `parsePmidBlock` accepts). One PMID
+ * stays a text query: `searchBlob` already carries the PMID, so a lone number
+ * matches exactly as it always did. De-duplicated, first-seen order. Pure.
+ */
+export function parsePmidQuery(query: string): string[] | null {
+  const tokens = query
+    .trim()
+    .split(/[\s,;]+/)
+    .filter((t) => t.length > 0);
+  if (tokens.length < 2 || !tokens.every((t) => /^[1-9][0-9]*$/.test(t))) return null;
+  return [...new Set(tokens)];
+}
+
+/** The search box's match: a PMID list matches its members exactly; anything
+ *  else is the free-text `matchesQuery`. Pure. */
+export function matchesSearch(row: CoreQueueRow, query: string): boolean {
+  const pmids = parsePmidQuery(query);
+  return pmids ? pmids.includes(row.pmid) : matchesQuery(row, query);
+}
+
+/**
+ * "Matched 2 of 3 PMIDs here. Elsewhere: 123 (Confirmed)." — what a pasted PMID
+ * list found in the scope on screen, and where each miss actually is. `where`
+ * answers for one PMID the list does not show. Pure.
+ */
+export function pmidMatchNote(
+  pmids: readonly string[],
+  shown: ReadonlySet<string>,
+  where: (pmid: string) => string,
+): string {
+  const missing = pmids.filter((p) => !shown.has(p));
+  const head = `Matched ${pmids.length - missing.length} of ${pmids.length} PMIDs here.`;
+  if (missing.length === 0) return head;
+  return `${head} Elsewhere: ${missing.map((p) => `${p} (${where(p)})`).join(", ")}.`;
+}
+
+/** The Filters panel's groups, in the mockup's order. */
+export type FacetKey = "signal" | "llm" | "mstr" | "method" | "person" | "year";
+export const FACET_GROUPS: ReadonlyArray<{ key: FacetKey; label: string }> = [
+  { key: "signal", label: "Signals fired" },
+  { key: "llm", label: "LLM score" },
+  { key: "mstr", label: "Method match" },
+  { key: "method", label: "Method family" },
+  { key: "person", label: "Repeat user" },
+  { key: "year", label: "Year" },
+];
+/** Ticked values per group. Absent or empty means that group narrows nothing. */
+export type FacetSelection = Partial<Record<FacetKey, readonly string[]>>;
+
+/**
+ * Every facet value one row carries, per group, in the words the Filters panel
+ * prints. Built off the same functions the card uses, so a facet can never
+ * claim a signal the paper pane does not show:
+ *   - signal — `buildSignals` (so the repeat-user de-dup applies), plus a known
+ *     client on the byline, which is not a counted signal but is evidence a
+ *     reviewer filters on;
+ *   - llm — the dense score in the mockup's buckets, or "Not read";
+ *   - mstr / method — the tier and the family chips, both gated on `methodTier`
+ *     exactly as the card and `searchBlob` gate them;
+ *   - person — the repeat user the card NAMES (`repeatUser`), "Unnamed author"
+ *     when the signal fires with nobody nameable, and "No prior usage on the
+ *     byline" for a null affinity (the old facet of that name). A repeat user
+ *     de-duplicated into a staff/client token carries no value here, as it
+ *     carries no row on the card;
+ *   - year — the publication year, or "No year".
+ * Pure.
+ */
+export function facetValues(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  clientCwids: ReadonlySet<string> = new Set(),
+): Record<FacetKey, string[]> {
+  const kinds = new Set(buildSignals(row, paperCounts, clientCwids).map((s) => s.kind));
+  const signal: string[] = [];
+  if (kinds.has("ack")) signal.push("Acknowledged");
+  if (kinds.has("coauthor")) signal.push("Staff co-author");
+  if (matchesFilter(row, "client", clientCwids)) signal.push("Client co-author");
+  if (kinds.has("llm")) signal.push("LLM read");
+  if (kinds.has("affinity")) signal.push("Repeat user");
+  const llm =
+    row.llmScore === null
+      ? "Not read"
+      : row.llmScore <= 3
+        ? "0–3"
+        : row.llmScore <= 6
+          ? "4–6"
+          : "7–10";
+  const tier = row.methodTier
+    ? row.methodTier.charAt(0).toUpperCase() + row.methodTier.slice(1)
+    : "None";
+  const method = row.methodTier ? [...new Set(row.methodEvidence.map((m) => m.family))] : [];
+  let person: string[] = [];
+  if (row.authorAffinity === null) person = ["No prior usage on the byline"];
+  else if (kinds.has("affinity")) {
+    const who = repeatUser(row, paperCounts, clientCwids);
+    person = [who ? displayName(who.scholar.name) : "Unnamed author"];
+  }
+  return {
+    signal,
+    llm: [llm],
+    mstr: [tier],
+    method,
+    person,
+    year: [row.year === null ? "No year" : String(row.year)],
+  };
+}
+
+/** OR within a group, AND across groups (the mockup's semantics). A row with no
+ *  value in a ticked group does not match it. The empty selection matches
+ *  everything. Pure. */
+export function matchesFacets(
+  values: Readonly<Record<FacetKey, readonly string[]>>,
+  selection: FacetSelection,
+): boolean {
+  for (const { key } of FACET_GROUPS) {
+    const ticked = selection[key];
+    if (!ticked || ticked.length === 0) continue;
+    if (!values[key].some((v) => ticked.includes(v))) return false;
+  }
+  return true;
+}
+
+/** One rail evidence group: every candidate whose fired kinds share a key, and
+ *  how many of them are still undecided. */
+export interface EvidenceGroup {
+  key: string;
+  rows: CoreQueueRow[];
+  open: number;
+}
+
+/**
+ * The rail's "By evidence" list, straight off `evidenceGroupKey` — the same key
+ * the card's own signals produce, so a group can never name a pile its papers
+ * do not show. Membership is over ALL candidates (a paper decided this session
+ * stays in its group, held for its Undo); `open` counts the undecided ones.
+ * Groups keep first-appearance order over `candidates`, which the loader ranks
+ * by likelihood, so the group holding the surest paper leads. Pure.
+ */
+export function buildEvidenceGroups(
+  candidates: readonly CoreQueueRow[],
+  decided: ReadonlyMap<string, unknown>,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  clientCwids: ReadonlySet<string> = new Set(),
+): EvidenceGroup[] {
+  const byKey = new Map<string, EvidenceGroup>();
+  for (const r of candidates) {
+    const key = evidenceGroupKey(r, paperCounts, clientCwids);
+    let g = byKey.get(key);
+    if (!g) {
+      g = { key, rows: [], open: 0 };
+      byKey.set(key, g);
+    }
+    g.rows.push(r);
+    if (!decided.has(r.pmid)) g.open += 1;
+  }
+  return [...byKey.values()];
+}
+
+/** "Acknowledgment + staff co-author" — the group vocabulary as a rail label
+ *  (sentence case; `evidenceGroupLabel` is the lowercase inline form). Pure. */
+export function evidenceGroupName(key: string): string {
+  const s = key
+    .split("+")
+    .map((k) => GROUP_NAMES[k] ?? k)
+    .join(" + ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "Strong band" for one paper or a single-band pile, "Slight to Strong" for a
+ *  spread — band words only, never a likelihood range. Pure. */
+export function groupBandText(likelihoods: readonly number[]): string {
+  if (likelihoods.length === 0) return "";
+  const range =
+    likelihoods.length === 1 ? likelihoodBand(likelihoods[0]).label : bandRange(likelihoods);
+  return range.includes(" to ") ? range : `${range} band`;
+}
+
+/** One rail person: a WCM byline author this core already holds confirmed work
+ *  from, and the candidates they are on. */
+export interface RailPerson {
+  scholar: QueueScholar;
+  counts: CoreClientPaperCount;
+  rows: CoreQueueRow[];
+  open: number;
+}
+
+/**
+ * The rail's "By person" list: every WCM byline author of a candidate who has a
+ * confirmed paper with this core (`paperCounts`, server-computed and uncapped —
+ * the same numbers the repeat-user row prints). One entry per person, keyed on
+ * the lowercased CWID, and each candidate listed ONCE under each person on its
+ * byline (the mockup's sample data showed one paper twice under one person;
+ * that is not the behaviour). Ordered by open candidates, then confirmed
+ * papers, then name. Pure.
+ */
+export function buildRailPeople(
+  candidates: readonly CoreQueueRow[],
+  decided: ReadonlyMap<string, unknown>,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
+): RailPerson[] {
+  const byCwid = new Map<string, RailPerson>();
+  for (const r of candidates) {
+    const seen = new Set<string>();
+    for (const a of r.wcmAuthors) {
+      const cwid = a.cwid.toLowerCase();
+      if (seen.has(cwid)) continue;
+      seen.add(cwid);
+      const counts = paperCounts[cwid];
+      if (!counts || counts.papers <= 0) continue;
+      let p = byCwid.get(cwid);
+      if (!p) {
+        p = { scholar: a, counts, rows: [], open: 0 };
+        byCwid.set(cwid, p);
+      }
+      p.rows.push(r);
+      if (!decided.has(r.pmid)) p.open += 1;
+    }
+  }
+  return [...byCwid.values()].sort(
+    (a, b) =>
+      b.open - a.open ||
+      b.counts.papers - a.counts.papers ||
+      displayName(a.scholar.name).localeCompare(displayName(b.scholar.name)),
+  );
+}
+
 interface CoreClaimQueueProps {
   core: CoreReviewQueue["core"];
   candidates: CoreQueueRow[];
@@ -864,6 +1083,41 @@ interface CoreClaimQueueProps {
    *  `row.wcmAuthors` is capped at 12 per paper, so folding it would undercount
    *  a client buried in a long byline and print the short number as a fact. */
   paperCounts?: Readonly<Record<string, CoreClientPaperCount>>;
+  /** The page's title block (eyebrow, h1, description). v2 puts the header
+   *  buttons beside the title (mockup), and the buttons' dialogs are state this
+   *  component owns, so the page hands its title in rather than the buttons out. */
+  header?: ReactNode;
+}
+
+/** The rail's catch-all scope. Real queues split into up to sixteen evidence
+ *  combinations, so the list opens on everything rather than on one pile. */
+const ALL_SCOPE = "all";
+
+/** One decision batch, for "Undo last": a single paper, or a whole bulk action. */
+interface HistoryEntry {
+  pmids: string[];
+}
+
+/** Server-side batch cap on the bulk route (`MAX_BULK_PMIDS`). "Reject all N"
+ *  can exceed it on a big core, so bulk actions post in chunks of this size. */
+const BULK_CHUNK = 500;
+
+/** Split a bulk batch into route-sized requests, order kept. Pure. */
+export function chunkPmids(pmids: readonly string[], size: number = BULK_CHUNK): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < pmids.length; i += size) out.push(pmids.slice(i, i + size));
+  return out;
+}
+
+/**
+ * A paste into the single-line search box, with its line breaks made spaces.
+ * An `<input>` strips newlines from its value, so a column of PMIDs copied from
+ * a spreadsheet would otherwise land as ONE run of digits ("111\n222" ->
+ * "111222") and match nothing. Returns null when the paste has no line break
+ * (the browser's own paste is then fine). Pure.
+ */
+export function pasteAsOneLine(text: string): string | null {
+  return /[\r\n]/.test(text) ? text.replace(/\s+/g, " ").trim() : null;
 }
 
 export function CoreClaimQueue({
@@ -873,10 +1127,14 @@ export function CoreClaimQueue({
   rejected = [],
   clients = [],
   paperCounts = {},
+  header,
 }: CoreClaimQueueProps) {
   const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
+  // Reject reasons given this session, shown beside the decision ("Rejected ·
+  // Method match only"). The server keeps the note; this is only the echo.
+  const [notes, setNotes] = useState<ReadonlyMap<string, string>>(() => new Map());
   // Confirmed rows walked back this session — kept visible with an undo.
   const [revokedConfirmed, setRevokedConfirmed] = useState<Set<string>>(new Set());
   // Rejected rows restored this session — kept visible with an undo (mirror of above).
@@ -892,40 +1150,39 @@ export function CoreClaimQueue({
           ? "rejected"
           : "review",
   );
-  // Ticked evidence facets, AND-combined. The empty set IS the unnarrowed queue
-  // — there is no "all" member and no "All" pill; "Clear filters" resets.
-  const [filter, setFilter] = useState<ReadonlySet<FilterKey>>(() => new Set());
-  // Free-text narrowing, AND-ed with the facets (see `searchBlob`). It sits in
-  // the tab-strip row (the mockup's placement) but renders on the To review tab
-  // ONLY: the count line, the "Clear filters" link and the "Nothing matches this
-  // filter." state that report its effect are all review-tab controls, so a box
-  // drawn over the Confirmed/Rejected lists would be inert on two tabs of three.
+  // The rail: which pile the list shows. "By evidence" opens on every candidate;
+  // "By person" on the first person (see `buildRailPeople` for the order).
+  const [mode, setMode] = useState<RailMode>("evidence");
+  const [groupKey, setGroupKey] = useState<string>(ALL_SCOPE);
+  const [personCwid, setPersonCwid] = useState<string | null>(null);
+  // Ticked facet values (Filters panel), OR within a group and AND across.
+  const [facets, setFacets] = useState<FacetSelection>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Free text, or several PMIDs (see `parsePmidQuery`). AND-ed with the facets.
   const [query, setQuery] = useState("");
-  // Default to engine likelihood, high→low — the loader's own order, so the queue
-  // opens on what the engine is surest of. This is a deliberate override, not the
-  // original reasoning: the previous default was "uncertain first", on the ground
-  // that the 96%s don't need a human and the 55–75%s do. That argument still
-  // holds and that band is still one select away — the owner chose likelihood anyway.
+  // Engine likelihood, high→low — the loader's own order, so the list opens on
+  // what the engine is surest of (owner's choice; "Uncertain first" is a pill).
   const [sort, setSort] = useState<SortKey>("likelihood");
-  // Rows grouped by which KINDS of evidence fired. On by default (the artboard's
-  // own default): the pile a reviewer is looking at is "everything acknowledged",
-  // not a flat likelihood ladder.
-  const [grouped, setGrouped] = useState(true);
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
-  // Multi-select mode: off by default, so a row's checkbox never competes with
-  // its own Confirm/Reject for the first click.
-  const [selectMode, setSelectMode] = useState(false);
+  // The paper in the right-hand pane. Null means "the first one shown".
+  const [focusPmid, setFocusPmid] = useState<string | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
-  // Which bulk decision is in flight, if any. Every per-row button here already
-  // carries disabled={pending}; the selection bar needs the same, or a
-  // double-click on "Confirm all" posts the same batch twice.
+  // Which bulk decision is in flight, if any — a double-click on "Confirm 2"
+  // must not post the same batch twice.
   const [bulkPending, setBulkPending] = useState<Decision | null>(null);
-  // Which rows have their evidence expanded (collapsed by default — the token
-  // strip is the summary, the signal rows are the read-in-depth).
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  // The inline guard in front of every bulk REJECT (never a bulk confirm — a
+  // wrong confirm shows up on the public core page where someone will notice
+  // it; a wrong reject just silently leaves the papers missing). "all" is the
+  // mockup's "Reject all N…"; "selected" keeps the guard the selection's own
+  // Reject has always had.
+  const [armed, setArmed] = useState<"all" | "selected" | null>(null);
+  // This session's decision batches, newest last, for "Undo last" / `u`.
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [keysOpen, setKeysOpen] = useState(false);
+  // Below `lg` the focused paper is a full-screen sheet, opened by tapping a row.
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [copiedPmid, setCopiedPmid] = useState<string | null>(null);
   // Polite SR announcement of the last outcome — the success path is otherwise
-  // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
+  // silent (the pane swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");
   // Manual PMID add: paste a block of known PMIDs and claim them directly,
   // independent of the engine queue (POST /api/edit/core-claim/bulk).
@@ -945,58 +1202,23 @@ export function CoreClaimQueue({
   // reviewer has not been shown first.
   const [addCheck, setAddCheck] = useState<PmidCheck | null>(null);
   const [addChecking, setAddChecking] = useState(false);
-  // "Known clients" (ReciterAI #383 / SPS #2607) — the panel's OPEN/CLOSED
-  // state lives here (not in CoreClientsPanel), the same controlled-child
-  // pattern as Add PMIDs above, so the panel body can render as a toolbar
-  // sibling instead of a toolbar child (see the render below).
+  // "Known clients" (ReciterAI #383 / SPS #2607) — the modal's OPEN/CLOSED
+  // state lives here, the same controlled-child pattern as Add PMIDs above.
   //
   // The LIST does not. It is read straight off the `clients` prop, exactly as
-  // candidates/confirmed/rejected are, and for the same reason: every write in
-  // the dialog ends in `router.refresh()`, and a refresh re-renders the Server
-  // Component and hands this component a NEW prop without clearing its state.
-  // `clients` was the one prop in this file cached in `useState` — seeded once
-  // and never re-seeded — so that refreshed roster was discarded on arrival: a
-  // client a co-owner or a second tab had added could never show up here, and
-  // `clientCwids` below could drift out of step with the server-computed
-  // `paperCounts` it has to agree with (a byline flagged as a client
-  // co-author, with no counts to print for them).
+  // candidates/confirmed/rejected are: every write in the dialog ends in
+  // `router.refresh()`, which hands this component a NEW prop without clearing
+  // its state, so a cached copy would discard the refreshed roster on arrival
+  // and let `clientCwids` drift from the server-computed `paperCounts`.
   const [clientsOpen, setClientsOpen] = useState(false);
   const router = useRouter();
+  const listRef = useRef<HTMLUListElement | null>(null);
 
   // Name-only clients carry no cwid, so they never join this set — they cannot
   // flag a byline, which is exactly what the modal tells the owner up front.
   const clientCwids: ReadonlySet<string> = new Set(
     clients.flatMap((c) => (c.cwid ? [c.cwid.toLowerCase()] : [])),
   );
-
-
-  // Tick/untick one facet. Resetting is "Clear filters" below — the only one.
-  const toggleFilter = (key: FilterKey) =>
-    setFilter((s) => {
-      const next = new Set(s);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
-  // type="search" gives the box the platform's own clear button, but that only
-  // drops the text. "Clear filters" is the one link that drops BOTH narrowings,
-  // because the count line and the empty state below report them as one — and
-  // with the "All" pill retired it is the ONLY reset affordance on this surface,
-  // so `narrowed` below has to catch a text-only narrowing too.
-  const clearFilters = () => {
-    setFilter(new Set());
-    setQuery("");
-  };
-  const narrowed = filter.size > 0 || query.trim().length > 0;
-
-  const toggleIn = (
-    set: (fn: (s: ReadonlySet<string>) => ReadonlySet<string>) => void,
-    id: string,
-  ) =>
-    set((s) => {
-      const next = new Set(s);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
 
   const markPending = (pmid: string) => setPending((s) => new Set(s).add(pmid));
   const clearPending = (pmid: string) =>
@@ -1014,14 +1236,19 @@ export function CoreClaimQueue({
     });
 
   // Low-level POST to the claim endpoint; returns ok/error, touches no state.
+  // `note` rides along only when given — the route stores it (<= 2,000 chars)
+  // on the claim row and in its audit row.
   async function postClaim(
     pmid: string,
     status: Decision | "revoked",
+    note?: string,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     const res = await fetch("/api/edit/core-claim", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pmid, coreId: core.id, status }),
+      body: JSON.stringify(
+        note ? { pmid, coreId: core.id, status, note } : { pmid, coreId: core.id, status },
+      ),
     });
     if (!res.ok) {
       const data: unknown = await res.json().catch(() => ({}));
@@ -1034,16 +1261,23 @@ export function CoreClaimQueue({
     return { ok: true };
   }
 
-  // Decide a candidate (claimed/rejected) or revoke that decision, reflected locally.
-  async function send(pmid: string, status: Decision | "revoked") {
+  // Decide a candidate (claimed/rejected) or revoke that decision, reflected
+  // locally. Resolves true when the server accepted it.
+  async function send(pmid: string, status: Decision | "revoked", note?: string) {
     clearError(pmid);
     markPending(pmid);
-    const result = await postClaim(pmid, status);
+    const result = await postClaim(pmid, status, note);
     if (result.ok) {
       setDecided((m) => {
         const next = new Map(m);
         if (status === "revoked") next.delete(pmid);
         else next.set(pmid, status);
+        return next;
+      });
+      setNotes((m) => {
+        const next = new Map(m);
+        if (status === "rejected" && note) next.set(pmid, note);
+        else next.delete(pmid);
         return next;
       });
       const title = candidates.find((c) => c.pmid === pmid)?.title ?? "this publication";
@@ -1056,53 +1290,103 @@ export function CoreClaimQueue({
       setError(pmid, result.error);
     }
     clearPending(pmid);
+    return result.ok;
+  }
+
+  // What the latest render showed, for handlers that finish after an await.
+  const latest = useRef<{ visible: CoreQueueRow[]; focused: string | null }>({
+    visible: [],
+    focused: null,
+  });
+
+  /** Decide one paper from the pane, the keys, or a reason chip. On success it
+   *  joins the session history and — when it was the focused paper — the pane
+   *  moves to the next undecided paper below it (mockup), so a reviewer can work
+   *  down a pile with `a`/`r` alone. */
+  async function decide(pmid: string, status: Decision, note?: string) {
+    if (pending.has(pmid) || decided.has(pmid)) return;
+    const ok = await send(pmid, status, note);
+    if (!ok) return;
+    setHistory((h) => [...h, { pmids: [pmid] }]);
+    const { visible: shown, focused: wasFocused } = latest.current;
+    if (wasFocused !== pmid) return;
+    const at = shown.findIndex((r) => r.pmid === pmid);
+    const next = shown.slice(at + 1).find((r) => r.pmid !== pmid && !decided.has(r.pmid));
+    if (next) setFocusPmid(next.pmid);
+  }
+
+  /** The pane's own Undo: revoke this one decision and drop it from history. */
+  async function undoOne(pmid: string) {
+    const ok = await send(pmid, "revoked");
+    if (ok)
+      setHistory((h) =>
+        h.map((e) => ({ pmids: e.pmids.filter((p) => p !== pmid) })).filter((e) => e.pmids.length),
+      );
+  }
+
+  const [undoing, setUndoing] = useState(false);
+  /**
+   * "Undo last" / `u`: walk back the newest batch. A single decision is one
+   * revoke; a bulk batch is revoked one paper at a time on the single-claim route
+   * (the bulk route deliberately takes no `revoked`), sequentially so a big batch
+   * never fans out into hundreds of parallel requests. Anything that fails stays
+   * decided, keeps its error, and goes back on the stack.
+   */
+  async function undoLast() {
+    const last = history[history.length - 1];
+    if (!last || undoing) return;
+    setUndoing(true);
+    setHistory((h) => h.slice(0, -1));
+    const failed: string[] = [];
+    for (const p of last.pmids) {
+      if (!decided.has(p)) continue;
+      if (!(await send(p, "revoked"))) failed.push(p);
+    }
+    if (failed.length) setHistory((h) => [...h, { pmids: failed }]);
+    setFocusPmid(last.pmids[0]);
+    setUndoing(false);
   }
 
   /**
-   * Decide EVERY hand-selected row in one request. This is the selection bar's
-   * action, not a threshold sweep: the rows were picked one at a time (or by
-   * "Select N" on a group a reviewer is looking at), so there is no unseen band
-   * and nothing to gate on a likelihood number. One request to the bulk
-   * endpoint: the upsert + audit + writeback loop runs in a single server
-   * transaction (no client-side fan-out / partial-failure spray).
+   * Decide EVERY hand-selected (or, behind the guard, every shown) row through
+   * the bulk endpoint: the upsert + audit + writeback loop runs in one server
+   * transaction per request, each paper still getting its own audit row. Chunked
+   * at the route's cap; a failed chunk marks its own papers and stops, so
+   * nothing past it is posted on a guess.
    */
   async function bulkDecide(pmids: string[], status: Decision) {
     if (pmids.length === 0 || bulkPending !== null) return;
-    // Only "Reject all" is guarded, and the asymmetry is the point: a wrong bulk
-    // CONFIRM shows up on the public core page where someone will notice it, while a
-    // wrong bulk REJECT just silently leaves the papers missing. Per-row reject stays
-    // unguarded — it is one visible row, and Undo sits right there.
-    if (
-      status === "rejected" &&
-      !window.confirm(
-        `Reject ${pmids.length} publication${pmids.length === 1 ? "" : "s"} for this core?`,
-      )
-    ) {
-      return;
-    }
+    setArmed(null);
     setBulkPending(status);
     setPending((s) => new Set([...s, ...pmids]));
-    const res = await fetch("/api/edit/core-claim/bulk", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ coreId: core.id, pmids, status }),
-    }).catch(() => null);
-    const ok = res?.ok === true;
+    const done: string[] = [];
+    for (const chunk of chunkPmids(pmids)) {
+      const res = await fetch("/api/edit/core-claim/bulk", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ coreId: core.id, pmids: chunk, status }),
+      }).catch(() => null);
+      if (res?.ok !== true) break;
+      done.push(...chunk);
+    }
     const verb = status === "claimed" ? "Confirmed" : "Rejected";
-    if (ok) {
+    const failed = pmids.slice(done.length);
+    if (done.length > 0) {
       setDecided((m) => {
         const next = new Map(m);
-        for (const p of pmids) next.set(p, status);
+        for (const p of done) next.set(p, status);
         return next;
       });
-      setSelected(new Set());
-    } else {
+      setHistory((h) => [...h, { pmids: done }]);
+    }
+    if (failed.length === 0) setSelected(new Set());
+    else
       setErrors((m) => {
         const next = new Map(m);
-        for (const p of pmids) next.set(p, `bulk ${status === "claimed" ? "confirm" : "reject"} failed`);
+        for (const p of failed)
+          next.set(p, `bulk ${status === "claimed" ? "confirm" : "reject"} failed`);
         return next;
       });
-    }
     setPending((s) => {
       const next = new Set(s);
       for (const p of pmids) next.delete(p);
@@ -1110,17 +1394,12 @@ export function CoreClaimQueue({
     });
     setBulkPending(null);
     setAnnounce(
-      ok
+      failed.length === 0
         ? `${verb} ${pmids.length} publication${pmids.length === 1 ? "" : "s"}.`
         : `Bulk ${status === "claimed" ? "confirm" : "reject"} could not be saved.`,
     );
   }
 
-  // Claim a pasted block of known PMIDs directly — the queue's own candidates
-  // list plays no part; a pmid the engine never scored (or never will) is
-  // claimed anyway, and the server-side existence check catches anything SPS
-  // hasn't ingested. Refresh (not local state) so the page re-fetches the newly
-  // manual-confirmed rows with their real title/journal/etc.
   /** "Check PMIDs" — a `dryRun` bulk claim. Same route, same authorization, same
    *  reads; it just stops before the transaction, so what it reports is what a
    *  claim would actually do rather than a client-side guess. */
@@ -1174,6 +1453,11 @@ export function CoreClaimQueue({
     setAddResult(null);
   }
 
+  // Claim a pasted block of known PMIDs directly — the queue's own candidates
+  // list plays no part; a pmid the engine never scored (or never will) is
+  // claimed anyway, and the server-side existence check catches anything SPS
+  // hasn't ingested. Refresh (not local state) so the page re-fetches the newly
+  // manual-confirmed rows with their real title/journal/etc.
   async function submitAddPmids() {
     const { pmids, invalid } = parsePmidBlock(addText);
     if (pmids.length === 0) {
@@ -1324,84 +1608,292 @@ export function CoreClaimQueue({
     setCopiedPmid(pmid);
   }
 
+  // ---- derived: rail, scope, facets, the list -----------------------------
+
   // Remaining review work (decided rows stay visible for undo but don't count).
-  const open = candidates.filter((c) => !decided.has(c.pmid));
-  const remaining = open.length;
-  // Per-facet counts, over the still-open population only — a decided row is
-  // held on screen for its undo and must not inflate a facet. These earn their
-  // place twice over: the count tells a reviewer what a pill will do BEFORE the
-  // click, and a facet counting 0 is dropped from the row entirely rather than
-  // rendered as a pill whose only possible outcome is an empty queue.
-  // ponytail: six extra passes over `open`, recomputed every render, no memo.
-  // Fine at the sizes cores actually queue, but loadCoreReviewQueue has no
-  // LIMIT — if one core ever returns thousands of candidates, fold these into a
-  // single reduce or wrap them in useMemo([candidates, decided]).
-  const facetCounts: Record<FilterKey, number> = {
-    client: open.filter((c) => matchesFilter(c, "client", clientCwids)).length,
-    ack: open.filter((c) => matchesFilter(c, "ack", clientCwids)).length,
-    coauthored: open.filter((c) => matchesFilter(c, "coauthored", clientCwids)).length,
-    noprior: open.filter((c) => matchesFilter(c, "noprior", clientCwids)).length,
-    llm: open.filter((c) => matchesFilter(c, "llm", clientCwids)).length,
-    method: open.filter((c) => matchesFilter(c, "method", clientCwids)).length,
-  };
-  // Apply the facets AND the free-text query (but always keep a just-decided row
-  // visible so undo stays reachable), then sort. Likelihood is the loader's
-  // order; LLM re-sorts by score.
-  const visible = candidates
+  const remaining = candidates.filter((c) => !decided.has(c.pmid)).length;
+  // ponytail: every derivation below is recomputed per render, no memo. Fine at
+  // the queue sizes cores carry today (low thousands); memoize on
+  // [candidates, decided, paperCounts, clients] if a core ever gets much bigger.
+  const groups = buildEvidenceGroups(candidates, decided, paperCounts, clientCwids);
+  const people = buildRailPeople(candidates, decided, paperCounts);
+  const activeGroup = mode === "evidence" ? (groups.find((g) => g.key === groupKey) ?? null) : null;
+  const activePerson =
+    mode === "person"
+      ? (people.find((p) => p.scholar.cwid.toLowerCase() === personCwid) ?? people[0] ?? null)
+      : null;
+  const scopeRows =
+    mode === "person" ? (activePerson?.rows ?? []) : (activeGroup?.rows ?? candidates);
+  const values = new Map(
+    scopeRows.map((r) => [r.pmid, facetValues(r, paperCounts, clientCwids)] as const),
+  );
+  // The search narrows the facet COUNTS too (mockup); the facets do not narrow
+  // each other's counts, so a tick never makes its own neighbours vanish.
+  const searched = scopeRows.filter((r) => matchesSearch(r, query));
+  // Apply the facets AND the search (but always keep a just-decided row visible
+  // so its Undo stays reachable), then sort.
+  const visible = scopeRows
     .filter(
-      (c) =>
-        decided.has(c.pmid) || (matchesFilters(c, filter, clientCwids) && matchesQuery(c, query)),
+      (r) =>
+        decided.has(r.pmid) ||
+        (matchesSearch(r, query) && matchesFacets(values.get(r.pmid)!, facets)),
     )
     .slice()
     .sort((a, b) => compareBySort(sort, a, b));
-  // Rows in render order, bucketed by evidence kind when grouping is on. The
-  // bucket order follows first appearance in `visible`, so the sort still drives
-  // what a reviewer meets first.
-  const groups: { key: string; rows: CoreQueueRow[] }[] = [];
-  if (grouped) {
-    const byKey = new Map<string, CoreQueueRow[]>();
-    for (const r of visible) {
-      const k = evidenceGroupKey(r, paperCounts, clientCwids);
-      const list = byKey.get(k);
-      if (list) list.push(r);
-      else byKey.set(k, [r]);
+  // Counts over the still-open rows only: a decided row is held on screen for
+  // its undo and must not inflate a facet. A value at 0 is not offered at all
+  // unless it is already ticked (then it stays, so it can be unticked).
+  const facetGroups: FacetGroupView[] = FACET_GROUPS.map(({ key, label }) => {
+    const counts = new Map<string, number>();
+    for (const r of searched) {
+      if (decided.has(r.pmid)) continue;
+      for (const v of values.get(r.pmid)![key]) counts.set(v, (counts.get(v) ?? 0) + 1);
     }
-    for (const [key, rows] of byKey) groups.push({ key, rows });
-  } else {
-    groups.push({ key: "all", rows: visible });
-  }
-  // Intersected with `visible`, not just `decided`: a row you tick and then hide with a
-  // facet or the filter box must not be swept up by "Confirm all". Acting on rows the
-  // reviewer cannot see is precisely what removing the high-confidence sweep was for, and
-  // a Set keeps it O(n) on a queue that can carry a few hundred rows.
-  const visiblePmids = new Set(visible.map((r) => r.pmid));
-  const selectedPmids = [...selected].filter((p) => !decided.has(p) && visiblePmids.has(p));
+    const ticked = facets[key] ?? [];
+    for (const v of ticked) if (!counts.has(v)) counts.set(v, 0);
+    const options = [...counts]
+      .sort(
+        key === "year"
+          ? (a, b) => b[0].localeCompare(a[0])
+          : (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+      )
+      .map(([value, count]) => ({ value, count, selected: ticked.includes(value) }));
+    return { key, label, options };
+  }).filter((g) => g.options.length > 0);
+  const activeChips: ActiveChip[] = FACET_GROUPS.flatMap(({ key, label }) =>
+    (facets[key] ?? []).map((value) => ({ group: key, groupLabel: label, value })),
+  );
+  const narrowed = activeChips.length > 0 || query.trim().length > 0;
+
+  const focused = visible.find((r) => r.pmid === focusPmid) ?? visible[0] ?? null;
+  const focusIndex = focused ? visible.indexOf(focused) : -1;
+  latest.current = { visible, focused: focused?.pmid ?? null };
+
+  // The selection only ever acts on rows the reviewer can SEE: a row ticked and
+  // then hidden by a facet or the search drops out of the batch. Acting on rows
+  // nobody is looking at is what retiring the high-confidence sweep was for.
+  const openShown = visible.filter((r) => !decided.has(r.pmid));
+  const selectedPmids = openShown.filter((r) => selected.has(r.pmid)).map((r) => r.pmid);
+  const allChecked = openShown.length > 0 && selectedPmids.length === openShown.length;
+
+  // Several PMIDs in the box: say what matched here, and where the rest are.
+  const pmidQuery = parsePmidQuery(query);
+  const confirmedPmids = new Set(confirmed.map((r) => r.pmid));
+  const rejectedPmids = new Set(rejected.map((r) => r.pmid));
+  const scopePmids = new Set(scopeRows.map((r) => r.pmid));
+  const pmidNote = pmidQuery
+    ? pmidMatchNote(pmidQuery, new Set(visible.map((r) => r.pmid)), (p) => {
+        const d = decided.get(p);
+        if (d) return d === "claimed" ? "Confirmed this session" : "Rejected this session";
+        if (confirmedPmids.has(p)) return "Confirmed";
+        if (rejectedPmids.has(p)) return "Rejected";
+        const row = candidates.find((c) => c.pmid === p);
+        if (!row) return "not in this core's queue";
+        if (scopePmids.has(p)) return "To review · hidden by filters";
+        return `To review · ${evidenceGroupName(evidenceGroupKey(row, paperCounts, clientCwids))}`;
+      })
+    : null;
+
+  const railItems: RailItem[] =
+    mode === "evidence"
+      ? [
+          {
+            key: ALL_SCOPE,
+            label: "All candidates",
+            sub: plural(groups.length, "evidence group"),
+            count: remaining,
+          },
+          ...groups.map((g) => ({
+            key: g.key,
+            label: evidenceGroupName(g.key),
+            sub: groupBandText(g.rows.map((r) => r.likelihood)),
+            count: g.open,
+          })),
+        ]
+      : people.map((p) => ({
+          key: p.scholar.cwid.toLowerCase(),
+          label: displayName(p.scholar.name),
+          sub: `${p.counts.papers} prior confirmed${p.scholar.dept ? ` · ${p.scholar.dept}` : ""}`,
+          count: p.open,
+        }));
+  const railKey =
+    mode === "evidence"
+      ? (activeGroup?.key ?? ALL_SCOPE)
+      : (activePerson?.scholar.cwid.toLowerCase() ?? "");
+  const scopeTitle =
+    mode === "person"
+      ? activePerson
+        ? displayName(activePerson.scholar.name)
+        : "By person"
+      : activeGroup
+        ? evidenceGroupName(activeGroup.key)
+        : "All candidates";
+  const scopeSub =
+    mode === "person"
+      ? activePerson
+        ? `${plural(activePerson.open, "open candidate")} · ${activePerson.counts.papers} of ${plural(activePerson.counts.total, "publication")} already confirmed`
+        : ""
+      : activeGroup
+        ? `${plural(activeGroup.open, "open paper")} · ${groupBandText(activeGroup.rows.map((r) => r.likelihood))}`
+        : `${plural(remaining, "open candidate")} across ${plural(groups.length, "evidence group")}`;
+  const meshCount = candidates.filter(
+    (r) => r.topicalPrior !== null && decodeTopicalPrior(r.topicalPrior).mesh,
+  ).length;
+
   // Tabs only earn their place once there's history to switch to; otherwise the
-  // queue is the single "To review" scroll it always was.
+  // queue is the single "To review" view it always was.
   const hasHistory = confirmed.length > 0 || rejected.length > 0;
+  const sessionConfirmed = [...decided.values()].filter((d) => d === "claimed").length;
+  const sessionRejected = decided.size - sessionConfirmed;
+
+  // ---- scope changes ------------------------------------------------------
+
+  /** Any change of pile drops the selection and disarms the guard: both were
+   *  about rows the reviewer is no longer looking at. */
+  const resetForScope = () => {
+    setFocusPmid(null);
+    setSelected(new Set());
+    setArmed(null);
+  };
+  const chooseMode = (m: RailMode) => {
+    if (m === mode) return;
+    setMode(m);
+    resetForScope();
+  };
+  const chooseScope = (key: string) => {
+    if (mode === "evidence") setGroupKey(key);
+    else setPersonCwid(key);
+    resetForScope();
+  };
+  const toggleFacet = (group: string, value: string) => {
+    setFacets((f) => {
+      const k = group as FacetKey;
+      const cur = f[k] ?? [];
+      return { ...f, [k]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] };
+    });
+    setFocusPmid(null);
+    setArmed(null);
+  };
+  const clearFilters = () => {
+    setFacets({});
+    setQuery("");
+    setArmed(null);
+  };
+
+  // ---- focus + keyboard ---------------------------------------------------
+
+  function focusRow(pmid: string) {
+    setFocusPmid(pmid);
+    listRef.current
+      ?.querySelector(`[data-pmid="${pmid}"]`)
+      // jsdom has no scrollIntoView; the optional call keeps the keys testable.
+      ?.scrollIntoView?.({ block: "nearest" });
+  }
+  function move(dir: 1 | -1) {
+    if (visible.length === 0) return;
+    const at = Math.max(0, focusIndex);
+    const next = visible[Math.min(visible.length - 1, Math.max(0, at + dir))];
+    focusRow(next.pmid);
+  }
+  function toggleSelected(pmid: string) {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (!next.delete(pmid)) next.add(pmid);
+      return next;
+    });
+  }
+
+  // One window listener for the whole review tab (mockup), re-pointed at the
+  // latest render's closures through a ref so it is bound once. It stands down
+  // while typing — INPUT, TEXTAREA, SELECT, contenteditable — and under any
+  // modifier, so j, k and x stay ordinary letters in the search box and the
+  // dialogs; and while either dialog is open, whose focus trap owns the keys.
+  const onKey = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
+  onKey.current = (e) => {
+    if (view !== "review" || candidates.length === 0 || addOpen || clientsOpen) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (k === "j" || k === "ArrowDown") {
+      e.preventDefault();
+      move(1);
+    } else if (k === "k" || k === "ArrowUp") {
+      e.preventDefault();
+      move(-1);
+    } else if (k === "a" || k === "r") {
+      if (focused && !decided.has(focused.pmid)) {
+        e.preventDefault();
+        void decide(focused.pmid, k === "a" ? "claimed" : "rejected");
+      }
+    } else if (k === "x") {
+      if (focused && !decided.has(focused.pmid)) {
+        e.preventDefault();
+        toggleSelected(focused.pmid);
+      }
+    } else if (k === "u") {
+      e.preventDefault();
+      void undoLast();
+    } else if (k === "?") {
+      e.preventDefault();
+      setKeysOpen((o) => !o);
+    } else if (k === "Escape") {
+      setKeysOpen(false);
+      setSheetOpen(false);
+    }
+  };
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => onKey.current(e);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // The focused paper's "Review all N papers by X" — the repeat-user row's jump
+  // into By person, keeping this paper in the pane. Only in By evidence (in By
+  // person the list already IS that person), and only for someone the rail lists.
+  const repeatAction = (() => {
+    if (!focused || mode !== "evidence") return null;
+    const who = repeatUser(focused, paperCounts, clientCwids);
+    const person = who
+      ? people.find((p) => p.scholar.cwid.toLowerCase() === who.scholar.cwid.toLowerCase())
+      : undefined;
+    if (!person) return null;
+    const cwid = person.scholar.cwid.toLowerCase();
+    return {
+      label: `Review all ${plural(person.open, "paper")} by ${displayName(person.scholar.name)}`,
+      onClick: () => {
+        const keep = focused.pmid;
+        setMode("person");
+        setPersonCwid(cwid);
+        setSelected(new Set());
+        setArmed(null);
+        setFocusPmid(keep);
+      },
+    };
+  })();
+
+  const HEADER_BUTTON =
+    "border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm";
 
   return (
     <div data-slot="core-claim-queue">
       <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
         {announce}
       </div>
-      {/* The mockup's top row: the core-staff lock chip on the left, the button
-          group on the right. `justify-between` is the mockup's split, but the
-          button group ALSO carries `ml-auto` — the chip is absent whenever the
-          engine has published no staff count, and a lone flex child under
-          `justify-between` would slide left, moving the buttons out from under
-          the reviewer's cursor for exactly the cores with the least data. */}
+      {/* The mockup's header row: the page's title block on the left, the three
+          controls on the right, bottom-aligned. The button group carries
+          `ml-auto` so it stays right when the title wraps under it. */}
       <div
         data-slot="core-queue-toolbar"
-        className="mb-2 flex flex-wrap items-center justify-between gap-2"
+        className="mb-6 flex flex-wrap items-end justify-between gap-4"
       >
-        <CoreStaffChip staffCount={core.staffCount} staffTrackedCount={core.staffTrackedCount} />
+        {header ? <div className="min-w-0">{header}</div> : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setClientsOpen((v) => !v)}
             aria-pressed={clientsOpen}
-            className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
+            className={HEADER_BUTTON}
           >
             Known clients (<span className="tabular-nums">{clients.length}</span>)
           </button>
@@ -1412,36 +1904,28 @@ export function CoreClaimQueue({
               setAddResult(null);
             }}
             aria-pressed={addOpen}
-            className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
+            className={HEADER_BUTTON}
           >
             Add PMIDs
           </button>
-          {/* The mockup's third button. It shipped DISABLED while no core
-              reporting route existed; the core-reports widening (2026-09-06)
-              gave cores reports 3 and 6 (and 11–13 followed), so it is now a
-              real link to this core's reports index. Same authz on the other side — a
-              core's owner/curator (or a superuser/comms_steward) passes, and
-              nobody else does — so this never leads a reviewer to a 403 they
-              could reach the review queue from.
-              Styling tracks its two siblings above (rounded-md, no icon): the
-              mockup toolbar restyle landed while this branch was open, and the
-              link must not quietly bring the old pill back. */}
+          {/* This core's reports index (3, 6 and the core-only 11–13), the same
+              `center=<coreId>&kind=core` scope the index and every report use.
+              Same authz on the other side, so it never leads a reviewer to a
+              403 they could reach the review queue from. */}
           <a
-            // This core's reports index (3, 6 and the core-only 11–13), the same
-            // `center=<coreId>&kind=core` scope the index and every report use.
             href={`/edit/reports?center=${encodeURIComponent(core.id)}&kind=core&scope=core`}
-            className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
+            className={HEADER_BUTTON}
           >
             Reporting
           </a>
         </div>
       </div>
 
-      {/* Both toolbar panels are MODALS, not inline drawers: each is a task with
+      {/* Both header panels are MODALS, not inline drawers: each is a task with
           its own commit step, and an inline panel pushed the queue down the page
-          while it was open — the reviewer lost their place in the list they were
-          about to act on. Padding lives on the bands inside `DialogContent`
-          (which is `p-0`), so the header and footer rules run full-bleed. */}
+          while it was open. Add PMIDs is the existing "Confirm now" manual add;
+          the mockup's "Send to review" mode needs a table that does not exist
+          yet and is deliberately not drawn. */}
       <Dialog
         open={addOpen}
         onOpenChange={(next) => {
@@ -1561,162 +2045,315 @@ export function CoreClaimQueue({
         onClose={() => setClientsOpen(false)}
       />
 
-      {/* One bordered panel holding the tab strip, the facets, the controls and
-          the status strip, so the active tab reads as connected to the body it
-          switches. The head strip is surface-2 and the active tab is surface, so
-          the raised tab merges into the panel below it. */}
+      {/* The tab row (mockup): the view switch on the left; on the To review
+          tab, the session line with its Undo and the shortcuts popover on the
+          right. */}
       <div
         data-slot="core-queue-panel"
-        className="border-apollo-border bg-apollo-surface mb-3 overflow-hidden rounded-lg border"
+        className="border-apollo-border-strong flex flex-wrap items-end justify-between gap-x-3 gap-y-2 border-b"
       >
-        <div className="border-apollo-border bg-apollo-surface-2 flex flex-wrap items-end gap-x-3 gap-y-2 border-b px-3 pt-2">
-          {hasHistory ? (
-            <ViewTabs
-              view={view}
-              onView={setView}
-              reviewCount={remaining}
-              confirmedCount={confirmed.length}
-              rejectedCount={rejected.length}
-            />
-          ) : (
-            <h2 className="mb-2 flex items-baseline gap-2 text-[15px] font-semibold">
-              To review
-              <span className="text-muted-foreground text-sm font-normal tabular-nums">
-                {remaining}
-              </span>
-            </h2>
-          )}
-          {view === "review" && candidates.length > 0 ? (
-            /* "method" is now TRUE, not aspirational: the card renders a
-               "Method family <tier>" evidence token and `searchBlob` searches
-               that token's text. The individual family and tool NAMES are still
-               not searched (`method_evidence` stays out of the loader's
-               select) — a query for a specific tool matches nothing. */
-            <Input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter by title, author, journal, PMID or method..."
-              aria-label="Filter candidates"
-              className="mb-2 ml-auto h-8 w-[330px] max-w-full text-xs"
-            />
-          ) : null}
-        </div>
-
+        {hasHistory ? (
+          <ViewTabs
+            view={view}
+            onView={(v) => {
+              setView(v);
+              setArmed(null);
+            }}
+            reviewCount={remaining}
+            confirmedCount={confirmed.length}
+            rejectedCount={rejected.length}
+          />
+        ) : (
+          <h2 className="mb-2 flex items-baseline gap-2 text-[15px] font-semibold">
+            To review
+            <span className="text-muted-foreground text-sm font-normal tabular-nums">
+              {remaining}
+            </span>
+          </h2>
+        )}
         {view === "review" && candidates.length > 0 ? (
-          <>
-            <QueueControls
-              filter={filter}
-              onToggleFilter={toggleFilter}
-              counts={facetCounts}
-              sort={sort}
-              onSort={setSort}
-              grouped={grouped}
-              onToggleGrouped={() => setGrouped((g) => !g)}
-              selectMode={selectMode}
-              onToggleSelectMode={() => {
-                setSelectMode((m) => !m);
-                if (selectMode) setSelected(new Set());
-              }}
-            />
-            <div
-              data-slot="core-queue-status"
-              className="border-apollo-border bg-apollo-surface-2 text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-3 py-2 text-xs"
-            >
-              <span>
-                Showing {visible.length} of {candidates.length} candidates
-              </span>
-              {narrowed ? (
+          <div className="text-muted-foreground mb-2 flex flex-wrap items-center gap-3 text-xs">
+            {history.length > 0 ? (
+              <span data-slot="core-queue-session" className="flex items-center gap-2">
+                <span className="text-foreground">
+                  This session: {sessionConfirmed} confirmed · {sessionRejected} rejected
+                </span>
                 <button
                   type="button"
-                  onClick={clearFilters}
-                  className="text-apollo-slate underline"
+                  disabled={undoing}
+                  onClick={() => void undoLast()}
+                  className="text-apollo-slate hover:underline disabled:opacity-50"
                 >
-                  Clear filters
+                  Undo last
                 </button>
-              ) : null}
-              <span className="ml-auto">
-                Keys: <Kbd>j</Kbd>/<Kbd>k</Kbd> move · <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject ·{" "}
-                <Kbd>x</Kbd> select · <Kbd>u</Kbd> undo
               </span>
-            </div>
-          </>
+            ) : null}
+            <ShortcutsButton open={keysOpen} onToggle={() => setKeysOpen((o) => !o)} />
+          </div>
         ) : null}
       </div>
 
-      {view === "review" ? (
+      {view === "review" && candidates.length === 0 ? (
+        <p className="text-muted-foreground border-apollo-border mt-4 rounded-lg border border-dashed px-4 py-6 text-sm">
+          Nothing to review — every candidate publication for this core has been confirmed or
+          rejected.
+        </p>
+      ) : null}
+
+      {view === "review" && candidates.length > 0 ? (
         <>
-          {candidates.length === 0 ? (
-            <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
-              Nothing to review — every candidate publication for this core has been confirmed or
-              rejected.
-            </p>
-          ) : visible.length === 0 ? (
-            <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
-              Nothing matches this filter.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {groups.map((g) => {
-                const collapsed = collapsedGroups.has(g.key);
-                return (
-                  <div key={g.key}>
-                    {grouped ? (
-                      <GroupHeader
-                        label={evidenceGroupLabel(g.key, g.rows.length)}
-                        range={bandRange(g.rows.map((r) => r.likelihood))}
-                        collapsed={collapsed}
-                        onToggle={() => toggleIn(setCollapsedGroups, g.key)}
-                        onSelectAll={() => {
-                          setSelected((s) => new Set([...s, ...g.rows.map((r) => r.pmid)]));
-                          setSelectMode(true);
-                        }}
-                        selectLabel={`Select ${g.rows.length}`}
-                      />
-                    ) : null}
-                    {collapsed ? null : (
-                      <ul className="flex flex-col gap-3">
-                        {g.rows.map((row) => (
-                          <li key={row.pmid}>
-                            <CandidateCard
-                              row={row}
-                              clientCwids={clientCwids}
-              paperCounts={paperCounts}
-                              decided={decided.get(row.pmid)}
-                              pending={pending.has(row.pmid)}
-                              error={errors.get(row.pmid)}
-                              expanded={expanded.has(row.pmid)}
-                              onToggleExpanded={() => toggleIn(setExpanded, row.pmid)}
-                              selectMode={selectMode}
-                              selected={selected.has(row.pmid)}
-                              onToggleSelected={() => toggleIn(setSelected, row.pmid)}
-                              // "x" both ticks the row and arms selection mode,
-                              // so the shortcut works from the queue's default
-                              // (unselectable) state without a mouse trip to
-                              // "Select several" first.
-                              onSelectShortcut={() => {
-                                toggleIn(setSelected, row.pmid);
-                                setSelectMode(true);
-                              }}
-                              copied={copiedPmid === row.pmid}
-                              onCopyPmid={() => copyPmid(row.pmid)}
-                              onDecide={(status) => send(row.pmid, status)}
-                              onUndo={() => send(row.pmid, "revoked")}
-                            />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
+          <div data-slot="core-queue-search" className="mt-4 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="search"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setFocusPmid(null);
+                  setArmed(null);
+                }}
+                onPaste={(e) => {
+                  const flat = pasteAsOneLine(e.clipboardData.getData("text"));
+                  if (flat === null) return;
+                  e.preventDefault();
+                  const el = e.currentTarget;
+                  const start = el.selectionStart ?? el.value.length;
+                  const end = el.selectionEnd ?? el.value.length;
+                  setQuery(`${el.value.slice(0, start)}${flat}${el.value.slice(end)}`);
+                  setFocusPmid(null);
+                  setArmed(null);
+                }}
+                placeholder="Search title, author, journal, or paste several PMIDs"
+                aria-label="Filter candidates"
+                className="bg-apollo-surface h-9 min-w-0 flex-[1_1_260px] text-[13px]"
+              />
+              <button
+                type="button"
+                aria-expanded={filtersOpen}
+                aria-controls="core-queue-filters"
+                onClick={() => setFiltersOpen((o) => !o)}
+                className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] whitespace-nowrap ${
+                  activeChips.length > 0 ? "border-apollo-slate" : "border-apollo-border-strong"
+                } ${filtersOpen ? "bg-apollo-surface-2" : "bg-apollo-surface"}`}
+              >
+                Filters
+                <span className="bg-apollo-rail rounded-full px-1.5 text-xs text-[var(--evidence-body)] tabular-nums">
+                  {activeChips.length}
+                </span>
+              </button>
+              <div role="group" aria-label="Sort" className="flex shrink-0 gap-1">
+                {SORT_PILLS.map((s) => (
+                  <button
+                    key={s.key}
+                    type="button"
+                    aria-pressed={sort === s.key}
+                    onClick={() => setSort(s.key)}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap ${
+                      sort === s.key
+                        ? "border-apollo-border-strong bg-apollo-surface"
+                        : "border-transparent"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          )}
+            {pmidNote ? (
+              <p
+                data-slot="core-queue-pmid-note"
+                className="border-apollo-border bg-apollo-surface-2 rounded-lg border px-2.5 py-1.5 text-xs leading-normal text-[var(--evidence-body)]"
+              >
+                {pmidNote}
+              </p>
+            ) : null}
+            {filtersOpen ? (
+              <FiltersPanel id="core-queue-filters" groups={facetGroups} onToggle={toggleFacet} />
+            ) : null}
+            {narrowed ? (
+              <ActiveFilterChips
+                chips={activeChips}
+                onRemove={toggleFacet}
+                onClear={clearFilters}
+              />
+            ) : null}
+          </div>
+
+          {/* Three panes at `lg` (mockup); below it the rail is a select, the list
+              runs full width, and the paper opens as a full-screen sheet. */}
+          <div
+            data-slot="core-queue-panes"
+            className="mt-4 flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,232px)_minmax(0,1fr)_minmax(0,1.2fr)] lg:items-start lg:gap-5"
+          >
+            <ScopeRail
+              mode={mode}
+              onMode={chooseMode}
+              items={railItems}
+              activeKey={railKey}
+              onSelect={chooseScope}
+              emptyText="Nobody on these bylines has a confirmed paper with this core yet, so there is no one to review by."
+              about={
+                <AboutSignals
+                  staffCount={core.staffCount}
+                  staffTrackedCount={core.staffTrackedCount}
+                  meshCount={meshCount}
+                />
+              }
+            />
+
+            <section aria-label="Candidates" className="flex min-w-0 flex-col gap-2.5">
+              <div>
+                <h2 className="text-base leading-snug font-medium">{scopeTitle}</h2>
+                {scopeSub ? (
+                  <p className="text-muted-foreground mt-0.5 text-xs">{scopeSub}</p>
+                ) : null}
+              </div>
+              <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
+                <div
+                  data-slot="core-queue-selection-bar"
+                  role="group"
+                  aria-label="Selected publications"
+                  className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 text-[13px] ${
+                    selectedPmids.length > 0 ? "bg-apollo-slate-tint" : "bg-apollo-surface-2"
+                  }`}
+                >
+                  <label className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={allChecked}
+                      disabled={openShown.length === 0}
+                      onChange={() =>
+                        setSelected((s) => {
+                          const next = new Set(s);
+                          for (const r of openShown) {
+                            if (allChecked) next.delete(r.pmid);
+                            else next.add(r.pmid);
+                          }
+                          return next;
+                        })
+                      }
+                      className="size-4 accent-[var(--apollo-slate)]"
+                    />
+                    <span>
+                      {selectedPmids.length > 0
+                        ? `${selectedPmids.length} of ${openShown.length} selected`
+                        : `Select all ${openShown.length} ${narrowed ? "matching" : "shown"}`}
+                    </span>
+                  </label>
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={selectedPmids.length === 0 || bulkPending !== null}
+                      onClick={() => void bulkDecide(selectedPmids, "claimed")}
+                      className="inline-flex h-7 items-center rounded-md bg-[var(--color-accent-slate)] px-2.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {bulkPending === "claimed"
+                        ? "Confirming…"
+                        : selectedPmids.length > 0
+                          ? `Confirm ${selectedPmids.length}`
+                          : "Confirm"}
+                      <span className="sr-only"> selected</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedPmids.length === 0 || bulkPending !== null}
+                      onClick={() => setArmed("selected")}
+                      className="border-border-strong bg-background inline-flex h-7 items-center rounded-md border px-2.5 text-xs disabled:opacity-50"
+                    >
+                      {bulkPending === "rejected"
+                        ? "Rejecting…"
+                        : selectedPmids.length > 0
+                          ? `Reject ${selectedPmids.length}`
+                          : "Reject"}
+                      <span className="sr-only"> selected</span>
+                    </button>
+                    {selectedPmids.length === 0 && armed === null && openShown.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setArmed("all")}
+                        className="text-muted-foreground hover:text-foreground px-1 text-xs whitespace-nowrap"
+                      >
+                        Reject all {openShown.length}…
+                      </button>
+                    ) : null}
+                  </span>
+                </div>
+                {armed ? (
+                  <RejectGuard
+                    count={armed === "all" ? openShown.length : selectedPmids.length}
+                    what={armed === "all" ? "shown" : "selected"}
+                    disabled={bulkPending !== null}
+                    onReject={() =>
+                      void bulkDecide(
+                        armed === "all" ? openShown.map((r) => r.pmid) : selectedPmids,
+                        "rejected",
+                      )
+                    }
+                    onCancel={() => setArmed(null)}
+                  />
+                ) : null}
+                <ul ref={listRef} aria-label="Candidate papers">
+                  {visible.map((r) => (
+                    <QueueListRow
+                      key={r.pmid}
+                      row={r}
+                      mode={mode}
+                      focused={focused?.pmid === r.pmid}
+                      decided={decided.get(r.pmid)}
+                      error={errors.get(r.pmid)}
+                      checked={selected.has(r.pmid)}
+                      onCheck={() => toggleSelected(r.pmid)}
+                      onOpen={() => {
+                        setFocusPmid(r.pmid);
+                        setSheetOpen(true);
+                      }}
+                      paperCounts={paperCounts}
+                      clientCwids={clientCwids}
+                    />
+                  ))}
+                </ul>
+              </div>
+              {visible.length === 0 ? (
+                <p className="text-muted-foreground border-apollo-border rounded-lg border border-dashed px-4 py-6 text-center text-sm">
+                  {mode === "person" && !activePerson
+                    ? "No one to review by yet."
+                    : "Nothing matches this filter."}
+                </p>
+              ) : null}
+              <p data-slot="core-queue-status" className="text-muted-foreground text-xs">
+                Showing {visible.length} of {scopeRows.length} candidates
+              </p>
+            </section>
+
+            {focused ? (
+              <FocusedPaper
+                row={focused}
+                position={`${focusIndex + 1} of ${visible.length} shown`}
+                hasPrev={focusIndex > 0}
+                hasNext={focusIndex < visible.length - 1}
+                onPrev={() => move(-1)}
+                onNext={() => move(1)}
+                sheetOpen={sheetOpen}
+                onCloseSheet={() => setSheetOpen(false)}
+                clientCwids={clientCwids}
+                paperCounts={paperCounts}
+                decided={decided.get(focused.pmid)}
+                note={notes.get(focused.pmid) ?? null}
+                pending={pending.has(focused.pmid)}
+                error={errors.get(focused.pmid)}
+                copied={copiedPmid === focused.pmid}
+                onCopyPmid={() => copyPmid(focused.pmid)}
+                onDecide={(status, note) => void decide(focused.pmid, status, note)}
+                onUndo={() => void undoOne(focused.pmid)}
+                repeatAction={repeatAction}
+              />
+            ) : null}
+          </div>
         </>
       ) : null}
 
       {view === "confirmed" ? (
-        <ul className="flex flex-col gap-1.5">
+        <ul className="mt-4 flex flex-col gap-1.5">
           {confirmed.map((row) => (
             <ConfirmedRow
               key={row.pmid}
@@ -1725,7 +2362,7 @@ export function CoreClaimQueue({
               pending={pending.has(row.pmid)}
               error={errors.get(row.pmid)}
               clientCwids={clientCwids}
-                              paperCounts={paperCounts}
+              paperCounts={paperCounts}
               onRevoke={() => revokeConfirmed(row.pmid, row.claimed, row.title)}
               onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
             />
@@ -1734,7 +2371,7 @@ export function CoreClaimQueue({
       ) : null}
 
       {view === "rejected" ? (
-        <ul className="flex flex-col gap-1.5">
+        <ul className="mt-4 flex flex-col gap-1.5">
           {rejected.map((row) => (
             <RejectedRow
               key={row.pmid}
@@ -1748,127 +2385,51 @@ export function CoreClaimQueue({
           ))}
         </ul>
       ) : null}
-
-      {view === "review" && selectedPmids.length > 0 ? (
-        <div
-          data-slot="core-queue-selection-bar"
-          className="bg-apollo-bar fixed bottom-5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3.5 rounded-xl px-4 py-2.5 text-white shadow-lg"
-          role="group"
-          aria-label="Selected publications"
-        >
-          <span className="text-[13px] font-medium">
-            {selectedPmids.length} paper{selectedPmids.length === 1 ? "" : "s"} selected
-          </span>
-          <span className="h-5 w-px bg-white/20" aria-hidden />
-          <button
-            type="button"
-            disabled={bulkPending !== null}
-            onClick={() => bulkDecide(selectedPmids, "claimed")}
-            className="inline-flex h-8 items-center rounded-full bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {bulkPending === "claimed" ? "Confirming…" : "Confirm all"}
-          </button>
-          <button
-            type="button"
-            disabled={bulkPending !== null}
-            onClick={() => bulkDecide(selectedPmids, "rejected")}
-            className="inline-flex h-8 items-center rounded-full border border-white/30 px-3 text-sm disabled:opacity-50"
-          >
-            {bulkPending === "rejected" ? "Rejecting…" : "Reject all"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setSelected(new Set());
-              setSelectMode(false);
-            }}
-            className="text-xs text-white/70"
-          >
-            Clear
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
 
-/**
- * The toolbar's lock chip: what the co-author signal (signal 2) actually has to
- * work with on this core. Both counts come from ReciterAI's facility
- * dictionary via etl/dynamodb Block 6b (`PK=CORE#{id}, SK=STAFF_DICT`) — COUNTS,
- * never the CWIDs, which stay upstream.
- *
- * The two numbers are not interchangeable, and that is the whole reason this
- * chip renders both. `staffCount` is what the dictionary LISTS under the core's
- * `staff:` key. `staffTrackedCount` is how many of those the signal can
- * actually MATCH: pipeline_cores/signals.py `coauthorship_index` reads the
- * core's tracked staff CWIDs, so a listed staff member with no personIdentifier
- * upstream is invisible to it. The two differ on 9 of the 14 live cores; the
- * mockup's own core lists four and tracks one, the longest roster (seven)
- * tracks four, and three cores list staff while tracking none.
- * A chip built on the listed count alone would tell a reviewer the signal
- * "draws on 4 core staff" on exactly the core in the owner's mockup, where it
- * draws on one — the same species of false mechanism claim `decodeTopicalPrior`
- * already put on 7,332 live chips. So the sentence leads with the tracked
- * count and carries the listed one behind it, and the two dead states say so
- * outright rather than naming a number the signal cannot use.
- *
- * Four states:
- *   - counts unpublished (`staffCount` null; `staffTrackedCount` null is the
- *     same case, since the ETL writes the pair together or not at all) —
- *     renders NOTHING, exactly as before this shipped. Not-yet-published must
- *     look like nothing at all, never like an empty roster; the rest of this
- *     queue is built on the same invisible-not-broken property.
- *   - listed 0 — the dictionary lists no staff at all for this core. Its own
- *     sentence: the signal cannot fire, so every candidate the reviewer sees is
- *     carried by the other three signals (round 2 dropped the prefilter prior to
- *     a footnote, so `SIGNAL_COUNT` is 4 and this is one of them).
- *   - listed > 0, tracked 0 — the dictionary lists staff but none of them
- *     resolve. Same conclusion, different cause, and the cause is worth saying:
- *     this one is fixable upstream, "lists none" is not.
- *   - tracked > 0 — the mockup's sentence, "M of N" emphasized.
- *
- * The mockup also draws a "Manage staff" link beside this chip. It is
- * deliberately NOT built: there is no destination — the roster lives in the
- * facility dictionary, not in SPS, and no core-staff role exists to hang an
- * editor off. This toolbar already carries one knowingly-inert control
- * ("Reporting..."); a second would make dead controls the pattern here. It
- * becomes a `/roles` link the day a core-staff role exists.
- */
-function CoreStaffChip({
-  staffCount,
-  staffTrackedCount,
+/** The inline guard in front of a bulk reject (mockup's "Reject all N shown?"). */
+function RejectGuard({
+  count,
+  what,
+  disabled,
+  onReject,
+  onCancel,
 }: {
-  staffCount: number | null;
-  staffTrackedCount: number | null;
+  count: number;
+  what: "shown" | "selected";
+  disabled: boolean;
+  onReject: () => void;
+  onCancel: () => void;
 }) {
-  if (staffCount === null || staffTrackedCount === null) return null;
   return (
-    <span
-      data-slot="core-staff-chip"
-      className="border-apollo-border bg-apollo-surface-2 text-muted-foreground inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs"
+    <div
+      data-slot="core-queue-reject-guard"
+      className="border-apollo-border flex flex-wrap items-center justify-between gap-2 border-t bg-red-50 px-3.5 py-2 text-[13px] text-red-800"
     >
-      <Lock className="size-3.5 shrink-0" aria-hidden />
-      {staffCount === 0 ? (
-        <span>
-          The facility dictionary lists no core staff, so the co-author signal cannot fire for this
-          core.
-        </span>
-      ) : staffTrackedCount === 0 ? (
-        <span>
-          The facility dictionary lists {staffCount} core staff, but none are resolvable, so the
-          co-author signal cannot fire for this core.
-        </span>
-      ) : (
-        <span>
-          Co-author signal draws on{" "}
-          <span className="text-foreground font-semibold">
-            {staffTrackedCount} of {staffCount}
-          </span>{" "}
-          core staff from the facility dictionary
-        </span>
-      )}
-    </span>
+      <span>
+        Reject {what === "shown" ? "all " : ""}
+        {count} {what}? Each gets its own audit row and can be restored.
+      </span>
+      <span className="flex gap-1.5">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onReject}
+          className="inline-flex h-7 items-center rounded-md bg-red-700 px-2.5 text-xs font-medium text-white disabled:opacity-50"
+        >
+          Reject {count}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex h-7 items-center rounded-md px-2.5 text-xs"
+        >
+          Cancel
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -1930,51 +2491,6 @@ function ViewTabs({
             </button>
           );
         })}
-    </div>
-  );
-}
-
-/** The evidence-group band: a collapse caret, the vocabulary label, the group's
- *  band range, and a "Select N" that arms selection mode on this pile. */
-function GroupHeader({
-  label,
-  range,
-  collapsed,
-  onToggle,
-  onSelectAll,
-  selectLabel,
-}: {
-  label: string;
-  range: string;
-  collapsed: boolean;
-  onToggle: () => void;
-  onSelectAll: () => void;
-  selectLabel: string;
-}) {
-  return (
-    <div className="bg-apollo-rail border-apollo-rail-border mb-2 flex items-center gap-3 rounded-md border px-3 py-2">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={!collapsed}
-        aria-label="Collapse or expand this group"
-        className="border-border-strong text-muted-foreground hover:text-foreground inline-flex size-5 items-center justify-center rounded border bg-background"
-      >
-        {collapsed ? (
-          <ChevronDown className="size-3" aria-hidden />
-        ) : (
-          <ChevronUp className="size-3" aria-hidden />
-        )}
-      </button>
-      <span className="text-foreground text-xs font-semibold">{label}</span>
-      {range ? <span className="text-muted-foreground text-xs">{range}</span> : null}
-      <button
-        type="button"
-        onClick={onSelectAll}
-        className="border-border-strong text-apollo-slate ml-auto inline-flex h-6 items-center rounded-full border bg-background px-2.5 text-xs"
-      >
-        {selectLabel}
-      </button>
     </div>
   );
 }
@@ -2216,307 +2732,235 @@ function RejectedRow({
   );
 }
 
-/** The facet row and the controls row, stacked inside the queue panel. The
- *  free-text box is NOT here — it sits in the tab-strip row above (the mockup's
- *  placement), which is why this takes no `query`. */
-function QueueControls({
-  filter,
-  onToggleFilter,
-  counts,
-  sort,
-  onSort,
-  grouped,
-  onToggleGrouped,
-  selectMode,
-  onToggleSelectMode,
-}: {
-  filter: ReadonlySet<FilterKey>;
-  onToggleFilter: (f: FilterKey) => void;
-  counts: Record<FilterKey, number>;
-  sort: SortKey;
-  onSort: (s: SortKey) => void;
-  grouped: boolean;
-  onToggleGrouped: () => void;
-  selectMode: boolean;
-  onToggleSelectMode: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2 px-3 py-2.5">
-      {/* The pill row and the text box above are both "filter candidates";
-          naming them apart keeps two controls from answering to one name. */}
-      <div
-        className="flex flex-wrap gap-1.5"
-        role="group"
-        aria-label="Filter candidates by evidence"
-      >
-        {/* Every pill is a genuine checkbox — the old "All" reset pill is gone
-            (owner decision), so there is no odd button-among-checkboxes left in
-            this group. Native Space/Enter activation covers all of them. */}
-        {FILTERS.filter((f) => counts[f.key] > 0).map((f) => {
-          const checked = filter.has(f.key);
-          return (
-            <button
-              key={f.key}
-              type="button"
-              role="checkbox"
-              aria-checked={checked}
-              onClick={() => onToggleFilter(f.key)}
-              className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
-                checked
-                  ? "bg-apollo-maroon border-transparent text-white"
-                  : "border-apollo-border text-muted-foreground hover:text-foreground bg-apollo-surface"
-              }`}
-            >
-              {f.label} <span className="tabular-nums opacity-80">{counts[f.key]}</span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          aria-pressed={grouped}
-          onClick={onToggleGrouped}
-          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
-        >
-          {grouped ? "Grouped by evidence" : "Group by evidence"}
-        </button>
-        <button
-          type="button"
-          aria-pressed={selectMode}
-          onClick={onToggleSelectMode}
-          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-apollo-surface-2 px-3.5 text-xs"
-        >
-          {selectMode ? "Exit selection" : "Select several"}
-        </button>
-        {/* The label is VISIBLE now and carries the word the options used to
-            repeat, so the option text is bare ("Most certain first", not
-            "Sort: Most certain first"). htmlFor/id ties the label to the select
-            so clicking it focuses the control; aria-label keeps the fuller
-            accessible name ("Sort by") the sr-only span used to give it. */}
-        <label
-          htmlFor="core-queue-sort"
-          className="text-muted-foreground ml-1 text-[13px] font-medium"
-        >
-          Sort
-        </label>
-        <select
-          id="core-queue-sort"
-          aria-label="Sort by"
-          value={sort}
-          onChange={(e) => onSort(e.target.value as SortKey)}
-          className="border-border-strong bg-apollo-surface focus-visible:ring-apollo-maroon rounded-md border px-2 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2"
-        >
-          {SORTS.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
-  );
+/**
+ * The short signal chips on a list row (mockup: "Repeat user · Fei Wang",
+ * "LLM 2/10", "Method strong"). Same sources as the paper pane — the counted
+ * signals off `buildSignals`, a known client on the byline, the method tier —
+ * so a chip never names evidence the pane would not show. The repeat-user chip
+ * names its person only in By evidence: in By person the whole list is that
+ * person, and repeating the name on every row would be noise. Pure.
+ */
+export function rowChips(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
+  clientCwids: ReadonlySet<string>,
+  mode: RailMode,
+): string[] {
+  const chips: string[] = [];
+  for (const s of buildSignals(row, paperCounts, clientCwids)) {
+    if (s.kind === "ack") chips.push("Acknowledged");
+    else if (s.kind === "coauthor") chips.push("Staff co-author");
+    else if (s.kind === "llm") chips.push(`LLM ${row.llmScore}/10`);
+    else if (mode === "evidence") {
+      const who = repeatUser(row, paperCounts, clientCwids);
+      chips.push(who ? `Repeat user · ${displayName(who.scholar.name)}` : "Repeat user");
+    }
+  }
+  if (matchesFilter(row, "client", clientCwids)) chips.push("Client co-author");
+  if (row.methodTier) chips.push(`Method ${row.methodTier}`);
+  return chips;
 }
 
-function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="border-apollo-border rounded border px-1 py-px font-mono text-[10px]">
-      {children}
-    </kbd>
-  );
-}
-
-// Focusable shell shared by the active and decided card states — carries the
-// keyboard contract (a/r/x/u + j/k/↑/↓), firing only when the card itself is
-// focused (not a child button/link/input), so its inner controls keep their
-// native behavior. That guard is LOAD-BEARING now that j, k and x are ordinary
-// printable characters: the queue's free-text filter box lives outside this
-// subtree entirely, and every in-card control (checkbox, Confirm, Reject, the
-// evidence disclosure) is a child, so neither can be hijacked by a shortcut.
-const CARD_SHELL =
-  "bg-apollo-surface rounded-lg border border-apollo-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-maroon";
-
-function CandidateCard({
+/**
+ * One compact row in the middle pane: checkbox, title, meta, signal chips, band
+ * and — once decided this session — its status (mockup). Clicking anywhere but
+ * the checkbox focuses the paper; below `lg` that also opens the sheet. The row
+ * is two siblings, a checkbox and a button, because a checkbox nested in a
+ * button is not valid HTML and would swallow the row click.
+ */
+function QueueListRow({
   row,
+  mode,
+  focused,
+  decided,
+  error,
+  checked,
+  onCheck,
+  onOpen,
+  paperCounts,
+  clientCwids,
+}: {
+  row: CoreQueueRow;
+  mode: RailMode;
+  focused: boolean;
+  decided: Decision | undefined;
+  error: string | undefined;
+  checked: boolean;
+  onCheck: () => void;
+  onOpen: () => void;
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
+  clientCwids: ReadonlySet<string>;
+}) {
+  const band = likelihoodBand(row.likelihood);
+  const chips = rowChips(row, paperCounts, clientCwids, mode);
+  const meta = [row.journal ?? row.journalAbbrev, row.year, `PMID ${row.pmid}`]
+    .filter((v) => v !== null && v !== "")
+    .join(" · ");
+  const status = error
+    ? { text: "Not saved", cls: "text-red-700" }
+    : decided === "claimed"
+      ? { text: "Confirmed", cls: "text-apollo-green" }
+      : decided === "rejected"
+        ? { text: "Rejected", cls: "text-red-700" }
+        : null;
+  return (
+    <li
+      data-slot="core-queue-row"
+      data-pmid={row.pmid}
+      aria-current={focused ? "true" : undefined}
+      className={`border-apollo-border flex gap-2.5 border-t px-3.5 py-3 first:border-t-0 ${
+        focused
+          ? "bg-apollo-slate-tint shadow-[inset_3px_0_0_var(--apollo-slate)]"
+          : "bg-apollo-surface"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked && !decided}
+        disabled={!!decided}
+        onChange={onCheck}
+        aria-label={`Select ${row.title}`}
+        className="mt-1 size-4 shrink-0 accent-[var(--apollo-slate)]"
+      />
+      <button
+        type="button"
+        onClick={onOpen}
+        className={`flex min-w-0 flex-1 gap-2.5 text-left focus-visible:outline-none ${
+          decided ? "opacity-60" : ""
+        }`}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="text-foreground line-clamp-2 block text-sm leading-snug">
+            {displayTitle(row.title)}
+          </span>
+          <span className="text-muted-foreground mt-0.5 block text-xs">{meta}</span>
+          {chips.length > 0 ? (
+            <span className="mt-1.5 flex flex-wrap gap-1">
+              {chips.map((c) => (
+                <span
+                  key={c}
+                  className="border-apollo-border bg-apollo-surface-2 rounded-full border px-1.5 py-px text-[11px] text-[var(--evidence-body)]"
+                >
+                  {c}
+                </span>
+              ))}
+            </span>
+          ) : null}
+        </span>
+        <span className="shrink-0 text-right text-[11px]">
+          <span className={`block font-semibold tracking-[0.06em] uppercase ${band.text}`}>
+            {band.label} {Math.round(row.likelihood * 100)}%
+          </span>
+          {status ? <span className={`mt-1 block ${status.cls}`}>{status.text}</span> : null}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/**
+ * The right-hand pane: one paper in full (mockup). Everything the old card
+ * showed on expand is here from the start — the evidence rows no longer hide
+ * behind a disclosure, since the pane holds one paper, not a scroll of them.
+ *
+ * Below `lg` this is a full-screen sheet: hidden until a row is tapped, then
+ * `fixed inset-0` with its own Close. At `lg` it is the sticky third pane and
+ * the sheet state is ignored.
+ */
+function FocusedPaper({
+  row,
+  position,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
+  sheetOpen,
+  onCloseSheet,
   clientCwids,
   paperCounts,
   decided,
+  note,
   pending,
   error,
-  expanded,
-  onToggleExpanded,
-  selectMode,
-  selected,
-  onToggleSelected,
-  onSelectShortcut,
   copied,
   onCopyPmid,
   onDecide,
   onUndo,
+  repeatAction,
 }: {
   row: CoreQueueRow;
+  position: string;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  sheetOpen: boolean;
+  onCloseSheet: () => void;
   clientCwids: ReadonlySet<string>;
   /** Per-person confirmed-paper counts for this core (see `clientPaperCounts`). */
   paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
   decided: Decision | undefined;
+  /** The reject reason given this session, if any. */
+  note: string | null;
   pending: boolean;
   error: string | undefined;
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  selectMode: boolean;
-  selected: boolean;
-  onToggleSelected: () => void;
-  /** "x": tick this row AND arm selection mode, so the shortcut works from the
-   *  queue's default state. Distinct from `onToggleSelected`, which is the
-   *  checkbox's own handler and must not turn the mode on by itself. */
-  onSelectShortcut: () => void;
   copied: boolean;
   onCopyPmid: () => void;
-  onDecide: (status: Decision) => void;
+  onDecide: (status: Decision, note?: string) => void;
   onUndo: () => void;
+  repeatAction: { label: string; onClick: () => void } | null;
 }) {
-  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (e.target !== e.currentTarget) return; // only when the shell itself is focused
-    const k = e.key.toLowerCase();
-    // j/k are the vi-style twins of ArrowDown/ArrowUp, not a second mechanism.
-    const down = k === "arrowdown" || k === "j";
-    if (down || k === "arrowup" || k === "k") {
-      e.preventDefault();
-      const li = e.currentTarget.closest("li");
-      const sibling = down ? li?.nextElementSibling : li?.previousElementSibling;
-      (sibling?.querySelector("[data-card]") as HTMLElement | null)?.focus();
-      return;
-    }
-    if (pending) return;
-    if (!decided && k === "a") {
-      e.preventDefault();
-      onDecide("claimed");
-    } else if (!decided && k === "r") {
-      e.preventDefault();
-      onDecide("rejected");
-    } else if (!decided && k === "x") {
-      // Selection is a To-review affordance; a decided row has nothing to sweep.
-      e.preventDefault();
-      onSelectShortcut();
-    } else if (decided && k === "u") {
-      e.preventDefault();
-      onUndo();
-    }
-  }
-
-  if (decided) {
-    // Tint the strip so a confirm vs. reject reads at a glance, not just from the
-    // icon — same pattern as opportunity-intake-panel's STATUS_STYLES.
-    const tint =
-      decided === "claimed" ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50";
-    return (
-      <div
-        className={`flex items-center justify-between gap-3 rounded-lg border p-4 ${tint} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-maroon`}
-        data-card
-        data-pmid={row.pmid}
-        tabIndex={0}
-        role="group"
-        aria-label={`${decided === "claimed" ? "Confirmed" : "Rejected"}: ${row.title}`}
-        aria-keyshortcuts="u j k ArrowUp ArrowDown"
-        onKeyDown={onKeyDown}
-      >
-        <div className="flex min-w-0 items-center gap-2 text-sm">
-          {decided === "claimed" ? (
-            <Check className="size-4 shrink-0 text-emerald-600" aria-hidden />
-          ) : (
-            <X className="size-4 shrink-0 text-red-600" aria-hidden />
-          )}
-          <span className={decided === "claimed" ? "text-emerald-800" : "text-red-800"}>
-            {decided === "claimed" ? "Confirmed" : "Rejected"}
-          </span>
-          <span className="text-foreground truncate">{row.title}</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {error ? (
-            <span className="text-xs text-red-600" role="alert">
-              Could not save: {error}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            disabled={pending}
-            onClick={onUndo}
-            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
-          >
-            <Undo2 className="size-3.5" aria-hidden /> Undo
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const likelihoodPct = Math.round(row.likelihood * 100);
   const band = likelihoodBand(row.likelihood);
   const signals = buildSignals(row, paperCounts, clientCwids);
-  const tokens = evidenceTokens(row, clientCwids, paperCounts);
+  // A known client on the byline: evidence a reviewer weighs, but not one of the
+  // four counted signals — so it gets its own uncounted row, in the words (and
+  // with the staff-wins de-dup) of the client token `evidenceTokens` builds.
+  const clientToken =
+    evidenceTokens(row, clientCwids, paperCounts).find((t) =>
+      t.label.startsWith("Client co-author"),
+    ) ?? null;
   // Gated on the repeat-user row being ON SCREEN, not on the prior's own decode:
   // the affinity copy points at that row, and per-person de-duplication can drop
-  // it, which left the footnote saying "it only restates the repeat-user number"
-  // with no such row anywhere on the card (round 2).
+  // it (round 2).
   const footnote = priorFootnote(
     row.topicalPrior,
     signals.some((s) => s.kind === "affinity"),
   );
-  // Method-family chips at the card top plus the "Methods used" evidence row
-  // (mockup). ONE CHIP PER FAMILY: the extractor emits an entry per
-  // (family, tool) pair, so a paper that used two tools from the same family
-  // would otherwise carry the same chip twice. Only the top-ranked entry carries
-  // a `sentence` — that is how lib/api/core-queue.ts bounds the RSC payload — so
-  // `find` is the top-ranked one, never an arbitrary pick.
-  //
-  // Both are gated on `methodTier`, because both must print it: a chip that said
-  // only "Flow cytometry" would be the bare "method family identified" the
-  // per-family tiering exists to prevent (399x lift at strong, 1.6x at weak).
+  // One chip per family (the extractor emits an entry per family+tool), and the
+  // top-ranked entry's sentence as the quote. Both gated on `methodTier`, because
+  // both must print it: a bare "Flow cytometry" would be the "method family
+  // identified" boolean the per-family tiering exists to prevent.
   const methodFamilies = row.methodTier
     ? [...new Set(row.methodEvidence.map((m) => m.family))]
     : [];
   const methodQuote = row.methodTier
     ? (row.methodEvidence.find((m) => m.sentence)?.sentence ?? null)
     : null;
-  // What the card shows OUTSIDE the four counted signals, in the words the card
-  // itself uses. The 0-signal empty state names these instead of asserting that
-  // nothing is shown: a method-only row rendered "No labelled signal." with its
-  // own green chips directly above it and a fully rendered "Methods used" quote
-  // directly below — three statements about one row, two of them false (round 2).
+  // What the pane shows OUTSIDE the four counted signals, so the 0-signal state
+  // names it instead of asserting that nothing is shown (round 2).
   const uncounted = [
     row.methodTier ? "method family" : null,
     footnote ? "prefilter prior" : null,
   ].filter((s): s is string => s !== null);
-  // The header's meta line, middot-separated: the journal, when PubMed indexed
-  // it, then the PMID. Each part is dropped when its data is missing rather than
-  // rendered empty, so the separators are built from what actually survives.
-  //
-  // FULL title first, the abbreviation only as a fallback (owner, round 2). This
-  // REVERSES #2620, whose comment argued the other way — the full title really is
-  // a paragraph for a few journals — but "Proc Natl Acad Sci U S A" is not a
-  // venue a reviewer can identify at a glance, and identifying the venue is the
-  // whole job of this line. The row is `flex-wrap`, so the longest title in
-  // PubMed ("Proceedings of the National Academy of Sciences of the United
-  // States of America", ~475px at this size) still fits the card's first column
-  // beside the date and PMID, and a narrower card moves the later parts onto a
-  // second line rather than overflowing.
+  // The meta line: FULL journal title first, the abbreviation only as a
+  // fallback (owner, round 2), then the PubMed date (or the year when PubMed
+  // never indexed one), then the PMID. Separators come from what survives.
   const journalLabel = row.journal ?? row.journalAbbrev;
   const addedToPubMed = formatAddedToPubMed(row.dateAddedToEntrez);
   const metaParts: Array<{ key: string; node: ReactNode }> = [];
   if (journalLabel) metaParts.push({ key: "journal", node: <span>{journalLabel}</span> });
   if (addedToPubMed) metaParts.push({ key: "added", node: <span>{addedToPubMed}</span> });
-  // No index date on file — the publication year is the only vintage left.
   else if (row.year !== null)
     metaParts.push({ key: "year", node: <span className="tabular-nums">{row.year}</span> });
   metaParts.push({
     key: "pmid",
-    // PMID shown verbatim (curators key off it); links to PubMed when present.
     node: row.pubmedUrl ? (
       <a
         href={row.pubmedUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="hover:text-foreground inline-flex items-center gap-1 tabular-nums hover:underline"
+        className="text-apollo-slate inline-flex items-center gap-1 tabular-nums hover:underline"
       >
         PMID {row.pmid} <ExternalLink className="size-3" aria-hidden />
       </a>
@@ -2524,263 +2968,294 @@ function CandidateCard({
       <span className="tabular-nums">PMID {row.pmid}</span>
     ),
   });
+  const statusWord =
+    decided === "claimed" ? "Confirmed" : decided === "rejected" ? "Rejected" : null;
   return (
-    <div
-      className={`${CARD_SHELL} px-5 py-4`}
-      data-card
+    <article
+      data-slot="core-queue-focus"
       data-pmid={row.pmid}
-      tabIndex={0}
-      role="group"
-      aria-label={`Candidate: ${row.title}`}
-      aria-keyshortcuts="a r x j k ArrowUp ArrowDown"
-      onKeyDown={onKeyDown}
+      aria-label={`${statusWord ?? "Candidate"}: ${row.title}`}
+      className={`${
+        sheetOpen ? "fixed inset-0 z-40 flex overflow-y-auto" : "hidden"
+      } bg-apollo-surface lg:border-apollo-border min-w-0 flex-col gap-4 p-5 lg:sticky lg:inset-auto lg:top-4 lg:z-auto lg:flex lg:overflow-visible lg:rounded-[var(--apollo-radius-card)] lg:border lg:px-[22px] lg:py-5 lg:shadow-[var(--apollo-shadow-card)]`}
     >
-      <div
-        className={`grid items-start gap-4 ${
-          selectMode
-            ? "grid-cols-[26px_minmax(0,1fr)_112px_auto]"
-            : "grid-cols-[minmax(0,1fr)_112px_auto]"
-        }`}
-      >
-        {selectMode ? (
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggleSelected}
-            aria-label={`Select ${row.title}`}
-            className="mt-1.5 size-4"
-          />
-        ) : null}
-
-        <div className="min-w-0">
-          {methodFamilies.length > 0 ? (
-            // Green pills at the top of the card, mockup parity. The tier rides
-            // WITH them, and the caveat is on screen rather than in a `title`
-            // attribute a touch user can never open: these labels come from an
-            // extractor reading the paper's own methods text, so they say what
-            // the PAPER did — never that this core did it. Uncounted by design;
-            // `evidenceTokens` carries the same reasoning at length.
-            <p className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-              {methodFamilies.map((f) => (
-                <span
-                  key={f}
-                  className="border-apollo-green-tint-border bg-apollo-green-tint text-apollo-green-foreground inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium"
-                >
-                  {f}
-                </span>
-              ))}
-              <span className="text-muted-foreground text-[11px]">
-                {row.methodTier} method match — what the paper did, not whether this core did it
-              </span>
-            </p>
-          ) : null}
-          {row.authorAffinity === null ? (
-            <p className="mb-1.5">
-              <span className="border-border-strong text-muted-foreground bg-apollo-surface-2 inline-block rounded border px-2 py-0.5 text-[11px]">
-                No prior core usage anywhere on this byline
-              </span>
-            </p>
-          ) : null}
-          <h3 className="text-foreground text-[15px] font-medium">{displayTitle(row.title)}</h3>
-          <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
-            {metaParts.map((part, i) => (
-              <span key={part.key} className="inline-flex items-center gap-1.5">
-                {i > 0 ? (
-                  <span className="text-muted-foreground/60" aria-hidden>
-                    ·
-                  </span>
-                ) : null}
-                {part.node}
-              </span>
-            ))}
-            <button
-              type="button"
-              onClick={onCopyPmid}
-              title={copied ? "PMID copied" : "Copy PMID"}
-              aria-label={copied ? "PMID copied" : "Copy PMID"}
-              className="border-border-strong text-muted-foreground hover:text-foreground bg-apollo-surface-2 inline-flex size-5 items-center justify-center rounded border"
-            >
-              {copied ? (
-                <Check className="size-3 text-emerald-600" aria-hidden />
-              ) : (
-                <Copy className="size-3" aria-hidden />
-              )}
-            </button>
-          </div>
-          <Byline row={row} clientCwids={clientCwids} />
-          {row.synopsis ? (
-            <p className="bg-muted/60 border-apollo-border text-muted-foreground mt-2.5 rounded-md border px-3 py-2 text-[13px] leading-snug">
-              {row.synopsis}
-            </p>
-          ) : null}
-
+      <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
+        <span>{position}</span>
+        <span className="flex items-center gap-1">
           <button
             type="button"
-            onClick={onToggleExpanded}
-            aria-expanded={expanded}
-            className="border-border-strong bg-apollo-surface-2 mt-2.5 flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left"
+            disabled={!hasPrev}
+            onClick={onPrev}
+            className="hover:text-foreground rounded-md px-2 py-1 disabled:opacity-40"
           >
-            <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
-              {tokens.length > 0 ? (
-                tokens.map((t, i) => (
-                  <span key={t.label} className="inline-flex items-baseline gap-1 text-[12.5px]">
-                    {i > 0 ? (
-                      <span className="text-muted-foreground/60 font-bold" aria-hidden>
-                        ·
-                      </span>
-                    ) : null}
-                    <span className="text-muted-foreground">{t.label}</span>
-                    <span className="text-foreground font-medium">{t.value}</span>
-                  </span>
-                ))
-              ) : (
-                <span className="text-foreground text-[12.5px]">No labelled signal.</span>
-              )}
-            </span>
-            <span
-              title={expanded ? "Hide evidence" : "Show evidence"}
-              aria-label={expanded ? "Hide evidence" : "Show evidence"}
-              className="border-border-strong text-apollo-slate bg-apollo-surface inline-flex size-7 shrink-0 items-center justify-center rounded-lg border"
-            >
-              {expanded ? (
-                <ChevronUp className="size-4" aria-hidden />
-              ) : (
-                <ChevronDown className="size-4" aria-hidden />
-              )}
-            </span>
+            Previous
           </button>
+          <button
+            type="button"
+            disabled={!hasNext}
+            onClick={onNext}
+            className="hover:text-foreground rounded-md px-2 py-1 disabled:opacity-40"
+          >
+            Next
+          </button>
+          <button
+            type="button"
+            onClick={onCloseSheet}
+            aria-label="Close paper"
+            className="border-apollo-border-strong text-foreground ml-1 inline-flex size-7 items-center justify-center rounded-md border lg:hidden"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+        </span>
+      </div>
 
-          {/* Inside the FIRST GRID COLUMN, not a sibling of the grid. As a
-              sibling it spanned the whole card, so it ran past the right edge of
-              the collapsed strip it expands — past the score meter and the
-              Confirm/Reject buttons — and the two blocks never lined up (round 2,
-              item 7). Same column, same width, no `ml-1`: the border rule now
-              starts on the strip's own left edge and reads as its continuation. */}
-          {expanded ? (
-            <div className="border-border-strong mt-3 border-l-2 pl-3.5">
-              {signals.length === 0 ? (
-                <p className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded-lg border px-3 py-2.5 text-[12.5px] leading-relaxed">
-                  {/* "counted", not "labelled": the row can carry labels this panel
-                      does not count — a method family is chipped, tokened and quoted
-                      on the very same card. So the ending names whatever IS on
-                      screen, and only the genuinely bare row says the queue is
-                      showing nothing. */}
-                  No counted signal.{" "}
-                  {uncounted.length > 0
-                    ? `The ${uncounted.join(" and ")} on this card ${uncounted.length > 1 ? "are" : "is"} all it carries; judge it on the paper.`
-                    : "The score moved on engine inputs this queue doesn’t show; judge it on the paper."}
-                </p>
-              ) : (
-                <ul aria-label="evidence">
-                  {signals.map((s) => (
-                    <SignalRow
-                      key={s.kind}
-                      signal={s}
-                      row={row}
-                      paperCounts={paperCounts}
-                      clientCwids={clientCwids}
-                    />
-                  ))}
-                </ul>
-              )}
-              {methodQuote ? (
-                // Deliberately NOT an <li> inside the evidence list and NOT in
-                // `buildSignals`: the method family is weighted 0.00 in the
-                // engine's combine.WEIGHTS and 63% of tiered rows are "weak",
-                // where the measured lift inverts to BELOW background. So it is
-                // shown in full, always with its tier, and never counted toward
-                // SIGNAL_COUNT — the same reasoning as the strip token.
-                <div className="border-apollo-border grid grid-cols-[200px_minmax(0,1fr)] items-start gap-3.5 border-t py-2.5">
-                  <div>
-                    <div className="text-foreground text-[12.5px] leading-tight font-semibold">
-                      Methods used
-                    </div>
-                    <div className="text-muted-foreground mt-1 text-[11px]">
-                      {row.methodTier} · not counted
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <blockquote className="border-border-strong bg-apollo-lock-bg text-foreground rounded-r-md border-l-2 px-2.5 py-2 text-[12.5px] leading-relaxed">
-                      “{methodQuote}”
-                    </blockquote>
-                    <p className="text-muted-foreground mt-1.5 text-[12px] leading-relaxed">
-                      Read out of the paper’s own methods text: it says what the paper did, not
-                      whether this core did it.
-                    </p>
-                  </div>
-                </div>
+      <div>
+        {row.authorAffinity === null ? (
+          <p className="mb-1.5">
+            <span className="border-border-strong text-muted-foreground bg-apollo-surface-2 inline-block rounded border px-2 py-0.5 text-[11px]">
+              No prior core usage anywhere on this byline
+            </span>
+          </p>
+        ) : null}
+        <h3 className="text-foreground text-[19px] leading-snug font-medium text-pretty">
+          {displayTitle(row.title)}
+        </h3>
+        <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px]">
+          {metaParts.map((part, i) => (
+            <span key={part.key} className="inline-flex items-center gap-1.5">
+              {i > 0 ? (
+                <span className="text-muted-foreground/60" aria-hidden>
+                  ·
+                </span>
               ) : null}
-              {footnote ? (
-                <p className="text-muted-foreground mt-2 text-[12px] leading-relaxed italic">
-                  {footnote}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+              {part.node}
+            </span>
+          ))}
+          <button
+            type="button"
+            onClick={onCopyPmid}
+            title={copied ? "PMID copied" : "Copy PMID"}
+            aria-label={copied ? "PMID copied" : "Copy PMID"}
+            className="border-border-strong text-muted-foreground hover:text-foreground bg-apollo-surface-2 inline-flex size-5 items-center justify-center rounded border"
+          >
+            {copied ? (
+              <Check className="size-3 text-emerald-600" aria-hidden />
+            ) : (
+              <Copy className="size-3" aria-hidden />
+            )}
+          </button>
         </div>
+        <Byline row={row} clientCwids={clientCwids} />
+        {row.synopsis ? (
+          <p className="bg-apollo-surface-2 mt-2.5 rounded-lg px-3 py-2 text-[13px] leading-snug text-[var(--evidence-body)]">
+            {row.synopsis}
+          </p>
+        ) : null}
+      </div>
 
-        <div>
+      <div
+        data-slot="core-queue-meter"
+        className={`flex flex-wrap items-center gap-3 rounded-[10px] px-3.5 py-3 ${
+          decided === "claimed"
+            ? "bg-emerald-50"
+            : decided === "rejected"
+              ? "bg-red-50"
+              : "bg-apollo-surface-2"
+        }`}
+      >
+        <div className="min-w-0 flex-[1_1_140px]">
           <div
-            className={`text-[11px] font-semibold uppercase tracking-[0.04em] ${band.text}`}
+            className={`text-[11px] font-semibold tracking-[0.04em] uppercase ${band.text}`}
             data-slot="core-queue-score"
           >
             {band.label} {likelihoodPct}%
           </div>
-          <span className="bg-apollo-surface-2 border-apollo-border mt-1 block h-1.5 overflow-hidden rounded-full border">
+          <span className="bg-apollo-border-strong mt-1.5 block h-1 overflow-hidden rounded-full">
             <span
               className={`block h-full rounded-full ${band.fill}`}
               style={{ width: `${likelihoodPct}%` }}
             />
           </span>
-          <div className="text-muted-foreground mt-1 text-[10.5px]">
-            {signals.length} of {SIGNAL_COUNT} signals
+          <div className="text-muted-foreground mt-1 text-xs">
+            {signals.length} of {SIGNAL_COUNT} signals fired
           </div>
         </div>
-
-        <div className="flex shrink-0 gap-2">
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => onDecide("claimed")}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white disabled:opacity-50"
+        {statusWord ? (
+          <div className="flex items-center gap-2.5 text-[13px]">
+            <span
+              className={`font-medium ${decided === "claimed" ? "text-emerald-800" : "text-red-800"}`}
+            >
+              {statusWord}
+              {note ? ` · ${note}` : ""}
+            </span>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={onUndo}
+              className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm disabled:opacity-50"
+            >
+              <Undo2 className="size-3.5" aria-hidden /> Undo
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => onDecide("claimed")}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--color-accent-slate)] px-3.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              <Check className="size-3.5" aria-hidden /> Confirm
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => onDecide("rejected")}
+              className="border-border-strong text-foreground bg-background inline-flex h-9 items-center gap-1.5 rounded-md border px-3.5 text-sm disabled:opacity-50"
+            >
+              <X className="size-3.5" aria-hidden /> Reject
+            </button>
+          </div>
+        )}
+        {statusWord ? null : (
+          <div
+            role="group"
+            aria-label="Reject with a reason"
+            className="text-muted-foreground flex basis-full flex-wrap items-center gap-1.5 text-xs"
           >
-            <Check className="size-3.5" aria-hidden /> Confirm
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => onDecide("rejected")}
-            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
-          >
-            <X className="size-3.5" aria-hidden /> Reject
-          </button>
-        </div>
+            <span>Reject with a reason:</span>
+            {REJECT_REASONS.map((reason) => (
+              <button
+                key={reason}
+                type="button"
+                disabled={pending}
+                onClick={() => onDecide("rejected", reason)}
+                className="border-apollo-border-strong bg-apollo-surface text-foreground rounded-full border px-2.5 py-0.5 disabled:opacity-50"
+              >
+                {reason}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-
       {error ? (
-        <p className="mt-2 text-xs text-red-600" role="alert">
+        <p className="-mt-2 text-xs text-red-600" role="alert">
           Could not save: {error}
         </p>
       ) : null}
-    </div>
+
+      <div>
+        <p className="text-muted-foreground mb-1 text-[11px] tracking-[0.1em] uppercase">
+          Why this surfaced
+        </p>
+        {signals.length === 0 ? (
+          <p className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded-lg border px-3 py-2.5 text-[12.5px] leading-relaxed">
+            {/* "counted", not "labelled": the paper can carry labels this list
+                does not count — a method family is chipped and quoted on the
+                very same pane. So the ending names whatever IS on screen. */}
+            No counted signal.{" "}
+            {uncounted.length > 0
+              ? `The ${uncounted.join(" and ")} on this card ${uncounted.length > 1 ? "are" : "is"} all it carries; judge it on the paper.`
+              : "The score moved on engine inputs this queue doesn’t show; judge it on the paper."}
+          </p>
+        ) : (
+          <ul aria-label="evidence">
+            {signals.map((s) => (
+              <SignalRow
+                key={s.kind}
+                signal={s}
+                row={row}
+                paperCounts={paperCounts}
+                clientCwids={clientCwids}
+                action={s.kind === "affinity" ? repeatAction : null}
+              />
+            ))}
+          </ul>
+        )}
+        {clientToken ? (
+          <div
+            data-slot="core-queue-client-row"
+            className="border-apollo-border grid grid-cols-[minmax(0,170px)_minmax(0,1fr)] items-start gap-3.5 border-t py-3"
+          >
+            <div>
+              <div className="text-foreground text-[13px] leading-tight font-medium">
+                {clientToken.label}
+              </div>
+              <div className="text-muted-foreground mt-1 text-xs">Known client · not counted</div>
+            </div>
+            <div className="text-foreground min-w-0 text-[13px] leading-normal font-medium">
+              {clientToken.value}
+            </div>
+          </div>
+        ) : null}
+        {row.methodTier ? (
+          // Deliberately NOT an <li> in the evidence list and NOT in
+          // `buildSignals`: the method family is weighted 0.00 in the engine's
+          // combine.WEIGHTS and 63% of tiered rows are "weak", where the measured
+          // lift inverts to BELOW background. Shown in full, always with its
+          // tier, never counted toward SIGNAL_COUNT.
+          <div
+            data-slot="core-queue-methods"
+            className="border-apollo-border grid grid-cols-[minmax(0,170px)_minmax(0,1fr)] items-start gap-3.5 border-t py-3"
+          >
+            <div>
+              <div className="text-foreground text-[13px] leading-tight font-medium">
+                Methods used
+              </div>
+              <div className="text-muted-foreground mt-1 text-xs">
+                {row.methodTier} · context only
+              </div>
+            </div>
+            <div className="flex min-w-0 flex-col gap-2">
+              <p className="flex flex-wrap gap-1">
+                {methodFamilies.map((f) => (
+                  <span
+                    key={f}
+                    className="border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate inline-block rounded-full border px-2 py-0.5 text-xs"
+                  >
+                    {f}
+                  </span>
+                ))}
+              </p>
+              {methodQuote ? (
+                <blockquote className="border-apollo-border-strong border-l-2 pl-2.5 text-[13px] leading-normal text-[var(--evidence-body)]">
+                  “{methodQuote}”
+                </blockquote>
+              ) : null}
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                {row.methodTier} method match — what the paper did, not whether this core did it
+              </p>
+            </div>
+          </div>
+        ) : null}
+        {footnote ? (
+          <p className="text-muted-foreground mt-2 text-[12px] leading-relaxed italic">
+            {footnote}
+          </p>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
 /** One fired signal: label + strength glyphs on the left, the evidence itself on
  *  the right (a value line, a plain-language detail, and the quote when the run
- *  captured one). */
+ *  captured one), and an optional link-style action under it (the repeat-user
+ *  row's "Review all N papers by X"). */
 function SignalRow({
   signal,
   row,
   paperCounts,
   clientCwids,
+  action = null,
 }: {
   signal: Signal;
   row: CoreQueueRow;
   paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
   /** The same set `buildSignals` de-duplicated against — without it this row
-   *  would name a person the strip above already excluded. */
+   *  would name a person the pane's other rows already name. */
   clientCwids: ReadonlySet<string>;
+  action?: { label: string; onClick: () => void } | null;
 }) {
   let label: string;
   let value: string | null = null;
@@ -2838,9 +3313,9 @@ function SignalRow({
     }
   }
   return (
-    <li className="border-apollo-border grid grid-cols-[200px_minmax(0,1fr)] items-start gap-3.5 border-t py-2.5">
+    <li className="border-apollo-border grid grid-cols-[minmax(0,170px)_minmax(0,1fr)] items-start gap-3.5 border-t py-3">
       <div>
-        <div className="text-foreground text-[12.5px] font-semibold leading-tight">{label}</div>
+        <div className="text-foreground text-[13px] font-medium leading-tight">{label}</div>
         <div className="mt-1 flex items-center gap-1.5">
           <StrengthGlyphs dots={signal.dots} />
           <span className="text-muted-foreground text-[11px]">{signal.strength}</span>
@@ -2857,6 +3332,15 @@ function SignalRow({
           <blockquote className="border-border-strong bg-apollo-lock-bg text-foreground mt-1.5 rounded-r-md border-l-2 px-2.5 py-2 text-[12.5px] leading-relaxed">
             “<QuoteWithAlias text={quote} alias={row.ackAlias} />”
           </blockquote>
+        ) : null}
+        {action ? (
+          <button
+            type="button"
+            onClick={action.onClick}
+            className="text-apollo-slate mt-1.5 text-[13px] hover:underline"
+          >
+            {action.label}
+          </button>
         ) : null}
       </div>
     </li>

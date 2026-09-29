@@ -287,6 +287,9 @@ describe("buildPeopleDoc — golden snapshots", () => {
         {
           cwid: "ann1234",
           role: "PI",
+          // #2081 — `piRoleEver` keys on the funding-index row predicate, which
+          // needs a real (NOT NULL in the schema) externalId.
+          externalId: "INFOED-ACC-001-ann1234",
           endDate: FAR_FUTURE,
           mechanism: "R01",
         },

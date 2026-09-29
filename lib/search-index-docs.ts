@@ -45,6 +45,7 @@ import { deriveGrantSignals } from "@/lib/api/match-researchers";
 // `lib/funding-roles.ts` is deliberately import-free — safe here, unlike
 // `lib/api/data-quality.ts`, which re-exports the same PI_ROLES but constructs Prisma.
 import { isPiRole } from "@/lib/funding-roles";
+import { hasFundingPiChip } from "@/lib/funding-projection";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
 import type { TrialEvidence } from "@/lib/search-trial-evidence";
 import { buildClinicalAnchors, loadSpecialtyAnchorMap } from "@/lib/clinical-mesh-anchors";
@@ -652,11 +653,11 @@ export const PEOPLE_INDEX_SELECT = {
   // line reads O(1) — same doc-precompute pattern as `meshSubtreeCounts`. Suppressed
   // / hidden pmids are filtered in `buildPeopleDoc` against the kept-authorship set.
   publicationTopics: { select: { pmid: true, parentTopicId: true } },
-  // #2239 — UNFILTERED by source. `grantCount` must count the same population
-  // the profile Funding section lists, which includes prior-institution
-  // RePORTER awards. The active-grant signals (hasActiveGrants / piRoleEver /
-  // activePiGrantCount) still count WCM-administered awards only: `buildPeopleDoc`
-  // drops source='RePORTER' rows for those in memory (`wcmGrants`).
+  // UNFILTERED by source (#2081, #2239). `piRoleEver` must see the same rows the
+  // funding index does (RePORTER kept, #2285), and `grantCount` counts the
+  // population the profile Funding section lists, which includes
+  // prior-institution RePORTER awards. hasActiveGrants / activePiGrantCount
+  // re-apply the `source != 'RePORTER'` filter in `buildPeopleDoc` (`wcmGrants`).
   grants: true,
   authorships: {
     // Issue #63 — drop Retraction / Erratum so retracted-paper titles
@@ -1023,6 +1024,11 @@ export async function buildPeopleDoc(
   // OPTIONAL per-cwid clinical-trial evidence (`loadTrialEvidenceByCwid`).
   // When OMITTED the trial fields are never emitted (byte-identical doc).
   trialEvidenceByCwid?: Map<string, TrialEvidence>,
+  // #2081 — OPTIONAL active grant-suppression set (`loadAllGrantSuppressions`),
+  // the same set the funding index drops rows by. Feeds `piRoleEver` so a
+  // suppressed PI row no longer counts toward "PI (ever)" while rendering no
+  // chip. When OMITTED no row is treated as suppressed.
+  suppressedGrants?: ReadonlySet<string>,
   // #2239 — OPTIONAL funding-section visibility (`loadFundingVisibility`): the
   // #160 grant suppressions and `hideFunding` section overrides the profile
   // applies to its Funding list, so `grantCount` counts that same population.
@@ -1380,14 +1386,15 @@ export async function buildPeopleDoc(
   // is on an MPI award indexed as `piRoleEver: false` and never appeared in the PI
   // facet at all.
   //
-  // These signals count WCM-administered awards only, not individual
-  // prior-institution history — the `source: { not: "RePORTER" }` scope that used
-  // to live on `PEOPLE_INDEX_SELECT`'s `grants` relation, moved here (#2239) so
-  // `grantCount` below can see the RePORTER rows the profile lists.
-  const wcmGrants = s.grants.filter((g) => g.source !== "RePORTER");
+  // #2081 — `piRoleEver` ("PI (ever)") is computed with the funding index's own
+  // chip predicate over ALL the scholar's grant rows, so the facet counts exactly
+  // the displayed scholars who render as a PI chip on a Funding row (RePORTER
+  // rows included, suppressed rows excluded). The other grant signals stay
+  // scoped to WCM-administered awards (not prior-institution RePORTER history).
   const now = new Date();
+  const wcmGrants = s.grants.filter((g) => g.source !== "RePORTER");
   const hasActiveGrants = wcmGrants.some((g) => isFundingActive(g.endDate, now));
-  const piRoleEver = wcmGrants.some((g) => isPiRole(g.role));
+  const piRoleEver = hasFundingPiChip(s.grants, suppressedGrants ?? new Set<string>());
   const activePiGrantCount = wcmGrants.reduce((n, g) => {
     if (!isPiRole(g.role)) return n;
     if (!isFundingActive(g.endDate, now)) return n;

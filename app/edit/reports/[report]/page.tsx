@@ -45,24 +45,38 @@
  * badge, "Edit details", the body's `subtitle`, the "About this report"
  * disclosure) → the body's `main`. `force-dynamic`, noindex, like every `/edit/*` console page.
  *
+ * A core (`kind=core`: reports 3, 6, 11, 12, 13) swaps "← All reports" for
+ * `CoreReportsHeader` (mockup `Core pub review/Core Reports.dc.html`): "←
+ * Review queue", the "Viewing" picker over the cores this viewer can report
+ * on (`loadReportableUnitsForActor(…, ["core"])`, the index's own list), the
+ * "{core} reports" h1 and a tab per core report; `ReportHeader` then drops its
+ * own h1 (`underCoreHeader`). Every other kind renders exactly as before.
+ *
  * Loading: no route `loading.tsx` (it replaced the whole page, top bar
  * included, since the shell needs the session). The body streams under
  * `Suspense` with `ReportBodySkeleton`, so only the report area shimmers.
  */
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import {
+  CoreReportsHeader,
+  type CoreReportTab,
+} from "@/components/edit/reports/core-reports-header";
 import type { ReportAccessPopoverProps } from "@/components/edit/report-access-popover";
 import { ReportHeader } from "@/components/edit/report-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import type { EditSession } from "@/lib/auth/superuser";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { db } from "@/lib/db";
 import {
+  loadReportableUnitsForActor,
   loadReportsContext,
+  REPORT_NUMBERS_BY_KIND,
   resolveNumberedReportCenterCode,
   type ReportableUnitKind,
 } from "@/lib/edit/cancer-center-reports";
@@ -159,6 +173,8 @@ export default async function EditReportPage({
   // here would be a latency regression on the heaviest report.
   let loadAccess: () => Promise<ReportAccessPopoverProps>;
   let render: () => Promise<ReportRender>;
+  // A core's shared header (tabs + picker); null for every other kind.
+  let loadCoreHeader: () => Promise<ReactNode> = async () => null;
 
   if (def.gate === "unit") {
     const allowedKinds = unitKindsFor(n);
@@ -194,6 +210,9 @@ export default async function EditReportPage({
         : `/edit/reports?center=${encodeURIComponent(code)}&kind=${kind}`;
     loadAccess = async () => ({ mode: "unit" });
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
+    if (kind === "core") {
+      loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n);
+    }
   } else if (def.gate === "admin") {
     if (!(await canViewArticleCountReport(session))) notFound();
     back = "/edit/reports";
@@ -225,12 +244,13 @@ export default async function EditReportPage({
   // Mark it handled so a body that fails before a boundary awaits it is not
   // reported as an unhandled rejection; the boundaries still see the error.
   rendered.catch(() => {});
-  const [pendingSlugRequests, pendingHonors, access] = await Promise.all([
+  const [pendingSlugRequests, pendingHonors, access, coreHeader] = await Promise.all([
     session.isSuperuser && isSlugRequestEnabled()
       ? countPendingSlugRequests(db.read)
       : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
     loadAccess(),
+    loadCoreHeader(),
   ]);
   // Keyed on the query so a filter change (same route, new params) shows the
   // skeleton again instead of leaving the old results up while it loads.
@@ -243,10 +263,12 @@ export default async function EditReportPage({
       pendingHonors={pendingHonors}
       reportsTab
     >
-      <Link href={back} className="text-apollo-slate mb-4 inline-block text-sm hover:underline">
-        &larr; All reports
-      </Link>
-      <ReportHeader n={n} session={session} access={access}>
+      {coreHeader ?? (
+        <Link href={back} className="text-apollo-slate mb-4 inline-block text-sm hover:underline">
+          &larr; All reports
+        </Link>
+      )}
+      <ReportHeader n={n} session={session} access={access} underCoreHeader={coreHeader !== null}>
         <Suspense key={bodyKey} fallback={<Skeleton className="h-4 w-96 max-w-full" />}>
           <RenderedPart rendered={rendered} part="subtitle" />
         </Suspense>
@@ -255,6 +277,39 @@ export default async function EditReportPage({
         <RenderedPart rendered={rendered} part="main" />
       </Suspense>
     </ConsoleShell>
+  );
+}
+
+/** `CoreReportsHeader` for one core's report `n`: the viewer's cores A–Z (the
+ *  one on screen kept even if the list somehow lacks it) and a tab per
+ *  `REPORT_NUMBERS_BY_KIND.core` report, named from `report_meta`. */
+async function coreReportsHeader(
+  session: EditSession,
+  coreId: string,
+  coreName: string,
+  n: ReportKey,
+): Promise<ReactNode> {
+  const [units, meta] = await Promise.all([
+    loadReportableUnitsForActor(session, db.read, ["core"]),
+    loadReportMeta(),
+  ]);
+  const options = units
+    .filter((u) => u.kind === "core")
+    .map((u) => ({ code: u.code, name: u.name }));
+  if (!options.some((o) => o.code === coreId)) options.push({ code: coreId, name: coreName });
+  options.sort((a, b) => a.name.localeCompare(b.name));
+  const tabs: CoreReportTab[] = REPORT_NUMBERS_BY_KIND.core.flatMap((num) => {
+    const m = meta.get(String(num) as ReportKey);
+    return m ? [{ n: m.key, name: m.name, slug: m.slug }] : [];
+  });
+  return (
+    <CoreReportsHeader
+      coreId={coreId}
+      coreName={coreName}
+      options={options}
+      tabs={tabs}
+      current={n}
+    />
   );
 }
 

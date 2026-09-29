@@ -116,12 +116,15 @@ beforeEach(() => {
   mockHonorsTabVisible.mockReturnValue(false);
   mockPendingHonors.mockResolvedValue(0);
   mockSession.mockResolvedValue({ cwid: "edt1", isSuperuser: true, isCommsSteward: false });
-  mockFindFirst.mockImplementation((args: { where: { source: string; status?: string } }) => {
+  mockFindFirst.mockImplementation((args: { where: { source: string; status?: string | { in: string[] } } }) => {
     const f = fixtures[args.where.source];
     // The loader issues exactly two shapes: the newest SUCCESS, and the newest
     // attempt of any outcome.
+    // A source with `liveStatuses` asks for its success row as `{ in: [...] }`.
     return Promise.resolve(
-      args.where.status === "success" ? (f?.success ?? null) : (f?.attempt ?? null),
+      args.where.status === "success" || typeof args.where.status === "object"
+        ? (f?.success ?? null)
+        : (f?.attempt ?? null),
     );
   });
 });
@@ -168,6 +171,18 @@ const annual: TrackedSpec = { cadence: "annual" };
 
 /** The loader needs exactly one Prisma model, so the fake is one method. */
 const fakeClient = () => ({ etlRun: { findFirst: mockFindFirst } }) as unknown as EtlStatusClient;
+
+describe("liveStatuses (spotlight gate)", () => {
+  it("counts a skipped gate run as alive, and only that source", async () => {
+    await loadEtlStatus(fakeClient(), new Date(NOW), "prod");
+    const where = (source: string) =>
+      mockFindFirst.mock.calls
+        .map((c) => c[0].where)
+        .find((w) => w.source === source && w.completedAt);
+    expect(where("ReciterAI-spotlight-gate")?.status).toEqual({ in: ["success", "skipped"] });
+    expect(where("ED")?.status).toBe("success");
+  });
+});
 
 describe("etl-status state mapping", () => {
   it("grades a recent success as up to date and an old one as late", () => {
@@ -475,8 +490,8 @@ describe("/edit/etl-status page", () => {
   });
 
   // Hierarchy, not Tools: Hierarchy is one of the two loaders that actually
-  // writes `manifestGeneratedAt` (the other is Spotlight, which carries an ack
-  // and so grades to "known issue" here). Tools is completedAt-anchored by
+  // writes `manifestGeneratedAt` (the other is Spotlight, which grades on its
+  // run via `anchorOnRun` and so ignores the manifest). Tools is completedAt-anchored by
   // design, so a Tools fixture would assert on a row prod cannot emit.
   it("paints a frozen artifact as late even though the import finished minutes ago", async () => {
     fixtures = {
@@ -505,8 +520,7 @@ describe("/edit/etl-status page", () => {
 
   it("renders a live acknowledgement as its own state, neither green nor red", async () => {
     const acked = Object.entries(TRACKED).find(([, s]) => s.ack !== undefined);
-    // If the last ack is ever removed, this must be a deliberate act — the same
-    // posture tests/unit/freshness-sla.test.ts already takes on Spotlight.
+    // If the last ack is ever removed, this must be a deliberate act.
     expect(acked?.[1].ack, "no source carries an ack any more").toBeDefined();
     const [source, spec] = acked!;
     const ack = spec.ack!;

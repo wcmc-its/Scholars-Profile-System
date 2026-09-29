@@ -53,6 +53,8 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/edit/cancer-center-reports", () => ({
   loadReportsContext: h.mockLoadReportsContext,
   resolveNumberedReportCenterCode: h.mockResolveNumbered,
+  // The core header (`?kind=core`) lists the viewer's cores.
+  loadReportableUnitsForActor: vi.fn().mockResolvedValue([]),
   REPORT_NUMBERS_BY_KIND: {
     center: [1, 2, 3, 4, 5, 6],
     department: [3, 6],

@@ -221,11 +221,14 @@ async function indexPeople(concreteIndex: string) {
   // above) and pass it to every `buildPeopleDoc`. Deliberately a SEPARATE
   // query from `PEOPLE_INDEX_SELECT`'s `grants` relation below — the
   // hasActiveGrants / activePiGrantCount signals built from that relation
-  // drop `source = "RePORTER"` rows (in memory since #2239); ESI
+  // drop `source = "RePORTER"` rows in memory (#2239); ESI
   // eligibility needs the scholar's FULL unfiltered grant history (see
   // `loadEsiEligibilityByCwid`'s doc comment in `lib/search-index-docs.ts`).
   const esiEligibleByCwid = await loadEsiEligibilityByCwid(prisma);
   const trialEvidenceByCwid = await loadTrialEvidenceByCwid(prisma);
+  // #2081 — the funding index's grant-suppression set, so `piRoleEver` drops
+  // the same suppressed rows the Funding tab's PI chips do.
+  const suppressedGrants = await loadAllGrantSuppressions(prisma);
   // #2239 — grant suppressions + `hideFunding` overrides, once per build, so
   // each doc's `grantCount` counts the rows the profile Funding section lists.
   const fundingVisibility = await loadFundingVisibility(prisma);
@@ -269,6 +272,7 @@ async function indexPeople(concreteIndex: string) {
           overviewOverrides,
           esiEligibleByCwid,
           trialEvidenceByCwid,
+          suppressedGrants,
           fundingVisibility,
         ),
       ),

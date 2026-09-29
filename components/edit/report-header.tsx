@@ -38,27 +38,50 @@ export type ReportHeaderProps = {
   access?: ReportAccessPopoverProps;
   /** The page's dynamic subtitle `<p>`, rendered under the heading row. */
   children?: React.ReactNode;
+  /** Under `CoreReportsHeader` (a core's report): that header owns the `<h1>`
+   *  and its selected tab already names the report, so the name here is a
+   *  screen-reader-only `<h2>` and the badge rides the eyebrow row. */
+  underCoreHeader?: boolean;
 };
 
-export async function ReportHeader({ n, session, access, children }: ReportHeaderProps) {
+export async function ReportHeader({
+  n,
+  session,
+  access,
+  children,
+  underCoreHeader = false,
+}: ReportHeaderProps) {
   const meta = await reportMetaFor(n);
   const canEditMeta = session.isSuperuser;
   const canManageAccess = access?.mode === "person" && access.canManage;
   const request = canEditMeta ? await loadReportRequestRecord(n) : null;
+  const badge = access && (
+    <span className="inline-flex" data-testid="report-header-access">
+      <ReportAccessPopover {...access} />
+    </span>
+  );
   return (
     <div className="flex flex-wrap items-start justify-between gap-6">
       <div className="min-w-0 flex-1">
-        <div className="text-muted-foreground mb-1.5 text-xs font-semibold tracking-[0.08em] uppercase tabular-nums">
-          Report {n}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="m-0 text-[26px] font-bold tracking-[-0.01em]">{meta.name}</h1>
-          {access && (
-            <span className="inline-flex" data-testid="report-header-access">
-              <ReportAccessPopover {...access} />
+        {underCoreHeader ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="sr-only">{meta.name}</h2>
+            <span className="text-muted-foreground text-xs font-semibold tracking-[0.08em] uppercase tabular-nums">
+              Report {n}
             </span>
-          )}
-        </div>
+            {badge}
+          </div>
+        ) : (
+          <>
+            <div className="text-muted-foreground mb-1.5 text-xs font-semibold tracking-[0.08em] uppercase tabular-nums">
+              Report {n}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="m-0 text-[26px] font-bold tracking-[-0.01em]">{meta.name}</h1>
+              {badge}
+            </div>
+          </>
+        )}
         <div className="text-muted-foreground mt-2 max-w-[760px] text-[15px]" data-testid="report-header-rendered">
           {children}
           {meta.descriptionHtml !== null && (
