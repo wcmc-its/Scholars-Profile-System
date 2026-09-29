@@ -119,4 +119,26 @@ describe("maybeUpdatedSlug — pin precedence (#497 §5.2)", () => {
       data: { slug: "jane-smith-2" },
     });
   });
+
+  it("skips a slug another scholar's old URL still redirects from (#2606)", async () => {
+    mockScholarFindUnique.mockResolvedValue({ slug: "old-name" });
+    const history = new Map([["jane-smith", "someone-else"]]);
+    await maybeUpdatedSlug("old-name", "Jane Smith", "free4", new Set(["old-name"]), new Set(), history);
+    expect(mockScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "free4" },
+      data: { slug: "jane-smith-2" },
+    });
+    // the slug just vacated now redirects to free4
+    expect(history.get("old-name")).toBe("free4");
+  });
+
+  it("lets a scholar reclaim a slug from their OWN history (#2606)", async () => {
+    mockScholarFindUnique.mockResolvedValue({ slug: "old-name" });
+    const history = new Map([["jane-smith", "free5"]]);
+    await maybeUpdatedSlug("old-name", "Jane Smith", "free5", new Set(["old-name"]), new Set(), history);
+    expect(mockScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "free5" },
+      data: { slug: "jane-smith" },
+    });
+  });
 });
