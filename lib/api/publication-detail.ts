@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
+import { fetchWcmAuthorsForPmids, type WcmAuthorChip } from "@/lib/api/topics";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 import {
   isMethodsLensPubModalEnabled,
@@ -149,6 +150,9 @@ export type PublicationDetailPayload = {
     synopsis: string | null;
   };
   topics: PublicationDetailTopic[];
+  /** Confirmed WCM authors, suppression-filtered by the same resolver the search
+   *  and topic-feed chips use. The modal renders them as pills in the byline. */
+  wcmAuthors: WcmAuthorChip[];
   /** #917 — method families attributed to this pmid (de-duped across WCM
    *  authors), gated + suppression-filtered. Empty when the Methods lens is off
    *  or the paper has no surfaced family; the modal omits the section then. */
@@ -633,9 +637,10 @@ export async function getPublicationDetail(
   // #917 — method families for this pmid (gated; [] when the lens is off), and
   // the core facilities for this pmid (gated; [] when CORE_PUB_MODAL is off).
   // Independent reads — run concurrently.
-  const [methodFamilies, cores] = await Promise.all([
+  const [methodFamilies, cores, wcmAuthorsByPmid] = await Promise.all([
     resolveMethodFamilies(pmid),
     resolvePublicationCores(pmid),
+    fetchWcmAuthorsForPmids([pmid]),
   ]);
 
   // Citing publications. With PUBLICATION_CITING_BRIDGE=on the in-VPC app serves
@@ -717,6 +722,7 @@ export async function getPublicationDetail(
       synopsis: pub.synopsis && pub.synopsis.length > 0 ? pub.synopsis : null,
     },
     topics,
+    wcmAuthors: wcmAuthorsByPmid.get(pmid) ?? [],
     methodFamilies,
     cores,
     citingPubs,

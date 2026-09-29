@@ -1188,6 +1188,8 @@ export type WcmAuthorChip = {
   identityImageEndpoint: string;
   isFirst: boolean;
   isLast: boolean;
+  /** 1-based PubMed author position; 0 = middle author, rank unknown (#2227). */
+  position?: number;
   /** #536 — carried onto the AuthorChip so a hidden identity class (doctoral
    *  student) renders as plain text, not a profile link. */
   roleCategory: RoleCategory | null;
@@ -1244,6 +1246,7 @@ export async function fetchWcmAuthorsForPmids(
         pmid: true,
         isFirst: true,
         isLast: true,
+        position: true,
         scholar: {
           select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
         },
@@ -1288,6 +1291,7 @@ export async function fetchWcmAuthorsForPmids(
       identityImageEndpoint: identityImageEndpoint(row.scholar.cwid),
       isFirst: row.isFirst,
       isLast: row.isLast,
+      position: row.position,
       roleCategory: (row.scholar.roleCategory as RoleCategory | null) ?? null,
     });
     byPmid.set(row.pmid, arr);

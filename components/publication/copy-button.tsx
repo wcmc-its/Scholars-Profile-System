@@ -13,9 +13,13 @@ import { Check, Copy } from "lucide-react";
 export function CopyButton({
   value,
   label,
+  showLabel = false,
 }: {
   value: string;
   label: string;
+  /** Also show a visible "Copied" word beside the check while confirmed
+   *  (publication-modal header identifiers). Default stays icon-only. */
+  showLabel?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -39,13 +43,20 @@ export function CopyButton({
       type="button"
       onClick={handleCopy}
       aria-label={label}
-      className="-my-1.5 -ml-0.5 -mr-1.5 inline-flex h-6 w-6 items-center justify-center align-middle text-muted-foreground/70 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+      className={
+        showLabel
+          ? `-my-1.5 -ml-0.5 inline-flex h-6 min-w-6 items-center justify-center gap-[3px] px-0.5 align-middle text-xs hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-ring rounded-sm ${
+              copied ? "text-foreground" : "text-muted-foreground"
+            }`
+          : "-my-1.5 -ml-0.5 -mr-1.5 inline-flex h-6 w-6 items-center justify-center align-middle text-muted-foreground/70 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-ring rounded-sm"
+      }
     >
       {copied ? (
         <Check className="h-3 w-3" aria-hidden="true" />
       ) : (
         <Copy className="h-3 w-3" aria-hidden="true" />
       )}
+      {showLabel && copied ? <span aria-hidden="true">Copied</span> : null}
       <span className="sr-only" aria-live="polite">
         {copied ? "Copied" : ""}
       </span>
