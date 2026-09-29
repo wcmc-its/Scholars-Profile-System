@@ -176,6 +176,9 @@ describe("CoreClaimQueue", () => {
       const view = render(
         <CoreClaimQueue core={CORE} candidates={[row({ likelihood })]} confirmed={[]} />,
       );
+      // Below the display floor the row is hidden until "Show" (see the floor tests).
+      const show = within(view.container).queryByRole("button", { name: "Show" });
+      if (show) fireEvent.click(show);
       const text = view.container.querySelector('[data-slot="core-queue-score"]')?.textContent;
       view.unmount();
       return text;

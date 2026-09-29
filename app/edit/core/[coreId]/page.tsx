@@ -35,7 +35,7 @@ import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { CoreEditSections } from "@/components/edit/core-edit-sections";
 import type { CoreLeaderState } from "@/components/edit/core-leader-card";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { countHighConfidence } from "@/lib/api/core-console-index";
+import { countHighConfidence, countReviewSuggestions } from "@/lib/api/core-console-index";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
 import { corePath } from "@/lib/core-url";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -193,7 +193,11 @@ export default async function EditCorePage({
       access={access}
       actorCwid={session.cwid}
       actorRole={actorRole}
-      pending={{ total: candidates.length, strong: countHighConfidence(candidates) }}
+      pending={{
+        // The /edit/core index's own "To review" count (display floor applied).
+        total: countReviewSuggestions(candidates),
+        strong: countHighConfidence(candidates),
+      }}
       previewHref={previewHref}
       coresNavVisible={consoleTabs.cores}
       attr={attr}

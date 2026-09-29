@@ -85,7 +85,7 @@ vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: vi.
 
 import { resolveCoreLeaderRoleLabel } from "@/components/edit/core-leader-card";
 import EditCorePage from "@/app/edit/core/[coreId]/page";
-import { HIGH_CONFIDENCE_LIKELIHOOD } from "@/lib/api/core-console-index";
+import { CANDIDATE_DISPLAY_FLOOR, HIGH_CONFIDENCE_LIKELIHOOD } from "@/lib/api/core-console-index";
 
 type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
@@ -176,13 +176,30 @@ describe("/edit/core/[coreId] — #2559 role-label wiring", () => {
 
 describe("/edit/core/[coreId] — single-scroll page data", () => {
   const withLikelihoods = (...ls: number[]) =>
-    mockLoadQueue.mockResolvedValue({ candidates: ls.map((likelihood) => ({ likelihood })) });
+    mockLoadQueue.mockResolvedValue({
+      candidates: ls.map((likelihood) => ({ likelihood, status: "candidate" })),
+    });
 
   it("the banner's strong count is the /edit/core index's HIGH_CONFIDENCE_LIKELIHOOD cut", async () => {
     // Straddle the index's constant: at-the-cut counts, just-below doesn't.
-    withLikelihoods(0.95, HIGH_CONFIDENCE_LIKELIHOOD, HIGH_CONFIDENCE_LIKELIHOOD - 0.01, 0.1);
+    withLikelihoods(0.95, HIGH_CONFIDENCE_LIKELIHOOD, HIGH_CONFIDENCE_LIKELIHOOD - 0.01, 0.5);
     const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
     expect(findByType(result, mockSections)!.props.pending).toEqual({ total: 4, strong: 2 });
+  });
+
+  it("'pending in total' is the index's floored count: below-floor and queued rows are left out", async () => {
+    mockLoadQueue.mockResolvedValue({
+      candidates: [
+        { likelihood: 0.95, status: "candidate" },
+        { likelihood: CANDIDATE_DISPLAY_FLOOR, status: "candidate" },
+        { likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01, status: "candidate" },
+        { likelihood: 0.31, status: "candidate" },
+        // sent to review by hand: on the queue, not an engine suggestion
+        { likelihood: 0, status: "unscored", queued: true },
+      ],
+    });
+    const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+    expect(findByType(result, mockSections)!.props.pending).toEqual({ total: 2, strong: 1 });
   });
 
   it("an empty queue is 0 of 0", async () => {
