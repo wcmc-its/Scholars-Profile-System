@@ -2306,15 +2306,14 @@ describe("EtlStack honors-list scraper (scholars-honors-<env>)", () => {
       });
     });
 
-    it(`${env}: a weekly rule (enabled in staging, DISABLED in prod until its supervised first run), sending every list`, () => {
+    it(`${env}: an enabled weekly rule, sending every list`, () => {
       const rule = Object.values(template.findResources("AWS::Events::Rule")).find(
         (r) => r.Properties?.Name === `sps-honors-${env}`,
       );
       expect(rule?.Properties?.ScheduleExpression).toBe("cron(0 10 ? * MON *)");
-      // Each env stays disabled until its supervised first run has been checked
-      // for candidates that duplicate the seed import; the machine still
-      // deploys and is startable by hand. Staging's was clean on 2026-09-25.
-      expect(rule?.Properties?.State).toBe(env === "staging" ? "ENABLED" : "DISABLED");
+      // Staging's supervised first run was clean on 2026-09-25; prod was
+      // switched on 2026-09-29, its first manual run following that deploy.
+      expect(rule?.Properties?.State).toBe("ENABLED");
       expect(rule?.Properties?.Targets).toHaveLength(1);
       expect(JSON.parse(rule?.Properties?.Targets[0].Input)).toEqual({
         lists: "all",
