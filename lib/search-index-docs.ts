@@ -42,6 +42,7 @@ import { deriveGrantSignals } from "@/lib/api/match-researchers";
 // `lib/funding-roles.ts` is deliberately import-free — safe here, unlike
 // `lib/api/data-quality.ts`, which re-exports the same PI_ROLES but constructs Prisma.
 import { isPiRole } from "@/lib/funding-roles";
+import { hasFundingPiChip } from "@/lib/funding-projection";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
 import type { TrialEvidence } from "@/lib/search-trial-evidence";
 import { buildClinicalAnchors, loadSpecialtyAnchorMap } from "@/lib/clinical-mesh-anchors";
@@ -270,9 +271,9 @@ export async function loadOverviewOverrides(
  * feed it the right rows.
  *
  * CRITICAL: this query is DELIBERATELY UNFILTERED on `grants` — no
- * `source: { not: "RePORTER" }` where-clause, unlike `PEOPLE_INDEX_SELECT`'s
- * `grants` relation (which intentionally scopes grantCount / hasActiveGrants /
- * activePiGrantCount to WCM-administered awards only). `deriveGrantSignals`'
+ * `source: { not: "RePORTER" }` filter, unlike the grantCount / hasActiveGrants /
+ * activePiGrantCount signals `buildPeopleDoc` derives (WCM-administered awards
+ * only). `deriveGrantSignals`'
  * ESI-forfeiture check needs a scholar's FULL grant history, including
  * prior-institution RePORTER-sourced records — a RePORTER-only major-PI award
  * still forfeits ESI eligibility. Feeding it the filtered relation would
@@ -604,9 +605,11 @@ export const PEOPLE_INDEX_SELECT = {
   // line reads O(1) — same doc-precompute pattern as `meshSubtreeCounts`. Suppressed
   // / hidden pmids are filtered in `buildPeopleDoc` against the kept-authorship set.
   publicationTopics: { select: { pmid: true, parentTopicId: true } },
-  // Exclude source='RePORTER' — the person-doc grantCount + active-grant signals
-  // count WCM-administered awards only, not individual prior-institution history.
-  grants: { where: { source: { not: "RePORTER" } } },
+  // UNFILTERED (#2081). `piRoleEver` must see the same rows the funding index
+  // does, and that index keeps RePORTER rows (#2285). The WCM-administered-only
+  // signals (grantCount, hasActiveGrants, activePiGrantCount) re-apply the
+  // `source != 'RePORTER'` filter in `buildPeopleDoc`.
+  grants: true,
   authorships: {
     // Issue #63 — drop Retraction / Erratum so retracted-paper titles
     // and MeSH don't pull a person into search results for unrelated
@@ -972,6 +975,11 @@ export async function buildPeopleDoc(
   // OPTIONAL per-cwid clinical-trial evidence (`loadTrialEvidenceByCwid`).
   // When OMITTED the trial fields are never emitted (byte-identical doc).
   trialEvidenceByCwid?: Map<string, TrialEvidence>,
+  // #2081 — OPTIONAL active grant-suppression set (`loadAllGrantSuppressions`),
+  // the same set the funding index drops rows by. Feeds `piRoleEver` so a
+  // suppressed PI row no longer counts toward "PI (ever)" while rendering no
+  // chip. When OMITTED no row is treated as suppressed.
+  suppressedGrants?: ReadonlySet<string>,
 ): Promise<Record<string, unknown> | null> {
   // #2113 — effective overview, read-merged against the override map (see
   // the parameter doc above). Drives both `overview` / `overviewLength`
@@ -1323,10 +1331,17 @@ export async function buildPeopleDoc(
   // NIH multiple-PI award, so a scholar whose only principal-investigator standing
   // is on an MPI award indexed as `piRoleEver: false` and never appeared in the PI
   // facet at all.
+  //
+  // #2081 — `piRoleEver` ("PI (ever)") is computed with the funding index's own
+  // chip predicate over ALL the scholar's grant rows, so the facet counts exactly
+  // the displayed scholars who render as a PI chip on a Funding row (RePORTER
+  // rows included, suppressed rows excluded). The other grant signals stay
+  // scoped to WCM-administered awards (not prior-institution RePORTER history).
   const now = new Date();
-  const hasActiveGrants = s.grants.some((g) => isFundingActive(g.endDate, now));
-  const piRoleEver = s.grants.some((g) => isPiRole(g.role));
-  const activePiGrantCount = s.grants.reduce((n, g) => {
+  const wcmGrants = s.grants.filter((g) => g.source !== "RePORTER");
+  const hasActiveGrants = wcmGrants.some((g) => isFundingActive(g.endDate, now));
+  const piRoleEver = hasFundingPiChip(s.grants, suppressedGrants ?? new Set<string>());
+  const activePiGrantCount = wcmGrants.reduce((n, g) => {
     if (!isPiRole(g.role)) return n;
     if (!isFundingActive(g.endDate, now)) return n;
     if (isTrainingOnlyGrant(g)) return n;
@@ -1683,7 +1698,7 @@ export async function buildPeopleDoc(
     isComplete,
     personType,
     publicationCount: kept,
-    grantCount: s.grants.length,
+    grantCount: wcmGrants.length,
     mostRecentPubDate,
     // Issue #532 — leadership signal (OMIT-on-empty: scholars who are
     // neither chair nor chief write nothing for this field, mirroring

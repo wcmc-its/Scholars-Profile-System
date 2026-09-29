@@ -304,15 +304,43 @@ export function groupGrantsByProject<
   for (const r of rows) {
     // #160 — drop a suppressed grant role before grouping/projection. A project
     // with no surviving rows never forms a group (-> dark, never indexed).
-    if (r.externalId && suppressedExternalIds.has(r.externalId)) continue;
-    const base = fundingProjectBaseKey(r.externalId);
-    if (!base) continue;
-    const key = coreProjectNum(r.awardNumber) ?? base;
+    if (!isFundingIndexedRow(r, suppressedExternalIds)) continue;
+    const key =
+      coreProjectNum(r.awardNumber) ?? (fundingProjectBaseKey(r.externalId) as string);
     const arr = byProject.get(key) ?? [];
     arr.push(r);
     byProject.set(key, arr);
   }
   return byProject;
+}
+
+/**
+ * True when a grant row survives into the funding index: not suppressed (#160)
+ * and keyed by a recognised externalId form (InfoEd or RePORTER, #2285). The
+ * row filter {@link groupGrantsByProject} applies before grouping.
+ */
+export function isFundingIndexedRow(
+  r: { externalId: string | null },
+  suppressedExternalIds: ReadonlySet<string>,
+): boolean {
+  if (r.externalId && suppressedExternalIds.has(r.externalId)) return false;
+  return fundingProjectBaseKey(r.externalId) !== null;
+}
+
+/**
+ * #2081 — THE definition of "this scholar renders as a PI chip on a Funding
+ * row": at least one of their grant rows reaches the funding index AND carries
+ * a {@link isPiRole} role. The People index's `piRoleEver` (the "PI (ever)"
+ * facet) is computed with this exact function so the facet and the chips cannot
+ * drift. They previously did: the people doc filtered `source != 'RePORTER'`
+ * and ignored suppression, while the funding index keeps RePORTER rows (#2285)
+ * and drops suppressed ones.
+ */
+export function hasFundingPiChip(
+  rows: readonly { role: string; externalId: string | null }[],
+  suppressedExternalIds: ReadonlySet<string>,
+): boolean {
+  return rows.some((r) => isPiRole(r.role) && isFundingIndexedRow(r, suppressedExternalIds));
 }
 
 /**
@@ -353,7 +381,7 @@ export function multiPiExternalIds(
 /** Per-row role bucket — Multi-PI is a project-level fact (≥2 PI rows on
  *  the same account number) and gets layered in by the caller. */
 export function rowRoleBucket(role: string): "PI" | "Co-I" | null {
-  if (role === "PI" || role === "PI-Subaward" || role === "Co-PI") return "PI";
+  if (isPiRole(role)) return "PI";
   if (role === "Co-I") return "Co-I";
   return null;
 }
