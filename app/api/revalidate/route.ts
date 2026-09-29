@@ -17,6 +17,7 @@ import { apiError } from "@/lib/api/error-response";
  *   - "/scholars/{slug}"     profile page (slug = [a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)
  *   - "/topics/{slug}"       topic detail / placeholder
  *   - "/sitemap.xml"         dynamic sitemap (Phase 5)
+ *   - "/sitemap/{id}.xml"    child sitemap shard (#2262; id = digits)
  *
  * Auth (#103 / B04): `Authorization: Bearer <token>`, compared constant-time
  * against `SCHOLARS_REVALIDATE_TOKEN` and the optional rotation-window token

@@ -16,7 +16,8 @@ import {
 
 // ISR — falls back to 24h revalidation if no on-demand revalidate fires. The
 // ETL orchestrator busts this path via /api/revalidate?path=/sitemap.xml after
-// each run, refreshing the shard list when the corpus crosses a shard boundary.
+// each run, refreshing the shard list when the corpus crosses a shard boundary,
+// and busts each child `/sitemap/{id}.xml` alongside it (#2262).
 export const revalidate = 86400;
 
 export async function GET(): Promise<Response> {

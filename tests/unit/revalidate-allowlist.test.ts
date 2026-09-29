@@ -9,6 +9,23 @@ describe("isAllowedRevalidatePath", () => {
     }
   });
 
+  it("allows child sitemap shards `/sitemap/{id}.xml` only (#2262)", () => {
+    expect(isAllowedRevalidatePath("/sitemap/0.xml")).toBe(true);
+    expect(isAllowedRevalidatePath("/sitemap/12.xml")).toBe(true);
+    for (const p of [
+      "/sitemap",
+      "/sitemap/",
+      "/sitemap/0",
+      "/sitemap/abc.xml",
+      "/sitemap/-1.xml",
+      "/sitemap/0.xml/x",
+      "/sitemap/0.xmlx",
+      "/sitemap/../0.xml",
+    ]) {
+      expect(isAllowedRevalidatePath(p)).toBe(false);
+    }
+  });
+
   it("allows scholar / topic / department / division dynamic paths", () => {
     expect(isAllowedRevalidatePath("/scholars/jane-smith")).toBe(true);
     expect(isAllowedRevalidatePath("/topics/cardiology")).toBe(true);

@@ -30,6 +30,7 @@
  */
 import { db } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
+import { buildSitemapEntries, sitemapChunkCount } from "@/lib/sitemap";
 
 /**
  * Origins from which `/api/revalidate` may be reached. Each entry matches an
@@ -148,8 +149,18 @@ export async function runRevalidate(): Promise<void> {
     }
     console.log(`[Revalidate] queued ${depts.length} department page(s)`);
 
+    // #2262 — the index lists shard links only; every advertised URL lives in
+    // a child `/sitemap/{id}.xml`, so the children must be busted too. Shard
+    // count comes from the same buildSitemapEntries() both routes use. One
+    // EXTRA shard is busted past the count: it drops a now-orphaned tail after
+    // a corpus shrink, and covers an undercount here (the ETL task-def lacks
+    // the app's method-page flag, so /methods/** may be absent from this tally).
     await requestRevalidate("/sitemap.xml");
-    console.log("[Revalidate] queued /sitemap.xml");
+    const shardCount = sitemapChunkCount((await buildSitemapEntries()).length);
+    for (let id = 0; id <= shardCount; id++) {
+      await requestRevalidate(`/sitemap/${id}.xml`);
+    }
+    console.log(`[Revalidate] queued /sitemap.xml + ${shardCount + 1} shard(s)`);
   } catch (err) {
     console.warn("[Revalidate] could not enumerate paths:", err);
   } finally {

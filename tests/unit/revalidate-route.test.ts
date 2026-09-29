@@ -169,6 +169,15 @@ describe("POST /api/revalidate — Phase 5 sitemap path", () => {
     expect(mockRevalidatePath).toHaveBeenCalledWith("/sitemap.xml");
   });
 
+  it("200 + revalidates a child sitemap shard /sitemap/0.xml (#2262)", async () => {
+    const req = makeRequest({ path: "/sitemap/0.xml", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.revalidated).toBe("/sitemap/0.xml");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/sitemap/0.xml");
+  });
+
   it("400 on /_next/static/foo (not a revalidatable path)", async () => {
     const req = makeRequest({ path: "/_next/static/foo", token: "test-token-abc" });
     const resp = await POST(req);
