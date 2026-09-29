@@ -88,6 +88,10 @@ TID="$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASKDEF" --laun
   --overrides "$OVERRIDES" --query 'tasks[0].taskArn' --output text)"
 TID="${TID##*/}"
 echo "task: $TID — waiting…" >&2
+# Print where the task actually landed: a wrong-subnet launch otherwise reads as a DB pool timeout (#2103).
+LANDED="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TID" \
+  --query "tasks[0].attachments[0].details[?name=='subnetId'].value | [0]" --output text || true)"
+echo "landed in subnet: ${LANDED:-unknown} (expected one of: $SUBNETS)" >&2
 aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TID"
 
 EXIT="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TID" \
