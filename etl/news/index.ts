@@ -197,6 +197,28 @@ export type ExistingMention = {
   creditedOutlet: string | null;
 };
 
+type ArticleMetadata = Pick<
+  ExistingMention,
+  "title" | "publishedAt" | "excerpt" | "thumbnailUrl" | "outlet" | "creditedOutlet"
+>;
+
+/**
+ * The article-metadata half of `reconcile`: title/date/excerpt/thumbnail/outlet
+ * only, never review state (status/source/enteredByCwid/showOnProfile) or
+ * provenance. Also applied to a row that stores the same story under another
+ * slug (#2240), so a human hide or reject on it survives the refresh.
+ */
+export function metadataPatch(cur: ArticleMetadata, r: MentionUpsert): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  if (cur.title !== r.title) data.title = r.title;
+  if (!sameDate(cur.publishedAt, r.publishedAt)) data.publishedAt = r.publishedAt;
+  if (cur.excerpt !== r.excerpt) data.excerpt = r.excerpt;
+  if (cur.thumbnailUrl !== r.thumbnailUrl) data.thumbnailUrl = r.thumbnailUrl;
+  if (cur.outlet !== r.outlet) data.outlet = r.outlet;
+  if (cur.creditedOutlet !== r.creditedOutlet) data.creditedOutlet = r.creditedOutlet;
+  return data;
+}
+
 /**
  * Compute the update patch for an existing (cwid, url) row given a freshly
  * scraped mention. Empty patch => preserve as-is. Pure, so the review-state
@@ -207,13 +229,7 @@ export type ExistingMention = {
  *     never downgraded and never resurrected.
  */
 export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string, unknown> {
-  const data: Record<string, unknown> = {};
-  if (cur.title !== r.title) data.title = r.title;
-  if (!sameDate(cur.publishedAt, r.publishedAt)) data.publishedAt = r.publishedAt;
-  if (cur.excerpt !== r.excerpt) data.excerpt = r.excerpt;
-  if (cur.thumbnailUrl !== r.thumbnailUrl) data.thumbnailUrl = r.thumbnailUrl;
-  if (cur.outlet !== r.outlet) data.outlet = r.outlet;
-  if (cur.creditedOutlet !== r.creditedOutlet) data.creditedOutlet = r.creditedOutlet;
+  const data = metadataPatch(cur, r);
 
   const humanTouched = cur.enteredByCwid !== null;
   if (!humanTouched) {
@@ -277,25 +293,37 @@ export async function upsertMentions(rows: MentionUpsert[]): Promise<{
   // here and would be created a second time. Look the affected scholars up by
   // story key as well, and skip a create that would duplicate one.
   const cwids = [...new Set(rows.map((r) => r.cwid))];
-  /** `"<cwid> <storyKey>"` -> the urls this scholar already has it stored under. */
-  const storedStories = new Map<string, Set<string>>();
+  type StoredSibling = ArticleMetadata & { id: string; url: string };
+  /** `"<cwid> <storyKey>"` -> the rows this scholar already has it stored under. */
+  const storedStories = new Map<string, StoredSibling[]>();
   if (cwids.length) {
     for (const e of await db.write.newsMention.findMany({
       where: { cwid: { in: cwids } },
-      select: { cwid: true, url: true, title: true, publishedAt: true },
+      select: {
+        id: true,
+        cwid: true,
+        url: true,
+        title: true,
+        publishedAt: true,
+        excerpt: true,
+        thumbnailUrl: true,
+        outlet: true,
+        creditedOutlet: true,
+      },
     })) {
       const k = storyKey(e.title, e.publishedAt);
       if (!k) continue;
       const key = `${e.cwid} ${k}`;
-      storedStories.set(key, (storedStories.get(key) ?? new Set()).add(e.url));
+      storedStories.set(key, [...(storedStories.get(key) ?? []), e]);
     }
   }
-  /** True when this scholar already has the same story under a DIFFERENT url. */
-  const storedElsewhere = (r: MentionUpsert): boolean => {
+  /** The rows holding this story under a DIFFERENT url, or null when none. */
+  const storedElsewhere = (r: MentionUpsert): StoredSibling[] | null => {
     const k = storyKey(r.title, r.publishedAt);
-    if (!k) return false;
-    const urlsForStory = storedStories.get(`${r.cwid} ${k}`);
-    return urlsForStory !== undefined && !urlsForStory.has(r.url);
+    if (!k) return null;
+    const rowsForStory = storedStories.get(`${r.cwid} ${k}`);
+    if (!rowsForStory || rowsForStory.some((s) => s.url === r.url)) return null;
+    return rowsForStory;
   };
 
   let inserted = 0;
@@ -310,8 +338,19 @@ export async function upsertMentions(rows: MentionUpsert[]): Promise<{
         if (!cur) {
           // #2241 — same story, other slug, already stored. Creating it would
           // render the article twice on the profile.
-          if (storedElsewhere(r)) {
+          const siblings = storedElsewhere(r);
+          if (siblings) {
             deduped++;
+            // #2240 — the stored row may sit on a slug the feed never emits
+            // again (a 301 alias), so it would never be matched by url and its
+            // metadata would stay stale forever. Refresh it from this story.
+            for (const s of siblings) {
+              const data = metadataPatch(s, r);
+              if (Object.keys(data).length > 0) {
+                await tx.newsMention.update({ where: { id: s.id }, data });
+                updated++;
+              }
+            }
             continue;
           }
           await tx.newsMention.create({
