@@ -54,6 +54,14 @@ describe("ScholarCardGrid", () => {
     expect(wide.className).toContain("hidden md:flex");
   });
 
+  it("the md+ card IS the hover trigger (Radix asChild props reach the <a>)", () => {
+    render(<ScholarCardGrid popover={POPOVER} heading="Scholars in this area" scholars={[scholar(2)]} />);
+    const [narrow, wide] = cardLinks();
+    expect(wide.getAttribute("data-state")).toBe("closed");
+    expect(wide.getAttribute("data-slot")).toBe("hover-card-trigger");
+    expect(narrow.getAttribute("data-state")).toBeNull();
+  });
+
   it("renders up to 3 area bullets, and none when the scholar has no areas", () => {
     render(
       <ScholarCardGrid popover={POPOVER}

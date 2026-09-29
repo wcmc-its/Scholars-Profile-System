@@ -75,7 +75,11 @@ const payload = {
 };
 
 function stubFetch(body: unknown) {
-  const fn = vi.fn(async () => ({ ok: true, status: 200, json: async () => body }));
+  const fn = vi.fn(async (_url: RequestInfo | URL) => ({
+    ok: true,
+    status: 200,
+    json: async () => body,
+  }));
   vi.stubGlobal("fetch", fn);
   return fn;
 }
