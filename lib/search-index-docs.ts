@@ -25,8 +25,11 @@ import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import {
   isAuthorHidden,
   isPublicationDark,
+  loadAllGrantSuppressions,
+  loadEntitySuppressions,
   type PublicationSuppressions,
 } from "@/lib/api/manual-layer";
+import { countGrantProjects, profileFundingRows } from "@/lib/grants/project-count";
 // Issue #824 §4c — the public method-family rollup is gated through the SAME
 // #800/#801 overlay every public Method surface uses. `isFamilyPubliclyVisible`
 // is a pure predicate (no DB / no module side effect), and `methods-overlay`
@@ -261,6 +264,51 @@ export async function loadOverviewOverrides(
   return byCwid;
 }
 
+/** #2239 — what the profile Funding section hides, for `buildPeopleDoc`'s
+ *  `grantCount` (see {@link loadFundingVisibility}). */
+export type FundingVisibility = {
+  /** Scholars whose `hideFunding` section override is set ("true"). */
+  hideFundingCwids: ReadonlySet<string>;
+  /** Active #160 grant suppressions, by grant `externalId`. */
+  suppressedGrantIds: ReadonlySet<string>;
+};
+
+const NO_SUPPRESSED_GRANTS: ReadonlySet<string> = new Set();
+
+/**
+ * #2239 — load the funding-section visibility inputs the profile applies to its
+ * Funding list (`lib/api/profile.ts` → `profileFundingRows`), so the people doc's
+ * `grantCount` counts the same rows.
+ *
+ * Without `scope` (the nightly build): corpus-wide, one read each — the grant
+ * suppression read is `loadAllGrantSuppressions`, batch-only by contract. With
+ * `scope` (the single-scholar fast path): cwid- and id-scoped, via the
+ * per-request `loadEntitySuppressions`.
+ */
+export async function loadFundingVisibility(
+  client: Pick<PrismaClient, "fieldOverride" | "suppression">,
+  scope?: { cwid: string; grantExternalIds: readonly string[] },
+): Promise<FundingVisibility> {
+  const [hideRows, suppressedGrantIds] = await Promise.all([
+    client.fieldOverride.findMany({
+      where: {
+        entityType: "scholar",
+        fieldName: "hideFunding",
+        value: "true",
+        ...(scope ? { entityId: scope.cwid } : {}),
+      },
+      select: { entityId: true },
+    }),
+    scope
+      ? loadEntitySuppressions("grant", scope.grantExternalIds, client)
+      : loadAllGrantSuppressions(client),
+  ]);
+  return {
+    hideFundingCwids: new Set(hideRows.map((r) => r.entityId)),
+    suppressedGrantIds,
+  };
+}
+
 /**
  * #2300 — bulk-load `esiEligible` (labeled "Early Stage Investigator" in the
  * UI — see `lib/search.ts`'s mapping comment) into a `cwid -> boolean` map,
@@ -270,9 +318,9 @@ export async function loadOverviewOverrides(
  * feed it the right rows.
  *
  * CRITICAL: this query is DELIBERATELY UNFILTERED on `grants` — no
- * `source: { not: "RePORTER" }` where-clause, unlike `PEOPLE_INDEX_SELECT`'s
- * `grants` relation (which intentionally scopes grantCount / hasActiveGrants /
- * activePiGrantCount to WCM-administered awards only). `deriveGrantSignals`'
+ * `source: { not: "RePORTER" }` filter, unlike `buildPeopleDoc`'s `wcmGrants`
+ * (which intentionally scopes hasActiveGrants / activePiGrantCount to
+ * WCM-administered awards only). `deriveGrantSignals`'
  * ESI-forfeiture check needs a scholar's FULL grant history, including
  * prior-institution RePORTER-sourced records — a RePORTER-only major-PI award
  * still forfeits ESI eligibility. Feeding it the filtered relation would
@@ -604,9 +652,12 @@ export const PEOPLE_INDEX_SELECT = {
   // line reads O(1) — same doc-precompute pattern as `meshSubtreeCounts`. Suppressed
   // / hidden pmids are filtered in `buildPeopleDoc` against the kept-authorship set.
   publicationTopics: { select: { pmid: true, parentTopicId: true } },
-  // Exclude source='RePORTER' — the person-doc grantCount + active-grant signals
-  // count WCM-administered awards only, not individual prior-institution history.
-  grants: { where: { source: { not: "RePORTER" } } },
+  // #2239 — UNFILTERED by source. `grantCount` must count the same population
+  // the profile Funding section lists, which includes prior-institution
+  // RePORTER awards. The active-grant signals (hasActiveGrants / piRoleEver /
+  // activePiGrantCount) still count WCM-administered awards only: `buildPeopleDoc`
+  // drops source='RePORTER' rows for those in memory (`wcmGrants`).
+  grants: true,
   authorships: {
     // Issue #63 — drop Retraction / Erratum so retracted-paper titles
     // and MeSH don't pull a person into search results for unrelated
@@ -972,6 +1023,11 @@ export async function buildPeopleDoc(
   // OPTIONAL per-cwid clinical-trial evidence (`loadTrialEvidenceByCwid`).
   // When OMITTED the trial fields are never emitted (byte-identical doc).
   trialEvidenceByCwid?: Map<string, TrialEvidence>,
+  // #2239 — OPTIONAL funding-section visibility (`loadFundingVisibility`): the
+  // #160 grant suppressions and `hideFunding` section overrides the profile
+  // applies to its Funding list, so `grantCount` counts that same population.
+  // When OMITTED no row is treated as suppressed or hidden.
+  fundingVisibility?: FundingVisibility,
 ): Promise<Record<string, unknown> | null> {
   // #2113 — effective overview, read-merged against the override map (see
   // the parameter doc above). Drives both `overview` / `overviewLength`
@@ -1323,10 +1379,16 @@ export async function buildPeopleDoc(
   // NIH multiple-PI award, so a scholar whose only principal-investigator standing
   // is on an MPI award indexed as `piRoleEver: false` and never appeared in the PI
   // facet at all.
+  //
+  // These signals count WCM-administered awards only, not individual
+  // prior-institution history — the `source: { not: "RePORTER" }` scope that used
+  // to live on `PEOPLE_INDEX_SELECT`'s `grants` relation, moved here (#2239) so
+  // `grantCount` below can see the RePORTER rows the profile lists.
+  const wcmGrants = s.grants.filter((g) => g.source !== "RePORTER");
   const now = new Date();
-  const hasActiveGrants = s.grants.some((g) => isFundingActive(g.endDate, now));
-  const piRoleEver = s.grants.some((g) => isPiRole(g.role));
-  const activePiGrantCount = s.grants.reduce((n, g) => {
+  const hasActiveGrants = wcmGrants.some((g) => isFundingActive(g.endDate, now));
+  const piRoleEver = wcmGrants.some((g) => isPiRole(g.role));
+  const activePiGrantCount = wcmGrants.reduce((n, g) => {
     if (!isPiRole(g.role)) return n;
     if (!isFundingActive(g.endDate, now)) return n;
     if (isTrainingOnlyGrant(g)) return n;
@@ -1683,7 +1745,16 @@ export async function buildPeopleDoc(
     isComplete,
     personType,
     publicationCount: kept,
-    grantCount: s.grants.length,
+    // #2238/#2239 — funding PROJECTS over the rows the profile Funding section
+    // lists (shared `profileFundingRows` + `countGrantProjects`), so the card's
+    // "N grants" equals the profile header. Was `s.grants.length`: raw award
+    // rows, RePORTER excluded, suppression and `hideFunding` ignored.
+    grantCount: countGrantProjects(
+      profileFundingRows(s.grants, {
+        hideFunding: fundingVisibility?.hideFundingCwids.has(s.cwid) ?? false,
+        suppressedGrantIds: fundingVisibility?.suppressedGrantIds ?? NO_SUPPRESSED_GRANTS,
+      }),
+    ),
     mostRecentPubDate,
     // Issue #532 — leadership signal (OMIT-on-empty: scholars who are
     // neither chair nor chief write nothing for this field, mirroring

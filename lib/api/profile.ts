@@ -33,6 +33,7 @@ import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/v
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
+import { profileFundingRows } from "@/lib/grants/project-count";
 import { isFundingActive } from "@/lib/funding-active";
 import { multiPiExternalIds } from "@/lib/funding-projection";
 import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
@@ -1889,11 +1890,13 @@ export const getScholarFullProfileBySlug = cache(
       // last ETL run), promote it on the fly. Lets the profile section
       // reflect canonical-lookup updates without re-ingesting.
       // section-visibility — `hideFunding` drops the whole Funding section.
-      grants: hiddenSections.has("hideFunding")
-        ? []
-        : scholar.grants
-            // #160 — drop a suppressed grant role from the funding section.
-            .filter((g) => !suppressedGrantIds.has(g.externalId))
+      // #160 — a suppressed grant role drops too. The population rule is shared
+      // with the people-index builder (`profileFundingRows`, #2239) so the
+      // search card's "N grants" counts exactly the rows this section lists.
+      grants: profileFundingRows(scholar.grants, {
+        hideFunding: hiddenSections.has("hideFunding"),
+        suppressedGrantIds,
+      })
             .map((g) => {
               const lowerConfidenceCutoff = new Date(now);
               lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);

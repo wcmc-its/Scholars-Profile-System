@@ -86,6 +86,7 @@ import {
   buildPeopleDoc,
   buildPublicationDoc,
   isRequireDisplayableAuthorEnabled,
+  loadFundingVisibility,
   loadMeshAncestorContext,
   loadOverviewOverrides,
   type MeshAncestorContext,
@@ -475,6 +476,12 @@ async function buildScholarOps(
   const overviewOverrides = await loadOverviewOverrides(db.read, cwid);
   // Keep the trial fields on a fast-path reindex (one cwid-scoped read).
   const trialEvidence = await loadTrialEvidenceByCwid(db.read, cwid);
+  // #2239 — keep `grantCount` on the profile's Funding population (grant
+  // suppressions + `hideFunding`) on a fast-path reindex too; cwid/id-scoped.
+  const fundingVisibility = await loadFundingVisibility(db.read, {
+    cwid,
+    grantExternalIds: scholar.grants.map((g) => g.externalId),
+  });
   const doc = await buildPeopleDoc(
     scholar,
     db.read,
@@ -484,6 +491,7 @@ async function buildScholarOps(
     overviewOverrides,
     undefined,
     trialEvidence,
+    fundingVisibility,
   );
   if (doc === null) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];
