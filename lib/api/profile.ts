@@ -1213,7 +1213,13 @@ export const getScholarFullProfileBySlug = cache(
                 // the one writer of non-WCM rows. This keeps such rows from
                 // being hauled over the wire per publication just to be
                 // dropped.
-                where: { cwid: { not: null } },
+                //
+                // Confirmed rows only (#2261, parity with #2220 on the home
+                // spotlight and every other chip surface in lib/api): the
+                // owner query above filters `isConfirmed: true`, and
+                // resolveDarkPmids gates darkness over confirmed authors, so
+                // the chip row must count the same authors.
+                where: { isConfirmed: true, cwid: { not: null } },
                 orderBy: { position: "asc" },
                 include: {
                   scholar: {
