@@ -170,7 +170,9 @@ describe("profile serializer", () => {
   // rather than a silent widening of every publication's byline over the wire.
   // Asserted on the QUERY for the same reason the honors gate above is: a mock
   // returns whatever it is told, so only the where-clause can prove the scope.
-  it("scopes each publication's author rows to WCM rows in the loader query", async () => {
+  // Also confirmed-only (#2261, parity with #2220): an unconfirmed row must
+  // never surface as a co-author chip.
+  it("scopes each publication's author rows to confirmed WCM rows in the loader query", async () => {
     const { prisma } = (await import("@/lib/db")) as unknown as {
       prisma: { publicationAuthor: { findMany: Mock } };
     };
@@ -182,7 +184,10 @@ describe("profile serializer", () => {
     const args = prisma.publicationAuthor.findMany.mock.calls.at(-1)?.[0] as {
       include: { publication: { select: { authors: { where: unknown } } } };
     };
-    expect(args.include.publication.select.authors.where).toEqual({ cwid: { not: null } });
+    expect(args.include.publication.select.authors.where).toEqual({
+      isConfirmed: true,
+      cwid: { not: null },
+    });
   });
 
   // Primary institution on public labels — absence-as-default. The payload
