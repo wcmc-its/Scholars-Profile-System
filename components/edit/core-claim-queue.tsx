@@ -1418,8 +1418,8 @@ export function CoreClaimQueue({
           </button>
           {/* The mockup's third button. It shipped DISABLED while no core
               reporting route existed; the core-reports widening (2026-09-06)
-              gave cores reports 3 and 6, so it is now a real link to this
-              core's Publications report. Same authz on the other side — a
+              gave cores reports 3 and 6 (and 11–13 followed), so it is now a
+              real link to this core's reports index. Same authz on the other side — a
               core's owner/curator (or a superuser/comms_steward) passes, and
               nobody else does — so this never leads a reviewer to a 403 they
               could reach the review queue from.
@@ -1427,11 +1427,12 @@ export function CoreClaimQueue({
               mockup toolbar restyle landed while this branch was open, and the
               link must not quietly bring the old pill back. */}
           <a
-            // The NUMBER on purpose: it is the permanent link, and `/edit/reports/[report]` 307s it to the current slug.
-            href={`/edit/reports/3?center=${encodeURIComponent(core.id)}&kind=core`}
+            // This core's reports index (3, 6 and the core-only 11–13), the same
+            // `center=<coreId>&kind=core` scope the index and every report use.
+            href={`/edit/reports?center=${encodeURIComponent(core.id)}&kind=core`}
             className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center rounded-md border px-3 text-sm"
           >
-            Reporting...
+            Reporting
           </a>
         </div>
       </div>

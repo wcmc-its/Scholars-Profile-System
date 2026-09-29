@@ -357,7 +357,7 @@ function fakeLivenessDb(
 }
 
 describe("loadReportLiveness — cores", () => {
-  it("a core with confirmed usages reads LIVE on both of its reports", async () => {
+  it("a core with confirmed usages reads LIVE on all five of its reports", async () => {
     const db = fakeLivenessDb({
       publicationCore: [
         { coreId: "14", pmid: "111", status: "confirmed" },
@@ -366,9 +366,9 @@ describe("loadReportLiveness — cores", () => {
     });
     const result = await loadReportLiveness([{ code: "14", kind: "core" }], db as never);
     const core = result.get("14");
-    expect(core?.totalCount).toBe(2);
-    expect(core?.liveCount).toBe(2);
-    expect(core?.perReport.map((r) => r.n)).toEqual([3, 6]);
+    expect(core?.totalCount).toBe(5);
+    expect(core?.liveCount).toBe(5);
+    expect(core?.perReport.map((r) => r.n)).toEqual([3, 6, 11, 12, 13]);
     expect(core?.perReport.every((r) => r.live)).toBe(true);
   });
 
@@ -390,19 +390,22 @@ describe("loadReportLiveness — cores", () => {
       coreClaim: [{ coreId: "14", pmid: "333", status: "claimed" }],
     });
     const result = await loadReportLiveness([{ code: "14", kind: "core" }], db as never);
-    expect(result.get("14")?.liveCount).toBe(2);
+    expect(result.get("14")?.liveCount).toBe(5);
   });
 
-  it("a core with zero confirmed usages is not live, and the count is 0 of 2 — never a crash or a padded six", async () => {
+  it("a core with zero confirmed usages is not live, and the count is 0 of 5 — never a crash or a padded catalog", async () => {
     const db = fakeLivenessDb();
     const result = await loadReportLiveness([{ code: "7", kind: "core" }], db as never);
     expect(result.get("7")).toEqual({
       perReport: [
         { n: 3, live: false, lastRefreshedAt: null },
         { n: 6, live: false, lastRefreshedAt: null },
+        { n: 11, live: false, lastRefreshedAt: null },
+        { n: 12, live: false, lastRefreshedAt: null },
+        { n: 13, live: false, lastRefreshedAt: null },
       ],
       liveCount: 0,
-      totalCount: 2,
+      totalCount: 5,
       lastRefreshedAt: null,
     });
   });
@@ -416,10 +419,13 @@ describe("loadReportLiveness — cores", () => {
 });
 
 describe("REPORT_NUMBERS_BY_KIND", () => {
-  it("a core gets reports 3 and 6 only — 1/2/4/5 stay center-only", () => {
-    expect(REPORT_NUMBERS_BY_KIND.core).toEqual([3, 6]);
-    // Follows the department/division precedent exactly.
-    expect(REPORT_NUMBERS_BY_KIND.core).toEqual(REPORT_NUMBERS_BY_KIND.department);
+  it("a core gets reports 3 and 6 plus the core-only 11–13 — 1/2/4/5 stay center-only", () => {
+    expect(REPORT_NUMBERS_BY_KIND.core).toEqual([3, 6, 11, 12, 13]);
+    // 3/6 follow the department/division precedent; 11–13 are core-only.
+    expect(REPORT_NUMBERS_BY_KIND.core.filter((n) => n < 10)).toEqual(REPORT_NUMBERS_BY_KIND.department);
+    for (const kind of ["center", "department", "division"] as const) {
+      for (const n of [11, 12, 13] as const) expect(REPORT_NUMBERS_BY_KIND[kind]).not.toContain(n);
+    }
     for (const n of [1, 2, 4, 5] as const) {
       expect(REPORT_NUMBERS_BY_KIND.core).not.toContain(n);
       expect(REPORT_NUMBERS_BY_KIND.center).toContain(n);

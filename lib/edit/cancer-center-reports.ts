@@ -428,7 +428,7 @@ export async function loadReportableUnitsForActor(
     }));
 }
 
-export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6;
+export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13;
 
 /**
  * Which numbered reports apply to a unit of this kind — the single source of
@@ -448,7 +448,9 @@ export const REPORT_NUMBERS_BY_KIND: Record<ReportableUnitKind, readonly ReportN
   center: [1, 2, 3, 4, 5, 6],
   department: [3, 6],
   division: [3, 6],
-  core: [3, 6],
+  // 11 Core users, 12 Output over time, 13 Grants citing the core: core-only,
+  // all read the same confirmed-usage set as 3/6 (`loadConfirmedCorePmidsByCore`).
+  core: [3, 6, 11, 12, 13],
 };
 
 /** Size of the full (center) report catalog — six numbered reports. Kept as a
@@ -678,7 +680,9 @@ export async function loadReportLiveness(
           toReview: funding?.toReview ?? 0,
         };
       // 3, 4, 5, 6 — proxied by active-membership existence (center/dept/div)
-      // or by real confirmed-usage presence (core).
+      // or by real confirmed-usage presence (core). 11–13 are core-only and
+      // read that same confirmed-usage set, so the same bit is exact for them
+      // (13 a proxy like 6: a core with no grant-linked paper renders empty).
       return { n, live: hasPublicationSource, lastRefreshedAt: null };
     });
 
