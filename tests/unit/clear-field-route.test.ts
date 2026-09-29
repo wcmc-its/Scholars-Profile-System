@@ -11,6 +11,7 @@ const {
   mockScholarFindMany,
   mockScholarUpdate,
   mockSlugHistoryUpsert,
+  mockSlugHistoryFindMany,
   mockReflectOverviewEdit,
   mockResolveProfiles,
 } = vi.hoisted(() => ({
@@ -23,6 +24,7 @@ const {
   mockScholarFindMany: vi.fn(),
   mockScholarUpdate: vi.fn(),
   mockSlugHistoryUpsert: vi.fn(),
+  mockSlugHistoryFindMany: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
   mockResolveProfiles: vi.fn(),
 }));
@@ -67,7 +69,7 @@ const fakeTx = {
     findMany: mockScholarFindMany,
     update: mockScholarUpdate,
   },
-  slugHistory: { upsert: mockSlugHistoryUpsert },
+  slugHistory: { upsert: mockSlugHistoryUpsert, findMany: mockSlugHistoryFindMany },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -95,6 +97,7 @@ beforeEach(() => {
   mockScholarFindMany.mockResolvedValue([]); // no other scholars hold a slug
   mockScholarUpdate.mockResolvedValue({});
   mockSlugHistoryUpsert.mockResolvedValue({});
+  mockSlugHistoryFindMany.mockResolvedValue([]); // no other scholar's history
   mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
 });
 
@@ -185,6 +188,19 @@ describe("POST /api/edit/clear-field", () => {
     mockScholarFindMany.mockResolvedValue([{ slug: "jane-smith" }]); // taken by someone else
     const res = await POST(post({ entityType: "scholar", entityId: "sch5", fieldName: "slug" }));
     expect(res.status).toBe(200);
+    expect(mockScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "sch5" },
+      data: { slug: "jane-smith-2" },
+    });
+  });
+
+  it("skips a slug another scholar's old URL still redirects from (#2606)", async () => {
+    mockSlugHistoryFindMany.mockResolvedValue([{ oldSlug: "jane-smith" }]);
+    const res = await POST(post({ entityType: "scholar", entityId: "sch5", fieldName: "slug" }));
+    expect(res.status).toBe(200);
+    expect(mockSlugHistoryFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { currentCwid: { not: "sch5" } } }),
+    );
     expect(mockScholarUpdate).toHaveBeenCalledWith({
       where: { cwid: "sch5" },
       data: { slug: "jane-smith-2" },
