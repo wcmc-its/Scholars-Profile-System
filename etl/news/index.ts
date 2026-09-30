@@ -23,6 +23,7 @@
  * Env:
  *   NEWS_SEED_PATH   read this JSON (ScrapedArticle[]) instead of scraping.
  *   NEWS_BACKFILL=1  ignore the already-ingested set; walk the full feed.
+ *                    Operator run: `scripts/run-etl-step.sh etl:news <env> NEWS_BACKFILL=1`.
  *   NEWS_MAX_PAGES   feed-page ceiling for a backfill (default 60; 100 stories/page).
  */
 import { readFileSync } from "node:fs";
