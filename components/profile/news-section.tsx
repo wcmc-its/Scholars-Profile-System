@@ -1,4 +1,5 @@
 import type { ProfilePayload } from "@/lib/api/profile";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 /** A Media highlights clip adds its press outlet; a newsroom story has none. */
 type NewsMention = ProfilePayload["news"][number] & {
@@ -84,7 +85,8 @@ export function NewsSection({ news }: { news: NewsMention[] }) {
 
       {rest.length > 0 ? (
         <details className="border-border border-t">
-          <summary className="text-muted-foreground hover:text-foreground cursor-pointer py-3 text-sm">
+          <summary className={`flex w-fit items-center gap-1 text-muted-foreground hover:text-foreground cursor-pointer py-3 text-sm ${SUMMARY_NO_MARKER}`}>
+            <Caret />
             Show {rest.length} more {rest.length === 1 ? "mention" : "mentions"}
           </summary>
           <ul>

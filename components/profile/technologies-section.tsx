@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { TechnologyOverview } from "@/components/profile/technology-overview";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 type Technology = ProfilePayload["technologies"][number];
 
@@ -135,7 +136,10 @@ export function TechnologiesSection({ technologies }: { technologies: Technology
         // Native <details> so "show more" needs no client state — the section
         // stays server-rendered. Only the handful of scholars with >5 land here.
         <details className="border-border border-t">
-          <summary className="text-muted-foreground hover:text-foreground cursor-pointer py-3 text-sm">
+          <summary
+            className={`text-muted-foreground hover:text-foreground flex w-fit cursor-pointer items-center gap-1 py-3 text-sm ${SUMMARY_NO_MARKER}`}
+          >
+            <Caret />
             Show {rest.length} more {rest.length === 1 ? "technology" : "technologies"}
           </summary>
           <ul>

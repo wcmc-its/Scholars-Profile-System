@@ -16,6 +16,7 @@ import Link from "next/link";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Caret } from "@/components/ui/caret";
 
 /** The rail around a body's filters: "Filters", the reset link, a help line,
  *  then the sections. `resetHref` null → the reset link renders disabled
@@ -85,9 +86,7 @@ export function RailSection({
           </span>
           <span className="mt-0.5 block truncate text-sm">{summary}</span>
         </span>
-        <span aria-hidden className="text-muted-foreground text-xs transition-transform group-open:rotate-180">
-          ▾
-        </span>
+        <Caret dropdown className="text-muted-foreground" />
       </summary>
       <div className="flex flex-col gap-3 px-[18px] pt-0.5 pb-4">{children}</div>
     </details>

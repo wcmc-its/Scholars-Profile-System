@@ -12,6 +12,7 @@ import {
 import { PublicationRow } from "@/components/profile/publication-row";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import type { ProfilePublication } from "@/lib/api/profile";
+import { Caret } from "@/components/ui/caret";
 
 /**
  * Map publicationType strings (verbatim from PubMed via ReciterDB) to filter
@@ -246,9 +247,7 @@ export function PublicationsSection({
                 className="group"
               >
                 <summary className="flex cursor-pointer list-none items-baseline gap-3 py-4 hover:text-[var(--color-accent-slate)] [&::-webkit-details-marker]:hidden">
-                  <span className="text-muted-foreground inline-block w-3 text-[10px] transition-transform group-open:rotate-90">
-                    ▶
-                  </span>
+                  <Caret className="text-muted-foreground relative top-[3px]" />
                   <span className="text-lg font-semibold tracking-tight">{g.label}</span>
                   <span className="text-muted-foreground text-sm">
                     {g.count} {g.count === 1 ? "publication" : "publications"}

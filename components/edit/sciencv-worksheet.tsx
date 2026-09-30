@@ -30,6 +30,7 @@ import {
 } from "@/lib/edit/biosketch-params";
 import type { BiosketchProduct, BiosketchProducts } from "@/lib/edit/biosketch-products";
 import { cn } from "@/lib/utils";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 /**
  * SciENcv accepts at most this many honors; the picker enforces it when the profile holds more.
@@ -456,7 +457,10 @@ export function SciencvWorksheet({
               Native <details>: works on touch, needs no script, and reads in order for a
               screen reader (a hover card would not). */}
           <details className="mt-3" data-testid="ws-why">
-            <summary className="text-apollo-slate w-fit cursor-pointer text-sm font-medium select-none">
+            <summary
+              className={`text-apollo-slate flex w-fit cursor-pointer items-center gap-1 text-sm font-medium select-none ${SUMMARY_NO_MARKER}`}
+            >
+              <Caret />
               Why copy block by block?
             </summary>
             <p className="text-muted-foreground mt-2 max-w-prose text-sm">

@@ -58,6 +58,7 @@ import type {
 } from "@/lib/edit/honor-queue";
 import { isFullTimeFaculty, REJECTION_REASONS, yearPlausibilityNote } from "@/lib/edit/honor-queue";
 import { cn } from "@/lib/utils";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 type Props = {
   pending: HonorQueueGroup[];
@@ -1692,7 +1693,12 @@ function SourcesPanel({
 
       {runs.length > 1 ? (
         <details className="text-[13px]" data-slot="honors-sources-runs">
-          <summary className="text-muted-foreground cursor-pointer">Earlier loads</summary>
+          <summary
+            className={`text-muted-foreground flex w-fit cursor-pointer items-center gap-1 ${SUMMARY_NO_MARKER}`}
+          >
+            <Caret />
+            Earlier loads
+          </summary>
           <ul className="mt-2 flex flex-col gap-1">
             {runs.slice(1).map((r) => {
               const st = runStatus(r);

@@ -123,6 +123,7 @@ import {
 import { extractLastNameSort } from "@/lib/name-sort";
 import { profilePath } from "@/lib/profile-url";
 import { markPaste, markedConceptCount } from "@/lib/matcha-paste-highlight";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 type Status =
   | { kind: "idle" }
@@ -970,7 +971,8 @@ export function MatchaPanel({
           onClick={() => setShowFullText((v) => !v)}
           className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
         >
-          {showFullText ? "Show less ▴" : "Show full text ▾"}
+          {showFullText ? "Show less" : "Show full text"}
+          <Caret dropdown open={showFullText} className="ml-0.5 inline-block align-[-2px]" />
         </button>
       </div>
       {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
@@ -1825,8 +1827,9 @@ export function MatchaPanel({
                     className="text-xs font-medium text-[var(--apollo-slate)] underline-offset-4 hover:underline"
                   >
                     {showSource
-                      ? "Hide source text with matched concepts ▴"
-                      : "Show source text with matched concepts ▾"}
+                      ? "Hide source text with matched concepts"
+                      : "Show source text with matched concepts"}
+                      <Caret dropdown open={showSource} className="ml-0.5 inline-block align-[-2px]" />
                   </button>
                   {showSource ? askQuote : null}
                 </div>
@@ -3830,7 +3833,8 @@ function ResearcherRow({
         ) : null}
         {papers.length > 0 ? (
           <details className="mt-1.5">
-            <summary className="text-muted-foreground cursor-pointer text-xs select-none">
+            <summary className={`flex w-fit items-center gap-1 text-muted-foreground cursor-pointer text-xs select-none ${SUMMARY_NO_MARKER}`}>
+              <Caret />
               Why this match — top paper{papers.length === 1 ? "" : "s"}
             </summary>
             <ul className="mt-1 space-y-1">

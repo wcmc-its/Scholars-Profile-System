@@ -26,6 +26,7 @@ import type { EditSession } from "@/lib/auth/superuser";
 import { loadReportRequestRecord, reportMetaFor, type ReportKey } from "@/lib/edit/report-meta";
 import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import { OVERVIEW_HTML_CLASS } from "@/lib/utils";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 export type ReportHeaderProps = {
   /** Which report — the `report_meta.report_key`. */
@@ -86,7 +87,8 @@ export async function ReportHeader({
           {children}
           {meta.descriptionHtml !== null && (
             <details className="mt-2 text-sm" data-testid="report-description">
-              <summary className="cursor-pointer">About this report</summary>
+              <summary className={`flex w-fit items-center gap-1 cursor-pointer ${SUMMARY_NO_MARKER}`}>
+                <Caret />About this report</summary>
               <div
                 className={OVERVIEW_HTML_CLASS}
                 dangerouslySetInnerHTML={{ __html: sanitizeOverviewHtml(meta.descriptionHtml) }}

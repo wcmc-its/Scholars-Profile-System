@@ -57,6 +57,7 @@ import {
   type GateHolder,
 } from "@/lib/edit/functional-roles";
 import { cn } from "@/lib/utils";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 /** The note every surface carries while `FUNCTIONAL_ROLES_AUTHZ` is off. */
 export const FUNCTIONAL_ROLES_TRACKING_NOTE =
@@ -687,7 +688,8 @@ export function FunctionalRolesPanel({
               </p>
             ) : (
               <details className="text-muted-foreground">
-                <summary className="text-foreground cursor-pointer">
+                <summary className={`flex w-fit items-center gap-1 text-foreground cursor-pointer ${SUMMARY_NO_MARKER}`}>
+                  <Caret />
                   Parity: {gaps.length} current {gaps.length === 1 ? "grant has" : "grants have"} no
                   matching row here.
                 </summary>
