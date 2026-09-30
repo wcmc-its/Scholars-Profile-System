@@ -72,7 +72,7 @@ Step Functions alarms.
 |---|---|---|---|---|
 | **WCM Enterprise Directory** (LDAPS) | [`lib/sources/ldap.ts`](../lib/sources/ldap.ts) | nightly | `Scholar`, `Appointment`, dept/division org units, clinical-profile links, postdoc/student mentor edges, VIVO redirect set | New hires / title changes / departures don't appear until ED is reachable again. The roster as a whole goes stale, not blank. |
 | **InfoEd** (MS SQL) | [`lib/sources/mssql-infoed.ts`](../lib/sources/mssql-infoed.ts) | nightly | `Grant` (funding) | Funding section stops updating; existing grants still render. |
-| **COI Portal** (MySQL) | [`lib/sources/mysql-coi.ts`](../lib/sources/mysql-coi.ts) | nightly | `CoiActivity` (disclosures) | Disclosures stop updating. |
+| **COI** (MS SQL) | [`lib/sources/mssql-coi-frt.ts`](../lib/sources/mssql-coi-frt.ts) | nightly | `CoiActivity` (disclosures) | Disclosures stop updating. |
 | **ASMS** (MS SQL) | [`lib/sources/mssql-asms.ts`](../lib/sources/mssql-asms.ts) | nightly | `Education` | Education/training entries stop updating. |
 | **Jenzabar** (MS SQL) | [`lib/sources/mssql-jenzabar.ts`](../lib/sources/mssql-jenzabar.ts) | weekly | `PhdMentorRelationship`, GS faculty | Graduate-school mentoring chips stop updating. See [`etl/jenzabar-gs-faculty-probe.md`](./etl/jenzabar-gs-faculty-probe.md). |
 | **ReciterDB** (MariaDB) | [`lib/sources/reciterdb.ts`](../lib/sources/reciterdb.ts) | nightly | `Publication`, `PublicationAuthor`, MeSH terms, abstracts, citation counts | Publications stop updating. **This is the heavy job (~5 min) and it cascades** — it `deleteMany`s `Publication` and the `dynamodb` step must follow it (see consistency window below). |

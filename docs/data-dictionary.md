@@ -23,7 +23,7 @@ system that owns the data — because that's what determines who to ask when a v
 | **ED** | WCM Enterprise Directory (LDAPS) | [`lib/sources/ldap.ts`](../lib/sources/ldap.ts), `etl/ed` | nightly |
 | **ASMS** | ASMS (MS SQL) | [`lib/sources/mssql-asms.ts`](../lib/sources/mssql-asms.ts) | nightly |
 | **InfoEd** | InfoEd grants (MS SQL) | [`lib/sources/mssql-infoed.ts`](../lib/sources/mssql-infoed.ts) | nightly |
-| **COI** | COI Portal (MySQL) | [`lib/sources/mysql-coi.ts`](../lib/sources/mysql-coi.ts) | nightly |
+| **COI** | COI + FRT SQL Server | [`lib/sources/mssql-coi-frt.ts`](../lib/sources/mssql-coi-frt.ts) | nightly |
 | **Jenzabar** | Graduate School (MS SQL) | [`lib/sources/mssql-jenzabar.ts`](../lib/sources/mssql-jenzabar.ts) | per spec |
 | **ReCiter** | ReciterDB (MariaDB) — publications | [`lib/sources/reciterdb.ts`](../lib/sources/reciterdb.ts) | weekly |
 | **ReciterAI** | DynamoDB + S3 — topics/scores/spotlight | `etl/dynamodb`, `etl/spotlight`, `etl/hierarchy` | weekly / annual |

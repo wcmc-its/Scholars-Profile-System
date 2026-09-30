@@ -1,5 +1,7 @@
 /**
- * COI ETL — Phase 4e. Disclosures from v_coi_vivo_activity_group.
+ * COI ETL — Phase 4e. Disclosures from v_coi_vivo_activity_group on the
+ * COI + FRT SQL Server (moved off the MySQL COI host 2026-09-30; the
+ * cutover parity check matched all 3,390 rows column-for-column).
  * No privacy filtering per user 2026-04-30 — all rows imported.
  *
  * Phase 1 spec amendment: spec didn't enumerate a Disclosures section, but
@@ -9,7 +11,7 @@
  */
 import { db } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
-import { closeCoiPool, withCoiConnection } from "@/lib/sources/mysql-coi";
+import { closeCoiFrtPool, getCoiFrtPool } from "@/lib/sources/mssql-coi-frt";
 
 type Row = {
   cwid: string | null;
@@ -46,16 +48,16 @@ async function main() {
     console.log(`Active scholars: ${ourSet.size}`);
 
     console.log("Querying v_coi_vivo_activity_group...");
-    const rows = await withCoiConnection(async (conn) => {
-      const result = (await conn.query(
+    const pool = await getCoiFrtPool();
+    const rows = (
+      await pool.request().query<Row>(
         `SELECT cwid, entity, activity_type, value, activity_relates_to,
                 wcmc_facilities, purchasing_procurement, chair_approval,
                 vivo_pops_activity_group, description
-         FROM v_coi_vivo_activity_group
+         FROM dbo.v_coi_vivo_activity_group
          WHERE cwid IS NOT NULL`,
-      )) as Row[];
-      return result;
-    });
+      )
+    ).recordset;
     console.log(`COI returned ${rows.length} rows.`);
 
     const filtered = rows.filter((r) => r.cwid !== null && ourSet.has(r.cwid));
@@ -131,5 +133,5 @@ main()
   })
   .finally(async () => {
     await db.write.$disconnect();
-    await closeCoiPool();
+    await closeCoiFrtPool();
   });
