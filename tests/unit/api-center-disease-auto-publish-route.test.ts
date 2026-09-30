@@ -11,7 +11,7 @@ const {
   mockCenterProgramFindFirst,
   mockUnitAdminFindMany,
   mockTransaction,
-  mockTxCenterUpdate,
+  mockTxCenterUpdateMany,
   mockAppendAuditRow,
   mockReadEditRequest,
 } = vi.hoisted(() => ({
@@ -19,7 +19,7 @@ const {
   mockCenterProgramFindFirst: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockTransaction: vi.fn(),
-  mockTxCenterUpdate: vi.fn(),
+  mockTxCenterUpdateMany: vi.fn(),
   mockAppendAuditRow: vi.fn(),
   mockReadEditRequest: vi.fn(),
 }));
@@ -44,7 +44,10 @@ import { POST } from "@/app/api/edit/center/[code]/disease-auto-publish/route";
 
 const CODE = "meyer_cancer_center";
 const CURATOR = { cwid: "cur1001", isSuperuser: false };
-const fakeTx = { center: { update: mockTxCenterUpdate } };
+const fakeTx = { center: { updateMany: mockTxCenterUpdateMany } };
+/** The PRIMARY's value, which the route's compare-and-set sees. The replica
+ *  (`db.read`, `mockCenterFindUnique`) may disagree with it, as in prod. */
+let primaryValue: boolean;
 
 function call(
   body: unknown,
@@ -74,11 +77,18 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
-  mockCenterFindUnique.mockResolvedValue({ code: CODE, diseaseAutoPublish: true });
+  primaryValue = true;
+  mockCenterFindUnique.mockResolvedValue({ code: CODE });
   mockCenterProgramFindFirst.mockResolvedValue({ code: "BR" });
   mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: CODE, role: "curator" }]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
-  mockTxCenterUpdate.mockResolvedValue({});
+  mockTxCenterUpdateMany.mockImplementation(
+    async (args: { where: { code: string; diseaseAutoPublish: boolean }; data: { diseaseAutoPublish: boolean } }) => {
+      if (args.where.code !== CODE || args.where.diseaseAutoPublish !== primaryValue) return { count: 0 };
+      primaryValue = args.data.diseaseAutoPublish;
+      return { count: 1 };
+    },
+  );
   mockAppendAuditRow.mockResolvedValue(undefined);
 });
 
@@ -88,7 +98,11 @@ describe("POST /api/edit/center/[code]/disease-auto-publish", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, code: CODE, enabled: false, changed: true });
     expect(mockTransaction).toHaveBeenCalledTimes(1);
-    expect(mockTxCenterUpdate).toHaveBeenCalledWith({ where: { code: CODE }, data: { diseaseAutoPublish: false } });
+    expect(mockTxCenterUpdateMany).toHaveBeenCalledWith({
+      where: { code: CODE, diseaseAutoPublish: true },
+      data: { diseaseAutoPublish: false },
+    });
+    expect(primaryValue).toBe(false);
     expect(mockAppendAuditRow).toHaveBeenCalledTimes(1);
     expect(mockAppendAuditRow.mock.calls[0][0]).toBe(fakeTx);
     expect(mockAppendAuditRow.mock.calls[0][1]).toMatchObject({
@@ -105,10 +119,11 @@ describe("POST /api/edit/center/[code]/disease-auto-publish", () => {
   });
 
   it("turns it back on", async () => {
-    mockCenterFindUnique.mockResolvedValue({ code: CODE, diseaseAutoPublish: false });
+    primaryValue = false;
     const res = await call({ enabled: true });
     expect(res.status).toBe(200);
-    expect(mockTxCenterUpdate).toHaveBeenCalledWith({ where: { code: CODE }, data: { diseaseAutoPublish: true } });
+    expect(await res.json()).toMatchObject({ ok: true, enabled: true, changed: true });
+    expect(primaryValue).toBe(true);
     expect(mockAppendAuditRow.mock.calls[0][1]).toMatchObject({
       beforeValues: { diseaseAutoPublish: false },
       afterValues: { diseaseAutoPublish: true },
@@ -119,7 +134,30 @@ describe("POST /api/edit/center/[code]/disease-auto-publish", () => {
     const res = await call({ enabled: true });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, changed: false });
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(primaryValue).toBe(true);
+    expect(mockAppendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("decides the no-op on the PRIMARY, never the replica: an off-then-on flip inside replica lag still writes", async () => {
+    // The replica still says ON; the primary already committed the earlier OFF.
+    mockCenterFindUnique.mockResolvedValue({ code: CODE, diseaseAutoPublish: true });
+    primaryValue = false;
+    const res = await call({ enabled: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, enabled: true, changed: true });
+    expect(primaryValue).toBe(true);
+    expect(mockAppendAuditRow).toHaveBeenCalledTimes(1);
+    expect(mockAppendAuditRow.mock.calls[0][1]).toMatchObject({
+      beforeValues: { diseaseAutoPublish: false },
+      afterValues: { diseaseAutoPublish: true },
+    });
+  });
+
+  it("a stale replica saying OFF cannot fabricate a change: the primary is already ON, so no write and no audit", async () => {
+    mockCenterFindUnique.mockResolvedValue({ code: CODE, diseaseAutoPublish: false });
+    primaryValue = true;
+    const res = await call({ enabled: true });
+    expect(await res.json()).toMatchObject({ ok: true, changed: false });
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
   });
 
@@ -179,7 +217,8 @@ describe("POST /api/edit/center/[code]/disease-auto-publish", () => {
     mockUnitAdminFindMany.mockResolvedValue([]);
     const res = await call({ enabled: false }, { session: { cwid: "sup0001", isSuperuser: true } });
     expect(res.status).toBe(200);
-    expect(mockTxCenterUpdate).toHaveBeenCalledTimes(1);
+    expect(mockTxCenterUpdateMany).toHaveBeenCalledTimes(1);
+    expect(primaryValue).toBe(false);
   });
 
   it("500 write_failed when the transaction throws", async () => {

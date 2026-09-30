@@ -11,11 +11,17 @@
  * otherwise), and the actor must be Curator/Owner of THIS center or
  * Superuser/comms_steward (`canEditUnit`).
  *
- * Setting the value it already has is a no-op (`changed: false`, no audit row).
- * Otherwise one `db.write.$transaction` updates the column and appends a
- * `disease_auto_publish_set` audit row (`targetEntityType: "center"`,
- * `targetEntityId` the code, before/after `{ diseaseAutoPublish }`), with
- * `actorCwid` the real accountable human, never the impersonated cwid.
+ * One `db.write.$transaction` does a compare-and-set ON THE PRIMARY
+ * (`updateMany where diseaseAutoPublish = !enabled`) and, only when that
+ * changed a row, appends a `disease_auto_publish_set` audit row
+ * (`targetEntityType: "center"`, `targetEntityId` the code, before/after
+ * `{ diseaseAutoPublish }`), with `actorCwid` the real accountable human, never
+ * the impersonated cwid. Zero rows changed means the value was already
+ * `enabled`: a no-op (`changed: false`, no audit row). The no-op decision and
+ * the audit before-value never come from `db.read`: the prod reader is a
+ * lagging replica, so an off-then-on flip inside the lag would read the stale
+ * value, skip the write and leave the switch off while the UI shows it on.
+ * `db.read` is used only for the existence, taxonomy and authz gates.
  *
  * No ISR revalidation: nothing public reads the switch yet. The public center
  * page that will (PR5) must revalidate here when it lands.
@@ -50,7 +56,7 @@ export async function POST(
   const { code } = await params;
   const center = await db.read.center.findUnique({
     where: { code },
-    select: { code: true, diseaseAutoPublish: true },
+    select: { code: true },
   });
   if (!center) return editError(400, "unit_not_found", "code");
 
@@ -78,16 +84,14 @@ export async function POST(
     return editError(403, authz.reason);
   }
 
-  if (center.diseaseAutoPublish === enabled) {
-    return editOk({ code: center.code, enabled, changed: false });
-  }
-
+  let changed: boolean;
   try {
-    await db.write.$transaction(async (tx) => {
-      await tx.center.update({
-        where: { code: center.code },
+    changed = await db.write.$transaction(async (tx) => {
+      const { count } = await tx.center.updateMany({
+        where: { code: center.code, diseaseAutoPublish: !enabled },
         data: { diseaseAutoPublish: enabled },
       });
+      if (count === 0) return false;
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
@@ -95,16 +99,17 @@ export async function POST(
         targetEntityId: center.code,
         action: "disease_auto_publish_set",
         fieldsChanged: ["diseaseAutoPublish"],
-        beforeValues: { diseaseAutoPublish: center.diseaseAutoPublish },
+        beforeValues: { diseaseAutoPublish: !enabled },
         afterValues: { diseaseAutoPublish: enabled },
         ts: new Date(),
         requestId,
       });
+      return true;
     });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
 
-  return editOk({ code: center.code, enabled, changed: true });
+  return editOk({ code: center.code, enabled, changed });
 }
