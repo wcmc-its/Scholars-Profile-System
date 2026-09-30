@@ -34,6 +34,14 @@ const {
   mockIsCoiGapEnabled: vi.fn(),
 }));
 
+// Impersonated writes now re-check that the REAL initiator is a superuser (an
+// observer-started "View as" is read-only — lib/edit/request.ts). These tests'
+// overlays model a superuser-started View as.
+vi.mock("@/lib/auth/superuser", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/auth/superuser")>()),
+  isSuperuser: async () => true,
+}));
+
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEffectiveEditSession,
   impersonationActive: mockImpersonationActive,

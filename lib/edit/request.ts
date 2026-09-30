@@ -16,7 +16,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { nowSeconds } from "@/lib/auth/session";
 import { getSession } from "@/lib/auth/session-server";
-import { type EditSession } from "@/lib/auth/superuser";
+import { stripObserverView } from "@/lib/auth/observer-view";
+import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
 import {
   getEffectiveEditSession,
   impersonationActive,
@@ -236,6 +237,30 @@ export async function resolveEditIdentity(): Promise<EditIdentity | null> {
 }
 
 /**
+ * The identity a WRITE authorizes against — {@link resolveEditIdentity} with the
+ * two write-only refusals every mutating `/api/edit/*` handler owes:
+ *   - the observer's synthetic steward grant is stripped (`stripObserverView`),
+ *     so a write is authorized by the person's OWN roles only;
+ *   - under a "View as" overlay, `IMPERSONATION_READONLY` or an initiator who is
+ *     not a superuser (i.e. an observer, `canImpersonate`) refuses the write.
+ * `readEditRequest` calls this; a write route that reads its own body calls it
+ * directly (the observer gate test enforces one or the other).
+ */
+export async function resolveEditIdentityForWrite(): Promise<
+  { ok: true; id: EditIdentity } | { ok: false; response: NextResponse }
+> {
+  const id = await resolveEditIdentity();
+  if (!id) return { ok: false, response: new NextResponse(null, { status: 401 }) };
+  if (
+    id.impersonatedCwid !== null &&
+    (impersonationReadonly() || !(await isSuperuser(id.realCwid)))
+  ) {
+    return { ok: false, response: editError(403, "impersonation_readonly") };
+  }
+  return { ok: true, id: { ...id, session: stripObserverView(id.session) } };
+}
+
+/**
  * The shared `/api/edit/*` preamble. Returns the request context, or a ready
  * error response — `415` (non-JSON), `403` (cross-origin), `401` (no session,
  * empty body — `self-edit-spec.md` edge case 16), `413` (oversized body), or
@@ -263,18 +288,12 @@ export async function readEditRequest(request: NextRequest): Promise<EditRequest
   // (#637 §3). `session`/`effective` carry the live `isSuperuser` verdict of the
   // EFFECTIVE cwid; `realCwid` is the human for attribution; `impersonatedCwid`
   // is the overlay target (or `null`).
-  const id = await resolveEditIdentity();
-  if (!id) {
-    return { ok: false, response: new NextResponse(null, { status: 401 }) };
-  }
-  const { session: effective, realCwid, impersonatedCwid } = id;
-
-  // R3 optional view-only mode: while impersonating, refuse the write up front
-  // (the default is edit-enabled — see #637 §3). Placed before the body read so
-  // an oversized/garbage body still 403s rather than 413/400.
-  if (impersonatedCwid !== null && impersonationReadonly()) {
-    return { ok: false, response: editError(403, "impersonation_readonly") };
-  }
+  // R3 view-only refusals (and the observer strip) live in
+  // `resolveEditIdentityForWrite`. Placed before the body read so an
+  // oversized/garbage body still 403s rather than 413/400.
+  const resolved = await resolveEditIdentityForWrite();
+  if (!resolved.ok) return resolved;
+  const { session: effective, realCwid, impersonatedCwid } = resolved.id;
 
   // Size-bounded body read — declared length first, then a post-read backstop.
   const declared = Number(request.headers.get("content-length"));

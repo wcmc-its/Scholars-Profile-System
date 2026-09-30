@@ -28,6 +28,8 @@ import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
+import { isObserver } from "@/lib/auth/observer";
+import { withObserverView } from "@/lib/auth/observer-view";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
 import { isGroupMember } from "@/lib/auth/ldap-group";
@@ -87,7 +89,15 @@ export interface EditSession {
    * `getEffectiveEditSession`) always populate it.
    */
   isCvGenerator?: boolean;
+  /**
+   * `observer` (`lib/auth/observer.ts`): `true` ONLY when this session's
+   * `isCommsSteward` is the observer's SYNTHETIC read grant, not a real one.
+   * Read surfaces treat the viewer as a steward; every write path strips the
+   * grant first (`stripObserverView`), so no write predicate ever sees it.
+   */
+  isObserver?: boolean;
 }
+
 
 
 /** One structured log line for a directory-side failure of the superuser check. */
@@ -140,21 +150,25 @@ export async function getEditSession(): Promise<EditSession | null> {
   // #1514 — six independent LDAPS group checks; resolve concurrently so the
   // wall-clock cost is one directory round-trip, not six. All six are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc, dsv, cvg] = await Promise.all([
+  const [su, cs, dev, hc, dsv, cvg, obs] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
     isHonorsCurator(session.cwid),
     isDataSharingViewer(session.cwid),
     isCvGenerator(session.cwid),
+    isObserver(session.cwid),
   ]);
-  return {
-    cwid: session.cwid,
-    isSuperuser: su,
-    isCommsSteward: cs,
-    isDeveloper: dev,
-    isHonorsCurator: hc,
-    isDataSharingViewer: dsv,
-    isCvGenerator: cvg,
-  };
+  return withObserverView(
+    {
+      cwid: session.cwid,
+      isSuperuser: su,
+      isCommsSteward: cs,
+      isDeveloper: dev,
+      isHonorsCurator: hc,
+      isDataSharingViewer: dsv,
+      isCvGenerator: cvg,
+    },
+    obs,
+  );
 }

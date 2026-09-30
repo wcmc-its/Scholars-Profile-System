@@ -1873,6 +1873,16 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         CV_GENERATOR_ENABLED: "on",
         SCHOLARS_CV_GENERATOR_GROUP_CN: "ITS:Library:Scholars/cv-generator-role",
+        // `observer` role (2026-09-30) -- read-only view of the whole /edit
+        // console (steward parity) plus read-only "View as", for trusted staff
+        // who need to understand the app and guide users through changes.
+        // Writes authorize against the person's OWN roles only
+        // (lib/auth/observer.ts). Staging first; prod after the trial.
+        //   OBSERVER_ENABLED -- master kill switch; not "on" => dormant.
+        //   SCHOLARS_OBSERVER_GROUP_CN -- ED group, created 2026-09-30.
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        OBSERVER_ENABLED: envConfig.envName === "staging" ? "on" : "off",
+        SCHOLARS_OBSERVER_GROUP_CN: "ITS:Library:Scholars/observer-role",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"

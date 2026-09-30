@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
+import { isObserver } from "@/lib/auth/observer";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { isDeveloper } from "@/lib/auth/development";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
@@ -129,11 +130,13 @@ export async function GET(): Promise<NextResponse> {
   const developer = superuser ? false : await isDeveloper(session.cwid).catch(() => false);
   const canAccessFundingMatcher = superuser || developer;
 
-  // R1 — only a superuser may initiate impersonation, AND the feature must be
-  // enabled. The flag-off short-circuit (mirrored from `impersonationActive`)
-  // keeps a dark deployment from advertising the switcher entry.
+  // R1 — only a superuser or an observer (read-only "View as") may initiate
+  // impersonation, AND the feature must be enabled. The flag-off short-circuit
+  // (mirrored from `impersonationActive`) keeps a dark deployment from
+  // advertising the switcher entry.
   const featureEnabled = process.env.IMPERSONATION_ENABLED === "true";
-  const canImpersonate = featureEnabled && superuser;
+  const canImpersonate =
+    featureEnabled && (superuser || (await isObserver(session.cwid).catch(() => false)));
 
   // Role-aware console entry points for the account-menu dropdown
   // (`lib/auth/console-links.ts`, role-aware-navigation-entry-points-spec.md).
@@ -152,7 +155,10 @@ export async function GET(): Promise<NextResponse> {
       managesUnits: false,
     });
   } else {
-    const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
+    // An observer gets the steward's console entry (their read-only view).
+    const commsSteward =
+      (await isCommsSteward(session.cwid).catch(() => false)) ||
+      (await isObserver(session.cwid).catch(() => false));
     const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
     const managesUnits = manageable !== null && manageable.total > 0;
     consoleLinks = buildConsoleLinks({

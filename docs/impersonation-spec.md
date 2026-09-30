@@ -103,7 +103,7 @@ No new LDAP group — **R1 reuses `isSuperuser`** (`ITS:Library:Scholars/superus
 
 Enforced in `middleware.ts` on `/api/impersonation` (route-level):
 
-**R1 — Initiator gate.** `canImpersonate(realCwid) = isSuperuser(realCwid)` — the existing live, fail-closed LDAPS check (`lib/auth/superuser.ts`), against `session.cwid`, **never** the effective cwid.
+**R1 — Initiator gate.** `canImpersonate(realCwid) = isSuperuser(realCwid) || isObserver(realCwid)` (observer added 2026-09-30: an observer-started overlay is **always read-only** — every write refuses `impersonation_readonly` regardless of `IMPERSONATION_READONLY`; see [`access-control-rbac.md`](./access-control-rbac.md) Observer) — the existing live, fail-closed LDAPS check (`lib/auth/superuser.ts`), against `session.cwid`, **never** the effective cwid.
 
 **R2 — Escalation guard, down-only.** `assertImpersonable` blocks impersonating any CWID that is itself a superuser (`<`, stricter than the spec's `≤` — no lateral admin→admin).
 

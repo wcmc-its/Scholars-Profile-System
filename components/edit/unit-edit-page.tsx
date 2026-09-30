@@ -169,9 +169,16 @@ export type UnitEditPageProps = {
    *  page computes this server-side (`loadConsoleTabs(session, db.read)`);
    *  default `false` keeps the flat label for a caller that hasn't. */
   orgUnitsNavVisible?: boolean;
+  /** Observer viewing a unit they have no real role on: "View only", `inert`. */
+  readOnly?: boolean;
 };
 
-export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEditPageProps) {
+export function UnitEditPage({
+  ctx,
+  attr,
+  orgUnitsNavVisible = false,
+  readOnly = false,
+}: UnitEditPageProps) {
   const visible = ATTRIBUTES.filter((a) => a.visible(ctx));
   const active: AttrDef =
     visible.find((a) => a.key === attr) ??
@@ -226,6 +233,7 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
   return (
     <EditShell
       mode="superuser"
+      readOnly={readOnly}
       scholarName={ctx.unit.name}
       // A unit, not a scholar profile — "Profiles" never has anywhere useful
       // to go from a unit editor. Its OWN structural crumb ("Org units") is

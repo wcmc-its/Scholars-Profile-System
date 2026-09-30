@@ -42,6 +42,7 @@ Plus **break-glass** — the emergency-access and kill-switch procedures.
 | **Unit Curator** | a `unit_admin` row (`role=curator`) | per POST | Edit the unit **only**. Cannot delegate (cannot grant any role) — the load-bearing line that stops a curator self-escalating. |
 | **comms_steward** | Enterprise Directory group, resolved via `isCommsSteward(cwid)`; whole role dark unless `COMMS_STEWARD_ENABLED=on` | per `/edit/*` GET / `/api/edit/*` POST, same as Superuser | Near-superuser profile parity across **all** scholars (bio, highlights, visibility, publication suppression) minus `slug` and unit create/delete. Edits any *existing* unit's content at curator parity. **2026-08-26 widening:** ALSO full access-management parity on every unit (department/division/center/core) — grant/revoke `owner`/`curator` rows anywhere, with no `unit_admin` row of their own — and full curator-parity on cores (content, leaders/roster, the claim queue). Still excluded: the `/edit/administrators` roster page, unit create/delete, and `slug`. See [`comms-steward-profile-editing-spec.md`](./comms-steward-profile-editing-spec.md) §3b/§11. |
 | **Proxy editor** | a `scholar_proxy` row `(scholarCwid, proxyCwid)` — the scholar's explicit designee (#779, ADR-005 Amendment 3); the proxy holds **no other role** (not Self/Superuser/Unit role), enforced at grant **and** re-checked at every edit | per request, keyed on the **real** cwid | Edit *the granted scholar's* `overview` and hide *that scholar's* own misattributed publications — exactly self-edit scope, on exactly that one scholar. Cannot edit `slug`/upstream fields; cannot manage the proxy list. Distinct from a Unit Owner/Curator's unit-scoped proxy edit. |
+| **Observer** | Enterprise Directory group `ITS:Library:Scholars/observer-role`, resolved via `isObserver(cwid)` ([`lib/auth/observer.ts`](../lib/auth/observer.ts)); whole role dark unless `OBSERVER_ENABLED=on` | per `/edit/*` GET / `/api/edit/*` POST, same as Superuser | **Read-only** view of the whole console at `comms_steward` parity: every profile, unit, queue and report (incl. report downloads, 50-scholar export cap unchanged). May start **"View as"**, always read-only. Grants **no** write: every write authorizes against the person's *own* roles only, so a faculty member or unit curator who is also an observer keeps exactly their own edit rights. Not: Matcha (`development`), `/edit/etl-status`, `/edit/administrators`. |
 
 Key properties:
 
@@ -50,6 +51,14 @@ Key properties:
 - **Fail-closed:** a directory error *denies*, never grants. So an Enterprise Directory
   outage blocks all editing rather than risking privilege escalation (`superuser_check_failed`
   is logged). Losing the superuser group takes effect on the user's *next* `/edit/*` request.
+- **Observer is a read grant, stripped on write.** For an observer who is not already a
+  superuser/steward, the READ session carries a synthetic `isCommsSteward: true` flagged
+  `isObserver: true` (`withObserverView`, [`lib/auth/observer-view.ts`](../lib/auth/observer-view.ts)),
+  so every console surface renders with no per-page wiring. Every write resolves identity
+  through `resolveEditIdentityForWrite` ([`lib/edit/request.ts`](../lib/edit/request.ts),
+  called by `readEditRequest`), which strips that grant and refuses any write under a
+  "View as" overlay started by a non-superuser (`impersonation_readonly`). A new mutating
+  `/api/edit/*` route must go through one of the two; the observer gate test fails otherwise.
 - **`owner` subsumes `curator`** (an owner needs no separate curator row).
 
 ### Unit RBAC scope rules (ADR-005 Amendment 1 § A1.2)
