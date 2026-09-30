@@ -631,6 +631,7 @@ async function handleSearch(request: NextRequest) {
   const queryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
+    meshConfidence: taxonomyMatch.meshResolution?.confidence ?? null,
     knownCwids: classifierSets.cwids,
     knownSurnames: classifierSets.surnames,
     knownDepartments: classifierSets.departments,
