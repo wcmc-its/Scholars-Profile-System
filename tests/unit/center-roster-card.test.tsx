@@ -1097,3 +1097,102 @@ describe("CenterRosterCard — 'Has diseases to review' and the review queue", (
     expect(within(sheet()).getByTestId("disease-review-next").textContent).toBe("Next: Delta →");
   });
 });
+
+describe("CenterRosterCard — bulk selection", () => {
+  const two = [member({ cwid: "a", name: "Alpha" }), member({ cwid: "b", name: "Bravo" }), member({ cwid: "c", name: "Charlie" })];
+
+  it("the bar appears on a tick; Set role POSTs once per selected member only", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard {...base} members={two} programs={[]} membershipRoles={MEMBERSHIP_ROLES} />,
+    );
+    expect(screen.queryByTestId("roster-bulk-role")).toBeNull();
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    fireEvent.click(within(container).getByTestId("roster-select-b"));
+    expect(screen.getByText("2 members selected")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("roster-bulk-role"), { target: { value: "core_faculty" } });
+    await waitFor(() => expect(screen.queryByTestId("roster-bulk-role")).toBeNull());
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      expect.objectContaining({ cwid: "a", action: "set", membershipRoleKey: "core_faculty" }),
+      expect.objectContaining({ cwid: "b", action: "set", membershipRoleKey: "core_faculty" }),
+    ]);
+  });
+
+  it("select-all ticks every shown member; Set program writes each", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(<CenterRosterCard {...base} members={two} programs={PROGRAMS} />);
+    fireEvent.click(within(container).getByTestId("roster-select-all"));
+    expect(screen.getByText("3 members selected")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("roster-bulk-program"), { target: { value: "CB" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.every((c) => bodyOf(c).programCode === "CB")).toBe(true);
+  });
+
+  it("a failed write stays selected so it can be retried", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const cwid = JSON.parse(String((init as RequestInit).body)).cwid;
+      return new Response(JSON.stringify(cwid === "b" ? { ok: false, error: "x" } : { ok: true }), {
+        status: cwid === "b" ? 500 : 200,
+      });
+    });
+    const { container } = render(<CenterRosterCard {...base} members={two} programs={PROGRAMS} />);
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    fireEvent.click(within(container).getByTestId("roster-select-b"));
+    fireEvent.change(screen.getByTestId("roster-bulk-program"), { target: { value: "CB" } });
+    await waitFor(() => expect(screen.getByText("1 member selected")).toBeTruthy());
+    expect((within(container).getByTestId("roster-select-b") as HTMLElement).getAttribute("data-state")).toBe("checked");
+  });
+
+  it("Confirm high-confidence confirms only the selected members' pending HIGH rows", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1), diseaseRow({ diseaseCode: "GYN" })] }),
+          member({ cwid: "b", name: "Bravo", diseases: [pendingHigh("LUNG", 1)] }),
+        ]}
+        programs={[]}
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    const button = screen.getByTestId("roster-bulk-confirm-high");
+    expect(button.textContent).toBe("Confirm 1 high-confidence");
+    fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(bodyOf(fetchMock.mock.calls[0])).toEqual({ cwid: "a", diseaseCode: "BREAST", decision: "confirmed" });
+  });
+});
+
+describe("CenterRosterCard — Fill dates", () => {
+  it("fills undated members from their WCM appointment start, skipping invitees, the unknown and an end-date clash; Undo clears them", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "a", wcmStartDate: "2011-09-01" }),
+          member({ cwid: "b" }), // no appointment date on file
+          member({ cwid: "c", wcmStartDate: "2020-01-01", endDate: "2019-01-01" }), // would invert the range
+          member({ cwid: "d", wcmStartDate: "2015-01-01", membershipRoleKey: "invited" }), // not joined
+          member({ cwid: "e", startDate: "2018-01-01", wcmStartDate: null }), // already dated
+        ]}
+        programs={[]}
+      />,
+    );
+    const card = within(container).getByTestId("roster-fill-dates");
+    expect(card.textContent).toMatch(/3 memberships have no start date/);
+    expect(card.textContent).toMatch(/2 can’t be filled automatically/);
+    fireEvent.click(within(card).getByTestId("roster-fill-dates-run"));
+    await waitFor(() => expect(within(container).getByTestId("roster-fill-dates-done").textContent).toMatch(/1 start date filled/));
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      expect.objectContaining({ cwid: "a", action: "set", startDate: "2011-09-01" }),
+    ]);
+    expect(within(container).getByTestId("roster-dates-label-a").textContent).toBe("Since Sep 2011");
+
+    fireEvent.click(within(container).getByTestId("roster-fill-dates-undo"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(bodyOf(fetchMock.mock.calls[1])).toEqual(expect.objectContaining({ cwid: "a", startDate: null }));
+    await waitFor(() => expect(within(container).getByTestId("roster-dates-label-a").textContent).toBe("No start date"));
+  });
+});

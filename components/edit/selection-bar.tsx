@@ -125,7 +125,10 @@ export type SelectionBarProps = {
    *  does omitting `onExtend` (a list with no meaningful order — Mentees). */
   extendCount?: number;
   onExtend?: () => void;
-  onHide: () => void;
+  onHide?: () => void;
+  /** Replaces the "Hide from profile" verb for a list whose bulk actions are
+   *  something else (the center roster's Set role / Set program / Confirm). */
+  actions?: React.ReactNode;
   onClear: () => void;
   busy: boolean;
 };
@@ -137,6 +140,7 @@ export function SelectionBar({
   extendCount = 0,
   onExtend,
   onHide,
+  actions,
   onClear,
   busy,
 }: SelectionBarProps) {
@@ -164,9 +168,12 @@ export function SelectionBar({
         </button>
       )}
       <div className="ml-auto flex items-center gap-2">
-        <Button type="button" variant="apollo" size="sm" disabled={busy} onClick={onHide}>
-          Hide from profile
-        </Button>
+        {actions ??
+          (onHide && (
+            <Button type="button" variant="apollo" size="sm" disabled={busy} onClick={onHide}>
+              Hide from profile
+            </Button>
+          ))}
         <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClear}>
           Clear
         </Button>

@@ -107,6 +107,8 @@ type Opts = {
     recentPubs: number;
     specialtyStatus: string;
   }>;
+  /** Roster "Fill dates" — `appointment.findMany` rows. */
+  appointments?: Array<{ cwid: string; startDate: Date | null }>;
   diseaseDecisions?: Array<{
     cwid: string;
     diseaseCode: string;
@@ -176,6 +178,7 @@ function fakeClient(o: Opts) {
     divisionMembership: { findMany: vi.fn().mockResolvedValue(o.divisionMembers ?? []) },
     cancerCenterDiseaseAssignment: { findMany: vi.fn().mockResolvedValue(o.diseaseAssignments ?? []) },
     cancerCenterDiseaseDecision: { findMany: vi.fn().mockResolvedValue(o.diseaseDecisions ?? []) },
+    appointment: { findMany: vi.fn().mockResolvedValue(o.appointments ?? []) },
   };
 }
 
@@ -641,6 +644,7 @@ describe("loadUnitEditContext — manual division roster", () => {
         scholarState: "active",
         publiclyListed: true,
         diseases: [],
+        wcmStartDate: null,
       },
     ]);
     expect(ctx!.unit.deptName).toBe("Medicine");
@@ -736,6 +740,7 @@ describe("loadUnitEditContext — center", () => {
         scholarState: "unknown",
         publiclyListed: false,
         diseases: [],
+        wcmStartDate: null,
       },
     ]);
     // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with
@@ -916,6 +921,27 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
     expect(ctx!.roster![0].diseases).toEqual([
       { diseaseCode: "BREAST", assignment: expect.objectContaining({ rank: 1 }), decision: null, drifted: false },
     ]);
+  });
+
+  it("sends an undated member's EARLIEST appointment start as wcmStartDate; a dated member gets none", async () => {
+    const client = fakeClient({
+      center,
+      centerMembers: [
+        { cwid: "mem1", source: "manual" },
+        { cwid: "mem2", source: "manual", startDate: new Date("2020-01-01") },
+      ],
+      centerPrograms: PROGRAMS,
+      appointments: [
+        { cwid: "mem1", startDate: new Date("2015-07-01") },
+        { cwid: "mem1", startDate: new Date("2011-09-01") },
+      ],
+    });
+    const ctx = await loadUnitEditContext("center", "meyer", SUPERUSER, asClient(client));
+    expect(ctx!.roster!.find((r) => r.cwid === "mem1")!.wcmStartDate).toBe("2011-09-01");
+    expect(ctx!.roster!.find((r) => r.cwid === "mem2")!.wcmStartDate).toBeNull();
+    expect(client.appointment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ cwid: { in: ["mem1"] } }) }),
+    );
   });
 
   it("a rejected decision flags drift once the current row is high-confidence", async () => {
