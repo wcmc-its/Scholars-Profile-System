@@ -44,10 +44,13 @@ export const COI_GROUP_ORDER = [
 export function groupCoiDisclosures(disclosures: readonly CoiDisclosure[]): CoiGroup[] {
   const grouped = new Map<string, Set<string>>();
   for (const d of disclosures) {
-    if (!d.entity) continue;
+    // Source names carry stray trailing spaces ("Atropos Health "), which
+    // rendered as "Atropos Health ·" and kept whitespace-only dupes apart.
+    const entity = d.entity?.trim();
+    if (!entity) continue;
     const key = d.activityGroup ?? "Other";
     const set = grouped.get(key) ?? new Set<string>();
-    set.add(d.entity);
+    set.add(entity);
     grouped.set(key, set);
   }
 
