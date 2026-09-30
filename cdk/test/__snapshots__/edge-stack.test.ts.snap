@@ -874,6 +874,55 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudFront::Function",
     },
+    "EdgeWafLogGroup3EA07F97": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "aws-waf-logs-sps-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "EdgeWafLogging": {
+      "DependsOn": [
+        "EdgeWafLogGroup3EA07F97",
+      ],
+      "Properties": {
+        "LogDestinationConfigs": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":logs:us-east-1:123456789012:log-group:aws-waf-logs-sps-prod",
+              ],
+            ],
+          },
+        ],
+        "RedactedFields": [
+          {
+            "SingleHeader": {
+              "Name": "authorization",
+            },
+          },
+          {
+            "SingleHeader": {
+              "Name": "cookie",
+            },
+          },
+        ],
+        "ResourceArn": {
+          "Fn::GetAtt": [
+            "EdgeWebAcl",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::WAFv2::LoggingConfiguration",
+    },
     "EdgeWebAcl": {
       "Properties": {
         "CustomResponseBodies": {
@@ -1011,6 +1060,12 @@ a{color:var(--slate)}
                       "Count": {},
                     },
                     "Name": "SizeRestrictions_BODY",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SizeRestrictions_QUERYSTRING",
                   },
                 ],
                 "VendorName": "AWS",
@@ -1324,7 +1379,16 @@ a{color:var(--slate)}
     "SecurityHeadersE66B69D3": {
       "Properties": {
         "ResponseHeadersPolicyConfig": {
-          "Comment": "SPS security headers (prod) -- HSTS only; B21 layers CSP/XFO.",
+          "Comment": "SPS security headers (prod) -- HSTS + CORP; B21 layers CSP/XFO.",
+          "CustomHeadersConfig": {
+            "Items": [
+              {
+                "Header": "Cross-Origin-Resource-Policy",
+                "Override": false,
+                "Value": "same-site",
+              },
+            ],
+          },
           "Name": "sps-security-headers-prod",
           "SecurityHeadersConfig": {
             "StrictTransportSecurity": {
@@ -2418,6 +2482,55 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudFront::Function",
     },
+    "EdgeWafLogGroup3EA07F97": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "aws-waf-logs-sps-staging",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "EdgeWafLogging": {
+      "DependsOn": [
+        "EdgeWafLogGroup3EA07F97",
+      ],
+      "Properties": {
+        "LogDestinationConfigs": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":logs:us-east-1:123456789012:log-group:aws-waf-logs-sps-staging",
+              ],
+            ],
+          },
+        ],
+        "RedactedFields": [
+          {
+            "SingleHeader": {
+              "Name": "authorization",
+            },
+          },
+          {
+            "SingleHeader": {
+              "Name": "cookie",
+            },
+          },
+        ],
+        "ResourceArn": {
+          "Fn::GetAtt": [
+            "EdgeWebAcl",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::WAFv2::LoggingConfiguration",
+    },
     "EdgeWebAcl": {
       "Properties": {
         "CustomResponseBodies": {
@@ -2555,6 +2668,12 @@ a{color:var(--slate)}
                       "Count": {},
                     },
                     "Name": "SizeRestrictions_BODY",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SizeRestrictions_QUERYSTRING",
                   },
                 ],
                 "VendorName": "AWS",
@@ -2868,7 +2987,16 @@ a{color:var(--slate)}
     "SecurityHeadersE66B69D3": {
       "Properties": {
         "ResponseHeadersPolicyConfig": {
-          "Comment": "SPS security headers (staging) -- HSTS only; B21 layers CSP/XFO.",
+          "Comment": "SPS security headers (staging) -- HSTS + CORP; B21 layers CSP/XFO.",
+          "CustomHeadersConfig": {
+            "Items": [
+              {
+                "Header": "Cross-Origin-Resource-Policy",
+                "Override": false,
+                "Value": "same-site",
+              },
+            ],
+          },
           "Name": "sps-security-headers-staging",
           "SecurityHeadersConfig": {
             "StrictTransportSecurity": {

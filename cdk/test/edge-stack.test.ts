@@ -985,6 +985,27 @@ describe("EdgeStack", () => {
           Ref: htmlPolicyLogicalId,
         });
       });
+
+      it("adds Cross-Origin-Resource-Policy: same-site to the S3-served assets, never overriding the origin (#1945)", () => {
+        const policies = template.findResources(
+          "AWS::CloudFront::ResponseHeadersPolicy",
+        );
+        const ref = staticBehavior().ResponseHeadersPolicyId as {
+          Ref: string;
+        };
+        const cfg = (
+          policies[ref.Ref].Properties as Record<string, unknown>
+        ).ResponseHeadersPolicyConfig as Record<string, unknown>;
+        const items = (cfg.CustomHeadersConfig as Record<string, unknown>)
+          .Items as Array<Record<string, unknown>>;
+        expect(items).toContainEqual({
+          Header: "Cross-Origin-Resource-Policy",
+          Value: "same-site",
+          Override: false,
+        });
+        // Still no CSP at the edge (ADR-007: the app owns it).
+        expect(JSON.stringify(cfg)).not.toContain("ContentSecurityPolicy");
+      });
     });
 
     describe("#1944 viewerHostOrp retired -- legacy VIVO redirects now come from SITE_URL, not the viewer Host", () => {
@@ -1531,6 +1552,46 @@ describe("EdgeStack", () => {
         const overrides = JSON.stringify(common?.Statement);
         expect(overrides).toContain("SizeRestrictions_BODY");
         expect(overrides).toContain('"Count"');
+      });
+
+      it("keeps SizeRestrictions_QUERYSTRING in count alongside _BODY, and nothing else (#1939)", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const common = rules.find(
+          (x) => x.Name === "AWSManagedRulesCommonRuleSet",
+        );
+        const stmt = (common?.Statement as Record<string, unknown>)
+          .ManagedRuleGroupStatement as Record<string, unknown>;
+        expect(stmt.RuleActionOverrides).toEqual([
+          { Name: "SizeRestrictions_BODY", ActionToUse: { Count: {} } },
+          { Name: "SizeRestrictions_QUERYSTRING", ActionToUse: { Count: {} } },
+        ]);
+      });
+
+      it("logs the WebACL to an aws-waf-logs- CloudWatch group with Authorization + Cookie redacted (#1939)", () => {
+        template.resourceCountIs("AWS::Logs::LogGroup", 1);
+        template.hasResourceProperties("AWS::Logs::LogGroup", {
+          LogGroupName: "aws-waf-logs-sps-staging",
+          RetentionInDays: 90,
+        });
+        template.resourceCountIs("AWS::WAFv2::LoggingConfiguration", 1);
+        const aclId = Object.keys(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0];
+        const cfg = Object.values(
+          template.findResources("AWS::WAFv2::LoggingConfiguration"),
+        )[0]?.Properties as Record<string, unknown>;
+        expect(cfg.ResourceArn).toEqual({ "Fn::GetAtt": [aclId, "Arn"] });
+        const dest = JSON.stringify(cfg.LogDestinationConfigs);
+        expect(dest).toContain(":log-group:aws-waf-logs-sps-staging");
+        // WAF rejects a destination ARN carrying logGroupArn's `:*` suffix.
+        expect(dest).not.toContain(":*");
+        expect(cfg.RedactedFields).toEqual([
+          { SingleHeader: { Name: "authorization" } },
+          { SingleHeader: { Name: "cookie" } },
+        ]);
       });
 
       it("runs Bot Control label-only BEFORE the rate rule (#125 verified-bot exemption)", () => {
