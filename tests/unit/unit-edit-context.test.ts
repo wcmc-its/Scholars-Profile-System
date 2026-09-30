@@ -449,6 +449,8 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
     expect(roster[0].scholarState).toBe("departed");
     expect(roster[0].name).toBe("Gone Person");
     expect(roster[0].title).toBe("Professor");
+    // The ED-sync detection day — "End at departure dates" writes it.
+    expect(roster[0].departedOn).toBe("2026-01-15");
   });
 
   it("a cwid with NO scholar row is `unknown`, and the name still falls back to the cwid", async () => {
@@ -645,6 +647,7 @@ describe("loadUnitEditContext — manual division roster", () => {
         publiclyListed: true,
         diseases: [],
         wcmStartDate: null,
+        departedOn: null,
       },
     ]);
     expect(ctx!.unit.deptName).toBe("Medicine");
@@ -741,6 +744,7 @@ describe("loadUnitEditContext — center", () => {
         publiclyListed: false,
         diseases: [],
         wcmStartDate: null,
+        departedOn: null,
       },
     ]);
     // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with

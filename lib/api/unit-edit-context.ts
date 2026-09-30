@@ -192,6 +192,9 @@ export type UnitEditContext = {
      *  (YYYY-MM-DD), sent only for a center membership with no start date;
      *  absent/null otherwise or when no appointment has one. */
     wcmStartDate?: string | null;
+    /** Roster upkeep "End at departure dates": the day the ED sync marked this
+     *  person gone (`Scholar.deletedAt`), for a departed member only. */
+    departedOn?: string | null;
   }> | null;
   /** The center's program taxonomy (#552), present for a center (empty when the
    *  center has none — the roster editor hides Type + Program then). null for a
@@ -308,11 +311,14 @@ export async function resolveScholarNames(
   cwids: ReadonlyArray<string>,
   client: UnitEditContextClient,
 ): Promise<
-  Map<string, { name: string; title: string | null; departed: boolean; publiclyListed: boolean }>
+  Map<
+    string,
+    { name: string; title: string | null; departed: boolean; departedOn: string | null; publiclyListed: boolean }
+  >
 > {
   const out = new Map<
     string,
-    { name: string; title: string | null; departed: boolean; publiclyListed: boolean }
+    { name: string; title: string | null; departed: boolean; departedOn: string | null; publiclyListed: boolean }
   >();
   const unique = [...new Set(cwids.filter((c) => c.length > 0))];
   if (unique.length === 0) return out;
@@ -332,6 +338,9 @@ export async function resolveScholarNames(
       name: row.preferredName,
       title: row.primaryTitle,
       departed: row.deletedAt !== null,
+      // The day the ED sync saw them go — our only departure date (no HR
+      // last-day feed); "End at departure dates" uses it.
+      departedOn: row.deletedAt ? row.deletedAt.toISOString().slice(0, 10) : null,
       // #1827 — the public center-roster gate, so /edit can flag members the
       // public page silently drops (suppressed profile, hidden role class).
       publiclyListed: isPublicRosterMember(row),
@@ -1026,6 +1035,7 @@ export async function loadUnitEditContext(
           publiclyListed: external !== undefined || (resolved?.publiclyListed ?? false),
           diseases: diseasesByCwid.get(r.cwid) ?? [],
           wcmStartDate: wcmStartByCwid.get(r.cwid) ?? null,
+          departedOn: external ? null : (resolved?.departedOn ?? null),
         };
       })
     : null;

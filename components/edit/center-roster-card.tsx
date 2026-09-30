@@ -159,6 +159,9 @@ export type RosterMember = {
   /** "Fill dates": earliest WCM appointment start, sent only for an undated
    *  center membership (`loadUnitEditContext`). */
   wcmStartDate?: string | null;
+  /** "End at departure dates": the day the ED sync marked this person gone
+   *  (`Scholar.deletedAt`) — our only departure date; there is no HR feed. */
+  departedOn?: string | null;
 };
 
 export type CenterProgramOption = { code: string; label: string; sortOrder: number };
@@ -869,6 +872,38 @@ export function CenterRosterCard({
     }
   }
 
+  // "End at departure dates": close each still-open membership of someone who
+  // left WCM on the day the ED sync saw them go. A date before the row's own
+  // Start would be refused, so that row is left for "Review each".
+  const closeable = members.filter(
+    (m): m is RosterMember & { departedOn: string } =>
+      needsCloseOutOf(m) && !!m.departedOn && (!m.startDate || m.departedOn >= m.startDate),
+  );
+  const [ended, setEnded] = React.useState<ReadonlyArray<string> | null>(null);
+  const [ending, setEnding] = React.useState(false);
+
+  async function endAtDeparture() {
+    setEnding(true);
+    try {
+      const batch = closeable;
+      const ok = await mapChunked(batch, (m) => patch(m.cwid, { endDate: m.departedOn }));
+      setEnded(batch.filter((_, i) => ok[i]).map((m) => m.cwid));
+    } finally {
+      setEnding(false);
+    }
+  }
+
+  async function undoEnd() {
+    if (!ended) return;
+    setEnding(true);
+    try {
+      await mapChunked(ended, (cwid) => patch(cwid, { endDate: null }));
+      setEnded(null);
+    } finally {
+      setEnding(false);
+    }
+  }
+
   async function undoFill() {
     if (!filled) return;
     setFilling(true);
@@ -939,7 +974,7 @@ export function CenterRosterCard({
 
   return (
     <>
-    {(hasDiseases || showCloseOut || undated.length > 0 || filled !== null) && (
+    {(hasDiseases || showCloseOut || ended !== null || undated.length > 0 || filled !== null) && (
       <div className="mb-4 grid gap-4 lg:grid-cols-2" data-testid="center-roster-summary">
         {hasDiseases && (
           <section
@@ -990,12 +1025,25 @@ export function CenterRosterCard({
             )}
           </section>
         )}
-        {(showCloseOut || undated.length > 0 || filled !== null) && (
+        {(showCloseOut || ended !== null || undated.length > 0 || filled !== null) && (
           <section
             className="border-apollo-border bg-apollo-surface flex flex-col gap-3 rounded-xl border p-5"
             data-testid="roster-upkeep"
           >
             <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">Membership upkeep</p>
+            {ended !== null && (
+              <div
+                className="border-apollo-border flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm"
+                data-testid="roster-end-departed-done"
+              >
+                <span className="flex-1">
+                  {plural(ended.length, "membership", "memberships")} ended at departure date.
+                </span>
+                <Button type="button" variant="ghost" size="sm" disabled={ending} onClick={undoEnd} data-testid="roster-end-departed-undo">
+                  Undo
+                </Button>
+              </div>
+            )}
             {showCloseOut && (
             <div
               className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber flex flex-col gap-2.5 rounded-lg border px-4 py-3 text-sm"
@@ -1006,17 +1054,36 @@ export function CenterRosterCard({
                   {needsCloseOut === 1 ? "1 member has left WCM" : `${needsCloseOut} members have left WCM`}
                 </strong>
                 Their center membership is still open.
+                {closeable.length > 0 &&
+                  ` A departure date (when our directory saw them leave) is on file for ${
+                    closeable.length === needsCloseOut ? (needsCloseOut === 1 ? "them" : `all ${needsCloseOut}`) : fmt(closeable.length)
+                  }.`}
               </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="bg-apollo-surface w-fit"
-                onClick={jumpToDeparted}
-                data-testid="roster-needs-close-out-jump"
-              >
-                Review each
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {closeable.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="bg-apollo-surface w-fit"
+                    disabled={ending}
+                    onClick={endAtDeparture}
+                    data-testid="roster-end-departed-run"
+                  >
+                    {ending ? "Ending…" : "End at departure dates"}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-fit"
+                  onClick={jumpToDeparted}
+                  data-testid="roster-needs-close-out-jump"
+                >
+                  Review each
+                </Button>
+              </div>
             </div>
             )}
             {filled !== null ? (
