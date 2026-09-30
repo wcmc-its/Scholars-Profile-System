@@ -51,6 +51,13 @@ import {
   isTrackedInEnv,
   liveStatusWhere,
 } from "@/lib/etl/freshness-policy";
+import {
+  MARGIN_WARN_FRACTION,
+  type MarginResult,
+  gradeDurationMargin,
+  marginWindowStart,
+  stepTimeoutSeconds,
+} from "@/lib/etl/duration-margin";
 
 async function evaluate(now: number): Promise<SourceStatus[]> {
   const env = process.env.SCHOLARS_ENV;
@@ -81,6 +88,30 @@ async function evaluate(now: number): Promise<SourceStatus[]> {
       );
     }
     out.push(gradeSource(source, spec, freshnessAnchor(last, spec.anchorOnRun), now));
+  }
+  return out;
+}
+
+/**
+ * #2190 — per-step duration margin. For every tracked source with an SPS
+ * timeout, grade every `etl_run` row started in its cadence window against that
+ * timeout (see lib/etl/duration-margin.ts). WARN tier: a breach is logged as a
+ * `[freshness] WARN` line and never sets the exit code — nothing has failed yet,
+ * and the exit code is reserved for staleness, which alarms via
+ * `sps-etl-heartbeat-status-<env>`.
+ */
+async function evaluateMargins(now: number): Promise<MarginResult[]> {
+  const env = process.env.SCHOLARS_ENV;
+  const out: MarginResult[] = [];
+  for (const [source, spec] of Object.entries(TRACKED)) {
+    if (!isTrackedInEnv(spec, env)) continue;
+    const timeoutSeconds = stepTimeoutSeconds(source);
+    if (timeoutSeconds === null) continue;
+    const rows = await db.read.etlRun.findMany({
+      where: { source, startedAt: { gte: marginWindowStart(spec.cadence, now) } },
+      select: { startedAt: true, completedAt: true, status: true },
+    });
+    out.push(gradeDurationMargin(source, timeoutSeconds, rows, now));
   }
   return out;
 }
@@ -148,6 +179,25 @@ async function main(): Promise<void> {
   if (untracked.length > 0) {
     console.log(`[freshness] untracked sources (not alarmed): ${untracked.join(", ")}`);
   }
+
+  const margins = await evaluateMargins(now);
+  const breaches = margins.filter((m) => m.level !== "ok");
+  for (const m of breaches) {
+    const w = m.worst!;
+    console.warn(
+      `[freshness] WARN  margin ${m.source}: ${m.level.toUpperCase()} — run started ` +
+        `${w.startedAt.toISOString()} (${w.status}${w.open ? ", no completedAt" : ""}) took ` +
+        `${Math.round(w.durationSeconds)}s = ${Math.round((m.fraction ?? 0) * 100)}% of its ` +
+        `${m.timeoutSeconds}s timeout` +
+        (w.open && m.level === "over"
+          ? " — never closed its row, so it was likely killed at the timeout"
+          : ""),
+    );
+  }
+  console.log(
+    `[freshness] margin: ${margins.length} sources checked against their step timeout, ` +
+      `${breaches.length} at or over ${Math.round(MARGIN_WARN_FRACTION * 100)}% (warn only, not alarmed)`,
+  );
 
   const acked = statuses.filter((s) => s.acknowledged);
   const stale = statuses.filter((s) => s.stale && !s.acknowledged);
