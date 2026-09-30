@@ -49,6 +49,13 @@ export type AuditAction =
    *  (score/confidence at decision time). Requires the `scholars_audit`
    *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
   | "disease_assignment_decision"
+  /** a curator turned a center's "Auto-publish high-confidence inferences"
+   *  switch on or off (`POST /api/edit/center/[code]/disease-auto-publish`,
+   *  `Center.diseaseAutoPublish`); `targetEntityType='center'`,
+   *  `targetEntityId` is the center code; before/after carry
+   *  `{ diseaseAutoPublish: boolean }`. Requires the `scholars_audit` action
+   *  ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "disease_auto_publish_set"
   /** a UnitAdmin row was inserted or hard-deleted (#540 Phase 1) */
   | "grant_change"
   /** a superuser began a "View as" impersonation session (#637 R5 — enter) */

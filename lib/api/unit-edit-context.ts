@@ -258,6 +258,11 @@ export type UnitEditContext = {
    *  One shared list for the whole center (not per member); `null` for a
    *  department or division, same convention as {@link programs}. */
   diseaseOptions: ReadonlyArray<DiseaseCodeOption> | null;
+  /** The center's "Auto-publish high-confidence inferences" switch
+   *  (`Center.diseaseAutoPublish`, `lib/cancer-center-disease-publish.ts`).
+   *  Present for a center with a `CenterProgram` taxonomy (the same gate as
+   *  `diseaseOptions`); `null` otherwise. */
+  diseaseAutoPublish: boolean | null;
   /** The actor's effective role on THIS unit (drives client-side rail filtering). */
   actorRole: UnitActorRole;
   /** The acting session's CWID — the access card disables Remove on this row
@@ -504,6 +509,7 @@ export async function loadUnitEditContext(
   let deptSlug: string | null = null;
   let source: "ED" | "manual";
   let centerType: "center" | "institute" | null = null;
+  let centerDiseaseAutoPublish = true;
   let rowLeaderCwid: string | null;
   let rowLeaderInterim: boolean | undefined;
 
@@ -575,6 +581,7 @@ export async function loadUnitEditContext(
         url: true,
         slug: true,
         centerType: true,
+        diseaseAutoPublish: true,
       },
     });
     if (!row) return null;
@@ -586,6 +593,8 @@ export async function loadUnitEditContext(
     // "manual" regardless of the seed/import provenance on the row.
     source = "manual";
     centerType = row.centerType === "institute" ? "institute" : "center";
+    // Column default is ON; a missing value (older fixture) reads as the default.
+    centerDiseaseAutoPublish = row.diseaseAutoPublish ?? true;
     // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row only;
     // `Center.directorCwid` / `Center.leaderInterim` no longer exist as read
     // sources. Separate query: the assignment is polymorphic on (entityType,
@@ -1180,6 +1189,7 @@ export async function loadUnitEditContext(
     centerMembershipRoles,
     siblingDivisions,
     diseaseOptions,
+    diseaseAutoPublish: hasProgramTaxonomy ? centerDiseaseAutoPublish : null,
     actorRole,
     actorCwid: session.cwid,
   };

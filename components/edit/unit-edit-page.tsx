@@ -580,6 +580,7 @@ function renderRoster(ctx: UnitEditContext) {
         // already computed by `loadUnitEditContext` for the API route's
         // own server-side validation but never reached this component.
         diseaseOptions={ctx.diseaseOptions ?? []}
+        diseaseAutoPublish={ctx.diseaseAutoPublish === true}
         cornellDirectoryEnabled={isCornellDirectoryMembersEnabled()}
       />
     );

@@ -56,11 +56,16 @@
  * assignment data (`hasDiseases`) — data-driven, since `unit-edit-context.ts`
  * gates the whole `diseases`/`diseaseOptions` payload on the center having a
  * `CenterProgram` taxonomy (so never on CTSC). Each member shows an amber
- * "N to review" pill for undecided rows and an "N confirmed" count; "+ Add a
- * disease" for a member with none, "Manage" when every row was rejected. A
- * "Disease inferences" summary card above the table counts members to review
- * and live inferences by confidence, and holds "Start review queue". Every
- * cell control opens
+ * "N to review" pill for rows waiting on a curator and an "N published · M
+ * automatically" line; "+ Add a disease" for a member with none, "Manage"
+ * when every row was rejected. A "Disease inferences" summary card above the
+ * table counts members to review and live inferences by confidence, holds
+ * "Start review queue", and the center's "Auto-publish high-confidence
+ * inferences" switch. With the switch on, an undecided high-confidence row is
+ * published without review (`diseaseRowStatus`,
+ * `lib/cancer-center-disease-publish.ts`), so it drops out of every
+ * to-review count, the queue, and the bulk "Confirm N high-confidence"; the
+ * bar's high segment is striped to say so. Every cell control opens
  * `CenterDiseaseReviewSheet` (Edit Center redesign; replaces the inline
  * expanded panel): evidence, Confirm / Reject / Undo, "Confirm N
  * high-confidence", and manual add. "Start review queue (N)" walks the
@@ -90,11 +95,12 @@ import { ArrowRight, ChevronDown, Download, Plus, Search } from "lucide-react";
 
 import { CenterDiseaseReviewSheet } from "@/components/edit/center-disease-review-sheet";
 import {
+  autoPublishedDiseaseRows,
   confidenceOf,
-  confirmedDiseaseRows,
   diseaseLabel,
   liveDiseaseRows,
   pendingDiseaseRows,
+  publishedDiseaseRows,
   type DiseaseDecisionKind,
 } from "@/components/edit/center-roster-diseases";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
@@ -118,6 +124,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import type { DiseaseCodeOption, RosterDiseaseRow } from "@/lib/api/unit-edit-context";
 import { INVITED_ROLE_KEY, MEMBER_ROLE_KEY, deriveMembershipType } from "@/lib/org-unit-roles";
 import { CTSC_EXTERNAL_SOURCE, externalSourceLabel } from "@/lib/edit/external-member-sources";
@@ -188,6 +195,14 @@ export type CenterRosterCardProps = {
    *  this roster. Defaults to `[]` (a non-Cancer-Center roster, or the
    *  context loader's own catch-and-degrade path). */
   diseaseOptions?: ReadonlyArray<DiseaseCodeOption>;
+  /** The center's "Auto-publish high-confidence inferences" switch
+   *  (`ctx.diseaseAutoPublish`, `Center.diseaseAutoPublish`). When on, an
+   *  undecided high-confidence inference is published without review and
+   *  leaves every to-review count, the queue, and "Confirm N high-confidence"
+   *  (`diseaseRowStatus`, `lib/cancer-center-disease-publish.ts`). The page
+   *  passes the stored value (default ON); absent here means off, which is
+   *  the pre-switch behaviour. */
+  diseaseAutoPublish?: boolean;
   /** #2519 — when true, render the WCM/Cornell source toggle above the add
    *  typeahead (the `CORNELL_DIRECTORY_MEMBERS` flag, resolved server-side —
    *  same pattern as `exportEnabled`). Defaults to false, so a caller that
@@ -201,6 +216,10 @@ type Status = "active" | "pending" | "inactive" | "invited";
 type RosterFilter = "all" | "invited" | "inactive" | "departed";
 
 type ConfidenceFilter = "any" | "high" | "medium" | "low";
+
+/** The auto-published marker on the confidence bar's high segment. */
+const AUTO_STRIPES =
+  "repeating-linear-gradient(135deg, rgba(255,255,255,0.45) 0 3px, transparent 3px 6px)";
 
 /** Rows per "Show 25 more" page. */
 const PAGE_SIZE = 25;
@@ -234,23 +253,27 @@ export function datesLabel(startDate: string | null, endDate: string | null): st
 }
 
 /**
- * The collapsed Diseases cell: an amber "N to review" pill for undecided
- * rows and an "N confirmed" count. A member with no disease rows at all gets
- * "+ Add a disease"; one whose rows were all rejected gets "Manage". Every
- * control opens the review sheet.
+ * The collapsed Diseases cell: an amber "N to review" pill for rows waiting on
+ * a curator and a muted "N published · M automatically" line (published =
+ * confirmed + auto-published; the " · M automatically" part only when M > 0).
+ * A member with no disease rows at all gets "+ Add a disease"; one whose rows
+ * were all rejected gets "Manage". Every control opens the review sheet.
  */
 function DiseaseCell({
   member,
   inactive,
+  autoPublish,
   onOpen,
 }: {
   member: RosterMember;
   inactive: boolean;
+  autoPublish: boolean;
   onOpen: (cwid: string) => void;
 }) {
   const diseases = member.diseases ?? [];
-  const confirmed = confirmedDiseaseRows(diseases).length;
-  const pending = pendingDiseaseRows(diseases).length;
+  const published = publishedDiseaseRows(diseases, autoPublish).length;
+  const auto = autoPublishedDiseaseRows(diseases, autoPublish).length;
+  const pending = pendingDiseaseRows(diseases, autoPublish).length;
   const open = () => onOpen(member.cwid);
 
   return (
@@ -265,14 +288,14 @@ function DiseaseCell({
           {pending} to review
         </button>
       )}
-      {confirmed > 0 && (
+      {published > 0 && (
         <button
           type="button"
           onClick={open}
           className="text-muted-foreground text-xs whitespace-nowrap hover:underline"
           data-testid={`roster-disease-manage-${member.cwid}`}
         >
-          {confirmed} confirmed
+          {published} published{auto > 0 ? ` · ${auto} automatically` : ""}
         </button>
       )}
       {diseases.length === 0 && !inactive && (
@@ -285,7 +308,7 @@ function DiseaseCell({
           + Add a disease
         </button>
       )}
-      {diseases.length > 0 && pending === 0 && confirmed === 0 && (
+      {diseases.length > 0 && pending === 0 && published === 0 && (
         <button
           type="button"
           onClick={open}
@@ -396,6 +419,7 @@ export function CenterRosterCard({
   today,
   exportEnabled = false,
   diseaseOptions = [],
+  diseaseAutoPublish = false,
   cornellDirectoryEnabled = false,
 }: CenterRosterCardProps) {
   const now = today ?? todayIso();
@@ -409,6 +433,10 @@ export function CenterRosterCard({
   }, [membershipRoles]);
 
   const [members, setMembers] = React.useState<RosterMember[]>(() => [...initial]);
+  // The center's auto-publish switch — optimistic, reverted on a failed write.
+  const [autoPublish, setAutoPublish] = React.useState(diseaseAutoPublish);
+  const [autoPublishSaving, setAutoPublishSaving] = React.useState(false);
+  const [autoPublishError, setAutoPublishError] = React.useState<string | null>(null);
   // #2519 — which directory the add typeahead searches. Only reachable when
   // `cornellDirectoryEnabled` renders the toggle; otherwise always "wcm".
   const [addSource, setAddSource] = React.useState<"wcm" | "cornell">("wcm");
@@ -586,7 +614,7 @@ export function CenterRosterCard({
     const member = members.find((m) => m.cwid === cwid);
     const prevRow = member?.diseases?.find((d) => d.diseaseCode === diseaseCode);
     if (!prevRow && decision !== "confirmed") return;
-    if (needsReviewOnly && pendingDiseaseRows(member?.diseases).length > 0) {
+    if (needsReviewOnly && pendingDiseaseRows(member?.diseases, autoPublish).length > 0) {
       setReviewedHere((s) => (s.has(cwid) ? s : new Set([...s, cwid])));
     }
 
@@ -655,6 +683,36 @@ export function CenterRosterCard({
       });
     diseaseWriteQueue.current.set(key, run);
     await run;
+  }
+
+  /** Flip the center's auto-publish switch — optimistic; a failed write puts
+   *  the switch back and says so beside it. */
+  async function toggleAutoPublish(next: boolean) {
+    const prev = autoPublish;
+    setAutoPublish(next);
+    setAutoPublishError(null);
+    setAutoPublishSaving(true);
+    try {
+      let data: { ok?: boolean; error?: string } | null = null;
+      let ok = false;
+      try {
+        const res = await fetch(`/api/edit/center/${encodeURIComponent(unitCode)}/disease-auto-publish`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: next }),
+        });
+        data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        ok = res.ok && data?.ok === true;
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        setAutoPublish(prev);
+        setAutoPublishError(mapErrorToMessage(data?.error ?? ""));
+      }
+    } finally {
+      setAutoPublishSaving(false);
+    }
   }
 
   async function add() {
@@ -756,7 +814,7 @@ export function CenterRosterCard({
   const matchesDiseaseFilter = (m: RosterMember) =>
     selectedDiseaseCodes.size === 0 ||
     liveDiseaseRows(m.diseases).some((d) => selectedDiseaseCodes.has(d.diseaseCode));
-  const hasPending = (m: RosterMember) => pendingDiseaseRows(m.diseases).length > 0;
+  const hasPending = (m: RosterMember) => pendingDiseaseRows(m.diseases, autoPublish).length > 0;
   // `preDiseaseFiltered` is every filter EXCEPT the disease multi-select, so
   // the multi-select's OWN option counts stay meaningful as more codes are
   // checked (an OR-widening selection, not a further narrowing one). The
@@ -813,7 +871,7 @@ export function CenterRosterCard({
   const allPageSelected = pageMembers.length > 0 && pageMembers.every((m) => selection.selected.has(m.cwid));
   const selectedMembers = [...selection.selected].flatMap((c) => byCwid.get(c) ?? []);
   const highPairs = selectedMembers.flatMap((m) =>
-    pendingDiseaseRows(m.diseases)
+    pendingDiseaseRows(m.diseases, autoPublish)
       .filter((d) => d.assignment?.confidence === "high")
       .map((d) => ({ cwid: m.cwid, code: d.diseaseCode })),
   );
@@ -938,6 +996,10 @@ export function CenterRosterCard({
     if (c === "high" || c === "medium" || c === "low") tierCounts[c] += 1;
   }
   const membersToReview = members.filter(hasPending).length;
+  // What the switch is publishing right now (none when it is off).
+  const autoRowsByMember = members.map((m) => autoPublishedDiseaseRows(m.diseases, autoPublish).length);
+  const autoRowCount = autoRowsByMember.reduce((n, c) => n + c, 0);
+  const autoMemberCount = autoRowsByMember.filter((c) => c > 0).length;
   const fmt = (n: number) => n.toLocaleString("en-US");
   const liveTotal = liveRows.length || 1;
   // Redundant once the curator is ON the Left WCM tab.
@@ -959,7 +1021,7 @@ export function CenterRosterCard({
   // anyone finished meanwhile is skipped).
   const nextCwid =
     queue && queueIndex >= 0
-      ? queue.slice(queueIndex + 1).find((c) => pendingDiseaseRows(byCwid.get(c)?.diseases).length > 0)
+      ? queue.slice(queueIndex + 1).find((c) => pendingDiseaseRows(byCwid.get(c)?.diseases, autoPublish).length > 0)
       : undefined;
   const queueState =
     queue && queueIndex >= 0
@@ -999,14 +1061,28 @@ export function CenterRosterCard({
               )}
             </div>
             <div className="bg-apollo-surface-2 flex h-2 overflow-hidden rounded-full" aria-hidden>
-              <span className="bg-apollo-slate" style={{ width: `${(tierCounts.high / liveTotal) * 100}%` }} />
+              {/* Diagonal stripes mark the high segment as auto-published. */}
+              <span
+                className="bg-apollo-slate"
+                style={{
+                  width: `${(tierCounts.high / liveTotal) * 100}%`,
+                  ...(autoPublish ? { backgroundImage: AUTO_STRIPES } : null),
+                }}
+                data-testid="roster-disease-summary-high-segment"
+                data-auto-published={autoPublish ? "true" : "false"}
+              />
               <span className="bg-apollo-amber" style={{ width: `${(tierCounts.medium / liveTotal) * 100}%` }} />
               <span className="bg-apollo-border-strong" style={{ width: `${(tierCounts.low / liveTotal) * 100}%` }} />
             </div>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] tabular-nums" data-testid="roster-disease-summary-tiers">
               <span>
-                <span className="bg-apollo-slate mr-1.5 inline-block size-2 rounded-sm" aria-hidden />
+                <span
+                  className="bg-apollo-slate mr-1.5 inline-block size-2 rounded-sm"
+                  style={autoPublish ? { backgroundImage: AUTO_STRIPES } : undefined}
+                  aria-hidden
+                />
                 <strong className="font-semibold">{fmt(tierCounts.high)}</strong> high
+                {autoPublish && " · auto-published"}
               </span>
               <span>
                 <span className="bg-apollo-amber mr-1.5 inline-block size-2 rounded-sm" aria-hidden />
@@ -1017,6 +1093,35 @@ export function CenterRosterCard({
                 <strong className="font-semibold">{fmt(tierCounts.low)}</strong> low
               </span>
             </p>
+            <div
+              className="border-apollo-border flex items-start gap-3 border-t pt-3"
+              data-testid="roster-auto-publish"
+            >
+              <div className="min-w-0 flex-1">
+                <label htmlFor="roster-auto-publish-switch" className="text-sm font-medium">
+                  Auto-publish high-confidence inferences
+                </label>
+                <p className="text-muted-foreground mt-0.5 text-xs" data-testid="roster-auto-publish-help">
+                  {autoPublish
+                    ? `${fmt(autoRowCount)} ${autoRowCount === 1 ? "inference" : "inferences"} for ${fmt(autoMemberCount)} ${
+                        autoMemberCount === 1 ? "member" : "members"
+                      } ${autoRowCount === 1 ? "is" : "are"} published. A curator can reject any of them; medium and low confidence stays in your queue.`
+                    : "High-confidence inferences wait in your queue like the rest."}
+                </p>
+                {autoPublishError && (
+                  <p className="text-destructive mt-1 text-xs" role="alert" data-testid="roster-auto-publish-error">
+                    {autoPublishError}
+                  </p>
+                )}
+              </div>
+              <Switch
+                id="roster-auto-publish-switch"
+                checked={autoPublish}
+                disabled={autoPublishSaving}
+                onCheckedChange={(v) => void toggleAutoPublish(v)}
+                data-testid="roster-auto-publish-switch"
+              />
+            </div>
             {filtersActive && needsReviewList.length > 0 && (
               <p className="text-muted-foreground text-xs">
                 The queue follows the Members filters below ({fmt(needsReviewList.length)}{" "}
@@ -1608,7 +1713,7 @@ export function CenterRosterCard({
                       )}
                       {hasDiseases && (
                         <td className="px-3 py-2">
-                          <DiseaseCell member={m} inactive={status === "inactive"} onOpen={openSheet} />
+                          <DiseaseCell member={m} inactive={status === "inactive"} autoPublish={autoPublish} onOpen={openSheet} />
                         </td>
                       )}
                       <td className="px-3 py-2">
@@ -1780,6 +1885,7 @@ export function CenterRosterCard({
         }
         onClose={closeSheet}
         diseaseOptions={diseaseOptions}
+        autoPublish={autoPublish}
         onDecide={decideDisease}
         queue={queueState}
         error={error}

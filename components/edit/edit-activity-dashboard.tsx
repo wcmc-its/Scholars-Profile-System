@@ -141,6 +141,7 @@ const CATEGORIES: ReadonlyArray<{ key: string; label: string; actions?: Readonly
       "role_vocabulary_update",
       "role_vocabulary_delete",
       "disease_assignment_decision",
+      "disease_auto_publish_set",
       "core_claim",
       "core_client_add",
       "core_client_remove",

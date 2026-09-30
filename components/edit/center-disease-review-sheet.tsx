@@ -15,6 +15,13 @@
  * row. The bulk confirm is that same call per pair, not a new endpoint or
  * audit action.
  *
+ * Tabs: To review / Published / All. Published is confirmed plus
+ * auto-published (`isDiseasePublished`, `lib/cancer-center-disease-publish.ts`);
+ * an auto-published row carries an "Auto-published" badge and keeps BOTH
+ * Reject (stores a rejection) and Confirm (turns it into a human-confirmed
+ * decision). With the center's switch off there are no auto rows, and the
+ * sheet behaves as before.
+ *
  * In a review queue the header shows "Review queue · i of N" and the footer
  * "Next: <name> →" (the card owns the queue; this only renders it).
  *
@@ -37,8 +44,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { DiseaseCodeOption, RosterDiseaseRow } from "@/lib/api/unit-edit-context";
+import { diseaseRowStatus, isDiseasePublished } from "@/lib/cancer-center-disease-publish";
 import {
   FOCUS_LABEL,
+  autoPublishedDiseaseRows,
   diseaseLabel,
   evidenceSummary,
   pendingDiseaseRows,
@@ -76,7 +85,7 @@ export type ReviewQueueState = {
   onPrev?: (() => void) | null;
 };
 
-type SheetTab = "review" | "confirmed" | "all";
+type SheetTab = "review" | "published" | "all";
 
 /** Publications / Grants / Trials, the Details expander. Grants and trials
  *  show "N led" plus "N supported" when there are any; the data has no
@@ -186,6 +195,7 @@ function AddDisease({
 function DiseaseReviewRow({
   cwid,
   row,
+  autoPublish,
   busy,
   expanded,
   onToggle,
@@ -193,6 +203,7 @@ function DiseaseReviewRow({
 }: {
   cwid: string;
   row: RosterDiseaseRow;
+  autoPublish: boolean;
   busy: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -200,6 +211,7 @@ function DiseaseReviewRow({
 }) {
   const a = row.assignment;
   const decision = row.decision?.decision as "confirmed" | "rejected" | undefined;
+  const status = diseaseRowStatus(row, autoPublish);
   // A manual add never had a suggestion to lose — distinct from a decision
   // whose backing assignment later disappeared (real drift).
   const isManualAdd = !a && row.decision !== null && row.decision.scoreAtDecision === null;
@@ -221,6 +233,16 @@ function DiseaseReviewRow({
           {isManualAdd ? "Manually added" : "No longer suggested"}
         </Badge>
       )}
+      {status === "auto" && (
+        <Badge
+          variant="outline"
+          className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded px-1.5 py-0 text-[11px]"
+          title="Published without review because this center auto-publishes high-confidence inferences."
+          data-testid={`disease-auto-${cwid}-${code}`}
+        >
+          Auto-published
+        </Badge>
+      )}
       {row.drifted && (
         <Badge
           variant="outline"
@@ -238,7 +260,7 @@ function DiseaseReviewRow({
     <li
       className={`border-apollo-border border-b py-3 ${decision === "rejected" ? "opacity-60" : ""}`}
       data-testid={`disease-card-${cwid}-${code}`}
-      data-decision={decision ?? "pending"}
+      data-decision={decision ?? (status === "auto" ? "auto" : "pending")}
     >
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div className="text-muted-foreground w-6 shrink-0 pt-px text-[13px] tabular-nums">
@@ -318,6 +340,7 @@ export function CenterDiseaseReviewSheet({
   member,
   onClose,
   diseaseOptions,
+  autoPublish = false,
   onDecide,
   queue,
   error = null,
@@ -326,6 +349,8 @@ export function CenterDiseaseReviewSheet({
   member: ReviewSheetMember | null;
   onClose: () => void;
   diseaseOptions: ReadonlyArray<DiseaseCodeOption>;
+  /** The center's auto-publish switch — see the docblock. Absent means off. */
+  autoPublish?: boolean;
   onDecide: (cwid: string, diseaseCode: string, decision: DiseaseDecisionKind) => Promise<void>;
   queue: ReviewQueueState | null;
   /** The card's latest write error, shown in the sheet (see the docblock). */
@@ -345,6 +370,7 @@ export function CenterDiseaseReviewSheet({
             member={member}
             onClose={onClose}
             diseaseOptions={diseaseOptions}
+            autoPublish={autoPublish}
             onDecide={onDecide}
             queue={queue}
             error={error}
@@ -359,6 +385,7 @@ function SheetBody({
   member,
   onClose,
   diseaseOptions,
+  autoPublish,
   onDecide,
   queue,
   error,
@@ -366,6 +393,7 @@ function SheetBody({
   member: ReviewSheetMember;
   onClose: () => void;
   diseaseOptions: ReadonlyArray<DiseaseCodeOption>;
+  autoPublish: boolean;
   onDecide: (cwid: string, diseaseCode: string, decision: DiseaseDecisionKind) => Promise<void>;
   queue: ReviewQueueState | null;
   error: string | null;
@@ -376,7 +404,9 @@ function SheetBody({
 
   const inTab = (t: SheetTab, d: RosterDiseaseRow) =>
     t === "all" ||
-    (t === "review" ? d.decision === null && d.assignment !== null : d.decision?.decision === "confirmed");
+    (t === "review"
+      ? d.assignment !== null && diseaseRowStatus(d, autoPublish) === "pending"
+      : isDiseasePublished(d, autoPublish));
   const [tab, setTab] = React.useState<SheetTab>(() =>
     diseases.some((d) => inTab("review", d)) ? "review" : "all",
   );
@@ -393,15 +423,17 @@ function SheetBody({
   const shownRows = diseases.filter((d) => !hiddenCodes.has(d.diseaseCode));
   const tabCounts: Record<SheetTab, number> = {
     review: diseases.filter((d) => inTab("review", d)).length,
-    confirmed: diseases.filter((d) => inTab("confirmed", d)).length,
+    published: diseases.filter((d) => inTab("published", d)).length,
     all: diseases.length,
   };
 
-  const pending = pendingDiseaseRows(diseases);
+  const pending = pendingDiseaseRows(diseases, autoPublish);
   const high = pending.filter((d) => d.assignment?.confidence === "high");
-  const nConfirmed = diseases.filter((d) => d.decision?.decision === "confirmed").length;
+  const nPublished = tabCounts.published;
+  const nAuto = autoPublishedDiseaseRows(diseases, autoPublish).length;
   const nRejected = diseases.filter((d) => d.decision?.decision === "rejected").length;
-  const summary = `${pending.length.toLocaleString("en-US")} to review · ${nConfirmed.toLocaleString("en-US")} confirmed${nRejected ? ` · ${nRejected.toLocaleString("en-US")} rejected` : ""}`;
+  const fmt = (n: number) => n.toLocaleString("en-US");
+  const summary = `${fmt(pending.length)} to review · ${fmt(nPublished)} published${nAuto ? ` (${fmt(nAuto)} automatically)` : ""}${nRejected ? ` · ${fmt(nRejected)} rejected` : ""}`;
   const sub = [member.title, `CWID ${cwid}`, member.programLabel].filter(Boolean).join(" · ");
 
   async function act(codes: ReadonlyArray<string>, decision: DiseaseDecisionKind) {
@@ -457,7 +489,7 @@ function SheetBody({
             {(
               [
                 ["review", "To review"],
-                ["confirmed", "Confirmed"],
+                ["published", "Published"],
                 ["all", "All"],
               ] as ReadonlyArray<readonly [SheetTab, string]>
             ).map(([value, label]) => (
@@ -495,6 +527,7 @@ function SheetBody({
                 key={d.diseaseCode}
                 cwid={cwid}
                 row={d}
+                autoPublish={autoPublish}
                 busy={busy.has(d.diseaseCode)}
                 expanded={expanded === d.diseaseCode}
                 onToggle={() => setExpanded((e) => (e === d.diseaseCode ? null : d.diseaseCode))}

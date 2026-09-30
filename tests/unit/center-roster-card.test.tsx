@@ -781,17 +781,17 @@ function sheet(): HTMLElement {
 }
 
 describe("CenterRosterCard — disease chips", () => {
-  it("shows an 'N to review' pill and an 'N confirmed' count — no per-disease chips", () => {
+  it("shows an 'N to review' pill and an 'N published' count — no per-disease chips", () => {
     const m = member({
       diseases: [confirmed("BREAST", 1), confirmed("LUNG", 2), confirmed("SKIN", 3), diseaseRow({ diseaseCode: "GYN" })],
     });
     const { container } = render(<CenterRosterCard {...base} members={[m]} programs={[]} />);
     expect(within(container).queryByTestId("roster-disease-chip-m1-BREAST")).toBeNull();
     expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review");
-    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("3 confirmed");
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("3 published");
   });
 
-  it("'+ Add a disease' for a member with none, 'N confirmed' when nothing is left to review; both open the sheet", () => {
+  it("'+ Add a disease' for a member with none, 'N published' when nothing is left to review; both open the sheet", () => {
     const { container } = render(
       <CenterRosterCard
         {...base}
@@ -813,7 +813,7 @@ describe("CenterRosterCard — disease chips", () => {
     expect(within(sheet()).getByText(/no disease assignments for this member yet/i)).toBeTruthy();
   });
 
-  it("the confirmed count opens the sheet too", () => {
+  it("the published count opens the sheet too", () => {
     const { container } = render(
       <CenterRosterCard {...base} members={[member({ diseases: [confirmed("BREAST", 1)] })]} programs={[]} />,
     );
@@ -839,7 +839,7 @@ describe("CenterRosterCard — disease chips", () => {
     );
     fireEvent.click(within(sheet()).getByTestId("disease-review-tab-review"));
     expect(within(sheet()).queryByTestId("disease-card-m1-BREAST")).toBeNull();
-    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-confirmed"));
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-published"));
     expect(within(sheet()).getByTestId("disease-card-m1-LUNG")).toBeTruthy();
     expect(within(sheet()).getByTestId("disease-card-m1-BREAST")).toBeTruthy();
   });
@@ -857,7 +857,7 @@ describe("CenterRosterCard — disease review sheet", () => {
     const s = within(sheet());
     expect(s.getByText("Member One")).toBeTruthy();
     expect(s.getByText("Professor of Medicine · CWID m1 · Cancer Therapeutics")).toBeTruthy();
-    expect(s.getByTestId("disease-review-summary").textContent).toBe("1 to review · 1 confirmed · 1 rejected");
+    expect(s.getByTestId("disease-review-summary").textContent).toBe("1 to review · 1 published · 1 rejected");
     const card = within(s.getByTestId("disease-card-m1-BREAST"));
     expect(card.getByText("#1")).toBeTruthy();
     expect(card.getByText("Primary")).toBeTruthy();
@@ -884,9 +884,9 @@ describe("CenterRosterCard — disease review sheet", () => {
     await waitFor(() =>
       expect(within(sheet()).getByTestId("disease-decision-m1-BREAST").textContent).toBe("Confirmed"),
     );
-    expect(within(sheet()).getByTestId("disease-review-summary").textContent).toBe("0 to review · 1 confirmed");
-    // The roster row now counts it as confirmed and shows no pending pill.
-    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("1 confirmed");
+    expect(within(sheet()).getByTestId("disease-review-summary").textContent).toBe("0 to review · 1 published");
+    // The roster row now counts it as published and shows no pending pill.
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("1 published");
     expect(within(container).queryByTestId("roster-disease-pending-m1")).toBeNull();
   });
 
@@ -1237,5 +1237,207 @@ describe("CenterRosterCard — End at departure dates", () => {
     );
     expect(within(container).queryByTestId("roster-end-departed-run")).toBeNull();
     expect(within(container).getByTestId("roster-needs-close-out-jump")).toBeTruthy();
+  });
+});
+
+describe("CenterRosterCard — auto-publish high-confidence inferences", () => {
+  // Two undecided HIGH rows (auto-published when the switch is on), one
+  // undecided medium row (always waits), one confirmed row.
+  const mixed = () =>
+    member({
+      diseases: [pendingHigh("BREAST", 1), pendingHigh("LUNG", 2), diseaseRow({ diseaseCode: "GYN" }), confirmed("SKIN", 4)],
+    });
+
+  function stubAutoPublish(ok: boolean) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify(ok ? { ok: true, changed: true } : { ok: false, error: "write_failed" }), {
+          status: ok ? 200 : 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+  }
+
+  it("ON: the pill counts only what waits, the published line counts confirmed + auto", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review");
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("3 published · 2 automatically");
+  });
+
+  it("OFF (the default): every undecided row is pending, exactly as before", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} />);
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("3 to review");
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("1 published");
+  });
+
+  it("ON: the summary stripes the high segment, says auto-published, and explains the switch", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[mixed(), member({ cwid: "m2", name: "Two", diseases: [pendingHigh("BREAST", 1)] })]}
+        programs={[]}
+        diseaseAutoPublish
+      />,
+    );
+    const summary = within(within(container).getByTestId("roster-disease-summary"));
+    expect(summary.getByTestId("roster-disease-summary-members").textContent).toBe("1 member to review");
+    expect(summary.getByTestId("roster-disease-summary-tiers").textContent).toMatch(/3 high · auto-published/);
+    const high = summary.getByTestId("roster-disease-summary-high-segment");
+    expect(high.getAttribute("data-auto-published")).toBe("true");
+    expect(high.style.backgroundImage).toMatch(/repeating-linear-gradient/);
+    expect(summary.getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("true");
+    expect(summary.getByTestId("roster-auto-publish-help").textContent).toBe(
+      "3 inferences for 2 members are published. A curator can reject any of them; medium and low confidence stays in your queue.",
+    );
+  });
+
+  it("OFF: plain high segment and legend, and the waiting-in-queue help text", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} />);
+    const summary = within(within(container).getByTestId("roster-disease-summary"));
+    expect(summary.getByTestId("roster-disease-summary-members").textContent).toBe("1 member to review");
+    const tiers = summary.getByTestId("roster-disease-summary-tiers").textContent ?? "";
+    expect(tiers).toMatch(/2 high/);
+    expect(tiers).not.toMatch(/auto-published/);
+    const high = summary.getByTestId("roster-disease-summary-high-segment");
+    expect(high.getAttribute("data-auto-published")).toBe("false");
+    expect(high.style.backgroundImage).toBe("");
+    expect(summary.getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("false");
+    expect(summary.getByTestId("roster-auto-publish-help").textContent).toBe(
+      "High-confidence inferences wait in your queue like the rest.",
+    );
+  });
+
+  it("ON: a member with only high-confidence rows has nothing to review — no pill, no queue, no bulk confirm", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1), pendingHigh("LUNG", 2)] })]}
+        programs={[]}
+        diseaseAutoPublish
+      />,
+    );
+    expect(within(container).queryByTestId("roster-disease-pending-a")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-manage-a").textContent).toBe("2 published · 2 automatically");
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("0");
+    expect(within(container).queryByTestId("roster-start-review-queue")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-summary-members").textContent).toBe("Nothing left to review");
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    expect(screen.queryByTestId("roster-bulk-confirm-high")).toBeNull();
+  });
+
+  it("OFF: the same member is in the queue and the bulk confirm offers its high rows", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1), pendingHigh("LUNG", 2)] })]}
+        programs={[]}
+        diseaseAutoPublish={false}
+      />,
+    );
+    expect(within(container).getByTestId("roster-disease-pending-a").textContent).toBe("2 to review");
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("1");
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    expect(screen.getByTestId("roster-bulk-confirm-high").textContent).toBe("Confirm 2 high-confidence");
+  });
+
+  it("ON: the review queue skips members whose only undecided rows are auto-published", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1)] }),
+          member({ cwid: "b", name: "Bravo", diseases: [diseaseRow({})] }),
+        ]}
+        programs={[]}
+        diseaseAutoPublish
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toBe("Review queue · 1 of 1");
+    expect(within(sheet()).getByText("Bravo")).toBeTruthy();
+  });
+
+  it("the switch POSTs the new value and the counts follow it", async () => {
+    const fetchMock = stubAutoPublish(true);
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-auto-publish-switch"));
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("3 to review");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/center/meyer_cancer_center/disease-auto-publish");
+    expect(bodyOf(fetchMock.mock.calls[0])).toEqual({ enabled: false });
+    await waitFor(() =>
+      expect(within(container).getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("false"),
+    );
+    expect(within(container).queryByTestId("roster-auto-publish-error")).toBeNull();
+  });
+
+  it("a failed switch write reverts it and shows an error", async () => {
+    stubAutoPublish(false);
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-auto-publish-switch"));
+    await waitFor(() => expect(within(container).getByTestId("roster-auto-publish-error")).toBeTruthy());
+    expect(within(container).getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("true");
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review");
+  });
+
+  it("sheet, ON: To review excludes auto rows; Published holds confirmed + auto with an Auto-published badge", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    const s = within(sheet());
+    expect(s.getByTestId("disease-review-tab-review").textContent).toBe("To review 1");
+    expect(s.getByTestId("disease-review-tab-published").textContent).toBe("Published 3");
+    expect(s.getByTestId("disease-review-tab-all").textContent).toBe("All 4");
+    expect(s.getByTestId("disease-review-summary").textContent).toBe("1 to review · 3 published (2 automatically)");
+    // To review: only the medium row, and no "Confirm N high-confidence".
+    expect(s.getByTestId("disease-card-m1-GYN")).toBeTruthy();
+    expect(s.queryByTestId("disease-card-m1-BREAST")).toBeNull();
+    expect(s.queryByTestId("disease-confirm-high")).toBeNull();
+
+    fireEvent.click(s.getByTestId("disease-review-tab-published"));
+    const breast = within(s.getByTestId("disease-card-m1-BREAST"));
+    expect(s.getByTestId("disease-card-m1-BREAST").getAttribute("data-decision")).toBe("auto");
+    expect(breast.getByTestId("disease-auto-m1-BREAST").textContent).toBe("Auto-published");
+    expect(breast.getByTestId("disease-reject-m1-BREAST")).toBeTruthy();
+    expect(breast.getByTestId("disease-confirm-m1-BREAST")).toBeTruthy();
+    // A human-confirmed row carries no auto badge.
+    expect(s.queryByTestId("disease-auto-m1-SKIN")).toBeNull();
+    expect(s.queryByTestId("disease-card-m1-GYN")).toBeNull();
+  });
+
+  it("sheet, ON: Confirm on an auto row makes it human-confirmed; Reject stores a rejection and the row stays until the tab changes", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-published"));
+
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-m1-BREAST"));
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-decision-m1-BREAST").textContent).toBe("Confirmed"),
+    );
+    expect(within(sheet()).queryByTestId("disease-auto-m1-BREAST")).toBeNull();
+
+    fireEvent.click(within(sheet()).getByTestId("disease-reject-m1-LUNG"));
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-card-m1-LUNG").getAttribute("data-decision")).toBe("rejected"),
+    );
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      { cwid: "m1", diseaseCode: "BREAST", decision: "confirmed" },
+      { cwid: "m1", diseaseCode: "LUNG", decision: "rejected" },
+    ]);
+    // Re-choosing the tab drops the rejected row out of Published.
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-published"));
+    expect(within(sheet()).queryByTestId("disease-card-m1-LUNG")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("2 published");
+  });
+
+  it("sheet, OFF: high rows sit in To review with Confirm N high-confidence, and no auto badge", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    const s = within(sheet());
+    expect(s.getByTestId("disease-review-tab-review").textContent).toBe("To review 3");
+    expect(s.getByTestId("disease-review-tab-published").textContent).toBe("Published 1");
+    expect(s.getByTestId("disease-confirm-high").textContent).toBe("Confirm 2 high-confidence");
+    expect(s.getByTestId("disease-card-m1-BREAST").getAttribute("data-decision")).toBe("pending");
+    expect(s.queryByTestId("disease-auto-m1-BREAST")).toBeNull();
   });
 });

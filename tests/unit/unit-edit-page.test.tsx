@@ -86,7 +86,9 @@ vi.mock("@/components/edit/unit-roster-card", () => ({
   UnitRosterCard: () => <div data-testid="panel-roster" />,
 }));
 vi.mock("@/components/edit/center-roster-card", () => ({
-  CenterRosterCard: () => <div data-testid="panel-center-roster" />,
+  CenterRosterCard: ({ diseaseAutoPublish }: { diseaseAutoPublish?: boolean }) => (
+    <div data-testid="panel-center-roster" data-auto-publish={String(diseaseAutoPublish)} />
+  ),
 }));
 vi.mock("@/components/edit/center-program-card", () => ({
   CenterProgramCard: () => <div data-testid="panel-center-program" />,
@@ -141,6 +143,7 @@ function ctx(over: {
     centerMembershipRoles: unitType === "center" ? [] : null,
     siblingDivisions: over.siblings ?? null,
     diseaseOptions: unitType === "center" ? [] : null,
+    diseaseAutoPublish: unitType === "center" ? true : null,
     actorRole: over.actorRole ?? "curator",
     actorCwid: "act001",
   };
@@ -387,6 +390,21 @@ describe("UnitEditPage — Members", () => {
       />,
     );
     expect(screen.getByTestId("panel-center-roster")).toBeTruthy();
+  });
+
+  it("passes the center's auto-publish switch to the roster table", () => {
+    const { unmount } = render(
+      <UnitEditPage ctx={ctx({ unitType: "center", actorRole: "superuser", access: [] })} attr="roster" />,
+    );
+    expect(screen.getByTestId("panel-center-roster").getAttribute("data-auto-publish")).toBe("true");
+    unmount();
+    render(
+      <UnitEditPage
+        ctx={{ ...ctx({ unitType: "center", actorRole: "superuser", access: [] }), diseaseAutoPublish: false }}
+        attr="roster"
+      />,
+    );
+    expect(screen.getByTestId("panel-center-roster").getAttribute("data-auto-publish")).toBe("false");
   });
 });
 

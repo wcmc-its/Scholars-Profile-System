@@ -55,7 +55,7 @@ export type RosterChangeKind = "add" | "remove" | "modify";
  *  (the code itself never changes), so it renders as "Disease: BREAST →
  *  confirmed" through the same `FIELD_LABEL`-keyed template roster fields use. */
 export type RosterFieldChange = {
-  field: "type" | "program" | "start" | "end" | "disease" | "role";
+  field: "type" | "program" | "start" | "end" | "disease" | "role" | "autoPublish";
   from: string | null;
   to: string | null;
 };
@@ -98,6 +98,10 @@ type DiseaseSnapshot = {
   scoreAtDecision?: number | null;
   confidenceAtDecision?: string | null;
 };
+
+/** The `disease_auto_publish_set` snapshot shape (`/api/edit/center/[code]/
+ *  disease-auto-publish`) — the center's switch before/after the write. */
+type AutoPublishSnapshot = { diseaseAutoPublish?: boolean | null };
 
 /** The narrow Prisma surface this reader needs — `db.read` satisfies it.
  *  `centerMembership` is the disease-decision roster-cwid lookup (see the
@@ -225,6 +229,24 @@ export function deriveDiseaseChange(
   };
 }
 
+/**
+ * A `disease_auto_publish_set` row (the center's "Auto-publish high-confidence
+ * inferences" switch). It concerns the center, not a member, so `targetCwid`
+ * is empty; the one field change reads "Auto-publish: off → on".
+ */
+export function deriveAutoPublishChange(
+  before: AutoPublishSnapshot | null,
+  after: AutoPublishSnapshot | null,
+): { changeKind: RosterChangeKind; targetCwid: string; fieldChanges: RosterFieldChange[] } {
+  const onOff = (s: AutoPublishSnapshot | null) =>
+    typeof s?.diseaseAutoPublish === "boolean" ? (s.diseaseAutoPublish ? "on" : "off") : null;
+  return {
+    changeKind: "modify",
+    targetCwid: "",
+    fieldChanges: [{ field: "autoPublish", from: onOff(before), to: onOff(after) }],
+  };
+}
+
 /** Map a list of raw audit rows to the view-shaped history entries. Routes a
  *  `disease_assignment_decision` row through {@link deriveDiseaseChange}
  *  instead of {@link deriveChange} — the two actions store differently-shaped
@@ -240,7 +262,9 @@ export function shapeAuditRows(rows: ReadonlyArray<RawAuditRow>): CenterAuditEnt
             after as DiseaseSnapshot | null,
             r.target_entity_id,
           )
-        : deriveChange(before as RosterSnapshot | null, after as RosterSnapshot | null);
+        : r.action === "disease_auto_publish_set"
+          ? deriveAutoPublishChange(before as AutoPublishSnapshot | null, after as AutoPublishSnapshot | null)
+          : deriveChange(before as RosterSnapshot | null, after as RosterSnapshot | null);
     return {
       id: String(r.id),
       ts: tsIso(r.ts),
@@ -255,6 +279,7 @@ export function shapeAuditRows(rows: ReadonlyArray<RawAuditRow>): CenterAuditEnt
 
 /**
  * Load the last {@link CENTER_AUDIT_WINDOW_DAYS} days of `roster_change` +
+ * `disease_auto_publish_set` (both keyed by this center) +
  * `disease_assignment_decision` rows for one center, newest first. Returns
  * `[]` when the center has no recorded activity of either kind. The caller
  * MUST have already authorized the actor on this center.
@@ -299,7 +324,8 @@ export async function loadCenterAuditHistory(
            before_values, after_values
       FROM scholars_audit.manual_edit_audit
      WHERE (
-             (action = 'roster_change' AND target_entity_type = 'center' AND target_entity_id = ${centerCode})
+             (action IN ('roster_change', 'disease_auto_publish_set')
+               AND target_entity_type = 'center' AND target_entity_id = ${centerCode})
              ${diseaseBranch}
            )
        AND ts >= ${cutoff}

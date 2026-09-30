@@ -1815,6 +1815,14 @@ model Center {
   scholarCount  Int      @default(0) @map("scholar_count")
   sortOrder     Int      @default(0) @map("sort_order")
   source        String   @default("seed") @db.VarChar(32)
+  /// Auto-publish high-confidence disease inferences (Cancer Center roster).
+  /// When true, a `CancerCenterDiseaseAssignment` with `confidence = 'high'`
+  /// and no curator `CancerCenterDiseaseDecision` counts as published and
+  /// leaves the review queue; a curator can still reject or confirm it. When
+  /// false, every undecided inference waits for review. The predicate lives in
+  /// `lib/cancer-center-disease-publish.ts`; toggled via
+  /// `POST /api/edit/center/[code]/disease-auto-publish`. Default ON.
+  diseaseAutoPublish Boolean @default(true) @map("disease_auto_publish")
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
