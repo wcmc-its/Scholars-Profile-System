@@ -632,6 +632,7 @@ async function handleSearch(request: NextRequest) {
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
     meshConfidence: taxonomyMatch.meshResolution?.confidence ?? null,
+    meshMatchedForm: taxonomyMatch.meshResolution?.matchedForm ?? null,
     knownCwids: classifierSets.cwids,
     knownSurnames: classifierSets.surnames,
     knownDepartments: classifierSets.departments,

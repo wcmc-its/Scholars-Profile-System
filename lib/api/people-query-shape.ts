@@ -66,6 +66,12 @@ export interface ClassifyPeopleQueryInput {
    */
   meshConfidence?: "exact" | "entry-term" | "partial" | null;
   /**
+   * #2777 — `meshResolution.matchedForm`. The resolution can come from the
+   * #692 filler-stripped retry ("rice research" -> "rice"), so the verbatim
+   * rule counts tokens here, not in `query`.
+   */
+  meshMatchedForm?: string | null;
+  /**
    * Lowercased `Scholar.cwid` values. CWID detection is exact set membership —
    * `scholar.cwid` is the PK, so this catches all-letter CWIDs (`rgcryst`)
    * that no format regex could, with zero false positives.
@@ -131,7 +137,7 @@ function departmentLeftover(
  * (#2777): when the WHOLE query is a descriptor name or entry term ("long
  * covid" -> Post-Acute COVID-19 Syndrome), the surname collision on one of its
  * words is incidental, and hybrid's name boost would pin scholars surnamed
- * Long above the topical ones. Single-token queries are excluded so a bare
+ * Long above the topical ones. Single-token matched forms are excluded so a bare
  * surname that is also a descriptor ("rice", "stone") keeps its hybrid
  * reading; "cantley ras" resolves at most `partial`, so it stays hybrid.
  *
@@ -184,7 +190,8 @@ export function classifyPeopleQuery(
   // token is also a surname.
   const verbatimMesh =
     input.meshConfidence === "exact" || input.meshConfidence === "entry-term";
-  if (input.meshResolved && verbatimMesh && tokens.length > 1) return "topic";
+  const matchedTokens = (input.meshMatchedForm ?? "").trim().split(/\s+/).filter(Boolean).length;
+  if (input.meshResolved && verbatimMesh && matchedTokens > 1) return "topic";
 
   if (surnameAnchor && topicSignal) return "hybrid";
   if (departmentHasLeftover) return "hybrid";

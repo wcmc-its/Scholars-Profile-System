@@ -191,11 +191,13 @@ describe("classifyPeopleQuery — #2777 verbatim MeSH over surname", () => {
   function classifyWithConfidence(
     query: string,
     meshConfidence: "exact" | "entry-term" | "partial" | null,
+    meshMatchedForm: string = query,
   ): PeopleQueryShape {
     return classifyPeopleQuery({
       query,
       meshResolved: meshConfidence !== null,
       meshConfidence,
+      meshMatchedForm,
       knownCwids: CWIDS,
       knownSurnames: TOPIC_SURNAMES,
       knownDepartments: DEPARTMENTS,
@@ -220,6 +222,14 @@ describe("classifyPeopleQuery — #2777 verbatim MeSH over surname", () => {
 
   it("bare surname that is itself a descriptor stays hybrid", () => {
     expect(classifyWithConfidence("rice", "exact")).toBe("hybrid");
+  });
+
+  it("filler-stripped retry resolving to a single-token surname stays hybrid", () => {
+    expect(classifyWithConfidence("rice research", "entry-term", "rice")).toBe("hybrid");
+  });
+
+  it("filler-stripped retry resolving to a multi-token entry term -> topic", () => {
+    expect(classifyWithConfidence("long covid patients", "entry-term", "long covid")).toBe("topic");
   });
 });
 
