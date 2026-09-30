@@ -16,7 +16,7 @@ const nodes = {
   ed:     { x: AX, y: 150, w: SW, h: SH, kind: "ext", title: "Enterprise Directory", sub: ["LDAPS · person types, appointments, headshots"], chip: { tone: "nightly", text: "nightly" } },
   asms:   { x: BX, y: 150, w: SW, h: SH, kind: "ext", title: "ASMS", sub: ["MS SQL · education, degrees"], chip: { tone: "nightly", text: "nightly" } },
   infoed: { x: AX, y: 210, w: SW, h: SH, kind: "ext", title: "InfoEd", sub: ["MS SQL · grants (funding)"], chip: { tone: "nightly", text: "nightly" } },
-  coi:    { x: BX, y: 210, w: SW, h: SH, kind: "ext", title: "COI Portal", sub: ["MySQL · disclosures"], chip: { tone: "nightly", text: "nightly" } },
+  coi:    { x: BX, y: 210, w: SW, h: SH, kind: "ext", title: "COI Portal", sub: ["MS SQL · disclosures"], chip: { tone: "nightly", text: "nightly" } },
   rdb:    { x: AX, y: 270, w: SW, h: SH, kind: "ext", title: "ReciterDB", sub: ["MariaDB · publications, MeSH, clinical trials"], chip: { tone: "nightly", text: "nightly" } },
   onc:    { x: BX, y: 270, w: SW, h: SH, kind: "ext", title: "OnCore (CTMS)", sub: ["clinical-trial mgmt · investigators, status"], chip: { tone: "ondemand", text: "manual export" } },
   rai:    { x: AX, y: 330, w: SW, h: SH, kind: "ext", title: "ReciterAI", sub: ["DynamoDB + S3 · topics, spotlights"], chip: { tone: "weekly", text: "weekly" } },

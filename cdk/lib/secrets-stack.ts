@@ -264,7 +264,8 @@ export class SecretsStack extends Stack {
       {
         constructId: "EtlCoi",
         name: `scholars/${env}/etl/coi`,
-        description: "SPS ETL credentials — COI source endpoint.",
+        description:
+          "SPS ETL credentials — COI + FRT SQL Server (COI disclosures view + Faculty Review Tool mentees; SCHOLARS_COI_FRT_* server/port/database/username/password).",
       },
       {
         constructId: "EtlReciter",
