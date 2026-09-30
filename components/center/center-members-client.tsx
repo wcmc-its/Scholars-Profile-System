@@ -527,12 +527,8 @@ function GroupedRoster({
   const ofTotal = anySelected || appointment !== "All" || q !== "" ? shown : total;
 
   return (
-    // The facet rail is 240px (was 200px): the Disease focus toggle's two
-    // nowrap segments ("Any involvement" / "Primary focus") need ~106px each,
-    // and at 200px the second was clipped by the rail's overflow. The gutter
-    // drops 56px -> 40px so the table column loses only 24px net.
-    <div className="mt-5 flex flex-col gap-8 pt-2 md:flex-row md:flex-wrap md:items-start md:gap-x-10">
-      <aside className="md:w-[240px] md:shrink-0 md:grow-0">
+    <div className="mt-5 flex flex-col gap-8 pt-2 md:flex-row md:flex-wrap md:items-start md:gap-x-14">
+      <aside className="md:w-[200px] md:shrink-0 md:grow-0">
         <div className="flex flex-col gap-[22px] md:sticky md:top-[76px] md:max-h-[calc(100vh-76px)] md:overflow-y-auto">
           {anySelected && (
             <button
