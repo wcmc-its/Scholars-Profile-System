@@ -104,6 +104,9 @@ jobs:
         run: npm run synth -- -c env=staging
         working-directory: cdk
 
+      # allowLatestAppImage: Sps-App-prod carries an error annotation without
+      # -c appImageDigest (#2343), and `cdk synth` validates every stack. CI has
+      # no running digest to pass; it only checks that the app synthesizes.
       - name: Synth (prod)
-        run: npm run synth -- -c env=prod
+        run: npm run synth -- -c env=prod -c allowLatestAppImage=true
         working-directory: cdk

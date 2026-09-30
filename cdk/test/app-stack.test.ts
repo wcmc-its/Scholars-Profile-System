@@ -1,4 +1,4 @@
-import { Match, Template } from "aws-cdk-lib/assertions";
+import { Annotations, Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { resolveEnvConfig, type SpsEnvConfig } from "../lib/config";
 import { NetworkStack } from "../lib/network-stack";
@@ -2612,6 +2612,104 @@ describe("AppStack", () => {
       t.resourceCountIs("AWS::ApplicationAutoScaling::ScalingPolicy", 0);
     });
   });
+});
+
+// #2343 -- a manual `cdk deploy Sps-App-<env>` must be able to keep the
+// pipeline's digest pin instead of re-registering the family on :latest.
+describe("AppStack app image digest pin (#2343)", () => {
+  const DIGEST = `sha256:${"ab12".repeat(16)}`;
+
+  function build(envName: "staging" | "prod", ctx: Record<string, unknown>) {
+    const fixture = makeFixture(envName);
+    for (const [k, v] of Object.entries(ctx)) fixture.app.node.setContext(k, v);
+    const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
+      env: fixture.env,
+      envConfig: fixture.envConfig,
+    });
+    const stack = new AppStack(fixture.app, `Sps-App-${envName}`, {
+      env: fixture.env,
+      envConfig: fixture.envConfig,
+      vpc: network.vpc,
+    });
+    return { stack, template: Template.fromStack(stack) };
+  }
+
+  type TaskDef = {
+    Properties: { Family: string; ContainerDefinitions: Array<{ Name: string; Image: unknown }> };
+  };
+
+  /** The JSON-stringified Image of `container` in task family `family`. */
+  function imageOf(template: Template, family: string, container: string): string {
+    const all = Object.values(template.findResources("AWS::ECS::TaskDefinition")) as TaskDef[];
+    const defs = all.filter((r) => r.Properties.Family === family);
+    expect(defs).toHaveLength(1);
+    const cd = defs[0].Properties.ContainerDefinitions.find((c) => c.Name === container);
+    expect(cd).toBeDefined();
+    return JSON.stringify(cd!.Image);
+  }
+
+  const errorsOf = (stack: AppStack) =>
+    Annotations.fromStack(stack).findError("*", Match.stringLikeRegexp("#2343"));
+
+  it("prod with -c appImageDigest pins sps-app and sps-migrate to repo@sha256 and raises no error", () => {
+    const { stack, template } = build("prod", { appImageDigest: DIGEST });
+    for (const [family, container] of [
+      ["sps-app-prod", "app"],
+      ["sps-migrate-prod", "migrate"],
+    ]) {
+      const image = imageOf(template, family, container);
+      expect(image).toContain(`@${DIGEST}`);
+      expect(image).not.toContain(":latest");
+    }
+    expect(errorsOf(stack)).toHaveLength(0);
+  });
+
+  it("prod without a digest and without the override carries an error (deploy/diff of Sps-App-prod fails)", () => {
+    const { stack } = build("prod", {});
+    expect(errorsOf(stack)).toHaveLength(1);
+  });
+
+  it("prod: the guard does not arm when the CLI selected only another stack (cdk deploy -e Sps-Edge-prod)", () => {
+    const { stack, template } = build("prod", { "aws:cdk:bundling-stacks": ["Sps-Edge-prod"] });
+    expect(errorsOf(stack)).toHaveLength(0);
+    expect(imageOf(template, "sps-app-prod", "app")).toContain(":latest");
+  });
+
+  it("prod: the guard arms when the CLI selected Sps-App-prod (cdk deploy -e Sps-App-prod)", () => {
+    const { stack } = build("prod", { "aws:cdk:bundling-stacks": ["Sps-App-prod"] });
+    expect(errorsOf(stack)).toHaveLength(1);
+  });
+
+  it("prod with -c allowLatestAppImage=true synthesizes on :latest with no error (bootstrap / CI synth)", () => {
+    const { stack, template } = build("prod", { allowLatestAppImage: "true" });
+    expect(errorsOf(stack)).toHaveLength(0);
+    expect(imageOf(template, "sps-app-prod", "app")).toContain(":latest");
+  });
+
+  it("staging is not gated: no digest -> :latest, no error", () => {
+    const { stack, template } = build("staging", {});
+    expect(errorsOf(stack)).toHaveLength(0);
+    expect(imageOf(template, "sps-app-staging", "app")).toContain(":latest");
+  });
+
+  it("staging honours -c appImageDigest when given", () => {
+    const { template } = build("staging", { appImageDigest: DIGEST });
+    expect(imageOf(template, "sps-app-staging", "app")).toContain(`@${DIGEST}`);
+  });
+
+  it("the ETL-image families stay on :latest (deploy.yml pins them before each run-task)", () => {
+    const { template } = build("prod", { appImageDigest: DIGEST });
+    const image = imageOf(template, "sps-db-bootstrap-prod", "db-bootstrap");
+    expect(image).toContain(":latest");
+    expect(image).not.toContain(DIGEST);
+  });
+
+  it.each(["latest", "sha256:abc", `sha256:${"AB12".repeat(16)}`, "ab12".repeat(16)])(
+    "a malformed appImageDigest (%s) fails synth",
+    (bad) => {
+      expect(() => build("prod", { appImageDigest: bad })).toThrow(/appImageDigest must be sha256/);
+    },
+  );
 });
 
 // Honors queue Run now: ONE action on ONE machine, and the flag ships dark.
