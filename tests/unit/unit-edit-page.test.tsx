@@ -440,13 +440,14 @@ describe("UnitEditPage — header, breadcrumb and nav", () => {
     );
   });
 
-  it("the crumb names the kind — or a division's parent department", () => {
+  it("the crumb names the kind — a division too, not its parent department", () => {
     const { unmount } = render(<UnitEditPage ctx={ctx({})} />);
     expect(screen.getByTestId("unit-edit-crumb").textContent).toBe("Departments");
     unmount();
     render(<UnitEditPage ctx={ctx({ unitType: "division" })} />);
-    expect(screen.getByTestId("unit-edit-crumb").textContent).toBe("Parent");
-    expect(screen.getByTestId("unit-edit-kind").textContent).toBe("Division");
+    expect(screen.getByTestId("unit-edit-crumb").textContent).toBe("Divisions");
+    // The parent department moves from the crumb into the kind chip.
+    expect(screen.getByTestId("unit-edit-kind").textContent).toBe("Division · Parent");
   });
 
   it("the kind crumb links to /edit/units?kind= only when the root crumb links too", () => {
@@ -458,10 +459,11 @@ describe("UnitEditPage — header, breadcrumb and nav", () => {
     const second = render(<UnitEditPage ctx={ctx({ unitType: "center" })} />);
     expect(screen.getByTestId("unit-edit-crumb").getAttribute("href")).toBeNull();
     second.unmount();
-    // A division's crumb names its parent department — no kind link behind it.
+    // A division's crumb is "Divisions", linking to the division filter like
+    // its Members page's crumb does.
     render(<UnitEditPage ctx={ctx({ unitType: "division" })} orgUnitsNavVisible />);
-    expect(screen.getByTestId("unit-edit-crumb").textContent).toBe("Parent");
-    expect(screen.getByTestId("unit-edit-crumb").getAttribute("href")).toBeNull();
+    expect(screen.getByTestId("unit-edit-crumb").textContent).toBe("Divisions");
+    expect(screen.getByTestId("unit-edit-crumb").getAttribute("href")).toBe("/edit/units?kind=division");
   });
 
   it("'Org units' links back to /edit/units when the units-tab grant allows (dwd2001 bug #7)", () => {

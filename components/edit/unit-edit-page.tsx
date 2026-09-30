@@ -269,7 +269,8 @@ const LEGACY_ATTR_SECTION: Partial<Record<AttrKey, string>> = {
 /** Mirrors `CenterProgramCard`'s EXCLUDED_PROGRAM_CODES (no public page). */
 const CENTER_PROGRAMS_WITHOUT_PAGE = new Set(["ZY"]);
 
-/** The chip beside the `<h1>`. */
+/** The chip beside the `<h1>`. A division's chip names its parent
+ *  department, since the breadcrumb now reads "Divisions". */
 function kindLabel(ctx: UnitEditContext): string {
   switch (ctx.unit.unitType) {
     case "center":
@@ -277,11 +278,12 @@ function kindLabel(ctx: UnitEditContext): string {
     case "department":
       return "Department";
     case "division":
-      return "Division";
+      return ctx.unit.deptName ? `Division · ${ctx.unit.deptName}` : "Division";
   }
 }
 
-/** The breadcrumb's second segment — the unit's kind, or a division's parent. */
+/** The breadcrumb's second segment — always the unit's kind, matching the
+ *  EditShell crumb on the same unit's Members page. */
 function crumbLabel(ctx: UnitEditContext): string {
   switch (ctx.unit.unitType) {
     case "center":
@@ -289,18 +291,15 @@ function crumbLabel(ctx: UnitEditContext): string {
     case "department":
       return "Departments";
     case "division":
-      return ctx.unit.deptName ?? "Divisions";
+      return "Divisions";
   }
 }
 
 /** The second crumb's link — `/edit/units?kind=`, the same filter EditShell's
  *  kind crumb opens. Only when the root crumb links too (the viewer can reach
- *  `/edit/units`), and only when the label IS the kind plural: a division
- *  crumb that names its parent department stays plain text, since a link
- *  labelled "Medicine" that lists every division would mislead. */
+ *  `/edit/units`). */
 function crumbHref(ctx: UnitEditContext, orgUnitsNavVisible: boolean): string | undefined {
   if (!orgUnitsNavVisible) return undefined;
-  if (ctx.unit.unitType === "division" && ctx.unit.deptName) return undefined;
   return `/edit/units?kind=${ctx.unit.unitType}`;
 }
 
