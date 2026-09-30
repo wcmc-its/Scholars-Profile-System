@@ -330,6 +330,22 @@ describe("/edit (self) — #536 hidden-identity-class guard", () => {
   });
 });
 
+describe("/edit (self) — ORCID suggestion under \"View as\"", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("loads the ORCID suggestion while a superuser impersonates, so View as matches what the scholar sees", async () => {
+    vi.stubEnv("SELF_EDIT_ORCID_SUGGESTION", "on");
+    mockGetSession.mockResolvedValue({ cwid: "adm001" });
+    mockGetEffectiveCwid.mockReturnValue("fac001");
+    mockIsSuperuser.mockResolvedValue(true);
+    mockLoadEditContext.mockResolvedValue(fakeCtx("fac001", "full_time_faculty"));
+
+    await EditSelfPage({ searchParams: searchParams() });
+    const opts = mockLoadEditContext.mock.calls[0][4];
+    expect(opts.includeOrcidSuggestion).toBe(true);
+  });
+});
+
 describe("/edit (self) — loadConsoleTabs migration (Gaps 1 / 1b)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
