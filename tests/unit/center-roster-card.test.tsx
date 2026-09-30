@@ -223,9 +223,11 @@ describe("CenterRosterCard — the three mutually-exclusive filters", () => {
     expect(screen.queryByTestId("center-roster-row-pen")).toBeNull();
   });
 
-  it("the Active badge is green; the others are not", () => {
+  it("Active is plain text; the exceptions get a pill", () => {
     render(<CenterRosterCard {...base} members={members} programs={[]} />);
-    expect(screen.getByTestId("roster-status-act").className).toMatch(/apollo-green/);
+    expect(screen.getByTestId("roster-status-act").tagName).toBe("SPAN");
+    expect(screen.getByTestId("roster-status-act").className).not.toMatch(/rounded-full/);
+    expect(screen.getByTestId("roster-status-ina").className).toMatch(/rounded-full/);
     expect(screen.getByTestId("roster-status-ina").className).not.toMatch(/apollo-green/);
   });
 
@@ -264,7 +266,7 @@ describe("CenterRosterCard — dates label and 'Edit dates'", () => {
     );
     expect(within(container).getByTestId("roster-dates-label-m1").textContent).toBe("Since Mar 2021");
     const trigger = within(container).getByTestId("roster-dates-trigger-m1");
-    expect(trigger.textContent).toBe("Edit dates");
+    expect(trigger.textContent).toBe("Edit");
     fireEvent.click(trigger);
     expect((screen.getByTestId("roster-start-m1") as HTMLInputElement).value).toBe("2021-03-15");
   });
@@ -305,6 +307,7 @@ describe("CenterRosterCard — inline edits", () => {
   it("Add POSTs action:add and inserts the row", async () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("center-roster-add-open"));
     fireEvent.click(screen.getByTestId("typeahead-pick"));
     fireEvent.click(screen.getByTestId("center-roster-add"));
     await waitFor(() => expect(screen.getByTestId("center-roster-row-new9")).toBeTruthy());
@@ -319,6 +322,7 @@ describe("CenterRosterCard — inline edits", () => {
       }),
     );
     render(<CenterRosterCard {...base} members={[member({})]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("center-roster-add-open"));
     fireEvent.click(screen.getByTestId("typeahead-pick"));
     fireEvent.click(screen.getByTestId("center-roster-add"));
     await waitFor(() => expect(screen.getByTestId("roster-not-public-new9")).toBeTruthy());
@@ -332,6 +336,7 @@ describe("CenterRosterCard — inline edits", () => {
     // fix, post() threw past add()'s rollback and left a phantom row with no error.
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 401 }));
     render(<CenterRosterCard {...base} members={[]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("center-roster-add-open"));
     fireEvent.click(screen.getByTestId("typeahead-pick"));
     fireEvent.click(screen.getByTestId("center-roster-add"));
     // the optimistic row is inserted, then rolled back once the failed POST settles
@@ -342,6 +347,7 @@ describe("CenterRosterCard — inline edits", () => {
   it("Remove confirms then POSTs action:remove and drops the row", async () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.click(screen.getByTestId("roster-remove-m1"));
     // The confirm is "Remove anyway" — the row trigger stays "Remove", so the
     // two are distinguishable and this can't accidentally click the trigger.
@@ -352,6 +358,7 @@ describe("CenterRosterCard — inline edits", () => {
 
   it("the remove dialog steers to an End date rather than framing removal as cheap", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.click(screen.getByTestId("roster-remove-m1"));
     expect(screen.getByText(/End date instead/i)).toBeTruthy();
     expect(screen.getByText(/added in error/i)).toBeTruthy();
@@ -365,6 +372,7 @@ describe("CenterRosterCard — inline edits", () => {
       // membership-active so the default show-active-only filter keeps it visible.
       <CenterRosterCard {...base} members={[member({ endDate: "2999-01-01" })]} programs={[]} />,
     );
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.click(screen.getByTestId("roster-remove-m1"));
     expect(screen.getByText(/including the end date already recorded/i)).toBeTruthy();
   });
@@ -383,7 +391,7 @@ describe("departed / unresolvable members (#2324)", () => {
     expect(screen.getByTestId("center-roster-row-gone1")).toBeTruthy();
     expect(screen.getByTestId("roster-scholar-state-gone1").textContent).toBe("Left WCM");
     expect(screen.getByTestId("roster-needs-close-out").textContent).toMatch(
-      /1 member has left WCM but their center membership is still open/i,
+      /^1 member has left WCMTheir center membership is still open\./i,
     );
   });
 
@@ -525,10 +533,10 @@ describe("CenterRosterCard — status tabs with counts", () => {
     const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
     const tabs = within(container).getAllByRole("tab");
     expect(tabs.map((t) => t.textContent)).toEqual([
-      "All members (4)",
-      "Invited (1)",
-      "Inactive (1)",
-      "Left WCM (1)",
+      "All members 4",
+      "Invited 1",
+      "Inactive 1",
+      "Left WCM 1",
     ]);
     expect(within(container).getByTestId("roster-filter-all").getAttribute("aria-selected")).toBe("true");
     fireEvent.click(within(container).getByTestId("roster-filter-invited"));
@@ -567,8 +575,8 @@ describe("CenterRosterCard — left-WCM banner", () => {
       />,
     );
     const banner = within(container).getByTestId("roster-needs-close-out");
-    expect(banner.textContent).toMatch(/^2 members have left WCM but their center membership is still open\./);
-    fireEvent.click(within(banner).getByRole("button", { name: "Review and set end dates" }));
+    expect(banner.textContent).toMatch(/^2 members have left WCMTheir center membership is still open\./);
+    fireEvent.click(within(banner).getByRole("button", { name: "Review each" }));
     expect(within(container).getByTestId("roster-filter-departed").getAttribute("aria-selected")).toBe("true");
     expect(within(container).queryByTestId("center-roster-row-here")).toBeNull();
     expect(within(container).queryByTestId("roster-needs-close-out")).toBeNull();
@@ -636,8 +644,9 @@ describe("CenterRosterCard — Program filter", () => {
     expect(within(container).queryByTestId("roster-disease-filter-trigger")).toBeNull();
     expect(within(container).queryByTestId("roster-needs-review-toggle")).toBeNull();
     expect(within(container).queryByText("Diseases")).toBeNull();
-    // Remove stays offered; the server refuses it for a feed row (mapped below).
-    expect(within(container).getByTestId("roster-remove-ext1")).toBeTruthy();
+    // Remove stays offered (in the dates popover); the server refuses it for a feed row (mapped below).
+    fireEvent.click(within(container).getByTestId("roster-dates-trigger-ext1"));
+    expect(screen.getByTestId("roster-remove-ext1")).toBeTruthy();
   });
 
   it("keys on the payload, not the source: a ctsc-feed row on a center WITH programs and diseases still shows them", () => {
@@ -668,7 +677,8 @@ describe("CenterRosterCard — Program filter", () => {
         programs={[]}
       />,
     );
-    fireEvent.click(within(container).getByTestId("roster-remove-ext1"));
+    fireEvent.click(within(container).getByTestId("roster-dates-trigger-ext1"));
+    fireEvent.click(screen.getByTestId("roster-remove-ext1"));
     fireEvent.click(screen.getByRole("button", { name: "Remove anyway" }));
     await waitFor(() => expect(within(container).getByText(/nightly CTSC feed/)).toBeTruthy());
     expect(within(container).getByTestId("center-roster-row-ext1")).toBeTruthy();
@@ -680,11 +690,11 @@ describe("CenterRosterCard — paging", () => {
     member({ cwid: `p${String(i).padStart(2, "0")}`, name: `Person ${i}` }),
   );
 
-  it("shows 25, then the rest on 'Show 25 more'", () => {
+  it("shows 25, then the rest on 'Load more'", () => {
     const { container } = render(<CenterRosterCard {...base} members={many} programs={[]} />);
     expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(25);
     expect(within(container).getByTestId("roster-range-label").textContent).toBe("Showing 25 of 30 members");
-    expect(within(container).getByTestId("roster-show-more").textContent).toBe("Show 25 more");
+    expect(within(container).getByTestId("roster-show-more").textContent).toBe("Load more");
     fireEvent.click(within(container).getByTestId("roster-show-more"));
     expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(30);
     expect(within(container).queryByTestId("roster-show-more")).toBeNull();
@@ -771,21 +781,17 @@ function sheet(): HTMLElement {
 }
 
 describe("CenterRosterCard — disease chips", () => {
-  it("shows at most 2 CONFIRMED chips, a +N more count, and an 'N to review' pill — pending rows are not chips", () => {
+  it("shows an 'N to review' pill and an 'N confirmed' count — no per-disease chips", () => {
     const m = member({
       diseases: [confirmed("BREAST", 1), confirmed("LUNG", 2), confirmed("SKIN", 3), diseaseRow({ diseaseCode: "GYN" })],
     });
     const { container } = render(<CenterRosterCard {...base} members={[m]} programs={[]} />);
-    expect(within(container).getByTestId("roster-disease-chip-m1-BREAST").textContent).toBe("Breast Cancer");
-    expect(within(container).getByTestId("roster-disease-chip-m1-LUNG")).toBeTruthy();
-    expect(within(container).queryByTestId("roster-disease-chip-m1-SKIN")).toBeNull();
-    expect(within(container).queryByTestId("roster-disease-chip-m1-GYN")).toBeNull();
-    expect(within(container).getByTestId("roster-disease-chip-more-m1").textContent).toBe("+1 more");
-    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review →");
-    expect(within(container).queryByTestId("roster-disease-manage-m1")).toBeNull();
+    expect(within(container).queryByTestId("roster-disease-chip-m1-BREAST")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review");
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("3 confirmed");
   });
 
-  it("'+ Add a disease' for a member with none, 'Manage' when nothing is left to review; both open the sheet", () => {
+  it("'+ Add a disease' for a member with none, 'N confirmed' when nothing is left to review; both open the sheet", () => {
     const { container } = render(
       <CenterRosterCard
         {...base}
@@ -807,11 +813,34 @@ describe("CenterRosterCard — disease chips", () => {
     expect(within(sheet()).getByText(/no disease assignments for this member yet/i)).toBeTruthy();
   });
 
-  it("a chip opens the sheet too", () => {
+  it("the confirmed count opens the sheet too", () => {
     const { container } = render(
       <CenterRosterCard {...base} members={[member({ diseases: [confirmed("BREAST", 1)] })]} programs={[]} />,
     );
-    fireEvent.click(within(container).getByTestId("roster-disease-chip-m1-BREAST"));
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-m1"));
+    expect(within(sheet()).getByTestId("disease-card-m1-BREAST")).toBeTruthy();
+  });
+
+  it("the sheet opens on 'To review'; a decided row stays until the tab changes", async () => {
+    stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ diseases: [confirmed("LUNG", 1), diseaseRow({})] })]}
+        programs={[]}
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    expect(within(sheet()).getByTestId("disease-review-tab-review").getAttribute("aria-selected")).toBe("true");
+    expect(within(sheet()).queryByTestId("disease-card-m1-LUNG")).toBeNull();
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-m1-BREAST"));
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-decision-m1-BREAST").textContent).toBe("Confirmed"),
+    );
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-review"));
+    expect(within(sheet()).queryByTestId("disease-card-m1-BREAST")).toBeNull();
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-confirmed"));
+    expect(within(sheet()).getByTestId("disease-card-m1-LUNG")).toBeTruthy();
     expect(within(sheet()).getByTestId("disease-card-m1-BREAST")).toBeTruthy();
   });
 });
@@ -856,8 +885,8 @@ describe("CenterRosterCard — disease review sheet", () => {
       expect(within(sheet()).getByTestId("disease-decision-m1-BREAST").textContent).toBe("Confirmed"),
     );
     expect(within(sheet()).getByTestId("disease-review-summary").textContent).toBe("0 to review · 1 confirmed");
-    // The roster row now shows it as a confirmed chip and no pending pill.
-    expect(within(container).getByTestId("roster-disease-chip-m1-BREAST")).toBeTruthy();
+    // The roster row now counts it as confirmed and shows no pending pill.
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("1 confirmed");
     expect(within(container).queryByTestId("roster-disease-pending-m1")).toBeNull();
   });
 
@@ -968,7 +997,7 @@ describe("CenterRosterCard — manual add (\"+ Add a disease\")", () => {
     const { container } = render(
       <CenterRosterCard {...base} members={[member({ diseases: [manuallyAdded] })]} programs={[]} />,
     );
-    fireEvent.click(within(container).getByTestId("roster-disease-chip-m1-GI_COLORECTAL"));
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-m1"));
     fireEvent.click(within(sheet()).getByTestId("disease-undo-m1-GI_COLORECTAL"));
     await waitFor(() => expect(within(sheet()).queryByTestId("disease-card-m1-GI_COLORECTAL")).toBeNull());
   });
@@ -1013,11 +1042,20 @@ describe("CenterRosterCard — 'Has diseases to review' and the review queue", (
     expect(within(next).getByText("Next: Charlie").className).toMatch(/truncate/);
   });
 
+  it("Prev walks back through the queue", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    expect(within(sheet()).queryByTestId("disease-review-prev")).toBeNull();
+    fireEvent.click(within(sheet()).getByTestId("disease-review-next"));
+    fireEvent.click(within(sheet()).getByTestId("disease-review-prev"));
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toMatch(/1 of/);
+  });
+
   it("the count follows the other filters", () => {
     const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
     fireEvent.change(within(container).getByTestId("roster-search-input"), { target: { value: "alpha" } });
     expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("1");
-    expect(within(container).getByTestId("roster-start-review-queue").textContent).toBe("Start review queue (1)");
+    expect(within(container).getByTestId("roster-start-review-queue").textContent).toBe("Start review queue");
   });
 
   it("walks the queue with 'Next', skipping anyone already finished, and Close ends it", async () => {
