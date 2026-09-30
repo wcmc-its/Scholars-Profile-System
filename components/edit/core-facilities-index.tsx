@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import type { CoreConsoleRow } from "@/lib/api/core-console-index";
 import { CANDIDATE_DISPLAY_FLOOR_PCT } from "@/lib/cores/review-thresholds";
 import { cn } from "@/lib/utils";
+import { Caret } from "@/components/ui/caret";
 
 export type CoreFilter = "review" | "hidden" | "problem";
 type SortKey = "name" | "status" | "review" | "confirmed" | "clients" | "staff";
@@ -423,9 +424,7 @@ function CoreRow({
               {c.facility || "No facility name"}
             </span>
           </span>
-          <span className="text-muted-foreground text-xs lg:hidden" aria-hidden>
-            {open ? "▾" : "▸"}
-          </span>
+          <Caret open={open} className="text-muted-foreground lg:hidden" />
         </button>
 
         <div className="col-span-2 flex flex-col items-start gap-0.5 lg:col-span-1">
@@ -513,9 +512,7 @@ function CoreRow({
           )}
         </div>
 
-        <span className="text-muted-foreground hidden text-right text-xs lg:block" aria-hidden>
-          {open ? "▾" : "▸"}
-        </span>
+        <Caret open={open} className="text-muted-foreground hidden justify-self-end lg:block" />
       </div>
 
       {open && <CoreDetails core={c} id={detailsId} reviewHref={reviewHref} editHref={editHref} />}

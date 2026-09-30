@@ -76,6 +76,7 @@ import {
   writeShownParam,
 } from "@/lib/taxonomy/feed-load-more";
 import { sanitizePubTitle } from "@/lib/utils";
+import { Caret } from "@/components/ui/caret";
 
 type Sort = "newest" | "most_cited" | "by_impact";
 type Filter = "research_articles_only" | "all";
@@ -869,7 +870,7 @@ export function PubRow({
               {usagesExpanded
                 ? "Show fewer"
                 : `+ ${moreCount} more usage${moreCount === 1 ? "" : "s"}`}
-              <span aria-hidden="true">{usagesExpanded ? " ▴" : " ▾"}</span>
+              <Caret dropdown open={usagesExpanded} className="ml-0.5 inline-block align-[-2px]" />
             </button>
           )}
         </div>

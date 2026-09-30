@@ -31,6 +31,7 @@ import {
   formatUsd,
   type FitTierLabel,
 } from "@/lib/match-display";
+import { Caret } from "@/components/ui/caret";
 
 type Axes = {
   topicAffinity: number;
@@ -267,11 +268,7 @@ function OpportunityRow({ o, tier }: { o: Opportunity; tier: FitTierLabel }) {
         aria-expanded={open}
         className="group mt-2 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
       >
-        <span
-          className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${open ? "rotate-90" : ""}`}
-        >
-          ▶
-        </span>
+        <Caret open={open} className="text-muted-foreground" />
         <span className="group-hover:underline">Details</span>
       </button>
 

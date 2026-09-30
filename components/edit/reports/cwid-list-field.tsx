@@ -26,6 +26,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CWID_LIST_MAX, parseCwidText } from "@/lib/cwid-list-text";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 export type AppliedCwidList = { id: string; found: boolean; count: number; unmatched: string[] };
 
@@ -102,7 +103,8 @@ export function CwidListField({ applied }: { applied: AppliedCwidList | null }) 
           )}
           {applied.unmatched.length > 0 && (
             <details className="text-muted-foreground text-[13px]">
-              <summary className="cursor-pointer">
+              <summary className={`flex w-fit items-center gap-1 cursor-pointer ${SUMMARY_NO_MARKER}`}>
+                <Caret />
                 Not found among active scholars ({applied.unmatched.length.toLocaleString()})
               </summary>
               <p className="mt-1 max-h-32 overflow-y-auto font-mono text-xs break-words" data-testid="cwid-list-unmatched">

@@ -12,6 +12,7 @@ import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
 import { grantRoleShortLabel, grantRoleTitle, isPiRole } from "@/lib/funding-roles";
 import { countGrantProjects, grantProjectKey } from "@/lib/grants/project-count";
+import { Caret } from "@/components/ui/caret";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -299,9 +300,7 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
           }
         >
           <summary className="flex cursor-pointer list-none items-center gap-2 py-3 text-sm font-medium text-[var(--color-accent-slate)] [&::-webkit-details-marker]:hidden">
-            <span className="text-muted-foreground inline-block w-3 text-[10px] transition-transform group-open:rotate-90">
-              ▶
-            </span>
+            <Caret className="text-muted-foreground" />
             Completed grants ({completedGroups.length})
           </summary>
           <ul className="pb-3">
@@ -428,13 +427,7 @@ function GrantRow({
               className="group mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
               aria-expanded={expanded}
             >
-              <span
-                className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${
-                  expanded ? "rotate-90" : ""
-                }`}
-              >
-                ▶
-              </span>
+              <Caret open={expanded} className="text-muted-foreground" />
               <span className="group-hover:underline">
                 {expandLabel(pubCount, !!group.abstract)}
               </span>

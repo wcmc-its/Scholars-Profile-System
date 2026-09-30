@@ -43,6 +43,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { UnitDirectoryEntry, UnitPageKind } from "@/lib/edit/manageable-units";
 import { cn } from "@/lib/utils";
+import { Caret } from "@/components/ui/caret";
 
 type SortKey = "name" | "scholars";
 type Gap = "any" | "desc" | "lead" | "both";
@@ -370,12 +371,7 @@ export function AllUnitsDirectory({
                               data-testid={`all-units-section-${kind}`}
                               className="bg-apollo-page border-apollo-border flex w-full cursor-pointer items-center gap-2.5 border-b px-5 py-2.5 text-left"
                             >
-                              <span
-                                className="text-muted-foreground w-3 text-center text-sm leading-none"
-                                aria-hidden
-                              >
-                                {open ? "▾" : "▸"}
-                              </span>
+                              <Caret open={open} className="text-muted-foreground" />
                               <span className="text-[13px] font-semibold tracking-[.06em] uppercase">
                                 {title}
                               </span>

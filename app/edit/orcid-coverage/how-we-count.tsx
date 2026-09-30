@@ -9,6 +9,7 @@
 "use client";
 
 import * as React from "react";
+import { Caret } from "@/components/ui/caret";
 
 export function HowWeCount({
   intro,
@@ -30,7 +31,8 @@ export function HowWeCount({
           className="text-apollo-slate whitespace-nowrap hover:underline"
           data-testid="orcid-coverage-how-we-count"
         >
-          {open ? "Hide how we count ▴" : "How we count ▾"}
+          {open ? "Hide how we count" : "How we count"}
+          <Caret dropdown open={open} className="ml-0.5 inline-block align-[-2px]" />
         </button>
       </p>
       <div id="orcid-coverage-definitions" hidden={!open} data-testid="orcid-coverage-definitions">

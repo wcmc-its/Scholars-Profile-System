@@ -92,6 +92,7 @@ import {
   type MentorshipTypeKey,
 } from "@/lib/edit/mentorship-type";
 import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 const FORM_ID = "mentored-pubs-filters";
 const SHEET_SUFFIX = "-sheet";
@@ -329,7 +330,8 @@ export async function renderMentoredPublicationsReport({
                   to publications and aren&rsquo;t shown.
                   {loaded.droppedNoCwidMentees.length > 0 && (
                     <details className="mt-1.5" data-testid="mentored-pubs-no-cwid-list">
-                      <summary className="cursor-pointer font-medium underline-offset-2 hover:underline">View list</summary>
+                      <summary className={`flex w-fit items-center gap-1 cursor-pointer font-medium underline-offset-2 hover:underline ${SUMMARY_NO_MARKER}`}>
+                        <Caret />View list</summary>
                       <ul className="mt-1.5 flex flex-col gap-0.5">
                         {loaded.droppedNoCwidMentees.map((m, i) => (
                           <li key={i}>

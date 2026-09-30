@@ -15,6 +15,7 @@ import { MatchReason } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { profilePath } from "@/lib/profile-url";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
+import { Caret } from "@/components/ui/caret";
 
 /**
  * Issue #78 F2 — Funding result row.
@@ -239,13 +240,7 @@ export function FundingResultRow({
             className="group mt-1.5 inline-flex items-center gap-1 text-[13px] text-[var(--color-accent-slate)]"
             aria-expanded={expanded}
           >
-            <span
-              className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${
-                expanded ? "rotate-90" : ""
-              }`}
-            >
-              ▶
-            </span>
+            <Caret open={expanded} className="text-muted-foreground" />
             <span className="group-hover:underline">
               {expandLabel(hit.pubCount, !!hit.abstract)}
             </span>

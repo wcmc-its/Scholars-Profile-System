@@ -69,6 +69,7 @@ import {
   type HighlightSpan,
 } from "@/lib/coi-gap/mention";
 import { FEEDBACK_REASONS, type FeedbackReason } from "@/lib/coi-gap/feedback";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 export type CoiGapCardProps = {
   cwid: string;
@@ -643,7 +644,8 @@ export function CoiGapCard({
         </ul>
         {card.mentions.length > COI_GAP_PAPER_EXAMPLE_LIMIT && (
           <details data-testid={`coi-gap-org-more-${card.organization}`}>
-            <summary className="text-apollo-slate mt-1 cursor-pointer text-sm font-medium">
+            <summary className={`flex w-fit items-center gap-1 text-apollo-slate mt-1 cursor-pointer text-sm font-medium ${SUMMARY_NO_MARKER}`}>
+              <Caret />
               Show {card.mentions.length - COI_GAP_PAPER_EXAMPLE_LIMIT} more paper
               {card.mentions.length - COI_GAP_PAPER_EXAMPLE_LIMIT === 1 ? "" : "s"}
             </summary>
@@ -1091,7 +1093,8 @@ export function CoiGapCard({
             into the SAME two-view structure, visibly marked (dashed border + flag). */}
         {lowerUnitCount > 0 && (
           <details data-testid="coi-gap-lower" className="border-apollo-border border-t pt-3">
-            <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+            <summary className={`flex w-fit items-center gap-1 text-apollo-slate cursor-pointer text-sm font-medium ${SUMMARY_NO_MARKER}`}>
+              <Caret />
               Show {lowerUnitCount} lower-confidence match{lowerUnitCount === 1 ? "" : "es"}
             </summary>
             <p className="text-muted-foreground mt-1.5 text-xs">

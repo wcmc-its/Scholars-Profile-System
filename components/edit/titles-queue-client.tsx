@@ -30,6 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { TITLE_RANK, TITLE_TIER_LABEL, type TitleOption } from "@/lib/scholar-title";
 import { cn } from "@/lib/utils";
+import { Caret } from "@/components/ui/caret";
 
 /** A ladder rank for display: "4", "8.5"; "—" for unranked. Mirrors
  *  `formatTitleRank` (title-dashboard.ts), which this client file cannot
@@ -75,7 +76,8 @@ export function RubricDisclosure({
         </span>
         <span className="text-muted-foreground min-w-[240px] flex-1 text-[13px]">{summary}</span>
         <span className="text-apollo-slate text-[13px] whitespace-nowrap">
-          {open ? "Hide ladder ▴" : "Show ladder and rules ▾"}
+          {open ? "Hide ladder" : "Show ladder and rules"}
+          <Caret dropdown open={open} className="ml-0.5 inline-block align-[-2px]" />
         </span>
       </button>
       <div id="rubric-body" hidden={!open} className="border-apollo-border border-t px-5 pt-1 pb-5">

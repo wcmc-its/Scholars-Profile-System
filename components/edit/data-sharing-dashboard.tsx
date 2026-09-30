@@ -136,6 +136,7 @@ import {
 } from "@/lib/edit/data-sharing-dashboard";
 import { effectiveTierOf, urlOf } from "@/lib/repository-tier";
 import { cn } from "@/lib/utils";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 /** Card chrome shared by every tile, chart and table on the page. */
 const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] border";
@@ -1012,7 +1013,10 @@ function RepositoriesSection({
           items CSV) predates this layout; kept behind a disclosure so the
           tier card leads. */}
       <details className="group">
-        <summary className="text-apollo-slate cursor-pointer text-[13px] hover:underline">
+        <summary
+          className={`text-apollo-slate flex w-fit cursor-pointer items-center gap-1 text-[13px] hover:underline ${SUMMARY_NO_MARKER}`}
+        >
+          <Caret />
           All {report.byRepository.length.toLocaleString()} repositories: access model and items
         </summary>
         <div className="mt-3 flex flex-col gap-2">
@@ -1256,7 +1260,10 @@ function DepartmentsSection({
         ))}
       </div>
       <details className="group">
-        <summary className="text-apollo-slate cursor-pointer text-[12.5px] hover:underline">
+        <summary
+          className={`text-apollo-slate flex w-fit cursor-pointer items-center gap-1 text-[12.5px] hover:underline ${SUMMARY_NO_MARKER}`}
+        >
+          <Caret />
           Why these don&rsquo;t add up
         </summary>
         <div

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
+import { Caret } from "@/components/ui/caret";
 
 type Trial = ProfilePayload["clinicalTrials"][number];
 
@@ -51,9 +52,7 @@ export function ClinicalTrialsSection({ trials }: { trials: Trial[] }) {
           className={activeTrials.length > 0 ? "group border-border mt-4 border-t" : "group"}
         >
           <summary className="flex cursor-pointer list-none items-center gap-2 py-3 text-sm font-medium text-[var(--color-accent-slate)] [&::-webkit-details-marker]:hidden">
-            <span className="text-muted-foreground inline-block w-3 text-[10px] transition-transform group-open:rotate-90">
-              ▶
-            </span>
+            <Caret className="text-muted-foreground" />
             Completed &amp; closed trials ({completedTrials.length})
           </summary>
           <ul className="pb-3">
@@ -116,13 +115,7 @@ function TrialRow({ trial }: { trial: Trial }) {
               className="group mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
               aria-expanded={expanded}
             >
-              <span
-                className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${
-                  expanded ? "rotate-90" : ""
-                }`}
-              >
-                ▶
-              </span>
+              <Caret open={expanded} className="text-muted-foreground" />
               <span className="group-hover:underline">
                 {expanded ? "Hide details" : "Show details"}
               </span>

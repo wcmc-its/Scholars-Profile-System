@@ -1,5 +1,6 @@
 import type { ProfilePayload } from "@/lib/api/profile";
 import { TechnologyOverview } from "@/components/profile/technology-overview";
+import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
 type Dataset = ProfilePayload["datasets"][number];
 
@@ -88,7 +89,8 @@ export function DatasetsSection({ datasets }: { datasets: Dataset[] }) {
         // Native <details> so "show more" needs no client state — the section
         // stays server-rendered, same as technologies-section.tsx.
         <details className="border-border border-t">
-          <summary className="text-muted-foreground hover:text-foreground cursor-pointer py-3 text-sm">
+          <summary className={`flex w-fit items-center gap-1 text-muted-foreground hover:text-foreground cursor-pointer py-3 text-sm ${SUMMARY_NO_MARKER}`}>
+            <Caret />
             Show {rest.length} more {rest.length === 1 ? "dataset" : "datasets"}
           </summary>
           <ul>
