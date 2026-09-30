@@ -65,6 +65,14 @@ const EXT: Source[] = [
   { name: "NLM MeSH", data: "Subject vocabulary for search", cad: "annual" },
 ];
 
+// Feed the Datasets section and the data-sharing dashboard via reciterdb.dataset_deposit
+// (scripts/bulk-data-rule, hand-run, so "occasional"; the SPS copy itself is weekly).
+const DATA: Source[] = [
+  { name: "Europe PMC", data: "Full-text Data Availability statements, scanned for dataset deposits", cad: "occasional" },
+  { name: "PubMed Central", data: "Full text where Europe PMC has none", cad: "occasional" },
+  { name: "DataCite", data: "Dataset titles, creators and publishers", cad: "occasional" },
+];
+
 const CADENCES: Cadence[] = ["live", "nightly", "weekly", "annual", "occasional"];
 
 const SCHOLARS_EDITS = [
@@ -192,7 +200,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
       { field: "Citing papers", source: "NIH iCite", cadence: "Occasional", tag: "At the source", how: "Follows iCite." },
       { field: "Retractions", source: "PubMed", cadence: "Nightly", tag: "Not editable", how: "Retracted papers are hidden everywhere automatically." },
       { field: "Selected highlights", detail: "Up to three featured papers", source: "Scholars, from Impact scores", cadence: "Nightly", tag: "Yours to edit", how: "Pick your own on your edit page, or keep the automatic set." },
-      { field: "Datasets", detail: "Off unless you turn it on", source: "ReCiter database", cadence: "Weekly", tag: "Yours to edit", how: "Turn the section on, then hide or mark “Not mine.”" },
+      { field: "Datasets", detail: "Off unless you turn it on", source: "Europe PMC and PubMed Central full text, PubMed and DataCite, via the ReCiter database", cadence: "Occasional", tag: "Yours to edit", how: "Turn the section on, then hide or mark “Not mine.”" },
     ],
   },
   {
@@ -396,7 +404,7 @@ function SourceGroup({
 
 export function SystemContext() {
   const [cad, setCad] = useState<Cadence | null>(null);
-  const all = [...WCM, ...EXT];
+  const all = [...WCM, ...EXT, ...DATA];
   return (
     <div className="mt-6 flex flex-col gap-3.5">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -438,6 +446,7 @@ export function SystemContext() {
         <div className="flex flex-col gap-4">
           <SourceGroup label="WCM source systems" sources={WCM} cad={cad} />
           <SourceGroup label="Outside sources" sources={EXT} cad={cad} />
+          <SourceGroup label="Data-sharing sources" sources={DATA} cad={cad} />
         </div>
 
         <div className="flex items-center justify-center gap-1.5 text-[var(--apollo-ink-2)] lg:flex-col lg:px-1">
