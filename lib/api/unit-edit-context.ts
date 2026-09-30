@@ -188,6 +188,10 @@ export type UnitEditContext = {
      *  still type-check; absent → `[]` (same convention as `RosterMember.
      *  scholarState` in `center-roster-card.tsx`). */
     diseases?: ReadonlyArray<RosterDiseaseRow>;
+    /** Roster upkeep "Fill dates": the person's earliest WCM appointment start
+     *  (YYYY-MM-DD), sent only for a center membership with no start date;
+     *  absent/null otherwise or when no appointment has one. */
+    wcmStartDate?: string | null;
   }> | null;
   /** The center's program taxonomy (#552), present for a center (empty when the
    *  center has none — the roster editor hides Type + Program then). null for a
@@ -277,6 +281,7 @@ export type UnitEditContextClient = Pick<
   | "centerProgram"
   | "cancerCenterDiseaseAssignment"
   | "cancerCenterDiseaseDecision"
+  | "appointment"
   | "orgUnitRoleAssignment"
   | "orgUnitRole"
   | "orgUnitRoleScope"
@@ -984,6 +989,23 @@ export async function loadUnitEditContext(
       }))
     : null;
 
+  // Roster upkeep "Fill dates": each undated center member's earliest WCM
+  // appointment start. Only queried for the rows that need it.
+  const wcmStartByCwid = new Map<string, string>();
+  const undatedCwids = unitType === "center" ? rosterRows.filter((r) => !r.startDate).map((r) => r.cwid) : [];
+  if (undatedCwids.length > 0) {
+    const appts = await client.appointment.findMany({
+      where: { cwid: { in: undatedCwids }, startDate: { not: null } },
+      select: { cwid: true, startDate: true },
+    });
+    for (const a of appts) {
+      if (!a.startDate) continue;
+      const iso = a.startDate.toISOString().slice(0, 10);
+      const cur = wcmStartByCwid.get(a.cwid);
+      if (!cur || iso < cur) wcmStartByCwid.set(a.cwid, iso);
+    }
+  }
+
   const roster = hasRoster
     ? rosterRows.map((r) => {
         const resolved = nameMap.get(r.cwid);
@@ -1003,6 +1025,7 @@ export async function loadUnitEditContext(
           // member. External rows render through their own source path.
           publiclyListed: external !== undefined || (resolved?.publiclyListed ?? false),
           diseases: diseasesByCwid.get(r.cwid) ?? [],
+          wcmStartDate: wcmStartByCwid.get(r.cwid) ?? null,
         };
       })
     : null;

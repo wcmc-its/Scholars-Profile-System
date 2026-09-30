@@ -38,6 +38,14 @@
  * the "Membership upkeep" card above the table ("Review each" jumps to the
  * Left WCM tab) — outstanding work, not hidden rows.
  *
+ * Bulk: each row has a checkbox (the header one ticks every member shown);
+ * the shared `SelectionBar` then offers Set role, Set program, and Confirm N
+ * high-confidence. Each is the ordinary one-member write per row, sent in
+ * bounded chunks (`mapChunked`); a row whose write fails stays ticked.
+ * "Fill dates" in the upkeep card sets each undated member's start to their
+ * earliest WCM appointment start (`wcmStartDate`), skipping invitees and any
+ * date after the row's End date, with an Undo that clears exactly those rows.
+ *
  * Inline edits POST `/api/edit/roster` `action:"set"` one field at a time
  * (a field present as `null` clears it). Add → `action:"add"`, Remove →
  * `action:"remove"` (the server refuses it for a `ctsc-feed` row, whose
@@ -96,6 +104,13 @@ import {
 } from "@/components/edit/directory-people-typeahead";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { useShowMore } from "@/components/edit/reports/report-show-more";
+import {
+  SelectionBar,
+  SelectionBarSpacer,
+  mapChunked,
+  plural,
+  useRowSelection,
+} from "@/components/edit/selection-bar";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -141,6 +156,9 @@ export type RosterMember = {
    *  rank (drift-only decision rows trailing by code) — see
    *  `loadUnitEditContext`. */
   diseases?: ReadonlyArray<RosterDiseaseRow>;
+  /** "Fill dates": earliest WCM appointment start, sent only for an undated
+   *  center membership (`loadUnitEditContext`). */
+  wcmStartDate?: string | null;
 };
 
 export type CenterProgramOption = { code: string; label: string; sortOrder: number };
@@ -501,10 +519,15 @@ export function CenterRosterCard({
    *  from the local optimistic patch (the role select sets `membershipType`
    *  locally too, via `deriveMembershipType`, but the wire contract is
    *  `membershipRoleKey` alone). */
-  async function patch(cwid: string, field: Partial<RosterMember>, postBody?: Record<string, unknown>) {
+  async function patch(
+    cwid: string,
+    field: Partial<RosterMember>,
+    postBody?: Record<string, unknown>,
+  ): Promise<boolean> {
     setError(null);
     const prev = members.find((m) => m.cwid === cwid);
-    if (!prev) return;
+    if (!prev) return false;
+    let saved = false;
     const next = { ...prev, ...field };
     setMembers((ms) => ms.map((m) => (m.cwid === cwid ? next : m)));
     const prior = writeQueue.current.get(cwid) ?? Promise.resolve();
@@ -513,9 +536,11 @@ export function CenterRosterCard({
       .then(async () => {
         const ok = await post({ cwid, action: "set", ...(postBody ?? field) });
         if (!ok) setMembers((ms) => ms.map((m) => (m.cwid === cwid ? prev : m)));
+        saved = ok !== false;
       });
     writeQueue.current.set(cwid, run);
     await run;
+    return saved;
   }
 
   /** Per-(cwid, diseaseCode) write chain — same reason `writeQueue` above
@@ -777,6 +802,84 @@ export function CenterRosterCard({
   const byCwid = new Map(members.map((m) => [m.cwid, m]));
   const pageMembers = paging.visible.flatMap((c) => byCwid.get(c) ?? []);
 
+  // Bulk actions: tick rows, then Set role / Set program / Confirm
+  // high-confidence from the shared floating bar. Each member is still its own
+  // ordinary POST (and audit row), sent in bounded chunks.
+  const selection = useRowSelection(pageMembers.map((m) => ({ id: m.cwid, selectable: true })));
+  const [bulkBusy, setBulkBusy] = React.useState(false);
+  const allPageSelected = pageMembers.length > 0 && pageMembers.every((m) => selection.selected.has(m.cwid));
+  const selectedMembers = [...selection.selected].flatMap((c) => byCwid.get(c) ?? []);
+  const highPairs = selectedMembers.flatMap((m) =>
+    pendingDiseaseRows(m.diseases)
+      .filter((d) => d.assignment?.confidence === "high")
+      .map((d) => ({ cwid: m.cwid, code: d.diseaseCode })),
+  );
+
+  function toggleAllOnPage(on: boolean) {
+    for (const m of pageMembers) selection.toggle(m.cwid, on);
+  }
+
+  async function runBulk(write: (cwid: string) => Promise<boolean>) {
+    const batch = [...selection.selected];
+    setBulkBusy(true);
+    try {
+      const ok = await mapChunked(batch, write);
+      selection.settle(batch, batch.filter((_, i) => !ok[i]));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  const bulkSetRole = (roleKey: string) =>
+    runBulk((cwid) =>
+      patch(cwid, { membershipRoleKey: roleKey, membershipType: deriveMembershipType(roleKey) }, { membershipRoleKey: roleKey }),
+    );
+  const bulkSetProgram = (code: string) => runBulk((cwid) => patch(cwid, { programCode: code || null }));
+
+  async function bulkConfirmHigh() {
+    const pairs = highPairs;
+    setBulkBusy(true);
+    try {
+      await mapChunked(pairs, (p) => decideDisease(p.cwid, p.code, "confirmed"));
+      selection.clear();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // "Fill dates": undated memberships take the person's earliest WCM
+  // appointment start. Invitees haven't joined, so they're left alone; a
+  // date after the row's own End date would be refused, so it's skipped.
+  const undated = members.filter((m) => !m.startDate && statusOf(m, now) !== "invited");
+  const fillable = undated.filter(
+    (m): m is RosterMember & { wcmStartDate: string } =>
+      !!m.wcmStartDate && (!m.endDate || m.wcmStartDate <= m.endDate),
+  );
+  const [filled, setFilled] = React.useState<ReadonlyArray<string> | null>(null);
+  const [filling, setFilling] = React.useState(false);
+
+  async function fillDates() {
+    setFilling(true);
+    try {
+      const batch = fillable;
+      const ok = await mapChunked(batch, (m) => patch(m.cwid, { startDate: m.wcmStartDate }));
+      setFilled(batch.filter((_, i) => ok[i]).map((m) => m.cwid));
+    } finally {
+      setFilling(false);
+    }
+  }
+
+  async function undoFill() {
+    if (!filled) return;
+    setFilling(true);
+    try {
+      await mapChunked(filled, (cwid) => patch(cwid, { startDate: null }));
+      setFilled(null);
+    } finally {
+      setFilling(false);
+    }
+  }
+
   const filtersActive =
     selectedDiseaseCodes.size > 0 ||
     confidenceFilter !== "any" ||
@@ -790,7 +893,7 @@ export function CenterRosterCard({
   const needsCloseOut = members.filter(needsCloseOutOf).length;
   // Member + Role + [Program] + [Diseases] + Status — Start/End are no longer
   // their own columns (folded into Program/Member, see `MemberDateRange`).
-  const colCount = 3 + (hasPrograms ? 1 : 0) + (hasDiseases ? 1 : 0);
+  const colCount = 4 + (hasPrograms ? 1 : 0) + (hasDiseases ? 1 : 0);
 
   // Disease-inference summary card — roster-wide, independent of the filters.
   const liveRows = members.flatMap((m) => liveDiseaseRows(m.diseases));
@@ -836,7 +939,7 @@ export function CenterRosterCard({
 
   return (
     <>
-    {(hasDiseases || showCloseOut) && (
+    {(hasDiseases || showCloseOut || undated.length > 0 || filled !== null) && (
       <div className="mb-4 grid gap-4 lg:grid-cols-2" data-testid="center-roster-summary">
         {hasDiseases && (
           <section
@@ -887,12 +990,13 @@ export function CenterRosterCard({
             )}
           </section>
         )}
-        {showCloseOut && (
+        {(showCloseOut || undated.length > 0 || filled !== null) && (
           <section
             className="border-apollo-border bg-apollo-surface flex flex-col gap-3 rounded-xl border p-5"
             data-testid="roster-upkeep"
           >
             <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">Membership upkeep</p>
+            {showCloseOut && (
             <div
               className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber flex flex-col gap-2.5 rounded-lg border px-4 py-3 text-sm"
               data-testid="roster-needs-close-out"
@@ -914,6 +1018,48 @@ export function CenterRosterCard({
                 Review each
               </Button>
             </div>
+            )}
+            {filled !== null ? (
+              <div
+                className="border-apollo-border flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm"
+                data-testid="roster-fill-dates-done"
+              >
+                <span className="flex-1">{plural(filled.length, "start date", "start dates")} filled.</span>
+                <Button type="button" variant="ghost" size="sm" disabled={filling} onClick={undoFill} data-testid="roster-fill-dates-undo">
+                  Undo
+                </Button>
+              </div>
+            ) : (
+              undated.length > 0 && (
+                <div
+                  className="border-apollo-border flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm"
+                  data-testid="roster-fill-dates"
+                >
+                  <div className="min-w-0 flex-1 basis-56">
+                    <p className="font-medium">
+                      {undated.length === 1
+                        ? "1 membership has no start date"
+                        : `${fmt(undated.length)} memberships have no start date`}
+                    </p>
+                    <p className="text-muted-foreground text-[13px]">
+                      Use each person&rsquo;s WCM appointment date.
+                      {undated.length > fillable.length &&
+                        ` ${fmt(undated.length - fillable.length)} can’t be filled automatically.`}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={filling || fillable.length === 0}
+                    onClick={fillDates}
+                    data-testid="roster-fill-dates-run"
+                  >
+                    {filling ? "Filling…" : `Fill ${plural(fillable.length, "date", "dates")}`}
+                  </Button>
+                </div>
+              )
+            )}
           </section>
         )}
       </div>
@@ -1201,6 +1347,15 @@ export function CenterRosterCard({
           <table className="[&_td]:align-middle w-full min-w-[720px] text-sm" data-testid="center-roster-table">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left text-xs">
               <tr className="border-apollo-border border-b">
+                <th className="w-10 py-2 pr-0 pl-3">
+                  <Checkbox
+                    checked={allPageSelected}
+                    disabled={bulkBusy || pageMembers.length === 0}
+                    onCheckedChange={(c) => toggleAllOnPage(c === true)}
+                    aria-label="Select every member shown"
+                    data-testid="roster-select-all"
+                  />
+                </th>
                 <th className="px-3 py-2 font-medium">Member</th>
                 <th className="px-3 py-2 font-medium">Role</th>
                 {hasPrograms && <th className="px-3 py-2 font-medium">Program &amp; dates</th>}
@@ -1266,6 +1421,15 @@ export function CenterRosterCard({
                       data-testid={`center-roster-row-${m.cwid}`}
                       data-needs-close-out={rowNeedsCloseOut ? "true" : undefined}
                     >
+                      <td className="w-10 py-2 pr-0 pl-3">
+                        <Checkbox
+                          checked={selection.selected.has(m.cwid)}
+                          disabled={bulkBusy}
+                          onCheckedChange={(c) => selection.toggle(m.cwid, c === true)}
+                          aria-label={`Select ${m.name}`}
+                          data-testid={`roster-select-${m.cwid}`}
+                        />
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {/* No hover card for an external (netid, no WCM
@@ -1418,6 +1582,63 @@ export function CenterRosterCard({
           </table>
           </div>
         )}
+
+        <SelectionBarSpacer count={selection.selected.size} />
+        <SelectionBar
+          count={selection.selected.size}
+          noun="member"
+          nounPlural="members"
+          busy={bulkBusy}
+          onClear={selection.clear}
+          actions={
+            <>
+              <select
+                aria-label="Set role for selected members"
+                className="border-apollo-border-strong bg-apollo-surface h-8 rounded-md border px-2 text-sm"
+                value=""
+                disabled={bulkBusy}
+                onChange={(e) => e.target.value && void bulkSetRole(e.target.value)}
+                data-testid="roster-bulk-role"
+              >
+                <option value="">Set role…</option>
+                {roleOptions.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              {hasPrograms && (
+                <select
+                  aria-label="Set program for selected members"
+                  className="border-apollo-border-strong bg-apollo-surface h-8 rounded-md border px-2 text-sm"
+                  value=""
+                  disabled={bulkBusy}
+                  onChange={(e) => e.target.value && void bulkSetProgram(e.target.value)}
+                  data-testid="roster-bulk-program"
+                >
+                  <option value="">Set program…</option>
+                  {programs.map((p) => (
+                    <option key={p.code} value={p.code}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {highPairs.length > 0 && (
+                <Button
+                  type="button"
+                  variant="apollo"
+                  size="sm"
+                  disabled={bulkBusy}
+                  onClick={bulkConfirmHigh}
+                  data-testid="roster-bulk-confirm-high"
+                >
+                  Confirm {fmt(highPairs.length)} high-confidence
+                </Button>
+              )}
+            </>
+          }
+        />
 
         {visible.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3">
