@@ -611,7 +611,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "OBSERVER_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_OBSERVER_GROUP_CN",
