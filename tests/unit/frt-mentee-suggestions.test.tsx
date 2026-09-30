@@ -4,7 +4,7 @@
  * Fictional people — this repo is public.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
@@ -75,6 +75,59 @@ describe("FRT mentee suggestions", () => {
       { name: "Ana M. Ruiz", cwid: "anr2002", programLabel: "Research" },
     ]);
     await waitFor(() => expect(screen.queryByTestId("frt-mentee-12")).toBeNull());
+  });
+
+  it("groups rows: linked, then not linked, then outside WCM collapsed; no filter on a short list", () => {
+    render(
+      <MenteeSuggestionsCard
+        cwid="self01"
+        suggestions={[]}
+        frtMentees={[...ROWS, frt({ id: 13, menteeName: "Kim Lopez", external: true })]}
+        manualMentees={[]}
+      />,
+    );
+    expect(
+      within(screen.getByTestId("frt-mentees-linked")).getByTestId("frt-mentee-12"),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("frt-mentees-unlinked")).getByTestId("frt-mentee-11"),
+    ).toBeTruthy();
+    const outside = screen.getByTestId("frt-mentees-outside") as HTMLDetailsElement;
+    expect(outside.open).toBe(false);
+    expect(outside.textContent).toContain("1 outside WCM");
+    expect(within(outside).getByTestId("frt-mentee-13")).toBeTruthy();
+    expect(screen.queryByTestId("frt-mentees-filter")).toBeNull();
+  });
+
+  it("over 15 rows: a name filter narrows every group, matching the linked person's name too", () => {
+    const many = Array.from({ length: 16 }, (_, i) =>
+      frt({ id: 100 + i, menteeName: `Person ${i}`, external: i % 2 === 0 }),
+    );
+    render(
+      <MenteeSuggestionsCard
+        cwid="self01"
+        suggestions={[]}
+        frtMentees={[
+          ...many,
+          frt({
+            id: 12,
+            menteeName: "A. Ruiz",
+            menteeCwid: "anr2002",
+            menteeCwidName: "Ana M. Ruiz",
+          }),
+        ]}
+        manualMentees={[]}
+      />,
+    );
+    const filter = screen.getByTestId("frt-mentees-filter");
+    fireEvent.change(filter, { target: { value: "ana m" } });
+    expect(screen.getByTestId("frt-mentee-12")).toBeTruthy();
+    expect(screen.queryByTestId("frt-mentee-101")).toBeNull();
+    fireEvent.change(filter, { target: { value: "person 1" } });
+    expect(screen.getByTestId("frt-mentee-101")).toBeTruthy(); // not linked
+    expect((screen.getByTestId("frt-mentees-outside") as HTMLDetailsElement).open).toBe(true);
+    fireEvent.change(filter, { target: { value: "zzz" } });
+    expect(screen.getByTestId("frt-mentees-no-match")).toBeTruthy();
   });
 
   it("Not a mentee POSTs dismiss and moves the row to the dismissed footer", async () => {
