@@ -863,6 +863,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_FUNDING_TAB_MSM",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_FUNDING_PHRASE_BOOST",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_FUNDING_TEXT_EVIDENCE",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_SHELL_STREAMING",
                 "Value": "on",
               },
@@ -5416,6 +5428,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_TAB_MSM",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_PHRASE_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_TEXT_EVIDENCE",
                 "Value": "on",
               },
               {
