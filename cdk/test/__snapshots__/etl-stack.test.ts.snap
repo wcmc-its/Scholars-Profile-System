@@ -1423,6 +1423,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "NODE_ENV",
                 "Value": "production",
               },
+              {
+                "Name": "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
+                "Value": "E28NKDFXC7K2ZL",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -11457,6 +11461,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "NODE_ENV",
                 "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
+                "Value": "E17NRWINXLP3B3",
               },
             ],
             "Essential": true,
