@@ -366,6 +366,90 @@ write, because `appendAuditRow` runs inside the write transaction. Budget for
 this explicitly; it is the difference between "the cell is editable" and "the
 feature works."
 
+## Display contract (as shipped, 2026-09-30)
+
+Written down per open decision 2 (#2033). Shipped by #2922 (auto-publish,
+review queue) and #2923 (public center page); every statement below is read
+off the merged code, not the mockup.
+
+### What "published" means
+
+One predicate decides it, shared by `/edit` and the public page:
+`diseaseRowStatus` / `isDiseasePublished` in
+`lib/cancer-center-disease-publish.ts`. A (cwid, diseaseCode) pair is the merge
+of a generator row (`CancerCenterDiseaseAssignment`, confidence
+high | medium | low) and a curator row (`CancerCenterDiseaseDecision`,
+confirmed | rejected). Evaluated in this order:
+
+| Status | Rule | Published |
+|---|---|---|
+| `confirmed` | a curator confirmed it (a manual add is a confirmed decision with no assignment row) | yes |
+| `rejected` | a curator rejected it | **never** |
+| `auto` | no decision, the center's switch is on, and confidence is `high` | yes |
+| `pending` | everything else: no decision and not auto-published | no |
+
+- **The human always wins.** A decision is checked before confidence, so a
+  rejected high-confidence row stays hidden with the switch on, and a confirmed
+  low-confidence row is shown with it off.
+- **The switch** is `Center.diseaseAutoPublish` (`prisma/schema.prisma`,
+  `@default(true)`, migration `20260930120000_center_disease_auto_publish`),
+  so auto-publish is **on by default** per the 09-30 product decision. Only
+  `high` auto-publishes (`AUTO_PUBLISH_CONFIDENCE`). A curator flips it per
+  center through `POST /api/edit/center/[code]/disease-auto-publish`
+  (`app/api/edit/center/[code]/disease-auto-publish/route.ts`), audited as
+  `disease_auto_publish_set`.
+- **This relaxes part 4 of the four-part contract above** on purpose: with the
+  switch on, an undecided `high` row is published without review. `medium` and
+  `low` rows still read as suggestions until a human confirms them, and turning
+  the switch off returns every undecided `high` row to `pending`.
+- **Focus does not gate publication.** `isDiseasePublished` never reads
+  `focus`, so a published row can be `peripheral` (for example a stale `high`
+  row auto-publishes). Focus only changes how a published row is shown (below).
+
+### Where it is read
+
+- **`/edit/center/[code]` roster** (`components/edit/center-roster-diseases.ts`,
+  `center-roster-card.tsx`, `center-disease-review-sheet.tsx`): "to review" is
+  an assignment-backed row whose status is `pending`, so with the switch on,
+  auto rows leave every to-review count. The sheet's Published tab is
+  `confirmed` plus `auto`; auto rows carry an "Auto-published" badge with
+  Reject and Confirm.
+- **Public center page** (`lib/api/centers.ts` `attachDiseases`, via
+  `buildPublishedDiseasesByCwid` in `lib/center-member-diseases.ts`): a member's
+  `diseases` holds only published rows; rejected and pending rows never reach
+  the payload. It is gated three ways: the `CENTER_DISEASE_FACET` flag
+  (`lib/center-disease-flags.ts`, wired staging on / prod off in
+  `cdk/lib/app-stack.ts`; off means no query and an unchanged payload), the
+  grouped roster only (a center with a `CenterProgram` taxonomy, today Meyer),
+  and a member with no published disease gets no `diseases` field. The disease
+  tables carry no center column, so a second programmed center would inherit
+  this curation (constraint recorded under D1 in
+  `docs/cancer-center-disease-taxonomy-decisions.md`).
+- Curated diseases sit **beside** `TopicAssignment` and the TOPICS row; they
+  never replace or override it (D1, decided 09-30).
+
+### Primary focus and breadth
+
+- **Primary** is the generator's `focus === "primary"`: rank 1, not stale
+  (a publication within `STALE_AFTER_YEARS`, 8), confidence above `low`
+  (`focusOf` in `scripts/cancer-center-disease-assignments.ts`; the Focus table
+  above). The public page reads the stored `focus` and never recomputes it.
+- A curator's manual add has no assignment row, so its `focus` and `rank` are
+  null; it is **never** primary.
+- **Order** (`compareMemberDiseases`, `lib/center-member-diseases.ts`): primary
+  first, then rank ascending (manual adds last), then label.
+- **Card DISEASES row** (`components/center/center-disease-row.tsx`): above
+  TOPICS; at most `DISEASE_ROW_CAP` = 3 chips in that order, then "+N more".
+  Primary chips are filled slate tint, the rest outlined. Chips are not links.
+- **Disease focus facet** (`components/center/center-disease-facet.tsx`,
+  filtering in `components/center/center-members-client.tsx`): "Any
+  involvement" matches every published disease; "Primary focus" matches only
+  published rows with `focus === "primary"`. OR within the facet, AND across
+  facets. It shows the top 8 diseases, then "Show all N".
+- There is no rank or confidence cut-off beyond the publish rule: breadth is
+  bounded by the 3-chip cap on the card, and the "Primary focus" toggle is the
+  roster-style reading the #2033 SME expected.
+
 ## Open decisions
 
 Ordered by what blocks what. 0, 1 and 2 gate the schema; the rest can move after.
@@ -414,13 +498,18 @@ Ordered by what blocks what. 0, 1 and 2 gate the schema; the rest can move after
    pipelines. Replace means the hover card reads from this instead. Override
    means `TopicAssignment` stays but a curated row wins at read time. This is a
    question about what the public site claims, not an implementation detail.
+   **DECIDED 2026-09-30: beside** (D1 in
+   `docs/cancer-center-disease-taxonomy-decisions.md`, shipped by #2923).
 2. **Which rows become records? — DECIDED: persist all rows with their
    confidence, and gate at display time.** Storing everything and choosing the
    cut in the consumer is the reversible version of a decision the spec itself
    flags as a migration rather than an edit. The framing collision behind #2033
-   stands as the reason the display contract must still be written down: the
-   sheet ranks *evidence*, an SME read it as *a clinical roster*, and both
-   readings are reasonable.
+   (the sheet ranks *evidence*, an SME read it as *a clinical roster*) is
+   answered by the display contract, now **RESOLVED** and written down in
+   "Display contract (as shipped, 2026-09-30)" above: published = confirmed, or
+   an undecided `high` row while the center's auto-publish switch is on
+   (default on); rejected is never shown; the "Primary focus" facet gives the
+   roster reading.
 3. **Are the 18 codes the right cut?** They follow MeSH site/histology, not the
    Center's disease management teams. Largely subsumed by Decision 0 — the
    ruleset offers 25 site buckets with provenance. If DMTs are the target, that
@@ -431,9 +520,12 @@ Ordered by what blocks what. 0, 1 and 2 gate the schema; the rest can move after
    with no leukemia, lymphoma, myeloma or MDS output was carrying all four as
    rows. Specialty corroborates evidence; it does not manufacture it. Reverting
    is one `|| specialtyMatch` in `confidenceOf`.
-5. **How should breadth be displayed?** A cytopathologist legitimately leads work
-   across many organs; `rank` exists so a consumer can take the top N rather than
-   all of them, but the cut-off is a product call.
+5. **How should breadth be displayed? — RESOLVED (#2923).** A cytopathologist
+   legitimately leads work across many organs. As shipped there is no rank
+   cut-off: every published disease is kept, the member card shows at most 3
+   chips (primary first, then rank) plus "+N more", and the facet's "Primary
+   focus" toggle narrows to rank-1 current work. See "Primary focus and
+   breadth" above.
 6. **Prod has no Meyer roster.** All figures come from staging; the prod
    membership load is tracked separately (#906 / #552).
 
