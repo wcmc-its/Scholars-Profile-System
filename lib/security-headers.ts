@@ -114,7 +114,8 @@ export function resolveCspMode(raw: string | undefined): CspMode {
  *
  * HSTS, X-Frame-Options, X-Content-Type-Options and Referrer-Policy are the
  * four headers named by #120. Permissions-Policy completes the set by denying
- * powerful browser features this app never uses. Every value here is constant,
+ * powerful browser features this app never uses; COOP/CORP (#1945) isolate the
+ * browsing context and resources from cross-site pages. Every value here is constant,
  * so build-time evaluation in the routes manifest is correct — unlike the CSP,
  * which is env-gated and lives in {@link buildCspResponseHeaders} (see the
  * module doc above). These apply to all routes (`source: "/:path*"`), including
@@ -133,6 +134,13 @@ export function buildSecurityHeaders(): ResponseHeader[] {
       key: "Permissions-Policy",
       value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
     },
+    // #1945. COOP severs `window.opener` between this app and any cross-origin
+    // window (no OAuth/SAML popup flow depends on it; SSO is a full-page
+    // redirect). CORP `same-site` still admits every *.cornell.edu consumer,
+    // and no cross-site page embeds our assets. COEP is deliberately omitted:
+    // `require-corp` would block the directory.weill.cornell.edu headshots.
+    { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+    { key: "Cross-Origin-Resource-Policy", value: "same-site" },
   ];
 }
 
