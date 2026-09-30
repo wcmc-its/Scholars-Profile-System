@@ -3,6 +3,7 @@ import {
   Duration,
   RemovalPolicy,
   SecretValue,
+  ArnFormat,
   Stack,
   type StackProps,
 } from "aws-cdk-lib";
@@ -10,6 +11,7 @@ import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
@@ -43,7 +45,7 @@ const EDGE_IP_PATH = "/edge-ip";
  *    stylesheet, an image, or the origin -- WAF terminates before CloudFront
  *    even matches a cache behavior. Everything is inline, system fonts only.
  *  - Inline `<style>`/`<script>` are safe here: no CSP reaches this response.
- *    Neither `securityHeaders` nor `htmlHeaders` sets one (HSTS only, see
+ *    Neither `securityHeaders` nor `htmlHeaders` sets one (no CSP, see
  *    below), the app's CSP comes from the origin, and a response-headers
  *    policy is attached to a cache behavior -- which is never selected for a
  *    WAF-blocked request. The script degrades to the static "Unavailable"
@@ -286,13 +288,28 @@ export class EdgeStack extends Stack {
       "SecurityHeaders",
       {
         responseHeadersPolicyName: `sps-security-headers-${env}`,
-        comment: `SPS security headers (${env}) -- HSTS only; B21 layers CSP/XFO.`,
+        comment: `SPS security headers (${env}) -- HSTS + CORP; B21 layers CSP/XFO.`,
         securityHeadersBehavior: {
           strictTransportSecurity: {
             accessControlMaxAge: Duration.days(730),
             includeSubdomains: true,
             override: true,
           },
+        },
+        // #1945: `/_next/static/*` is served from S3 (#700), so it never
+        // passes through `withSecurityHeaders()` and carried no
+        // Cross-Origin-Resource-Policy. `same-site` matches what the app
+        // stamps on every Next-served response (#2911). `override: false` so
+        // any origin-supplied value (the ALB fallback, the other behaviors
+        // sharing this policy) wins and the two can never disagree.
+        customHeadersBehavior: {
+          customHeaders: [
+            {
+              header: "Cross-Origin-Resource-Policy",
+              value: "same-site",
+              override: false,
+            },
+          ],
         },
       },
     );
@@ -1122,7 +1139,8 @@ export class EdgeStack extends Stack {
             name: groupName,
             priority: i + 1,
             // Enforced (#1434, after the count-mode soak). SizeRestrictions_BODY
-            // alone stays in count: it fires on legitimate >8 KB /edit saves.
+            // stays in count (legitimate >8 KB /edit saves), and so does
+            // SizeRestrictions_QUERYSTRING (#1939, 2 KB cap).
             overrideAction: { none: {} },
             statement: {
               managedRuleGroupStatement: {
@@ -1133,6 +1151,16 @@ export class EdgeStack extends Stack {
                       ruleActionOverrides: [
                         {
                           name: "SizeRestrictions_BODY",
+                          actionToUse: { count: {} },
+                        },
+                        // #1939: same failure mode one field over -- the
+                        // 2 KB query-string cap 403s allow-listed requests
+                        // with no app-level handling, and faceted filter
+                        // state only grows. Observe via WAF logs below; if a
+                        // real URL nears the cap, fix the app (POST /
+                        // compressed state), not this override.
+                        {
+                          name: "SizeRestrictions_QUERYSTRING",
                           actionToUse: { count: {} },
                         },
                       ],
@@ -1234,6 +1262,40 @@ export class EdgeStack extends Stack {
         description: `SPS front end ${env} - WCM-only IP allow, AWS managed rule groups enforced, bot-aware rate limit`,
       });
       webAclArn = webAcl.attrArn;
+
+      // #1939: WAF logging. Without it the only record of WHICH rule fired
+      // is get-sampled-requests' 3-hour window. CloudWatch Logs destination:
+      // the group name MUST start with `aws-waf-logs-`, and a CLOUDFRONT-scope
+      // WebACL logs to us-east-1 -- this stack's region. The destination ARN
+      // must NOT carry the `:*` suffix `logGroupArn` renders, hence formatArn.
+      // Authorization + Cookie are redacted: session cookies and bearer
+      // tokens must never land in a log group.
+      const wafLogGroupName = `aws-waf-logs-sps-${env}`;
+      const wafLogGroup = new logs.LogGroup(this, "EdgeWafLogGroup", {
+        logGroupName: wafLogGroupName,
+        retention: logs.RetentionDays.THREE_MONTHS,
+        removalPolicy: RemovalPolicy.RETAIN,
+      });
+      const wafLogging = new wafv2.CfnLoggingConfiguration(
+        this,
+        "EdgeWafLogging",
+        {
+          resourceArn: webAcl.attrArn,
+          logDestinationConfigs: [
+            Stack.of(this).formatArn({
+              service: "logs",
+              resource: "log-group",
+              resourceName: wafLogGroupName,
+              arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+            }),
+          ],
+          redactedFields: [
+            { singleHeader: { Name: "authorization" } },
+            { singleHeader: { Name: "cookie" } },
+          ],
+        },
+      );
+      wafLogging.node.addDependency(wafLogGroup);
     }
 
     // ------------------------------------------------------------------
