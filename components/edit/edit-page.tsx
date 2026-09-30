@@ -196,7 +196,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // co-authors who hold a trainee-type appointment, offered for the mentor to
   // add (or dismiss). Self OR superuser; never a proxy / unit-admin (excluded in
   // `attrsForMode`). The rail item appears only when the loader returned rows.
-  { key: "mentee-suggestions", label: "From your publications", modes: ["self", "superuser"] },
+  { key: "mentee-suggestions", label: "Suggested mentees", modes: ["self", "superuser"] },
   // Conflicts of interest — read-only; managed in the Weill Research Gateway.
   { key: "coi", label: "Conflicts of interest", readonly: true, modes: ["self", "superuser"] },
   // From your publications (#SELF_EDIT_COI_GAP_HINT) — a sensitive advisory:
@@ -781,7 +781,8 @@ export function EditPage({
   // history still surfaces the item, to restore). The rail badge and the
   // Mentees-tab pointer count only ACTIVE (non-dismissed) rows.
   const hasMenteeSuggestions =
-    (mode === "self" || isSuperuserLike(mode)) && ctx.menteeSuggestions.length > 0;
+    (mode === "self" || isSuperuserLike(mode)) &&
+    ctx.menteeSuggestions.length + ctx.frtMentees.length > 0;
   const activeMenteeSuggestions = activeMenteeSuggestionCount(ctx);
   // Available technologies — CTL is the SOR and the row is public info (visible to
   // every edit mode, like publications/coi), so the ONLY gate is "has ≥1 invention".
@@ -1052,14 +1053,18 @@ function orcidEditHref(orcidTabEnabled: boolean, detailBase: string, cwid: strin
     : resolveSelfServiceHref(ORCID_MANAGE_URL, cwid);
 }
 
-/** #2634 — non-dismissed suggestion rows: the rail badge + Mentees pointer count. */
+/** #2634 — non-dismissed suggestion rows (co-author + Faculty Review Tool):
+ *  the rail badge + Mentees pointer count. */
 function activeMenteeSuggestionCount(ctx: EditContext): number {
-  return ctx.menteeSuggestions.filter((s) => s.dismissedAt === null).length;
+  return (
+    ctx.menteeSuggestions.filter((s) => s.dismissedAt === null).length +
+    ctx.frtMentees.filter((s) => s.dismissedAt === null).length
+  );
 }
 
-/** "3 co-authors look like trainees" / "1 co-author looks like a trainee". */
+/** "3 suggested mentees" / "1 suggested mentee". */
 function menteeSuggestionPointer(n: number): string {
-  return n === 1 ? "1 co-author looks like a trainee" : `${n} co-authors look like trainees`;
+  return n === 1 ? "1 suggested mentee" : `${n} suggested mentees`;
 }
 
 function renderPanel(
@@ -1535,7 +1540,7 @@ function renderPanel(
                 href={`${detailBase}?attr=mentee-suggestions`}
                 className="text-apollo-slate font-medium hover:underline"
               >
-                Mentees &rsaquo; From your publications
+                Mentees &rsaquo; Suggested mentees
               </Link>
             </p>
           )}
@@ -1556,6 +1561,7 @@ function renderPanel(
           mode={voiceMode}
           scholarName={scholarName}
           suggestions={ctx.menteeSuggestions}
+          frtMentees={ctx.frtMentees}
           manualMentees={ctx.manualMentees}
         />
       );

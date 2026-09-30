@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
+import { FrtMenteeSuggestions } from "@/components/edit/frt-mentee-suggestions";
 import {
   MenteeForm,
   draftToEntry,
@@ -31,6 +32,7 @@ import {
 } from "@/components/edit/manual-mentees-card";
 import { Button } from "@/components/ui/button";
 import type {
+  EditContextFrtMentee,
   EditContextMenteeSuggestion,
   EditContextMenteeSuggestionEvidence,
 } from "@/lib/api/edit-context";
@@ -49,6 +51,8 @@ export type MenteeSuggestionsCardProps = {
   mode?: "self" | "superuser";
   scholarName?: string;
   suggestions: ReadonlyArray<EditContextMenteeSuggestion>;
+  /** Faculty Review Tool mentees (their own panel below the co-author one). */
+  frtMentees?: ReadonlyArray<EditContextFrtMentee>;
   /** The mentor's stored hand-entered mentees; "Add as mentee" appends to this
    *  array and POSTs the WHOLE thing (the #2011 full-array contract). */
   manualMentees: ReadonlyArray<ManualMentee>;
@@ -107,6 +111,7 @@ export function MenteeSuggestionsCard({
   mode = "self",
   scholarName = "",
   suggestions,
+  frtMentees = [],
   manualMentees,
 }: MenteeSuggestionsCardProps) {
   const router = useRouter();
@@ -197,10 +202,12 @@ export function MenteeSuggestionsCard({
     return programType ? { ...draftToEntry(draft), programType } : draftToEntry(draft);
   }
 
-  /** Append to the mentor's hand-entered list and POST the whole array. */
-  async function addAsMentee(s: EditContextMenteeSuggestion, draft: Draft): Promise<boolean> {
-    setErr(s.id, null);
-    setBusyFor(s.id, true);
+  /** Append one entry to the mentor's hand-entered list and POST the whole
+   *  array. Resolves to an error message, or null on success. Session adds are
+   *  deduped against the prop by cwid, or by name for a name-only entry. */
+  async function postManualMentee(entry: ManualMentee): Promise<string | null> {
+    const keyOf = (m: ManualMentee) => m.cwid ?? `name:${m.name}`;
+    const stored = new Set(manualMentees.map(keyOf));
     try {
       const res = await fetch("/api/edit/field", {
         method: "POST",
@@ -209,25 +216,30 @@ export function MenteeSuggestionsCard({
           entityType: "scholar",
           entityId: cwid,
           fieldName: "manualMentees",
-          value: [
-            ...manualMentees,
-            ...addedEntries.filter((a) => !manualMentees.some((m) => m.cwid === a.cwid)),
-            entryFor(s, draft),
-          ],
+          value: [...manualMentees, ...addedEntries.filter((a) => !stored.has(keyOf(a))), entry],
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || data.ok !== true) {
-        setErr(s.id, mapErrorToMessage(data.error ?? ""));
+      if (!res.ok || data.ok !== true) return mapErrorToMessage(data.error ?? "");
+      setAddedEntries((a) => [...a, entry]);
+      router.refresh();
+      return null;
+    } catch {
+      return GENERIC_ERROR;
+    }
+  }
+
+  async function addAsMentee(s: EditContextMenteeSuggestion, draft: Draft): Promise<boolean> {
+    setErr(s.id, null);
+    setBusyFor(s.id, true);
+    try {
+      const err = await postManualMentee(entryFor(s, draft));
+      if (err) {
+        setErr(s.id, err);
         return false;
       }
       setAdded((a) => new Set(a).add(s.id));
-      setAddedEntries((a) => [...a, entryFor(s, draft)]);
-      router.refresh();
       return true;
-    } catch {
-      setErr(s.id, GENERIC_ERROR);
-      return false;
     } finally {
       setBusyFor(s.id, false);
     }
@@ -255,80 +267,91 @@ export function MenteeSuggestionsCard({
         Mentees
       </Link>
 
-      <EditPanel
-        slot="mentee-suggestions-panel"
-        heading="From your publications"
-        description={
-          su
-            ? `Co-authors of ${scholarName}’s who hold a trainee-type appointment at WCM. Adding one lists them on the public profile; nothing here is public until it is added. Refreshes nightly from curated publications.`
-            : "Co-authors of yours who hold a trainee-type appointment at WCM. Adding one lists them on your public profile; nothing here is public until you do. Refreshes nightly from curated publications."
-        }
-      >
-        {main.length === 0 ? (
-          <p className="text-muted-foreground text-sm" data-testid="mentee-suggestions-empty">
-            No suggestions yet. We look for co-authors who hold a trainee appointment; suggestions
-            refresh nightly as publications are curated.
-          </p>
-        ) : (
-          <ul
-            className="border-apollo-border divide-apollo-border divide-y rounded-md border"
-            data-testid="mentee-suggestions-list"
-          >
-            {main.map((s) => (
-              <SuggestionRow key={s.id} {...rowProps(s)} />
-            ))}
-          </ul>
-        )}
-
-        {weak.length > 0 && (
-          <details data-testid="mentee-suggestions-weak">
-            <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
-              {weak.length} weaker {weak.length === 1 ? "match" : "matches"} (1 co-authored paper
-              each)
-            </summary>
-            <ul className="border-apollo-border divide-apollo-border mt-2 divide-y rounded-md border">
-              {weak.sort(byStrength).map((s) => (
+      {(suggestions.length > 0 || frtMentees.length === 0) && (
+        <EditPanel
+          slot="mentee-suggestions-panel"
+          heading="From your publications"
+          description={
+            su
+              ? `Co-authors of ${scholarName}’s who hold a trainee-type appointment at WCM. Adding one lists them on the public profile; nothing here is public until it is added. Refreshes nightly from curated publications.`
+              : "Co-authors of yours who hold a trainee-type appointment at WCM. Adding one lists them on your public profile; nothing here is public until you do. Refreshes nightly from curated publications."
+          }
+        >
+          {main.length === 0 ? (
+            <p className="text-muted-foreground text-sm" data-testid="mentee-suggestions-empty">
+              No suggestions yet. We look for co-authors who hold a trainee appointment; suggestions
+              refresh nightly as publications are curated.
+            </p>
+          ) : (
+            <ul
+              className="border-apollo-border divide-apollo-border divide-y rounded-md border"
+              data-testid="mentee-suggestions-list"
+            >
+              {main.map((s) => (
                 <SuggestionRow key={s.id} {...rowProps(s)} />
               ))}
             </ul>
-          </details>
-        )}
+          )}
 
-        {gone.length > 0 && (
-          <details data-testid="mentee-suggestions-dismissed">
-            <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
-              {gone.length} dismissed
-            </summary>
-            <ul className="mt-2 flex flex-col gap-2">
-              {gone.map((s) => (
-                <li
-                  key={s.id}
-                  className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-sm"
-                  data-testid={`mentee-suggestion-dismissed-${s.id}`}
-                >
-                  <span>
-                    <span className="text-foreground">{s.menteeName}</span> {s.menteeCwid}
-                    {s.dismissReason ? ` · ${REASON_LABEL[s.dismissReason]}` : null}
-                    {errors.get(s.id) ? (
-                      <span className="text-destructive"> · {errors.get(s.id)}</span>
-                    ) : null}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy.has(s.id)}
-                    onClick={() => setDismissal(s, null)}
-                    data-testid={`mentee-suggestion-restore-${s.id}`}
+          {weak.length > 0 && (
+            <details data-testid="mentee-suggestions-weak">
+              <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+                {weak.length} weaker {weak.length === 1 ? "match" : "matches"} (1 co-authored paper
+                each)
+              </summary>
+              <ul className="border-apollo-border divide-apollo-border mt-2 divide-y rounded-md border">
+                {weak.sort(byStrength).map((s) => (
+                  <SuggestionRow key={s.id} {...rowProps(s)} />
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {gone.length > 0 && (
+            <details data-testid="mentee-suggestions-dismissed">
+              <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+                {gone.length} dismissed
+              </summary>
+              <ul className="mt-2 flex flex-col gap-2">
+                {gone.map((s) => (
+                  <li
+                    key={s.id}
+                    className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-sm"
+                    data-testid={`mentee-suggestion-dismissed-${s.id}`}
                   >
-                    Restore
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </EditPanel>
+                    <span>
+                      <span className="text-foreground">{s.menteeName}</span> {s.menteeCwid}
+                      {s.dismissReason ? ` · ${REASON_LABEL[s.dismissReason]}` : null}
+                      {errors.get(s.id) ? (
+                        <span className="text-destructive"> · {errors.get(s.id)}</span>
+                      ) : null}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy.has(s.id)}
+                      onClick={() => setDismissal(s, null)}
+                      data-testid={`mentee-suggestion-restore-${s.id}`}
+                    >
+                      Restore
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </EditPanel>
+      )}
+
+      {frtMentees.length > 0 && (
+        <FrtMenteeSuggestions
+          rows={frtMentees}
+          su={su}
+          scholarName={scholarName}
+          addMentee={postManualMentee}
+        />
+      )}
     </>
   );
 }

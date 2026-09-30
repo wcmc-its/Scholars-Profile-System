@@ -64,7 +64,7 @@ describe("loadReportMeta", () => {
     ]) {
       expect(seven).toContain(`<strong>${label}</strong>`);
     }
-    expect(seven).toContain("Not yet a source: the Faculty Review Tool");
+    expect(seven).toContain("Self-reported (Faculty Review)");
     // Only allowlisted tags — the same set the sanitizer keeps — and already
     // clean: the read-path re-sanitize (`ReportHeader`) is a no-op on it.
     const tags = new Set([...seven.matchAll(/<\/?([a-z0-9]+)/g)].map((m) => m[1]));

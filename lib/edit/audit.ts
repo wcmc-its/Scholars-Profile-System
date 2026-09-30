@@ -300,7 +300,14 @@ export type AuditAction =
    *  `"{coreId}:{pmid}"` pair (the `core_claim` shape); before is null, after
    *  carries `{ queued: true }`. Requires the `scholars_audit` action ENUM be
    *  extended — see `scripts/sql/audit-log.sql`. */
-  | "core_queue_add";
+  | "core_queue_add"
+  /** A mentor (or a genuine superuser) dismissed / restored a Faculty Review
+   *  Tool mentee suggestion, or set its CWID (`frt_mentee.mentee_cwid`, null =
+   *  "no WCM person"). `targetEntityId` is the `frt_mentee` id. Requires the
+   *  `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
+  | "frt_mentee_dismiss"
+  | "frt_mentee_restore"
+  | "frt_mentee_assign_cwid";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -397,7 +404,11 @@ export type AuditEntityType =
   | "functional_role"
   /** a public honor list the honors-list scraper reads (`lib/honors/lists.ts`);
    *  `targetEntityId` is the list id. Only `honor_list_run` uses it. */
-  | "honor_list";
+  | "honor_list"
+  /** a Faculty Review Tool mentee row (`frt_mentee`); `targetEntityId` is its
+   *  id. Requires the `scholars_audit` target_entity_type ENUM be extended,
+   *  see `scripts/sql/audit-log.sql`. */
+  | "frt_mentee";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

@@ -63,6 +63,7 @@ import {
   type OrcidVerdict,
 } from "@/lib/edit/orcid-coverage";
 import type { OrcidEvidence } from "@/lib/edit/orcid";
+import { frtNameKey } from "@/lib/frt/mentee-name";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
@@ -78,6 +79,7 @@ type EditContextReadClient = Pick<
   | "coiActivity"
   | "coiGapCandidate"
   | "menteeSuggestion"
+  | "frtMentee"
   | "publication"
   | "publicationConflictStatement"
   | "reporterProfileCandidate"
@@ -554,6 +556,28 @@ export type EditContextMenteeSuggestion = {
 };
 
 /**
+ * A Faculty Review Tool self-reported mentee (`frt_mentee`) for the same
+ * "Suggested mentees" sub-view, same gate as `menteeSuggestions`. `menteeCwid`
+ * is the name match or the mentor's own assignment (`cwidAssigned`); null =
+ * name only. Mentees already listed (by CWID, or by name for a name-only
+ * hand-entered mentee) are excluded; dismissed rows are included.
+ */
+export type EditContextFrtMentee = {
+  id: number;
+  menteeName: string;
+  menteeCwid: string | null;
+  /** Display name of `menteeCwid` when it is a Scholars profile. */
+  menteeCwidName: string | null;
+  cwidAssigned: boolean;
+  mentoringType: string | null;
+  external: boolean;
+  firstReviewYear: number;
+  lastReviewYear: number;
+  /** ISO timestamp, or null while active. */
+  dismissedAt: string | null;
+};
+
+/**
  * The Highlights-editor state (#836). Surfaced ONLY when `loadEditContext` is
  * called with `opts.includeHighlights === true`, which the self page sets behind
  * `SELF_EDIT_MANUAL_HIGHLIGHTS` for a genuine self viewer. `null` for every
@@ -736,6 +760,8 @@ export type EditContext = {
    * `opts.includeMenteeSuggestions === true`; empty for every other caller.
    */
   menteeSuggestions: ReadonlyArray<EditContextMenteeSuggestion>;
+  /** Faculty Review Tool mentees, same gate as `menteeSuggestions`. */
+  frtMentees: ReadonlyArray<EditContextFrtMentee>;
   /** The scholar's ORCID candidate fold (`orcidVerdict` over their `orcid_candidate`
    *  rows, minus the pairs they dismissed) — populated only when `loadEditContext` is called with
    *  `opts.includeOrcidSuggestion === true` (`SELF_EDIT_ORCID_SUGGESTION`); null for
@@ -1885,6 +1911,51 @@ export async function loadEditContext(
     }
   }
 
+  const frtMentees: EditContextFrtMentee[] = [];
+  if (opts?.includeMenteeSuggestions === true) {
+    const listedCwids = new Set<string>([
+      ...mentees.map((m) => m.externalId.slice(cwid.length + 1)),
+      ...manualMenteeRows.map((m) => m.cwid).filter((c): c is string => !!c),
+    ]);
+    const listedNames = new Set(
+      manualMenteeRows.map((m) => frtNameKey(m.name)).filter((k): k is string => !!k),
+    );
+    const rows = (
+      await client.frtMentee.findMany({
+        where: { mentorCwid: cwid },
+        orderBy: [{ lastReviewYear: "desc" }, { menteeName: "asc" }],
+      })
+    ).filter(
+      (r) =>
+        !listedNames.has(r.nameKey) && !(r.menteeCwid !== null && listedCwids.has(r.menteeCwid)),
+    );
+    const matchedCwids = [...new Set(rows.map((r) => r.menteeCwid).filter((c): c is string => !!c))];
+    const names = new Map(
+      matchedCwids.length > 0
+        ? (
+            await client.scholar.findMany({
+              where: { cwid: { in: matchedCwids } },
+              select: { cwid: true, preferredName: true },
+            })
+          ).map((s) => [s.cwid, s.preferredName])
+        : [],
+    );
+    for (const r of rows) {
+      frtMentees.push({
+        id: r.id,
+        menteeName: r.menteeName,
+        menteeCwid: r.menteeCwid,
+        menteeCwidName: r.menteeCwid ? (names.get(r.menteeCwid) ?? null) : null,
+        cwidAssigned: r.cwidAssignedAt !== null,
+        mentoringType: r.mentoringType,
+        external: r.external,
+        firstReviewYear: r.firstReviewYear,
+        lastReviewYear: r.lastReviewYear,
+        dismissedAt: r.dismissedAt ? r.dismissedAt.toISOString() : null,
+      });
+    }
+  }
+
   // One bounded suppression query across all three entity types, keyed on the
   // stable externalId. Whole-entity only (`contributorCwid IS NULL` — PR-A/PR-B
   // reject a contributor for these). Per-request, never cached — the ADR-005
@@ -2033,6 +2104,7 @@ export async function loadEditContext(
       profileLinks,
       manualMenteeUnresolvedCwids,
       menteeSuggestions,
+      frtMentees,
       orcidVerdict: orcidVerdictValue,
       orcidCandidates: orcidCandidateRows,
       unmatchedPubmedCoi,
@@ -2217,6 +2289,7 @@ export async function loadEditContext(
     profileLinks,
     manualMenteeUnresolvedCwids,
     menteeSuggestions,
+    frtMentees,
     orcidVerdict: orcidVerdictValue,
     orcidCandidates: orcidCandidateRows,
     unmatchedPubmedCoi,

@@ -344,6 +344,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       ["mtype", "thesis", false],
       ["mtype", "postdoc", false],
       ["mtype", "faculty", false],
+      ["mtype", "frt", false],
     ]);
     expect(checkboxes(findByTestId(form, "mentored-pubs-section-inferred"))).toEqual([
       ["mtype", "likely", false],
@@ -370,6 +371,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.",
       expect.stringContaining("reporting manager from the ED appointment record"),
       expect.stringContaining("Added by the mentor on their Scholars profile"),
+      expect.stringContaining("annual Faculty Review Tool"),
       expect.stringContaining("Not on any roster"),
       expect.stringContaining("research staff or MD alumni"),
     ]);
@@ -827,10 +829,11 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       ["mtype", "thesis", true],
       ["mtype", "postdoc", true],
       ["mtype", "faculty", true],
+      ["mtype", "frt", true],
       ["mtype", "likely", false],
       ["mtype", "possible", false],
     ]);
-    const confirmed = ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty"];
+    const confirmed = ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty", "frt"];
     expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], confirmed);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
       scopes: ["*"],
@@ -840,10 +843,10 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       ...MENTORED,
     });
     expect(textOf(findByTestId(findByType(result, h.mockAutoSubmitForm), "mentored-pubs-section-mtype"))).toContain(
-      "All 6 program pairings",
+      "All 7 program pairings",
     );
     const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; value: string }>;
-    expect(chips[1]).toMatchObject({ group: "Mentorship", value: "Program pairings (6)" });
+    expect(chips[1]).toMatchObject({ group: "Mentorship", value: "Program pairings (7)" });
   });
 
   it("a superuser: the chosen types reach BOTH loaders with the '*' scope, and the popover carries the current rows with canManage=true", async () => {

@@ -148,6 +148,7 @@ const fakeCtx = (cwid: string) => ({
   reporterProfileCandidates: [],
   reporterProfileConfirmed: [],
   menteeSuggestions: [], // #2634
+  frtMentees: [],
   orcidVerdict: null,
   orcidCandidates: [],
   highlights: null,

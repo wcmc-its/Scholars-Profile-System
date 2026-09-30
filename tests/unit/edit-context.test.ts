@@ -32,6 +32,7 @@ type FakeClient = {
   coiActivity: { findMany: AnyMock };
   coiGapCandidate: { findMany: AnyMock };
   menteeSuggestion: { findMany: AnyMock };
+  frtMentee: { findMany: AnyMock };
   publication: { findMany: AnyMock };
   publicationConflictStatement: { findMany: AnyMock };
   scholarTechnology: { findMany: AnyMock };
@@ -79,6 +80,7 @@ function fakeClient(): FakeClient {
     // #2634 mentee suggestions — default "none"; only queried with
     // `{ includeMenteeSuggestions: true }`.
     menteeSuggestion: { findMany: vi.fn().mockResolvedValue([]) },
+    frtMentee: { findMany: vi.fn().mockResolvedValue([]) },
     // Publications — the COI-gap loader joins this by pmid for the per-source
     // year + sort date. Default to "no rows" (year/ts fall back to null/0).
     publication: { findMany: vi.fn().mockResolvedValue([]) },
