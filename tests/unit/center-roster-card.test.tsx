@@ -1196,3 +1196,46 @@ describe("CenterRosterCard — Fill dates", () => {
     await waitFor(() => expect(within(container).getByTestId("roster-dates-label-a").textContent).toBe("No start date"));
   });
 });
+
+describe("CenterRosterCard — End at departure dates", () => {
+  it("ends each open departed membership on its departure date, skipping one that would precede its Start; Undo reopens them", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "g1", scholarState: "departed", departedOn: "2026-01-15", startDate: "2020-01-01" }),
+          member({ cwid: "g2", scholarState: "departed", departedOn: "2019-01-01", startDate: "2020-01-01" }), // precedes Start
+          member({ cwid: "g3", scholarState: "departed", departedOn: null }), // no date on file
+          member({ cwid: "g4", scholarState: "departed", departedOn: "2025-01-01", endDate: "2024-06-01" }), // already closed
+          member({ cwid: "here" }),
+        ]}
+        programs={[]}
+      />,
+    );
+    const banner = within(container).getByTestId("roster-needs-close-out");
+    expect(banner.textContent).toMatch(/3 members have left WCM/);
+    expect(banner.textContent).toMatch(/is on file for 1\./);
+    fireEvent.click(within(banner).getByTestId("roster-end-departed-run"));
+    await waitFor(() =>
+      expect(within(container).getByTestId("roster-end-departed-done").textContent).toMatch(/1 membership ended at departure date/),
+    );
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      expect.objectContaining({ cwid: "g1", action: "set", endDate: "2026-01-15" }),
+    ]);
+    expect(within(container).getByTestId("roster-needs-close-out").textContent).toMatch(/2 members have left WCM/);
+
+    fireEvent.click(within(container).getByTestId("roster-end-departed-undo"));
+    await waitFor(() => expect(within(container).queryByTestId("roster-end-departed-done")).toBeNull());
+    expect(bodyOf(fetchMock.mock.calls[1])).toEqual(expect.objectContaining({ cwid: "g1", endDate: null }));
+    expect(within(container).getByTestId("roster-needs-close-out").textContent).toMatch(/3 members have left WCM/);
+  });
+
+  it("offers no End button when no departure date is usable", () => {
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ cwid: "g3", scholarState: "departed" })]} programs={[]} />,
+    );
+    expect(within(container).queryByTestId("roster-end-departed-run")).toBeNull();
+    expect(within(container).getByTestId("roster-needs-close-out-jump")).toBeTruthy();
+  });
+});
