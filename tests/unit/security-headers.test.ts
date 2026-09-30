@@ -40,6 +40,13 @@ describe("buildSecurityHeaders (static, build-time)", () => {
     expect(valueOf("Permissions-Policy")).toContain("camera=()");
   });
 
+  it("isolates the browsing context and resources with COOP/CORP but no COEP (#1945)", () => {
+    expect(valueOf("Cross-Origin-Opener-Policy")).toBe("same-origin");
+    expect(valueOf("Cross-Origin-Resource-Policy")).toBe("same-site");
+    // COEP require-corp would block the cross-origin directory headshots.
+    expect(valueOf("Cross-Origin-Embedder-Policy")).toBeUndefined();
+  });
+
   it("does NOT carry the env-gated CSP — that is emitted at runtime by middleware (#374)", () => {
     // The CSP and its Reporting-Endpoints pair moved to buildCspResponseHeaders
     // because next.config headers() bakes at build time and could never flip
