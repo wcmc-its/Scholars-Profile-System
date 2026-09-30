@@ -1156,6 +1156,43 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
     expect(ctx!.diseaseOptions).toBeNull();
   });
 
+  it("carries the center's auto-publish switch (stored value, read on the center query)", async () => {
+    const client = fakeClient({
+      center: { ...center, diseaseAutoPublish: false },
+      centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null }],
+    });
+    const ctx = await loadUnitEditContext("center", "meyer", SUPERUSER, asClient(client));
+    expect(ctx!.diseaseAutoPublish).toBe(false);
+    expect(client.center.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ diseaseAutoPublish: true }) }),
+    );
+  });
+
+  it("auto-publish reads ON when the column is on (the default)", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center: { ...center, diseaseAutoPublish: true },
+          centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null }],
+        }),
+      ),
+    );
+    expect(ctx!.diseaseAutoPublish).toBe(true);
+  });
+
+  it("auto-publish is null for a program-less center, like diseaseOptions", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(fakeClient({ center: { ...center, diseaseAutoPublish: true }, centerPrograms: [] })),
+    );
+    expect(ctx!.diseaseAutoPublish).toBeNull();
+  });
+
   it("is null for a department/division — not a center", async () => {
     const dept = {
       code: "N1280",
@@ -1172,5 +1209,6 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
       asClient(fakeClient({ department: dept })),
     );
     expect(ctx!.diseaseOptions).toBeNull();
+    expect(ctx!.diseaseAutoPublish).toBeNull();
   });
 });

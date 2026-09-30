@@ -4,6 +4,7 @@
  * client-safe: no `@/lib/db`, nothing that builds prisma.
  */
 import type { RosterDiseaseRow } from "@/lib/api/unit-edit-context";
+import { diseaseRowStatus, isDiseasePublished } from "@/lib/cancer-center-disease-publish";
 
 export type DiseaseDecisionKind = "confirmed" | "rejected" | "clear";
 
@@ -65,15 +66,40 @@ export function liveDiseaseRows(diseases: ReadonlyArray<RosterDiseaseRow> | unde
   return (diseases ?? []).filter((d) => d.decision?.decision !== "rejected");
 }
 
-/** Assignment rows with no curator decision yet — the "N to review" count. */
-export function pendingDiseaseRows(diseases: ReadonlyArray<RosterDiseaseRow> | undefined): RosterDiseaseRow[] {
-  return (diseases ?? []).filter((d) => d.assignment !== null && d.decision === null);
+/** Assignment rows waiting for a curator — no decision yet, and not
+ *  auto-published (`diseaseRowStatus`, `lib/cancer-center-disease-publish.ts`).
+ *  The "N to review" count, the review queue, and "Confirm N high-confidence"
+ *  all read this, so with `autoPublish` on, high-confidence rows drop out of
+ *  every one of them together. */
+export function pendingDiseaseRows(
+  diseases: ReadonlyArray<RosterDiseaseRow> | undefined,
+  autoPublish: boolean,
+): RosterDiseaseRow[] {
+  return (diseases ?? []).filter(
+    (d) => d.assignment !== null && diseaseRowStatus(d, autoPublish) === "pending",
+  );
 }
 
-/** Rows an editor has confirmed (manual adds included) — the only ones the
- *  collapsed roster chips show. */
+/** Rows an editor has confirmed (manual adds included). */
 export function confirmedDiseaseRows(diseases: ReadonlyArray<RosterDiseaseRow> | undefined): RosterDiseaseRow[] {
   return (diseases ?? []).filter((d) => d.decision?.decision === "confirmed");
+}
+
+/** Undecided high-confidence rows the center auto-publishes (none when
+ *  `autoPublish` is off). */
+export function autoPublishedDiseaseRows(
+  diseases: ReadonlyArray<RosterDiseaseRow> | undefined,
+  autoPublish: boolean,
+): RosterDiseaseRow[] {
+  return (diseases ?? []).filter((d) => diseaseRowStatus(d, autoPublish) === "auto");
+}
+
+/** Published rows — confirmed plus auto-published (`isDiseasePublished`). */
+export function publishedDiseaseRows(
+  diseases: ReadonlyArray<RosterDiseaseRow> | undefined,
+  autoPublish: boolean,
+): RosterDiseaseRow[] {
+  return (diseases ?? []).filter((d) => isDiseasePublished(d, autoPublish));
 }
 
 /** The one-line evidence summary under a disease in the review sheet:

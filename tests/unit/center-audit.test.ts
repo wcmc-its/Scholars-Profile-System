@@ -163,6 +163,29 @@ describe("shapeAuditRows", () => {
   });
 });
 
+describe("shapeAuditRows — disease_auto_publish_set", () => {
+  it("renders the center's switch as one 'autoPublish' change with no member", () => {
+    const [e] = shapeAuditRows([
+      {
+        id: 11n,
+        ts: new Date("2026-09-30T12:00:00.000Z"),
+        actor_cwid: "cur0001",
+        impersonated_cwid: null,
+        action: "disease_auto_publish_set",
+        target_entity_id: "meyer_cancer_center",
+        before_values: { diseaseAutoPublish: true },
+        after_values: '{"diseaseAutoPublish":false}',
+      },
+    ]);
+    expect(e).toMatchObject({
+      id: "11",
+      changeKind: "modify",
+      targetCwid: "",
+      fieldChanges: [{ field: "autoPublish", from: "on", to: "off" }],
+    });
+  });
+});
+
 describe("loadCenterAuditHistory", () => {
   it("returns [] for an empty center code without querying (roster lookup included)", async () => {
     const queryRaw = vi.fn();
@@ -218,6 +241,23 @@ describe("loadCenterAuditHistory", () => {
     const cutoff = captured[2] as Date;
     expect(cutoff).toBeInstanceOf(Date);
     expect(now.getTime() - cutoff.getTime()).toBe(CENTER_AUDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  });
+
+  it("reads the center's auto-publish switch rows through the center-keyed branch (no new bound value)", async () => {
+    let sql = "";
+    const values: unknown[] = [];
+    const queryRaw = vi.fn(async (strings: TemplateStringsArray, ...v: unknown[]) => {
+      sql = strings.join("?");
+      values.push(...v);
+      return [];
+    });
+    const client = {
+      $queryRaw: queryRaw,
+      centerMembership: { findMany: vi.fn(async () => []) },
+    } as unknown as CenterAuditClient;
+    await loadCenterAuditHistory("meyer_cancer_center", client);
+    expect(sql).toMatch(/action IN \('roster_change', 'disease_auto_publish_set'\)\s+AND target_entity_type = 'center'/);
+    expect(values[0]).toBe("meyer_cancer_center");
   });
 
   it("scopes disease-decision rows to the center's CURRENT roster cwids (deduped, joined into the OR branch)", async () => {

@@ -47,6 +47,8 @@ const FIELD_LABEL: Record<RosterFieldChange["field"], string> = {
   // `fieldChanges` entry (`lib/api/center-audit.ts`'s `deriveDiseaseChange`):
   // "Disease: BREAST → confirmed".
   disease: "Disease",
+  // A `disease_auto_publish_set` row — the center's switch, "off → on".
+  autoPublish: "Auto-publish high-confidence",
 };
 
 /** Format a stored ISO-8601 instant as a compact UTC wall-clock string. */
@@ -152,7 +154,7 @@ export function CenterHistoryView({
                       )}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">{CHANGE_LABEL[e.changeKind]}</td>
-                    <td className="px-3 py-2 font-medium whitespace-nowrap">{e.targetCwid}</td>
+                    <td className="px-3 py-2 font-medium whitespace-nowrap">{e.targetCwid || "—"}</td>
                     <td className="px-3 py-2">
                       <DiffSummary entry={e} />
                     </td>
