@@ -146,10 +146,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // PubMed competing-interest statements backfill — runs right after ReCiter.
   "ReCiter-COI-Statements": { cadence: "nightly" },
   ASMS: { cadence: "nightly" },
-  // Excluded from the STAGING cadence (InfoEd's on-prem range overlaps the Sps
-  // VPC CIDR — see the nightlySteps comment in cdk/lib/etl-stack.ts); prod
-  // keeps the step.
-  InfoEd: { cadence: "nightly", envs: ["prod"] },
+  // Both envs since #2906 (staging was excluded 2026-06-22 → 2026-09-29).
+  InfoEd: { cadence: "nightly" },
   COI: { cadence: "nightly" },
   // Moved from nightly to weekly (Paul, 2026-08-16) — it only computes
   // against whatever COI/statement data is already in SPS-DB (see the
@@ -473,9 +471,8 @@ export function ackState(
 }
 
 /**
- * Whether this env is responsible for a source. The cadences genuinely differ
- * per env (InfoEd is excluded from the staging nightly over the on-prem CIDR
- * overlap), and when the env is UNSET — local runs, pre-SCHOLARS_ENV deploys —
+ * Whether this env is responsible for a source. A cadence can differ per env
+ * (none do today; InfoEd was staging-excluded until #2906), and when the env is UNSET — local runs, pre-SCHOLARS_ENV deploys —
  * an env-scoped source is skipped rather than reported missing. Reporting it
  * would tell a superuser on staging that a prod-only import "never ran".
  */
