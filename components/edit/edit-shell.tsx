@@ -61,7 +61,12 @@ function Breadcrumb({ crumbs }: { crumbs: ReadonlyArray<Crumb> }) {
       data-slot="edit-breadcrumb"
     >
       {crumbs.map((c, i) => (
-        <span key={`${i}-${c.label}`} className="flex min-w-0 items-center gap-1.5">
+        // Only the LAST crumb (the long unit/scholar name) may shrink; the short
+        // structural ones ("Org units", "Centers") stay whole on a phone.
+        <span
+          key={`${i}-${c.label}`}
+          className={`flex items-center gap-1.5 ${i === crumbs.length - 1 ? "min-w-0" : "shrink-0"}`}
+        >
           {i > 0 && <span aria-hidden>/</span>}
           {c.href ? (
             <Link
