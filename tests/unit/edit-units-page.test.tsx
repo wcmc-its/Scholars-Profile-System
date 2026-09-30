@@ -66,14 +66,14 @@ beforeEach(() => {
 describe("/edit/units — ConsoleShell wiring", () => {
   it("signed-out → SAML redirect", async () => {
     mockGetEditSession.mockResolvedValue(null);
-    await expect(EditUnitsPage()).rejects.toThrow(
+    await expect(EditUnitsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
       "__REDIRECT__:/api/auth/saml/login?return=/edit/units",
     );
   });
 
   it("passes the EFFECTIVE session through to ConsoleShell — loadConsoleTabs derives every grant-based tab from it", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     expect(result.props.session).toBe(OWNER);
     // The bare escape hatch stays — this page has no unit-admin gate of its
     // own, unlike every other console page (docs/edit-console-ia-spec.md
@@ -83,7 +83,7 @@ describe("/edit/units — ConsoleShell wiring", () => {
 
   it("no longer hand-computes dataQualityTab/usageTab/reportsTab — ConsoleShell derives them from session now", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     expect(result.props.dataQualityTab).toBeUndefined();
     expect(result.props.usageTab).toBeUndefined();
     expect(result.props.reportsTab).toBeUndefined();
@@ -114,7 +114,7 @@ describe("/edit/units — page header", () => {
       isSuperuser: true,
       isCommsSteward: false,
     });
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     const create = findAll(result, (el) => el.props["data-testid"] === "all-units-create");
     expect(create).toHaveLength(1);
     expect(create[0].props.href).toBe("/edit/unit/new");
@@ -128,7 +128,7 @@ describe("/edit/units — page header", () => {
       isSuperuser: false,
       isCommsSteward: true,
     });
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     expect(findAll(result, (el) => el.props["data-testid"] === "all-units-create")).toHaveLength(0);
     const p = findAll(result, (el) => el.type === "p")[0];
     expect(textOf(p)).toContain("Every department, division, center and core.");
@@ -136,7 +136,7 @@ describe("/edit/units — page header", () => {
 
   it("unit owner: keeps the 'you can edit' copy and gets no directory", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     const p = findAll(result, (el) => el.type === "p")[0];
     expect(textOf(p)).toContain("you can edit");
     expect(findAll(result, (el) => el.type === "section")).toHaveLength(0);

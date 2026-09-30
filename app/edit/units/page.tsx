@@ -46,13 +46,13 @@ export const metadata = {
 export default async function EditUnitsPage({
   searchParams,
 }: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-} = {}) {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/units");
   }
-  const kind = parseUnitKindParam(((await searchParams) ?? {}).kind);
+  const kind = parseUnitKindParam((await searchParams).kind);
 
   const allUnits = await loadManageableUnits(session.cwid, db.read);
   const units = kind ? filterManageableUnitsByKind(allUnits, kind) : allUnits;
