@@ -1917,7 +1917,12 @@ export class EtlStack extends Stack {
     buildSchedule(
       "NightlyScheduleRule",
       "nightly",
-      events.Schedule.expression("cron(0 7 * * ? *)"),
+      // Staging starts 45 min after prod so the two InfoEd steps (~30 min into
+      // each run, ~5-8 min long) never query the same InfoEd server at once
+      // (#2906). Still >4h clear of the Sunday 12:00 weekly (see below).
+      events.Schedule.expression(
+        envConfig.envName === "staging" ? "cron(45 7 * * ? *)" : "cron(0 7 * * ? *)",
+      ),
       this.nightlyStateMachine,
     );
     buildSchedule(

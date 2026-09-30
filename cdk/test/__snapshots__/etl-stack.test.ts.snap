@@ -17990,7 +17990,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Properties": {
         "Description": "SPS ETL nightly cadence (staging). D7.",
         "Name": "sps-etl-nightly-staging",
-        "ScheduleExpression": "cron(0 7 * * ? *)",
+        "ScheduleExpression": "cron(45 7 * * ? *)",
         "State": "ENABLED",
         "Targets": [
           {
