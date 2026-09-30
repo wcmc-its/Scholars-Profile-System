@@ -48,12 +48,16 @@
  * `resolveEditIdentity()` — never the effective/impersonated cwid. One
  * `db.write.$transaction` per call: the lookup + upsert-or-delete +
  * `appendAuditRow` (`action: "disease_assignment_decision"`,
- * `targetEntityType: "scholar"`) commit atomically. No `reflectUnitChange` —
- * this data is not ISR-cached anywhere.
+ * `targetEntityType: "scholar"`) commit atomically. When
+ * `CENTER_DISEASE_FACET` is on, a real change runs `reflectUnitChange` for the
+ * center and each of its program pages: both render published diseases (facet
+ * + card row) from their ISR pages and the `center:` swr roster cache. Flag off
+ * ⇒ nothing public reads this data, so no reflection.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { loadDiseaseCodeOptions } from "@/lib/api/unit-edit-context";
+import { isCenterDiseaseFacetEnabled } from "@/lib/center-disease-flags";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
@@ -63,6 +67,7 @@ import {
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { reflectUnitChange } from "@/lib/edit/revalidation";
 import { CWID_PATTERN } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/center/[code]/disease-assignments";
@@ -115,8 +120,25 @@ export async function POST(
   }
 
   const { code } = await params;
-  const center = await db.read.center.findUnique({ where: { code }, select: { code: true } });
+  const center = await db.read.center.findUnique({
+    where: { code },
+    select: { code: true, slug: true },
+  });
   if (!center) return editError(400, "unit_not_found", "code");
+  // The public center page — and every program page, which renders the same
+  // GroupedRoster — shows published diseases only behind the flag.
+  const reflectPublic = async () => {
+    if (!isCenterDiseaseFacetEnabled()) return;
+    const programs = await db.read.centerProgram.findMany({
+      where: { centerCode: center.code },
+      select: { code: true },
+    });
+    await reflectUnitChange({
+      unitKind: "center",
+      unitSlug: center.slug,
+      programCodes: programs.map((p) => p.code),
+    });
+  };
 
   // Defense in depth — see docblock: `[code]` must resolve to a center with a
   // `CenterProgram` taxonomy, the same data-driven Cancer-Center-only gate
@@ -185,6 +207,7 @@ export async function POST(
       return editError(500, "write_failed");
     }
 
+    await reflectPublic();
     return editOk({ cwid, diseaseCode, decision, changed: true });
   }
 
@@ -198,8 +221,9 @@ export async function POST(
   });
 
   const decidedAt = new Date();
+  let row: { decision: string; scoreAtDecision: number | null; confidenceAtDecision: string | null };
   try {
-    const row = await db.write.$transaction(async (tx) => {
+    row = await db.write.$transaction(async (tx) => {
       const assignment = await tx.cancerCenterDiseaseAssignment.findUnique({
         where: { cwid_diseaseCode: { cwid, diseaseCode } },
         select: { score: true, confidence: true },
@@ -260,14 +284,6 @@ export async function POST(
 
       return decided;
     });
-
-    return editOk({
-      cwid,
-      diseaseCode,
-      decision: row.decision,
-      scoreAtDecision: row.scoreAtDecision,
-      confidenceAtDecision: row.confidenceAtDecision,
-    });
   } catch (err) {
     if (err instanceof AssignmentNotFound) {
       return editError(404, "assignment_not_found", "diseaseCode");
@@ -275,4 +291,15 @@ export async function POST(
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
+
+  // After the try/catch, like the clear path and the sibling routes: a
+  // reflection failure must not report a committed write as `write_failed`.
+  await reflectPublic();
+  return editOk({
+    cwid,
+    diseaseCode,
+    decision: row.decision,
+    scoreAtDecision: row.scoreAtDecision,
+    confidenceAtDecision: row.confidenceAtDecision,
+  });
 }

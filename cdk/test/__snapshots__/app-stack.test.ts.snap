@@ -470,6 +470,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "CENTER_DISEASE_FACET",
+                "Value": "off",
+              },
+              {
                 "Name": "ORG_UNIT_ROLE_CONSOLE",
                 "Value": "on",
               },
@@ -5015,6 +5019,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_COLLABORATION_GRANT_AXIS",
+                "Value": "on",
+              },
+              {
+                "Name": "CENTER_DISEASE_FACET",
                 "Value": "on",
               },
               {

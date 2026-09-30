@@ -9,12 +9,13 @@
  * close, and this table copies that shape on purpose. Also covers `decidedBy`
  * always being the REAL accountable actor, never the impersonated cwid.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const {
   mockCenterFindUnique,
   mockCenterProgramFindFirst,
+  mockCenterProgramFindMany,
   mockUnitAdminFindMany,
   mockReadDecisionFindUnique,
   mockTransaction,
@@ -26,6 +27,7 @@ const {
 } = vi.hoisted(() => ({
   mockCenterFindUnique: vi.fn(),
   mockCenterProgramFindFirst: vi.fn(),
+  mockCenterProgramFindMany: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockReadDecisionFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
@@ -40,7 +42,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     read: {
       center: { findUnique: mockCenterFindUnique },
-      centerProgram: { findFirst: mockCenterProgramFindFirst },
+      centerProgram: { findFirst: mockCenterProgramFindFirst, findMany: mockCenterProgramFindMany },
       unitAdmin: { findMany: mockUnitAdminFindMany },
       cancerCenterDiseaseDecision: { findUnique: mockReadDecisionFindUnique },
     },
@@ -55,9 +57,12 @@ vi.mock("@/lib/edit/request", async (importOriginal) => ({
   readEditRequest: mockReadEditRequest,
 }));
 
+const { mockReflectUnitChange } = vi.hoisted(() => ({ mockReflectUnitChange: vi.fn() }));
+vi.mock("@/lib/edit/revalidation", () => ({ reflectUnitChange: mockReflectUnitChange }));
+
 import { POST } from "@/app/api/edit/center/[code]/disease-assignments/route";
 
-const CENTER = { code: "meyer_cancer_center" };
+const CENTER = { code: "meyer_cancer_center", slug: "meyer" };
 const CURATOR = { cwid: "cur1001", isSuperuser: false };
 
 const fakeTx = {
@@ -108,6 +113,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockCenterFindUnique.mockResolvedValue(CENTER);
   mockCenterProgramFindFirst.mockResolvedValue({ code: "BR" });
+  mockCenterProgramFindMany.mockResolvedValue([{ code: "BR" }, { code: "CB" }]);
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "center", entityId: CENTER.code, role: "curator" },
   ]);
@@ -118,6 +124,47 @@ beforeEach(() => {
     decision: "confirmed",
     scoreAtDecision: CURRENT_ASSIGNMENT.score,
     confidenceAtDecision: CURRENT_ASSIGNMENT.confidence,
+  });
+});
+
+describe("POST /api/edit/center/[code]/disease-assignments — public reflection (CENTER_DISEASE_FACET)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("flag on: a confirm reflects the public center page", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "on");
+    const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
+    expect(res.status).toBe(200);
+    expect(mockReflectUnitChange).toHaveBeenCalledWith({
+      unitKind: "center",
+      unitSlug: "meyer",
+      programCodes: ["BR", "CB"],
+    });
+  });
+
+  it("flag on: a clear that deletes a decision reflects; a no-op clear does not", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "on");
+    await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "clear" });
+    expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    mockReadDecisionFindUnique.mockResolvedValue(EXISTING_DECISION);
+    await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "clear" });
+    expect(mockReflectUnitChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("flag on: a reflection failure after a committed confirm is not reported as write_failed", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "on");
+    mockReflectUnitChange.mockRejectedValueOnce(new Error("revalidate boom"));
+    // The committed write must not be turned into a `500 write_failed`; the
+    // error propagates out of the handler instead, as in the sibling routes.
+    await expect(
+      call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" }),
+    ).rejects.toThrow("revalidate boom");
+    expect(mockTxDecisionUpsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("flag off: nothing is reflected", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "off");
+    await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
+    expect(mockReflectUnitChange).not.toHaveBeenCalled();
   });
 });
 

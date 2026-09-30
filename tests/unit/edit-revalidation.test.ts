@@ -191,6 +191,25 @@ describe("reflectUnitChange", () => {
     ]);
   });
 
+  it("flushes every listed program page of a center (programCodes + programCode, deduped)", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectUnitChange({
+      unitKind: "center",
+      unitSlug: "cancer",
+      programCodes: ["BR", "CB"],
+      programCode: "CB",
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/centers/cancer/programs/BR");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/centers/cancer/programs/CB");
+    expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
+      "/browse",
+      "/centers/cancer",
+      "/centers/cancer/programs/BR",
+      "/centers/cancer/programs/CB",
+      "/centers/cancer/areas/*",
+    ]);
+  });
+
   it("is dormant when no distribution id is set: no enqueue, no send", async () => {
     // beforeEach already deletes SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID.
     await reflectUnitChange({ unitKind: "department", unitSlug: "medicine" });

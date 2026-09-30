@@ -232,6 +232,10 @@ export async function reflectUnitChange(params: {
   /** #1117 — for a center program edit (leaders/description), the program code
    *  whose dedicated page `/centers/{slug}/programs/{code}` must also flush. */
   programCode?: string;
+  /** Every program page of the center, for an edit that changes what all of
+   *  them render (the published-disease roster data on each program's
+   *  GroupedRoster). Merged with `programCode`. */
+  programCodes?: readonly string[];
 }): Promise<void> {
   const paths: string[] = ["/browse"];
   if (params.unitKind === "department") {
@@ -249,8 +253,10 @@ export async function reflectUnitChange(params: {
       paths.push(`/centers/${params.previousSlug}`);
     }
     // #1117 — the program's own ISR page renders the leaders/description.
-    if (params.programCode) {
-      paths.push(`/centers/${params.unitSlug}/programs/${params.programCode}`);
+    const programCodes = new Set(params.programCodes ?? []);
+    if (params.programCode) programCodes.add(params.programCode);
+    for (const programCode of programCodes) {
+      paths.push(`/centers/${params.unitSlug}/programs/${programCode}`);
     }
   }
   revalidatePaths(paths);

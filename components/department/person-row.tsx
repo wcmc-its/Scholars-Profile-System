@@ -34,6 +34,7 @@ export function PersonRow({
   rowTags = ROSTER_ROW_TAGS,
   activeAppointment = "All",
   departmentContext = false,
+  diseaseRow,
 }: {
   hit: DepartmentFacultyHit;
   /** Optional badge rendered after the name — e.g. the center roster's
@@ -57,6 +58,10 @@ export function PersonRow({
   /** Rendered on the row's OWN department roster: the meta line drops the
    *  redundant "Department of X" and shows just the division (or nothing). */
   departmentContext?: boolean;
+  /** D1 — the public center roster's DISEASES row (`CenterDiseaseRow`),
+   *  rendered above the TOPICS row. Omitted everywhere else, so department /
+   *  division cards are unchanged. */
+  diseaseRow?: ReactNode;
 }) {
   // #2519 — a Cornell (Ithaca) external member's `departmentName` is a raw
   // Cornell dept string (e.g. "CIO - IT Security Office"), not a WCM
@@ -152,6 +157,7 @@ export function PersonRow({
         {apptLine && (
           <div className="text-[13px] leading-[19px] text-muted-foreground">{apptLine}</div>
         )}
+        {diseaseRow}
         {meshRow.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-[6px]">
             <span
