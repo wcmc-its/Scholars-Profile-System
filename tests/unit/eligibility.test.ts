@@ -88,9 +88,10 @@ describe("isPubliclyDisplayed / PUBLICLY_DISPLAYED_ROLES (#536)", () => {
     expect(isPubliclyDisplayed("DOCTORAL_STUDENT_MD")).toBe(false);
   });
 
-  it("keeps legacy ETL role values visible — the fail-closed flip must not hide them", () => {
-    // deriveRoleCategory folds these into affiliated_faculty today, but pre-rewrite
-    // rows may still carry them. See LEGACY_VISIBLE_ROLES in lib/eligibility.ts.
+  it("no longer admits the retired pre-rewrite role values (#2265)", () => {
+    // deriveRoleCategory folds these into affiliated_faculty; the 2026-08-06 prod
+    // census found zero active rows carrying them, so the legacy allowlist was
+    // dropped and they now fail closed like any other unrecognized token.
     for (const role of [
       "voluntary_faculty",
       "adjunct_faculty",
@@ -98,7 +99,7 @@ describe("isPubliclyDisplayed / PUBLICLY_DISPLAYED_ROLES (#536)", () => {
       "faculty_emeritus",
       "research_staff",
     ]) {
-      expect(isPubliclyDisplayed(role)).toBe(true);
+      expect(isPubliclyDisplayed(role)).toBe(false);
     }
   });
 
@@ -219,23 +220,12 @@ describe("isEnrolledDoctoralStudent (#2599)", () => {
     for (const role of NON_STUDENT_ROLES) {
       expect(isEnrolledDoctoralStudent(role)).toBe(false);
     }
-    // The legacy values `LEGACY_VISIBLE_ROLES` keeps alive for pre-rewrite rows
-    // are recognized too, so they keep their credential.
-    for (const role of [
-      "voluntary_faculty",
-      "adjunct_faculty",
-      "courtesy_faculty",
-      "faculty_emeritus",
-      "research_staff",
-    ]) {
-      expect(isEnrolledDoctoralStudent(role)).toBe(false);
-    }
   });
 
   it("fails CLOSED on an unrecognized token — suppress rather than assert a credential", () => {
     // Changed by #2599's second pass. `former_doctoral_student` is NOT a real enum
     // value (no `deriveRoleCategory` branch emits it and it is in neither
-    // PUBLICLY_DISPLAYED_ROLES nor LEGACY_VISIBLE_ROLES nor HIDDEN_ROLE_CATEGORIES),
+    // PUBLICLY_DISPLAYED_ROLES nor HIDDEN_ROLE_CATEGORIES),
     // so it is now unrecognized ⇒ treated as enrolled ⇒ postnominal suppressed. The
     // asymmetry: suppressing on an unknown role costs a degree suffix, admitting one
     // asserts a credential the person may not hold. Prefix-vs-substring is still
@@ -267,14 +257,7 @@ describe("isEnrolledDoctoralStudent (#2599)", () => {
     // The equivalence argued in isPubliclyDisplayed's docblock, executed: for every
     // token, the widened predicate's answer composed with the visible-set lookup
     // equals the ORIGINAL implementation (prefix-only student check, then the set).
-    const VISIBLE_KEYS = new Set<string>([
-      ...PUBLICLY_DISPLAYED_ROLES,
-      "voluntary_faculty",
-      "adjunct_faculty",
-      "courtesy_faculty",
-      "faculty_emeritus",
-      "research_staff",
-    ]);
+    const VISIBLE_KEYS = new Set<string>(PUBLICLY_DISPLAYED_ROLES);
     const prefixOnly = (r: string) => r.trim().toLowerCase().startsWith("doctoral_student");
     const original = (r: string | null | undefined): boolean => {
       if (r == null) return true;
