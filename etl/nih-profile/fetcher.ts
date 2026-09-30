@@ -309,6 +309,8 @@ export type ReporterPublication = {
  * is chunked (the criteria array is bounded) and each chunk is offset-paginated;
  * the caller unions the returned PMIDs into a candidate's `grantPmids` Set, so
  * cross-chunk duplicates are harmless. Returns one row per (core, pmid) linkage.
+ * A chunk over RePORTER's 9,999-offset cap falls back to per-core fetches, and a
+ * core that alone exceeds the cap is skipped with a warning (#2592).
  */
 export async function fetchPublicationsByCoreProjectNums(
   coreNums: string[],
@@ -319,55 +321,82 @@ export async function fetchPublicationsByCoreProjectNums(
 
   for (let i = 0; i < cores.length; i += CORE_NUMS_BATCH) {
     const batch = cores.slice(i, i + CORE_NUMS_BATCH);
-    let offset = 0;
-    let total: number | null = null;
-    while (true) {
-      const resp = await fetchReporterWithRetry(NIH_PUBLICATIONS_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          criteria: { core_project_nums: batch },
-          limit: PAGE_LIMIT,
-          offset,
-        }),
-        cache: "no-store",
-      });
-      if (!resp.ok) {
-        throw new Error(
-          `NIH RePORTER /publications/search failed: HTTP ${resp.status} ` +
-            `(${batch.length} cores, offset ${offset})`,
-        );
-      }
-      const data = (await resp.json()) as {
-        meta?: { total?: number };
-        results?: Array<{
-          coreproject?: string | null;
-          pmid?: number | null;
-          applid?: number | null;
-        }>;
-      };
-      const results = data.results ?? [];
-      for (const r of results) {
-        // Drop rows without a usable PMID — they can't discriminate a candidate.
-        if (typeof r.pmid !== "number" || r.pmid <= 0) continue;
-        out.push({
-          coreProjectNum: r.coreproject ?? null,
-          pmid: r.pmid,
-          applId: typeof r.applid === "number" ? r.applid : null,
-        });
-      }
-      if (total === null) total = data.meta?.total ?? 0;
-      offset += results.length;
-      if (results.length < PAGE_LIMIT || offset >= total) break;
-      if (offset >= 9999) {
-        throw new Error(
-          `publications for cores [${batch.join(",")}] exceed the 9,999-offset ` +
-            `cap (total ${total}). Sub-batch before fetching further.`,
-        );
-      }
-      await sleep(REQ_DELAY_MS);
+    const rows = await fetchPublicationPages(batch);
+    if (rows) {
+      out.push(...rows);
+      continue;
     }
+    // #2592 — the batch overflows the offset cap: re-fetch core by core and
+    // skip only a core that overflows on its own, so the candidate is still
+    // evaluated on its remaining cores.
+    for (const core of batch) {
+      const coreRows = batch.length > 1 ? await fetchPublicationPages([core]) : null;
+      if (coreRows) {
+        out.push(...coreRows);
+      } else {
+        console.warn(
+          `  publications for core ${core} exceed RePORTER's 9,999-offset cap; ` +
+            `skipping that core (remaining cores still evaluated).`,
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/** RePORTER rejects offsets past this, so a larger result set can't be paged. */
+const REPORTER_OFFSET_CAP = 9999;
+
+/** Every publication row linked to `cores`, or null when the result set exceeds
+ *  the 9,999-offset cap (detected from the first page's total, before paging). */
+async function fetchPublicationPages(
+  cores: string[],
+): Promise<ReporterPublication[] | null> {
+  const out: ReporterPublication[] = [];
+  let offset = 0;
+  let total: number | null = null;
+  while (true) {
+    const resp = await fetchReporterWithRetry(NIH_PUBLICATIONS_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        criteria: { core_project_nums: cores },
+        limit: PAGE_LIMIT,
+        offset,
+      }),
+      cache: "no-store",
+    });
+    if (!resp.ok) {
+      throw new Error(
+        `NIH RePORTER /publications/search failed: HTTP ${resp.status} ` +
+          `(${cores.length} cores, offset ${offset})`,
+      );
+    }
+    const data = (await resp.json()) as {
+      meta?: { total?: number };
+      results?: Array<{
+        coreproject?: string | null;
+        pmid?: number | null;
+        applid?: number | null;
+      }>;
+    };
     await sleep(REQ_DELAY_MS);
+    if (total === null) {
+      total = data.meta?.total ?? 0;
+      if (total > REPORTER_OFFSET_CAP) return null;
+    }
+    const results = data.results ?? [];
+    for (const r of results) {
+      // Drop rows without a usable PMID — they can't discriminate a candidate.
+      if (typeof r.pmid !== "number" || r.pmid <= 0) continue;
+      out.push({
+        coreProjectNum: r.coreproject ?? null,
+        pmid: r.pmid,
+        applId: typeof r.applid === "number" ? r.applid : null,
+      });
+    }
+    offset += results.length;
+    if (results.length < PAGE_LIMIT || offset >= total) break;
   }
   return out;
 }
