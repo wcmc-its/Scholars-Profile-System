@@ -1,9 +1,9 @@
 /**
- * #955 — the `/edit` shell surfaces a "Change history" entry (a ghost button)
- * beside the "Preview profile" outline button, wired to
+ * #955 — the `/edit` shell surfaces a "Change history" entry, wired to
  * `/edit/scholar/[cwid]/history`. The link shows in every edit mode (history
  * visibility == edit access) and, being an internal page, opens in the same tab
- * (no `target=_blank`, no external arrow).
+ * (no `target=_blank`, no external arrow). Header redesign (2026-09-30): it is
+ * now a text link on the meta line under the `<h1>`, not a ghost button.
  *
  * `AccountMenu` is a client component that fires an impersonation-probe fetch on
  * mount, so it's mocked out — this suite only exercises the shell's link row.
@@ -29,7 +29,7 @@ const base = {
 };
 
 describe("EditShell — change-history entry link (#955)", () => {
-  it("renders 'Change history' as a ghost button pointing at the internal history page (same tab)", () => {
+  it("renders 'Change history' as a meta-line link pointing at the internal history page (same tab)", () => {
     render(
       <EditShell {...base} historyHref="/edit/scholar/abc1001/history">
         <div>panel</div>
@@ -37,8 +37,9 @@ describe("EditShell — change-history entry link (#955)", () => {
     );
     const link = screen.getByTestId("edit-history-link");
     expect(link.getAttribute("href")).toBe("/edit/scholar/abc1001/history");
-    expect(link.textContent).toContain("Change history");
-    expect(link.getAttribute("data-variant")).toBe("ghost");
+    expect(link.textContent).toBe("Change history");
+    // A plain meta-line link now, not a Button.
+    expect(link.getAttribute("data-variant")).toBeNull();
     // Internal — no new-tab / external semantics (unlike Preview profile).
     expect(link.getAttribute("target")).toBeNull();
     expect(link.getAttribute("rel")).toBeNull();

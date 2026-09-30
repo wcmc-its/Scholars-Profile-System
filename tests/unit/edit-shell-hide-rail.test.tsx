@@ -2,7 +2,8 @@
  * `EditShell`'s `hideRail` — one attribute (the Cancer Center Members table)
  * needs the whole width, not a shared column with a 9-item rail it has no
  * room to use. `hideRail` drops both the desktop rail and the phone
- * `<select>` swap, replacing them with a single "← Back" link (`backHref`).
+ * `<select>` swap; the way back is a breadcrumb crumb naming the entity
+ * (`backHref`, header redesign 2026-09-30 — was a separate "← Back" link).
  * Default (`hideRail` unset) is byte-identical to the existing shell —
  * covered by `edit-shell-history-link.test.tsx`, not repeated here.
  */
@@ -51,7 +52,7 @@ describe("EditShell — hideRail", () => {
     expect(screen.queryByTestId("rail-sheet-trigger")).toBeNull();
   });
 
-  it("renders a Back link to backHref in the rail's place", () => {
+  it("renders a breadcrumb crumb naming the entity, linking to backHref, in the rail's place", () => {
     render(
       <EditShell {...base} hideRail backHref="/edit/center/meyer_cancer_center">
         <div>panel</div>
@@ -59,7 +60,8 @@ describe("EditShell — hideRail", () => {
     );
     const back = screen.getByTestId("edit-rail-back");
     expect(back.getAttribute("href")).toBe("/edit/center/meyer_cancer_center");
-    expect(back.textContent).toContain("Back");
+    expect(back.textContent).toBe("Sandra and Edward Meyer Cancer Center");
+    expect(back.closest("nav")?.getAttribute("aria-label")).toBe("Breadcrumb");
   });
 
   it("omits the Back link when hideRail is true but no backHref is given", () => {

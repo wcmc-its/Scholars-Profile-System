@@ -7,7 +7,7 @@
  * isolates the router's logic.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 const { mockRosterExportEnabled, mockBasics, mockSectionNav, mockFacultyExport } = vi.hoisted(
   () => ({
@@ -356,6 +356,28 @@ describe("UnitEditPage — Members", () => {
     expect(screen.queryByTestId("unit-section-basics")).toBeNull();
     expect(screen.getByTestId("edit-rail-back").getAttribute("href")).toBe("/edit/department/N1280");
     expect(screen.getByTestId("panel-faculty-export")).toBeTruthy();
+  });
+
+  it("the ?attr=roster page header: 'Org units / Centers / {name}' crumbs + the unit name as the h1", () => {
+    render(
+      <UnitEditPage
+        ctx={ctx({ unitType: "center", actorRole: "owner" })}
+        attr="roster"
+        orgUnitsNavVisible
+      />,
+    );
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).getByTestId("edit-subnav-units").getAttribute("href")).toBe("/edit/units");
+    const kind = within(crumb).getByTestId("edit-subnav-unit-kind");
+    expect(kind.textContent).toBe("Centers");
+    expect(kind.getAttribute("href")).toBe("/edit/units?kind=center");
+    expect(within(crumb).getByTestId("edit-rail-back").getAttribute("href")).toBe(
+      "/edit/center/N1280",
+    );
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(document.querySelector('[data-slot="edit-role-pill"]')?.textContent).toBe(
+      "Editing as administrator",
+    );
   });
 
   it("an ED division's roster page is the faculty export only", () => {

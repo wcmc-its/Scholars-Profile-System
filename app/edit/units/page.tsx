@@ -9,6 +9,12 @@
  * superuser `AdminSubnav`. Reads the EFFECTIVE edit session (so "View as" #637
  * scopes the list to the impersonated identity, like the other unit pages).
  *
+ * `?kind=department|division|center|core` (the unit editor breadcrumb's
+ * "{Kind plural}" crumb) narrows BOTH lists to that kind, with a "Show all"
+ * link back; an unknown value is ignored. `/edit*` is an uncacheable edge
+ * behavior (CachingDisabled + ALL_VIEWER, `cdk/lib/edge-stack.ts`), so the
+ * query string reaches the origin — no Group B allow-list entry needed.
+ *
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
  */
 import { redirect } from "next/navigation";
@@ -24,6 +30,12 @@ import { db } from "@/lib/db";
 import { loadAllUnitsDirectory, loadManageableUnits } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import {
+  UNIT_KIND_PLURAL_LOWER,
+  filterDirectoryByKind,
+  filterManageableUnitsByKind,
+  parseUnitKindParam,
+} from "@/lib/edit/unit-kind-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -32,22 +44,29 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function EditUnitsPage() {
+export default async function EditUnitsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/units");
   }
+  const kind = parseUnitKindParam(((await searchParams) ?? {}).kind);
 
-  const units = await loadManageableUnits(session.cwid, db.read);
+  const allUnits = await loadManageableUnits(session.cwid, db.read);
+  const units = kind ? filterManageableUnitsByKind(allUnits, kind) : allUnits;
   // A superuser AND a comms_steward (a global unit-content editor, comms-steward-
   // profile-editing-spec.md §3b) both get the complete org-unit directory (#971)
   // — they may edit any existing unit, not only ones they hold a grant on.
   // Retired units stay superuser-only (the directory's includeRetired below),
   // matching the retired gate in unit-edit-context.ts.
   const canSeeAllUnitsDirectory = session.isSuperuser || session.isCommsSteward;
-  const directoryUnits = canSeeAllUnitsDirectory
+  const allDirectoryUnits = canSeeAllUnitsDirectory
     ? await loadAllUnitsDirectory(db.read, { includeRetired: session.isSuperuser })
     : [];
+  const directoryUnits = kind ? filterDirectoryByKind(allDirectoryUnits, kind) : allDirectoryUnits;
 
   // The shared console tab strip (role-aware-navigation-entry-points-spec.md): the
   // "Units" tab is active here, and every other surface the viewer can open is a
@@ -102,11 +121,35 @@ export default async function EditUnitsPage() {
           </Button>
         )}
       </div>
-      <ManageableUnitsIndex
-        units={units}
-        isSuperuser={session.isSuperuser}
-        canFindAnyUnit={canSeeAllUnitsDirectory}
-      />
+      {kind && (
+        <div
+          className="text-muted-foreground mb-6 flex flex-wrap items-center gap-x-2 text-[13px]"
+          data-testid="units-kind-filter"
+        >
+          <span>Showing {UNIT_KIND_PLURAL_LOWER[kind]}</span>
+          <span aria-hidden>·</span>
+          <Link
+            href="/edit/units"
+            className="text-apollo-slate hover:underline"
+            data-testid="units-kind-filter-clear"
+          >
+            Show all
+          </Link>
+        </div>
+      )}
+      {kind && units.total === 0 && allUnits.total > 0 && !canSeeAllUnitsDirectory ? (
+        // The actor manages units, just none of this kind — say so rather than
+        // falling through to the index's "you don't manage any units" state.
+        <span className="text-muted-foreground text-sm" data-testid="units-kind-filter-empty">
+          None of the units you can edit are {UNIT_KIND_PLURAL_LOWER[kind]}.
+        </span>
+      ) : (
+        <ManageableUnitsIndex
+          units={units}
+          isSuperuser={session.isSuperuser}
+          canFindAnyUnit={canSeeAllUnitsDirectory}
+        />
+      )}
       {canSeeAllUnitsDirectory && (
         <section className={units.total > 0 ? "mt-10" : undefined}>
           <AllUnitsDirectory units={directoryUnits} heading={units.total > 0} />

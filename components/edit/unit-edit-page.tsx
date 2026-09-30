@@ -231,6 +231,8 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
       // `orgUnitsNavVisible`, gated on the caller's units-tab predicate.
       isProfileEntity={false}
       orgUnitsNavVisible={orgUnitsNavVisible}
+      // "Org units / {Kind plural}" — the kind crumb filters `/edit/units`.
+      unitKind={ctx.unit.unitType}
       railItems={railItems}
       activeAttr={active.key}
       basePath={basePath}
@@ -238,8 +240,8 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
       reportsHref={reportsHref}
       subRail={subRail}
       // Members gets the whole width for its own filter bar + (on a center)
-      // disease grid — "← Back" (to basePath, the sections page) is the way
-      // back to everything else.
+      // disease grid — the "{unit name}" breadcrumb crumb (to basePath, the
+      // sections page) is the way back to everything else.
       hideRail
       backHref={basePath}
     >

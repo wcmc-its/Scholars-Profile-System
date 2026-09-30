@@ -1,11 +1,11 @@
 /**
  * `EditShell`'s `readOnly` / `contentInert` props (#2482, the `cv_generator`
- * role) — `readOnly` swaps the superuser banner's "editing … as an
- * administrator" claim for an honest "viewing … read-only" line;
+ * role) — `readOnly` swaps the header role pill's "Editing as administrator"
+ * for an honest "View only" (and drops "Changes are logged…");
  * `contentInert` (defaults to `readOnly`) makes the panel content native
  * `inert` (unfocusable/unclickable, still fully visible). They're split apart
  * so the CV-export panel can stay interactive (`contentInert={false}`) while
- * the banner still tells the truth (`readOnly={true}`) — CV export never
+ * the pill still tells the truth (`readOnly={true}`) — CV export never
  * writes anything. Default (both unset) is byte-identical to the existing
  * shell.
  */
@@ -19,6 +19,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { EditShell } from "@/components/edit/edit-shell";
+
+const pill = () => document.querySelector('[data-slot="edit-role-pill"]');
 
 const base = {
   mode: "superuser" as const,
@@ -51,25 +53,26 @@ describe("EditShell — readOnly", () => {
     expect(screen.getByTestId("the-button").closest("[inert]")).not.toBeNull();
   });
 
-  it("swaps the superuser banner to the read-only 'viewing' copy when readOnly", () => {
+  it("swaps the role pill to 'View only' and drops 'Changes are logged' when readOnly", () => {
     render(
-      <EditShell {...base} readOnly>
+      <EditShell {...base} readOnly historyHref="/edit/scholar/abc1001/history">
         <div>panel</div>
       </EditShell>,
     );
-    const banner = screen.getByRole("alert");
-    expect(banner.textContent).toContain("viewing");
-    expect(banner.textContent).toContain("read-only");
-    expect(banner.textContent).not.toContain("as an administrator");
+    expect(pill()?.textContent).toBe("View only");
+    expect(document.body.textContent).not.toContain("Changes are logged");
+    // History visibility == access, so the link itself survives.
+    expect(screen.getByTestId("edit-history-link")).toBeTruthy();
   });
 
-  it("keeps the normal 'editing … as an administrator' banner when readOnly is unset", () => {
+  it("keeps 'Editing as administrator' + 'Changes are logged…' when readOnly is unset", () => {
     render(
       <EditShell {...base}>
         <div>panel</div>
       </EditShell>,
     );
-    expect(screen.getByRole("alert").textContent).toContain("as an administrator");
+    expect(pill()?.textContent).toBe("Editing as administrator");
+    expect(document.body.textContent).toContain("Changes are logged to your account");
   });
 
   it("contentInert=false keeps the panel interactive even while readOnly=true (the CV-export exception, #2482)", () => {
@@ -82,10 +85,8 @@ describe("EditShell — readOnly", () => {
     );
     // The button stays clickable...
     expect(screen.getByTestId("download-cv").closest("[inert]")).toBeNull();
-    // ...but the banner still tells the truth about the role.
-    const banner = screen.getByRole("alert");
-    expect(banner.textContent).toContain("read-only");
-    expect(banner.textContent).not.toContain("as an administrator");
+    // ...but the pill still tells the truth about the role.
+    expect(pill()?.textContent).toBe("View only");
   });
 
   it("contentInert defaults to readOnly when omitted", () => {

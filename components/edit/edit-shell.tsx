@@ -13,71 +13,72 @@
  * full vertical rail collapses to a `<select>` below `md` so the editor is not
  * buried under nine links on phones (finding 4.5).
  *
+ * Page header (Meyer Cancer Center mockup, 2026-09-30): ONE block inside the
+ * content container, above the rail + detail body — a small muted breadcrumb,
+ * the page `<h1>` (a unit's name, the scholar's identity block, or "Your
+ * profile") with the "View reports" / "Preview profile" actions on the right,
+ * and a meta line: a slate-tint role pill ("Editing as administrator" …) then
+ * "Changes are logged to your account · Change history". It replaces the old
+ * bordered breadcrumb row, the separate actions row, the hideRail "‹ Back"
+ * row and the full-width Superuser/Proxy/UnitAdmin banners.
+ *
  * `hideRail` drops BOTH the rail column and the phone `<select>` for one
  * dedicated attribute — content that wants the whole width (the Cancer
  * Center Members table, with its own filter bar + disease grid) rather than
- * sharing it with a 9-item nav the page can't use anyway. In its place, a
- * "← Back" link (`backHref`) is the only way back to the rest of the
- * attribute set — this is a one-attribute escape hatch, not a rail
- * replacement, so it's deliberately just a link, not a breadcrumb.
+ * sharing it with a 9-item nav the page can't use anyway. The way back to the
+ * rest of the attribute set is then a third breadcrumb crumb naming the
+ * entity (`backHref`).
  */
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ChevronLeftIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronLeftIcon, Shield } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 import { RailSheet } from "@/components/edit/rail-sheet";
-import { ProxyBanner } from "@/components/edit/proxy-banner";
-import { SuperuserBanner } from "@/components/edit/superuser-banner";
-import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { Button } from "@/components/ui/button";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 
-/** A navigable "{label} / {current}" breadcrumb — shared by the "Profiles"
- *  crumb (superuser-on-a-profile, unit-admin-with-a-grant) and the "Org
- *  units" crumb (superuser-on-a-unit-with-a-grant), so the two structural
- *  breadcrumbs render identically rather than drifting apart. */
-function BreadcrumbCrumb({
-  href,
-  label,
-  current,
-  testId,
-}: {
-  href: string;
-  label: string;
-  current: string;
-  testId: string;
-}) {
-  return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
-      <Link
-        href={href}
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-        data-testid={testId}
-      >
-        <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-        {label}
-      </Link>
-      <span className="text-muted-foreground" aria-hidden>
-        /
-      </span>
-      <span className="font-medium" aria-current="page">
-        {current}
-      </span>
-    </nav>
-  );
-}
+/** A unit editor's kind — the breadcrumb's second crumb + its `/edit/units?kind=` filter. */
+export type EditShellUnitKind = "department" | "division" | "center" | "core";
 
-/** A flat, non-navigable "{current}" breadcrumb — the fallback shape for a
- *  unit editor whose viewer doesn't hold a units-tab grant, a proxy editor
- *  (no roster to return to at all), and a unit admin whose grant doesn't
- *  admit `profilesNavVisible`. */
-function FlatBreadcrumb({ current, testId }: { current: string; testId?: string }) {
+const UNIT_KIND_PLURAL: Record<EditShellUnitKind, string> = {
+  department: "Departments",
+  division: "Divisions",
+  center: "Centers",
+  core: "Cores",
+};
+
+/** One breadcrumb segment: a link when `href` is set, plain muted text
+ *  otherwise. `truncate` + `min-w-0` so a long unit name ellipsizes on a phone
+ *  instead of pushing the page sideways. */
+type Crumb = { label: string; href?: string; testId?: string };
+
+function Breadcrumb({ crumbs }: { crumbs: ReadonlyArray<Crumb> }) {
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
-      <span className="font-medium" aria-current="page" data-testid={testId}>
-        {current}
-      </span>
+    <nav
+      aria-label="Breadcrumb"
+      className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[13px]"
+      data-slot="edit-breadcrumb"
+    >
+      {crumbs.map((c, i) => (
+        <span key={`${i}-${c.label}`} className="flex min-w-0 items-center gap-1.5">
+          {i > 0 && <span aria-hidden>/</span>}
+          {c.href ? (
+            <Link
+              href={c.href}
+              className="hover:text-foreground inline-flex min-w-0 items-center gap-1"
+              data-testid={c.testId}
+            >
+              {i === 0 && <ChevronLeftIcon className="size-3.5 shrink-0" aria-hidden="true" />}
+              <span className="truncate">{c.label}</span>
+            </Link>
+          ) : (
+            <span className="truncate" data-testid={c.testId}>
+              {c.label}
+            </span>
+          )}
+        </span>
+      ))}
     </nav>
   );
 }
@@ -85,7 +86,8 @@ function FlatBreadcrumb({ current, testId }: { current: string; testId?: string 
 export type EditShellProps = {
   mode: "self" | "superuser" | "proxy" | "unit-admin";
   /** The entity display name (scholar preferred name, or a unit name). Kept as
-   *  `scholarName` for call-site stability — it is the top-bar + banner label. */
+   *  `scholarName` for call-site stability — the header `<h1>` (unit editors) and
+   *  the avatar's initials source. */
   scholarName: string;
   /** Attribute rail items + the active key + the base path for the links. */
   railItems: ReadonlyArray<RailItem>;
@@ -152,6 +154,10 @@ export type EditShellProps = {
    *  hasn't computed it (and for the rare viewer the predicate genuinely
    *  fails for, e.g. a role that reaches a unit page without a real grant). */
   orgUnitsNavVisible?: boolean;
+  /** Unit editor pages only (`isProfileEntity=false`): the unit's kind — the
+   *  breadcrumb's "{Kind plural}" crumb, linking to `/edit/units?kind={kind}`
+   *  when `orgUnitsNavVisible`. Omit ⇒ the "Org units" crumb alone. */
+  unitKind?: EditShellUnitKind;
   /** Unit-admin mode only: whether the viewer (the org-unit administrator
    *  editing this scholar on a unit's behalf) satisfies the profiles-tab
    *  predicate (`TAB_PREDICATES.profiles` — true whenever
@@ -174,19 +180,21 @@ export type EditShellProps = {
    *  for the existing /edit/scholar callers. */
   subRail?: React.ReactNode;
   /** Drops the rail column (desktop) and the `<select>` swap (phone) entirely,
-   *  giving the detail panel the full width — a "← Back" link (`backHref`)
-   *  takes its place. For one attribute that needs the room, not a general
-   *  layout switch; default false leaves every existing caller unchanged. */
+   *  giving the detail panel the full width — a third breadcrumb crumb naming
+   *  the entity (`backHref`) is the way back. For one attribute that needs the
+   *  room, not a general layout switch; default false leaves every existing
+   *  caller unchanged. */
   hideRail?: boolean;
-  /** Where `hideRail`'s "← Back" link goes — normally `basePath` (the same
-   *  unit, default attribute, rail restored). No-op when `hideRail` is false. */
+  /** Where `hideRail`'s entity-name crumb (`data-testid="edit-rail-back"`)
+   *  goes — normally `basePath` (the same unit, default attribute, rail
+   *  restored). No-op when `hideRail` is false. */
   backHref?: string;
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
-   *  administers this scholar, naming the "via {unit} administrator" banner. */
+   *  administers this scholar, naming the "Editing as {unit} administrator" pill. */
   unitAdmin?: { unitKind: "department" | "division" | "center" | "institution"; unitName: string };
   /**
-   * `cv_generator` role (#2482): the superuser banner reads "viewing … this
-   * role is read-only" instead of "editing … as an administrator" — true on
+   * `cv_generator` role (#2482): the header's role pill reads "View only" (and
+   * drops "Changes are logged…") instead of "Editing as administrator" — true on
    * every panel this role reaches, including the one exception below, since
    * downloading a CV doesn't change the profile either. Default false leaves
    * every existing caller unchanged.
@@ -198,7 +206,7 @@ export type EditShellProps = {
    * `readOnly`. Pass `false` while `readOnly` is `true` for the ONE cv_generator
    * exception (the "cv" attr's "Download CV" button, which never writes
    * anything and is the role's named purpose) so that one panel stays
-   * interactive while the banner still tells the truth about the role.
+   * interactive while the pill still tells the truth about the role.
    */
   contentInert?: boolean;
   children: React.ReactNode;
@@ -219,6 +227,7 @@ export function EditShell({
   canBrowseProfiles = false,
   isProfileEntity = true,
   orgUnitsNavVisible = false,
+  unitKind,
   profilesNavVisible = false,
   consoleNav,
   subRail,
@@ -229,11 +238,92 @@ export function EditShell({
   contentInert = readOnly,
   children,
 }: EditShellProps) {
+  const isSelf = mode === "self";
   const isSuperuser = mode === "superuser";
-  const isProxy = mode === "proxy";
   const isUnitAdmin = mode === "unit-admin";
-  const showIdentity = identity != null && mode !== "self";
+  const isUnitEditor = isSuperuser && !isProfileEntity;
+  const showIdentity = identity != null && !isSelf && !isUnitEditor;
   const identitySubline = [identity?.title, identity?.institution].filter(Boolean).join(" · ");
+
+  // Breadcrumb. A unit editor: "Org units / {Kind plural}" (links only when
+  // the viewer's units-tab grant admits them — `orgUnitsNavVisible`). A
+  // scholar edited by someone else: "‹ Profiles", navigable under the same
+  // conditions the old "Profiles / {name}" crumb was (a superuser on a
+  // profile; a unit admin whose profiles-tab grant admits them); otherwise
+  // there is no roster to return to (a proxy grant names none) and the line
+  // is omitted. Self mode keeps its tab strip / `consoleNav` instead.
+  const crumbs: Crumb[] = [];
+  if (isUnitEditor) {
+    crumbs.push({
+      label: "Org units",
+      href: orgUnitsNavVisible ? "/edit/units" : undefined,
+      testId: orgUnitsNavVisible ? "edit-subnav-units" : undefined,
+    });
+    if (unitKind) {
+      crumbs.push({
+        label: UNIT_KIND_PLURAL[unitKind],
+        href: orgUnitsNavVisible ? `/edit/units?kind=${unitKind}` : undefined,
+        testId: "edit-subnav-unit-kind",
+      });
+    }
+  } else if ((isSuperuser && isProfileEntity) || (isUnitAdmin && profilesNavVisible)) {
+    crumbs.push({ label: "Profiles", href: "/edit/profiles", testId: "edit-subnav-profiles" });
+  }
+  // `hideRail`'s way back to the rest of the attribute set — the entity itself.
+  if (hideRail && backHref) {
+    crumbs.push({ label: scholarName, href: backHref, testId: "edit-rail-back" });
+  }
+
+  // Role pill + meta line (never in self mode — the editor knows who they are).
+  const pillText = isSelf
+    ? null
+    : readOnly
+      ? "View only"
+      : mode === "proxy"
+        ? "Editing as proxy"
+        : isUnitAdmin
+          ? `Editing as ${unitAdmin?.unitName ?? "unit"} administrator`
+          : "Editing as administrator";
+  const metaItems: React.ReactNode[] = [];
+  if (!isSelf && !readOnly) {
+    metaItems.push(<span key="logged">Changes are logged to your account</span>);
+  }
+  if (historyHref) {
+    metaItems.push(
+      <Link
+        key="history"
+        href={historyHref}
+        className="text-apollo-slate hover:underline"
+        data-testid="edit-history-link"
+      >
+        Change history
+      </Link>,
+    );
+  }
+
+  const title = showIdentity ? (
+    <div className="flex min-w-0 items-center gap-3" data-testid="edit-identity-header">
+      <HeadshotAvatar
+        cwid={identity.cwid}
+        preferredName={scholarName}
+        size="md"
+        className="border-apollo-border-strong size-11 shrink-0 border"
+      />
+      <div className="min-w-0">
+        <h1 className="text-[26px] leading-tight font-[600] tracking-[-0.01em] [overflow-wrap:anywhere]">
+          {identity.name}
+        </h1>
+        {identitySubline && (
+          <p className="text-muted-foreground mt-0.5 text-[13px]">{identitySubline}</p>
+        )}
+      </div>
+    </div>
+  ) : (
+    <h1 className="text-[26px] leading-tight font-[600] tracking-[-0.01em] [overflow-wrap:anywhere]">
+      {isSelf ? "Your profile" : scholarName}
+    </h1>
+  );
+
   return (
     <div className="bg-apollo-page min-h-screen" data-slot="edit-shell" data-mode={mode}>
       {/* Skip link — first focusable element, jumps past the rail to the editor. */}
@@ -244,97 +334,104 @@ export function EditShell({
         Skip to editor
       </a>
 
-      {/* Top bar (black) — the shared Apollo chrome with a real account/exit menu
-          (self-fetching `AccountMenu context="console"`; see `_account` above). */}
-      <ConsoleTopBar>{mode === "self" ? consoleNav : null}</ConsoleTopBar>
+      {/* Top bar (black) — the shared Apollo chrome with a real account/exit
+          menu. `variant="console"` so the brand is NOT an <h1>: the page header
+          below owns the page's one <h1>. */}
+      <ConsoleTopBar variant="console" showAccountMenu>
+        {isSelf ? consoleNav : null}
+      </ConsoleTopBar>
 
-      {/* Sub-nav — maroon underline on the active tab. A superuser editing a
-          scholar gets a "Profiles / <name>" breadcrumb back to the roster; a
-          unit editor gets an "Org units / <name>" breadcrumb back to its own
-          roster when the viewer's units-tab grant admits them
-          (`orgUnitsNavVisible`); a unit admin editing a scholar gets the same
-          "Profiles / <name>" crumb superuser mode does when their
-          profiles-tab grant admits them (`profilesNavVisible`) — a real
-          proxy editor never gets a navigable crumb, since a proxy grant names
-          no roster at all. A superuser on their own /edit gets an "All
-          profiles" link across — or, when `consoleNav` is supplied (superuser
-          / comms_steward self-edit), no row at all: the full shared admin nav
-          sits in the top bar instead. */}
-      {mode === "self" && consoleNav ? null : (
-      <div className="border-border border-b">
-        <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
-          {isSuperuser && isProfileEntity ? (
-            <BreadcrumbCrumb
-              href="/edit/profiles"
-              label="Profiles"
-              current={scholarName}
-              testId="edit-subnav-profiles"
-            />
-          ) : isSuperuser ? (
-            // A unit editor (department/division/center/core) — "Profiles"
-            // still has nowhere useful to go from here, but the unit itself
-            // has a real roster to go back to (`/edit/units`) whenever the
-            // viewer's own units-tab grant admits them; when it doesn't (a
-            // role that somehow reaches a unit page with no real grant),
-            // fall back to the same flat, non-navigable label as proxy mode.
-            orgUnitsNavVisible ? (
-              <BreadcrumbCrumb
-                href="/edit/units"
-                label="Org units"
-                current={scholarName}
-                testId="edit-subnav-units"
-              />
-            ) : (
-              <FlatBreadcrumb current={scholarName} />
-            )
-          ) : isUnitAdmin && profilesNavVisible ? (
-            // A unit admin edits a scholar on behalf of a unit they actually
-            // manage — the same roster ("Profiles") a superuser returns to,
-            // gated on their own profiles-tab grant rather than assumed.
-            <BreadcrumbCrumb
-              href="/edit/profiles"
-              label="Profiles"
-              current={scholarName}
-              testId="edit-subnav-profiles"
-            />
-          ) : isProxy || isUnitAdmin ? (
-            // A proxy grant names no roster at all, and a unit admin whose
-            // grant doesn't admit `profilesNavVisible` falls back the same
-            // way — a flat label naming the scholar being edited, not a
-            // navigable breadcrumb.
-            <FlatBreadcrumb
-              current={scholarName}
-              testId={isUnitAdmin ? "edit-subnav-unit-admin" : "edit-subnav-proxy"}
-            />
-          ) : (
-            <div className="flex items-center gap-6">
-              <span
-                className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
-                aria-current="page"
+      {/* Self mode's minimal tab strip ("My Profile" / "All profiles") —
+          navigation, not a breadcrumb, so it stays as it was. Superseded by
+          `consoleNav` (rendered in the top bar) when supplied. */}
+      {isSelf && !consoleNav && (
+        <div className="border-border border-b">
+          <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
+            <span
+              className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
+              aria-current="page"
+            >
+              My Profile
+            </span>
+            {canBrowseProfiles && (
+              <Link
+                href="/edit/profiles"
+                className="text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-3 text-sm"
+                data-testid="edit-subnav-profiles"
               >
-                My Profile
-              </span>
-              {canBrowseProfiles && (
-                <Link
-                  href="/edit/profiles"
-                  className="text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-3 text-sm"
-                  data-testid="edit-subnav-profiles"
-                >
-                  All profiles
-                </Link>
+                All profiles
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Page header — breadcrumb, title row (h1 left, actions right; the
+          actions drop below the title on a phone), meta line. */}
+      <div
+        className="mx-auto flex max-w-[var(--max-content)] flex-col gap-2.5 px-4 pt-5 sm:px-6"
+        data-slot="edit-page-header"
+      >
+        {crumbs.length > 0 && <Breadcrumb crumbs={crumbs} />}
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+          <div className="flex min-w-0 flex-[1_1_280px] flex-col gap-1.5">
+            {title}
+            {(pillText || metaItems.length > 0) && (
+              <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+                {pillText && (
+                  <span
+                    className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-notice-text inline-flex max-w-full items-center gap-1.5 rounded-full border py-0.5 pr-2.5 pl-2 text-[12px] font-medium"
+                    data-slot="edit-role-pill"
+                  >
+                    <Shield className="size-3.5 shrink-0" aria-hidden />
+                    {pillText}
+                  </span>
+                )}
+                {metaItems.map((item, idx) => (
+                  <span key={idx} className="flex items-center gap-x-2">
+                    {idx > 0 && <span aria-hidden>·</span>}
+                    {item}
+                  </span>
+                ))}
+              </div>
+            )}
+            {isUnitAdmin && (
+              <p className="text-muted-foreground text-[13px]" data-slot="edit-unit-admin-note">
+                You can edit the overview and hide misattributed publications; name, title, and
+                contact details come from WCM systems, and the profile URL is set by a Scholars
+                administrator.
+              </p>
+            )}
+          </div>
+          {(reportsHref || previewHref) && (
+            <div className="flex shrink-0 items-center gap-2">
+              {reportsHref && (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={reportsHref} data-testid="edit-reports-link">
+                    View reports
+                    <ArrowRight className="size-4" aria-hidden />
+                  </Link>
+                </Button>
+              )}
+              {previewHref && (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={previewHref} target="_blank" rel="noreferrer">
+                    Preview profile
+                    <ArrowUpRight className="size-4" aria-hidden />
+                  </Link>
+                </Button>
               )}
             </div>
           )}
         </div>
       </div>
-      )}
 
       {/* Body — rail + detail. The rail column is desktop-only; on phones a
           compact <select> at the top of the detail column replaces it.
           `hideRail` drops that first track altogether (both the desktop rail
           and the phone <select>) so the detail panel is the only column. */}
       <div
-        className={`mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 ${
+        className={`mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-4 pt-5 pb-8 sm:px-6 ${
           hideRail ? "" : "md:grid-cols-[auto_1fr]"
         }`}
       >
@@ -352,95 +449,17 @@ export function EditShell({
 
         <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
           {hideRail ? (
-            <>
-              {backHref && (
-                <Link
-                  href={backHref}
-                  className="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm"
-                  data-testid="edit-rail-back"
-                >
-                  <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-                  Back
-                </Link>
-              )}
-              {/* hideRail drops the rail COLUMN (the attribute switcher), not
-                  subRail's own cross-nav (sibling divisions / a center's Reports
-                  link) — it still needs somewhere to live, so it renders here
-                  instead of silently disappearing with the rest of the rail. */}
-              {subRail && <div className="mb-4">{subRail}</div>}
-            </>
+            // hideRail drops the rail COLUMN (the attribute switcher), not
+            // subRail's own cross-nav (sibling divisions / a center's Reports
+            // link) — it still needs somewhere to live, so it renders here
+            // instead of silently disappearing with the rest of the rail.
+            subRail && <div className="mb-4">{subRail}</div>
           ) : (
             <RailSheet
               items={railItems}
               active={activeAttr}
               basePath={basePath}
               subRail={subRail}
-            />
-          )}
-
-          {/* Header row: the identity block (edit-for-others only) on the left,
-              the button row on the right — or just the right-aligned button row
-              when there is no identity block (self mode, unit editors). Buttons,
-              in order: "Change history" (ghost, internal audit page, #955), for
-              a center "View reports" (ghost, internal, Reports IA redesign
-              2026-08-14 — survives the roster/Members page, which hides the
-              rail), then "Preview profile" (outline, the public profile,
-              external ↗). Design round 3, 2026-09-21. */}
-          {(showIdentity || historyHref || reportsHref || previewHref) && (
-            <div className={`flex flex-wrap items-start gap-4 ${showIdentity ? "mb-6" : "mb-4"}`}>
-              {showIdentity && (
-                <div className="flex min-w-0 items-center gap-4" data-testid="edit-identity-header">
-                  <HeadshotAvatar
-                    cwid={identity.cwid}
-                    preferredName={scholarName}
-                    size="md"
-                    className="border-apollo-border-strong size-11 border"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-[22px] leading-tight font-[600] tracking-[-0.02em]">
-                      {identity.name}
-                    </p>
-                    {identitySubline && (
-                      <p className="text-muted-foreground mt-0.5 text-[13px]">{identitySubline}</p>
-                    )}
-                  </div>
-                </div>
-              )}
-              <div className="ml-auto flex shrink-0 items-center gap-2">
-                {historyHref && (
-                  <Button asChild variant="ghost" size="sm">
-                    <Link href={historyHref} data-testid="edit-history-link">
-                      Change history
-                    </Link>
-                  </Button>
-                )}
-                {reportsHref && (
-                  <Button asChild variant="ghost" size="sm">
-                    <Link href={reportsHref} data-testid="edit-reports-link">
-                      View reports
-                      <ArrowRight className="size-4" aria-hidden />
-                    </Link>
-                  </Button>
-                )}
-                {previewHref && (
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={previewHref} target="_blank" rel="noreferrer">
-                      Preview profile
-                      <ArrowUpRight className="size-4" aria-hidden />
-                    </Link>
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {isSuperuser && <SuperuserBanner targetLabel={scholarName} readOnly={readOnly} />}
-          {isProxy && <ProxyBanner targetLabel={scholarName} />}
-          {isUnitAdmin && unitAdmin && (
-            <UnitAdminBanner
-              targetLabel={scholarName}
-              unitKind={unitAdmin.unitKind}
-              unitName={unitAdmin.unitName}
             />
           )}
 

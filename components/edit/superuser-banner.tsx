@@ -3,16 +3,16 @@
  * `/edit/*` shell, § `/edit/scholar/[cwid]`).
  *
  * Server Component (no interactivity, no state): the banner an administrator
- * sees above the cards on `/edit/scholar/[cwid]` (when `cwid != session.cwid`)
- * and on `/edit/publication/[pmid]`. The label is the editing target — a
+ * sees above the cards on `/edit/publication/[pmid]`. (`/edit/scholar/[cwid]`
+ * and the unit editors moved to `EditShell`'s header role pill in the
+ * 2026-09-30 header redesign; the proxy / unit-admin banners went with it.) The label is the editing target — a
  * scholar's preferred name on the scholar surface, the publication title on
  * the takedown surface — and never the actor's CWID (the actor is already in
  * the header's account menu).
  *
  * Visual standard (design round 3, 2026-09-21): the slate-tint "notice" —
  * `--apollo-slate-tint` fill, `--apollo-slate-tint-border`, 13px text in
- * `--apollo-notice-text`, 8px radius, the outline `Shield` glyph. `ProxyBanner`
- * and `UnitAdminBanner` share the same chrome; the roles differ by copy.
+ * `--apollo-notice-text`, 8px radius, the outline `Shield` glyph.
  */
 import { Shield } from "lucide-react";
 

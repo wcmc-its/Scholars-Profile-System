@@ -142,3 +142,83 @@ describe("/edit/units — page header", () => {
     expect(findAll(result, (el) => el.type === "section")).toHaveLength(0);
   });
 });
+
+describe("/edit/units — ?kind= filter (unit editor kind crumb)", () => {
+  const unit = (kind: string, code: string) => ({
+    kind,
+    code,
+    name: `Unit ${code}`,
+    role: "owner",
+    href: `/edit/${kind}/${code}`,
+  });
+  const GRANTS = {
+    departments: [unit("department", "D1")],
+    divisions: [],
+    centers: [unit("center", "C1")],
+    cores: [],
+    institutions: [],
+    total: 2,
+  };
+  const DIRECTORY = [
+    { kind: "department", code: "D1" },
+    { kind: "center", code: "C1" },
+    { kind: "center", code: "C2" },
+    { kind: "core", code: "7" },
+  ];
+  const props = (kind?: string | string[]) => ({
+    searchParams: Promise.resolve(kind === undefined ? {} : { kind }),
+  });
+  const indexUnits = (result: El) =>
+    findAll(result, (el) => "units" in el.props && "isSuperuser" in el.props)[0]?.props.units as
+      | typeof GRANTS
+      | undefined;
+  const directoryUnits = (result: El) =>
+    findAll(result, (el) => Array.isArray(el.props.units) && !("isSuperuser" in el.props))[0]
+      ?.props.units as Array<{ kind: string }> | undefined;
+  const byTestId = (result: El, id: string) =>
+    findAll(result, (el) => el.props["data-testid"] === id);
+
+  it("kind=center narrows the manageable index to centers, with a 'Show all' clear link", async () => {
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadManageableUnits.mockResolvedValue(GRANTS);
+    const result = asEl(await EditUnitsPage(props("center")));
+    const units = indexUnits(result)!;
+    expect(units.centers).toHaveLength(1);
+    expect(units.departments).toHaveLength(0);
+    expect(units.total).toBe(1);
+    const clear = byTestId(result, "units-kind-filter-clear");
+    expect(clear).toHaveLength(1);
+    expect(clear[0].props.href).toBe("/edit/units");
+    const line = byTestId(result, "units-kind-filter")[0];
+    const showing = findAll(line, (el) => el.type === "span")[0];
+    expect((showing.props.children as unknown[]).join("")).toBe("Showing centers");
+  });
+
+  it("kind=center narrows the superuser all-units directory too", async () => {
+    mockGetEditSession.mockResolvedValue({ cwid: "su01", isSuperuser: true, isCommsSteward: false });
+    mockLoadAllUnitsDirectory.mockResolvedValue(DIRECTORY);
+    const result = asEl(await EditUnitsPage(props("center")));
+    expect(directoryUnits(result)!.map((u) => u.kind)).toEqual(["center", "center"]);
+  });
+
+  it.each([["bogus"], [["center", "core"]], [undefined]])(
+    "ignores an unknown / repeated / absent kind (%j) — full lists, no filter line",
+    async (kind) => {
+      mockGetEditSession.mockResolvedValue({ cwid: "su01", isSuperuser: true, isCommsSteward: false });
+      mockLoadManageableUnits.mockResolvedValue(GRANTS);
+      mockLoadAllUnitsDirectory.mockResolvedValue(DIRECTORY);
+      const result = asEl(await EditUnitsPage(props(kind)));
+      expect(indexUnits(result)!.total).toBe(2);
+      expect(directoryUnits(result)).toHaveLength(4);
+      expect(byTestId(result, "units-kind-filter")).toHaveLength(0);
+    },
+  );
+
+  it("an owner with no grants of that kind sees a 'none of that kind' line, not the no-units empty state", async () => {
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadManageableUnits.mockResolvedValue(GRANTS);
+    const result = asEl(await EditUnitsPage(props("core")));
+    expect(byTestId(result, "units-kind-filter-empty")).toHaveLength(1);
+    expect(indexUnits(result)).toBeUndefined();
+  });
+});
