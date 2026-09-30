@@ -475,7 +475,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_DISEASE_FACET",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORG_UNIT_ROLE_CONSOLE",
