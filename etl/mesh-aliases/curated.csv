@@ -117,3 +117,6 @@ NICU,D007363,"Intensive Care Units, Neonatal. Clinical abbreviation; no concept 
 prime editing,D000072669,"Gene Editing. No prime-editing descriptor; parent technique. No concept on staging 2026-09-24 (39 vs 190)."
 PROTAC,D000094243,"Proteolysis Targeting Chimera. Abbreviation; no concept on staging 2026-09-24. Descriptor is recent, so few pubs are tagged yet."
 HFpEF,D054144,"Heart Failure, Diastolic. Closest descriptor, not identical (no preserved-EF descriptor). No concept on staging 2026-09-24 (7 vs 471)."
+alzheimer,D000544,"#1342 morphological alias -> Alzheimer Disease. Bare form keys 'alzheimer'; the Alzheimer's row keys 'alzheimers' and the singularizer only strips a trailing s, so it cannot bridge. meshMapped:false on staging per #1342."
+parkinson,D010300,"#1342 morphological alias -> Parkinson Disease. Same gap as alzheimer: the Parkinson's row keys 'parkinsons'. meshMapped:false on staging per #1342."
+diabetic,D003920,"#1342 derivational alias -> Diabetes Mellitus (same head as the diabetes row). Whole-query only; 'diabetic retinopathy' etc. still resolve exact to their own descriptors. meshMapped:false on staging per #1342."
