@@ -194,6 +194,8 @@ describe("/api/edit/proxy — grant", () => {
       exp: 0,
     });
     mockImpersonationActive.mockReturnValue(true);
+    // A superuser-started overlay (an observer's is refused earlier, read-only).
+    mockIsSuperuser.mockImplementation(async (cwid: string) => cwid === "sup001");
     const res = await POST(post({ scholarCwid: SCHOLAR, proxyCwid: PROXY, action: "grant" }));
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: "impersonation_block" });

@@ -610,6 +610,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "ITS:Library:Scholars/cv-generator-role",
               },
               {
+                "Name": "OBSERVER_ENABLED",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_OBSERVER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/observer-role",
+              },
+              {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",
                 "Value": "on",
               },
@@ -5176,6 +5184,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_CV_GENERATOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/cv-generator-role",
+              },
+              {
+                "Name": "OBSERVER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_OBSERVER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/observer-role",
               },
               {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",

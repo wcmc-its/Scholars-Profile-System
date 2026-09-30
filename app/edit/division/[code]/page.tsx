@@ -31,6 +31,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import { stripObserverView } from "@/lib/auth/observer-view";
 
 export const dynamic = "force-dynamic";
 
@@ -82,5 +83,11 @@ export default async function EditDivisionPage({
   // Drives `EditShell`'s "Org units" breadcrumb (dwd2001 bug #7) — the same
   // units-tab predicate `/edit/units` itself gates on, not a bespoke check.
   const consoleTabs = await loadConsoleTabs(session, db.read);
-  return <UnitEditPage ctx={ctx} attr={attr} orgUnitsNavVisible={consoleTabs.units} />;
+  // An observer's steward grant is read-only; their OWN unit role (if any) still edits.
+  const readOnly =
+    session.isObserver === true &&
+    (await loadUnitEditContext("division", code, stripObserverView(session), db.read)) === null;
+  return (
+    <UnitEditPage ctx={ctx} attr={attr} orgUnitsNavVisible={consoleTabs.units} readOnly={readOnly} />
+  );
 }

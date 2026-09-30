@@ -34,6 +34,16 @@ vi.mock("@/lib/edit/request", async (importActual) => {
     ...actual,
     resolveEditIdentity: mockResolveIdentity,
     impersonationReadonly: mockReadonly,
+    // Mirror of the real write resolver over the mocked identity (see
+    // overview-selection-route.test.ts); superuser-started overlay.
+    resolveEditIdentityForWrite: async () => {
+      const id = await mockResolveIdentity();
+      if (!id) return { ok: false, response: new Response(null, { status: 401 }) };
+      if (id.impersonatedCwid !== null && mockReadonly()) {
+        return { ok: false, response: actual.editError(403, "impersonation_readonly") };
+      }
+      return { ok: true, id };
+    },
   };
 });
 vi.mock("@/lib/edit/overview-authz", () => ({ authorizeOverviewWrite: mockAuthorize }));

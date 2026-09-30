@@ -26,9 +26,8 @@ import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import {
   editError,
   editOk,
-  impersonationReadonly,
   logEditFailure,
-  resolveEditIdentity,
+  resolveEditIdentityForWrite,
 } from "@/lib/edit/request";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 
@@ -48,9 +47,10 @@ async function authorizeWrite(
   }
   if (!isOverviewGenerateEnabled()) return editError(404, "not_found");
 
-  const id = await resolveEditIdentity();
-  if (!id) return new NextResponse(null, { status: 401 });
-  const { session, realCwid, impersonatedCwid } = id;
+  // Observer strip + impersonation-readonly refusal (lib/edit/request.ts).
+  const resolved = await resolveEditIdentityForWrite();
+  if (!resolved.ok) return resolved.response;
+  const { session, realCwid, impersonatedCwid } = resolved.id;
 
   const requested = new URL(request.url).searchParams.get("cwid")?.trim();
   const targetCwid = requested && requested.length > 0 ? requested : session.cwid;
@@ -66,9 +66,6 @@ async function authorizeWrite(
   if (!authz.ok) {
     logEditDenial({ actorCwid: session.cwid, targetCwid, path: PATH, reason: authz.reason });
     return editError(403, authz.reason);
-  }
-  if (impersonatedCwid !== null && impersonationReadonly()) {
-    return editError(403, "impersonation_readonly");
   }
   const body = ((await request.json().catch(() => null)) ?? {}) as Body;
   return { targetCwid, body };

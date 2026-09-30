@@ -44,7 +44,7 @@ import {
   getEffectiveEditSession,
   impersonationActive,
 } from "@/lib/auth/effective-identity";
-import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
+import { type EditSession } from "@/lib/auth/superuser";
 import {
   readSessionValue,
   withImpersonation,
@@ -272,10 +272,12 @@ describe("assertImpersonable — R2 down-only escalation guard", () => {
     });
   });
 
-  it("exposes canImpersonate as the live isSuperuser check (R1)", () => {
-    // R1 reuses isSuperuser verbatim — a defensive identity assertion so a
-    // refactor that breaks the alias is caught here.
-    expect(canImpersonate).toBe(isSuperuser);
+  it("canImpersonate (R1) admits a superuser and refuses a non-superuser non-observer", async () => {
+    // R1 = isSuperuser || isObserver (observer: read-only View as). The observer
+    // leg is dormant here (OBSERVER_ENABLED unset); see observer-role.test.ts.
+    ldapReturnsSuperusersFor(new Set([SUPERUSER_FIXTURE]));
+    expect(await canImpersonate(SUPERUSER_FIXTURE)).toBe(true);
+    expect(await canImpersonate(ROLE_FIXTURES.owner)).toBe(false);
   });
 });
 

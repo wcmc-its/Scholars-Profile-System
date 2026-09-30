@@ -182,9 +182,11 @@ export default async function EditScholarPage({
         ? "unit-admin"
         : session.isSuperuser
           ? "superuser"
-          : session.isCommsSteward
+          : session.isCommsSteward && !session.isObserver
             ? "comms_steward"
-            : "cv-generator";
+            : // An observer's steward grant is read-only: render the
+              // cv-generator (superuser-parity, inert) view.
+              "cv-generator";
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set

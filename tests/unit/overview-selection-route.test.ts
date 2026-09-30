@@ -27,7 +27,21 @@ const {
 
 vi.mock("@/lib/edit/request", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/edit/request")>();
-  return { ...actual, resolveEditIdentity: mockResolveIdentity };
+  return {
+    ...actual,
+    resolveEditIdentity: mockResolveIdentity,
+    // The real write resolver calls the module-local resolveEditIdentity, which
+    // this mock can't reach — mirror it over the mocked identity (superuser-started
+    // overlay; the observer path is covered in observer-role.test.ts).
+    resolveEditIdentityForWrite: async () => {
+      const id = await mockResolveIdentity();
+      if (!id) return { ok: false, response: new Response(null, { status: 401 }) };
+      if (id.impersonatedCwid !== null && actual.impersonationReadonly()) {
+        return { ok: false, response: actual.editError(403, "impersonation_readonly") };
+      }
+      return { ok: true, id };
+    },
+  };
 });
 vi.mock("@/lib/edit/overview-authz", () => ({ authorizeOverviewWrite: mockAuthorize }));
 vi.mock("@/lib/edit/authz", () => ({

@@ -118,6 +118,16 @@ export async function ConsoleShell({
         />
       </ConsoleTopBar>
       <main id="console-main" tabIndex={-1} className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+        {session.isObserver ? (
+          <p
+            role="note"
+            data-testid="observer-banner"
+            className="border-border bg-muted text-muted-foreground mb-6 rounded-md border px-4 py-2 text-sm"
+          >
+            <strong className="text-foreground">View only.</strong> You can see everything here.
+            Only changes your own roles allow will save.
+          </p>
+        ) : null}
         {children}
       </main>
     </div>

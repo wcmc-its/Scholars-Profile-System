@@ -22,9 +22,9 @@ import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import {
   editError,
   editOk,
-  impersonationReadonly,
   logEditFailure,
   resolveEditIdentity,
+  resolveEditIdentityForWrite,
 } from "@/lib/edit/request";
 import {
   loadOverviewSelectionDeltas,
@@ -38,13 +38,22 @@ const PATH = "/api/edit/overview/selection";
  *  return early (401 / 403 / 404). Shared by GET + PUT. */
 async function authorizeTarget(
   request: NextRequest,
+  forWrite = false,
 ): Promise<
   { targetCwid: string; actorCwid: string; impersonatedCwid: string | null } | NextResponse
 > {
   if (!isOverviewGenerateEnabled()) return editError(404, "not_found");
 
-  const id = await resolveEditIdentity();
-  if (!id) return new NextResponse(null, { status: 401 });
+  let id;
+  if (forWrite) {
+    // Observer strip + impersonation-readonly refusal (lib/edit/request.ts).
+    const resolved = await resolveEditIdentityForWrite();
+    if (!resolved.ok) return resolved.response;
+    id = resolved.id;
+  } else {
+    id = await resolveEditIdentity();
+    if (!id) return new NextResponse(null, { status: 401 });
+  }
   const { session, realCwid, impersonatedCwid } = id;
 
   const requested = new URL(request.url).searchParams.get("cwid")?.trim();
@@ -80,17 +89,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function PUT(request: NextRequest): Promise<NextResponse> {
   // This route reads its body via `request.json()` instead of `readEditRequest`,
   // so the write-path guards every sibling gets for free are owed explicitly:
-  // the R4 same-origin + JSON content-type CSRF defense, and the R3
-  // impersonation-readonly refusal before any mutation.
+  // the R4 same-origin + JSON content-type CSRF defense, and (via
+  // `authorizeTarget(…, true)`) the R3 impersonation-readonly refusal + observer strip.
   const origin = verifyRequestOrigin(request);
   if (!origin.ok) {
     return editError(origin.reason === "bad_content_type" ? 415 : 403, origin.reason);
   }
-  const auth = await authorizeTarget(request);
+  const auth = await authorizeTarget(request, true);
   if (auth instanceof NextResponse) return auth;
-  if (auth.impersonatedCwid !== null && impersonationReadonly()) {
-    return editError(403, "impersonation_readonly");
-  }
   // Untrusted body — `saveOverviewSelectionDeltas` normalizes before persisting, so
   // a malformed / oversized payload is coerced rather than rejected.
   const body = await request.json().catch(() => ({}));
