@@ -150,7 +150,7 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
   // (the five known hidden values); `isPubliclyDisplayed` is a PREDICATE that
   // additionally (a) prefix-matches every `doctoral_student*` variant, including
   // ones nobody has enumerated yet — out-of-band writes provably happen, see the
-  // LEGACY_VISIBLE_ROLES note in lib/eligibility.ts — and (b) fails CLOSED on any
+  // publicRoleWhere note in lib/eligibility.ts — and (b) fails CLOSED on any
   // unrecognized role since #2202. A row `notIn` admits but the predicate rejects
   // is exactly a published URL that 404s, which is the defect. The profile route
   // gates on this predicate, so the sitemap must too, or the two disagree about

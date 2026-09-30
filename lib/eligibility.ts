@@ -123,29 +123,16 @@ export function publicRoleWhere(): PublicRoleWhere {
 }
 
 /**
- * Legacy `role_category` values the current ED ETL can no longer emit —
- * `deriveRoleCategory` (etl/ed/index.ts) folds voluntary / adjunct / courtesy /
- * emeritus into `affiliated_faculty` and has no `research_staff` branch — but which
- * pre-rewrite or out-of-band rows may still carry. The suffixed `doctoral_student_*`
- * values are proof that out-of-band writes happen: 1,875 staging rows carry them and
- * no version of this repo ever emitted them. Listed so the fail-closed check below
- * cannot hide a legitimately-visible historical row.
+ * The lower-cased `role_category` tokens {@link isPubliclyDisplayed} admits.
  *
- * ponytail: drop once a prod census of `SELECT role_category, COUNT(*) FROM scholar`
- * shows zero rows carrying these.
+ * #2265 — this used to also spread a `LEGACY_VISIBLE_ROLES` list (`voluntary_faculty`,
+ * `adjunct_faculty`, `courtesy_faculty`, `faculty_emeritus`, `research_staff`) —
+ * pre-rewrite values the ED ETL can no longer emit (`deriveRoleCategory` folds them
+ * into `affiliated_faculty`). The 2026-08-06 prod census found zero active rows
+ * carrying any of them, so they were dropped. A row that still carries one now fails
+ * closed like any other unrecognized token.
  */
-const LEGACY_VISIBLE_ROLES = [
-  "voluntary_faculty",
-  "adjunct_faculty",
-  "courtesy_faculty",
-  "faculty_emeritus",
-  "research_staff",
-] as const;
-
-const VISIBLE_ROLE_KEYS: ReadonlySet<string> = new Set<string>([
-  ...PUBLICLY_DISPLAYED_ROLES,
-  ...LEGACY_VISIBLE_ROLES,
-]);
+const VISIBLE_ROLE_KEYS: ReadonlySet<string> = new Set<string>(PUBLICLY_DISPLAYED_ROLES);
 
 /**
  * Every `role_category` token this repo RECOGNIZES — the visible roles plus the
