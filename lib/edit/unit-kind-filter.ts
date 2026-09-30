@@ -3,11 +3,7 @@
  * (`EditShell`) links here to list only that kind. Pure (type-only imports),
  * so it is safe from both the page and client-bundled code.
  */
-import type {
-  ManageableUnits,
-  UnitDirectoryEntry,
-  UnitPageKind,
-} from "@/lib/edit/manageable-units";
+import type { ManageableUnits, UnitPageKind } from "@/lib/edit/manageable-units";
 
 const KINDS: ReadonlyArray<UnitPageKind> = ["department", "division", "center", "core"];
 
@@ -44,12 +40,4 @@ export function filterManageableUnitsByKind(
     total:
       keep.departments.length + keep.divisions.length + keep.centers.length + keep.cores.length,
   };
-}
-
-/** The all-units directory narrowed to one kind. */
-export function filterDirectoryByKind(
-  units: ReadonlyArray<UnitDirectoryEntry>,
-  kind: UnitPageKind,
-): UnitDirectoryEntry[] {
-  return units.filter((u) => u.kind === kind);
 }

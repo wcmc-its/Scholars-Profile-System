@@ -32,7 +32,6 @@ import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
   UNIT_KIND_PLURAL_LOWER,
-  filterDirectoryByKind,
   filterManageableUnitsByKind,
   parseUnitKindParam,
 } from "@/lib/edit/unit-kind-filter";
@@ -66,7 +65,6 @@ export default async function EditUnitsPage({
   const allDirectoryUnits = canSeeAllUnitsDirectory
     ? await loadAllUnitsDirectory(db.read, { includeRetired: session.isSuperuser })
     : [];
-  const directoryUnits = kind ? filterDirectoryByKind(allDirectoryUnits, kind) : allDirectoryUnits;
 
   // The shared console tab strip (role-aware-navigation-entry-points-spec.md): the
   // "Units" tab is active here, and every other surface the viewer can open is a
@@ -152,7 +150,13 @@ export default async function EditUnitsPage({
       )}
       {canSeeAllUnitsDirectory && (
         <section className={units.total > 0 ? "mt-10" : undefined}>
-          <AllUnitsDirectory units={directoryUnits} heading={units.total > 0} />
+          <AllUnitsDirectory
+            // Remount per kind so a new ?kind= re-seeds the Kind facet.
+            key={kind ?? "all"}
+            units={allDirectoryUnits}
+            initialKind={kind ?? undefined}
+            heading={units.total > 0}
+          />
         </section>
       )}
     </ConsoleShell>

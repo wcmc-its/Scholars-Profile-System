@@ -211,6 +211,7 @@ export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEdit
         name={ctx.unit.name}
         kindLabel={kindLabel(ctx)}
         crumbLabel={crumbLabel(ctx)}
+        crumbHref={crumbHref(ctx, orgUnitsNavVisible)}
         orgUnitsNavVisible={orgUnitsNavVisible}
         actorRole={ctx.actorRole}
         previewHref={previewHref}
@@ -290,6 +291,17 @@ function crumbLabel(ctx: UnitEditContext): string {
     case "division":
       return ctx.unit.deptName ?? "Divisions";
   }
+}
+
+/** The second crumb's link — `/edit/units?kind=`, the same filter EditShell's
+ *  kind crumb opens. Only when the root crumb links too (the viewer can reach
+ *  `/edit/units`), and only when the label IS the kind plural: a division
+ *  crumb that names its parent department stays plain text, since a link
+ *  labelled "Medicine" that lists every division would mislead. */
+function crumbHref(ctx: UnitEditContext, orgUnitsNavVisible: boolean): string | undefined {
+  if (!orgUnitsNavVisible) return undefined;
+  if (ctx.unit.unitType === "division" && ctx.unit.deptName) return undefined;
+  return `/edit/units?kind=${ctx.unit.unitType}`;
 }
 
 /** The public path in front of the slug, for the Basics Profile URL field. */

@@ -346,7 +346,7 @@ export function EditShell({
           `consoleNav` (rendered in the top bar) when supplied. */}
       {isSelf && !consoleNav && (
         <div className="border-border border-b">
-          <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
+          <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-4 sm:px-6">
             <span
               className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
               aria-current="page"
@@ -395,13 +395,6 @@ export function EditShell({
                 ))}
               </div>
             )}
-            {isUnitAdmin && (
-              <p className="text-muted-foreground text-[13px]" data-slot="edit-unit-admin-note">
-                You can edit the overview and hide misattributed publications; name, title, and
-                contact details come from WCM systems, and the profile URL is set by a Scholars
-                administrator.
-              </p>
-            )}
           </div>
           {(reportsHref || previewHref) && (
             <div className="flex shrink-0 items-center gap-2">
@@ -424,6 +417,15 @@ export function EditShell({
             </div>
           )}
         </div>
+        {/* Full-width, AFTER the title row closes — inside the left column it
+            made `items-end` pin the actions to the note's last line, well
+            below the h1. */}
+        {isUnitAdmin && (
+          <p className="text-muted-foreground text-[13px]" data-slot="edit-unit-admin-note">
+            You can edit the overview and hide misattributed publications; name, title, and contact
+            details come from WCM systems, and the profile URL is set by a Scholars administrator.
+          </p>
+        )}
       </div>
 
       {/* Body — rail + detail. The rail column is desktop-only; on phones a

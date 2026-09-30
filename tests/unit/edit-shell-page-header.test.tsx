@@ -84,9 +84,11 @@ describe("EditShell — page header role pill", () => {
         <div>panel</div>
       </EditShell>,
     );
-    expect(document.querySelector('[data-slot="edit-unit-admin-note"]')?.textContent).toContain(
-      "profile URL is set by a Scholars administrator",
-    );
+    const note = document.querySelector('[data-slot="edit-unit-admin-note"]');
+    expect(note?.textContent).toContain("profile URL is set by a Scholars administrator");
+    // Full-width under the title row, not inside its left column — so the
+    // row's items-end aligns the actions with the h1/meta line, not the note.
+    expect(note?.parentElement?.getAttribute("data-slot")).toBe("edit-page-header");
     unmount();
     render(
       <EditShell {...base} mode="proxy">

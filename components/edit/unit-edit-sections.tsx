@@ -52,6 +52,7 @@ export function UnitEditSections({
   kindLabel,
   titleBadge,
   crumbLabel,
+  crumbHref,
   rootCrumb = { label: "Org units", href: "/edit/units" },
   orgUnitsNavVisible,
   actorRole,
@@ -68,6 +69,8 @@ export function UnitEditSections({
   titleBadge?: React.ReactNode;
   /** The breadcrumb's second segment ("Centers"); omitted = the root crumb only. */
   crumbLabel?: string;
+  /** Where the second crumb links (`/edit/units?kind=…`); omitted = plain text. */
+  crumbHref?: string;
   /** The breadcrumb's first segment — "Org units", or a core's "Cores". */
   rootCrumb?: { label: string; href: string };
   /** Whether the root crumb links back to its index (the viewer's tab predicate). */
@@ -110,9 +113,19 @@ export function UnitEditSections({
               <span className="text-muted-foreground" aria-hidden>
                 /
               </span>
-              <span className="text-muted-foreground" data-testid="unit-edit-crumb">
-                {crumbLabel}
-              </span>
+              {crumbHref ? (
+                <Link
+                  href={crumbHref}
+                  className="text-apollo-slate hover:underline"
+                  data-testid="unit-edit-crumb"
+                >
+                  {crumbLabel}
+                </Link>
+              ) : (
+                <span className="text-muted-foreground" data-testid="unit-edit-crumb">
+                  {crumbLabel}
+                </span>
+              )}
             </>
           )}
         </nav>

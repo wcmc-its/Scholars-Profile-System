@@ -150,17 +150,22 @@ type FilterState = {
 export function AllUnitsDirectory({
   units,
   heading = false,
+  initialKind,
 }: {
   units: ReadonlyArray<UnitDirectoryEntry>;
   /** Render an "All units" heading — the page sets it when the viewer's own
    *  "Units you manage" list sits above, so the two lists stay distinct. */
   heading?: boolean;
+  /** `/edit/units?kind=` — seeds the Kind facet's selection (rather than the
+   *  page pre-filtering `units`), so the facet keeps its real per-kind counts
+   *  and its own Clear filters still works. */
+  initialKind?: string;
 }) {
   const [query, setQuery] = React.useState("");
   const [sort, setSort] = React.useState<SortKey>("name");
   const [filters, setFilters] = React.useState<FilterState>({
     gap: "any",
-    kinds: new Set(),
+    kinds: new Set(initialKind ? [initialKind] : []),
     types: new Set(),
     sources: new Set(),
   });

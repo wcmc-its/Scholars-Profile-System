@@ -194,11 +194,18 @@ describe("/edit/units — ?kind= filter (unit editor kind crumb)", () => {
     expect((showing.props.children as unknown[]).join("")).toBe("Showing centers");
   });
 
-  it("kind=center narrows the superuser all-units directory too", async () => {
+  it("kind=center seeds the superuser all-units directory's Kind facet (rows unfiltered)", async () => {
     mockGetEditSession.mockResolvedValue({ cwid: "su01", isSuperuser: true, isCommsSteward: false });
     mockLoadAllUnitsDirectory.mockResolvedValue(DIRECTORY);
     const result = asEl(await EditUnitsPage(props("center")));
-    expect(directoryUnits(result)!.map((u) => u.kind)).toEqual(["center", "center"]);
+    const dir = findAll(
+      result,
+      (el) => Array.isArray(el.props.units) && !("isSuperuser" in el.props),
+    )[0];
+    // Full rows so the facet keeps its real per-kind counts; the kind is the
+    // facet's initial selection instead.
+    expect(dir.props.units).toHaveLength(4);
+    expect(dir.props.initialKind).toBe("center");
   });
 
   it.each([["bogus"], [["center", "core"]], [undefined]])(
