@@ -131,9 +131,29 @@ export function MenteeSuggestionsCard({
   const [errors, setErrors] = React.useState<Map<number, string>>(new Map());
   const [busy, setBusy] = React.useState<Set<number>>(new Set());
 
+  // A co-author who is also an active Faculty Review mentee shows once, in the
+  // FRT panel (which leads the page), with the co-authorship noted on that row.
+  const frtCwids = React.useMemo(
+    () =>
+      new Set(
+        frtMentees
+          .filter((r) => r.dismissedAt === null && r.menteeCwid !== null)
+          .map((r) => r.menteeCwid!),
+      ),
+    [frtMentees],
+  );
+  const coPubsByCwid = React.useMemo(
+    () => new Map(suggestions.map((s) => [s.menteeCwid, s.nCoPubs])),
+    [suggestions],
+  );
+  const coauthorSuggestions = React.useMemo(
+    () => suggestions.filter((s) => !frtCwids.has(s.menteeCwid)),
+    [suggestions, frtCwids],
+  );
+
   const view = React.useMemo(
     () =>
-      suggestions
+      coauthorSuggestions
         .filter((s) => !added.has(s.id))
         .map((s) => {
           const local = dismissed.get(s.id);
@@ -145,7 +165,7 @@ export function MenteeSuggestionsCard({
             dismissReason: local,
           };
         }),
-    [suggestions, dismissed, added],
+    [coauthorSuggestions, dismissed, added],
   );
   const main = view.filter(isDefault).sort(byStrength);
   const weak = view.filter(
@@ -267,9 +287,27 @@ export function MenteeSuggestionsCard({
         Mentees
       </Link>
 
-      {(suggestions.length > 0 || frtMentees.length === 0) && (
+      {frtMentees.length > 0 && (
+        <FrtMenteeSuggestions
+          rows={frtMentees}
+          su={su}
+          scholarName={scholarName}
+          coPubsByCwid={coPubsByCwid}
+          addMentee={postManualMentee}
+        />
+      )}
+
+      {(coauthorSuggestions.length > 0 || frtMentees.length === 0) && (
         <EditPanel
           slot="mentee-suggestions-panel"
+          // Under the FRT panel it is the second panel on the page: its own
+          // heading id (one panel-heading per page) and a divider above it.
+          {...(frtMentees.length > 0
+            ? {
+                headingId: "mentee-suggestions-coauthor-heading",
+                className: "border-apollo-border border-t pt-6",
+              }
+            : {})}
           heading="From your publications"
           description={
             su
@@ -350,15 +388,6 @@ export function MenteeSuggestionsCard({
             </details>
           )}
         </EditPanel>
-      )}
-
-      {frtMentees.length > 0 && (
-        <FrtMenteeSuggestions
-          rows={frtMentees}
-          su={su}
-          scholarName={scholarName}
-          addMentee={postManualMentee}
-        />
       )}
     </>
   );
