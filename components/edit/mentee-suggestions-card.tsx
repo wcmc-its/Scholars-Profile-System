@@ -20,7 +20,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { FrtMenteeSuggestions } from "@/components/edit/frt-mentee-suggestions";
@@ -295,7 +295,11 @@ export function MenteeSuggestionsCard({
 
           {weak.length > 0 && (
             <details data-testid="mentee-suggestions-weak">
-              <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+              <summary className="text-apollo-slate flex cursor-pointer list-none flex-wrap items-center gap-1 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  aria-hidden
+                  className="size-3.5 shrink-0 transition-transform [details[open]>summary>&]:rotate-90"
+                />
                 {weak.length} weaker {weak.length === 1 ? "match" : "matches"} (1 co-authored paper
                 each)
               </summary>
@@ -309,7 +313,11 @@ export function MenteeSuggestionsCard({
 
           {gone.length > 0 && (
             <details data-testid="mentee-suggestions-dismissed">
-              <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+              <summary className="text-apollo-slate flex cursor-pointer list-none flex-wrap items-center gap-1 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  aria-hidden
+                  className="size-3.5 shrink-0 transition-transform [details[open]>summary>&]:rotate-90"
+                />
                 {gone.length} dismissed
               </summary>
               <ul className="mt-2 flex flex-col gap-2">
@@ -435,7 +443,11 @@ function SuggestionRow({
 
       {s.evidence.length > 0 && (
         <details data-testid={`mentee-suggestion-pubs-${s.id}`}>
-          <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+          <summary className="text-apollo-slate flex cursor-pointer list-none flex-wrap items-center gap-1 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              aria-hidden
+              className="size-3.5 shrink-0 transition-transform [details[open]>summary>&]:rotate-90"
+            />
             Co-authored publications ({s.nCoPubs})
             {s.nCoPubs > s.evidence.length && (
               <span className="text-muted-foreground text-xs font-normal">

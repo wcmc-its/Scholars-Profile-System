@@ -12,6 +12,7 @@
 "use client";
 
 import * as React from "react";
+import { ChevronRight } from "lucide-react";
 
 import {
   DirectoryPeopleTypeahead,
@@ -189,7 +190,11 @@ export function FrtMenteeSuggestions({
           />
           {outside.length > 0 && (
             <details data-testid="frt-mentees-outside" open={needle !== ""}>
-              <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+              <summary className="text-apollo-slate flex cursor-pointer list-none flex-wrap items-center gap-1 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  aria-hidden
+                  className="size-3.5 shrink-0 transition-transform [details[open]>summary>&]:rotate-90"
+                />
                 {outside.length} outside WCM
               </summary>
               <ul className="border-apollo-border divide-apollo-border mt-2 divide-y rounded-md border">
@@ -202,7 +207,11 @@ export function FrtMenteeSuggestions({
 
       {gone.length > 0 && (
         <details data-testid="frt-mentees-dismissed">
-          <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+          <summary className="text-apollo-slate flex cursor-pointer list-none flex-wrap items-center gap-1 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              aria-hidden
+              className="size-3.5 shrink-0 transition-transform [details[open]>summary>&]:rotate-90"
+            />
             {gone.length} dismissed
           </summary>
           <ul className="mt-2 flex flex-col gap-2">
