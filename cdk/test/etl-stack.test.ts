@@ -1736,6 +1736,13 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
+    it("starts the staging nightly 45 min after prod's, so the InfoEd steps don't overlap (#2906)", () => {
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-etl-nightly-staging",
+        ScheduleExpression: "cron(45 7 * * ? *)",
+      });
+    });
+
     it("runs etl:infoed in BOTH nightly cadences (#2906)", () => {
       expect(getStateMachineDefinitionText(template, "scholars-nightly-staging")).toMatch(
         /etl:infoed/,
