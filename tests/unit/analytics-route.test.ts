@@ -386,3 +386,79 @@ describe("handleAnalyticsBeacon search_popover_* (#265)", () => {
     expect(logged.descriptorId).toBeNull();
   });
 });
+
+// not_found beacon (NotFoundBeacon) — re-emitted via logNotFound / logVivoFourOhFour.
+describe("handleAnalyticsBeacon — not_found", () => {
+  let logs: Array<Record<string, unknown>>;
+
+  beforeEach(() => {
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      logs.push(JSON.parse(line as string) as Record<string, unknown>);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("accepts a valid public not_found and emits the logNotFound shape only", () => {
+    handleAnalyticsBeacon({
+      event: "not_found",
+      variant: "public",
+      path: "/jane-doe",
+      pattern: "profile",
+    });
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ event: "not_found", path: "/jane-doe", pattern: "profile" });
+    expect(Object.keys(logs[0]).sort()).toEqual(["event", "path", "pattern", "ts"]);
+  });
+
+  it("strips query string and hash from the path, and caps its length", () => {
+    handleAnalyticsBeacon({ event: "not_found", path: "/a/b?email=x@y.z#frag", pattern: "other" });
+    handleAnalyticsBeacon({ event: "not_found", path: "/c#x?y", pattern: "other" });
+    handleAnalyticsBeacon({ event: "not_found", path: "/" + "z".repeat(2000), pattern: "other" });
+    expect(logs.map((l) => l.path).slice(0, 2)).toEqual(["/a/b", "/c"]);
+    expect((logs[2].path as string).length).toBe(512);
+  });
+
+  it("rejects a bad path or pattern (no log)", () => {
+    handleAnalyticsBeacon({ event: "not_found", path: "relative", pattern: "other" });
+    handleAnalyticsBeacon({ event: "not_found", path: "https://evil.example/x", pattern: "other" });
+    handleAnalyticsBeacon({ event: "not_found", path: 42, pattern: "other" });
+    handleAnalyticsBeacon({ event: "not_found", pattern: "other" });
+    handleAnalyticsBeacon({ event: "not_found", path: "/x", pattern: "bogus" });
+    handleAnalyticsBeacon({ event: "not_found", path: "/x" });
+    expect(logs).toHaveLength(0);
+  });
+
+  it("root variant on a VIVO path ALSO emits vivo_404, exactly as the old root not-found did", () => {
+    handleAnalyticsBeacon({
+      event: "not_found",
+      variant: "root",
+      path: "/display/cwid-abc123",
+      pattern: "vivo",
+    });
+    expect(logs.map((l) => l.event)).toEqual(["not_found", "vivo_404"]);
+    expect(logs[1]).toMatchObject({ url: "/display/cwid-abc123" });
+  });
+
+  it("root variant on a non-VIVO path emits not_found only; public never emits vivo_404", () => {
+    handleAnalyticsBeacon({ event: "not_found", variant: "root", path: "/nope", pattern: "other" });
+    handleAnalyticsBeacon({
+      event: "not_found",
+      variant: "public",
+      path: "/display/cwid-abc123",
+      pattern: "other",
+    });
+    expect(logs.map((l) => l.event)).toEqual(["not_found", "not_found"]);
+  });
+
+  it("POST /api/analytics returns 204 for a not_found beacon", async () => {
+    const resp = await POST(
+      makeRequest({ event: "not_found", variant: "root", path: "/nope", pattern: "other" }),
+    );
+    expect(resp.status).toBe(204);
+    expect(logs).toHaveLength(1);
+  });
+});
