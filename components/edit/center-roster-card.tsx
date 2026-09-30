@@ -17,9 +17,8 @@
  * always-visible date-input columns. "Edit dates" opens a small popover
  * with the same two `<input type=date>` fields as before, same
  * `onStartChange`/`onEndChange` validation (End < Start blocked client-side).
- * Remove rides along as a discreet text link right beside the date range —
- * dropped from its own always-on column since it's a rare action, not
- * something that needs permanent width on every row.
+ * Remove sits inside that popover, under the End date — a rare action (an
+ * add made in error), not something that needs permanent width on every row.
  *
  * ONE mutually-exclusive filter — All members (default) / Invited / Inactive /
  * Left WCM — rendered as status tabs, each labelled with its count, so the
@@ -31,11 +30,12 @@
  *
  * A row whose person has left WCM while the membership is still open is
  * tinted amber and its date-range trigger colored to match, because that is
- * the combination this card exists to surface. "Left WCM" is the roster
+ * the combination this card exists to surface; its Status cell reads "Left
+ * WCM" instead of the membership status. "Left WCM" is the roster
  * row's `scholarState === "departed"` (`scholarStateOf` in
  * `unit-edit-context.ts`: the Scholar row is soft-deleted), and "still open" means the
  * membership is not Inactive by its dates. The count of those rows drives
- * the amber banner above the table ("Review and set end dates" jumps to the
+ * the "Membership upkeep" card above the table ("Review each" jumps to the
  * Left WCM tab) — outstanding work, not hidden rows.
  *
  * Inline edits POST `/api/edit/roster` `action:"set"` one field at a time
@@ -47,10 +47,12 @@
  * Diseases: a "Diseases" column renders only for a center that actually has
  * assignment data (`hasDiseases`) — data-driven, since `unit-edit-context.ts`
  * gates the whole `diseases`/`diseaseOptions` payload on the center having a
- * `CenterProgram` taxonomy (so never on CTSC). Each member shows up to
- * `MAX_DISEASE_CHIPS` CONFIRMED chips, a "+N more" count, and an amber
- * "N to review →" pill for undecided rows; "+ Add a disease" for a member
- * with none, "Manage" when nothing is left to review. Every one of them opens
+ * `CenterProgram` taxonomy (so never on CTSC). Each member shows an amber
+ * "N to review" pill for undecided rows and an "N confirmed" count; "+ Add a
+ * disease" for a member with none, "Manage" when every row was rejected. A
+ * "Disease inferences" summary card above the table counts members to review
+ * and live inferences by confidence, and holds "Start review queue". Every
+ * cell control opens
  * `CenterDiseaseReviewSheet` (Edit Center redesign; replaces the inline
  * expanded panel): evidence, Confirm / Reject / Undo, "Confirm N
  * high-confidence", and manual add. "Start review queue (N)" walks the
@@ -76,7 +78,7 @@
 
 import Link from "next/link";
 import * as React from "react";
-import { ChevronDown } from "lucide-react";
+import { ArrowRight, ChevronDown, Download, Plus, Search } from "lucide-react";
 
 import { CenterDiseaseReviewSheet } from "@/components/edit/center-disease-review-sheet";
 import {
@@ -179,9 +181,6 @@ type RosterFilter = "all" | "invited" | "inactive" | "departed";
 
 type ConfidenceFilter = "any" | "high" | "medium" | "low";
 
-/** Confirmed chips shown before the "+N more" count kicks in. */
-const MAX_DISEASE_CHIPS = 2;
-
 /** Rows per "Show 25 more" page. */
 const PAGE_SIZE = 25;
 
@@ -214,10 +213,10 @@ export function datesLabel(startDate: string | null, endDate: string | null): st
 }
 
 /**
- * The collapsed Diseases cell: up to `MAX_DISEASE_CHIPS` CONFIRMED chips, a
- * "+N more" count, and an amber "N to review →" pill for undecided rows. A
- * member with no disease rows at all gets "+ Add a disease"; one with nothing
- * left to review gets "Manage". Every control opens the review sheet.
+ * The collapsed Diseases cell: an amber "N to review" pill for undecided
+ * rows and an "N confirmed" count. A member with no disease rows at all gets
+ * "+ Add a disease"; one whose rows were all rejected gets "Manage". Every
+ * control opens the review sheet.
  */
 function DiseaseCell({
   member,
@@ -229,66 +228,52 @@ function DiseaseCell({
   onOpen: (cwid: string) => void;
 }) {
   const diseases = member.diseases ?? [];
-  const confirmed = confirmedDiseaseRows(diseases);
+  const confirmed = confirmedDiseaseRows(diseases).length;
   const pending = pendingDiseaseRows(diseases).length;
-  const shown = confirmed.slice(0, MAX_DISEASE_CHIPS);
-  const overflow = confirmed.length - shown.length;
   const open = () => onOpen(member.cwid);
 
   return (
-    <div className="flex flex-wrap items-center gap-1" data-testid={`roster-disease-chips-${member.cwid}`}>
-      {shown.map((d) => (
-        <button
-          key={d.diseaseCode}
-          type="button"
-          onClick={open}
-          className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate rounded-full border px-2 py-px text-xs whitespace-nowrap hover:underline"
-          data-testid={`roster-disease-chip-${member.cwid}-${d.diseaseCode}`}
-        >
-          {diseaseLabel(d.diseaseCode)}
-        </button>
-      ))}
-      {overflow > 0 && (
-        <button
-          type="button"
-          onClick={open}
-          className="text-muted-foreground text-xs whitespace-nowrap hover:underline"
-          data-testid={`roster-disease-chip-more-${member.cwid}`}
-        >
-          +{overflow} more
-        </button>
-      )}
+    <div className="flex flex-col items-start gap-0.5" data-testid={`roster-disease-chips-${member.cwid}`}>
       {pending > 0 && (
         <button
           type="button"
           onClick={open}
-          className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber hover:border-apollo-amber rounded-full border px-2 py-px text-xs font-semibold whitespace-nowrap"
+          className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber hover:border-apollo-amber rounded-full border px-2.5 py-px text-xs font-medium whitespace-nowrap"
           data-testid={`roster-disease-pending-${member.cwid}`}
         >
-          {pending} to review →
+          {pending} to review
         </button>
       )}
-      {diseases.length === 0
-        ? !inactive && (
-            <button
-              type="button"
-              onClick={open}
-              className="text-apollo-slate text-xs hover:underline"
-              data-testid={`roster-disease-add-${member.cwid}`}
-            >
-              + Add a disease
-            </button>
-          )
-        : pending === 0 && (
-            <button
-              type="button"
-              onClick={open}
-              className="text-apollo-slate ml-0.5 text-xs hover:underline"
-              data-testid={`roster-disease-manage-${member.cwid}`}
-            >
-              Manage
-            </button>
-          )}
+      {confirmed > 0 && (
+        <button
+          type="button"
+          onClick={open}
+          className="text-muted-foreground text-xs whitespace-nowrap hover:underline"
+          data-testid={`roster-disease-manage-${member.cwid}`}
+        >
+          {confirmed} confirmed
+        </button>
+      )}
+      {diseases.length === 0 && !inactive && (
+        <button
+          type="button"
+          onClick={open}
+          className="text-apollo-slate text-xs hover:underline"
+          data-testid={`roster-disease-add-${member.cwid}`}
+        >
+          + Add a disease
+        </button>
+      )}
+      {diseases.length > 0 && pending === 0 && confirmed === 0 && (
+        <button
+          type="button"
+          onClick={open}
+          className="text-apollo-slate text-xs hover:underline"
+          data-testid={`roster-disease-manage-${member.cwid}`}
+        >
+          Manage
+        </button>
+      )}
     </div>
   );
 }
@@ -303,18 +288,20 @@ function MemberDateRange({
   onStartChange,
   onEndChange,
   needsCloseOut,
+  onRemove,
 }: {
   member: RosterMember;
   onStartChange: (value: string) => void;
   onEndChange: (value: string) => void;
   needsCloseOut: boolean;
+  onRemove: () => void;
 }) {
   const hasDates = member.startDate !== null || member.endDate !== null;
   return (
     <Popover>
       <span
         className={`text-xs whitespace-nowrap ${
-          needsCloseOut ? "text-apollo-amber font-semibold" : hasDates ? "text-foreground" : "text-muted-foreground"
+          needsCloseOut ? "text-apollo-amber font-semibold" : hasDates ? "text-muted-foreground" : "text-apollo-amber"
         }`}
         data-testid={`roster-dates-label-${member.cwid}`}
       >
@@ -326,7 +313,7 @@ function MemberDateRange({
           className="text-apollo-slate text-xs whitespace-nowrap hover:underline"
           data-testid={`roster-dates-trigger-${member.cwid}`}
         >
-          Edit dates
+          Edit
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -365,6 +352,16 @@ function MemberDateRange({
             data-testid={`roster-end-${member.cwid}`}
           />
         </div>
+        {/* Remove is rare (an add made in error) — it lives here, beside the
+            End date that is usually the right record, not on every row. */}
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-destructive self-start text-xs hover:underline"
+          onClick={onRemove}
+          data-testid={`roster-remove-${member.cwid}`}
+        >
+          Remove from center
+        </button>
       </PopoverContent>
     </Popover>
   );
@@ -400,6 +397,7 @@ export function CenterRosterCard({
   // impossible intersection. A segmented control makes the three states the
   // curator actually wants explicit, and nothing is ever silently hidden.
   const [filter, setFilter] = React.useState<RosterFilter>("all");
+  const [addOpen, setAddOpen] = React.useState(false);
   const [addValue, setAddValue] = React.useState<DirectoryValue | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [removeTarget, setRemoveTarget] = React.useState<RosterMember | null>(null);
@@ -794,6 +792,19 @@ export function CenterRosterCard({
   // their own columns (folded into Program/Member, see `MemberDateRange`).
   const colCount = 3 + (hasPrograms ? 1 : 0) + (hasDiseases ? 1 : 0);
 
+  // Disease-inference summary card — roster-wide, independent of the filters.
+  const liveRows = members.flatMap((m) => liveDiseaseRows(m.diseases));
+  const tierCounts = { high: 0, medium: 0, low: 0 };
+  for (const d of liveRows) {
+    const c = confidenceOf(d);
+    if (c === "high" || c === "medium" || c === "low") tierCounts[c] += 1;
+  }
+  const membersToReview = members.filter(hasPending).length;
+  const fmt = (n: number) => n.toLocaleString("en-US");
+  const liveTotal = liveRows.length || 1;
+  // Redundant once the curator is ON the Left WCM tab.
+  const showCloseOut = needsCloseOut > 0 && filter !== "departed";
+
   const programLabelOf = (code: string | null) =>
     code ? (programs.find((p) => p.code === code)?.label ?? code) : null;
 
@@ -819,16 +830,128 @@ export function CenterRosterCard({
           total: queue.length,
           nextName: nextCwid ? (byCwid.get(nextCwid)?.name ?? nextCwid) : null,
           onNext: () => nextCwid && setSheetCwid(nextCwid),
+          onPrev: queueIndex > 0 ? () => setSheetCwid(queue[queueIndex - 1]) : null,
         }
       : null;
 
   return (
+    <>
+    {(hasDiseases || showCloseOut) && (
+      <div className="mb-4 grid gap-4 lg:grid-cols-2" data-testid="center-roster-summary">
+        {hasDiseases && (
+          <section
+            className="border-apollo-border bg-apollo-surface flex flex-col gap-3 rounded-xl border p-5"
+            data-testid="roster-disease-summary"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">Disease inferences</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums" data-testid="roster-disease-summary-members">
+                  {membersToReview === 0
+                    ? "Nothing left to review"
+                    : `${fmt(membersToReview)} ${membersToReview === 1 ? "member" : "members"} to review`}
+                </p>
+                <p className="text-muted-foreground text-[13px] tabular-nums">{fmt(liveRows.length)} inferences</p>
+              </div>
+              {needsReviewList.length > 0 && (
+                <Button type="button" variant="apollo" size="sm" onClick={startQueue} data-testid="roster-start-review-queue">
+                  Start review queue
+                  <ArrowRight className="size-3.5" aria-hidden />
+                </Button>
+              )}
+            </div>
+            <div className="bg-apollo-surface-2 flex h-2 overflow-hidden rounded-full" aria-hidden>
+              <span className="bg-apollo-slate" style={{ width: `${(tierCounts.high / liveTotal) * 100}%` }} />
+              <span className="bg-apollo-amber" style={{ width: `${(tierCounts.medium / liveTotal) * 100}%` }} />
+              <span className="bg-apollo-border-strong" style={{ width: `${(tierCounts.low / liveTotal) * 100}%` }} />
+            </div>
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] tabular-nums" data-testid="roster-disease-summary-tiers">
+              <span>
+                <span className="bg-apollo-slate mr-1.5 inline-block size-2 rounded-sm" aria-hidden />
+                <strong className="font-semibold">{fmt(tierCounts.high)}</strong> high
+              </span>
+              <span>
+                <span className="bg-apollo-amber mr-1.5 inline-block size-2 rounded-sm" aria-hidden />
+                <strong className="font-semibold">{fmt(tierCounts.medium)}</strong> medium
+              </span>
+              <span>
+                <span className="bg-apollo-border-strong mr-1.5 inline-block size-2 rounded-sm" aria-hidden />
+                <strong className="font-semibold">{fmt(tierCounts.low)}</strong> low
+              </span>
+            </p>
+            {filtersActive && needsReviewList.length > 0 && (
+              <p className="text-muted-foreground text-xs">
+                The queue follows the Members filters below ({fmt(needsReviewList.length)}{" "}
+                {needsReviewList.length === 1 ? "member" : "members"}).
+              </p>
+            )}
+          </section>
+        )}
+        {showCloseOut && (
+          <section
+            className="border-apollo-border bg-apollo-surface flex flex-col gap-3 rounded-xl border p-5"
+            data-testid="roster-upkeep"
+          >
+            <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">Membership upkeep</p>
+            <div
+              className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber flex flex-col gap-2.5 rounded-lg border px-4 py-3 text-sm"
+              data-testid="roster-needs-close-out"
+            >
+              <p>
+                <strong className="block font-semibold">
+                  {needsCloseOut === 1 ? "1 member has left WCM" : `${needsCloseOut} members have left WCM`}
+                </strong>
+                Their center membership is still open.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="bg-apollo-surface w-fit"
+                onClick={jumpToDeparted}
+                data-testid="roster-needs-close-out-jump"
+              >
+                Review each
+              </Button>
+            </div>
+          </section>
+        )}
+      </div>
+    )}
     <EditPanel
       slot="center-roster-card"
       heading="Members"
-      description="The people listed on this center. Listing a member does not grant them edit access."
+      description="Listing a member does not grant them edit access."
+      headerAction={
+        <div className="flex flex-wrap items-center gap-2">
+          {exportEnabled && (
+            <a
+              // No `?activeOnly=1`: the export is the whole roster, and its
+              // `status` column is what distinguishes the rows.
+              href={`/edit/center/${encodeURIComponent(unitCode)}/export`}
+              className="text-foreground hover:bg-accent inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm whitespace-nowrap"
+              data-testid="center-roster-export-link"
+            >
+              <Download className="size-3.5" aria-hidden />
+              Export .xlsx
+            </a>
+          )}
+          <Button
+            type="button"
+            variant="apollo"
+            size="sm"
+            onClick={() => setAddOpen((v) => !v)}
+            aria-expanded={addOpen}
+            data-testid="center-roster-add-open"
+          >
+            <Plus className="size-3.5" aria-hidden />
+            Add member
+          </Button>
+        </div>
+      }
     >
       <div className="flex flex-col gap-4">
+        {addOpen && (
         <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="center-roster-add">
           <p className="text-sm font-medium">Add member</p>
           {cornellDirectoryEnabled && (
@@ -869,12 +992,23 @@ export function CenterRosterCard({
             onChange={setAddValue}
             source={cornellDirectoryEnabled ? addSource : "wcm"}
           />
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setAddOpen(false);
+                setAddValue(null);
+              }}
+            >
+              Cancel
+            </Button>
             <Button type="button" variant="apollo" onClick={add} disabled={!addValue || adding} data-testid="center-roster-add">
               {adding ? "Adding…" : "Add"}
             </Button>
           </div>
         </div>
+        )}
 
         {/* Status tabs — ONE mutually-exclusive choice (see the docblock),
             each labelled with its count. Scrolls sideways inside itself on a
@@ -908,7 +1042,10 @@ export function CenterRosterCard({
               }`}
               data-testid={`roster-filter-${value}`}
             >
-              {label} ({statusCounts[value]})
+              {label}{" "}
+              <span className="bg-apollo-surface-2 text-muted-foreground ml-1 rounded-full px-1.5 py-px text-xs font-medium">
+                {statusCounts[value]}
+              </span>
             </button>
           ))}
         </div>
@@ -917,24 +1054,36 @@ export function CenterRosterCard({
             program taxonomy; the disease controls only when this center has
             assignment data. AND-composed with each other and with the tabs. */}
         <div className="flex flex-wrap items-center gap-2.5" data-testid="center-roster-filter-bar">
-          <Input
-            id="roster-search-input"
-            type="text"
-            aria-label="Search name or CWID"
-            placeholder="Search name or CWID"
-            className="h-[34px] w-full sm:w-56"
-            value={freeText}
-            onChange={(e) => setFreeText(e.target.value)}
-            data-testid="roster-search-input"
-          />
+          <div className="relative w-full sm:w-64">
+            <Search
+              className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2"
+              aria-hidden
+            />
+            <Input
+              id="roster-search-input"
+              type="text"
+              aria-label="Search name or CWID"
+              placeholder="Name or CWID"
+              className="h-[34px] pl-8"
+              value={freeText}
+              onChange={(e) => setFreeText(e.target.value)}
+              data-testid="roster-search-input"
+            />
+          </div>
 
           {hasDiseases && (
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-[34px] gap-1.5" data-testid="roster-disease-filter-trigger">
-                  <span className="text-muted-foreground">Disease</span>
-                  <span className="font-semibold">
-                    {selectedDiseaseCodes.size === 0 ? "Any" : `${selectedDiseaseCodes.size.toLocaleString("en-US")} selected`}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-[34px] gap-1.5 font-normal"
+                  data-testid="roster-disease-filter-trigger"
+                >
+                  <span>
+                    {selectedDiseaseCodes.size === 0
+                      ? "Any disease"
+                      : `${fmt(selectedDiseaseCodes.size)} ${selectedDiseaseCodes.size === 1 ? "disease" : "diseases"}`}
                   </span>
                   <ChevronDown className="size-3.5 opacity-60" aria-hidden />
                 </Button>
@@ -1010,39 +1159,21 @@ export function CenterRosterCard({
                 type="button"
                 onClick={toggleNeedsReviewOnly}
                 aria-pressed={needsReviewOnly}
-                className={`inline-flex h-[34px] items-center gap-2 rounded-full border px-3 text-sm font-medium whitespace-nowrap transition-colors ${
+                className={`inline-flex h-[34px] items-center gap-2 rounded-md border px-3 text-sm whitespace-nowrap transition-colors ${
                   needsReviewOnly
-                    ? "border-apollo-amber bg-apollo-amber text-white"
-                    : "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber"
+                    ? "border-apollo-amber bg-apollo-amber-tint text-apollo-amber font-medium"
+                    : "border-apollo-border-strong bg-apollo-surface hover:bg-accent"
                 }`}
                 data-testid="roster-needs-review-toggle"
               >
-                Has diseases to review
-                <span className="font-bold tabular-nums" data-testid="roster-needs-review-count">
+                Needs review
+                <span className="text-muted-foreground text-xs tabular-nums" data-testid="roster-needs-review-count">
                   {needsReviewList.length.toLocaleString("en-US")}
                 </span>
               </button>
             </>
           )}
 
-          <span className="hidden flex-1 sm:block" />
-
-          {hasDiseases && needsReviewList.length > 0 && (
-            <Button type="button" size="sm" onClick={startQueue} data-testid="roster-start-review-queue">
-              Start review queue ({needsReviewList.length.toLocaleString("en-US")})
-            </Button>
-          )}
-          {exportEnabled && (
-            <a
-              // No `?activeOnly=1`: the export is the whole roster, and its
-              // `status` column is what distinguishes the rows.
-              href={`/edit/center/${encodeURIComponent(unitCode)}/export`}
-              className="text-apollo-slate text-sm whitespace-nowrap hover:underline"
-              data-testid="center-roster-export-link"
-            >
-              Export .xlsx
-            </a>
-          )}
         </div>
 
         {filtersActive && (
@@ -1061,30 +1192,6 @@ export function CenterRosterCard({
           </div>
         )}
 
-        {needsCloseOut > 0 && filter !== "departed" && (
-          <div
-            className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber flex flex-wrap items-center gap-3 rounded-lg border px-3.5 py-2.5 text-sm"
-            data-testid="roster-needs-close-out"
-          >
-            <span className="min-w-0 flex-1 basis-60">
-              <strong className="font-semibold">
-                {needsCloseOut === 1 ? "1 member has left WCM" : `${needsCloseOut} members have left WCM`}
-              </strong>{" "}
-              but their center membership is still open.
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="bg-apollo-surface"
-              onClick={jumpToDeparted}
-              data-testid="roster-needs-close-out-jump"
-            >
-              Review and set end dates
-            </Button>
-          </div>
-        )}
-
         {members.length === 0 ? (
           <p className="text-muted-foreground text-sm" data-testid="center-roster-empty">
             This roster is empty. Add the first member to populate this center.
@@ -1092,11 +1199,11 @@ export function CenterRosterCard({
         ) : (
           <div className="overflow-x-auto">
           <table className="[&_td]:align-middle w-full min-w-[720px] text-sm" data-testid="center-roster-table">
-            <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+            <thead className="bg-apollo-surface-2 text-muted-foreground text-left text-xs">
               <tr className="border-apollo-border border-b">
                 <th className="px-3 py-2 font-medium">Member</th>
                 <th className="px-3 py-2 font-medium">Role</th>
-                {hasPrograms && <th className="px-3 py-2 font-medium">Program</th>}
+                {hasPrograms && <th className="px-3 py-2 font-medium">Program &amp; dates</th>}
                 {hasDiseases && <th className="px-3 py-2 font-medium">Diseases</th>}
                 <th className="px-3 py-2 font-medium">Status</th>
               </tr>
@@ -1137,28 +1244,17 @@ export function CenterRosterCard({
                   // exclusive with the inactive row's page-colour background
                   // by construction, so the two never compose.
                   const rowNeedsCloseOut = needsCloseOutOf(m);
-                  // Remove is a discreet text link beside the date range, not
-                  // its own always-visible column — it's a rare action and
+                  // Remove lives in the dates popover — a rare action that
                   // doesn't need permanent screen real estate.
                   const dateAndRemove = (
-                    <div className="mt-0.5 flex items-center gap-1.5">
+                    <div className="mt-1 flex items-center gap-1.5">
                       <MemberDateRange
                         member={m}
                         onStartChange={(v) => onStartChange(m, v)}
                         onEndChange={(v) => onEndChange(m, v)}
                         needsCloseOut={rowNeedsCloseOut}
+                        onRemove={() => setRemoveTarget(m)}
                       />
-                      <span className="text-muted-foreground text-xs" aria-hidden>
-                        ·
-                      </span>
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-apollo-slate text-xs hover:underline"
-                        onClick={() => setRemoveTarget(m)}
-                        data-testid={`roster-remove-${m.cwid}`}
-                      >
-                        Remove
-                      </button>
                     </div>
                   );
                   return (
@@ -1184,15 +1280,6 @@ export function CenterRosterCard({
                                 {m.name}
                               </span>
                             </ScholarHoverCard>
-                          )}
-                          {m.scholarState === "departed" && (
-                            <Badge
-                              variant="outline"
-                              className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full"
-                              data-testid={`roster-scholar-state-${m.cwid}`}
-                            >
-                              Left WCM
-                            </Badge>
                           )}
                           {m.publiclyListed === false &&
                             m.scholarState !== "departed" &&
@@ -1232,9 +1319,18 @@ export function CenterRosterCard({
                             </Badge>
                           )}
                         </div>
-                        {m.title && <div className="text-muted-foreground text-xs">{m.title}</div>}
-                        <div className="text-muted-foreground text-xs" data-testid={`roster-cwid-${m.cwid}`}>
-                          CWID: {m.cwid}
+                        <div className="text-muted-foreground flex min-w-0 gap-1.5 text-xs">
+                          {m.title && (
+                            <>
+                              <span className="max-w-[22rem] truncate" title={m.title}>
+                                {m.title}
+                              </span>
+                              <span aria-hidden>·</span>
+                            </>
+                          )}
+                          <span className="font-mono" data-testid={`roster-cwid-${m.cwid}`}>
+                            {m.cwid}
+                          </span>
                         </div>
                         {/* No Program column on this center — the date range
                             folds under Member instead, so it's never dropped. */}
@@ -1269,7 +1365,7 @@ export function CenterRosterCard({
                             onChange={(e) => patch(m.cwid, { programCode: e.target.value || null })}
                             data-testid={`roster-program-${m.cwid}`}
                           >
-                            <option value="">—</option>
+                            <option value="">Choose program…</option>
                             {programs.map((p) => (
                               <option key={p.code} value={p.code}>
                                 {p.label}
@@ -1285,27 +1381,34 @@ export function CenterRosterCard({
                         </td>
                       )}
                       <td className="px-3 py-2">
-                        <Badge
-                          variant="outline"
-                          className={`rounded-full ${
-                            status === "active"
-                              ? "bg-apollo-green-tint text-apollo-green border-apollo-green-tint-border"
-                              : status === "invited"
+                        {m.scholarState === "departed" ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full"
+                            data-testid={`roster-scholar-state-${m.cwid}`}
+                          >
+                            Left WCM
+                          </Badge>
+                        ) : status === "active" ? (
+                          // Active is the norm — plain text; only exceptions get a pill.
+                          <span className="text-muted-foreground" data-testid={`roster-status-${m.cwid}`}>
+                            Active
+                          </span>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className={`rounded-full ${
+                              status === "invited"
                                 ? "bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border"
                                 : status === "inactive"
                                   ? "bg-apollo-surface-2 text-foreground border-apollo-border-strong"
                                   : "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border"
-                          }`}
-                          data-testid={`roster-status-${m.cwid}`}
-                        >
-                          {status === "active"
-                            ? "Active"
-                            : status === "pending"
-                              ? "Pending"
-                              : status === "invited"
-                                ? "Invited"
-                                : "Inactive"}
-                        </Badge>
+                            }`}
+                            data-testid={`roster-status-${m.cwid}`}
+                          >
+                            {status === "pending" ? "Pending" : status === "invited" ? "Invited" : "Inactive"}
+                          </Badge>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1322,15 +1425,14 @@ export function CenterRosterCard({
               {paging.rangeLabel} members
             </span>
             {paging.hasMore && (
-              <Button
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
+                className="text-apollo-slate text-sm hover:underline"
                 onClick={paging.showMore}
                 data-testid="roster-show-more"
               >
-                Show {PAGE_SIZE} more
-              </Button>
+                Load more
+              </button>
             )}
           </div>
         )}
@@ -1395,6 +1497,7 @@ export function CenterRosterCard({
         error={error}
       />
     </EditPanel>
+    </>
   );
 }
 

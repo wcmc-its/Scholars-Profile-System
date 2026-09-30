@@ -72,7 +72,11 @@ export type ReviewQueueState = {
   /** The next member in the queue that still has rows to review. */
   nextName: string | null;
   onNext: () => void;
+  /** The previous member in the queue, when there is one. */
+  onPrev?: (() => void) | null;
 };
+
+type SheetTab = "review" | "confirmed" | "all";
 
 /** Publications / Grants / Trials, the Details expander. Grants and trials
  *  show "N led" plus "N supported" when there are any; the data has no
@@ -370,6 +374,29 @@ function SheetBody({
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const { cwid, diseases } = member;
 
+  const inTab = (t: SheetTab, d: RosterDiseaseRow) =>
+    t === "all" ||
+    (t === "review" ? d.decision === null && d.assignment !== null : d.decision?.decision === "confirmed");
+  const [tab, setTab] = React.useState<SheetTab>(() =>
+    diseases.some((d) => inTab("review", d)) ? "review" : "all",
+  );
+  // Codes outside the tab when it was chosen. A row decided while its tab is
+  // showing stays put (with Undo) rather than vanishing; a newly added code
+  // is never in this set, so it shows up too.
+  const [hiddenCodes, setHiddenCodes] = React.useState<ReadonlySet<string>>(
+    () => new Set(diseases.filter((d) => !inTab(tab, d)).map((d) => d.diseaseCode)),
+  );
+  function chooseTab(t: SheetTab) {
+    setTab(t);
+    setHiddenCodes(new Set(diseases.filter((d) => !inTab(t, d)).map((d) => d.diseaseCode)));
+  }
+  const shownRows = diseases.filter((d) => !hiddenCodes.has(d.diseaseCode));
+  const tabCounts: Record<SheetTab, number> = {
+    review: diseases.filter((d) => inTab("review", d)).length,
+    confirmed: diseases.filter((d) => inTab("confirmed", d)).length,
+    all: diseases.length,
+  };
+
   const pending = pendingDiseaseRows(diseases);
   const high = pending.filter((d) => d.assignment?.confidence === "high");
   const nConfirmed = diseases.filter((d) => d.decision?.decision === "confirmed").length;
@@ -421,9 +448,35 @@ function SheetBody({
             </Button>
           )}
         </div>
-        <p className="text-muted-foreground mt-1.5 text-xs">
-          Ranked by evidence. Your decision is kept even if the evidence is later re-seeded.
-        </p>
+        {diseases.length > 0 && (
+          <div
+            className="bg-apollo-surface-2 mt-2 flex w-fit gap-0.5 rounded-lg p-0.5"
+            role="tablist"
+            aria-label="Show diseases"
+          >
+            {(
+              [
+                ["review", "To review"],
+                ["confirmed", "Confirmed"],
+                ["all", "All"],
+              ] as ReadonlyArray<readonly [SheetTab, string]>
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={tab === value}
+                onClick={() => chooseTab(value)}
+                className={`rounded-md px-2.5 py-1 text-[13px] whitespace-nowrap ${
+                  tab === value ? "bg-apollo-surface text-foreground font-medium shadow-sm" : "text-muted-foreground"
+                }`}
+                data-testid={`disease-review-tab-${value}`}
+              >
+                {label} <span className="text-muted-foreground ml-0.5 text-xs tabular-nums">{tabCounts[value]}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </SheetHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-2 pb-4">
@@ -436,7 +489,8 @@ function SheetBody({
           <p className="text-muted-foreground py-3 text-sm">No disease assignments for this member yet.</p>
         ) : (
           <ul>
-            {diseases.map((d) => (
+            {shownRows.length === 0 && <li className="text-muted-foreground py-3 text-sm">Nothing here.</li>}
+            {shownRows.map((d) => (
               <DiseaseReviewRow
                 key={d.diseaseCode}
                 cwid={cwid}
@@ -449,6 +503,9 @@ function SheetBody({
             ))}
           </ul>
         )}
+        <p className="text-muted-foreground mt-3 text-xs">
+          Ranked by evidence. Your decision is kept even if the evidence is later re-seeded.
+        </p>
         <AddDisease
           cwid={cwid}
           diseases={diseases}
@@ -463,6 +520,19 @@ function SheetBody({
         <Button type="button" variant="ghost" size="sm" onClick={onClose} data-testid="disease-review-close">
           Close
         </Button>
+        <span className="flex-1" />
+        {queue?.onPrev && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={queue.onPrev}
+            aria-label="Previous member"
+            data-testid="disease-review-prev"
+          >
+            <span aria-hidden>←</span>
+          </Button>
+        )}
         {queue?.nextName && (
           <Button
             type="button"
