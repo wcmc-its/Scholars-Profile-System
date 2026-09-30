@@ -1522,9 +1522,9 @@ export class AppStack extends Stack {
         // loader queries nothing and the payload is byte-identical. Only
         // published diseases (human-confirmed, or center auto-publish of high
         // confidence) render. Data-gated on a CenterProgram taxonomy (Meyer
-        // today). App-only, no reindex, no migration. Staging-on for soak;
-        // prod-off until sign-off.
-        CENTER_DISEASE_FACET: env === "staging" ? "on" : "off",
+        // today). App-only, no reindex, no migration. Prod-on 2026-09-30 after
+        // the staging soak was signed off.
+        CENTER_DISEASE_FACET: "on",
         // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
