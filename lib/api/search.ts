@@ -3445,6 +3445,21 @@ export async function searchPeople(opts: {
       }
     : innerScoringQuery;
 
+  // #1351 — the resolved MeSH descriptor name, highlighted in the bio snippet
+  // (see `highlight` below). Topic template only, and only for a resolution the
+  // concept machinery would admit (unambiguous, matched form long enough). Not
+  // under `exact` scope (#1951: a MeSH label is the concept, not the wording).
+  // Empty ⇒ the highlight body is unchanged.
+  const descriptorName = (opts.meshDescriptorName ?? "").trim();
+  const bioConceptTerm =
+    descriptorName &&
+    applyTopicTemplate &&
+    opts.scope !== "exact" &&
+    !opts.meshAmbiguous &&
+    (opts.meshMatchedFormLength ?? 0) >= MESH_MIN_MATCHED_FORM_LEN
+      ? descriptorName
+      : "";
+
   const body = {
     from: page * effectivePageSize,
     size: effectivePageSize,
@@ -3614,20 +3629,30 @@ export async function searchPeople(opts: {
       // so stripped generics ("Research") are never <mark>-ed. Without this the
       // discount clause's full query would still drive highlights. Omitted when
       // not demoting, so the default-off highlight body is unchanged.
-      ...(demoteGeneric
+      //
+      // #1351 — when the query resolved to a MeSH descriptor, ALSO mark the concept
+      // term in the bio, so a bio carrying "Pharmacogenetics" verbatim is marked on
+      // a "pharmacogenomics" search. Highlight-only: `body.query` / rank unchanged.
+      // The literal clause is the same multi_match the #692 path uses.
+      ...(demoteGeneric || bioConceptTerm.length > 0
         ? {
-            highlight_query: {
-              multi_match: {
-                query: contentQuery,
-                // Mirror the `fields` set above — drop areasOfInterest when the
-                // match-aware snippet replaces it with humanized areas (#824).
-                fields: matchAwareContext
-                  ? ["preferredName", "overview"]
-                  : ["preferredName", "areasOfInterest", "overview"],
-                type: "best_fields",
-                operator: "or",
-              },
-            },
+            highlight_query: (() => {
+              const literal = {
+                multi_match: {
+                  query: contentQuery,
+                  // Mirror the `fields` set above — drop areasOfInterest when the
+                  // match-aware snippet replaces it with humanized areas (#824).
+                  fields: matchAwareContext
+                    ? ["preferredName", "overview"]
+                    : ["preferredName", "areasOfInterest", "overview"],
+                  type: "best_fields",
+                  operator: "or",
+                },
+              };
+              return bioConceptTerm.length > 0
+                ? { bool: { should: [literal, { match_phrase: { overview: bioConceptTerm } }] } }
+                : literal;
+            })(),
           }
         : {}),
       pre_tags: ["<mark>"],
