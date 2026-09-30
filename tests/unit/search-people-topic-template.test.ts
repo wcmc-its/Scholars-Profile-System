@@ -26,6 +26,7 @@ const capturedBodies: Array<Record<string, unknown>> = [];
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
   PUBLICATIONS_INDEX: "scholars-publications",
+  FUNDING_INDEX: "scholars-funding",
   PEOPLE_FIELD_BOOSTS: ["preferredName^10", "publicationAbstracts^0.3"],
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: [
     "preferredName^10",
@@ -471,10 +472,13 @@ describe("generic-term demotion — #692 (people topic shape)", () => {
       relevanceMode: "v3" as const,
       shape: "topic" as const,
       meshDescendantUis: DESCENDANTS,
+      meshMatchedFormLength: 16,
     };
+    // The concept path sends more than one body per call; compare each call's last.
     await searchPeople(base);
+    const without = capturedBodies.at(-1)!;
     await searchPeople({ ...base, meshDescriptorName: "Pharmacogenetics" });
-    const [without, withConcept] = capturedBodies;
+    const withConcept = capturedBodies.at(-1)!;
     const hq = highlightOf(withConcept).highlight_query as {
       bool: { should: Record<string, unknown>[] };
     };
@@ -492,6 +496,25 @@ describe("generic-term demotion — #692 (people topic shape)", () => {
     // Scoring untouched: the query/rescore are identical with or without the descriptor.
     expect(withConcept.query).toEqual(without.query);
     expect(withConcept.rescore).toEqual(without.rescore);
+  });
+
+  it.each([
+    ["exact scope", { scope: "exact" as const }],
+    ["an ambiguous resolution", { meshAmbiguous: true }],
+    ["a too-short matched form", { meshMatchedFormLength: 1 }],
+  ])("#1351: no bio concept highlight under %s", async (_label, extra) => {
+    await searchPeople({
+      q: "pharmacogenomics",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+      meshMatchedFormLength: 16,
+      meshDescriptorName: "Pharmacogenetics",
+      ...extra,
+    });
+    const bodies = capturedBodies.filter((b) => "highlight" in b);
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const b of bodies) expect(JSON.stringify(highlightOf(b))).not.toContain("Pharmacogenetics");
   });
 
   it("#1351: a descriptor on a non-topic shape leaves the highlight body unchanged", async () => {

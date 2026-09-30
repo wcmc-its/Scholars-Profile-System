@@ -3446,9 +3446,17 @@ export async function searchPeople(opts: {
     : innerScoringQuery;
 
   // #1351 — the resolved MeSH descriptor name, highlighted in the bio snippet
-  // (see `highlight` below). Topic template only, the same shape gate as the
-  // concept machinery; empty ⇒ the highlight body is unchanged.
-  const bioConceptTerm = applyTopicTemplate ? (opts.meshDescriptorName ?? "").trim() : "";
+  // (see `highlight` below). Topic template only, and only for a resolution the
+  // concept machinery would admit (unambiguous, matched form long enough). Not
+  // under `exact` scope (#1951: a MeSH label is the concept, not the wording).
+  // Empty ⇒ the highlight body is unchanged.
+  const bioConceptTerm =
+    applyTopicTemplate &&
+    opts.scope !== "exact" &&
+    !opts.meshAmbiguous &&
+    (opts.meshMatchedFormLength ?? 0) >= MESH_MIN_MATCHED_FORM_LEN
+      ? (opts.meshDescriptorName ?? "").trim()
+      : "";
 
   const body = {
     from: page * effectivePageSize,
