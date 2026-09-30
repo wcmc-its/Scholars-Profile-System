@@ -514,6 +514,33 @@ model FormerFacultyRole {
   @@map("former_faculty_role")
 }
 
+/// Faculty Review Tool self-reported mentees (etl/frt, weekly). FRT names
+/// mentees in free text with no CWID; `menteeCwid` is set only on a unique
+/// first+last match (lib/frt/mentee-name.ts) for an internal mentee. One row per
+/// (mentor, name key) across every review year. Shown to the mentor as a
+/// suggestion on /edit (accept appends to manualMentees); counted in report 7
+/// whether accepted or not. Dismissals are carried across the weekly rebuild.
+model FrtMentee {
+  id              Int       @id @default(autoincrement())
+  mentorCwid      String    @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid      String?   @map("mentee_cwid") @db.VarChar(32)
+  menteeName      String    @map("mentee_name") @db.VarChar(255)
+  nameKey         String    @map("name_key") @db.VarChar(255)
+  /// FRT's free-text mentoring type ("Research", "Clinical", ...), latest year.
+  mentoringType   String?   @map("mentoring_type") @db.VarChar(255)
+  /// FRT external_mentee = 'Yes' (mentee outside WCM). Never CWID-matched.
+  external        Boolean   @default(false)
+  firstReviewYear Int       @map("first_review_year")
+  lastReviewYear  Int       @map("last_review_year")
+  refreshedAt     DateTime  @map("refreshed_at")
+  dismissedAt     DateTime? @map("dismissed_at")
+  dismissedBy     String?   @map("dismissed_by") @db.VarChar(32)
+
+  @@unique([mentorCwid, nameKey])
+  @@index([menteeCwid])
+  @@map("frt_mentee")
+}
+
 model MenteeSuggestion {
   id                       Int       @id @default(autoincrement())
   mentorCwid               String    @map("mentor_cwid") @db.VarChar(32)

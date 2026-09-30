@@ -100,6 +100,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "PhD and MD-PhD thesis advisor and student pairs in the Mentoring list.",
     origin: "external", // Jenzabar (MSSQL)
   },
+  FRT: {
+    label: "Faculty Review Tool Mentees",
+    description: "Mentees faculty report in their annual review, offered as suggestions in Mentees.",
+    origin: "external", // WCM COI + FRT SQL Server
+  },
   "ReCiterAI-projection": {
     label: "Research Topics & Scores",
     description: "Research topic pages, their ranked scholars, and per-paper impact scores.",

@@ -156,6 +156,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "COI-Gap": { cadence: "weekly" },
   // #608 — moved from the weekly machine to nightly (mentoring chips).
   Jenzabar: { cadence: "nightly" },
+  // Faculty Review Tool mentees (etl/frt); annual source, read weekly.
+  FRT: { cadence: "weekly" },
   "ReCiterAI-projection": { cadence: "nightly" },
   // #918 — Scholar.orcid from the WCM Identity table.
   "Identity-orcid": { cadence: "nightly" },
