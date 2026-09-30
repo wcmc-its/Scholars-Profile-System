@@ -223,7 +223,7 @@ describe("response", () => {
     await GET(req("?years=2025"));
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
       scopes: ["*"],
-      types: ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty"],
+      types: ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty", "frt"],
       gradYears: [2025],
       tail: 1,
       ...MENTORED,

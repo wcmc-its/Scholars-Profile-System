@@ -26,7 +26,7 @@
  */
 import { KIND_LABEL, type MenteeKind } from "@/lib/mentee-suggestions/kind";
 
-export type MentorshipSource = "roster" | "jenzabar" | "ed" | "coauthor" | "faculty";
+export type MentorshipSource = "roster" | "jenzabar" | "ed" | "coauthor" | "faculty" | "frt";
 export type MentorshipTier = "confirmed" | "presumptive" | "ambiguous";
 /** One (learner, mentor) pair's provenance: the program bucket (a
  *  `MentoringProgramKey`, or a `MenteeKind` for co-author pairs) and where
@@ -81,6 +81,8 @@ export function mentorshipLabel(t: MentorshipType): string {
     }
     case "faculty":
       return `${PROGRAM_LABEL[t.program] ?? t.program} · faculty-asserted`;
+    case "frt":
+      return MENTORSHIP_TYPE_LABEL.frt;
   }
 }
 
@@ -97,6 +99,7 @@ export const MENTORSHIP_TYPE_KEYS = [
   "likely",
   "possible",
   "faculty",
+  "frt",
 ] as const;
 export type MentorshipTypeKey = (typeof MENTORSHIP_TYPE_KEYS)[number];
 
@@ -109,6 +112,7 @@ export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
   likely: "Likely mentee (from co-authorship)",
   possible: "Possible mentee (from co-authorship)",
   faculty: "Faculty-asserted",
+  frt: "Self-reported (Faculty Review)",
 };
 
 /** One sentence per key: what the source is and how sure it is — the
@@ -130,6 +134,7 @@ export const MENTORSHIP_TYPE_DESCRIPTION: Record<MentorshipTypeKey, string> = {
     "The same inference for research staff or MD alumni, who may be peers rather than trainees. Off by default.",
   faculty:
     "Added by the mentor on their Scholars profile, or confirmed there from a co-authorship suggestion.",
+  frt: "Mentees the faculty member listed in the annual Faculty Review Tool, whether or not they added them to their profile. Counted only when linked to a WCM person (matched by name, or linked by the mentor in Scholars); no year.",
 };
 
 /** `report_access` scope key (`MENTORED_PUBS_SCOPES`, `lib/edit/report-access.ts`)
@@ -155,6 +160,7 @@ const CONFIRMED_TYPE_KEYS: ReadonlyArray<MentorshipTypeKey> = [
   "thesis",
   "postdoc",
   "faculty",
+  "frt",
 ];
 
 /** Which filter key a pair falls under; null for a roster bucket no scope
@@ -171,6 +177,8 @@ export function mentorshipTypeKey(t: MentorshipType): MentorshipTypeKey | null {
       return t.tier === "presumptive" ? "likely" : "possible";
     case "faculty":
       return "faculty";
+    case "frt":
+      return "frt";
   }
 }
 

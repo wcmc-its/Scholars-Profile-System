@@ -702,7 +702,7 @@ export async function loadMentoredGradYears(
     const rows = await db.read.postdocMentorRelationship.findMany({ select: { endDate: true } });
     for (const r of rows) add(r.endDate?.getUTCFullYear() ?? null);
   }
-  if (selected.has("likely") || selected.has("possible")) unknown = true;
+  if (selected.has("likely") || selected.has("possible") || selected.has("frt")) unknown = true;
   if (selected.has("faculty")) {
     for (const p of (await readFacultyPairs()).pairs) add(p.entry.year ?? null);
   }
@@ -916,6 +916,33 @@ export async function loadMentoredPublicationsReport({
       selected,
     );
   }
+  // Faculty Review Tool pairs with a CWID (name match or the mentor's own
+  // link), accepted or not. No year (the review year is not a training year),
+  // so admitted only with "unknown" selected. After the mentor's own word,
+  // before the inferences.
+  const frtRows =
+    selected.has("frt") && yearAdmitted(null)
+      ? await db.read.frtMentee.findMany({
+          where: { menteeCwid: { not: null } },
+          select: { mentorCwid: true, menteeCwid: true, menteeName: true },
+        })
+      : [];
+  for (const r of frtRows) {
+    const cut = r.menteeName.lastIndexOf(" ");
+    mergePair(
+      learners,
+      {
+        mentorCwid: r.mentorCwid,
+        menteeCwid: r.menteeCwid!,
+        firstName: cut < 0 ? null : r.menteeName.slice(0, cut),
+        lastName: cut < 0 ? r.menteeName : r.menteeName.slice(cut + 1),
+        gradYear: null,
+        entryYear: null,
+        type: { program: "other", source: "frt", tier: "confirmed" },
+      },
+      selected,
+    );
+  }
   // Co-author suggestions carry no year: admitted only with "unknown"
   // selected, and only the selected tier(s).
   const tiers: MentorshipTier[] = [
@@ -1048,7 +1075,14 @@ export async function loadMentoredPublicationsReport({
   // spelling (see `localCoPublications`, `lib/api/mentoring.ts`). The
   // mentee's `position` stands in for `menteeRank`; 0 ("rank unknown",
   // #2227) attaches no byline CWID, so the position reads null.
-  const unsuggested = facultyPairs.filter((p) => !suggestedPairs.has(pairKey(p)));
+  // FRT pairs that survived as `frt` take the same intersection.
+  const frtPairs = frtRows
+    .map((r) => ({ mentorCwid: r.mentorCwid, menteeCwid: r.menteeCwid! }))
+    .filter((p) => learners.get(p.menteeCwid)?.mentors.get(p.mentorCwid)?.source === "frt");
+  const unsuggested = [
+    ...facultyPairs.filter((p) => !suggestedPairs.has(pairKey(p))),
+    ...frtPairs,
+  ];
   const pmidsByCwid = new Map<string, Map<string, number>>();
   const authorCwids = [...new Set(unsuggested.flatMap((p) => [p.mentorCwid, p.menteeCwid]))];
   for (const batch of chunks(authorCwids, PMID_BATCH)) {

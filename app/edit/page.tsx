@@ -259,7 +259,7 @@ export default async function EditSelfPage({
     ctx.datasets.length > 0,
     // #2634 — "Mentees › From your publications" is valid when the loader
     // returned any row (active or dismissed), mirroring the rail rule.
-    ctx.menteeSuggestions.length > 0,
+    ctx.menteeSuggestions.length + ctx.frtMentees.length > 0,
     // Identifiers & Profiles is valid when EITHER of its cards is on: the ORCID
     // flag (tab, write, suggestion share one kill switch) or #2699 profile links.
     isOrcidSuggestionEnabled(),

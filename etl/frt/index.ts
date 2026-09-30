@@ -102,11 +102,20 @@ async function main() {
     }
 
     const idx = await buildNameIndex();
-    const dismissed = new Map(
+    // Mentor decisions (dismissals, hand-assigned CWIDs) survive the rebuild.
+    const decided = new Map(
       (
         await db.write.frtMentee.findMany({
-          where: { dismissedAt: { not: null } },
-          select: { mentorCwid: true, nameKey: true, dismissedAt: true, dismissedBy: true },
+          where: { OR: [{ dismissedAt: { not: null } }, { cwidAssignedAt: { not: null } }] },
+          select: {
+            mentorCwid: true,
+            nameKey: true,
+            menteeCwid: true,
+            dismissedAt: true,
+            dismissedBy: true,
+            cwidAssignedAt: true,
+            cwidAssignedBy: true,
+          },
         })
       ).map((d) => [`${d.mentorCwid}|${d.nameKey}`, d]),
     );
@@ -114,11 +123,15 @@ async function main() {
     let matched = 0;
     const inserts = [...byPair.entries()].map(([id, a]) => {
       const external = a.row.external_mentee === "Yes";
-      const hits = external ? undefined : idx.get(a.key);
-      const cwid = hits?.size === 1 ? [...hits][0] : null;
-      const menteeCwid = cwid && cwid !== a.row.cwid ? cwid : null;
+      const d = decided.get(id);
+      let menteeCwid: string | null;
+      if (d?.cwidAssignedAt) menteeCwid = d.menteeCwid;
+      else {
+        const hits = external ? undefined : idx.get(a.key);
+        const cwid = hits?.size === 1 ? [...hits][0] : null;
+        menteeCwid = cwid && cwid !== a.row.cwid ? cwid : null;
+      }
       if (menteeCwid) matched++;
-      const d = dismissed.get(id);
       return {
         mentorCwid: a.row.cwid,
         menteeCwid,
@@ -131,6 +144,8 @@ async function main() {
         refreshedAt: start,
         dismissedAt: d?.dismissedAt ?? null,
         dismissedBy: d?.dismissedBy ?? null,
+        cwidAssignedAt: d?.cwidAssignedAt ?? null,
+        cwidAssignedBy: d?.cwidAssignedBy ?? null,
       };
     });
     console.log(`Mentor/mentee pairs: ${inserts.length} (CWID-matched: ${matched}).`);

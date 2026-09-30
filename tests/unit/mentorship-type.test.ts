@@ -67,6 +67,11 @@ const CASES: Array<[MentorshipType, string, string]> = [
     "other:faculty:confirmed",
     "Other · faculty-asserted",
   ],
+  [
+    { program: "other", source: "frt", tier: "confirmed" },
+    "other:frt:confirmed",
+    "Self-reported (Faculty Review)",
+  ],
 ];
 
 const SCHEMA_WORDS = /presumptive|ambiguous|roster|Jenzabar|\bED\b/;
@@ -96,7 +101,7 @@ describe("mentorship type", () => {
   });
 });
 
-describe("mentorshipTypeKey — every pair folds into one of the eight filter keys", () => {
+describe("mentorshipTypeKey — every pair folds into one of the nine filter keys", () => {
   const KEYS: Array<[MentorshipType, string]> = [
     [{ program: "md", source: "roster", tier: "confirmed" }, "aoc"],
     [{ program: "mdphd", source: "roster", tier: "confirmed" }, "mdphd"],
@@ -108,6 +113,7 @@ describe("mentorshipTypeKey — every pair folds into one of the eight filter ke
     [{ program: "alumni_md", source: "coauthor", tier: "ambiguous" }, "possible"],
     [{ program: "postdoc", source: "faculty", tier: "confirmed" }, "faculty"],
     [{ program: "other", source: "faculty", tier: "confirmed" }, "faculty"],
+    [{ program: "other", source: "frt", tier: "confirmed" }, "frt"],
   ];
   it.each(KEYS)("%o → %s", (t, key) => {
     expect(mentorshipTypeKey(t)).toBe(key);
@@ -123,6 +129,7 @@ describe("mentorshipTypeKey — every pair folds into one of the eight filter ke
       "likely",
       "possible",
       "faculty",
+      "frt",
     ]);
     for (const k of MENTORSHIP_TYPE_KEYS) {
       expect(MENTORSHIP_TYPE_LABEL[k]).toBeTruthy();
@@ -143,10 +150,11 @@ describe("allowed / default / resolved selections per scope", () => {
       "thesis",
       "postdoc",
       "faculty",
+      "frt",
     ]);
   });
 
-  it("an md holder: only AOC of the roster keys, plus the five non-roster keys; default = [aoc] (faculty is selectable, not default)", () => {
+  it("an md holder: only AOC of the roster keys, plus the six non-roster keys; default = [aoc] (faculty and frt are selectable, not default)", () => {
     const md = new Set(["md"]);
     expect(allowedMentorshipTypes(md)).toEqual([
       "aoc",
@@ -155,6 +163,7 @@ describe("allowed / default / resolved selections per scope", () => {
       "likely",
       "possible",
       "faculty",
+      "frt",
     ]);
     expect(defaultMentorshipTypes(md)).toEqual(["aoc"]);
     expect(resolveMentorshipTypes(["faculty"], md)).toEqual(["faculty"]);
@@ -170,6 +179,7 @@ describe("allowed / default / resolved selections per scope", () => {
       "likely",
       "possible",
       "faculty",
+      "frt",
     ]);
   });
 
