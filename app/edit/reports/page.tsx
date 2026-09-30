@@ -28,12 +28,12 @@
  *
  * Reports IA redesign (2026-08-14): `?center=` addresses one of POTENTIALLY
  * SEVERAL reportable units; an accompanying `?kind=department|division|core`
- * addresses a department/division/core (by its core id) instead. Without
- * `?center=`: 0 reportable units → 404 for a scoped Owner/Curator/
- * comms_steward, but an empty index for a superuser (Gap 5, 2026-08-14 — a
- * superuser isn't scoped to any grants, so an empty roster isn't "this route
- * doesn't exist"); otherwise every reportable unit, scoped to the actor
- * (org-wide for a superuser/comms_steward, else their own `UnitAdmin` grants).
+ * addresses a department/division/core (by its core id) instead. 0 reportable
+ * units → 404 for a scoped Owner/Curator/comms_steward, but an empty index for
+ * a superuser (Gap 5, 2026-08-14 — a superuser isn't scoped to any grants, so
+ * an empty roster isn't "this route doesn't exist"); otherwise every
+ * reportable unit, scoped to the actor (org-wide for a superuser/
+ * comms_steward, else their own `UnitAdmin` grants).
  *
  * Reports Index redesign (2026-09-25): whatever the unit set, it renders as
  * ONE list grouped by unit (`ReportsIndex`) — Institution-wide and Mentoring
@@ -41,13 +41,18 @@
  * unit group. The search / scope / In progress filters ride the URL (`q`,
  * `scope`, `review=1`) so a shared link reproduces the view.
  *
- * Cores (core reports index picker, 2026-09-28): every core collapses into ONE
- * "Cores" group with a "Viewing" picker (`buildCoresUnit`), and
- * `?center=<coreId>&kind=core` is that full list with the core preselected,
- * no longer a one-unit view. A superuser's picker opens with "All cores (N)"
- * (`center=all&kind=core`, picker plan PR 2): under it the group lists only
- * reports 11–13, which roll every core up; 3 and 6 don't. Anyone else asking
- * for `center=all` gets the same 403 as any core they can't report on.
+ * One group per unit kind (core reports index picker, 2026-09-28, #2857 for
+ * cores; #2856 for centers, departments and divisions): every unit of a kind
+ * collapses into ONE "Centers" / "Departments" / "Divisions" / "Cores" group
+ * with a "Viewing" picker (`buildKindGroup`), and `?center=<code>&kind=<kind>`
+ * is that full list with the unit preselected, opening on the kind's segment
+ * — no longer a one-unit view. A unit outside the actor's roster still passes
+ * through `loadReportsContext` (the per-unit gate the one-unit view used), so
+ * the link from a unit's editor never loses access; denied is the same 403.
+ * A superuser's core picker opens with "All cores (N)" (`center=all&kind=core`,
+ * picker plan PR 2): under it the group lists only reports 11–13, which roll
+ * every core up; 3 and 6 don't. Anyone else asking for `center=all` gets the
+ * same 403 as any core they can't report on. No other kind has an "All".
  *
  * Program reports (`/edit/reports/7`, Mentored publications) are NOT
  * unit-scoped — their gate is a `report_access` row (`getReportScopes`,
@@ -74,7 +79,7 @@ import type {
 } from "@/components/edit/report-access-popover";
 import {
   ReportsIndex,
-  type ReportsIndexCoreOption,
+  type ReportsIndexUnitOption,
   type ReportsIndexReport,
   type ReportsIndexUnit,
 } from "@/components/edit/reports-index";
@@ -110,7 +115,7 @@ import {
 } from "@/lib/edit/report-access";
 import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
 import { accessSummary, ADMIN_AUDIENCE } from "@/lib/edit/report-access-summary";
-import { parseReportsIndexScope } from "@/lib/edit/reports-index-scope";
+import { parseReportsIndexScope, REPORTS_INDEX_SCOPES } from "@/lib/edit/reports-index-scope";
 import { loadReportMeta, type ReportKey, type ReportMeta } from "@/lib/edit/report-meta";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -232,35 +237,36 @@ export default async function EditReportsIndexPage({
   const params = (await searchParams) ?? {};
   const { center, kind: kindParam } = params;
   const kind = parseKind(kindParam);
-  // `?center=<coreId>&kind=core` (the queue's Reporting link) is the full
-  // index with the Cores group on that core, not a one-unit view: every core
-  // collapses into one group with a picker (core reports index picker plan,
-  // 2026-09-28). Every other `?center=` still addresses exactly one unit.
-  const preselectedCore = center && kind === "core" ? center : null;
-  const singleUnit = Boolean(center) && !preselectedCore;
-  let baseUnits: ReadonlyArray<{ code: string; kind: ReportableUnitKind; name: string }>;
-  if (center && singleUnit) {
-    // An explicit `?center=` addresses exactly one unit, validated against the
-    // CenterProgram taxonomy gate for a center. A department/division has no
-    // taxonomy to validate against — `loadReportsContext` is the real
-    // existence/authz gate for every kind.
-    const code = kind === "center" ? await resolveReportsCenterCode(db.read, center) : center;
-    const ctx = await loadReportsContext(code, session, db.read, kind);
-    if (ctx === null) return forbidden(session, code);
-    baseUnits = [{ code, kind, name: ctx.unit.name }];
-  } else {
-    baseUnits = await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
-    // A core this actor can't report on is the same 403 the one-unit view gave;
-    // "all" is a superuser's alone.
-    const allowedPreselect = isAllCores(preselectedCore)
-      ? canViewAllCores(session)
-      : baseUnits.some((u) => u.kind === "core" && u.code === preselectedCore);
-    if (preselectedCore && !allowedPreselect) return forbidden(session, preselectedCore);
-    // Gap 5: zero reportable units is an empty roster for a superuser, a 404
-    // for everyone else — unless a pseudo-unit (report 7/8/9) gives them
-    // somewhere to go.
-    if (baseUnits.length === 0 && !session.isSuperuser && extraUnits.length === 0) notFound();
+  // `?center=<code>&kind=<kind>` (a unit editor's Reports link, the queue's
+  // Reporting link, a report's back link) is the full index with that kind's
+  // group on that unit, not a one-unit view: every unit of a kind collapses
+  // into one group with a picker (#2857 cores, #2856 the rest).
+  const preselected = center || null;
+  let baseUnits: ReadonlyArray<{ code: string; kind: ReportableUnitKind; name: string }> =
+    await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
+  let preselectedCode = preselected;
+  if (preselected) {
+    if (isAllCores(preselected) && kind === "core") {
+      // "all" is a superuser's alone.
+      if (!canViewAllCores(session)) return forbidden(session, preselected);
+    } else if (!baseUnits.some((u) => u.kind === kind && u.code === preselected)) {
+      // Not on the actor's roster: the per-unit gate the one-unit view used
+      // decides — a center's code through its CenterProgram taxonomy gate, then
+      // `loadReportsContext` for every kind. Allowed → the unit joins its group.
+      const code =
+        kind === "center" ? await resolveReportsCenterCode(db.read, preselected) : preselected;
+      preselectedCode = code;
+      if (!baseUnits.some((u) => u.kind === kind && u.code === code)) {
+        const ctx = await loadReportsContext(code, session, db.read, kind);
+        if (!ctx) return forbidden(session, code);
+        baseUnits = [...baseUnits, { code, kind, name: ctx.unit.name }];
+      }
+    }
   }
+  // Gap 5: zero reportable units is an empty roster for a superuser, a 404
+  // for everyone else — unless a pseudo-unit (report 7/8/9) gives them
+  // somewhere to go.
+  if (baseUnits.length === 0 && !session.isSuperuser && extraUnits.length === 0) notFound();
 
   const liveness = await loadReportLiveness(
     baseUnits.map((u) => ({ code: u.code, kind: u.kind })),
@@ -277,17 +283,28 @@ export default async function EditReportsIndexPage({
       perReport: serializePerReport(liveness.get(u.code), reports),
     };
   };
-  const cores = baseUnits.filter((u) => u.kind === "core");
-  const coresUnit =
-    cores.length > 0
-      ? buildCoresUnit(cores.map(toUnit), preselectedCore, canViewAllCores(session))
-      : null;
+  // Every unit of a kind is one group, where the kind's first unit sat.
+  const groups = new Map(
+    REPORTABLE_KINDS.map((k) => {
+      const ofKind = baseUnits.filter((u) => u.kind === k);
+      const group =
+        ofKind.length > 0
+          ? buildKindGroup(
+              k,
+              ofKind.map(toUnit),
+              kind === k ? preselectedCode : null,
+              k === "core" && canViewAllCores(session),
+            )
+          : null;
+      return [k, { first: ofKind[0], group }] as const;
+    }),
+  );
   const units: ReportsIndexUnit[] = [
     ...extraUnits,
-    // Every core is one group, where the first core sat.
-    ...baseUnits.flatMap((u) =>
-      u.kind !== "core" ? [toUnit(u)] : u === cores[0] && coresUnit ? [coresUnit] : [],
-    ),
+    ...baseUnits.flatMap((u) => {
+      const { first, group } = groups.get(u.kind)!;
+      return u === first && group ? [group] : [];
+    }),
   ];
 
   return (
@@ -300,13 +317,12 @@ export default async function EditReportsIndexPage({
       <ReportsIndex
         units={units}
         // A global viewer sees every department/division/core: off under
-        // "All" (their own segments show them). Not for a one-unit
-        // `?center=` — that one unit is what they asked for.
-        hideUnderAll={(session.isSuperuser || session.isCommsSteward) && !singleUnit}
+        // "All" (their own segments show them).
+        hideUnderAll={session.isSuperuser || session.isCommsSteward}
         initialQuery={typeof params.q === "string" ? params.q : ""}
-        // A preselected core opens on the Cores segment unless the link names one.
+        // A preselected unit opens on its kind's segment unless the link names one.
         initialScope={
-          params.scope === undefined && preselectedCore ? "core" : parseReportsIndexScope(params.scope)
+          params.scope === undefined && preselected ? kind : parseReportsIndexScope(params.scope)
         }
         initialReview={params.review === "1"}
       />
@@ -322,45 +338,53 @@ function forbidden(session: EditSession, code: string) {
   );
 }
 
-/** Every core as ONE group (core reports index picker plan, 2026-09-28). The
- *  group IS the selected core (`?center=<coreId>&kind=core` if given, else the
- *  first alphabetically); `coreOptions` carries every core's code, name, edit
- *  link and liveness so `ReportsIndex`'s "Viewing" picker switches cores in
- *  place. One core keeps its own name as the heading.
+/** Every unit of one kind as ONE group — "Centers", "Departments",
+ *  "Divisions", "Cores" (core reports index picker plan, 2026-09-28; #2856).
+ *  The group IS the selected unit (`?center=<code>&kind=<kind>` if given, else
+ *  the first alphabetically); `unitOptions` carries every unit's code, name,
+ *  edit link and liveness so `ReportsIndex`'s "Viewing" picker switches units
+ *  in place. One unit keeps its own name as the heading.
  *
- *  `withAll` (a superuser): "All cores (N)" first — reports 11–13 only, each
- *  live when any core's is, no profile to edit. Never the default: it is
+ *  `withAll` (cores, a superuser): "All cores (N)" first — reports 11–13 only,
+ *  each live when any core's is, no profile to edit. Never the default: it is
  *  selected only when the URL names it. */
-function buildCoresUnit(
-  cores: ReportsIndexUnit[],
+function buildKindGroup(
+  kind: ReportableUnitKind,
+  units: ReportsIndexUnit[],
   preselected: string | null,
   withAll = false,
 ): ReportsIndexUnit {
-  const coreOptions: ReportsIndexCoreOption[] = [...cores]
+  const unitOptions: ReportsIndexUnitOption[] = [...units]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(({ code, name, editHref, perReport }) => ({ code, name, editHref, perReport }));
-  const name = cores.length > 1 ? "Cores" : undefined;
+  const name = units.length > 1 ? KIND_GROUP_NAME[kind] : undefined;
   if (withAll) {
     const onlyReports = ALL_CORES_REPORTS.map((n) => Number(n) as ReportsIndexReport["n"]);
-    const allOption: ReportsIndexCoreOption = {
+    const allOption: ReportsIndexUnitOption = {
       code: ALL_CORES,
-      name: `${ALL_CORES_NAME} (${cores.length})`,
+      name: `${ALL_CORES_NAME} (${units.length})`,
       editHref: "",
       perReport: onlyReports.map((n) => ({
         n,
-        live: cores.some((c) => c.perReport.some((p) => p.n === n && p.live)),
+        live: units.some((c) => c.perReport.some((p) => p.n === n && p.live)),
         lastRefreshedAt: null,
       })),
       onlyReports,
     };
-    coreOptions.unshift(allOption);
+    unitOptions.unshift(allOption);
     if (isAllCores(preselected))
-      return { ...cores[0], ...allOption, name: name ?? allOption.name, coreOptions };
+      return { ...units[0], ...allOption, name: name ?? allOption.name, unitOptions };
   }
-  const firstCore = coreOptions.find((o) => !isAllCores(o.code)) ?? coreOptions[0];
-  const selected = cores.find((c) => c.code === (preselected ?? firstCore.code)) ?? cores[0];
-  return { ...selected, name: name ?? selected.name, coreOptions };
+  const first = unitOptions.find((o) => !(withAll && isAllCores(o.code))) ?? unitOptions[0];
+  const selected = units.find((u) => u.code === (preselected ?? first.code)) ?? units[0];
+  return { ...selected, name: name ?? selected.name, unitOptions };
 }
+
+/** A per-kind group's heading: the kind's scope segment label. */
+const KIND_GROUP_NAME = Object.fromEntries(REPORTS_INDEX_SCOPES) as Record<
+  ReportableUnitKind,
+  string
+>;
 
 /** The person-granted Mentored publications report as a one-report
  *  pseudo-unit, so it rides the same list (and filter rail) as every unit —

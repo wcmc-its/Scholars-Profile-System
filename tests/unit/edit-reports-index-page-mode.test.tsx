@@ -3,9 +3,10 @@
  * viewer gets ONE grouped list (`ReportsIndex`), whether they reach it with
  * `?center=`, one reportable unit or many; the page no longer picks a
  * table / bands / single-unit rendering. Pinned here: the unit set each path
- * hands the list, `hideUnderAll` (global viewers only, never for an explicit
- * `?center=`), the per-report liveness it serializes (report 2's cycle and
- * review count included), and the URL filters it passes through. Mirrors the
+ * hands the list, `hideUnderAll` (global viewers only), the per-report
+ * liveness it serializes (report 2's cycle and review count included), the
+ * per-kind groups with their pickers (#2857 cores, #2856 the rest), and the
+ * URL filters it passes through. Mirrors the
  * mocking scaffold of `edit-reports-index-page-gap5.test.tsx`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -154,35 +155,42 @@ describe("/edit/reports — one grouped list for every viewer", () => {
     expect(props.units.map((u) => u.code)).toEqual(["a"]);
   });
 
-  it("?center= → one group named from the unit context; hideUnderAll off even for a superuser", async () => {
-    mockGetEditSession.mockResolvedValue(SUPERUSER);
-    mockLoadReportsContext.mockResolvedValue({ unit: { name: "Surgery" } });
-    const props = await indexProps({ center: "surg", kind: "department" });
+  it("?center= a unit off the actor's roster → the per-unit gate decides, and it joins the full list", async () => {
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadReportsContext.mockResolvedValue({ unit: { name: "Pediatric Surgery" } });
+    const props = await indexProps({ center: "peds", kind: "division" });
     expect(mockResolveCenter).not.toHaveBeenCalled();
     expect(mockLoadReportsContext).toHaveBeenCalledWith(
-      "surg",
-      SUPERUSER,
+      "peds",
+      OWNER,
       expect.anything(),
-      "department",
+      "division",
     );
-    expect(props.units).toEqual([
-      expect.objectContaining({
-        code: "surg",
-        kind: "department",
-        name: "Surgery",
-        editHref: "/edit/department/surg",
-      }),
+    expect(props.units.map((u) => [u.code, u.kind, u.name, u.editHref])).toEqual([
+      ["a", "center", "A", "/edit/center/a"],
+      ["surg", "department", "Surgery", "/edit/department/surg"],
+      ["peds", "division", "Pediatric Surgery", "/edit/division/peds"],
     ]);
-    expect(props.hideUnderAll).toBe(false);
-    expect(mockLoadReportableUnits).not.toHaveBeenCalled();
+    expect(props.initialScope).toBe("division");
   });
 
-  it("?center= a center resolves the code through the CenterProgram gate", async () => {
+  it("?center= a center off the roster resolves the code through the CenterProgram gate", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
     mockResolveCenter.mockResolvedValue("meyer");
     mockLoadReportsContext.mockResolvedValue({ unit: { name: "Meyer" } });
     const props = await indexProps({ center: "meyer-slug" });
-    expect(props.units.map((u) => [u.code, u.kind])).toEqual([["meyer", "center"]]);
+    expect(mockLoadReportsContext).toHaveBeenCalledWith(
+      "meyer",
+      OWNER,
+      expect.anything(),
+      "center",
+    );
+    // Two centers now: one "Centers" group, on the one the link named.
+    expect(props.units.map((u) => [u.code, u.kind, u.name])).toEqual([
+      ["meyer", "center", "Centers"],
+      ["surg", "department", "Surgery"],
+    ]);
+    expect(props.initialScope).toBe("center");
   });
 
   it("?center= the actor can't open → the forbidden page, no list", async () => {
@@ -250,7 +258,7 @@ describe("/edit/reports — one grouped list for every viewer", () => {
       { code: "c-alpha", name: "Alpha Flow Core", kind: "core" as const, centerType: null },
       { code: "c-mid", name: "Mid Sequencing Core", kind: "core" as const, centerType: null },
     ];
-    type CoresProps = { coreOptions?: Array<{ code: string; name: string; editHref: string }> };
+    type CoresProps = { unitOptions?: Array<{ code: string; name: string; editHref: string }> };
 
     it("N cores → ONE group where the first core sat, options A–Z, on the first alphabetically", async () => {
       mockGetEditSession.mockResolvedValue(SUPERUSER);
@@ -264,7 +272,7 @@ describe("/edit/reports — one grouped list for every viewer", () => {
       const group = props.units[1] as (typeof props.units)[number] & CoresProps;
       expect(group.editHref).toBe("/edit/core/c-alpha");
       // A superuser's list opens with "All cores (N)" — never the default.
-      expect(group.coreOptions!.map((o) => [o.code, o.name, o.editHref])).toEqual([
+      expect(group.unitOptions!.map((o) => [o.code, o.name, o.editHref])).toEqual([
         ["all", "All cores (3)", ""],
         ["c-alpha", "Alpha Flow Core", "/edit/core/c-alpha"],
         ["c-mid", "Mid Sequencing Core", "/edit/core/c-mid"],
@@ -333,7 +341,7 @@ describe("/edit/reports — one grouped list for every viewer", () => {
       mockLoadReportableUnits.mockResolvedValue(CORES);
       const props = await indexProps();
       const group = props.units[0] as (typeof props.units)[number] & CoresProps;
-      expect(group.coreOptions!.map((o) => o.code)).toEqual(["c-alpha", "c-mid", "c-zeta"]);
+      expect(group.unitOptions!.map((o) => o.code)).toEqual(["c-alpha", "c-mid", "c-zeta"]);
       const result = await EditReportsIndexPage({
         searchParams: Promise.resolve({ center: "all", kind: "core" }),
       });
@@ -347,7 +355,78 @@ describe("/edit/reports — one grouped list for every viewer", () => {
       const props = await indexProps();
       const group = props.units[0] as (typeof props.units)[number] & CoresProps;
       expect([group.code, group.name]).toEqual(["c-zeta", "Zeta Imaging Core"]);
-      expect(group.coreOptions).toHaveLength(1);
+      expect(group.unitOptions).toHaveLength(1);
+    });
+  });
+
+  describe.each([
+    ["department", "Departments"],
+    ["division", "Divisions"],
+    ["center", "Centers"],
+  ] as const)("%s units collapse into one group with a picker (#2856)", (kind, heading) => {
+    const OF_KIND = [
+      { code: `${kind}-z`, name: "Zeta Unit", kind, centerType: null },
+      { code: `${kind}-a`, name: "Alpha Unit", kind, centerType: null },
+      { code: `${kind}-m`, name: "Mid Unit", kind, centerType: null },
+    ];
+    const INST = { code: "inst", name: "Institute", kind: "center" as const, centerType: null };
+    const DEPT = { code: "dept", name: "Dept", kind: "department" as const, centerType: null };
+    // Something of another kind in front, so "where the first sat" is visible.
+    const other = kind === "center" ? DEPT : INST;
+    type Group = { unitOptions?: Array<{ code: string; name: string; editHref: string }> };
+
+    it(`N units → ONE "${heading}" group where the first sat, options A–Z, on the first alphabetically; no All option`, async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockLoadReportableUnits.mockResolvedValue([other, ...OF_KIND]);
+      const props = await indexProps();
+      expect(props.units.map((u) => [u.code, u.name])).toEqual([
+        [other.code, other.name],
+        [`${kind}-a`, heading],
+      ]);
+      const group = props.units[1] as (typeof props.units)[number] & Group;
+      expect(group.editHref).toBe(`/edit/${kind}/${kind}-a`);
+      expect(group.unitOptions!.map((o) => [o.code, o.name, o.editHref])).toEqual([
+        [`${kind}-a`, "Alpha Unit", `/edit/${kind}/${kind}-a`],
+        [`${kind}-m`, "Mid Unit", `/edit/${kind}/${kind}-m`],
+        [`${kind}-z`, "Zeta Unit", `/edit/${kind}/${kind}-z`],
+      ]);
+      expect(props.initialScope).toBe("all");
+    });
+
+    it(`?center=<code>&kind=${kind} → the full list on that unit, opening on its segment`, async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockLoadReportableUnits.mockResolvedValue([other, ...OF_KIND]);
+      const props = await indexProps({ center: `${kind}-m`, kind });
+      expect(mockLoadReportsContext).not.toHaveBeenCalled();
+      expect(mockResolveCenter).not.toHaveBeenCalled();
+      expect(props.units.map((u) => [u.code, u.name])).toEqual([
+        [other.code, other.name],
+        [`${kind}-m`, heading],
+      ]);
+      expect(props.units[1].editHref).toBe(`/edit/${kind}/${kind}-m`);
+      expect(props.initialScope).toBe(kind);
+      expect(props.hideUnderAll).toBe(true);
+    });
+
+    it(`?center= a ${kind} the actor can't report on → the forbidden page, no list`, async () => {
+      mockGetEditSession.mockResolvedValue(OWNER);
+      mockLoadReportableUnits.mockResolvedValue([OF_KIND[0]]);
+      mockResolveCenter.mockResolvedValue(`${kind}-other`);
+      mockLoadReportsContext.mockResolvedValue(null);
+      const result = await EditReportsIndexPage({
+        searchParams: Promise.resolve({ center: `${kind}-other`, kind }),
+      });
+      expect(findByType(result, mockReportsIndex)).toBeNull();
+      expect(findByType(result, mockForbidden)).not.toBeNull();
+    });
+
+    it(`an owner of one ${kind}: the group keeps the unit's name, one option`, async () => {
+      mockGetEditSession.mockResolvedValue(OWNER);
+      mockLoadReportableUnits.mockResolvedValue([OF_KIND[0]]);
+      const props = await indexProps();
+      const group = props.units[0] as (typeof props.units)[number] & Group;
+      expect([group.code, group.name]).toEqual([`${kind}-z`, "Zeta Unit"]);
+      expect(group.unitOptions).toHaveLength(1);
     });
   });
 

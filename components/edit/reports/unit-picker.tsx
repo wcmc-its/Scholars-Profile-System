@@ -1,28 +1,33 @@
 /**
- * "Viewing <core>" (mockup `Core pub review/Core Reports.dc.html`) — the one
- * core picker the reports index's Cores group (#2857) and the core report
- * pages' shared header both render. Controlled: the caller decides what a pick
- * does (the index swaps its group in place; a report page navigates). Without
- * JS the form GETs `action?center=<coreId>&kind=core`, which both pages read.
- * Its own line on a phone, the select shrinking to fit.
+ * "Viewing <unit>" (mockup `Core pub review/Core Reports.dc.html`) — the one
+ * unit picker the reports index's per-kind groups (Cores #2857; Centers,
+ * Departments, Divisions #2856) and the core report pages' shared header all
+ * render. Controlled: the caller decides what a pick does (the index swaps its
+ * group in place; a report page navigates). Without JS the form GETs
+ * `action?center=<code>&kind=<kind>`, which both pages read. A native select,
+ * so a phone gets the OS picker. Its own line on a phone, the select
+ * shrinking to fit.
  */
 "use client";
 
 import * as React from "react";
 
-export type CorePickerOption = { code: string; name: string };
+export type UnitPickerOption = { code: string; name: string };
 
-export function CorePicker({
+export function UnitPicker({
   options,
   value,
   onChange,
+  kind = "core",
   action = "/edit/reports",
-  id = "reports-index-core",
-  testId = "reports-index-core-select",
+  id = `reports-index-${kind}`,
+  testId = `reports-index-${kind}-select`,
 }: {
-  options: ReadonlyArray<CorePickerOption>;
+  options: ReadonlyArray<UnitPickerOption>;
   value: string;
   onChange: (code: string) => void;
+  /** The unit kind the no-JS form sends as `kind`. */
+  kind?: "center" | "department" | "division" | "core";
   /** Where the no-JS form GETs to. */
   action?: string;
   id?: string;
@@ -50,7 +55,7 @@ export function CorePicker({
           </option>
         ))}
       </select>
-      <input type="hidden" name="kind" value="core" />
+      <input type="hidden" name="kind" value={kind} />
       <noscript>
         <button type="submit" className="text-apollo-slate hover:underline">
           Go
