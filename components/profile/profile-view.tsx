@@ -898,7 +898,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                           {group}
                           <DisclosureGroupInfoTooltip group={group} />
                         </h3>
-                        <p className="text-base leading-snug">{entities.join("; ")}</p>
+                        <p className="text-base leading-snug">{entities.join(" · ")}</p>
                       </div>
                     ))}
                   </div>

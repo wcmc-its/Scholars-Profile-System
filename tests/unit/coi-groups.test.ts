@@ -59,6 +59,15 @@ describe("groupCoiDisclosures", () => {
     expect(groups).toEqual([{ group: "Other", entities: ["Has Entity"] }]);
   });
 
+  it("trims source whitespace, so a trailing-space name dedups with its clean twin", () => {
+    const groups = groupCoiDisclosures([
+      { entity: "Atropos Health ", activityGroup: "Ownership" },
+      { entity: "Atropos Health", activityGroup: "Ownership" },
+      { entity: "   ", activityGroup: "Ownership" }, // dropped — blank
+    ]);
+    expect(groups).toEqual([{ group: "Ownership", entities: ["Atropos Health"] }]);
+  });
+
   it("returns an empty array for no disclosures", () => {
     expect(groupCoiDisclosures([])).toEqual([]);
   });

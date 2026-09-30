@@ -40,7 +40,7 @@ describe("CoiCard — read-only conflicts of interest", () => {
   it("dedups + alpha-sorts entities within a group", () => {
     render(<CoiCard cwid="self01" mode="self" scholarName="Alex Self" disclosures={DISCLOSURES} />);
     const ownership = screen.getByTestId("coi-group-Ownership");
-    expect(within(ownership).getByText("Alpha Co; Zeta Co")).toBeTruthy();
+    expect(within(ownership).getByText("Alpha Co · Zeta Co")).toBeTruthy();
   });
 
   it("shows the self empty state when there are no disclosures", () => {
