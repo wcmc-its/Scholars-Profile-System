@@ -2406,6 +2406,24 @@ export class AppStack extends Stack {
         // is fed by THAT, not by the OR total (the upgrade the grants route's own comment
         // already anticipates). Then re-run this probe before flipping.
         SEARCH_FUNDING_CONCEPT_GRANTS: env === "staging" ? "on" : "off",
+        // #1090 -- Funding-tab relevance tiers 1-3 (PR #1092), shipped dark. Each
+        // reads `=== "on"` (resolveFundingTabMsm / resolveFundingPhraseBoost /
+        // resolveFundingTextEvidence in lib/api/search-flags.ts). App-only, NO
+        // reindex prereq.
+        //   SEARCH_FUNDING_TAB_MSM -- minimum_should_match floor on the funding
+        //     multi_match (+ abstract boost 1 -> 0.5), so a multi-token query no
+        //     longer admits a grant on one stemmed token.
+        //   SEARCH_FUNDING_PHRASE_BOOST -- ranking-only match_phrase `should` on
+        //     title/abstract; never admits or drops a grant (counts unchanged).
+        //   SEARCH_FUNDING_TEXT_EVIDENCE -- "In abstract: ..." / "In keywords: ..."
+        //     evidence lines on funding results.
+        // STAGING ON (soak + measure the count drop and tune the MSM threshold for
+        // the funding index -- the floor is calibrated for publications); PROD OFF
+        // until that tuning lands. Flip is env-only via cdk deploy Sps-App-<env>
+        // (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_FUNDING_TAB_MSM: env === "staging" ? "on" : "off",
+        SEARCH_FUNDING_PHRASE_BOOST: env === "staging" ? "on" : "off",
+        SEARCH_FUNDING_TEXT_EVIDENCE: env === "staging" ? "on" : "off",
         // #861 -- streams the /search shell so the header/tabs paint before the
         // cold MeSH precompute + the three badge-count searches resolve (the
         // 6-10s first-byte block). resolveSearchShellStreaming reads === "on".

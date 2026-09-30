@@ -54,9 +54,6 @@ SEARCH_AREA_BOOST_TOP_N             # area-boost scholar-list cap (code default 
 SEARCH_AREA_BOOST_W_MID             # area-boost tier weight (code default 1.5) — A/B lever
 SEARCH_AREA_BOOST_W_LO              # area-boost tier weight (code default 0.75) — A/B lever
 SEARCH_FUNDING_MATCH_REASON         # default-on (!== "off")
-SEARCH_FUNDING_PHRASE_BOOST
-SEARCH_FUNDING_TAB_MSM
-SEARCH_FUNDING_TEXT_EVIDENCE
 SEARCH_INDEX_BULK_MAX_ATTEMPTS
 SEARCH_INDEX_BULK_MAX_BYTES
 SEARCH_INDEX_BULK_MAX_DOCS
