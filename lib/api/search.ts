@@ -3450,12 +3450,14 @@ export async function searchPeople(opts: {
   // concept machinery would admit (unambiguous, matched form long enough). Not
   // under `exact` scope (#1951: a MeSH label is the concept, not the wording).
   // Empty ⇒ the highlight body is unchanged.
+  const descriptorName = (opts.meshDescriptorName ?? "").trim();
   const bioConceptTerm =
+    descriptorName &&
     applyTopicTemplate &&
     opts.scope !== "exact" &&
     !opts.meshAmbiguous &&
     (opts.meshMatchedFormLength ?? 0) >= MESH_MIN_MATCHED_FORM_LEN
-      ? (opts.meshDescriptorName ?? "").trim()
+      ? descriptorName
       : "";
 
   const body = {
