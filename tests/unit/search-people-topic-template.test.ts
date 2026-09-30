@@ -464,6 +464,45 @@ describe("generic-term demotion — #692 (people topic shape)", () => {
     expect(must0.multi_match?.query).toBe("microbiome");
     expect(highlightOf(capturedBodies[0]).highlight_query).toBeUndefined();
   });
+
+  it("#1351: a resolved descriptor adds a bio match_phrase to the HIGHLIGHT query only", async () => {
+    const base = {
+      q: "pharmacogenomics",
+      relevanceMode: "v3" as const,
+      shape: "topic" as const,
+      meshDescendantUis: DESCENDANTS,
+    };
+    await searchPeople(base);
+    await searchPeople({ ...base, meshDescriptorName: "Pharmacogenetics" });
+    const [without, withConcept] = capturedBodies;
+    const hq = highlightOf(withConcept).highlight_query as {
+      bool: { should: Record<string, unknown>[] };
+    };
+    expect(hq.bool.should).toEqual([
+      {
+        multi_match: {
+          query: "pharmacogenomics",
+          fields: ["preferredName", "areasOfInterest", "overview"],
+          type: "best_fields",
+          operator: "or",
+        },
+      },
+      { match_phrase: { overview: "Pharmacogenetics" } },
+    ]);
+    // Scoring untouched: the query/rescore are identical with or without the descriptor.
+    expect(withConcept.query).toEqual(without.query);
+    expect(withConcept.rescore).toEqual(without.rescore);
+  });
+
+  it("#1351: a descriptor on a non-topic shape leaves the highlight body unchanged", async () => {
+    await searchPeople({
+      q: "pharmacogenomics",
+      relevanceMode: "legacy",
+      shape: "topic",
+      meshDescriptorName: "Pharmacogenetics",
+    });
+    expect(highlightOf(capturedBodies[0]).highlight_query).toBeUndefined();
+  });
 });
 
 // Issue #824 §4c — method-family boost is flag-gated (reindex-then-flip) and
